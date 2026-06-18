@@ -6,6 +6,7 @@ import {
   type ProjectRpcProvider,
   type ProjectSettings,
 } from "@sdp/types";
+import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import type { KVStore, KVStoreSet } from "@/runtime/kv";
 import { getProviderAvailability } from "@/services/provider-availability.service";
@@ -293,7 +294,7 @@ async function getOrganizationSettings(
   }
 
   try {
-    return JSON.parse(row.settings) as OrganizationSettings;
+    return parsePostgresJson<OrganizationSettings>(row.settings);
   } catch {
     throw new AppError("INTERNAL_ERROR", "Organization settings are invalid JSON");
   }
@@ -324,7 +325,7 @@ async function getProjectSettings(
   }
 
   try {
-    return JSON.parse(row.settings) as ProjectSettings;
+    return parsePostgresJson<ProjectSettings>(row.settings);
   } catch {
     throw new AppError("INTERNAL_ERROR", "Project settings are invalid JSON");
   }

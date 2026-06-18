@@ -14,6 +14,11 @@ import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyWalletBinding, CachedApiKey }
 import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db";
+import {
+  parseOptionalPostgresJson,
+  parsePostgresJson,
+  parsePostgresJsonOr,
+} from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import type { KVStore } from "@/runtime/kv";
@@ -146,11 +151,11 @@ async function getFromDatabaseAndCache(
     projectId: result.project_id,
     role: result.role,
     permissions: result.permissions
-      ? JSON.parse(result.permissions)
+      ? parsePostgresJson<Permission[]>(result.permissions)
       : getPermissionsForApiKeyRole(result.role),
     environment: result.environment as "sandbox" | "production",
     rateLimitTier: result.rate_limit_tier as "standard" | "elevated" | "unlimited",
-    allowedIps: result.allowed_ips ? JSON.parse(result.allowed_ips) : null,
+    allowedIps: parseOptionalPostgresJson<string[]>(result.allowed_ips),
     signingWalletId,
     signingWalletIds,
     walletBindings,
@@ -181,16 +186,12 @@ function safeParsePermissionsArray(value: string | null | undefined): Permission
     return [];
   }
 
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed.filter((entry): entry is Permission => typeof entry === "string");
-  } catch {
+  const parsed = parsePostgresJsonOr<unknown>(value, []);
+  if (!Array.isArray(parsed)) {
     return [];
   }
+
+  return parsed.filter((entry): entry is Permission => typeof entry === "string");
 }
 
 function normalizeWalletBindings(cachedKey: CachedApiKey): {

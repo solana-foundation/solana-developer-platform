@@ -12,6 +12,7 @@ import type {
   ProjectRole,
   ProjectSettings,
 } from "@sdp/types";
+import { parsePostgresJsonOr } from "@/db/postgres-utils";
 
 export interface CreateProjectInput {
   organizationId: string;
@@ -517,11 +518,7 @@ export class ProjectService {
   }): Project {
     let settings: ProjectSettings | undefined;
     if (row.settings) {
-      try {
-        settings = JSON.parse(row.settings) as ProjectSettings;
-      } catch {
-        settings = undefined;
-      }
+      settings = parsePostgresJsonOr<ProjectSettings | undefined>(row.settings, undefined);
     }
 
     return {

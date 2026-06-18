@@ -9,6 +9,7 @@ import { getBase58Codec } from "@solana/codecs";
 import type { Address, KeyPairSigner, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
 import { getDb } from "@/db";
+import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import {
   KeychainFireblocksAdapter,
@@ -1750,10 +1751,12 @@ export class SigningService {
     // Return cached status if already resolved
     if (record.status === "completed" && record.signatures) {
       // Parse signatures from JSON (stored as address → base64 signature pairs)
-      const signaturesJson = JSON.parse(record.signatures) as Array<{
-        publicKey: string;
-        signature: string;
-      }>;
+      const signaturesJson = parsePostgresJson<
+        Array<{
+          publicKey: string;
+          signature: string;
+        }>
+      >(record.signatures);
       const signatures = new Map<Address, Uint8Array>();
       for (const { publicKey, signature } of signaturesJson) {
         signatures.set(publicKey as Address, decodeBase64(signature));

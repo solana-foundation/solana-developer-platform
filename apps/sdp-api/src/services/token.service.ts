@@ -18,6 +18,7 @@ import type {
   TokenTransactionStatus,
   TokenTransactionType,
 } from "@sdp/types";
+import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { AppError, badRequest } from "@/lib/errors";
 
@@ -266,19 +267,6 @@ interface TokenAccountMatch {
 interface WalletTransactionScope {
   publicKeys: readonly string[];
   tokenAccounts?: readonly TokenAccountMatch[];
-}
-
-// Postgres SQLSTATE for unique_violation. Used to translate races on
-// `UNIQUE(...)` constraints into our domain error codes.
-const POSTGRES_UNIQUE_VIOLATION = "23505";
-
-function isPostgresUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === POSTGRES_UNIQUE_VIOLATION
-  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1811,12 +1799,8 @@ export class TokenService {
     for (const row of rows) {
       if (row.extension === "metadataAuthority") {
         if (row.config !== null) {
-          try {
-            const parsed = JSON.parse(row.config) as unknown;
-            metadataAuthority = typeof parsed === "string" ? parsed : row.config;
-          } catch {
-            metadataAuthority = row.config;
-          }
+          const parsed = parsePostgresJsonOr<unknown>(row.config, row.config);
+          metadataAuthority = typeof parsed === "string" ? parsed : row.config;
         }
         continue;
       }
@@ -1826,11 +1810,7 @@ export class TokenService {
         continue;
       }
 
-      try {
-        extensions[row.extension] = JSON.parse(row.config) as unknown;
-      } catch {
-        extensions[row.extension] = row.config;
-      }
+      extensions[row.extension] = parsePostgresJsonOr<unknown>(row.config, row.config);
     }
 
     return {
@@ -1909,12 +1889,7 @@ export class TokenService {
   }
 
   private mapRowToTransaction(row: TokenTransactionRow): TokenTransaction {
-    let params: Record<string, unknown> = {};
-    try {
-      params = JSON.parse(row.operation_params) as Record<string, unknown>;
-    } catch {
-      params = {};
-    }
+    const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});
 
     return {
       id: row.id,

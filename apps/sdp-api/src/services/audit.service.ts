@@ -5,6 +5,7 @@
  */
 
 import type { Context } from "hono";
+import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import type { Env } from "@/types/env";
 
 export type AuditAction =
@@ -170,7 +171,7 @@ export class AuditService {
       action: row.action as AuditAction,
       resourceType: row.resource_type as ResourceType,
       resourceId: row.resource_id as string | null,
-      metadata: row.metadata ? JSON.parse(row.metadata as string) : null,
+      metadata: parseOptionalPostgresJson<Record<string, unknown>>(row.metadata),
       ipAddress: row.ip_address as string | null,
       requestId: row.request_id as string | null,
       status: row.status as "success" | "failure",
