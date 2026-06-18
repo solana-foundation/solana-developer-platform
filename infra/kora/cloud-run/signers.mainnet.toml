@@ -1,0 +1,14 @@
+# Mainnet signer: GCP KMS (non-exportable Ed25519). No private key in this repo / Doppler — signing is
+# gated by roles/cloudkms.signer on the key. The fee-payer Solana address is derived from the KMS public
+# key (rotating the key changes the address). Key name + pubkey are injected via Doppler (non-secret).
+# [signer_pool] is kept (even for one signer) so the fee-payer-balance metric works.
+
+[signer_pool]
+strategy = "round_robin"
+
+[[signers]]
+name = "sdp_mainnet_fee_payer"
+type = "gcp_kms"
+key_name_env = "KORA_GCP_KMS_KEY_NAME"
+public_key_env = "KORA_GCP_KMS_PUBLIC_KEY"
+weight = 1

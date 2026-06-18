@@ -1,0 +1,13 @@
+{
+  "name": "pagerduty",
+  "type": "pagerduty",
+  "settings": {
+    "integrationKey": "${PAGERDUTY_INTEGRATION_KEY}",
+    "severity": "{{ .CommonLabels.severity | default \"critical\" }}",
+    "class": "{{ .CommonLabels.scope | default \"sdp\" }}",
+    "component": "{{ .CommonLabels.service | default \"kora\" }}",
+    "group": "sdp",
+    "summary": "{{ .CommonAnnotations.summary }}{{ if not .CommonAnnotations.summary }}{{ .CommonLabels.alertname }}{{ end }}"
+  },
+  "disableResolveMessage": false
+}
