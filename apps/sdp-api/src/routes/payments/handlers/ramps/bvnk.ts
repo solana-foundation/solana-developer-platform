@@ -1,7 +1,7 @@
 import type { BvnkPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
 import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { badRequest, internalError } from "@/lib/errors";
+import { badRequest, counterpartyNotProvisioned } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import {
@@ -33,11 +33,6 @@ type BvnkOnrampQuote = PaymentRampQuote & {
   deliveryMode: "manual_instructions";
   paymentInstructions: BvnkPaymentRampInstruction[];
 };
-
-export interface BvnkOnrampQuoteResult {
-  quote: BvnkOnrampQuote;
-  persist: boolean;
-}
 
 function requesterIpAddress(c: AppContext): string {
   const forwarded = c.req.header("x-forwarded-for");
@@ -270,79 +265,47 @@ export async function ensureBvnkPaymentRule(
   };
 }
 
-async function resolveBvnkOnramp(
-  c: AppContext,
-  input: {
-    counterparty: CounterpartyRow;
-    projectId: string;
-    cryptoToken: string;
-    fiatCurrency?: string;
-    destinationWalletAddress: string;
-    collectedData?: CollectedFieldData;
-  }
-) {
-  if (!input.fiatCurrency) {
-    throw badRequest("fiatCurrency is required for BVNK on-ramp.");
-  }
-  const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
-  const fiatCurrency = input.fiatCurrency;
-  const customer = await ensureBvnkCustomer(c, input.counterparty, input.projectId, {
-    fiatCurrency,
-    collectedData: input.collectedData,
-  });
-  const resolution = await ensureBvnkPaymentRule(
-    c,
-    rampRuntime(c),
-    input.counterparty,
-    input.projectId,
-    customer,
-    {
-      currency,
-      network,
-      destinationWalletAddress: input.destinationWalletAddress,
-      fiatCurrency,
-    }
-  );
-  const instruction = buildBvnkOnrampInstruction(resolution, {
-    network,
-    destinationWalletAddress: input.destinationWalletAddress,
-    fiatCurrency,
-    mode: resolveSdpEnvironment(c),
-  });
-  const reference =
-    resolution.onboardingStatus === "ready"
-      ? resolution.entry.ruleId
-      : resolution.customer.customerReference;
-  if (!reference) {
-    throw internalError(
-      `BVNK on-ramp missing reference at status "${resolution.onboardingStatus}".`
-    );
-  }
-  return { instruction, id: reference, reference };
-}
-
-/**
- * Builds a BVNK on-ramp quote. Only "ready" onboarding states are committable
- * as a transfer row — mid-onboarding quotes must not be persisted.
- */
 export async function bvnkOnrampQuote(
   c: AppContext,
   input: {
     counterparty: CounterpartyRow;
-    projectId: string;
     cryptoToken: string;
     fiatCurrency?: string;
     destinationWalletAddress: string;
-    collectedData?: CollectedFieldData;
   }
-): Promise<BvnkOnrampQuoteResult> {
-  const { instruction, id } = await resolveBvnkOnramp(c, input);
-  const quote: BvnkOnrampQuote = {
+): Promise<BvnkOnrampQuote> {
+  if (!input.fiatCurrency) {
+    throw badRequest("fiatCurrency is required for BVNK on-ramp.");
+  }
+  const fiatCurrency = input.fiatCurrency;
+  const providerData = input.counterparty.provider_data;
+  const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+  const customer = readBvnkCustomer(providerData);
+  const key = bvnkOnrampKey(fiatCurrency, currency, network, input.destinationWalletAddress);
+  const entry = readBvnkOnrampEntry(providerData, key);
+
+  if (
+    !isBvnkCustomerVerified(customer.status) ||
+    !entry.ruleId ||
+    !entry.bankAccount?.accountNumber
+  ) {
+    throw counterpartyNotProvisioned("bvnk", "onramp", { customerStatus: customer.status });
+  }
+
+  const instruction = buildBvnkOnrampInstruction(
+    { customer, entry, onboardingStatus: "ready" },
+    {
+      network,
+      destinationWalletAddress: input.destinationWalletAddress,
+      fiatCurrency,
+      mode: resolveSdpEnvironment(c),
+    }
+  );
+  return {
     provider: "bvnk",
-    id,
+    id: entry.ruleId,
     status: "pending",
     deliveryMode: "manual_instructions",
     paymentInstructions: [instruction],
   };
-  return { quote, persist: instruction.onboardingStatus === "ready" };
 }
