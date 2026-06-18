@@ -1,4 +1,5 @@
 import type { AppDb } from "@/db";
+import { asPostgresJsonArray, asPostgresJsonObject } from "@/db/postgres-utils";
 import { badRequest } from "@/lib/errors";
 import type {
   ActivateApiKeyControlProfileRevisionInput,
@@ -29,26 +30,6 @@ import {
   generateWalletOperationId,
 } from "./policy.repository";
 
-function asJsonObject(value: unknown): Record<string, unknown> {
-  if (!value) {
-    return {};
-  }
-  if (typeof value === "string") {
-    return JSON.parse(value) as Record<string, unknown>;
-  }
-  return value as Record<string, unknown>;
-}
-
-function asJsonArray(value: unknown): Record<string, unknown>[] {
-  if (!value) {
-    return [];
-  }
-  if (typeof value === "string") {
-    return JSON.parse(value) as Record<string, unknown>[];
-  }
-  return value as Record<string, unknown>[];
-}
-
 function mapWalletControlProfileRow(row: Record<string, unknown>): WalletControlProfileRow {
   return {
     id: row.id as string,
@@ -73,7 +54,7 @@ function mapWalletControlProfileRevisionRow(
     id: row.id as string,
     profile_id: row.profile_id as string,
     revision_number: row.revision_number as number,
-    rules: asJsonArray(row.rules),
+    rules: asPostgresJsonArray(row.rules),
     default_action: row.default_action as WalletControlProfileRevisionRow["default_action"],
     created_by: (row.created_by as string | null | undefined) ?? null,
     created_at: row.created_at as string,
@@ -105,7 +86,7 @@ function mapApiKeyControlProfileRevisionRow(
     id: row.id as string,
     profile_id: row.profile_id as string,
     revision_number: row.revision_number as number,
-    rules: asJsonArray(row.rules),
+    rules: asPostgresJsonArray(row.rules),
     default_action: row.default_action as ApiKeyControlProfileRevisionRow["default_action"],
     created_by: (row.created_by as string | null | undefined) ?? null,
     created_at: row.created_at as string,
@@ -144,7 +125,7 @@ function mapWalletOperationRow(row: Record<string, unknown>): WalletOperationRow
     asset: (row.asset as string | null | undefined) ?? null,
     amount: (row.amount as string | null | undefined) ?? null,
     destination: (row.destination as string | null | undefined) ?? null,
-    raw_payload: asJsonObject(row.raw_payload),
+    raw_payload: asPostgresJsonObject(row.raw_payload),
     idempotency_key: (row.idempotency_key as string | null | undefined) ?? null,
     status: row.status as WalletOperationRow["status"],
     created_at: row.created_at as string,
@@ -162,7 +143,7 @@ function mapPolicyEvaluationRow(row: Record<string, unknown>): PolicyEvaluationR
     decision: row.decision as PolicyEvaluationRow["decision"],
     reason_code: row.reason_code as string,
     reason: (row.reason as string | null | undefined) ?? null,
-    matched_rules: asJsonArray(row.matched_rules),
+    matched_rules: asPostgresJsonArray(row.matched_rules),
     requires_approval: row.requires_approval as boolean,
     approval_request_id: (row.approval_request_id as string | null | undefined) ?? null,
     created_at: row.created_at as string,
