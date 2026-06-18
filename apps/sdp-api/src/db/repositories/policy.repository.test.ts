@@ -99,6 +99,22 @@ describe("PolicyRepository (postgres)", () => {
     expect(persistedRevision1?.default_action).toBe("allow");
   });
 
+  it("returns null when creating revisions for missing profiles", async () => {
+    await expect(
+      repo.createWalletControlProfileRevision({
+        profileId: "wcp_missing",
+        rules: [{ kind: "amount", max: "10" }],
+      })
+    ).resolves.toBeNull();
+
+    await expect(
+      repo.createApiKeyControlProfileRevision({
+        profileId: "akcp_missing",
+        rules: [{ kind: "destination", allowlist: ["recipient_1"] }],
+      })
+    ).resolves.toBeNull();
+  });
+
   it("records wallet operations and policy evaluations with revision references", async () => {
     const walletProfile = await repo.createWalletControlProfile({
       organizationId: TEST_ORG.id,

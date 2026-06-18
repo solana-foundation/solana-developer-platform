@@ -301,36 +301,47 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
 
     async createWalletControlProfileRevision(input: CreateWalletControlProfileRevisionInput) {
       const id = generateWalletControlProfileRevisionId();
-      const row = await db
-        .prepare(
-          `INSERT INTO wallet_control_profile_revisions (
-             id,
-             profile_id,
-             revision_number,
-             rules,
-             default_action,
-             created_by
-           )
-           SELECT
-             ?,
-             ?,
-             COALESCE(MAX(revision_number), 0) + 1,
-             ?::jsonb,
-             ?,
-             ?
-           FROM wallet_control_profile_revisions
-           WHERE profile_id = ?
-           RETURNING *`
-        )
-        .bind(
-          id,
-          input.profileId,
-          JSON.stringify(input.rules ?? []),
-          input.defaultAction ?? "allow",
-          input.createdBy ?? null,
-          input.profileId
-        )
-        .first<Record<string, unknown>>();
+      const row = await db.transaction(async (tx) => {
+        const profile = await tx
+          .prepare("SELECT id FROM wallet_control_profiles WHERE id = ? FOR UPDATE")
+          .bind(input.profileId)
+          .first<{ id: string }>();
+
+        if (!profile) {
+          return null;
+        }
+
+        return tx
+          .prepare(
+            `INSERT INTO wallet_control_profile_revisions (
+               id,
+               profile_id,
+               revision_number,
+               rules,
+               default_action,
+               created_by
+             )
+             SELECT
+               ?,
+               ?,
+               COALESCE(MAX(revision_number), 0) + 1,
+               ?::jsonb,
+               ?,
+               ?
+             FROM wallet_control_profile_revisions
+             WHERE profile_id = ?
+             RETURNING *`
+          )
+          .bind(
+            id,
+            input.profileId,
+            JSON.stringify(input.rules ?? []),
+            input.defaultAction ?? "allow",
+            input.createdBy ?? null,
+            input.profileId
+          )
+          .first<Record<string, unknown>>();
+      });
 
       return row ? mapWalletControlProfileRevisionRow(row) : null;
     },
@@ -437,36 +448,47 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
 
     async createApiKeyControlProfileRevision(input: CreateApiKeyControlProfileRevisionInput) {
       const id = generateApiKeyControlProfileRevisionId();
-      const row = await db
-        .prepare(
-          `INSERT INTO api_key_control_profile_revisions (
-             id,
-             profile_id,
-             revision_number,
-             rules,
-             default_action,
-             created_by
-           )
-           SELECT
-             ?,
-             ?,
-             COALESCE(MAX(revision_number), 0) + 1,
-             ?::jsonb,
-             ?,
-             ?
-           FROM api_key_control_profile_revisions
-           WHERE profile_id = ?
-           RETURNING *`
-        )
-        .bind(
-          id,
-          input.profileId,
-          JSON.stringify(input.rules ?? []),
-          input.defaultAction ?? "allow",
-          input.createdBy ?? null,
-          input.profileId
-        )
-        .first<Record<string, unknown>>();
+      const row = await db.transaction(async (tx) => {
+        const profile = await tx
+          .prepare("SELECT id FROM api_key_control_profiles WHERE id = ? FOR UPDATE")
+          .bind(input.profileId)
+          .first<{ id: string }>();
+
+        if (!profile) {
+          return null;
+        }
+
+        return tx
+          .prepare(
+            `INSERT INTO api_key_control_profile_revisions (
+               id,
+               profile_id,
+               revision_number,
+               rules,
+               default_action,
+               created_by
+             )
+             SELECT
+               ?,
+               ?,
+               COALESCE(MAX(revision_number), 0) + 1,
+               ?::jsonb,
+               ?,
+               ?
+             FROM api_key_control_profile_revisions
+             WHERE profile_id = ?
+             RETURNING *`
+          )
+          .bind(
+            id,
+            input.profileId,
+            JSON.stringify(input.rules ?? []),
+            input.defaultAction ?? "allow",
+            input.createdBy ?? null,
+            input.profileId
+          )
+          .first<Record<string, unknown>>();
+      });
 
       return row ? mapApiKeyControlProfileRevisionRow(row) : null;
     },
