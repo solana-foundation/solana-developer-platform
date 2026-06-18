@@ -28,7 +28,7 @@ function formatEstimateDecimal(value: string): string {
   }).format(parsed);
 }
 
-function buildFeeLabel(fees: PaymentRampEstimateFees): string | null {
+function buildFeeLabel(fees: PaymentRampEstimateFees): string {
   const networkFee = fees.network;
   const providerFee = fees.provider;
   const network = networkFee !== undefined ? Number(networkFee) : undefined;
@@ -50,9 +50,8 @@ function buildFeeLabel(fees: PaymentRampEstimateFees): string | null {
     return `Fees ${formatEstimateDecimal(providerFee)} ${providerCurrency} + ${formatEstimateDecimal(networkFee)} ${networkCurrency}`;
   }
 
-  const total = Number(fees.total);
-  if (total <= 0) {
-    return null;
+  if (Number(fees.total) === 0) {
+    return "No fees";
   }
 
   return `Fee ${formatEstimateDecimal(fees.total)} ${fees.currency}`;
@@ -84,11 +83,9 @@ function ProviderCardEstimate({
         </p>
         <div className="flex items-center justify-end gap-2 whitespace-nowrap">
           <span className="text-sm leading-none font-semibold text-text-extra-high">{`≈ ${amount} ${unit}`}</span>
-          {feeLabel ? (
-            <span className="rounded-full bg-border-extra-light px-2 py-0.5 text-xs leading-none font-medium text-text-low">
-              {feeLabel}
-            </span>
-          ) : null}
+          <span className="rounded-full bg-border-extra-light px-2 py-0.5 text-xs leading-none font-medium text-text-low">
+            {feeLabel}
+          </span>
         </div>
       </div>
     );

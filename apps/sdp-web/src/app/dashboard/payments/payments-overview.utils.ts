@@ -1,9 +1,11 @@
 import type {
   CustodyWalletAggregate,
   CustodyWalletTokenBalance,
+  RampDirection,
   PaymentTransferSummary as TransferRecord,
   PaymentsDashboardWallet as WalletRecord,
 } from "@sdp/types";
+import { toTitleCase } from "../activity-format-utils";
 
 // biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
@@ -196,6 +198,35 @@ export function resolveCounterparty(transfer: TransferRecord): string {
   }
 
   return transfer.destination ?? transfer.source ?? "Unavailable";
+}
+
+const RAMP_TYPE_LABELS = {
+  onramp: "Deposit",
+  offramp: "Pay",
+} as const satisfies Record<RampDirection, string>;
+
+export function resolveTransferTypeLabel(type: string | undefined): string {
+  if (type === "onramp" || type === "offramp") {
+    return RAMP_TYPE_LABELS[type];
+  }
+  return type ? toTitleCase(type) : "Transfer";
+}
+
+/** Source → destination amounts, Wise-style: what's sent vs. what's received. */
+export function resolveTransferFlow(transfer: TransferRecord): {
+  send: string | null;
+  receive: string | null;
+} {
+  const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
+  const cryptoLabel =
+    transfer.amount && transfer.token ? formatDisplayAmount(transfer.amount, transfer.token) : null;
+  const fiatLabel =
+    transfer.fiatAmount && transfer.fiatCurrency
+      ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
+      : null;
+  return isInbound
+    ? { send: fiatLabel, receive: cryptoLabel }
+    : { send: cryptoLabel, receive: fiatLabel };
 }
 
 export function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): number | null {

@@ -11,16 +11,23 @@ import type {
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { getApiError } from "@/app/dashboard/payments/payments-workspace.data";
+import { requirementFieldError } from "../schema";
 
 async function fetchCounterpartyRequirements(
   counterpartyId: string,
   provider: RampProviderId,
   direction: RampDirection,
-  fiatCurrency: RampFiatCurrency | undefined
+  fiatCurrency: RampFiatCurrency | undefined,
+  corridor?: AdvanceRequirementsPayload
 ): Promise<CounterpartyRequirements> {
   const params = new URLSearchParams({ provider, direction });
   if (fiatCurrency !== undefined) {
     params.set("fiatCurrency", fiatCurrency);
+  }
+  if (corridor) {
+    params.set("cryptoToken", corridor.cryptoToken);
+    params.set("destinationWallet", corridor.destinationWallet);
+    params.set("fiatCurrency", corridor.fiatCurrency);
   }
   const response = await fetch(
     `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/requirements?${params.toString()}`
@@ -35,6 +42,46 @@ async function fetchCounterpartyRequirements(
   }
 
   return body.data;
+}
+
+export interface AdvanceRequirementsPayload {
+  cryptoToken: string;
+  destinationWallet: string;
+  fiatCurrency: RampFiatCurrency;
+}
+
+async function advanceCounterpartyRequirements(
+  counterpartyId: string,
+  provider: RampProviderId,
+  direction: RampDirection,
+  payload: AdvanceRequirementsPayload & { collectedData: CollectedFieldData }
+): Promise<CounterpartyRequirements> {
+  const response = await fetch(
+    `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/requirements`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, direction, ...payload }),
+    }
+  );
+  const body = (await response.json().catch(() => ({}))) as {
+    data?: CounterpartyRequirements;
+    error?: { message?: string };
+  };
+
+  if (!response.ok || !body.data) {
+    throw new Error(getApiError(body, `Requirements advance failed (${response.status}).`));
+  }
+
+  return body.data;
+}
+
+function isOnboardingPending(status: CounterpartyRequirements["status"]): boolean {
+  return (
+    status === "customer_verification_required" ||
+    status === "customer_verifying" ||
+    status === "funding_account_provisioning"
+  );
 }
 
 export interface CounterpartyRequirementsParams {
@@ -58,6 +105,14 @@ export interface CounterpartyRequirementsState {
   isResolved: boolean;
   /** Why the user can't proceed past provider selection: a fetch error OR an `unsupported` reason. null when fine. */
   blockReason: string | null;
+  /** Live provider onboarding lifecycle from the last advance (POST); null until advanced. */
+  onboarding: CounterpartyRequirements | null;
+  /** Advances provider provisioning (onramp); resolves to the new lifecycle state. */
+  submitRequirements: (payload: AdvanceRequirementsPayload) => Promise<CounterpartyRequirements>;
+  /** An advance request is in flight (initial submit or a poll tick). */
+  isAdvancing: boolean;
+  /** Re-runs the advance (POST) to retry — used by the provisioning_failed "Try again" action. */
+  retryOnboarding: () => void;
 }
 
 /**
@@ -80,9 +135,16 @@ export function useCounterpartyRequirements(
   const subjectKey =
     params === null ? "" : `${params.counterpartyId}:${params.provider}:${params.fiatCurrency}`;
   const [trackedSubject, setTrackedSubject] = useState(subjectKey);
+  const [onboarding, setOnboarding] = useState<CounterpartyRequirements | null>(null);
+  const [lastAdvancePayload, setLastAdvancePayload] = useState<AdvanceRequirementsPayload | null>(
+    null
+  );
+  const [isAdvancing, setIsAdvancing] = useState(false);
   if (subjectKey !== trackedSubject) {
     setTrackedSubject(subjectKey);
     setCollectedData({});
+    setOnboarding(null);
+    setLastAdvancePayload(null);
   }
 
   const key =
@@ -105,20 +167,61 @@ export function useCounterpartyRequirements(
     { revalidateOnFocus: false, revalidateOnReconnect: false, revalidateIfStale: false }
   );
 
+  const submitRequirements = async (
+    payload: AdvanceRequirementsPayload
+  ): Promise<CounterpartyRequirements> => {
+    if (!params?.provider || !params.counterpartyId) {
+      throw new Error("Cannot advance requirements without a provider and counterparty.");
+    }
+    setIsAdvancing(true);
+    try {
+      const result = await advanceCounterpartyRequirements(
+        params.counterpartyId,
+        params.provider,
+        params.direction,
+        { ...payload, collectedData }
+      );
+      setOnboarding(result);
+      setLastAdvancePayload(payload);
+      return result;
+    } finally {
+      setIsAdvancing(false);
+    }
+  };
+
+  const retryOnboarding = () => {
+    if (lastAdvancePayload) {
+      void submitRequirements(lastAdvancePayload).catch(() => {});
+    }
+  };
+
+  useSWR(
+    onboarding && lastAdvancePayload && params?.provider && isOnboardingPending(onboarding.status)
+      ? (["counterparty-requirements-status-poll", subjectKey] as const)
+      : null,
+    async () => {
+      if (!lastAdvancePayload || !params?.provider) {
+        return;
+      }
+      const result = await fetchCounterpartyRequirements(
+        params.counterpartyId,
+        params.provider,
+        params.direction,
+        lastAdvancePayload.fiatCurrency,
+        lastAdvancePayload
+      );
+      setOnboarding(result);
+    },
+    { refreshInterval: 4000, revalidateOnFocus: false, dedupingInterval: 0 }
+  );
+
   const fields = useMemo<RequirementField[]>(
     () => (data?.status === "collect" ? data.fields : []),
     [data]
   );
 
   const isComplete = useMemo(
-    () =>
-      fields.every((field) => {
-        if (!field.required) {
-          return true;
-        }
-        const value = collectedData[field.key];
-        return value !== undefined && value.trim().length > 0;
-      }),
+    () => fields.every((field) => requirementFieldError(field, collectedData[field.key]) === null),
     [fields, collectedData]
   );
 
@@ -139,5 +242,9 @@ export function useCounterpartyRequirements(
     isComplete,
     isResolved: data !== undefined,
     blockReason,
+    onboarding,
+    submitRequirements,
+    isAdvancing,
+    retryOnboarding,
   };
 }

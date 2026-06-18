@@ -6,38 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { createApiKeyMaterial, parseJsonArray, randomBase64Url } from "@/services/api-key.utils";
-
-describe("parseJsonArray", () => {
-  it("returns null for null input", () => {
-    expect(parseJsonArray(null)).toBeNull();
-  });
-
-  it("returns null for empty string", () => {
-    expect(parseJsonArray("")).toBeNull();
-  });
-
-  it("parses valid JSON array", () => {
-    const result = parseJsonArray('["a", "b", "c"]');
-    expect(result).toEqual(["a", "b", "c"]);
-  });
-
-  it("parses empty JSON array", () => {
-    const result = parseJsonArray("[]");
-    expect(result).toEqual([]);
-  });
-
-  it("returns null for invalid JSON", () => {
-    expect(parseJsonArray("not json")).toBeNull();
-  });
-
-  it("parses non-array JSON (caller should validate)", () => {
-    // Note: parseJsonArray doesn't validate array type
-    // It's used in contexts where DB always stores arrays
-    const result = parseJsonArray('{"key": "value"}');
-    expect(result).toEqual({ key: "value" });
-  });
-});
+import { createApiKeyMaterial, randomBase64Url } from "@/services/api-key.utils";
 
 describe("randomBase64Url", () => {
   it("generates string of correct length", () => {

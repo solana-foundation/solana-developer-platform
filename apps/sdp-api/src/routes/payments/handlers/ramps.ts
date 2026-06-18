@@ -11,20 +11,35 @@ import {
   type RampFiatCurrency,
 } from "@sdp/types/generated/ramp-support";
 import type { RampProviderId } from "@sdp/types/provider-access";
+import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type { PaymentTransferStatus } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, badRequestQuery, internalError, notFound } from "@/lib/errors";
+import {
+  AppError,
+  badRequest,
+  badRequestQuery,
+  counterpartyNotProvisioned,
+  internalError,
+  notFound,
+} from "@/lib/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import {
   buildBvnkPartyDetails,
+  bvnkOnboardingRequirements,
   bvnkOnrampKey,
   isBvnkWalletActive,
   normalizeBvnkCurrencyAndNetwork,
   readBvnkOnrampEntry,
 } from "@/lib/ramps/providers/bvnk";
+import {
+  isLightsparkExternalAccountActive,
+  latestLightsparkPayoutAccount,
+  readLightsparkCustomerId,
+} from "@/lib/ramps/providers/lightspark";
+import { readyCounterparty } from "@/lib/ramps/requirements";
 import type { RampRuntimeContext } from "@/lib/ramps/types";
 import { success } from "@/lib/response";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
@@ -46,10 +61,11 @@ import {
   listOfframpCurrenciesQuerySchema,
   listOnrampCurrenciesQuerySchema,
   simulateSandboxTransferSchema,
+  type submitCounterpartyRequirementsSchema,
 } from "../schemas";
 import { type ResolvedScope, resolveScope, resolveWalletAddress } from "../wallets";
 import { bvnkOnrampQuote, ensureBvnkCustomer, ensureBvnkPaymentRule } from "./ramps/bvnk";
-import { ensureLightsparkCustomer, lightsparkOfframpQuote } from "./ramps/lightspark";
+import { ensureLightsparkCustomer, ensureLightsparkPayoutAccount } from "./ramps/lightspark";
 
 type OnrampCurrencyPair = {
   source: (typeof ONRAMP_SUPPORT)[number]["source"];
@@ -67,6 +83,8 @@ type ExecuteOnrampInput = z.infer<typeof executeOnrampSchema>;
 
 type ExecuteOfframpInput = z.infer<typeof executeOfframpSchema>;
 
+type SubmitCounterpartyRequirementsInput = z.infer<typeof submitCounterpartyRequirementsSchema>;
+
 function filterProviders(
   providers: readonly RampProviderId[],
   provider?: RampProviderId
@@ -82,7 +100,7 @@ function uniqueSorted<T extends string>(values: readonly T[]): T[] {
 }
 
 /** Enriches BVNK compliance with the requester IP from request headers. */
-async function assertRampProviderAvailable(
+export async function assertRampProviderAvailable(
   c: AppContext,
   providerId: RampProviderId,
   organizationId: string
@@ -238,12 +256,19 @@ async function executeOnrampWithProvider(
       const customer = await ensureBvnkCustomer(c, counterparty, projectId, {
         fiatCurrency: input.fiatCurrency,
       });
-      const bvnkPaymentRule = await ensureBvnkPaymentRule(c, counterparty, projectId, customer, {
-        currency,
-        network,
-        destinationWalletAddress,
-        fiatCurrency: input.fiatCurrency,
-      });
+      const bvnkPaymentRule = await ensureBvnkPaymentRule(
+        c,
+        ctx,
+        counterparty,
+        projectId,
+        customer,
+        {
+          currency,
+          network,
+          destinationWalletAddress,
+          fiatCurrency: input.fiatCurrency,
+        }
+      );
       return await RAMP_PROVIDER_CLIENTS.bvnk.executeOnramp(ctx, {
         destinationWalletAddress,
         cryptoToken: input.cryptoToken,
@@ -253,6 +278,62 @@ async function executeOnrampWithProvider(
     }
     default: {
       const _exhaustive: never = input.provider;
+      throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
+    }
+  }
+}
+
+export async function advanceCounterpartyRequirements(
+  c: AppContext,
+  input: SubmitCounterpartyRequirementsInput & { counterparty: CounterpartyRow; projectId: string }
+): Promise<CounterpartyRequirements> {
+  switch (input.provider) {
+    case "moonpay":
+      return readyCounterparty("moonpay", input.direction);
+    case "lightspark": {
+      const customer = await ensureLightsparkCustomer(c, {
+        counterparty: input.counterparty,
+        projectId: input.projectId,
+      });
+      if (input.direction === "offramp") {
+        await ensureLightsparkPayoutAccount(c, {
+          counterparty: input.counterparty,
+          projectId: input.projectId,
+          customer,
+          fiatCurrency: input.fiatCurrency,
+          collectedData: input.collectedData,
+        });
+      }
+      return readyCounterparty("lightspark", input.direction);
+    }
+    case "bvnk": {
+      if (input.direction === "offramp") {
+        return readyCounterparty("bvnk", input.direction);
+      }
+      const customer = await ensureBvnkCustomer(c, input.counterparty, input.projectId, {
+        fiatCurrency: input.fiatCurrency,
+        collectedData: input.collectedData,
+      });
+      const scope = await resolveScope(c);
+      const destinationWalletAddress = resolveWalletAddress(
+        scope.wallets,
+        input.destinationWallet,
+        "destinationWallet",
+        scope.auth
+      );
+      const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+      const resolution = await ensureBvnkPaymentRule(
+        c,
+        rampRuntime(c),
+        input.counterparty,
+        input.projectId,
+        customer,
+        { currency, network, destinationWalletAddress, fiatCurrency: input.fiatCurrency }
+      );
+      return bvnkOnboardingRequirements(resolution, input.direction);
+    }
+    default: {
+      const _exhaustive: never = input;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
     }
   }
@@ -459,7 +540,6 @@ export async function createOnrampQuote(c: AppContext) {
   );
 
   let quote: PaymentRampQuote;
-  let persist: boolean;
   switch (input.provider) {
     case "moonpay": {
       quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOnrampQuote(rampRuntime(c), {
@@ -470,11 +550,13 @@ export async function createOnrampQuote(c: AppContext) {
         externalCustomerId: counterparty.external_id ?? counterparty.id,
         redirectUrl: input.redirectUrl,
       });
-      persist = true;
       break;
     }
     case "lightspark": {
-      const { customerId } = await ensureLightsparkCustomer(c, { counterparty, projectId });
+      const customerId = readLightsparkCustomerId(counterparty.provider_data);
+      if (!customerId) {
+        throw counterpartyNotProvisioned("lightspark", "onramp");
+      }
       quote = await RAMP_PROVIDER_CLIENTS.lightspark.createOnrampQuote(rampRuntime(c), {
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
@@ -484,18 +566,15 @@ export async function createOnrampQuote(c: AppContext) {
         customerId,
         redirectUrl: input.redirectUrl,
       });
-      persist = true;
       break;
     }
     case "bvnk": {
-      ({ quote, persist } = await bvnkOnrampQuote(c, {
+      quote = await bvnkOnrampQuote(c, {
         counterparty,
-        projectId,
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
         destinationWalletAddress,
-        collectedData: input.collectedData,
-      }));
+      });
       break;
     }
     default: {
@@ -507,21 +586,19 @@ export async function createOnrampQuote(c: AppContext) {
     }
   }
 
-  if (persist) {
-    await persistRampQuoteTransfer(c, {
-      scope,
-      projectId,
-      counterparty,
-      quote,
-      direction: "onramp",
-      wallet: destinationWallet,
-      walletAddress: destinationWalletAddress,
-      cryptoToken: input.cryptoToken,
-      cryptoAmount: null,
-      fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
-      fiatAmount: input.fiatAmount,
-    });
-  }
+  await persistRampQuoteTransfer(c, {
+    scope,
+    projectId,
+    counterparty,
+    quote,
+    direction: "onramp",
+    wallet: destinationWallet,
+    walletAddress: destinationWalletAddress,
+    cryptoToken: input.cryptoToken,
+    cryptoAmount: null,
+    fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
+    fiatAmount: input.fiatAmount,
+  });
 
   return success(c, { quote });
 }
@@ -579,14 +656,29 @@ export async function createOfframpQuote(c: AppContext) {
       break;
     }
     case "lightspark": {
-      quote = await lightsparkOfframpQuote(c, {
-        counterparty,
-        projectId,
+      if (!input.fiatCurrency) {
+        throw badRequest("fiatCurrency is required for Lightspark off-ramp.");
+      }
+      const customerId = readLightsparkCustomerId(counterparty.provider_data);
+      const payoutAccount = latestLightsparkPayoutAccount(
+        counterparty.provider_data,
+        input.fiatCurrency
+      );
+      if (
+        !customerId ||
+        !payoutAccount ||
+        !isLightsparkExternalAccountActive(payoutAccount.status)
+      ) {
+        throw counterpartyNotProvisioned("lightspark", "offramp");
+      }
+      quote = await RAMP_PROVIDER_CLIENTS.lightspark.createOfframpQuote(rampRuntime(c), {
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
         cryptoAmount: input.cryptoAmount,
         sourceWalletAddress,
-        collectedData: input.collectedData,
+        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        customerId,
+        payoutAccountId: payoutAccount.accountId,
       });
       break;
     }

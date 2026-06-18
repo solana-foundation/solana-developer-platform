@@ -1,4 +1,5 @@
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
+import type { RequirementField } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 
 const providerField = z
@@ -101,3 +102,44 @@ export const onchainSendSchema = z.object({
 });
 
 export type OnchainSendFields = z.input<typeof onchainSendSchema>;
+
+export function applyRequirementMask(mask: string, raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  let out = "";
+  let next = 0;
+  for (const slot of mask) {
+    if (next >= digits.length) break;
+    if (slot === "#") {
+      out += digits[next];
+      next += 1;
+    } else {
+      out += slot;
+    }
+  }
+  return out;
+}
+
+export function requirementFieldError(
+  field: RequirementField,
+  raw: string | undefined
+): string | null {
+  const value = raw === undefined ? "" : raw.trim();
+  if (value.length === 0) {
+    return field.required ? `${field.label} is required.` : null;
+  }
+  if (field.kind === "select") {
+    return field.options.some((option) => option.value === value)
+      ? null
+      : `Select a valid ${field.label.toLowerCase()}.`;
+  }
+  if (field.minLength !== undefined && value.length < field.minLength) {
+    return `${field.label} must be at least ${field.minLength} characters.`;
+  }
+  if (field.maxLength !== undefined && value.length > field.maxLength) {
+    return `${field.label} must be at most ${field.maxLength} characters.`;
+  }
+  if (field.pattern !== undefined && !new RegExp(field.pattern).test(value)) {
+    return `${field.label} doesn't match the expected format${field.placeholder ? ` (e.g. ${field.placeholder})` : ""}.`;
+  }
+  return null;
+}

@@ -311,13 +311,14 @@ export const privateTransferSchema: z.ZodType<PrivateTransferRequest> = z.object
 });
 
 const rampProviderSchema = z.enum(RAMP_PROVIDERS);
+export const rampDirectionSchema = z.enum(["onramp", "offramp"]);
 const onrampCryptoRailSchema = z.enum(ONRAMP_CRYPTO_RAILS);
 const offrampCryptoRailSchema = z.enum(OFFRAMP_CRYPTO_RAILS);
 
-const rampCurrencyCodeSchema = z
+export const rampCurrencyCodeSchema = z
   .string()
   .regex(/^[a-zA-Z0-9_]+$/, { message: "Invalid ramp currency code" });
-const rampFiatCurrencySchema = z.preprocess(
+export const rampFiatCurrencySchema = z.preprocess(
   (value) => (typeof value === "string" ? value.trim().toUpperCase() : value),
   z.enum(RAMP_FIAT_CURRENCIES)
 );
@@ -451,8 +452,31 @@ export const createOnrampQuoteSchema = z.object({
   fiatCurrency: rampFiatCurrencySchema.optional(),
   fiatAmount: paymentAmountSchema,
   redirectUrl: z.string().url().optional(),
-  collectedData: z.record(z.string(), z.string()).optional(),
 });
+
+export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
+  z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
+  z.discriminatedUnion("direction", [
+    z.object({
+      provider: z.literal("bvnk"),
+      direction: z.literal("onramp"),
+      cryptoToken: rampCurrencyCodeSchema,
+      destinationWallet: z.string().min(1),
+      fiatCurrency: rampFiatCurrencySchema,
+      collectedData: z.record(z.string(), z.string()).optional(),
+    }),
+    z.object({ provider: z.literal("bvnk"), direction: z.literal("offramp") }),
+  ]),
+  z.discriminatedUnion("direction", [
+    z.object({ provider: z.literal("lightspark"), direction: z.literal("onramp") }),
+    z.object({
+      provider: z.literal("lightspark"),
+      direction: z.literal("offramp"),
+      fiatCurrency: rampFiatCurrencySchema,
+      collectedData: z.record(z.string(), z.string()).optional(),
+    }),
+  ]),
+]);
 
 export const createOfframpQuoteSchema = z.object({
   provider: rampProviderSchema,
@@ -462,7 +486,6 @@ export const createOfframpQuoteSchema = z.object({
   fiatCurrency: rampFiatCurrencySchema.optional(),
   cryptoAmount: paymentAmountSchema,
   redirectUrl: z.string().url().optional(),
-  collectedData: z.record(z.string(), z.string()).optional(),
 });
 
 export const executeOfframpSchema = z.object({

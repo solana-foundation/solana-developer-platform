@@ -43,3 +43,45 @@ export async function GET(request: Request, context: RouteContext) {
     );
   }
 }
+
+export async function POST(request: Request, context: RouteContext) {
+  const trace = createTimedTrace("route.dashboard.counterparty.requirements.submit", request);
+
+  try {
+    const counterpartyId = (await context.params).counterpartyId;
+    const apiClient = await createSdpApiClient(
+      trace.childContext("route.dashboard.counterparty.requirements.submit.api")
+    );
+    const body = await request.text();
+    const response = await apiClient.request(
+      `/v1/counterparties/${encodeURIComponent(counterpartyId)}/requirements`,
+      { method: "POST", body }
+    );
+    const responseBody = await response.text();
+
+    logRouteResult(trace, response.status);
+
+    return new NextResponse(responseBody, {
+      status: response.status,
+      headers: {
+        "Content-Type": response.headers.get("Content-Type") ?? "application/json",
+        "X-SDP-Trace-ID": trace.traceId,
+        "Server-Timing": trace.serverTiming(),
+      },
+    });
+  } catch (error) {
+    logRouteResult(trace, 500, {
+      error: error instanceof Error ? error.message : "Failed to submit counterparty requirements",
+    });
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to submit counterparty requirements",
+      },
+      {
+        status: 500,
+        headers: { "X-SDP-Trace-ID": trace.traceId, "Server-Timing": trace.serverTiming() },
+      }
+    );
+  }
+}

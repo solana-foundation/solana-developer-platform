@@ -16,6 +16,7 @@ import {
   type RampProviderId,
   resolveOrganizationProviderEntitlements,
 } from "@sdp/types";
+import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
@@ -207,7 +208,7 @@ function parseOrganizationSettings(raw: string | null): OrganizationSettings | n
   }
 
   try {
-    return JSON.parse(raw) as OrganizationSettings;
+    return parsePostgresJson<OrganizationSettings>(raw);
   } catch {
     throw new AppError("INTERNAL_ERROR", "Organization settings are invalid JSON");
   }

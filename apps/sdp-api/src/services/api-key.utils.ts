@@ -8,21 +8,6 @@
 import type { ApiKeyEnvironment } from "@sdp/types";
 
 /**
- * Safely parse a JSON array string, returning null on failure.
- */
-export function parseJsonArray(value: string | null): string[] | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(value) as string[];
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Generate a cryptographically random base64url string.
  *
  * Uses Web Crypto API for randomness, compatible with both

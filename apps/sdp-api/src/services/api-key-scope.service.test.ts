@@ -3,6 +3,7 @@ import type { ApiKeyContext } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import {
   assertApiKeyWalletAccess,
+  assertGrantableApiKeyPermissions,
   filterApiKeyWallets,
   getAllowedApiKeyWalletIds,
   getAllowedApiKeyWalletIdsForPermissions,
@@ -188,6 +189,54 @@ describe("api key scope service", () => {
         signingWalletId: "wal_missing_scope",
       })
     ).toThrowError(AppError);
+  });
+});
+
+describe("assertGrantableApiKeyPermissions", () => {
+  it("lets wildcard and org admins grant the api_admin role", () => {
+    expect(() => assertGrantableApiKeyPermissions(["*"], "api_admin", undefined)).not.toThrow();
+    expect(() =>
+      assertGrantableApiKeyPermissions(["org:admin", "api-keys:write"], "api_admin", undefined)
+    ).not.toThrow();
+  });
+
+  it("blocks a non-admin api-keys:write holder from minting an api_admin key", () => {
+    expect(() =>
+      assertGrantableApiKeyPermissions(["api-keys:write"], "api_admin", undefined)
+    ).toThrowError(AppError);
+  });
+
+  it("blocks escalation through a custom permissions array the actor lacks", () => {
+    expect(() =>
+      assertGrantableApiKeyPermissions(["api-keys:write"], "api_developer", ["*"])
+    ).toThrowError(AppError);
+    expect(() =>
+      assertGrantableApiKeyPermissions(["payments:read", "api-keys:write"], "api_developer", [
+        "tokens:write",
+      ])
+    ).toThrowError(AppError);
+  });
+
+  it("blocks the default api_developer role when the actor lacks those permissions", () => {
+    expect(() =>
+      assertGrantableApiKeyPermissions(["api-keys:write"], "api_developer", undefined)
+    ).toThrowError(AppError);
+  });
+
+  it("allows a non-admin to grant a subset of its own permissions", () => {
+    expect(() =>
+      assertGrantableApiKeyPermissions(
+        ["payments:read", "payments:write", "api-keys:write"],
+        "api_developer",
+        ["payments:read"]
+      )
+    ).not.toThrow();
+  });
+
+  it("treats an empty permission set as always grantable", () => {
+    expect(() =>
+      assertGrantableApiKeyPermissions(["api-keys:write"], "api_developer", [])
+    ).not.toThrow();
   });
 });
 

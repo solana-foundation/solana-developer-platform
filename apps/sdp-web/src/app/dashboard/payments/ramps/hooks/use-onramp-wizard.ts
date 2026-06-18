@@ -44,6 +44,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       insertAfter: "DEPOSIT",
       direction: "onramp",
     },
+    advanceRequirementsBeforeQuote: true,
     selectionSchema: depositSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/onramp/quote",
     buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, collectedData }) => ({
@@ -60,21 +61,6 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       setQuoteSimulationLoading(false);
       setQuoteSimulationSucceeded(false);
     },
-  });
-
-  const bvnkInstruction =
-    wizard.quote?.provider === "bvnk" && wizard.quote.deliveryMode === "manual_instructions"
-      ? wizard.quote.paymentInstructions[0]
-      : undefined;
-
-  const isAwaitingBvnk =
-    bvnkInstruction !== undefined &&
-    (bvnkInstruction.onboardingStatus !== "ready" || !bvnkInstruction.bankAccount?.accountNumber);
-
-  useSWR(isAwaitingBvnk ? "bvnk-onramp-verification-poll" : null, () => wizard.refreshQuote(), {
-    refreshInterval: 4000,
-    revalidateOnFocus: false,
-    dedupingInterval: 0,
   });
 
   const transferStatusKey = wizard.quote
@@ -134,7 +120,6 @@ export function useOnrampWizard(props: UseRampWizardProps) {
 
   return {
     ...wizard,
-    bvnkInstruction,
     transferStatus,
     transferStatusLoading,
     quoteSimulationLoading,

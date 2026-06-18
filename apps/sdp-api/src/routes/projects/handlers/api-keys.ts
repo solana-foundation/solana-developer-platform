@@ -108,13 +108,6 @@ export const createProjectApiKey = async (c: AppContext) => {
     walletPurpose,
   } = parsed.data;
 
-  const hasOrgAdminAccess =
-    auth.permissions.includes("*") || auth.permissions.includes("org:admin");
-
-  if (permissions && !hasOrgAdminAccess) {
-    throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require admin access");
-  }
-
   const walletSelection = resolveCreateWalletScope({
     walletScope,
     signingWalletId,
@@ -163,6 +156,7 @@ export const createProjectApiKey = async (c: AppContext) => {
     projectId,
     createdByKeyId: auth.apiKeyId ?? undefined,
     createdByUserId: auth.userId ?? undefined,
+    actorPermissions: auth.permissions,
     name,
     description,
     role,

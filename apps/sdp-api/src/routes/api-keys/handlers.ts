@@ -124,13 +124,6 @@ export const createApiKey = async (c: AppContext) => {
 
   const projectId = requireProjectId(c);
 
-  const hasOrgAdminAccess =
-    actor.permissions.includes("*") || actor.permissions.includes("org:admin");
-
-  if (permissions && !hasOrgAdminAccess) {
-    throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require admin access");
-  }
-
   const walletSelection = resolveCreateWalletScope({
     walletScope,
     signingWalletId,
@@ -216,6 +209,7 @@ export const createApiKey = async (c: AppContext) => {
     projectId,
     createdByUserId: createdBy,
     createdByKeyId: actor.apiKeyId ?? undefined,
+    actorPermissions: actor.permissions,
     name,
     description,
     role,
@@ -317,10 +311,10 @@ export const updateApiKey = async (c: AppContext) => {
   // Verify key belongs to this organization and the current project scope
   const existing = await getDb(c.env)
     .prepare(
-      "SELECT id, key_hash, project_id FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
+      "SELECT id, key_hash, project_id, role FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
     )
     .bind(keyId, actor.organizationId, projectId)
-    .first<{ id: string; key_hash: string; project_id: string }>();
+    .first<{ id: string; key_hash: string; project_id: string; role: ApiKeyRole }>();
 
   if (!existing) {
     throw notFound("API key");
@@ -333,41 +327,6 @@ export const updateApiKey = async (c: AppContext) => {
     walletBindings: parsed.data.walletBindings,
   });
 
-  const updates: string[] = [];
-  const values: (string | null)[] = [];
-
-  if (parsed.data.name !== undefined) {
-    updates.push("name = ?");
-    values.push(parsed.data.name);
-  }
-
-  if (parsed.data.description !== undefined) {
-    updates.push("description = ?");
-    values.push(parsed.data.description);
-  }
-
-  if (parsed.data.allowedIps !== undefined) {
-    updates.push("allowed_ips = ?");
-    values.push(parsed.data.allowedIps ? JSON.stringify(parsed.data.allowedIps) : null);
-  }
-
-  if (parsed.data.expiresAt !== undefined) {
-    updates.push("expires_at = ?");
-    values.push(parsed.data.expiresAt);
-  }
-
-  if (parsed.data.permissions !== undefined) {
-    const hasOrgAdminAccess =
-      actor.permissions.includes("*") || actor.permissions.includes("org:admin");
-
-    if (parsed.data.permissions && !hasOrgAdminAccess) {
-      throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require admin access");
-    }
-
-    updates.push("permissions = ?");
-    values.push(parsed.data.permissions ? JSON.stringify(parsed.data.permissions) : null);
-  }
-
   if (walletSelection.touched) {
     await assertWalletBindingsInScope(
       getDb(c.env),
@@ -375,19 +334,24 @@ export const updateApiKey = async (c: AppContext) => {
       existing.project_id,
       walletSelection.bindings
     );
-    updates.push("signing_wallet_id = ?");
-    values.push(walletSelection.defaultSigningWalletId);
   }
 
-  if (updates.length === 0) {
-    throw badRequest("No fields to update");
-  }
-
-  values.push(keyId);
-  await getDb(c.env)
-    .prepare(`UPDATE api_keys SET ${updates.join(", ")} WHERE id = ?`)
-    .bind(...values)
-    .run();
+  const apiKeyService = new ApiKeyService(getDb(c.env));
+  await apiKeyService.updateApiKey({
+    keyId,
+    organizationId: actor.organizationId,
+    projectId,
+    actorPermissions: actor.permissions,
+    currentRole: existing.role,
+    name: parsed.data.name,
+    description: parsed.data.description,
+    allowedIps: parsed.data.allowedIps,
+    expiresAt: parsed.data.expiresAt,
+    permissions: parsed.data.permissions,
+    signingWallet: walletSelection.touched
+      ? { walletId: walletSelection.defaultSigningWalletId }
+      : undefined,
+  });
 
   if (walletSelection.touched) {
     await replaceApiKeyWalletBindings(getDb(c.env), keyId, walletSelection.bindings);

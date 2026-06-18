@@ -38,6 +38,30 @@ function gridExchangeRateResponse(params: {
   );
 }
 
+function onrampExchangeRateResponse(
+  sendingAmount: number,
+  receivingAmount: number,
+  feeFixed: number
+): Response {
+  return new Response(
+    JSON.stringify({
+      data: [
+        {
+          sourceCurrency: { code: "USD", decimals: 2 },
+          destinationCurrency: { code: "USDC", decimals: 6 },
+          sendingAmount,
+          receivingAmount,
+          exchangeRate: 0.0001,
+          fees: { fixed: feeFixed },
+          minSendingAmount: 100,
+          maxSendingAmount: 500000,
+        },
+      ],
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
+}
+
 describe("LightsparkRampClient", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -50,7 +74,7 @@ describe("LightsparkRampClient", () => {
         gridExchangeRateResponse({
           sourceCurrency: "USDC",
           sourceDecimals: 6,
-          sendingAmount: 100000000,
+          sendingAmount: 10000,
           receivingAmount: 6400,
         })
       )
@@ -78,7 +102,7 @@ describe("LightsparkRampClient", () => {
     const amountSpecificUrl = new URL(String(fetchSpy.mock.calls[1]?.[0]));
     expect(amountSpecificUrl.searchParams.get("sourceCurrency")).toBe("USDC");
     expect(amountSpecificUrl.searchParams.get("destinationCurrency")).toBe("USD");
-    expect(amountSpecificUrl.searchParams.get("sendingAmount")).toBe("3000");
+    expect(amountSpecificUrl.searchParams.get("sendingAmount")).toBe("30000000");
   });
 
   it("uses each Grid source currency's decimals for estimate amounts", async () => {
@@ -88,7 +112,7 @@ describe("LightsparkRampClient", () => {
         gridExchangeRateResponse({
           sourceCurrency: "SOL",
           sourceDecimals: 9,
-          sendingAmount: 100000000,
+          sendingAmount: 10000,
           receivingAmount: 99833300,
         })
       )
@@ -109,7 +133,53 @@ describe("LightsparkRampClient", () => {
 
     const url = new URL(String(fetchSpy.mock.calls[1]?.[0]));
     expect(url.searchParams.get("sourceCurrency")).toBe("SOL");
-    expect(url.searchParams.get("sendingAmount")).toBe("125000");
+    expect(url.searchParams.get("sendingAmount")).toBe("1250000000");
+  });
+
+  it("uses fiat decimals and Grid receiving amount for USDC on-ramp estimate", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(onrampExchangeRateResponse(10000, 100000000, 0))
+      .mockResolvedValueOnce(onrampExchangeRateResponse(15000, 75000000, 5));
+
+    const estimate = await new LightsparkRampClient().estimateOnramp(LIGHTSPARK_CONTEXT, {
+      assetRail: "usdc.solana",
+      fiatCurrency: "USD",
+      fiatAmount: "150",
+    });
+
+    const probeUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    expect(probeUrl.searchParams.get("sourceCurrency")).toBe("USD");
+    expect(probeUrl.searchParams.get("destinationCurrency")).toBe("USDC");
+    expect(probeUrl.searchParams.has("sendingAmount")).toBe(false);
+
+    const amountUrl = new URL(String(fetchSpy.mock.calls[1]?.[0]));
+    expect(amountUrl.searchParams.get("sendingAmount")).toBe("15000");
+
+    expect(estimate).toMatchObject({
+      provider: "lightspark",
+      direction: "onramp",
+      fiatCurrency: "USD",
+      assetRail: "usdc.solana",
+      fiatAmount: "150",
+      cryptoAmount: "75",
+      exchangeRate: "2",
+      fees: { currency: "USD", total: "0.05" },
+    });
+  });
+
+  it("rejects a non-positive Grid receiving amount on on-ramp estimate", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(onrampExchangeRateResponse(10000, 100000000, 0))
+      .mockResolvedValueOnce(onrampExchangeRateResponse(15000, 0, 0));
+
+    await expect(
+      new LightsparkRampClient().estimateOnramp(LIGHTSPARK_CONTEXT, {
+        assetRail: "usdc.solana",
+        fiatCurrency: "USD",
+        fiatAmount: "150",
+      })
+    ).rejects.toThrow(/non-positive/);
   });
 
   it("returns Grid currency metadata on on-ramp quotes", async () => {
