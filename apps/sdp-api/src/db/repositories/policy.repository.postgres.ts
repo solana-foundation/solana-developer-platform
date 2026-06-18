@@ -1,4 +1,5 @@
 import type { AppDb } from "@/db";
+import { badRequest } from "@/lib/errors";
 import type {
   ActivateApiKeyControlProfileRevisionInput,
   ActivateWalletControlProfileRevisionInput,
@@ -166,6 +167,16 @@ function mapPolicyEvaluationRow(row: Record<string, unknown>): PolicyEvaluationR
     approval_request_id: (row.approval_request_id as string | null | undefined) ?? null,
     created_at: row.created_at as string,
   };
+}
+
+function validateApiKeyWalletPolicyBindingInput(input: UpsertApiKeyWalletPolicyBindingInput): void {
+  if (input.bindingScope === "selected" && !input.walletId) {
+    throw badRequest("walletId is required for selected API key wallet policy bindings");
+  }
+
+  if (input.bindingScope === "all" && (input.walletId || input.custodyWalletId)) {
+    throw badRequest("walletId and custodyWalletId must be omitted for all-wallet policy bindings");
+  }
 }
 
 async function getWalletControlProfileById(
@@ -532,6 +543,8 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async upsertApiKeyWalletPolicyBinding(input: UpsertApiKeyWalletPolicyBindingInput) {
+      validateApiKeyWalletPolicyBindingInput(input);
+
       const id = generateApiKeyWalletPolicyBindingId();
       const conflictTarget =
         input.bindingScope === "all"

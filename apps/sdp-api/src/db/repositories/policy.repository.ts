@@ -188,14 +188,25 @@ export interface ActivateApiKeyControlProfileRevisionInput {
   activatedAt?: string;
 }
 
-export interface UpsertApiKeyWalletPolicyBindingInput {
+interface UpsertApiKeyWalletPolicyBindingBaseInput {
   apiKeyId: string;
-  bindingScope: ApiKeyWalletPolicyBindingScope;
-  walletId?: string | null;
-  custodyWalletId?: string | null;
   walletControlProfileId?: string | null;
   apiKeyControlProfileId?: string | null;
 }
+
+export type UpsertApiKeyWalletPolicyBindingInput = UpsertApiKeyWalletPolicyBindingBaseInput &
+  (
+    | {
+        bindingScope: "all";
+        walletId?: null;
+        custodyWalletId?: null;
+      }
+    | {
+        bindingScope: "selected";
+        walletId: string;
+        custodyWalletId?: string | null;
+      }
+  );
 
 export interface CreateWalletOperationInput {
   organizationId: string;

@@ -201,6 +201,53 @@ describe("PolicyRepository (postgres)", () => {
     });
   });
 
+  it("rejects policy wallet bindings that do not match their scope before querying Postgres", async () => {
+    const selectedWithoutWalletId = {
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "selected",
+    } as const;
+
+    await expect(
+      // @ts-expect-error selected policy bindings require a wallet ID at compile time.
+      repo.upsertApiKeyWalletPolicyBinding(selectedWithoutWalletId)
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "walletId is required for selected API key wallet policy bindings",
+    });
+
+    const selectedWithNullWalletId = {
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "selected",
+      walletId: null,
+    } as const;
+
+    await expect(
+      // @ts-expect-error selected policy bindings require a non-null wallet ID.
+      repo.upsertApiKeyWalletPolicyBinding(selectedWithNullWalletId)
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "walletId is required for selected API key wallet policy bindings",
+    });
+
+    const allWithWalletTarget = {
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "all",
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+    } as const;
+
+    await expect(
+      // @ts-expect-error all-wallet policy bindings cannot carry a selected-wallet target.
+      repo.upsertApiKeyWalletPolicyBinding(allWithWalletTarget)
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "walletId and custodyWalletId must be omitted for all-wallet policy bindings",
+    });
+
+    const bindings = await repo.listApiKeyWalletPolicyBindings(TEST_API_KEY.id);
+    expect(bindings).toHaveLength(0);
+  });
+
   it("preserves policy-scoped wallet bindings when an API key is rotated", async () => {
     await getDb(env)
       .prepare(
