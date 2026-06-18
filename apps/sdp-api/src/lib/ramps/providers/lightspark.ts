@@ -1,9 +1,10 @@
-import { createVerify } from "node:crypto";
 import type {
   Counterparty,
   CounterpartyProviderData,
+  LightsparkGridAmount,
   LightsparkPaymentRampExecution,
   LightsparkPaymentRampInstruction,
+  LightsparkRampSettlement,
   PaymentRampEstimate,
   PaymentRampExecution,
   PaymentRampQuote,
@@ -19,9 +20,10 @@ import {
 } from "@sdp/types/payment-rails";
 import type { CollectedFieldData, CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
-import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
+import { AppError, badRequest, providerNotConfigured, providerUnavailable } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { isAddress } from "@/lib/solana";
+import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { type ProviderRequestInit, providerFetchJson } from "../fetch";
 import {
   basicAuthHeader,
@@ -49,7 +51,6 @@ import type {
 import { lightsparkCounterpartyRequirements } from "../validation/lightspark";
 
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
-const GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT = 10_000n;
 
 function readLightsparkConfig(
   env: Record<string, string | undefined>,
@@ -143,13 +144,16 @@ interface LightsparkOutgoingPaymentData {
   status: string;
   quoteId: string;
   failureReason?: string;
-  receivedAmount?: { amount: number; decimals: number };
+  sentAmount?: LightsparkGridAmount;
+  receivedAmount?: LightsparkGridAmount;
+  exchangeRate?: number;
+  fees?: number;
 }
 
 function readOptionalGridAmount(
   record: Record<string, unknown>,
   field: string
-): { amount: number; decimals: number } | undefined {
+): LightsparkGridAmount | undefined {
   const value = record[field];
   if (!isGridRecord(value)) {
     return undefined;
@@ -160,10 +164,56 @@ function readOptionalGridAmount(
     return undefined;
   }
   const decimals = currency.decimals;
-  if (!Number.isInteger(decimals) || typeof decimals !== "number") {
+  const currencyCode = currency.code;
+  if (
+    !Number.isInteger(decimals) ||
+    typeof decimals !== "number" ||
+    typeof currencyCode !== "string"
+  ) {
     return undefined;
   }
-  return { amount, decimals };
+  return { amount, currencyCode: currencyCode.toUpperCase(), decimals };
+}
+
+function readOptionalGridNumber(
+  record: Record<string, unknown>,
+  field: string
+): number | undefined {
+  const value = record[field];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function isLightsparkTerminalStatus(status: string): status is LightsparkRampSettlement["status"] {
+  return (
+    status === "COMPLETED" ||
+    status === "FAILED" ||
+    status === "EXPIRED" ||
+    status === "REFUND_FAILED"
+  );
+}
+
+function buildLightsparkSettlement(
+  data: LightsparkOutgoingPaymentData
+): LightsparkRampSettlement | undefined {
+  const { status, sentAmount, receivedAmount, exchangeRate, fees, failureReason } = data;
+  if (
+    !isLightsparkTerminalStatus(status) ||
+    !sentAmount ||
+    !receivedAmount ||
+    exchangeRate === undefined ||
+    fees === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    provider: "lightspark",
+    status,
+    sentAmount,
+    receivedAmount,
+    exchangeRate,
+    fees,
+    ...(failureReason ? { failureReason } : {}),
+  };
 }
 
 interface LightsparkOutgoingPaymentWebhook {
@@ -240,7 +290,10 @@ function parseLightsparkOutgoingPaymentWebhook(
       status: readRequiredGridString(data, "status", "Lightspark outgoing payment webhook data"),
       quoteId: readRequiredGridString(data, "quoteId", "Lightspark outgoing payment webhook data"),
       failureReason: readOptionalGridString(data, "failureReason"),
+      sentAmount: readOptionalGridAmount(data, "sentAmount"),
       receivedAmount: readOptionalGridAmount(data, "receivedAmount"),
+      exchangeRate: readOptionalGridNumber(data, "exchangeRate"),
+      fees: readOptionalGridNumber(data, "fees"),
     },
   };
 }
@@ -540,41 +593,6 @@ function parseGridExchangeRate(response: GridExchangeRatesResponse): GridExchang
   return entry;
 }
 
-function deriveGridExchangeRateRequestDecimals(rate: GridExchangeRate): number {
-  const defaultSourceAmount = BigInt(rate.sendingAmount);
-  if (defaultSourceAmount <= 0n) {
-    throw new AppError("PROVIDER_UNAVAILABLE", "Lightspark returned an invalid default amount");
-  }
-  if (defaultSourceAmount % GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT !== 0n) {
-    throw new AppError(
-      "PROVIDER_UNAVAILABLE",
-      "Lightspark returned an unsupported exchange-rate amount scale"
-    );
-  }
-
-  let scale = defaultSourceAmount / GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT;
-  let sourceDecimalsPerRequestDecimal = 0;
-  while (scale > 1n && scale % 10n === 0n) {
-    scale /= 10n;
-    sourceDecimalsPerRequestDecimal += 1;
-  }
-  if (scale !== 1n) {
-    throw new AppError(
-      "PROVIDER_UNAVAILABLE",
-      "Lightspark returned an unsupported exchange-rate amount scale"
-    );
-  }
-
-  const requestDecimals = rate.sourceCurrency.decimals - sourceDecimalsPerRequestDecimal;
-  if (requestDecimals < 0) {
-    throw new AppError(
-      "PROVIDER_UNAVAILABLE",
-      "Lightspark returned an invalid exchange-rate amount scale"
-    );
-  }
-  return requestDecimals;
-}
-
 export interface CreateLightsparkOnrampQuoteInput {
   /** Grid customer that will fund the quote in real time. */
   customerId: string;
@@ -711,20 +729,7 @@ export class LightsparkRampClient implements RampProvider {
       // Not JSON — treat the header value as bare base64.
     }
 
-    const verified = createVerify("SHA256")
-      .update(rawBody)
-      .verify(
-        // Doppler may store the PEM with literal "\n"; normalize to real newlines.
-        { key: publicKey.replace(/\\n/g, "\n"), format: "pem", type: "spki" },
-        Buffer.from(signatureB64, "base64")
-      );
-    if (!verified) {
-      throw new AppError("UNAUTHORIZED", "Invalid Lightspark webhook signature", {
-        provider: this.id,
-      });
-    }
-
-    let payload: unknown;
+    let payload: Record<string, unknown>;
     try {
       payload = JSON.parse(rawBody);
     } catch {
@@ -732,6 +737,15 @@ export class LightsparkRampClient implements RampProvider {
         provider: this.id,
       });
     }
+
+    const timestamp = payload.timestamp;
+    await verifyWebhookSignature({
+      provider: this.id,
+      signedPayload: rawBody,
+      signature: signatureB64,
+      algorithm: { type: "ecdsa-sha256", publicKeyPem: publicKey },
+      timestampSeconds: typeof timestamp === "string" ? Date.parse(timestamp) / 1000 : Number.NaN,
+    });
 
     return { provider: this.id, payload };
   }
@@ -748,8 +762,15 @@ export class LightsparkRampClient implements RampProvider {
     }
 
     const kind = LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES[webhook.type];
+    const settlement = buildLightsparkSettlement(webhook.data);
     if (kind === "failed" || kind === "expired") {
-      return { provider: this.id, kind, reference, error: webhook.data.failureReason };
+      return {
+        provider: this.id,
+        kind,
+        reference,
+        ...(webhook.data.failureReason ? { error: webhook.data.failureReason } : {}),
+        ...(settlement ? { settlement } : {}),
+      };
     }
     if (kind === "settled" && webhook.data.receivedAmount) {
       return {
@@ -760,6 +781,7 @@ export class LightsparkRampClient implements RampProvider {
           BigInt(webhook.data.receivedAmount.amount),
           webhook.data.receivedAmount.decimals
         ),
+        ...(settlement ? { settlement } : {}),
       };
     }
     return { provider: this.id, kind, reference };
@@ -956,14 +978,59 @@ export class LightsparkRampClient implements RampProvider {
   }
 
   async estimateOnramp(
-    _ctx: RampRuntimeContext,
-    _input: RampEstimateOnrampInput
+    { env, mode }: RampRuntimeContext,
+    input: RampEstimateOnrampInput
   ): Promise<PaymentRampEstimate> {
-    throw new AppError(
-      "ESTIMATE_NOT_AVAILABLE",
-      "Lightspark on-ramp rate is only known at quote time.",
-      { provider: this.id }
+    const config = readLightsparkConfig(env, mode);
+    const cryptoCurrency = normalizeLightsparkCurrencyCode(
+      getCryptoRailAssetLabel(input.assetRail)
     );
+    const corridor = parseGridExchangeRate(
+      await this.request<GridExchangeRatesResponse>(
+        config,
+        gridExchangeRatesPath({
+          sourceCurrency: input.fiatCurrency,
+          destinationCurrency: cryptoCurrency,
+        }),
+        { method: "GET" }
+      )
+    );
+    const sendingAmount = toLightsparkMinorUnitsInteger(
+      parseDecimalAmount(input.fiatAmount, corridor.sourceCurrency.decimals),
+      "fiatAmount"
+    );
+    const rate = parseGridExchangeRate(
+      await this.request<GridExchangeRatesResponse>(
+        config,
+        gridExchangeRatesPath({
+          sourceCurrency: input.fiatCurrency,
+          destinationCurrency: cryptoCurrency,
+          sendingAmount,
+        }),
+        { method: "GET" }
+      )
+    );
+
+    if (rate.receivingAmount <= 0) {
+      throw providerUnavailable("Lightspark returned a non-positive on-ramp receiving amount");
+    }
+    const cryptoAmount = formatDecimalAmount(
+      BigInt(rate.receivingAmount),
+      rate.destinationCurrency.decimals
+    );
+    return {
+      provider: this.id,
+      direction: "onramp",
+      fiatCurrency: input.fiatCurrency,
+      assetRail: input.assetRail,
+      fiatAmount: input.fiatAmount,
+      cryptoAmount,
+      exchangeRate: String(Number(input.fiatAmount) / Number(cryptoAmount)),
+      fees: {
+        currency: input.fiatCurrency,
+        total: formatDecimalAmount(BigInt(rate.fees.fixed), rate.sourceCurrency.decimals),
+      },
+    };
   }
 
   async estimateOfframp(
@@ -984,9 +1051,8 @@ export class LightsparkRampClient implements RampProvider {
         { method: "GET" }
       )
     );
-    const requestDecimals = deriveGridExchangeRateRequestDecimals(corridor);
     const sendingAmount = toLightsparkMinorUnitsInteger(
-      parseDecimalAmount(input.cryptoAmount, requestDecimals),
+      parseDecimalAmount(input.cryptoAmount, corridor.sourceCurrency.decimals),
       "cryptoAmount"
     );
     const rate = parseGridExchangeRate(
@@ -1001,8 +1067,13 @@ export class LightsparkRampClient implements RampProvider {
       )
     );
 
-    const netFiatMinorUnits = rate.receivingAmount > 0 ? BigInt(rate.receivingAmount) : 0n;
-    const fiatAmount = formatDecimalAmount(netFiatMinorUnits, rate.destinationCurrency.decimals);
+    if (rate.receivingAmount <= 0) {
+      throw providerUnavailable("Lightspark returned a non-positive off-ramp receiving amount");
+    }
+    const fiatAmount = formatDecimalAmount(
+      BigInt(rate.receivingAmount),
+      rate.destinationCurrency.decimals
+    );
     return {
       provider: this.id,
       direction: "offramp",

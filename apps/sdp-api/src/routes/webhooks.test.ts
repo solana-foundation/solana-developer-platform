@@ -575,7 +575,10 @@ describe("BVNK ramp webhook", () => {
   }
 
   async function sendBvnkWebhook(payload: unknown, signature?: string) {
-    const body = JSON.stringify(payload);
+    const body = JSON.stringify({
+      ...(payload as Record<string, unknown>),
+      timestamp: new Date().toISOString(),
+    });
     const sig =
       signature ?? createHmac("sha256", BVNK_WEBHOOK_SECRET).update(body).digest("base64");
     const background: Promise<unknown>[] = [];
@@ -820,6 +823,24 @@ describe("BVNK ramp webhook", () => {
     );
     expect(res.status).toBe(401);
   });
+
+  it("rejects a bvnk webhook that omits the envelope timestamp", async () => {
+    const body = JSON.stringify({
+      event: "bvnk:customers:status-change",
+      data: { customerId: CUSTOMER_REFERENCE, status: "VERIFIED", customerType: "INDIVIDUAL" },
+    });
+    const sig = createHmac("sha256", BVNK_WEBHOOK_SECRET).update(body).digest("base64");
+    const res = await app.request(
+      "/webhooks/payments/ramps/sandbox/bvnk",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Signature": sig },
+        body,
+      },
+      env
+    );
+    expect(res.status).toBe(401);
+  });
 });
 
 describe("Lightspark ramp webhook", () => {
@@ -832,7 +853,7 @@ describe("Lightspark ramp webhook", () => {
 
   type LightsparkOnrampWebhookBase = {
     id: string;
-    timestamp: string;
+    timestamp?: string;
   };
 
   type LightsparkOnrampPaymentDataBase = {
@@ -1001,10 +1022,18 @@ describe("Lightspark ramp webhook", () => {
       .run();
   }
 
-  function sendLightsparkWebhook(payload: LightsparkOnrampWebhookPayload) {
-    const body = JSON.stringify(payload);
+  async function sendLightsparkWebhook(payload: LightsparkOnrampWebhookPayload) {
+    const body = JSON.stringify({ ...payload, timestamp: new Date().toISOString() });
     const signature = createSign("SHA256").update(body).sign(privateKey).toString("base64");
-    return app.request(
+    const background: Promise<unknown>[] = [];
+    const executionCtx: ExecutionContext = {
+      waitUntil(promise) {
+        background.push(promise);
+      },
+      passThroughOnException() {},
+      props: {},
+    };
+    const res = await app.request(
       "/webhooks/payments/ramps/sandbox/lightspark",
       {
         method: "POST",
@@ -1014,8 +1043,11 @@ describe("Lightspark ramp webhook", () => {
         },
         body,
       },
-      env
+      env,
+      executionCtx
     );
+    await Promise.allSettled(background);
+    return res;
   }
 
   beforeEach(async () => {
@@ -1035,7 +1067,6 @@ describe("Lightspark ramp webhook", () => {
     const res = await sendLightsparkWebhook({
       id: "Webhook:019e979c-f68e-52c1-0000-3acafedca6e8",
       type: "OUTGOING_PAYMENT.PENDING",
-      timestamp: "2026-06-05T11:48:26.894404Z",
       data: {
         ...LIGHTSPARK_ONRAMP_PAYMENT_DATA,
         status: "PENDING",
@@ -1056,7 +1087,6 @@ describe("Lightspark ramp webhook", () => {
     const res = await sendLightsparkWebhook({
       id: "Webhook:019e979f-89d8-52c1-0000-2b4e2eaa4a8e",
       type: "OUTGOING_PAYMENT.PROCESSING",
-      timestamp: "2026-06-05T11:51:15.672154Z",
       data: {
         ...LIGHTSPARK_ONRAMP_PAYMENT_DATA,
         status: "PROCESSING",
@@ -1077,7 +1107,6 @@ describe("Lightspark ramp webhook", () => {
     const res = await sendLightsparkWebhook({
       id: "Webhook:019e979f-8bf4-52c1-0000-eca039904606",
       type: "OUTGOING_PAYMENT.COMPLETED",
-      timestamp: "2026-06-05T11:51:16.212053Z",
       data: {
         ...LIGHTSPARK_ONRAMP_PAYMENT_DATA,
         status: "COMPLETED",
@@ -1140,7 +1169,6 @@ describe("Lightspark ramp webhook", () => {
     return {
       id: "Webhook:019eb56e-ea4e-52c1-0000-36fa5542e7e6",
       type: "OUTGOING_PAYMENT.COMPLETED",
-      timestamp: "2026-06-11T06:46:45.582432Z",
       data: {
         ...LIGHTSPARK_ONRAMP_PAYMENT_DATA,
         quoteId: OFFRAMP_QUOTE_ID,
@@ -1187,7 +1215,6 @@ describe("Lightspark ramp webhook", () => {
     const stale = await sendLightsparkWebhook({
       id: "Webhook:019eb56d-f08b-52c1-0000-90f1e68dc8f8",
       type: "OUTGOING_PAYMENT.PENDING",
-      timestamp: "2026-06-11T06:45:41.643544Z",
       data: {
         ...LIGHTSPARK_ONRAMP_PAYMENT_DATA,
         quoteId: OFFRAMP_QUOTE_ID,
@@ -1202,5 +1229,269 @@ describe("Lightspark ramp webhook", () => {
       .bind(OFFRAMP_TRANSFER_ID)
       .first<{ status: string; fiat_amount: string }>();
     expect(transfer).toEqual({ status: "completed", fiat_amount: "9.99" });
+  });
+
+  it("rejects a lightspark webhook whose signed timestamp is outside the replay window", async () => {
+    await seedLightsparkOfframpTransfer();
+
+    const stalePayload = {
+      ...offrampCompletedWebhook(),
+      timestamp: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+    };
+    const body = JSON.stringify(stalePayload);
+    const signature = createSign("SHA256").update(body).sign(privateKey).toString("base64");
+    const res = await app.request(
+      "/webhooks/payments/ramps/sandbox/lightspark",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Grid-Signature": JSON.stringify({ v: 1, s: signature }),
+        },
+        body,
+      },
+      env
+    );
+    expect(res.status).toBe(401);
+
+    const transfer = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind(OFFRAMP_TRANSFER_ID)
+      .first<{ status: string }>();
+    expect(transfer?.status).toBe("awaiting_payment");
+  });
+
+  it("rejects a lightspark webhook that omits the envelope timestamp", async () => {
+    const body = JSON.stringify(offrampCompletedWebhook());
+    const signature = createSign("SHA256").update(body).sign(privateKey).toString("base64");
+    const res = await app.request(
+      "/webhooks/payments/ramps/sandbox/lightspark",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Grid-Signature": JSON.stringify({ v: 1, s: signature }),
+        },
+        body,
+      },
+      env
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("MoonPay ramp webhook", () => {
+  const ORG_ID = "org_moonpay_webhook";
+  const PROJECT_ID = "prj_moonpay_webhook";
+  const USER_ID = "usr_moonpay_webhook";
+  const TRANSFER_ID = "pt_moonpay_webhook";
+  const EXTERNAL_TX_ID = "ramp_quote_moonpay_webhook";
+  const MOONPAY_WEBHOOK_KEY = "moonpay_test_webhook_key";
+
+  function moonpaySignatureHeader(
+    body: string,
+    timestampSeconds: number,
+    key = MOONPAY_WEBHOOK_KEY
+  ) {
+    const s = createHmac("sha256", key).update(`${timestampSeconds}.${body}`).digest("hex");
+    return `t=${timestampSeconds},s=${s}`;
+  }
+
+  async function sendMoonpayWebhook(payload: unknown) {
+    const body = JSON.stringify(payload);
+    const header = moonpaySignatureHeader(body, Math.floor(Date.now() / 1000));
+    const background: Promise<unknown>[] = [];
+    const executionCtx: ExecutionContext = {
+      waitUntil(promise) {
+        background.push(promise);
+      },
+      passThroughOnException() {},
+      props: {},
+    };
+    const res = await app.request(
+      "/webhooks/payments/ramps/sandbox/moonpay",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Moonpay-Signature-V2": header },
+        body,
+      },
+      env,
+      executionCtx
+    );
+    await Promise.allSettled(background);
+    return res;
+  }
+
+  async function seedMoonpayOnrampTransfer() {
+    await getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(ORG_ID, "MoonPay Webhook Org", "moonpay-webhook-org", "enterprise", "active")
+      .run();
+    await getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+      .bind(USER_ID, "moonpay-webhook-user@example.com", 1, "active")
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(PROJECT_ID, ORG_ID, "Test", "moonpay-webhook-proj", "sandbox", "active", USER_ID)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, source_address, destination_address,
+           token, amount, memo, type, direction, status, provider, provider_reference,
+           delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
+           initiated_by_key_id, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        TRANSFER_ID,
+        ORG_ID,
+        PROJECT_ID,
+        "wallet_moonpay_webhook",
+        null,
+        "DestinationSolanaWallet111111111111111111111111",
+        "SOL",
+        null,
+        null,
+        "onramp",
+        "inbound",
+        "awaiting_payment",
+        "moonpay",
+        EXTERNAL_TX_ID,
+        null,
+        "USD",
+        "47.73",
+        {},
+        null,
+        null,
+        null,
+        "2026-06-18T00:00:00.000Z",
+        "2026-06-18T00:00:00.000Z"
+      )
+      .run();
+  }
+
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    env.MOONPAY_SANDBOX_WEBHOOK_KEY = MOONPAY_WEBHOOK_KEY;
+    await seedMoonpayOnrampTransfer();
+  });
+
+  afterEach(async () => {
+    env.MOONPAY_SANDBOX_WEBHOOK_KEY = undefined;
+    await clearTestDatabase(env);
+  });
+
+  const completedPayload = {
+    type: "transaction_updated",
+    externalCustomerId: "MOONPAY-ONRAMP-0001",
+    data: {
+      id: "0a5bb889-9afb-4b8d-835b-9b9855d67509",
+      status: "completed",
+      externalTransactionId: EXTERNAL_TX_ID,
+      failureReason: null,
+      baseCurrencyAmount: 47.73,
+      quoteCurrencyAmount: 0.649,
+      feeAmount: 2,
+      extraFeeAmount: 0,
+      networkFeeAmount: 0.27,
+      areFeesIncluded: true,
+      usdRate: 1,
+      cryptoTransactionId: "t11paHKpm79qTHVgSQ4rr9PAqE7ZT87MWpi1f5Nim8XzPyc7aPux",
+      baseCurrency: { code: "usd" },
+      currency: { code: "sol" },
+    },
+  };
+
+  it("records the delivered crypto amount and per-provider economics on a completed webhook", async () => {
+    const res = await sendMoonpayWebhook(completedPayload);
+    expect(res.status).toBe(200);
+
+    const transfer = await getDb(env)
+      .prepare("SELECT status, amount, provider_data FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{
+        status: string;
+        amount: string | null;
+        provider_data: { settlement?: Record<string, unknown> };
+      }>();
+    expect(transfer?.status).toBe("completed");
+    expect(transfer?.amount).toBe("0.649");
+    expect(transfer?.provider_data.settlement).toMatchObject({
+      provider: "moonpay",
+      status: "completed",
+      baseCurrencyCode: "USD",
+      baseCurrencyAmount: 47.73,
+      quoteCurrencyCode: "SOL",
+      quoteCurrencyAmount: 0.649,
+      feeAmount: 2,
+      networkFeeAmount: 0.27,
+    });
+  });
+
+  it("still marks a transfer failed when an early-stage failure omits economics", async () => {
+    const res = await sendMoonpayWebhook({
+      type: "transaction_failed",
+      externalCustomerId: "MOONPAY-ONRAMP-0001",
+      data: {
+        id: "0a5bb889-9afb-4b8d-835b-9b9855d67509",
+        status: "failed",
+        externalTransactionId: EXTERNAL_TX_ID,
+        failureReason: "kyc_rejected",
+      },
+    });
+    expect(res.status).toBe(200);
+
+    const transfer = await getDb(env)
+      .prepare("SELECT status, error, provider_data FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string; error: string | null; provider_data: { settlement?: unknown } }>();
+    expect(transfer?.status).toBe("failed");
+    expect(transfer?.error).toBe("kyc_rejected");
+    expect(transfer?.provider_data.settlement).toBeUndefined();
+  });
+
+  it("rejects a moonpay webhook whose signed timestamp is outside the replay window", async () => {
+    const body = JSON.stringify(completedPayload);
+    const staleHeader = moonpaySignatureHeader(body, Math.floor(Date.now() / 1000) - 6 * 60);
+    const res = await app.request(
+      "/webhooks/payments/ramps/sandbox/moonpay",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Moonpay-Signature-V2": staleHeader },
+        body,
+      },
+      env
+    );
+    expect(res.status).toBe(401);
+
+    const transfer = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string }>();
+    expect(transfer?.status).toBe("awaiting_payment");
+  });
+
+  it("rejects a moonpay webhook with an invalid signature", async () => {
+    const body = JSON.stringify(completedPayload);
+    const wrongKeyHeader = moonpaySignatureHeader(
+      body,
+      Math.floor(Date.now() / 1000),
+      "wrong_webhook_key"
+    );
+    const res = await app.request(
+      "/webhooks/payments/ramps/sandbox/moonpay",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Moonpay-Signature-V2": wrongKeyHeader },
+        body,
+      },
+      env
+    );
+    expect(res.status).toBe(401);
   });
 });

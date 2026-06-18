@@ -192,7 +192,9 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
                slot = ?,
                block_time = ?,
                fee = ?,
+               amount = ?,
                fiat_amount = ?,
+               provider_data = ?::jsonb,
                error = ?,
                updated_at = ?
            WHERE id = ?`
@@ -204,7 +206,13 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
           input.slot ?? existing.slot,
           input.blockTime ?? existing.block_time,
           input.fee ?? existing.fee,
+          input.amount ?? existing.amount,
           input.fiatAmount ?? existing.fiat_amount,
+          JSON.stringify(
+            input.providerData
+              ? { ...existing.provider_data, ...input.providerData }
+              : existing.provider_data
+          ),
           input.error ?? existing.error,
           input.updatedAt,
           input.transferId

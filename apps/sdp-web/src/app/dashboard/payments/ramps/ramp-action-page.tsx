@@ -6,7 +6,6 @@ import type {
   PaymentsDashboardWallet,
   RampProviderId,
 } from "@sdp/types";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR, { preload } from "swr";
@@ -16,20 +15,14 @@ import {
   fetchCounterpartyAccounts,
   fetchWallets,
 } from "@/app/dashboard/payments/payments-workspace.data";
-import { Button } from "@/components/ui/button";
 import { CounterpartyPicker } from "./components/counterparty-picker";
 import { CounterpartyRecentTransfers } from "./components/counterparty-recent-transfers";
-import { OfframpStepContent } from "./components/offramp-step-content";
-import { OnchainReceiveStepContent } from "./components/onchain-receive-step-content";
-import { OnchainSendStepContent } from "./components/onchain-send-step-content";
-import { OnrampStepContent } from "./components/onramp-step-content";
 import { type PaymentMethod, PaymentMethodStep } from "./components/payment-method-step";
-import { PoweredByRampProvider, RampWizardShell } from "./components/ramp-wizard-shell";
-import { OFFRAMP_STEPS, useOfframpWizard } from "./hooks/use-offramp-wizard";
-import { ONCHAIN_RECEIVE_STEPS, useOnchainReceiveWizard } from "./hooks/use-onchain-receive-wizard";
-import { ONCHAIN_SEND_STEPS, useOnchainSendWizard } from "./hooks/use-onchain-send-wizard";
-import { useOnrampWizard } from "./hooks/use-onramp-wizard";
-import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
+import { RampWizardShell } from "./components/ramp-wizard-shell";
+import { OfframpRail } from "./offramp-rail";
+import { OnchainReceiveRail } from "./onchain-receive-rail";
+import { OnchainSendRail } from "./onchain-send-rail";
+import { OnrampRail } from "./onramp-rail";
 
 interface PaymentsActionPageProps {
   mode: "send" | "receive";
@@ -47,9 +40,7 @@ type WizardStep = { label: string; title: string };
 const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 
-// ---- Rail children (mounted once the counterparty + method are known) ----
-
-interface RailProps {
+export interface RailProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
   enabledRampProviders: RampProviderId[];
@@ -60,227 +51,13 @@ interface RailProps {
   onExit: () => void;
 }
 
-function OnchainSendRail({
-  wallets,
-  walletsError,
-  counterpartyId,
-  counterpartyName,
-  preSteps,
-  onExit,
-}: RailProps) {
-  const wizard = useOnchainSendWizard({ wallets, walletsError, counterpartyId, onExit });
-  const primaryLabel = wizard.submitting
-    ? "Submitting..."
-    : wizard.isLastStep
-      ? wizard.transferResult
-        ? "Done"
-        : "Send transfer"
-      : "Next";
-
-  return (
-    <RampWizardShell
-      steps={[...preSteps, ...ONCHAIN_SEND_STEPS]}
-      stepIndex={preSteps.length + wizard.stepIndex}
-      primaryDisabled={wizard.submitting || !wizard.canProceed}
-      primaryLabel={primaryLabel}
-      walletsError={wizard.liveWalletsError}
-      onPrimary={() => void wizard.handlePrimary()}
-      onSecondary={wizard.handleSecondary}
-      counterpartyDialogOpen={false}
-      setCounterpartyDialogOpen={() => {}}
-      onCounterpartyCreated={() => {}}
-    >
-      <OnchainSendStepContent wizard={wizard} counterpartyName={counterpartyName} />
-    </RampWizardShell>
-  );
-}
-
-function OfframpRail({
-  wallets,
-  walletsError,
-  enabledRampProviders,
-  counterpartiesResult,
-  counterpartyId,
-  preSteps,
-  onExit,
-}: RailProps) {
-  const wizard = useOfframpWizard({
-    wallets,
-    walletsError,
-    enabledRampProviders,
-    counterpartiesResult,
-    initialCounterpartyId: counterpartyId,
-    onExit,
-  });
-
-  const transferTerminal = wizard.transferStatus
-    ? isTerminalRampTransferStatus(wizard.transferStatus.status)
-    : false;
-
-  return (
-    <RampWizardShell
-      steps={[...preSteps, ...OFFRAMP_STEPS]}
-      stepIndex={preSteps.length + wizard.stepIndex}
-      primaryDisabled={
-        wizard.hostedQuoteLoading ||
-        !wizard.canProceed ||
-        (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
-      }
-      primaryLabel={wizard.hostedQuoteLoading ? "Processing" : wizard.isLastStep ? "Done" : "Next"}
-      walletsError={wizard.liveWalletsError}
-      onPrimary={() => void wizard.handlePrimary()}
-      onSecondary={wizard.handleSecondary}
-      counterpartyDialogOpen={false}
-      setCounterpartyDialogOpen={() => {}}
-      onCounterpartyCreated={() => {}}
-      header={
-        wizard.fields.provider &&
-        (wizard.currentStepId === "REQUIREMENTS" || wizard.currentStepId === "COMPLETE") ? (
-          <PoweredByRampProvider provider={wizard.fields.provider} />
-        ) : null
-      }
-      secondaryLabel={wizard.onTransactionStage ? "Cancel" : undefined}
-      footerActions={
-        transferTerminal ? (
-          <Button asChild type="button" variant="secondary" className="self-center rounded-full">
-            <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
-              Go to transaction
-            </Link>
-          </Button>
-        ) : null
-      }
-      hidePrimary={wizard.currentStepId === "COMPLETE"}
-    >
-      <OfframpStepContent wizard={wizard} />
-    </RampWizardShell>
-  );
-}
-
-function OnchainReceiveRail({
-  wallets,
-  walletsError,
-  counterpartyId,
-  preSteps,
-  onExit,
-}: RailProps) {
-  const wizard = useOnchainReceiveWizard({ wallets, walletsError, counterpartyId, onExit });
-
-  return (
-    <RampWizardShell
-      steps={[...preSteps, ...ONCHAIN_RECEIVE_STEPS]}
-      stepIndex={preSteps.length + wizard.stepIndex}
-      primaryDisabled={
-        !wizard.canProceed || (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
-      }
-      primaryLabel={wizard.isLastStep ? "Done" : "Next"}
-      walletsError={wizard.liveWalletsError}
-      onPrimary={wizard.handlePrimary}
-      onSecondary={wizard.handleSecondary}
-      counterpartyDialogOpen={false}
-      setCounterpartyDialogOpen={() => {}}
-      onCounterpartyCreated={() => {}}
-    >
-      <OnchainReceiveStepContent wizard={wizard} />
-    </RampWizardShell>
-  );
-}
-
-function OnrampRail({
-  wallets,
-  walletsError,
-  enabledRampProviders,
-  counterpartiesResult,
-  counterpartyId,
-  preSteps,
-  onExit,
-}: RailProps) {
-  const wizard = useOnrampWizard({
-    wallets,
-    walletsError,
-    enabledRampProviders,
-    counterpartiesResult,
-    initialCounterpartyId: counterpartyId,
-    onExit,
-  });
-
-  const verificationUrl =
-    wizard.currentStepId === "PROVIDER" &&
-    wizard.onboarding?.status === "customer_verification_required"
-      ? wizard.onboarding.verificationUrl
-      : undefined;
-
-  const verificationPending =
-    wizard.currentStepId === "PROVIDER" &&
-    (wizard.onboarding?.status === "customer_verifying" ||
-      wizard.onboarding?.status === "funding_account_provisioning");
-
-  const transferTerminal = wizard.transferStatus
-    ? isTerminalRampTransferStatus(wizard.transferStatus.status)
-    : false;
-
-  return (
-    <RampWizardShell
-      steps={[...preSteps, ...wizard.steps]}
-      stepIndex={preSteps.length + wizard.stepIndex}
-      primaryDisabled={
-        wizard.hostedQuoteLoading ||
-        verificationPending ||
-        !wizard.canProceed ||
-        (wizard.currentStepId === "DEPOSIT" && wizard.walletsLoading)
-      }
-      primaryLabel={
-        wizard.hostedQuoteLoading
-          ? "Processing"
-          : verificationPending
-            ? "Verification pending"
-            : verificationUrl
-              ? "Complete Verification"
-              : "Next"
-      }
-      walletsError={wizard.liveWalletsError}
-      onPrimary={
-        verificationUrl
-          ? () => window.open(verificationUrl, "_blank", "noopener")
-          : wizard.isLastStep
-            ? wizard.finish
-            : () => void wizard.handlePrimary()
-      }
-      onSecondary={wizard.handleSecondary}
-      counterpartyDialogOpen={false}
-      setCounterpartyDialogOpen={() => {}}
-      onCounterpartyCreated={() => {}}
-      header={
-        wizard.fields.provider &&
-        (wizard.currentStepId === "REQUIREMENTS" || wizard.currentStepId === "PROVIDER") ? (
-          <PoweredByRampProvider provider={wizard.fields.provider} />
-        ) : null
-      }
-      secondaryLabel={wizard.onTransactionStage ? "Cancel" : undefined}
-      footerActions={
-        transferTerminal ? (
-          <Button asChild type="button" variant="secondary" className="self-center rounded-full">
-            <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
-              Go to transaction
-            </Link>
-          </Button>
-        ) : null
-      }
-      hidePrimary={wizard.currentStepId === "PROVIDER" && !verificationUrl}
-    >
-      <OnrampStepContent wizard={wizard} />
-    </RampWizardShell>
-  );
-}
-
-// ---- Orchestrator: counterparty -> method -> rail ----
-
-type Phase = "counterparty" | "method" | "rail";
+type RampsPhase = "counterparty" | "method" | "rail";
 
 export function PaymentsActionPage(props: PaymentsActionPageProps) {
   const { mode, enabledRampProviders } = props;
   const router = useRouter();
 
-  const [phase, setPhase] = useState<Phase>("counterparty");
+  const [phase, setPhase] = useState<RampsPhase>("counterparty");
   const [counterpartyId, setCounterpartyId] = useState("");
   const [method, setMethod] = useState<PaymentMethod | null>(null);
   const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
@@ -348,18 +125,21 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
       onExit: railOnExit,
     };
 
-    if (mode === "send") {
-      return effectiveMethod === "onchain" ? (
-        <OnchainSendRail {...railProps} />
-      ) : (
-        <OfframpRail {...railProps} />
-      );
+    const railKey = `${mode}:${effectiveMethod}` as const;
+    switch (railKey) {
+      case "send:onchain":
+        return <OnchainSendRail {...railProps} />;
+      case "send:ramp":
+        return <OfframpRail {...railProps} />;
+      case "receive:onchain":
+        return <OnchainReceiveRail {...railProps} />;
+      case "receive:ramp":
+        return <OnrampRail {...railProps} />;
+      default: {
+        const exhaustive: never = railKey;
+        throw new Error(`Unhandled rail: ${JSON.stringify(exhaustive)}`);
+      }
     }
-    return effectiveMethod === "onchain" ? (
-      <OnchainReceiveRail {...railProps} />
-    ) : (
-      <OnrampRail {...railProps} />
-    );
   }
 
   const stepIndex = phase === "counterparty" ? 0 : 1;

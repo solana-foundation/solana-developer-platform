@@ -48,9 +48,10 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       insertAfter: "WITHDRAW",
       direction: "offramp",
     },
+    advanceRequirementsBeforeQuote: true,
     selectionSchema: withdrawSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/offramp/quote",
-    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, collectedData }) => ({
+    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken }) => ({
       provider,
       counterpartyId: fields.counterpartyId,
       sourceWallet: fields.walletId,
@@ -58,7 +59,6 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       fiatCurrency: selectedRampPair.fiatCurrency,
       cryptoAmount: fields.amount.trim(),
       redirectUrl: `${window.location.origin}/dashboard/payments`,
-      collectedData,
     }),
     onQuoteCreated: () => {
       setOnchainSendLoading(false);

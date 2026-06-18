@@ -1,16 +1,16 @@
 "use client";
 
+import { SUCCESSFUL_PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
 import { ArrowRightIcon } from "lucide-react";
 import Image from "next/image";
 import useSWR from "swr";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
-import { formatRelativeTime, toTitleCase } from "../../../activity-format-utils";
-import { formatDisplayAmount } from "../../payments-overview.utils";
+import { formatRelativeTime } from "../../../activity-format-utils";
+import { resolveTransferFlow, resolveTransferTypeLabel } from "../../payments-overview.utils";
 import { fetchTransfers } from "../../payments-workspace.data";
 
 const RECENT_TRANSFERS_MAX_ROWS = 5;
-const SUCCESSFUL_TRANSFER_STATUSES: readonly string[] = ["completed", "confirmed", "finalized"];
 
 const SKELETON_ROWS = [
   { key: "row-1", provider: "w-24", type: "w-16", amount: "w-36", time: "w-16" },
@@ -25,7 +25,7 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
       fetchTransfers({
         pageSize: RECENT_TRANSFERS_MAX_ROWS,
         counterpartyId,
-        statuses: SUCCESSFUL_TRANSFER_STATUSES,
+        statuses: SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
       }),
     { revalidateOnFocus: false, revalidateIfStale: false, keepPreviousData: false }
   );
@@ -73,17 +73,7 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
       <h2 className="text-2xl font-medium text-text-extra-high">Recent Transfers</h2>
       <div>
         {data.map((transfer) => {
-          const cryptoLabel =
-            transfer.amount && transfer.token
-              ? formatDisplayAmount(transfer.amount, transfer.token)
-              : null;
-          const fiatLabel =
-            transfer.fiatAmount && transfer.fiatCurrency
-              ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
-              : null;
-          const orderedAmounts =
-            transfer.type === "onramp" ? [fiatLabel, cryptoLabel] : [cryptoLabel, fiatLabel];
-          const amounts = orderedAmounts.filter((label): label is string => label !== null);
+          const flow = resolveTransferFlow(transfer);
 
           return (
             <div key={transfer.id} className="flex items-center gap-3 py-3">
@@ -102,16 +92,16 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
                 </>
               ) : null}
               <span className="min-w-0 flex-1 truncate text-sm text-text-medium">
-                {transfer.type ? toTitleCase(transfer.type) : "Transfer"}
+                {resolveTransferTypeLabel(transfer.type)}
               </span>
-              {amounts.length > 0 ? (
-                <span className="flex shrink-0 items-center gap-1.5 text-sm text-text-medium">
-                  {amounts[0]}
-                  {amounts.length === 2 ? (
-                    <>
-                      <ArrowRightIcon className="size-3.5" />
-                      {amounts[1]}
-                    </>
+              {flow.send || flow.receive ? (
+                <span className="flex shrink-0 items-center gap-1.5 text-sm">
+                  {flow.send ? <span className="text-text-medium">{flow.send}</span> : null}
+                  {flow.send && flow.receive ? (
+                    <ArrowRightIcon className="size-3.5 text-text-low" />
+                  ) : null}
+                  {flow.receive ? (
+                    <span className="font-medium text-text-extra-high">{flow.receive}</span>
                   ) : null}
                 </span>
               ) : null}

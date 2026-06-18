@@ -4,6 +4,7 @@ import type { CollectedFieldData, RequirementField } from "@sdp/types/ramp-requi
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { applyRequirementMask, requirementFieldError } from "../schema";
 
 function RequirementFieldInput({
   field,
@@ -26,7 +27,8 @@ function RequirementFieldInput({
           searchPlaceholder="Search…"
         />
       );
-    case "text":
+    case "text": {
+      const error = value.trim().length > 0 ? requirementFieldError(field, value) : null;
       return (
         <div className="space-y-2">
           <Label htmlFor={field.key}>{field.label}</Label>
@@ -35,10 +37,18 @@ function RequirementFieldInput({
             id={field.key}
             placeholder={field.placeholder}
             value={value}
-            onChange={(event) => onChange(event.target.value)}
+            onChange={(event) =>
+              onChange(
+                field.mask
+                  ? applyRequirementMask(field.mask, event.target.value)
+                  : event.target.value
+              )
+            }
           />
+          {error ? <p className="text-sm text-status-error-text">{error}</p> : null}
         </div>
       );
+    }
     default: {
       const exhaustive: never = field;
       throw new Error(`Unhandled requirement field kind: ${JSON.stringify(exhaustive)}`);

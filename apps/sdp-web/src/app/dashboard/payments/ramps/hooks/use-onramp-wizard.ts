@@ -63,13 +63,6 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     },
   });
 
-  const onboardingReady = wizard.onboarding?.status === "ready";
-  useSWR(
-    onboardingReady && !wizard.quote ? "onramp-ready-quote" : null,
-    () => wizard.refreshQuote(),
-    { refreshInterval: 4000, revalidateOnFocus: false, dedupingInterval: 0 }
-  );
-
   const transferStatusKey = wizard.quote
     ? (["onramp-transfer-status", wizard.quote.provider, wizard.quote.id] as const)
     : null;

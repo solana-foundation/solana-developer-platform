@@ -1,4 +1,3 @@
-import type { PaymentRampQuote } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
@@ -215,43 +214,4 @@ export async function ensureLightsparkPayoutAccount(
   }
 
   return refreshPayoutAccount(c, input, entry);
-}
-
-export async function lightsparkOfframpQuote(
-  c: AppContext,
-  input: {
-    counterparty: CounterpartyRow;
-    projectId: string;
-    cryptoToken: string;
-    fiatCurrency?: RampFiatCurrency;
-    cryptoAmount: string;
-    sourceWalletAddress: string;
-    collectedData?: CollectedFieldData;
-  }
-): Promise<PaymentRampQuote> {
-  if (!input.fiatCurrency) {
-    throw badRequest("fiatCurrency is required for Lightspark off-ramp.");
-  }
-
-  const customer = await ensureLightsparkCustomer(c, {
-    counterparty: input.counterparty,
-    projectId: input.projectId,
-  });
-  const payoutAccount = await ensureLightsparkPayoutAccount(c, {
-    counterparty: input.counterparty,
-    projectId: input.projectId,
-    customer,
-    fiatCurrency: input.fiatCurrency,
-    collectedData: input.collectedData,
-  });
-
-  return RAMP_PROVIDER_CLIENTS.lightspark.createOfframpQuote(rampRuntime(c), {
-    cryptoToken: input.cryptoToken,
-    fiatCurrency: input.fiatCurrency,
-    cryptoAmount: input.cryptoAmount,
-    sourceWalletAddress: input.sourceWalletAddress,
-    externalCustomerId: input.counterparty.external_id ?? input.counterparty.id,
-    customerId: customer.customerId,
-    payoutAccountId: payoutAccount.accountId,
-  });
 }

@@ -40,7 +40,13 @@ function railOption(value: LightsparkPaymentRail): RequirementOption {
 }
 
 function bankNameField(): RequirementField {
-  return textField({ key: "bankName", label: "Bank name", required: true, maxLength: 256 });
+  return textField({
+    key: "bankName",
+    label: "Bank name",
+    required: true,
+    maxLength: 256,
+    placeholder: "Chase",
+  });
 }
 
 function swiftCodeField(required: boolean): RequirementField {
@@ -49,6 +55,7 @@ function swiftCodeField(required: boolean): RequirementField {
     label: "SWIFT / BIC code",
     required,
     pattern: SWIFT_BIC_PATTERN,
+    placeholder: "DEUTDEFF",
   });
 }
 
@@ -58,6 +65,7 @@ function accountNumberField(pattern?: string): RequirementField {
     label: "Account number",
     required: true,
     maxLength: 64,
+    placeholder: "12345678",
     ...(pattern ? { pattern } : {}),
   });
 }
@@ -69,6 +77,7 @@ function ibanField(pattern?: string): RequirementField {
     required: true,
     minLength: 15,
     maxLength: 34,
+    placeholder: "DE89370400440532013000",
     ...(pattern ? { pattern } : {}),
   });
 }
@@ -195,6 +204,7 @@ const LIGHTSPARK_PAYOUT_SPECS = {
         required: true,
         pattern: "^[0-9]{2}-?[0-9]{2}-?[0-9]{2}$",
         placeholder: "12-34-56",
+        mask: "##-##-##",
       }),
       accountNumberField("^[0-9]{8}$"),
     ],
@@ -300,7 +310,7 @@ const LIGHTSPARK_PAYOUT_SPECS = {
         pattern: "^[0-9]{9}$",
         placeholder: "021000021",
       }),
-      accountNumberField(),
+      accountNumberField("^[0-9]{4,17}$"),
     ],
   },
   VND: {

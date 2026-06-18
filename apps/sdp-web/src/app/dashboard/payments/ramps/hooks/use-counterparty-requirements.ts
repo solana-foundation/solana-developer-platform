@@ -11,6 +11,7 @@ import type {
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { getApiError } from "@/app/dashboard/payments/payments-workspace.data";
+import { requirementFieldError } from "../schema";
 
 async function fetchCounterpartyRequirements(
   counterpartyId: string,
@@ -52,6 +53,7 @@ export interface AdvanceRequirementsPayload {
 async function advanceCounterpartyRequirements(
   counterpartyId: string,
   provider: RampProviderId,
+  direction: RampDirection,
   payload: AdvanceRequirementsPayload & { collectedData: CollectedFieldData }
 ): Promise<CounterpartyRequirements> {
   const response = await fetch(
@@ -59,7 +61,7 @@ async function advanceCounterpartyRequirements(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, direction: "onramp", ...payload }),
+      body: JSON.stringify({ provider, direction, ...payload }),
     }
   );
   const body = (await response.json().catch(() => ({}))) as {
@@ -173,10 +175,12 @@ export function useCounterpartyRequirements(
     }
     setIsAdvancing(true);
     try {
-      const result = await advanceCounterpartyRequirements(params.counterpartyId, params.provider, {
-        ...payload,
-        collectedData,
-      });
+      const result = await advanceCounterpartyRequirements(
+        params.counterpartyId,
+        params.provider,
+        params.direction,
+        { ...payload, collectedData }
+      );
       setOnboarding(result);
       setLastAdvancePayload(payload);
       return result;
@@ -217,14 +221,7 @@ export function useCounterpartyRequirements(
   );
 
   const isComplete = useMemo(
-    () =>
-      fields.every((field) => {
-        if (!field.required) {
-          return true;
-        }
-        const value = collectedData[field.key];
-        return value !== undefined && value.trim().length > 0;
-      }),
+    () => fields.every((field) => requirementFieldError(field, collectedData[field.key]) === null),
     [fields, collectedData]
   );
 
