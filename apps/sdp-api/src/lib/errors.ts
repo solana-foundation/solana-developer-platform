@@ -232,6 +232,6 @@ export function counterpartyNotProvisioned(
   return new AppError(
     "CONFLICT",
     `Counterparty is not provisioned for ${provider} ${direction}. Complete the counterparty requirements (POST /counterparties/:counterpartyId/requirements) before requesting a quote.`,
-    { provider, direction, ...details }
+    { ...details, provider, direction }
   );
 }

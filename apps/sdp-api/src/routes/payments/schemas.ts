@@ -451,7 +451,6 @@ export const createOnrampQuoteSchema = z.object({
   fiatCurrency: rampFiatCurrencySchema.optional(),
   fiatAmount: paymentAmountSchema,
   redirectUrl: z.string().url().optional(),
-  collectedData: z.record(z.string(), z.string()).optional(),
 });
 
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
