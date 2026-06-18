@@ -144,6 +144,9 @@ function mapPolicyEvaluationRow(row: Record<string, unknown>): PolicyEvaluationR
     reason_code: row.reason_code as string,
     reason: (row.reason as string | null | undefined) ?? null,
     matched_rules: asPostgresJsonArray(row.matched_rules),
+    evaluation_context: asPostgresJsonObject(
+      row.evaluation_context
+    ) as unknown as PolicyEvaluationRow["evaluation_context"],
     requires_approval: row.requires_approval as boolean,
     approval_request_id: (row.approval_request_id as string | null | undefined) ?? null,
     created_at: row.created_at as string,
@@ -158,6 +161,24 @@ function validateApiKeyWalletPolicyBindingInput(input: UpsertApiKeyWalletPolicyB
   if (input.bindingScope === "all" && (input.walletId || input.custodyWalletId)) {
     throw badRequest("walletId and custodyWalletId must be omitted for all-wallet policy bindings");
   }
+}
+
+function createWalletOperationRawPayload(
+  input: CreateWalletOperationInput
+): Record<string, unknown> {
+  const rawPayload = { ...(input.rawPayload ?? {}) };
+
+  if (input.actor !== undefined) {
+    rawPayload.actor = input.actor;
+  }
+  if (input.context) {
+    rawPayload.context = input.context;
+  }
+  if (input.providerExtensions) {
+    rawPayload.providerExtensions = input.providerExtensions;
+  }
+
+  return rawPayload;
 }
 
 async function getWalletControlProfileById(
@@ -637,7 +658,7 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
           input.asset ?? null,
           input.amount ?? null,
           input.destination ?? null,
-          JSON.stringify(input.rawPayload ?? {}),
+          JSON.stringify(createWalletOperationRawPayload(input)),
           input.idempotencyKey ?? null,
           input.status ?? "created"
         )
@@ -664,9 +685,10 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
              reason_code,
              reason,
              matched_rules,
+             evaluation_context,
              requires_approval,
              approval_request_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?)`
         )
         .bind(
           id,
@@ -677,6 +699,7 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
           input.reasonCode,
           input.reason ?? null,
           JSON.stringify(input.matchedRules ?? []),
+          JSON.stringify(input.evaluationContext),
           input.requiresApproval ?? false,
           input.approvalRequestId ?? null
         )
