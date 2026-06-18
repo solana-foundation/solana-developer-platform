@@ -22,6 +22,7 @@ import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { formatDisplayLabel } from "@/lib/utils";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
@@ -219,7 +220,7 @@ export default async function WalletDetailPage({
                 trailing={<WalletAddressCopyButton address={wallet.publicKey} />}
               />
               <WalletInfoRow label="Wallet ID" value={wallet.walletId} monospace />
-              <WalletInfoRow label="Status" value={wallet.status} />
+              <WalletInfoRow label="Status" value={formatDisplayLabel(wallet.status)} />
               {provider ? (
                 <WalletInfoRow label="Provider" value={formatCustodyProviderName(provider)} />
               ) : null}
