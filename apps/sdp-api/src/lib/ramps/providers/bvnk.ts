@@ -120,6 +120,8 @@ interface BvnkConfig {
   auth: { authId: string; secretKey: string };
   walletId: string;
   apiBaseUrl: string;
+  signingHost: string;
+  proxyAuthSecret?: string;
 }
 
 function readBvnkConfig(env: Record<string, string | undefined>, mode: SdpEnvironment): BvnkConfig {
@@ -139,16 +141,27 @@ function readBvnkConfig(env: Record<string, string | undefined>, mode: SdpEnviro
     );
   }
 
+  const apiBaseUrlOverride = env.BVNK_API_BASE_URL?.trim();
   const apiBaseUrl =
-    env.BVNK_API_BASE_URL?.trim() ||
-    (mode === "sandbox" ? BVNK_SANDBOX_API_URL : BVNK_PRODUCTION_API_URL);
+    apiBaseUrlOverride || (mode === "sandbox" ? BVNK_SANDBOX_API_URL : BVNK_PRODUCTION_API_URL);
   try {
     new URL(apiBaseUrl);
   } catch {
     throw new AppError("INTERNAL_ERROR", "BVNK API URL configuration is invalid.");
   }
 
-  return { auth: { authId, secretKey }, walletId, apiBaseUrl };
+  const signingHostInput =
+    env.BVNK_SIGNING_HOST?.trim() ||
+    (mode === "sandbox" ? BVNK_SANDBOX_API_URL : BVNK_PRODUCTION_API_URL);
+  const signingHost = new URL(
+    signingHostInput.includes("://") ? signingHostInput : `https://${signingHostInput}`
+  ).hostname;
+
+  const proxyAuthSecret = apiBaseUrlOverride
+    ? env.PROXY_SHARED_SECRET?.trim() || undefined
+    : undefined;
+
+  return { auth: { authId, secretKey }, walletId, apiBaseUrl, signingHost, proxyAuthSecret };
 }
 
 type BvnkNetwork =
@@ -272,12 +285,12 @@ async function buildBvnkHawkAuthorizationHeader(
   url: URL,
   method: ProviderRequestInit<unknown>["method"],
   authId: string,
-  secretKey: string
+  secretKey: string,
+  signingHost: string
 ): Promise<string> {
   const ts = Math.floor(Date.now() / 1000).toString();
   const nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
   const resource = `${url.pathname}${url.search}`;
-  const port = url.port || (url.protocol === "https:" ? "443" : "80");
 
   const normalized = [
     "hawk.1.header",
@@ -285,8 +298,8 @@ async function buildBvnkHawkAuthorizationHeader(
     nonce,
     method,
     resource,
-    url.hostname.toLowerCase(),
-    port,
+    signingHost.toLowerCase(),
+    "443",
     "",
     "",
     "",
@@ -318,15 +331,18 @@ function mapBvnkErrorStatus(
   options?: { edgeBlocked?: boolean }
 ): AppError {
   if (options?.edgeBlocked) {
-    return new AppError(
-      "PROVIDER_UNAVAILABLE",
+    return providerUnavailable(
       `BVNK request was blocked at the edge (CloudFront/WAF, status ${status}) before reaching the API. This is typically IP rate-limiting, not a credential issue; retry shortly or from a different egress.`
     );
   }
-  if (status === 401 || status === 403) {
-    return new AppError(
-      "PROVIDER_NOT_CONFIGURED",
-      `BVNK rejected the request credentials (status ${status}). Check the BVNK Hawk auth configuration.`
+  if (status === 401) {
+    return providerNotConfigured(
+      "BVNK rejected the request credentials (status 401). Check the BVNK Hawk auth configuration."
+    );
+  }
+  if (status === 403) {
+    return providerNotConfigured(
+      "BVNK request was forbidden (status 403). Check the BVNK Hawk auth/account permissions, and — when BVNK_API_BASE_URL routes through the egress proxy — the PROXY_SHARED_SECRET / X-Proxy-Auth configuration."
     );
   }
   if (status === 429) {
@@ -763,12 +779,17 @@ export class BvnkRampClient implements RampProvider {
       url,
       init.method,
       config.auth.authId,
-      config.auth.secretKey
+      config.auth.secretKey,
+      config.signingHost
     );
 
     const { response, raw, parsed } = await providerFetch(this.id, url.toString(), {
       ...init,
-      headers: { Authorization: authorization, ...init.headers },
+      headers: {
+        Authorization: authorization,
+        ...(config.proxyAuthSecret ? { "X-Proxy-Auth": config.proxyAuthSecret } : {}),
+        ...init.headers,
+      },
     });
 
     if (!response.ok) {
@@ -794,7 +815,9 @@ export class BvnkRampClient implements RampProvider {
     fetchJson,
     writeDump,
   }: Parameters<RampProvider["_discoverRails"]>[0]) {
-    const base = env.BVNK_RAMP_RAILS_API_BASE_URL?.trim() || "https://api.sandbox.bvnk.com/";
+    const railsBaseOverride = env.BVNK_RAMP_RAILS_API_BASE_URL?.trim();
+    const base = railsBaseOverride || "https://api.sandbox.bvnk.com/";
+    const proxyAuthSecret = railsBaseOverride ? env.PROXY_SHARED_SECRET?.trim() : undefined;
     // biome-ignore lint/security/noSecrets: BVNK pagination query string, not a secret.
     const pageQuery = "?offset=0&max=1000";
 
@@ -818,6 +841,7 @@ export class BvnkRampClient implements RampProvider {
         await fetchJson(this.id, `anon ${request.path}`, url.toString(), {
           headers: {
             Accept: "application/json",
+            ...(proxyAuthSecret ? { "X-Proxy-Auth": proxyAuthSecret } : {}),
           },
         })
       );

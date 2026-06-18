@@ -151,5 +151,12 @@ CLERK_WEBHOOK_SECRET=whsec_...
 # BVNK_WALLET_ID=YOUR_BVNK_WALLET_ID
 # BVNK_WEBHOOK_SECRET=YOUR_BVNK_WEBHOOK_SIGNING_SECRET
 # BVNK_API_BASE_URL=https://api.sandbox.bvnk.com
+# When BVNK_API_BASE_URL is a static-egress proxy, set the real BVNK host used for
+# Hawk signing (defaults to the sandbox/prod BVNK host).
+# BVNK_SIGNING_HOST=api.sandbox.bvnk.com
+# Shared secret for the static-egress reverse proxy in front of BVNK. When set
+# (together with BVNK_API_BASE_URL), requests carry it as the X-Proxy-Auth header
+# (the proxy returns 403 without it). Leave unset for direct BVNK access.
+# PROXY_SHARED_SECRET=YOUR_PROXY_SHARED_SECRET
 # Note: BVNK on-ramp can require additional provider-side enablement/compliance setup
 # beyond API credentials (for example pay-in permissions on your merchant account).
