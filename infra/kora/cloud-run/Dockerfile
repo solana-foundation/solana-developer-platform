@@ -1,15 +1,7 @@
-# Builds Kora from main — gcp_kms signer + KORA_REDIS_URL env are not in any release yet.
-# Switch to FROM ghcr.io/solana-foundation/kora:<tag> once a release includes them.
-FROM rustlang/rust:nightly AS build
-# Pinned commit, not a moving branch — gcp_kms + KORA_REDIS_URL are unreleased. Bump deliberately;
-# switch to a released tag once one ships these (PRO-1312).
-ARG KORA_REF=50fe323a1042ce49a88b57e875e7909289882fe9
-RUN cargo install --git https://github.com/solana-foundation/kora --rev ${KORA_REF} kora-cli
-
-# trixie (glibc 2.41) matches the nightly builder's glibc; bookworm (2.36) is too old.
-FROM debian:trixie-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=build /usr/local/cargo/bin/kora /usr/local/bin/kora
+# Bake env config onto the prebuilt Kora image (published from main by kora's docker-edge.yml).
+# :edge tracks the latest main; pin KORA_IMAGE to a :<sha> or release tag for mainnet once validated.
+ARG KORA_IMAGE=ghcr.io/solana-foundation/kora:edge
+FROM ${KORA_IMAGE}
 
 # Non-secret config baked from the repo; secrets/env are injected at deploy from Doppler.
 ARG KORA_CONFIG=kora.mainnet.toml

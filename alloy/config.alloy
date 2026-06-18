@@ -1,0 +1,41 @@
+// Alloy collector: scrape SDP services' /metrics -> Grafana Cloud Mimir; logs -> Loki.
+// Secrets via Doppler env (GC_PROM_*/GC_LOKI_*). Deploy as an always-on Cloud Run service.
+
+prometheus.scrape "sdp" {
+  targets = [
+    { __address__ = "kora-mainnet-562819300243.us-central1.run.app:443", __scheme__ = "https", __metrics_path__ = "/metrics", service = "kora-mainnet" },
+    { __address__ = "kora-sdp-654412331372.us-central1.run.app:443", __scheme__ = "https", __metrics_path__ = "/metrics", service = "kora-sdp" },
+  ]
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.grafanacloud.receiver]
+}
+
+prometheus.remote_write "grafanacloud" {
+  endpoint {
+    url = sys.env("GC_PROM_PUSH_URL")
+    basic_auth {
+      username = sys.env("GC_PROM_USER")
+      password = sys.env("GC_PROM_TOKEN")
+    }
+  }
+}
+
+loki.write "grafanacloud" {
+  endpoint {
+    url = sys.env("GC_LOKI_PUSH_URL")
+    basic_auth {
+      username = sys.env("GC_LOKI_USER")
+      password = sys.env("GC_LOKI_TOKEN")
+    }
+  }
+}
+
+// Cloud Run logs -> Loki: enable once the log sink + pubsub.subscriber are set up (PRO-1368).
+// loki.source.gcplog "kora" {
+//   pull {
+//     project_id   = "solana-developer-platform"
+//     subscription = "kora-logs-alloy"
+//     labels       = { service = "kora-sdp" }
+//   }
+//   forward_to = [loki.write.grafanacloud.receiver]
+// }

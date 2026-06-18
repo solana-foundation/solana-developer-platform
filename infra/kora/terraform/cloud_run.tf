@@ -31,6 +31,17 @@ resource "google_cloud_run_v2_service" "kora" {
           memory = var.memory
         }
       }
+
+      startup_probe {
+        http_get {
+          path = "/liveness"
+          port = 8080
+        }
+        initial_delay_seconds = 5
+        timeout_seconds       = 3
+        period_seconds        = 10
+        failure_threshold     = 6
+      }
     }
   }
 
