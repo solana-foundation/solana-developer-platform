@@ -11,6 +11,16 @@ The umbrella. This ties the per-capability skills into one sequence. Read `apps/
 
 - **`docs`** — your provider's API documentation URL (e.g. `docs: https://docs.yourprovider.com`). Pass it when you start; every step uses it as the source of truth for your endpoints, auth, and payload shapes when mapping your API onto SDP's contract. The closer your docs, the less guesswork.
 
+## Enabling Payments v2
+
+Ramps live in **Payments v2**, which is feature-flagged **off** by default — so set the override cookie in the browser to see the v2 dashboard and exercise your integration through the UI:
+
+```
+sdp_dashboard_payments_v2_override=enabled
+```
+
+(Constant `DASHBOARD_PAYMENTS_V2_OVERRIDE_COOKIE_NAME` in `apps/sdp-web/src/lib/dashboard-feature-flags.ts`; read server-side, default off. Set it yourself in the browser — `disabled` or clearing the cookie reverts to legacy payments.)
+
 ## Sequence
 
 Do them in this order; skip the flows you don't support.
