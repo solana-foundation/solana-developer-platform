@@ -1,3 +1,4 @@
+import type { RampTransferSettlement } from "@sdp/types";
 import {
   isRampTransferType,
   type PaymentTransferRow as TransferRow,
@@ -43,6 +44,7 @@ export function mapTransferRow(row: TransferRow) {
     throw new AppError("INTERNAL_ERROR", "Ramp transfer is missing provider.");
   }
 
+  const settlement = row.provider_data.settlement as RampTransferSettlement | undefined;
   return {
     ...base,
     provider: row.provider,
@@ -51,5 +53,6 @@ export function mapTransferRow(row: TransferRow) {
     ...(row.delivery_mode ? { deliveryMode: row.delivery_mode } : {}),
     ...(row.fiat_currency ? { fiatCurrency: row.fiat_currency } : {}),
     ...(row.fiat_amount ? { fiatAmount: row.fiat_amount } : {}),
+    ...(settlement ? { settlement } : {}),
   };
 }

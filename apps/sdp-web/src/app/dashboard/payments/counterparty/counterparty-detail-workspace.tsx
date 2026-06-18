@@ -5,6 +5,7 @@ import type {
   CounterpartyAccount,
   PaymentTransferSummary,
   RampProviderId,
+  RampTransferSettlement,
 } from "@sdp/types";
 import {
   ArrowRightIcon,
@@ -51,6 +52,8 @@ import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
 import {
+  formatDisplayAmount,
+  formatMinorCurrencyAmount,
   formatTimestamp,
   resolveTransferFlow,
   resolveTransferTypeLabel,
@@ -420,6 +423,59 @@ function DetailRow({
   );
 }
 
+function RampSettlementRows({ settlement }: { settlement: RampTransferSettlement }) {
+  if (settlement.provider === "moonpay") {
+    const rate =
+      settlement.quoteCurrencyAmount > 0
+        ? settlement.baseCurrencyAmount / settlement.quoteCurrencyAmount
+        : null;
+    return (
+      <>
+        <DetailRow
+          label="Provider fee"
+          value={formatDisplayAmount(String(settlement.feeAmount), settlement.baseCurrencyCode)}
+        />
+        {settlement.networkFeeAmount > 0 ? (
+          <DetailRow
+            label="Network fee"
+            value={formatDisplayAmount(
+              String(settlement.networkFeeAmount),
+              settlement.baseCurrencyCode
+            )}
+          />
+        ) : null}
+        {rate !== null ? (
+          <DetailRow
+            label="Exchange rate"
+            value={`1 ${settlement.quoteCurrencyCode} = ${formatDisplayAmount(rate.toFixed(2), settlement.baseCurrencyCode)}`}
+          />
+        ) : null}
+      </>
+    );
+  }
+
+  const sentDecimal = settlement.sentAmount.amount / 10 ** settlement.sentAmount.decimals;
+  const receivedDecimal =
+    settlement.receivedAmount.amount / 10 ** settlement.receivedAmount.decimals;
+  const rate = receivedDecimal > 0 ? sentDecimal / receivedDecimal : null;
+  const fees = formatMinorCurrencyAmount(
+    settlement.fees,
+    settlement.sentAmount.currencyCode,
+    settlement.sentAmount.decimals
+  );
+  return (
+    <>
+      {fees ? <DetailRow label="Fees" value={fees} /> : null}
+      {rate !== null ? (
+        <DetailRow
+          label="Exchange rate"
+          value={`1 ${settlement.receivedAmount.currencyCode} = ${rate.toFixed(4)} ${settlement.sentAmount.currencyCode}`}
+        />
+      ) : null}
+    </>
+  );
+}
+
 function TransferDetailModal({
   transfer,
   counterpartyName,
@@ -515,6 +571,7 @@ function TransferDetailModal({
               />
             ) : null}
             {transfer.memo ? <DetailRow label="Memo" value={transfer.memo} /> : null}
+            {transfer.settlement ? <RampSettlementRows settlement={transfer.settlement} /> : null}
             {transfer.updatedAt ? (
               <DetailRow label="Last updated" value={formatTimestamp(transfer.updatedAt)} />
             ) : null}
