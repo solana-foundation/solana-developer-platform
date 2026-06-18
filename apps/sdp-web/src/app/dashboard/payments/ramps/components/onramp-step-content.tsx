@@ -128,9 +128,11 @@ function OnrampCompleteScreen({
       ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
       : null;
 
-  const detailRows: { label: string; value: string }[] = [
-    { label: "Provider", value: getRampProviderLabel(quote.provider) },
-  ];
+  const detailRows: { label: string; value: string }[] = [];
+  if (!receivedAmount && fundedAmount) {
+    detailRows.push({ label: "Funded", value: fundedAmount });
+  }
+  detailRows.push({ label: "Provider", value: getRampProviderLabel(quote.provider) });
 
   if (quote.provider === "lightspark") {
     const sendingAmount = formatMinorCurrencyAmount(
