@@ -161,6 +161,8 @@ export const createRecurringPaymentSchema = z.object({
   metadataUri: z.string().url().max(128).optional(),
 });
 
+export const activateRecurringPaymentSchema = z.object({}).strict();
+
 export const listRecurringPaymentsQuerySchema = z.object({
   counterpartyId: z.string().min(1).optional(),
   status: paymentRecurringPaymentStatusSchema.optional(),
