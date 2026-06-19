@@ -21,6 +21,7 @@ import {
   AppError,
   badRequest,
   badRequestQuery,
+  conflict,
   counterpartyNotProvisioned,
   internalError,
   notFound,
@@ -73,7 +74,6 @@ import {
   ensureBvnkPaymentRule,
 } from "./ramps/bvnk";
 import { ensureLightsparkCustomer, ensureLightsparkPayoutAccount } from "./ramps/lightspark";
-import { updateTransferRecord } from "./transfers";
 
 type OnrampCurrencyPair = {
   source: (typeof ONRAMP_SUPPORT)[number]["source"];
@@ -699,14 +699,15 @@ export async function createOfframpQuote(c: AppContext) {
       if (!input.fiatCurrency) {
         throw badRequest("fiatCurrency is required for BVNK off-ramp.");
       }
+      const ctx = rampRuntime(c);
       const bvnkOfframpWalletId = await ensureBvnkOfframpWallet(
         c,
-        rampRuntime(c),
+        ctx,
         counterparty,
         projectId,
         input.fiatCurrency
       );
-      quote = await RAMP_PROVIDER_CLIENTS.bvnk.createOfframpQuote(rampRuntime(c), {
+      quote = await RAMP_PROVIDER_CLIENTS.bvnk.createOfframpQuote(ctx, {
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
         cryptoAmount: input.cryptoAmount,
@@ -777,7 +778,17 @@ export async function cancelRampTransfer(c: AppContext) {
     throw badRequest(`Transfer can no longer be canceled (status: ${transfer.status}).`);
   }
 
-  const updated = await updateTransferRecord(c, transfer.id, { status: "canceled" });
+  const updated = await repository.updateTransferStatusGuarded({
+    transferId: transfer.id,
+    organizationId: scope.auth.organizationId,
+    projectId,
+    fromStatuses: CANCELABLE_RAMP_TRANSFER_STATUSES,
+    toStatus: "canceled",
+    updatedAt: new Date().toISOString(),
+  });
+  if (!updated) {
+    throw conflict("Transfer status changed before it could be canceled.");
+  }
 
   return success(c, { transfer: mapTransferRow(updated) });
 }

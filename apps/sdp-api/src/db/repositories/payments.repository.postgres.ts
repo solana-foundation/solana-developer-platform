@@ -222,6 +222,27 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
       return getTransferByIdInternal(db, input.transferId);
     },
 
+    async updateTransferStatusGuarded(input) {
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        extraClauses: ["id = ?", "status = ANY(?)"],
+        extraValues: [input.transferId, [...input.fromStatuses]],
+      });
+
+      const row = await db
+        .prepare(
+          `UPDATE payment_transfers
+           SET status = ?, updated_at = ?
+           WHERE ${scope.where}
+           RETURNING *`
+        )
+        .bind(input.toStatus, input.updatedAt, ...scope.values)
+        .first<Record<string, unknown>>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
     async getTransferById(params) {
       const scope = buildTransferScopeWhere({
         organizationId: params.organizationId,

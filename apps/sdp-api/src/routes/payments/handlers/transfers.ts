@@ -259,7 +259,7 @@ async function createTransferRecord(
   return createdRow;
 }
 
-export async function updateTransferRecord(
+async function updateTransferRecord(
   c: AppContext,
   transferId: string,
   patch: {

@@ -2687,6 +2687,101 @@ describe("Payments routes", () => {
     expect(body.error.message).toContain("bvnkCompliance.partyDetails is required");
   });
 
+  async function seedRampTransfer(input: {
+    id: string;
+    provider: string;
+    providerReference: string;
+    status: string;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers
+           (id, organization_id, project_id, wallet_id, token, amount, type, direction, status, provider, provider_reference, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        input.id,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_WALLET_ID,
+        "USDC",
+        null,
+        "offramp",
+        "outbound",
+        input.status,
+        input.provider,
+        input.providerReference,
+        now,
+        now
+      )
+      .run();
+  }
+
+  it("cancels a pending ramp transfer and marks the row canceled", async () => {
+    await seedRampTransfer({
+      id: "xfr_cancel_pending",
+      provider: "bvnk",
+      providerReference: "bvnk_ref_cancel_1",
+      status: "awaiting_payment",
+    });
+
+    const res = await app.request(
+      "/v1/payments/ramps/transfers/cancel",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ provider: "bvnk", providerReference: "bvnk_ref_cancel_1" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { transfer: { id: string; status: string } } };
+    expect(body.data.transfer.status).toBe("canceled");
+
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind("xfr_cancel_pending")
+      .first<{ status: string }>();
+    expect(row?.status).toBe("canceled");
+  });
+
+  it("refuses to cancel a ramp transfer that is already settling", async () => {
+    await seedRampTransfer({
+      id: "xfr_cancel_settling",
+      provider: "bvnk",
+      providerReference: "bvnk_ref_cancel_2",
+      status: "settling",
+    });
+
+    const res = await app.request(
+      "/v1/payments/ramps/transfers/cancel",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ provider: "bvnk", providerReference: "bvnk_ref_cancel_2" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("BAD_REQUEST");
+
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind("xfr_cancel_settling")
+      .first<{ status: string }>();
+    expect(row?.status).toBe("settling");
+  });
+
   it("returns bad request when provider is not supported", async () => {
     const res = await app.request(
       "/v1/payments/ramps/onramp/execute",

@@ -163,6 +163,19 @@ export interface PaymentsRepositoryContext {
 export interface PaymentsRepository {
   createTransfer(input: CreatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   updateTransfer(input: UpdatePaymentTransferInput): Promise<PaymentTransferRow | null>;
+  /**
+   * Atomically transitions a transfer's status only if it is currently one of
+   * `fromStatuses`, scoped to org/project. Returns the updated row, or null when
+   * no row matched (wrong owner, missing, or status changed concurrently).
+   */
+  updateTransferStatusGuarded(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    fromStatuses: readonly PaymentTransferStatus[];
+    toStatus: PaymentTransferStatus;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   getTransferById(params: {
     transferId: string;
