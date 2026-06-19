@@ -8,6 +8,9 @@ terraform {
     }
   }
 
-  # Local state for review. Before real applies, switch to a GCS backend keyed per env
-  # (terraform init -backend-config) so devnet/mainnet states don't collide.
+  # Shared remote state (versioned GCS bucket); per-env states are isolated by workspace.
+  backend "gcs" {
+    bucket = "solana-developer-platform-kora-tfstate"
+    prefix = "kora"
+  }
 }

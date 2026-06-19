@@ -95,6 +95,12 @@ variable "redis_memory_gb" {
   default = 1
 }
 
+variable "create_wif" {
+  type        = bool
+  default     = true
+  description = "Create the GitHub OIDC pool, provider, and deployer SA binding as a unit. Requires iam.workloadIdentityPools.create; set false where the caller lacks it (an owner runs the WIF apply)."
+}
+
 variable "github_repo" {
   type    = string
   default = "solana-foundation/solana-developer-platform"

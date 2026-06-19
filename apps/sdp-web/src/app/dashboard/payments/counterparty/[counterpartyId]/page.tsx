@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchCounterpartyDetail } from "../counterparty-detail.data";
@@ -36,7 +36,7 @@ export default async function CounterpartyDetailRoute({
       });
 
       if (!detail.counterparty) {
-        notFound();
+        redirect("/dashboard/payments/counterparty");
       }
 
       return (
