@@ -72,6 +72,8 @@ export type {
   ActiveWalletControlProfileResult,
   ApiKeyControlProfileRevisionRow,
   ApiKeyControlProfileRow,
+  ApiKeyPolicySubjectRow,
+  ApiKeyWalletPolicyBindingResolutionRow,
   ApiKeyWalletPolicyBindingRow,
   ApiKeyWalletPolicyTargetRow,
   CreateApiKeyControlProfileInput,

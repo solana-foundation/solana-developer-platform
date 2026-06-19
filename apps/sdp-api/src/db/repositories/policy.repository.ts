@@ -150,6 +150,12 @@ export interface ActiveApiKeyControlProfileResult {
   revision: ApiKeyControlProfileRevisionRow | null;
 }
 
+export interface ApiKeyPolicySubjectRow {
+  api_key_id: string;
+  organization_id: string;
+  project_id: string | null;
+}
+
 export interface ApiKeyWalletPolicyTargetRow {
   api_key_id: string;
   organization_id: string;
@@ -159,6 +165,11 @@ export interface ApiKeyWalletPolicyTargetRow {
   wallet_project_id: string | null;
   endpoint_binding_count: number;
   endpoint_wallet_binding_id: string | null;
+}
+
+export interface ApiKeyWalletPolicyBindingResolutionRow {
+  total_binding_count: number;
+  binding: ApiKeyWalletPolicyBindingRow | null;
 }
 
 export interface CreateWalletControlProfileInput {
@@ -294,16 +305,16 @@ export interface PolicyRepository {
   getActiveApiKeyControlProfileByProfileId(
     profileId: string
   ): Promise<ActiveApiKeyControlProfileResult | null>;
+  getApiKeyPolicySubject(apiKeyId: string): Promise<ApiKeyPolicySubjectRow | null>;
 
   upsertApiKeyWalletPolicyBinding(
     input: UpsertApiKeyWalletPolicyBindingInput
   ): Promise<ApiKeyWalletPolicyBindingRow | null>;
   listApiKeyWalletPolicyBindings(apiKeyId: string): Promise<ApiKeyWalletPolicyBindingRow[]>;
-  hasApiKeyWalletPolicyBindings(apiKeyId: string): Promise<boolean>;
-  getApplicableApiKeyWalletPolicyBinding(
+  getApiKeyWalletPolicyBindingResolution(
     apiKeyId: string,
     walletId: string
-  ): Promise<ApiKeyWalletPolicyBindingRow | null>;
+  ): Promise<ApiKeyWalletPolicyBindingResolutionRow>;
   getApiKeyWalletPolicyTarget(
     apiKeyId: string,
     walletId: string

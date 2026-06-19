@@ -559,6 +559,48 @@ describe("PolicyRepository (postgres)", () => {
     });
   });
 
+  it("rejects all-wallet policy bindings that reference inactive API key profiles", async () => {
+    const service = new PolicyFoundationService(repo);
+    const profile = await repo.createApiKeyControlProfile({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      apiKeyId: TEST_API_KEY.id,
+      name: "Inactive all-wallet controls",
+      createdBy: TEST_USER.id,
+    });
+    expect(profile).not.toBeNull();
+
+    await expect(
+      service.upsertApiKeyWalletPolicyBinding({
+        apiKeyId: TEST_API_KEY.id,
+        bindingScope: "all",
+        apiKeyControlProfileId: profile?.id,
+      })
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "API key policy profile is not active for the requested wallet binding",
+    });
+
+    await expect(repo.listApiKeyWalletPolicyBindings(TEST_API_KEY.id)).resolves.toHaveLength(0);
+  });
+
+  it("rejects all-wallet policy bindings with wallet-specific profile references", async () => {
+    const service = new PolicyFoundationService(repo);
+
+    await expect(
+      service.upsertApiKeyWalletPolicyBinding({
+        apiKeyId: TEST_API_KEY.id,
+        bindingScope: "all",
+        walletControlProfileId: "wcp_unscoped",
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "walletControlProfileId cannot be used with all-wallet policy bindings",
+    });
+
+    await expect(repo.listApiKeyWalletPolicyBindings(TEST_API_KEY.id)).resolves.toHaveLength(0);
+  });
+
   it("rejects policy wallet bindings that do not match their scope before querying Postgres", async () => {
     const selectedWithoutWalletId = {
       apiKeyId: TEST_API_KEY.id,

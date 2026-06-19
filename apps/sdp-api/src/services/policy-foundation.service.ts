@@ -16,6 +16,8 @@ import type {
 import type {
   ApiKeyControlProfileRevisionRow,
   ApiKeyControlProfileRow,
+  ApiKeyPolicySubjectRow,
+  ApiKeyWalletPolicyBindingResolutionRow,
   ApiKeyWalletPolicyBindingRow,
   ApiKeyWalletPolicyTargetRow,
   CreatePolicyEvaluationInput,
@@ -27,7 +29,7 @@ import type {
   WalletControlProfileRow,
   WalletOperationRow,
 } from "@/db/repositories";
-import { forbidden } from "@/lib/errors";
+import { badRequest, forbidden } from "@/lib/errors";
 import {
   createPolicyEvaluationInput,
   evaluateWalletOperationPolicies,
@@ -136,6 +138,19 @@ export class PolicyFoundationService {
       return mapApiKeyWalletPolicyBinding(row);
     }
 
+    const subject = await this.assertApiKeyPolicySubject(input.apiKeyId);
+
+    if (input.walletControlProfileId) {
+      throw badRequest("walletControlProfileId cannot be used with all-wallet policy bindings");
+    }
+    if (input.apiKeyControlProfileId) {
+      await this.resolveApiKeyPolicyProfileForBinding(
+        input.apiKeyControlProfileId,
+        subject,
+        input.apiKeyId
+      );
+    }
+
     const row = await this.repository.upsertApiKeyWalletPolicyBinding(input);
     if (!row) {
       throw new Error("Failed to upsert API key wallet policy binding");
@@ -147,13 +162,21 @@ export class PolicyFoundationService {
     input: ResolveApiKeyWalletPolicyScopeInput
   ): Promise<ResolvedApiKeyWalletPolicyScope> {
     const target = await this.assertApiKeyWalletPolicyTarget(input);
-    const bindingsConfigured = await this.repository.hasApiKeyWalletPolicyBindings(input.apiKeyId);
-    const binding = await this.repository.getApplicableApiKeyWalletPolicyBinding(
+    const resolution = await this.repository.getApiKeyWalletPolicyBindingResolution(
       input.apiKeyId,
       input.walletId
     );
+    return await this.resolveApiKeyWalletPolicyScopeForTarget(input, target, resolution);
+  }
 
-    if (bindingsConfigured && !binding) {
+  private async resolveApiKeyWalletPolicyScopeForTarget(
+    input: ResolveApiKeyWalletPolicyScopeInput,
+    target: ApiKeyWalletPolicyTargetRow,
+    resolution: ApiKeyWalletPolicyBindingResolutionRow
+  ): Promise<ResolvedApiKeyWalletPolicyScope> {
+    const binding = resolution.binding;
+
+    if (resolution.total_binding_count > 0 && !binding) {
       throw forbidden("API key policy binding is not configured for the requested wallet");
     }
 
@@ -214,18 +237,33 @@ export class PolicyFoundationService {
   async evaluateWalletOperationPolicies(
     operation: WalletOperationEnvelope
   ): Promise<WalletOperationPolicyEvaluation> {
-    const apiKeyScope = operation.apiKeyId
-      ? await this.resolveApiKeyWalletPolicyScope({
+    let apiKeyScope: ResolvedApiKeyWalletPolicyScope | null = null;
+    let apiKeyPolicy: EffectiveApiKeyPolicy | null = null;
+
+    if (operation.apiKeyId) {
+      const resolution = await this.repository.getApiKeyWalletPolicyBindingResolution(
+        operation.apiKeyId,
+        operation.walletId
+      );
+
+      if (resolution.total_binding_count > 0) {
+        const input = {
           apiKeyId: operation.apiKeyId,
           walletId: operation.walletId,
           custodyWalletId: operation.custodyWalletId,
-        })
-      : null;
+        };
+        const target = await this.assertApiKeyWalletPolicyTarget(input);
+        apiKeyScope = await this.resolveApiKeyWalletPolicyScopeForTarget(input, target, resolution);
+        apiKeyPolicy = apiKeyScope.apiKeyPolicy;
+      } else {
+        apiKeyPolicy = await this.resolveEffectiveApiKeyPolicy(operation.apiKeyId);
+      }
+    }
+
     const custodyWalletId = apiKeyScope?.target.custodyWalletId ?? operation.custodyWalletId;
     const walletPolicy = custodyWalletId
       ? await this.resolveEffectiveWalletPolicy(custodyWalletId)
       : IMPLICIT_DEFAULT_ALLOW_POLICY;
-    const apiKeyPolicy = apiKeyScope?.apiKeyPolicy ?? null;
 
     return evaluateWalletOperationPolicies({
       operation,
@@ -239,6 +277,16 @@ export class PolicyFoundationService {
   ): Promise<PolicyEvaluation> {
     const result = await this.evaluateWalletOperationPolicies(operation);
     return this.recordPolicyEvaluation(createPolicyEvaluationInput(result));
+  }
+
+  private async assertApiKeyPolicySubject(apiKeyId: string): Promise<ApiKeyPolicySubjectRow> {
+    const subject = await this.repository.getApiKeyPolicySubject(apiKeyId);
+
+    if (!subject) {
+      throw forbidden("API key is not active for policy binding");
+    }
+
+    return subject;
   }
 
   private async assertApiKeyWalletPolicyTarget(
@@ -287,7 +335,7 @@ export class PolicyFoundationService {
 
   private async resolveApiKeyPolicyProfileForBinding(
     profileId: string,
-    target: ApiKeyWalletPolicyTargetRow,
+    subject: ApiKeyPolicySubjectRow,
     apiKeyId: string
   ): Promise<EffectiveApiKeyPolicy> {
     const active = await this.repository.getActiveApiKeyControlProfileByProfileId(profileId);
@@ -298,8 +346,8 @@ export class PolicyFoundationService {
 
     if (
       active.profile.api_key_id !== apiKeyId ||
-      active.profile.organization_id !== target.organization_id ||
-      (active.profile.project_id !== null && active.profile.project_id !== target.project_id)
+      active.profile.organization_id !== subject.organization_id ||
+      (active.profile.project_id !== null && active.profile.project_id !== subject.project_id)
     ) {
       throw forbidden("API key policy profile is not scoped to the requested API key");
     }

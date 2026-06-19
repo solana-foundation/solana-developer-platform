@@ -489,18 +489,13 @@ describe("PolicyFoundationService policy evaluation", () => {
         },
       })),
       getActiveApiKeyControlProfileByApiKeyId: vi.fn(async () => null),
-      getApiKeyWalletPolicyTarget: vi.fn(async () => ({
-        api_key_id: "key_1",
-        organization_id: "org_1",
-        project_id: "prj_1",
-        wallet_id: "wal_1",
-        custody_wallet_id: "cw_1",
-        wallet_project_id: "prj_1",
-        endpoint_binding_count: 0,
-        endpoint_wallet_binding_id: null,
+      getApiKeyWalletPolicyBindingResolution: vi.fn(async () => ({
+        total_binding_count: 0,
+        binding: null,
       })),
-      hasApiKeyWalletPolicyBindings: vi.fn(async () => false),
-      getApplicableApiKeyWalletPolicyBinding: vi.fn(async () => null),
+      getApiKeyWalletPolicyTarget: vi.fn(async () => {
+        throw new Error("No-policy API key evaluation should not validate wallet scope");
+      }),
       createPolicyEvaluation,
     } as unknown as PolicyRepository;
     const service = new PolicyFoundationService(repository);
@@ -521,5 +516,6 @@ describe("PolicyFoundationService policy evaluation", () => {
         decision: "deny",
       })
     );
+    expect(repository.getApiKeyWalletPolicyTarget).not.toHaveBeenCalled();
   });
 });
