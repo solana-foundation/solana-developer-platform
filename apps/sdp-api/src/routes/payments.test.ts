@@ -3007,6 +3007,20 @@ describe("Payments routes", () => {
       id: string;
     }>();
     expect(transfers.results).toHaveLength(0);
+
+    const operation = await getDb(env)
+      .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
+      .first<{ status: string; operation_family: string; operation_type: string }>();
+    expect(operation).toMatchObject({
+      status: "evaluated",
+      operation_family: "payment",
+      operation_type: "payment_transfer_prepare",
+    });
+
+    const evaluation = await getDb(env)
+      .prepare("SELECT decision FROM policy_evaluations")
+      .first<{ decision: string }>();
+    expect(evaluation?.decision).toBe("allow");
   });
 
   it("blocks prepare transfer when amount exceeds maxTransferAmount", async () => {
@@ -3793,6 +3807,20 @@ describe("Payments routes", () => {
       }>();
     expect(transfers.results).toHaveLength(1);
     expect(transfers.results[0]?.id).toBe("xfr_existing_daily_limit");
+
+    const operation = await getDb(env)
+      .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
+      .first<{ status: string; operation_family: string; operation_type: string }>();
+    expect(operation).toMatchObject({
+      status: "evaluated",
+      operation_family: "payment",
+      operation_type: "payment_transfer_execute",
+    });
+
+    const evaluation = await getDb(env)
+      .prepare("SELECT decision FROM policy_evaluations")
+      .first<{ decision: string }>();
+    expect(evaluation?.decision).toBe("allow");
   });
 
   it("blocks create transfer with zero amount before creating a transfer record", async () => {

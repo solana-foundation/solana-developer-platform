@@ -965,15 +965,6 @@ export async function prepareTransfer(c: AppContext) {
   // TODO: parsed.data.options?.priorityFee — add a compute budget instruction to the
   //       transaction based on the requested priority level. Not yet implemented.
 
-  await assertWalletPolicyAllowsTransfer(c, {
-    organizationId: scope.auth.organizationId,
-    projectId: scope.auth.projectId,
-    wallet: operation.sourceWallet,
-    destinationAddress: operation.destinationAddress,
-    token: operation.token,
-    amount: operation.amount,
-  });
-
   const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
   await enforcePaymentTransferOperationPolicy(c, scope, operation, {
     operationType: "payment_transfer_prepare",
@@ -986,6 +977,14 @@ export async function prepareTransfer(c: AppContext) {
       amount: parsed.data.amount,
       referenceAddress: parsed.data.referenceAddress ?? null,
     },
+  });
+  await assertWalletPolicyAllowsTransfer(c, {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    wallet: operation.sourceWallet,
+    destinationAddress: operation.destinationAddress,
+    token: operation.token,
+    amount: operation.amount,
   });
 
   let prepared: PreparedTransferPayload;
@@ -1693,15 +1692,6 @@ export async function createTransfer(c: AppContext) {
     requiredWalletPermissions: ["payments:write"],
   });
 
-  await assertWalletPolicyAllowsTransfer(c, {
-    organizationId: scope.auth.organizationId,
-    projectId: scope.auth.projectId,
-    wallet: operation.sourceWallet,
-    destinationAddress: operation.destinationAddress,
-    token: operation.token,
-    amount: operation.amount,
-  });
-
   const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
   await enforcePaymentTransferOperationPolicy(c, scope, operation, {
     operationType: "payment_transfer_execute",
@@ -1713,6 +1703,14 @@ export async function createTransfer(c: AppContext) {
       token: parsed.data.token,
       amount: parsed.data.amount,
     },
+  });
+  await assertWalletPolicyAllowsTransfer(c, {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    wallet: operation.sourceWallet,
+    destinationAddress: operation.destinationAddress,
+    token: operation.token,
+    amount: operation.amount,
   });
 
   if (privateTransfer) {
