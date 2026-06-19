@@ -92,6 +92,7 @@ function apiKeyProfile(
 function createRepository(options: {
   walletPolicy?: ActiveWalletControlProfileResult | null;
   apiKeyPolicy?: ActiveApiKeyControlProfileResult | null;
+  evaluationError?: Error;
 }) {
   const operations: WalletOperationRow[] = [];
 
@@ -151,10 +152,15 @@ function createRepository(options: {
     listPolicyEvaluationsForOperation: vi.fn(async () => []),
     getActiveWalletControlProfileByCustodyWalletId: vi.fn(async () => options.walletPolicy ?? null),
     getActiveApiKeyControlProfileByApiKeyId: vi.fn(async () => options.apiKeyPolicy ?? null),
-    getApiKeyWalletPolicyBindingResolution: vi.fn(async () => ({
-      total_binding_count: 0,
-      binding: null,
-    })),
+    getApiKeyWalletPolicyBindingResolution: vi.fn(async () => {
+      if (options.evaluationError) {
+        throw options.evaluationError;
+      }
+      return {
+        total_binding_count: 0,
+        binding: null,
+      };
+    }),
   } as unknown as PolicyRepository;
 
   return repository;
@@ -241,6 +247,16 @@ describe("WalletPolicyEnforcementService", () => {
         reasonCode: "api_key_policy_match",
       },
     });
+    expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "failed");
+  });
+
+  it("marks the operation failed when policy evaluation throws", async () => {
+    const repository = createRepository({
+      evaluationError: new Error("policy resolver unavailable"),
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(service.enforce(baseOperation)).rejects.toThrow("policy resolver unavailable");
     expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "failed");
   });
 });

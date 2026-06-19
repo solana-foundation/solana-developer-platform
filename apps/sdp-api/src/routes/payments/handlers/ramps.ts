@@ -426,10 +426,11 @@ async function executeOfframpWithProvider(
     (wallet) => wallet.walletId === input.sourceWallet || wallet.publicKey === input.sourceWallet
   );
 
-  // Lightspark off-ramp source is a Grid account id passed through as-is; other
-  // providers draw from an SDP wallet whose address we resolve here.
+  // Lightspark off-ramp source may be an external Grid account id. When it is
+  // one of our SDP wallets, resolve it normally so permissions and policy checks
+  // apply to the wallet address used by the provider.
   const sourceWalletAddress =
-    input.provider === "lightspark"
+    input.provider === "lightspark" && !sourceWallet
       ? input.sourceWallet
       : resolveWalletAddress(scope.wallets, input.sourceWallet, "sourceWallet", scope.auth, [
           "payments:write",
@@ -444,9 +445,6 @@ async function executeOfframpWithProvider(
   if (!counterparty) throw notFound("Counterparty");
 
   if (sourceWallet) {
-    resolveWalletAddress(scope.wallets, input.sourceWallet, "sourceWallet", scope.auth, [
-      "payments:write",
-    ]);
     await assertWalletPolicyAllowsTransfer(c, {
       organizationId: scope.auth.organizationId,
       projectId: scope.auth.projectId,

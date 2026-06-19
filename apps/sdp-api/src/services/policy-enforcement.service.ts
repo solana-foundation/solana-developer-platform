@@ -3,6 +3,7 @@ import type {
   PolicyEvaluation,
   WalletOperationActor,
   WalletOperationEnvelope,
+  WalletOperationPolicyEvaluation,
   WalletOperationStatus,
 } from "@sdp/types";
 import { getDb } from "@/db";
@@ -38,10 +39,19 @@ export class WalletPolicyEnforcementService {
       ...input,
       status: input.status ?? "created",
     });
-    const result = await this.foundation.evaluateWalletOperationPolicies(operation);
-    const evaluation = await this.foundation.recordPolicyEvaluation(
-      createPolicyEvaluationInput(result)
-    );
+    let result: WalletOperationPolicyEvaluation;
+    let evaluation: PolicyEvaluation;
+
+    try {
+      result = await this.foundation.evaluateWalletOperationPolicies(operation);
+      evaluation = await this.foundation.recordPolicyEvaluation(
+        createPolicyEvaluationInput(result)
+      );
+    } catch (error) {
+      await this.repository.updateWalletOperationStatus(operation.id, "failed");
+      throw error;
+    }
+
     const status = walletOperationStatusForDecision(result.decision);
     const updated = await this.repository.updateWalletOperationStatus(operation.id, status);
 
@@ -138,7 +148,11 @@ function walletOperationPolicyDecisionError(
   };
 
   if (evaluation.decision === "deny" || evaluation.decision === "not_evaluated") {
-    return new AppError("FORBIDDEN", "Wallet operation denied by policy", details);
+    const message =
+      evaluation.decision === "not_evaluated"
+        ? "Wallet operation was not evaluated by policy"
+        : "Wallet operation denied by policy";
+    return new AppError("FORBIDDEN", message, details);
   }
 
   return new AppError("SIGNING_PENDING", "Wallet operation requires policy approval", details);
