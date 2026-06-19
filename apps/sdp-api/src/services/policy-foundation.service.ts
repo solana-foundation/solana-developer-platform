@@ -65,6 +65,7 @@ export interface ResolvedApiKeyWalletPolicyScope {
     walletProjectId: string | null;
   };
   binding: ApiKeyWalletPolicyBinding | null;
+  walletPolicy: EffectiveWalletPolicy | null;
   apiKeyPolicy: EffectiveApiKeyPolicy;
 }
 
@@ -125,7 +126,7 @@ export class PolicyFoundationService {
         );
       }
       if (input.walletControlProfileId) {
-        await this.assertWalletPolicyProfileForBinding(input.walletControlProfileId, target);
+        await this.resolveWalletPolicyProfileForBinding(input.walletControlProfileId, target);
       }
 
       const row = await this.repository.upsertApiKeyWalletPolicyBinding({
@@ -161,11 +162,14 @@ export class PolicyFoundationService {
   async resolveApiKeyWalletPolicyScope(
     input: ResolveApiKeyWalletPolicyScopeInput
   ): Promise<ResolvedApiKeyWalletPolicyScope> {
-    const target = await this.assertApiKeyWalletPolicyTarget(input);
     const resolution = await this.repository.getApiKeyWalletPolicyBindingResolution(
       input.apiKeyId,
       input.walletId
     );
+
+    this.assertApplicablePolicyBindingExists(resolution);
+
+    const target = await this.assertApiKeyWalletPolicyTarget(input);
     return await this.resolveApiKeyWalletPolicyScopeForTarget(input, target, resolution);
   }
 
@@ -184,15 +188,16 @@ export class PolicyFoundationService {
       return {
         target: mapApiKeyWalletPolicyTarget(target),
         binding: null,
+        walletPolicy: null,
         apiKeyPolicy: await this.resolveEffectiveApiKeyPolicy(input.apiKeyId),
       };
     }
 
     this.assertPolicyBindingMatchesTarget(binding, target);
 
-    if (binding.wallet_control_profile_id) {
-      await this.assertWalletPolicyProfileForBinding(binding.wallet_control_profile_id, target);
-    }
+    const walletPolicy = binding.wallet_control_profile_id
+      ? await this.resolveWalletPolicyProfileForBinding(binding.wallet_control_profile_id, target)
+      : null;
 
     const apiKeyPolicy = binding.api_key_control_profile_id
       ? await this.resolveApiKeyPolicyProfileForBinding(
@@ -205,6 +210,7 @@ export class PolicyFoundationService {
     return {
       target: mapApiKeyWalletPolicyTarget(target),
       binding: mapApiKeyWalletPolicyBinding(binding),
+      walletPolicy,
       apiKeyPolicy,
     };
   }
@@ -247,6 +253,7 @@ export class PolicyFoundationService {
       );
 
       if (resolution.total_binding_count > 0) {
+        this.assertApplicablePolicyBindingExists(resolution);
         // Once an API key has wallet policy bindings, an inactive or out-of-scope
         // requested wallet must fail closed instead of falling back to legacy policy lookup.
         const input = {
@@ -263,9 +270,11 @@ export class PolicyFoundationService {
     }
 
     const custodyWalletId = apiKeyScope?.target.custodyWalletId ?? operation.custodyWalletId;
-    const walletPolicy = custodyWalletId
-      ? await this.resolveEffectiveWalletPolicy(custodyWalletId)
-      : IMPLICIT_DEFAULT_ALLOW_POLICY;
+    const walletPolicy =
+      apiKeyScope?.walletPolicy ??
+      (custodyWalletId
+        ? await this.resolveEffectiveWalletPolicy(custodyWalletId)
+        : IMPLICIT_DEFAULT_ALLOW_POLICY);
 
     return evaluateWalletOperationPolicies({
       operation,
@@ -289,6 +298,14 @@ export class PolicyFoundationService {
     }
 
     return subject;
+  }
+
+  private assertApplicablePolicyBindingExists(
+    resolution: ApiKeyWalletPolicyBindingResolutionRow
+  ): void {
+    if (resolution.total_binding_count > 0 && !resolution.binding) {
+      throw forbidden("API key policy binding is not configured for the requested wallet");
+    }
   }
 
   private async assertApiKeyWalletPolicyTarget(
@@ -362,10 +379,10 @@ export class PolicyFoundationService {
     };
   }
 
-  private async assertWalletPolicyProfileForBinding(
+  private async resolveWalletPolicyProfileForBinding(
     profileId: string,
     target: ApiKeyWalletPolicyTargetRow
-  ): Promise<void> {
+  ): Promise<EffectiveWalletPolicy> {
     const active = await this.repository.getActiveWalletControlProfileByProfileId(profileId);
 
     if (!active?.revision) {
@@ -379,6 +396,13 @@ export class PolicyFoundationService {
     ) {
       throw forbidden("Wallet policy profile is not scoped to the requested wallet");
     }
+
+    return {
+      source: "customer_profile",
+      profile: mapWalletControlProfile(active.profile),
+      revision: mapWalletControlProfileRevision(active.revision),
+      defaultAction: active.revision.default_action,
+    };
   }
 }
 
