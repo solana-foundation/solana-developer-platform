@@ -1223,12 +1223,14 @@ export function TokenManagementWorkspace({
         return {
           signerWallets: freezeSignerSelection.wallets,
           signerUnavailableReason: freezeSignerSelection.unavailableReason,
+          // Freeze authority is always single
           onSignerWalletIdChange: (_value: string) => {},
         };
       case "pause":
         return {
           signerWallets: pauseSignerSelection.wallets,
           signerUnavailableReason: pauseSignerSelection.unavailableReason,
+          // Pause authority is always single
           onSignerWalletIdChange: (_value: string) => {},
         };
       default:

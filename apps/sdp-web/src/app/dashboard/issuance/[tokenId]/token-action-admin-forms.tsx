@@ -351,7 +351,7 @@ export function TokenActionAdminForms({
           <div className="space-y-4">
             <TokenSignerSelect
               signerWallets={signerWallets}
-              signerWalletId=""
+              signerWalletId={signerWallets[0].id} // Always single locked wallet
               signerUnavailableReason={signerUnavailableReason}
               onSignerWalletIdChange={onSignerWalletIdChange}
             />
@@ -404,7 +404,7 @@ export function TokenActionAdminForms({
           >
             <TokenSignerSelect
               signerWallets={signerWallets}
-              signerWalletId=""
+              signerWalletId={signerWallets[0].id} // Always single locked wallet
               signerUnavailableReason={signerUnavailableReason}
               onSignerWalletIdChange={onSignerWalletIdChange}
             />
