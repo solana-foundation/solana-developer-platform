@@ -445,14 +445,6 @@ async function executeOfframpWithProvider(
   if (!counterparty) throw notFound("Counterparty");
 
   if (sourceWallet) {
-    await assertWalletPolicyAllowsTransfer(c, {
-      organizationId: scope.auth.organizationId,
-      projectId: scope.auth.projectId,
-      wallet: sourceWallet,
-      enforceDestinationAllowlist: false,
-      token: input.cryptoToken,
-      amount: input.cryptoAmount,
-    });
     await enforceRampWalletOperationPolicy(c, {
       scope,
       wallet: sourceWallet,
@@ -466,6 +458,14 @@ async function executeOfframpWithProvider(
         cryptoToken: input.cryptoToken,
         cryptoAmount: input.cryptoAmount,
       },
+    });
+    await assertWalletPolicyAllowsTransfer(c, {
+      organizationId: scope.auth.organizationId,
+      projectId: scope.auth.projectId,
+      wallet: sourceWallet,
+      enforceDestinationAllowlist: false,
+      token: input.cryptoToken,
+      amount: input.cryptoAmount,
     });
   }
 

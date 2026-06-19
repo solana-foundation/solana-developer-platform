@@ -1846,6 +1846,20 @@ describe("Payments routes", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("FORBIDDEN");
+
+    const operation = await getDb(env)
+      .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
+      .first<{ status: string; operation_family: string; operation_type: string }>();
+    expect(operation).toMatchObject({
+      status: "evaluated",
+      operation_family: "ramp",
+      operation_type: "ramp_offramp_execute",
+    });
+
+    const evaluation = await getDb(env)
+      .prepare("SELECT decision FROM policy_evaluations")
+      .first<{ decision: string }>();
+    expect(evaluation?.decision).toBe("allow");
   });
 
   it("does not apply outbound wallet policy checks to MoonPay on-ramp", async () => {
