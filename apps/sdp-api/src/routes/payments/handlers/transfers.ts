@@ -52,6 +52,10 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import {
+  enforceWalletOperationPolicy,
+  walletOperationActorFromAuth,
+} from "@/services/policy-enforcement.service";
+import {
   type MagicBlockPrivateTransferOptions as MagicBlockProviderTransferOptions,
   type MagicBlockUnsignedTransaction,
   prepareMagicBlockPrivateTransfer,
@@ -82,7 +86,7 @@ import {
   resolveMintTokenProgram,
   resolveSourceTokenAccount,
 } from "../token-accounts";
-import { resolveScope, resolveWallet } from "../wallets";
+import { type ResolvedScope, resolveScope, resolveWallet } from "../wallets";
 
 // biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
@@ -257,6 +261,38 @@ async function createTransferRecord(
   }
 
   return createdRow;
+}
+
+async function enforcePaymentTransferOperationPolicy(
+  c: AppContext,
+  scope: ResolvedScope,
+  operation: OutboundPaymentOperation,
+  input: {
+    operationType: "payment_transfer_prepare" | "payment_transfer_execute";
+    memo?: string;
+    privateTransfer?: boolean;
+    rawPayload?: Record<string, unknown>;
+  }
+): Promise<void> {
+  await enforceWalletOperationPolicy(c.env, {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    custodyWalletId: operation.sourceWallet.id,
+    walletId: operation.sourceWallet.walletId,
+    apiKeyId: scope.auth.apiKeyId,
+    actor: walletOperationActorFromAuth(scope.auth),
+    operationFamily: "payment",
+    operationType: input.operationType,
+    asset: operation.token,
+    amount: operation.amount,
+    destination: operation.destinationAddress,
+    context: {
+      sourceAddress: operation.sourceAddress,
+      memo: input.memo ?? null,
+      privateTransfer: input.privateTransfer ?? false,
+    },
+    rawPayload: input.rawPayload,
+  });
 }
 
 async function updateTransferRecord(
@@ -938,10 +974,23 @@ export async function prepareTransfer(c: AppContext) {
     amount: operation.amount,
   });
 
+  const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
+  await enforcePaymentTransferOperationPolicy(c, scope, operation, {
+    operationType: "payment_transfer_prepare",
+    memo: parsed.data.memo,
+    privateTransfer: Boolean(privateTransfer),
+    rawPayload: {
+      source: parsed.data.source,
+      destination: parsed.data.destination,
+      token: parsed.data.token,
+      amount: parsed.data.amount,
+      referenceAddress: parsed.data.referenceAddress ?? null,
+    },
+  });
+
   let prepared: PreparedTransferPayload;
   let privateTransferMetadata: PreparedPrivateTransferMetadata | undefined;
   let transferType: TransferType = "transfer";
-  const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
 
   if (privateTransfer) {
     const mapped = await prepareMagicBlockPrivateTransferForOperation({
@@ -1654,6 +1703,18 @@ export async function createTransfer(c: AppContext) {
   });
 
   const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
+  await enforcePaymentTransferOperationPolicy(c, scope, operation, {
+    operationType: "payment_transfer_execute",
+    memo: parsed.data.memo,
+    privateTransfer: Boolean(privateTransfer),
+    rawPayload: {
+      source: parsed.data.source,
+      destination: parsed.data.destination,
+      token: parsed.data.token,
+      amount: parsed.data.amount,
+    },
+  });
+
   if (privateTransfer) {
     assertMagicBlockKoraSponsoredExecutionOptions(privateTransfer.magicBlock);
     const mapped = await prepareMagicBlockPrivateTransferForOperation({

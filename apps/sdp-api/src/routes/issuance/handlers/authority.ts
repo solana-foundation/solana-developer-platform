@@ -18,6 +18,7 @@ import {
   resolveCurrentAuthorityForRole,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { enforceIssuanceWalletOperationPolicy } from "./policy";
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicAuthorityRole = Parameters<MosaicService["prepareUpdateAuthority"]>[0]["role"];
@@ -193,7 +194,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     throw badRequest("Current authority is not available for this token");
   }
 
-  const { signer } = await resolveAuthoritySigner({
+  const { signer, walletId } = await resolveAuthoritySigner({
     env: c.env,
     auth,
     token,
@@ -205,6 +206,20 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   const newAuthority = parsed.data.authority.newAuthority
     ? assertValidAddress(parsed.data.authority.newAuthority, "newAuthority")
     : null;
+
+  await enforceIssuanceWalletOperationPolicy(c, {
+    auth,
+    token,
+    walletId,
+    operationType: "issuance_update_authority_execute",
+    destination: newAuthority,
+    rawPayload: {
+      action: "update_authority",
+      role,
+      currentAuthority: currentAuthorityRaw,
+      newAuthority,
+    },
+  });
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,

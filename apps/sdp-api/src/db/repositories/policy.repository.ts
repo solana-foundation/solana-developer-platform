@@ -322,6 +322,10 @@ export interface PolicyRepository {
 
   createWalletOperation(input: CreateWalletOperationInput): Promise<WalletOperationRow | null>;
   getWalletOperationById(walletOperationId: string): Promise<WalletOperationRow | null>;
+  updateWalletOperationStatus(
+    walletOperationId: string,
+    status: WalletOperationStatus
+  ): Promise<WalletOperationRow | null>;
   createPolicyEvaluation(input: CreatePolicyEvaluationInput): Promise<PolicyEvaluationRow | null>;
   listPolicyEvaluationsForOperation(walletOperationId: string): Promise<PolicyEvaluationRow[]>;
 }
