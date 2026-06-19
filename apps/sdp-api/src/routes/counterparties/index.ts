@@ -10,6 +10,7 @@ import {
   getCounterpartyFieldOptions,
   getCounterpartyRequirements,
   listCounterparties,
+  submitCounterpartyRequirements,
   updateCounterparty,
 } from "./handlers";
 
@@ -30,6 +31,11 @@ counterparties.get(
   "/:counterpartyId/requirements",
   requirePermissions("counterparties:read"),
   getCounterpartyRequirements
+);
+counterparties.post(
+  "/:counterpartyId/requirements",
+  requirePermissions("counterparties:write"),
+  submitCounterpartyRequirements
 );
 counterparties.patch(
   "/:counterpartyId",

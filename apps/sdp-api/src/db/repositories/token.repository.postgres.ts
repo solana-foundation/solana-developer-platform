@@ -1,5 +1,6 @@
 import type { Token, TokenExtensionsConfig, TokenStatus, TokenTemplate } from "@sdp/types";
 import type { AppDb } from "@/db";
+import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import { formatDecimalAmount } from "@/lib/amount";
 import type { ListTokensOptions, TokenRepository } from "./token.repository";
 
@@ -12,11 +13,7 @@ function parseExtensionValue(value: string | null): unknown {
     return true;
   }
 
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return value;
-  }
+  return parsePostgresJsonOr<unknown>(value, value);
 }
 
 function mapTokenRow(

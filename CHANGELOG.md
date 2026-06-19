@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.31.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.30.0...v0.31.0) (2026-06-18)
+
+### Features
+
+* **api:** PRO-1358 policy data model foundations ([#467](https://github.com/solana-foundation/solana-developer-platform/pull/467)) ([449027b](https://github.com/solana-foundation/solana-developer-platform/commit/449027bb234107b724f8bf49e97e71b4383d47bb))
+* counterparty requirements advance endpoint + on-ramp onboarding flow ([#456](https://github.com/solana-foundation/solana-developer-platform/pull/456)) ([cc134ad](https://github.com/solana-foundation/solana-developer-platform/commit/cc134adb290a00aa3b5618bb177119ed93b9dd99))
+
+### Bug Fixes
+
+* **sdp-web:** capitalize templates, statuses and operations ([#448](https://github.com/solana-foundation/solana-developer-platform/pull/448)) ([11d149b](https://github.com/solana-foundation/solana-developer-platform/commit/11d149b2d4844f28d8b247c51cd8d8f3d504d217))
+* **api-keys:** cap new key permissions to the creator's grant + tidy allowlist guard ([#433](https://github.com/solana-foundation/solana-developer-platform/pull/433)) ([61fea56](https://github.com/solana-foundation/solana-developer-platform/commit/61fea56bc9c6b8efc7cbe843658d8dc1c384a5ab))
+* repair local db seed flow for fresh clones ([bb47819](https://github.com/solana-foundation/solana-developer-platform/commit/bb47819891b8ed76ac3a07b4eb98f190d68eb837))
+
+### Refactors
+
+* **api:** transactional email Resend cleanup ([#466](https://github.com/solana-foundation/solana-developer-platform/pull/466)) ([0468ba1](https://github.com/solana-foundation/solana-developer-platform/commit/0468ba1f28f37bd1a62b45fd7c2de59cc22754ce))
+
+### Maintenance
+
+* **deps:** bump the actions group across 1 directory with 2 updates ([#449](https://github.com/solana-foundation/solana-developer-platform/pull/449)) ([6c0963d](https://github.com/solana-foundation/solana-developer-platform/commit/6c0963d0763a5217bc22e17ab7984b0551dc5b15))
+* **deps:** bump the minor-patch group across 1 directory with 27 updates ([#461](https://github.com/solana-foundation/solana-developer-platform/pull/461)) ([642c3fc](https://github.com/solana-foundation/solana-developer-platform/commit/642c3fc9a879dc9d2192e0b095bfc3a5f1caecae))
+* **deps:** bump hono from 4.12.23 to 4.12.25 ([57ef265](https://github.com/solana-foundation/solana-developer-platform/commit/57ef2654f7b17f5eae5e5870b37a3d06b8b614bb))
+* **deps-dev:** bump esbuild from 0.28.0 to 0.28.1 in /apps/sdp-api ([46a47ba](https://github.com/solana-foundation/solana-developer-platform/commit/46a47ba5f27c4d19cb36e5e4613a97f49d3d781e))
+* **deps-dev:** bump esbuild from 0.28.0 to 0.28.1 ([76cf01b](https://github.com/solana-foundation/solana-developer-platform/commit/76cf01be9edc6a9f00d1334c212a8ba86334a53b))
+* make secret-backed checks fork-aware ([2abfeb5](https://github.com/solana-foundation/solana-developer-platform/commit/2abfeb5a974c5ca7829b8ef9422aad037a2b09bf))
+
 ## [0.30.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.29.0...v0.30.0) (2026-06-16)
 
 ### Features

@@ -51,16 +51,25 @@ export async function applyRampSettlementEvent(c: AppContext, event: RampSettlem
     status: RAMP_SETTLEMENT_STATUS[event.kind],
     updatedAt: new Date().toISOString(),
   };
-  // For off-ramp the received side is the fiat payout; for on-ramp it is the
-  // crypto leg, which the transfer row already records as its amount.
-  if (event.kind === "settled" && event.receivedAmount && transfer.type === "offramp") {
-    update.fiatAmount = event.receivedAmount;
+  // Record the actual settled amount the provider reports: the fiat payout for
+  // off-ramp, the delivered crypto for on-ramp.
+  if (event.kind === "settled" && event.receivedAmount) {
+    if (transfer.type === "offramp") {
+      update.fiatAmount = event.receivedAmount;
+    } else {
+      update.amount = event.receivedAmount;
+    }
   }
-  if (event.kind === "failed" && event.error) {
+  if ((event.kind === "failed" || event.kind === "expired") && event.error) {
     update.error = event.error;
   }
-  if (event.kind === "expired" && event.error) {
-    update.error = event.error;
+  // Economics are captured only here, at the terminal settlement webhook — they are not
+  // backfilled for transfers that settled before this shipped.
+  if (
+    (event.kind === "settled" || event.kind === "failed" || event.kind === "expired") &&
+    event.settlement
+  ) {
+    update.providerData = { settlement: event.settlement };
   }
 
   await repo.updateTransfer(update);

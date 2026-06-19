@@ -31,6 +31,7 @@ export function textField(args: {
   minLength?: number;
   maxLength?: number;
   placeholder?: string;
+  mask?: string;
 }): RequirementField {
   return { kind: "text", ...args };
 }

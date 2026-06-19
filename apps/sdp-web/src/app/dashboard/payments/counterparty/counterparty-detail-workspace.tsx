@@ -4,8 +4,8 @@ import type {
   Counterparty,
   CounterpartyAccount,
   PaymentTransferSummary,
-  RampDirection,
   RampProviderId,
+  RampTransferSettlement,
 } from "@sdp/types";
 import {
   ArrowRightIcon,
@@ -51,7 +51,14 @@ import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
-import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
+import {
+  formatDisplayAmount,
+  formatMinorCurrencyAmount,
+  formatTimestamp,
+  resolveTransferFlow,
+  resolveTransferTypeLabel,
+  shortenAddress,
+} from "../payments-overview.utils";
 import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
@@ -95,35 +102,6 @@ function TransferStatusBadge({ status }: { status: string }) {
       {toTitleCase(status)}
     </span>
   );
-}
-
-const RAMP_TYPE_LABELS = {
-  onramp: "Deposit",
-  offramp: "Pay",
-} as const satisfies Record<RampDirection, string>;
-
-function resolveTransferTypeLabel(type: string | undefined): string {
-  if (type === "onramp" || type === "offramp") {
-    return RAMP_TYPE_LABELS[type];
-  }
-  return type ? toTitleCase(type) : "Transfer";
-}
-
-/** Source → destination amounts, Wise-style: what's sent vs. what's received. */
-function resolveTransferFlow(transfer: PaymentTransferSummary): {
-  send: string | null;
-  receive: string | null;
-} {
-  const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
-  const cryptoLabel =
-    transfer.amount && transfer.token ? formatDisplayAmount(transfer.amount, transfer.token) : null;
-  const fiatLabel =
-    transfer.fiatAmount && transfer.fiatCurrency
-      ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
-      : null;
-  return isInbound
-    ? { send: fiatLabel, receive: cryptoLabel }
-    : { send: cryptoLabel, receive: fiatLabel };
 }
 
 function TransferProviderCell({ provider }: { provider?: RampProviderId }) {
@@ -445,6 +423,59 @@ function DetailRow({
   );
 }
 
+function RampSettlementRows({ settlement }: { settlement: RampTransferSettlement }) {
+  if (settlement.provider === "moonpay") {
+    const rate =
+      settlement.quoteCurrencyAmount > 0
+        ? settlement.baseCurrencyAmount / settlement.quoteCurrencyAmount
+        : null;
+    return (
+      <>
+        <DetailRow
+          label="Provider fee"
+          value={formatDisplayAmount(String(settlement.feeAmount), settlement.baseCurrencyCode)}
+        />
+        {settlement.networkFeeAmount > 0 ? (
+          <DetailRow
+            label="Network fee"
+            value={formatDisplayAmount(
+              String(settlement.networkFeeAmount),
+              settlement.baseCurrencyCode
+            )}
+          />
+        ) : null}
+        {rate !== null ? (
+          <DetailRow
+            label="Exchange rate"
+            value={`1 ${settlement.quoteCurrencyCode} = ${formatDisplayAmount(rate.toFixed(2), settlement.baseCurrencyCode)}`}
+          />
+        ) : null}
+      </>
+    );
+  }
+
+  const sentDecimal = settlement.sentAmount.amount / 10 ** settlement.sentAmount.decimals;
+  const receivedDecimal =
+    settlement.receivedAmount.amount / 10 ** settlement.receivedAmount.decimals;
+  const rate = receivedDecimal > 0 ? sentDecimal / receivedDecimal : null;
+  const fees = formatMinorCurrencyAmount(
+    settlement.fees,
+    settlement.sentAmount.currencyCode,
+    settlement.sentAmount.decimals
+  );
+  return (
+    <>
+      {fees ? <DetailRow label="Fees" value={fees} /> : null}
+      {rate !== null ? (
+        <DetailRow
+          label="Exchange rate"
+          value={`1 ${settlement.receivedAmount.currencyCode} = ${rate.toFixed(4)} ${settlement.sentAmount.currencyCode}`}
+        />
+      ) : null}
+    </>
+  );
+}
+
 function TransferDetailModal({
   transfer,
   counterpartyName,
@@ -540,6 +571,7 @@ function TransferDetailModal({
               />
             ) : null}
             {transfer.memo ? <DetailRow label="Memo" value={transfer.memo} /> : null}
+            {transfer.settlement ? <RampSettlementRows settlement={transfer.settlement} /> : null}
             {transfer.updatedAt ? (
               <DetailRow label="Last updated" value={formatTimestamp(transfer.updatedAt)} />
             ) : null}

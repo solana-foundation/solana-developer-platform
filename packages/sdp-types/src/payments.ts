@@ -46,6 +46,59 @@ export interface PaymentWalletPolicyEnvelope {
   };
 }
 
+export type PaymentTransferStatus =
+  | "pending"
+  | "processing"
+  | "confirmed"
+  | "finalized"
+  | "failed"
+  | "awaiting_payment"
+  | "settling"
+  | "completed"
+  | "expired";
+
+export const SUCCESSFUL_PAYMENT_TRANSFER_STATUSES = [
+  "completed",
+  "confirmed",
+  "finalized",
+] as const satisfies readonly PaymentTransferStatus[];
+
+export interface LightsparkGridAmount {
+  amount: number;
+  currencyCode: string;
+  decimals: number;
+}
+
+/** MoonPay transaction economics, captured verbatim from a terminal webhook. */
+export interface MoonpayRampSettlement {
+  provider: "moonpay";
+  status: "completed" | "failed";
+  baseCurrencyCode: string;
+  baseCurrencyAmount: number;
+  quoteCurrencyCode: string;
+  quoteCurrencyAmount: number;
+  feeAmount: number;
+  extraFeeAmount: number;
+  networkFeeAmount: number;
+  areFeesIncluded: boolean;
+  usdRate: number;
+  cryptoTransactionId?: string;
+  failureReason?: string;
+}
+
+/** Lightspark (Grid) outgoing-payment economics, captured verbatim from a terminal webhook. */
+export interface LightsparkRampSettlement {
+  provider: "lightspark";
+  status: "COMPLETED" | "FAILED" | "EXPIRED" | "REFUND_FAILED";
+  sentAmount: LightsparkGridAmount;
+  receivedAmount: LightsparkGridAmount;
+  exchangeRate: number;
+  fees: number;
+  failureReason?: string;
+}
+
+export type RampTransferSettlement = MoonpayRampSettlement | LightsparkRampSettlement;
+
 export interface PaymentTransferSummary {
   id: string;
   status: string;
@@ -63,6 +116,7 @@ export interface PaymentTransferSummary {
   deliveryMode?: PaymentRampQuoteDeliveryMode;
   fiatCurrency?: string;
   fiatAmount?: string;
+  settlement?: RampTransferSettlement;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -402,7 +456,12 @@ export interface LightsparkPaymentRampInstruction {
   isPlatformAccount?: boolean;
 }
 
-export type BvnkOnboardingStatus = "verification_required" | "verifying" | "provisioning" | "ready";
+export type BvnkOnboardingStatus =
+  | "verification_required"
+  | "verifying"
+  | "verification_failed"
+  | "provisioning"
+  | "ready";
 
 export interface BvnkBankFundingDetails {
   accountNumber?: string;

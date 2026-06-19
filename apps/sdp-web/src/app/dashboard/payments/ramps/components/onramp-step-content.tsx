@@ -1,16 +1,28 @@
 "use client";
 
-import { CheckCircle2Icon, DollarSignIcon, Loader2Icon, XCircleIcon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  DollarSignIcon,
+  Loader2Icon,
+  ShieldCheckIcon,
+  XCircleIcon,
+} from "lucide-react";
 import {
   formatMinorCurrencyAmount,
   formatTimestamp,
 } from "@/app/dashboard/payments/payments-overview.utils";
-import { ONRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ramps";
+import { Button } from "@/components/ui/button";
+import {
+  getRampProviderLabel,
+  ONRAMP_PAIRS,
+  RAMP_PROVIDER_OPTIONS,
+  toRampCryptoToken,
+} from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { HostedRampFrame } from "./hosted-ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
-import { RampStepPlaceholder } from "./ramp-step-placeholder";
+import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
 import { RequirementsFields } from "./requirements-fields";
 
 function getOnrampTransferStatusCopy(status: string) {
@@ -93,9 +105,11 @@ function OnrampTransferStatusPanel({ transfer }: { transfer: OnrampWizard["trans
 
 function TransferDetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl bg-white px-4 py-3">
-      <p className="text-xs font-medium uppercase tracking-wide text-text-low">{label}</p>
-      <p className="mt-1 break-all text-sm font-medium text-text-extra-high">{value}</p>
+    <div className="flex items-start justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
+      <span className="shrink-0 text-sm text-text-low">{label}</span>
+      <span className="min-w-0 break-all text-right text-sm font-medium text-text-extra-high">
+        {value}
+      </span>
     </div>
   );
 }
@@ -107,26 +121,18 @@ function OnrampCompleteScreen({
   quote: NonNullable<OnrampWizard["quote"]>;
   transfer: NonNullable<OnrampWizard["transferStatus"]>;
 }) {
-  const finalizedDetails: { label: string; value: string }[] = [
-    { label: "Transfer ID", value: transfer.id },
-    { label: "Status", value: "Completed" },
-    { label: "Provider", value: quote.provider },
-    { label: "Quote ID", value: quote.id },
-  ];
+  const receivedAmount =
+    transfer.amount && transfer.token ? `${transfer.amount} ${transfer.token.toUpperCase()}` : null;
+  const fundedAmount =
+    transfer.fiatAmount && transfer.fiatCurrency
+      ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
+      : null;
 
-  if (transfer.fiatAmount && transfer.fiatCurrency) {
-    finalizedDetails.push({
-      label: "Funded",
-      value: `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`,
-    });
+  const detailRows: { label: string; value: string }[] = [];
+  if (!receivedAmount && fundedAmount) {
+    detailRows.push({ label: "Funded", value: fundedAmount });
   }
-
-  if (transfer.amount && transfer.token) {
-    finalizedDetails.push({
-      label: "Received",
-      value: `${transfer.amount} ${transfer.token.toUpperCase()}`,
-    });
-  }
+  detailRows.push({ label: "Provider", value: getRampProviderLabel(quote.provider) });
 
   if (quote.provider === "lightspark") {
     const sendingAmount = formatMinorCurrencyAmount(
@@ -140,36 +146,135 @@ function OnrampCompleteScreen({
       quote.receivingCurrency.decimals
     );
     if (sendingAmount) {
-      finalizedDetails.push({ label: "Final funded amount", value: sendingAmount });
+      detailRows.push({ label: "Final funded amount", value: sendingAmount });
     }
     if (receivingAmount) {
-      finalizedDetails.push({ label: "Final received amount", value: receivingAmount });
+      detailRows.push({ label: "Final received amount", value: receivingAmount });
     }
   }
 
   if (transfer.updatedAt) {
-    finalizedDetails.push({ label: "Completed", value: formatTimestamp(transfer.updatedAt) });
+    detailRows.push({ label: "Completed", value: formatTimestamp(transfer.updatedAt) });
   }
+  detailRows.push({ label: "Transfer ID", value: transfer.id });
+  detailRows.push({ label: "Quote ID", value: quote.id });
 
   return (
-    <div className="rounded-3xl border border-status-success-border bg-status-success-bg p-6 text-status-success-text">
-      <div className="flex items-start gap-4">
-        <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white">
-          <CheckCircle2Icon className="size-6" />
-        </span>
+    <div className="flex flex-col items-center gap-6">
+      <div className="flex size-16 items-center justify-center rounded-full bg-status-success-bg text-status-success-text">
+        <CheckCircle2Icon className="size-8" />
+      </div>
+      <div className="space-y-1 text-center">
+        <p className="text-2xl font-medium tracking-tight text-text-extra-high">Deposit complete</p>
+        <p className="text-sm text-text-low">The funds have settled to the destination wallet.</p>
+      </div>
+      <section className="w-full space-y-4 rounded-2xl bg-border-extra-light p-5">
+        {receivedAmount ? (
+          <div className="flex flex-col items-center gap-0.5 border-b border-border-light pb-4">
+            <p className="text-3xl font-semibold tracking-tight text-text-extra-high">
+              {receivedAmount}
+            </p>
+            {fundedAmount ? (
+              <p className="text-sm text-text-low">funded with {fundedAmount}</p>
+            ) : null}
+          </div>
+        ) : null}
         <div>
-          <p className="text-2xl font-medium tracking-tight">Transaction complete!</p>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed">
-            The deposit has settled. You can review this transfer from the counterparty record.
-          </p>
+          {detailRows.map((detail) => (
+            <TransferDetailRow key={detail.label} label={detail.label} value={detail.value} />
+          ))}
         </div>
-      </div>
+      </section>
+    </div>
+  );
+}
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
-        {finalizedDetails.map((detail) => (
-          <TransferDetailRow key={detail.label} label={detail.label} value={detail.value} />
-        ))}
-      </div>
+function OnboardingErrorPanel({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
+      <XCircleIcon className="size-10 text-status-error-text" />
+      <p className="text-lg font-medium text-text-extra-high">
+        We couldn't finish setting up your account
+      </p>
+      <p className="max-w-md text-sm leading-relaxed text-text-low">
+        Something went wrong provisioning your funding account. Please try again.
+      </p>
+      <Button type="button" variant="secondary" onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  );
+}
+
+function OnboardingVerificationFailedPanel() {
+  return (
+    <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
+      <XCircleIcon className="size-10 text-status-error-text" />
+      <p className="text-lg font-medium text-text-extra-high">
+        Identity verification was not approved
+      </p>
+      <p className="max-w-md text-sm leading-relaxed text-text-low">
+        BVNK couldn't verify your identity, so this funding account can't be activated. Contact
+        support if you believe this is a mistake.
+      </p>
+    </div>
+  );
+}
+
+function OnboardingPanel({
+  onboarding,
+  onRetry,
+}: {
+  onboarding: NonNullable<OnrampWizard["onboarding"]>;
+  onRetry: () => void;
+}) {
+  switch (onboarding.status) {
+    case "provisioning_failed":
+      return <OnboardingErrorPanel onRetry={onRetry} />;
+    case "customer_verification_failed":
+      return <OnboardingVerificationFailedPanel />;
+    default:
+      return <OnboardingPendingPanel status={onboarding.status} />;
+  }
+}
+
+function OnboardingPendingPanel({
+  status,
+}: {
+  status: NonNullable<OnrampWizard["onboarding"]>["status"];
+}) {
+  const needsVerification = status === "customer_verification_required";
+  let title: string;
+  let description: string;
+  switch (status) {
+    case "customer_verification_required":
+      title = "Verify your identity";
+      description =
+        "BVNK partners with Sumsub to confirm your identity before activating your funding account. Hit “Complete Verification” below to get started — this page refreshes automatically once you're approved, and your deposit instructions will appear right here.";
+      break;
+    case "customer_verifying":
+      title = "Verification in review";
+      description =
+        "Sumsub is reviewing your details — this usually takes just a few minutes. Feel free to come back later; your deposit instructions will show up here as soon as you're approved.";
+      break;
+    case "ready":
+      title = "Preparing your deposit instructions";
+      description = "Your funding account is ready — fetching your deposit details now.";
+      break;
+    default:
+      title = "Setting up your funding account";
+      description =
+        "Almost there — we're provisioning your virtual account now. Your deposit instructions will appear here in a moment.";
+  }
+  return (
+    <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
+      {needsVerification ? (
+        <ShieldCheckIcon className="size-10 text-text-extra-high" />
+      ) : (
+        <Loader2Icon className="size-10 animate-spin text-text-medium" />
+      )}
+      <p className="text-lg font-medium text-text-extra-high">{title}</p>
+      <p className="max-w-md text-sm leading-relaxed text-text-low">{description}</p>
     </div>
   );
 }
@@ -184,7 +289,8 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     walletsLoading,
     selectedWallet,
     selectedRampPair,
-    bvnkInstruction,
+    onboarding,
+    retryOnboarding,
     quote,
     transferStatus,
     quoteSimulationLoading,
@@ -244,13 +350,8 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
-  if (currentStepId === "PROVIDER" && bvnkInstruction?.onboardingStatus === "verifying") {
-    return (
-      <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
-        We're reviewing your details. This usually takes a few minutes — you can come back to
-        complete your deposit once verification is approved.
-      </div>
-    );
+  if (currentStepId === "PROVIDER" && onboarding && !quote) {
+    return <OnboardingPanel onboarding={onboarding} onRetry={retryOnboarding} />;
   }
 
   if (currentStepId === "PROVIDER" && quote) {
@@ -308,5 +409,5 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
-  return <RampStepPlaceholder />;
+  return <RampQuoteSkeleton />;
 }

@@ -28,7 +28,13 @@ import {
   notFound,
 } from "@/lib/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
+import { bvnkOnrampStatusFromProviderData } from "@/lib/ramps/providers/bvnk";
 import { created, noContent, success } from "@/lib/response";
+import {
+  advanceCounterpartyRequirements,
+  assertRampProviderAvailable,
+} from "@/routes/payments/handlers/ramps";
+import { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import { AuditService } from "@/services/audit.service";
 import { type AppContext, getCounterpartiesRepository } from "./context";
 import {
@@ -156,6 +162,30 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     throw notFound("Counterparty");
   }
 
+  if (
+    query.data.provider === "bvnk" &&
+    query.data.direction === "onramp" &&
+    query.data.cryptoToken &&
+    query.data.destinationWallet &&
+    query.data.fiatCurrency
+  ) {
+    const gate = RAMP_PROVIDER_CLIENTS.bvnk.validateCounterparty(mapToCounterparty(counterparty), {
+      direction: "onramp",
+      providerData: counterparty.provider_data,
+    });
+    if (gate.status === "collect" || gate.status === "unsupported") {
+      return success(c, gate);
+    }
+    return success(
+      c,
+      bvnkOnrampStatusFromProviderData(counterparty.provider_data, {
+        cryptoToken: query.data.cryptoToken,
+        fiatCurrency: query.data.fiatCurrency,
+        destinationWalletAddress: query.data.destinationWallet,
+      })
+    );
+  }
+
   const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
     mapToCounterparty(counterparty),
     {
@@ -165,6 +195,67 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     }
   );
   return success(c, requirements);
+};
+
+export const submitCounterpartyRequirements = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = counterpartyIdParamsSchema.safeParse(c.req.param());
+
+  if (!params.success) {
+    throw badRequestParams();
+  }
+
+  const body = await c.req.json();
+  const parsed = submitCounterpartyRequirementsSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
+  }
+
+  await assertRampProviderAvailable(c, parsed.data.provider, auth.organizationId);
+
+  const repo = getCounterpartiesRepository(c);
+  const counterparty = await repo.getCounterpartyById({
+    counterpartyId: params.data.counterpartyId,
+    organizationId: auth.organizationId,
+    projectId,
+  });
+
+  if (!counterparty) {
+    throw notFound("Counterparty");
+  }
+
+  const input = parsed.data;
+  const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
+    mapToCounterparty(counterparty),
+    {
+      direction: input.direction,
+      providerData: counterparty.provider_data,
+      ...("fiatCurrency" in input ? { fiatCurrency: input.fiatCurrency } : {}),
+    }
+  );
+
+  if (requirements.status === "unsupported") {
+    return success(c, requirements);
+  }
+
+  if (requirements.status === "collect") {
+    const collectedData = "collectedData" in input ? input.collectedData : undefined;
+    const missing = requirements.fields.filter(
+      (field) => !collectedData || collectedData[field.key] === undefined
+    );
+    if (missing.length > 0) {
+      return success(c, { ...requirements, fields: missing });
+    }
+  }
+
+  const advanced = await advanceCounterpartyRequirements(c, {
+    ...input,
+    counterparty,
+    projectId,
+  });
+  return success(c, advanced);
 };
 
 export const createCounterparty = async (c: AppContext) => {

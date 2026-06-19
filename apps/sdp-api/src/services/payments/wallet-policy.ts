@@ -1,3 +1,4 @@
+import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import type {
   PaymentsRepository,
   PaymentWalletPolicyRow as WalletPolicyRow,
@@ -17,15 +18,12 @@ export const DESTINATION_ALLOWLIST_POLICY_TYPE = "destination_allowlist";
 export const TRANSFER_LIMITS_POLICY_TYPE = "transfer_limits";
 
 function parsePolicyDocument(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
+  const parsed = parsePostgresJsonOr<unknown>(raw, null);
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
     return null;
   }
+
+  return parsed as Record<string, unknown>;
 }
 
 function parseDestinationAllowlistPolicy(raw: string): string[] {

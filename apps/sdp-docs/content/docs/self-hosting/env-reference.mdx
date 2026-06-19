@@ -13,7 +13,7 @@ The configurator groups variables into sections:
 
 | Section | What it covers |
 |---|---|
-| Basic | Core runtime — environment, deployment mode, sender email. |
+| Basic | Core runtime — environment, deployment mode, Transactional Email sender and Resend key. |
 | Database | Bundled Postgres or an external database. |
 | Cache | Bundled Redis or an external cache. |
 | Solana RPC | Network and RPC endpoint. |
@@ -40,6 +40,13 @@ These must be set or the stack will refuse to start:
 
 The configurator generates `API_KEY_PEPPER` and `CUSTODY_ENCRYPTION_KEY` for you
 and can auto-generate `POSTGRES_PASSWORD`.
+
+## Transactional Email
+
+SDP-owned Transactional Email uses Resend. Set `EMAIL_FROM` to the sender address
+and `RESEND_API_KEY` to the Resend API key before enabling product flows that send
+email. Organization member invitation emails are handled by Clerk and do not use
+these settings.
 
 ## Database
 

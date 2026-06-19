@@ -5,9 +5,11 @@
  */
 
 import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyStatus, Permission } from "@sdp/types";
+import type { DatabaseExecutor } from "@/db";
+import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
-import { createApiKeyMaterial, parseJsonArray } from "./api-key.utils";
+import { createApiKeyMaterial } from "./api-key.utils";
 import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
 
 export interface ApiKeyListItem {
@@ -114,6 +116,14 @@ interface ApiKeyDetailsRow extends ApiKeyListRow {
   rotation_deadline: string | null;
 }
 
+function stringifyJsonb(value: unknown, fallback: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  return JSON.stringify(value ?? fallback);
+}
+
 export class ApiKeyService {
   constructor(private db: DatabaseClient) {}
 
@@ -157,8 +167,8 @@ export class ApiKeyService {
     return {
       ...this.mapListRow(row),
       projectId: row.project_id,
-      allowedIps: parseJsonArray(row.allowed_ips),
-      permissions: row.permissions ? (JSON.parse(row.permissions) as Permission[]) : null,
+      allowedIps: parseOptionalPostgresJson<string[]>(row.allowed_ips),
+      permissions: row.permissions ? parsePostgresJson<Permission[]>(row.permissions) : null,
       signingWalletId: row.signing_wallet_id,
       rotatedFrom: row.rotated_from,
       rotationDeadline: row.rotation_deadline,
@@ -345,8 +355,8 @@ export class ApiKeyService {
 
     const rotationDeadline = new Date(Date.now() + gracePeriodHours * 60 * 60 * 1000).toISOString();
 
-    await this.db.batch([
-      this.db
+    await this.db.transaction(async (tx) => {
+      await tx
         .prepare(
           `INSERT INTO api_keys (
             id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
@@ -367,11 +377,15 @@ export class ApiKeyService {
           existing.allowed_ips,
           existing.signing_wallet_id,
           keyId
-        ),
-      this.db
+        )
+        .run();
+
+      await tx
         .prepare("UPDATE api_keys SET rotation_deadline = ? WHERE id = ?")
-        .bind(rotationDeadline, keyId),
-      this.db
+        .bind(rotationDeadline, keyId)
+        .run();
+
+      await tx
         .prepare(
           `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
            SELECT
@@ -382,8 +396,11 @@ export class ApiKeyService {
            FROM api_key_wallet_permissions
            WHERE api_key_id = ?`
         )
-        .bind(newKeyId, keyId),
-    ]);
+        .bind(newKeyId, keyId)
+        .run();
+
+      await this.cloneApiKeyPolicyFoundation(tx, keyId, newKeyId);
+    });
 
     return {
       apiKey: {
@@ -445,5 +462,150 @@ export class ApiKeyService {
       expiresAt: row.expires_at,
       createdAt: row.created_at,
     };
+  }
+
+  private async cloneApiKeyPolicyFoundation(
+    db: DatabaseExecutor,
+    sourceApiKeyId: string,
+    targetApiKeyId: string
+  ): Promise<void> {
+    const profileRows = await db
+      .prepare(
+        `SELECT *
+         FROM api_key_control_profiles
+         WHERE api_key_id = ?
+         ORDER BY created_at ASC`
+      )
+      .bind(sourceApiKeyId)
+      .all<Record<string, unknown>>();
+
+    const profileIdMap = new Map<string, string>();
+    const revisionIdMap = new Map<string, string>();
+
+    for (const profile of profileRows.results) {
+      const sourceProfileId = profile.id as string;
+      const targetProfileId = `akcp_${crypto.randomUUID()}`;
+      profileIdMap.set(sourceProfileId, targetProfileId);
+
+      await db
+        .prepare(
+          `INSERT INTO api_key_control_profiles (
+             id,
+             organization_id,
+             project_id,
+             api_key_id,
+             name,
+             status,
+             created_by,
+             activated_at,
+             archived_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          targetProfileId,
+          profile.organization_id,
+          profile.project_id,
+          targetApiKeyId,
+          profile.name,
+          profile.status,
+          profile.created_by ?? null,
+          profile.activated_at ?? null,
+          profile.archived_at ?? null
+        )
+        .run();
+
+      const revisionRows = await db
+        .prepare(
+          `SELECT *
+           FROM api_key_control_profile_revisions
+           WHERE profile_id = ?
+           ORDER BY revision_number ASC`
+        )
+        .bind(sourceProfileId)
+        .all<Record<string, unknown>>();
+
+      for (const revision of revisionRows.results) {
+        const sourceRevisionId = revision.id as string;
+        const targetRevisionId = `akcpr_${crypto.randomUUID()}`;
+        revisionIdMap.set(sourceRevisionId, targetRevisionId);
+
+        await db
+          .prepare(
+            `INSERT INTO api_key_control_profile_revisions (
+               id,
+               profile_id,
+               revision_number,
+               rules,
+               default_action,
+               created_by,
+               activated_at
+             ) VALUES (?, ?, ?, ?::jsonb, ?, ?, ?)`
+          )
+          .bind(
+            targetRevisionId,
+            targetProfileId,
+            revision.revision_number,
+            stringifyJsonb(revision.rules, []),
+            revision.default_action,
+            revision.created_by ?? null,
+            revision.activated_at ?? null
+          )
+          .run();
+      }
+
+      await db
+        .prepare(
+          `UPDATE api_key_control_profiles
+           SET active_revision_id = ?,
+               updated_at = sdp_iso_now()
+           WHERE id = ?`
+        )
+        .bind(
+          profile.active_revision_id
+            ? (revisionIdMap.get(profile.active_revision_id as string) ?? null)
+            : null,
+          targetProfileId
+        )
+        .run();
+    }
+
+    const bindingRows = await db
+      .prepare(
+        `SELECT *
+         FROM api_key_wallet_policy_bindings
+         WHERE api_key_id = ?
+         ORDER BY created_at ASC`
+      )
+      .bind(sourceApiKeyId)
+      .all<Record<string, unknown>>();
+
+    for (const binding of bindingRows.results) {
+      const apiKeyControlProfileId = binding.api_key_control_profile_id
+        ? (profileIdMap.get(binding.api_key_control_profile_id as string) ?? null)
+        : null;
+
+      await db
+        .prepare(
+          `INSERT INTO api_key_wallet_policy_bindings (
+             id,
+             api_key_id,
+             binding_scope,
+             wallet_id,
+             custody_wallet_id,
+             wallet_control_profile_id,
+             api_key_control_profile_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          `akwpol_${crypto.randomUUID()}`,
+          targetApiKeyId,
+          binding.binding_scope,
+          binding.wallet_id ?? null,
+          binding.custody_wallet_id ?? null,
+          binding.wallet_control_profile_id ?? null,
+          apiKeyControlProfileId
+        )
+        .run();
+    }
   }
 }

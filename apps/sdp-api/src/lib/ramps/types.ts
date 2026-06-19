@@ -3,6 +3,7 @@ import type {
   CounterpartyProviderData,
   PaymentRampEstimate,
   PaymentRampQuote,
+  RampTransferSettlement,
   SdpEnvironment,
 } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
@@ -79,9 +80,13 @@ export type RampSettlementEvent =
       kind: "settled";
       /** Amount the receiving side settled for, in display units — fiat for off-ramp, crypto for on-ramp. */
       receivedAmount?: string;
+      settlement?: RampTransferSettlement;
     })
-  | (BaseRampSettlementEvent & { kind: "failed"; error?: string })
-  | (BaseRampSettlementEvent & { kind: "expired"; error?: string })
+  | (BaseRampSettlementEvent & {
+      kind: "failed" | "expired";
+      error?: string;
+      settlement?: RampTransferSettlement;
+    })
   | { provider: RampProviderId; kind: "ignore"; reason: string };
 
 /**

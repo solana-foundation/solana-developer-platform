@@ -9,6 +9,7 @@ import {
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
+import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
@@ -39,7 +40,7 @@ function parseOrganizationSettings(raw: string | null): OrganizationSettings | n
   }
 
   try {
-    return JSON.parse(raw) as OrganizationSettings;
+    return parsePostgresJson<OrganizationSettings>(raw);
   } catch {
     return null;
   }

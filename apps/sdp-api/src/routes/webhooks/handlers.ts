@@ -4,6 +4,7 @@ import { Webhook } from "svix";
 import { getDb } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
+import { readString } from "@/lib/json";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
@@ -29,21 +30,21 @@ type ClerkWebhookEvent = {
 type WebhookRampProvider = keyof typeof RAMP_PROVIDER_CLIENTS;
 
 type ClerkOrgData = {
-  id: string | null;
-  name: string | null;
-  slug: string | null;
+  id: string | undefined;
+  name: string | undefined;
+  slug: string | undefined;
 };
 
 type ClerkMemberData = {
-  userId: string | null;
-  role: string | null;
-  email: string | null;
+  userId: string | undefined;
+  role: string | undefined;
+  email: string | undefined;
 };
 
 type ClerkUserData = {
-  id: string | null;
-  email: string | null;
-  name: string | null;
+  id: string | undefined;
+  email: string | undefined;
+  name: string | undefined;
 };
 
 type OrganizationMapping = {
@@ -56,14 +57,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
-}
-
-function readString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed.length ? trimmed : null;
 }
 
 function parseRampWebhookProvider(value: string | undefined): WebhookRampProvider {
@@ -151,7 +144,7 @@ function extractMember(data: Record<string, unknown>): ClerkMemberData {
   return { userId, role, email };
 }
 
-function extractPrimaryEmail(data: Record<string, unknown>): string | null {
+function extractPrimaryEmail(data: Record<string, unknown>): string | undefined {
   const emailAddresses = Array.isArray(data.email_addresses) ? data.email_addresses : [];
   const primaryEmailId = readString(data.primary_email_address_id);
 
@@ -169,7 +162,7 @@ function extractPrimaryEmail(data: Record<string, unknown>): string | null {
 
   for (const item of emailAddresses) {
     const emailRecord = asRecord(item);
-    const email = emailRecord ? readString(emailRecord.email_address) : null;
+    const email = emailRecord ? readString(emailRecord.email_address) : undefined;
     if (email) {
       return email;
     }
@@ -531,7 +524,7 @@ async function upsertMembership(c: AppContext, data: Record<string, unknown>) {
   const userId = await ensureUserMapping(c, {
     id: member.userId,
     email: member.email,
-    name: null,
+    name: undefined,
   });
   const role = mapClerkRoleToOrgRole(member.role);
   const memberId = `mem_${crypto.randomUUID()}`;
@@ -611,22 +604,34 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
     requestUrl: c.req.url,
   });
 
-  switch (result.provider) {
-    case "bvnk":
-      await handleBvnkRampWebhook(c, environment, result.payload);
-      break;
-    case "lightspark":
-      await handleLightsparkRampWebhook(c, result.payload);
-      break;
-    case "moonpay":
-      await handleMoonpayRampWebhook(c, result.payload);
-      break;
-    default:
-      throw new AppError(
-        "BAD_REQUEST",
-        `Unsupported ramp webhook provider: ${result.provider satisfies never}`
-      );
-  }
+  const dispatch = async () => {
+    switch (result.provider) {
+      case "bvnk":
+        await handleBvnkRampWebhook(c, environment, result.payload);
+        break;
+      case "lightspark":
+        await handleLightsparkRampWebhook(c, result.payload);
+        break;
+      case "moonpay":
+        await handleMoonpayRampWebhook(c, result.payload);
+        break;
+      default:
+        throw badRequest(`Unsupported ramp webhook provider: ${result.provider satisfies never}`);
+    }
+  };
+
+  // Signature is verified, so ack with 200 immediately and settle in the background: a
+  // slow DB write must not delay the 2xx the provider expects.
+  // TODO(ramps): until the reconciliation cron lands, this background pass is the only
+  // path that settles a transfer. The cron will reconcile any transaction left in a
+  // non-terminal state here (e.g. background processing that failed).
+  c.executionCtx.waitUntil(
+    dispatch().catch((error) =>
+      console.error(
+        `[ramp webhook] background processing failed (${result.provider}): ${error instanceof Error ? error.message : String(error)}`
+      )
+    )
+  );
 
   return success(c, {
     received: true,

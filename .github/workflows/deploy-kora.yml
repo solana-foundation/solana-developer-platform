@@ -1,0 +1,105 @@
+# Push to main (infra/kora) -> devnet; mainnet via workflow_dispatch. Per-env GitHub Environment
+# (devnet/mainnet) provides DOPPLER_TOKEN + vars GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT, KORA_GCP_PROJECT.
+name: Deploy Kora
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/kora/cloud-run/**'
+      - 'infra/kora/terraform/**'
+      - '.github/workflows/deploy-kora.yml'
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service to deploy"
+        type: choice
+        options: [kora]
+        default: kora
+        required: true
+      environment:
+        description: "Target environment"
+        type: choice
+        options: [devnet, mainnet]
+        default: devnet
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-kora-${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'devnet' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy kora (${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'devnet' }})
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'devnet' }}
+    env:
+      TARGET_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'devnet' }}
+      DOPPLER_PROJECT: solana-developer-platform
+      DOPPLER_CONFIG: prd
+      REGION: us-central1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build + deploy (config baked into image, secrets via Doppler)
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+          ENV: ${{ env.TARGET_ENV }}
+          PROJECT: ${{ vars.KORA_GCP_PROJECT }}
+        run: |
+          set -euo pipefail
+          doppler run --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" -- \
+            env ENV="$ENV" PROJECT="$PROJECT" REGION="$REGION" ./infra/kora/cloud-run/deploy.sh
+
+      - name: Notify Slack
+        if: always()
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+          STATUS: ${{ job.status }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SLACK=$(doppler secrets get SLACK_DEPLOY_WEBHOOK_URL --plain --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" 2>/dev/null || true)
+          if [ -z "$SLACK" ]; then echo "::warning::SLACK_DEPLOY_WEBHOOK_URL missing — skipping notification"; exit 0; fi
+          echo "::add-mask::$SLACK"
+          SHA=$(git rev-parse HEAD)
+          MSG=$(git log -1 --format=%s "$SHA" 2>/dev/null | cut -c1-140 || echo "")
+          if [ "$STATUS" = "success" ]; then MARKER="[DONE] Deploy kora ($TARGET_ENV)"; COLOR="#36a64f"; else MARKER="[FAILED] Deploy kora ($TARGET_ENV)"; COLOR="#cc0000"; fi
+          FIELDS=$(jq -n \
+            --arg env "$TARGET_ENV" --arg short_sha "${SHA:0:7}" --arg msg "$MSG" \
+            --arg actor "$ACTOR" --arg run "$RUN_URL" --arg rid "$RUN_ID" \
+            '[
+              {type:"mrkdwn",text:("*Service:*\n`kora` ("+$env+")")},
+              {type:"mrkdwn",text:("*Commit:*\n`"+$short_sha+"` — "+$msg)},
+              {type:"mrkdwn",text:("*Triggered by:*\n"+$actor)},
+              {type:"mrkdwn",text:("*Run:*\n<"+$run+"|workflow #"+$rid+">")}
+            ]')
+          PAYLOAD=$(jq -n --arg marker "$MARKER" --arg color "$COLOR" --argjson fields "$FIELDS" \
+            '{
+              text: ("*" + $marker + "*"),
+              attachments: [{
+                color: $color,
+                blocks: [
+                  {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
+                  {type:"section", fields:$fields}
+                ]
+              }]
+            }')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK"

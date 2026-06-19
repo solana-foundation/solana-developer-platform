@@ -74,7 +74,14 @@ export const FIELDS: EnvField[] = [
     section: "basic",
     kind: "text",
     label: "Email from address",
-    help: "Optional sender address for transactional email.",
+    help: "Sender address for SDP-owned Transactional Email.",
+  },
+  {
+    key: "RESEND_API_KEY",
+    section: "basic",
+    kind: "password",
+    label: "Resend API key",
+    help: "Required when SDP-owned Transactional Email is enabled.",
   },
 
   // Database

@@ -1,4 +1,5 @@
 import type { PaymentsDashboardWallet, Token, TokenAllowlistEntry } from "@sdp/types";
+import { formatDisplayLabel } from "@/lib/utils";
 import { type AccessControlMode, getTokenAccessControlMode } from "../access-control.utils";
 import type {
   ActionExecutionInput,
@@ -1085,7 +1086,7 @@ export function getExtensionRows(token: Token): ExtensionRow[] {
       id: "default-account-state",
       title: "Default Account State",
       helper: "Default state for newly created token accounts.",
-      value: token.extensions.defaultAccountState,
+      value: formatDisplayLabel(token.extensions.defaultAccountState),
     });
   }
 
@@ -1139,7 +1140,7 @@ export function getExtensionRows(token: Token): ExtensionRow[] {
       id: "template",
       title: "Template",
       helper: "Base template applied to this token.",
-      value: token.template,
+      value: formatDisplayLabel(token.template),
     },
     ...(controlListCopy
       ? [

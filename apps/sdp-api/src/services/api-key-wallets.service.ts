@@ -1,5 +1,6 @@
 import type { Permission } from "@sdp/types";
 import type { PreparedStatement } from "@/db";
+import { parsePostgresJsonOr } from "@/db/postgres-utils";
 
 export interface ApiKeyWalletBinding {
   walletId: string;
@@ -113,14 +114,10 @@ export async function cloneApiKeyWalletBindings(
 }
 
 function safeParsePermissions(raw: string): Permission[] | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
-
-    return parsed.filter((entry): entry is Permission => typeof entry === "string");
-  } catch {
+  const parsed = parsePostgresJsonOr<unknown>(raw, null);
+  if (!Array.isArray(parsed)) {
     return null;
   }
+
+  return parsed.filter((entry): entry is Permission => typeof entry === "string");
 }

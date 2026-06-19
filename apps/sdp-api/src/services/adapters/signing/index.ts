@@ -16,6 +16,7 @@
  * - "utila": Utila vault wallets (KeychainUtilaAdapter)
  */
 
+import { parsePostgresJson } from "@/db/postgres-utils";
 import type { CustodyProvider } from "@/services/custody/providers";
 import { normalizePem } from "@/services/custody/provisioning.common";
 import { createDfnsApiClient, normalizeDfnsWalletId } from "@/services/dfns/client";
@@ -60,6 +61,14 @@ export interface SigningConfigRecord {
   status: "active" | "inactive";
   createdAt: string;
   updatedAt: string;
+}
+
+function parseSigningConfigJson<T>(record: SigningConfigRecord, providerName: string): T {
+  try {
+    return parsePostgresJson<T>(record.config);
+  } catch {
+    throw new SigningError(`Invalid ${providerName} configuration JSON`, "PROVIDER_NOT_CONFIGURED");
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -381,12 +390,7 @@ function createUtilaAdapterFromEnv(env: Env): KeychainUtilaAdapter {
 }
 
 function createFireblocksAdapterFromRecord(record: SigningConfigRecord): KeychainFireblocksAdapter {
-  let parsed: FireblocksConfigJson;
-  try {
-    parsed = JSON.parse(record.config) as FireblocksConfigJson;
-  } catch {
-    throw new SigningError("Invalid Fireblocks configuration JSON", "PROVIDER_NOT_CONFIGURED");
-  }
+  const parsed = parseSigningConfigJson<FireblocksConfigJson>(record, "Fireblocks");
 
   if (parsed.provider && parsed.provider !== "fireblocks") {
     throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
@@ -414,12 +418,7 @@ function createFireblocksAdapterFromRecord(record: SigningConfigRecord): Keychai
 }
 
 function createPrivyAdapterFromRecord(record: SigningConfigRecord, env: Env): KeychainPrivyAdapter {
-  let parsed: PrivyConfigJson;
-  try {
-    parsed = JSON.parse(record.config) as PrivyConfigJson;
-  } catch {
-    throw new SigningError("Invalid Privy configuration JSON", "PROVIDER_NOT_CONFIGURED");
-  }
+  const parsed = parseSigningConfigJson<PrivyConfigJson>(record, "Privy");
 
   if (parsed.provider && parsed.provider !== "privy") {
     throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
@@ -451,12 +450,7 @@ function createCoinbaseAdapterFromRecord(
   record: SigningConfigRecord,
   env: Env
 ): KeychainCoinbaseAdapter {
-  let parsed: CoinbaseConfigJson;
-  try {
-    parsed = JSON.parse(record.config) as CoinbaseConfigJson;
-  } catch {
-    throw new SigningError("Invalid Coinbase CDP configuration JSON", "PROVIDER_NOT_CONFIGURED");
-  }
+  const parsed = parseSigningConfigJson<CoinbaseConfigJson>(record, "Coinbase CDP");
 
   if (parsed.provider && parsed.provider !== "coinbase_cdp") {
     throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
@@ -490,12 +484,7 @@ function createTurnkeyAdapterFromRecord(
   record: SigningConfigRecord,
   env: Env
 ): KeychainTurnkeyAdapter {
-  let parsed: TurnkeyConfigJson;
-  try {
-    parsed = JSON.parse(record.config) as TurnkeyConfigJson;
-  } catch {
-    throw new SigningError("Invalid Turnkey configuration JSON", "PROVIDER_NOT_CONFIGURED");
-  }
+  const parsed = parseSigningConfigJson<TurnkeyConfigJson>(record, "Turnkey");
 
   if (parsed.provider && parsed.provider !== "turnkey") {
     throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
@@ -544,12 +533,7 @@ function createTurnkeyAdapterFromRecord(
 }
 
 function createParaAdapterFromRecord(record: SigningConfigRecord, env: Env): KeychainParaAdapter {
-  let parsed: ParaConfigJson;
-  try {
-    parsed = JSON.parse(record.config) as ParaConfigJson;
-  } catch {
-    throw new SigningError("Invalid Para configuration JSON", "PROVIDER_NOT_CONFIGURED");
-  }
+  const parsed = parseSigningConfigJson<ParaConfigJson>(record, "Para");
 
   if (parsed.provider && parsed.provider !== "para") {
     throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
@@ -587,12 +571,7 @@ async function createDfnsAdapterFromRecord(
   record: SigningConfigRecord,
   env: Env
 ): Promise<KeychainDfnsAdapter> {
-  let parsed: DfnsConfigJson;
-  try {
-    parsed = JSON.parse(record.config) as DfnsConfigJson;
-  } catch {
-    throw new SigningError("Invalid DFNS configuration JSON", "PROVIDER_NOT_CONFIGURED");
-  }
+  const parsed = parseSigningConfigJson<DfnsConfigJson>(record, "DFNS");
 
   if (parsed.provider && parsed.provider !== "dfns") {
     throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
@@ -619,12 +598,7 @@ async function createDfnsAdapterFromRecord(
 }
 
 function createUtilaAdapterFromRecord(record: SigningConfigRecord, env: Env): KeychainUtilaAdapter {
-  let parsed: UtilaConfigJson;
-  try {
-    parsed = JSON.parse(record.config) as UtilaConfigJson;
-  } catch {
-    throw new SigningError("Invalid Utila configuration JSON", "PROVIDER_NOT_CONFIGURED");
-  }
+  const parsed = parseSigningConfigJson<UtilaConfigJson>(record, "Utila");
 
   if (parsed.provider && parsed.provider !== "utila") {
     throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");

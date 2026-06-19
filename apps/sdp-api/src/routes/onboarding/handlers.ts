@@ -1,6 +1,7 @@
 import { normalizeOrganizationTier } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { Env } from "@/types/env";
@@ -35,7 +36,7 @@ async function fetchOrganization(db: DatabaseClient, orgId: string) {
     slug: org.slug,
     tier: normalizeOrganizationTier(org.tier),
     status: org.status as "active" | "suspended" | "deleted",
-    settings: org.settings ? JSON.parse(org.settings) : null,
+    settings: parseOptionalPostgresJson(org.settings),
     createdAt: org.created_at,
     updatedAt: org.updated_at,
   };

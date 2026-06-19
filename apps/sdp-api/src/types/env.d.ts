@@ -62,7 +62,6 @@ export interface Env {
   SENTRY_TRACES_SAMPLE_RATE?: string;
 
   // Email configuration
-  EMAIL_PROVIDER?: "resend" | "console";
   EMAIL_FROM?: string;
   RESEND_API_KEY?: string;
   FRONTEND_URL?: string;
@@ -221,6 +220,8 @@ export interface Env {
   BVNK_WALLET_ID?: string;
   BVNK_WEBHOOK_SECRET?: string;
   BVNK_API_BASE_URL?: string;
+  BVNK_SIGNING_HOST?: string;
+  PROXY_SHARED_SECRET?: string;
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;
