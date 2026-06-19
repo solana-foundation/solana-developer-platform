@@ -55,6 +55,7 @@ export type PaymentTransferStatus =
   | "awaiting_payment"
   | "settling"
   | "completed"
+  | "canceled"
   | "expired";
 
 export const SUCCESSFUL_PAYMENT_TRANSFER_STATUSES = [

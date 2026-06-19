@@ -259,7 +259,7 @@ async function createTransferRecord(
   return createdRow;
 }
 
-async function updateTransferRecord(
+export async function updateTransferRecord(
   c: AppContext,
   transferId: string,
   patch: {
@@ -1962,6 +1962,7 @@ export async function listTransfers(c: AppContext) {
       "awaiting_payment",
       "settling",
       "completed",
+      "canceled",
       "expired",
     ];
     const needsNonChainRecords =

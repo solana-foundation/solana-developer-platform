@@ -323,6 +323,11 @@ export const rampFiatCurrencySchema = z.preprocess(
   z.enum(RAMP_FIAT_CURRENCIES)
 );
 
+export const cancelRampTransferSchema = z.object({
+  provider: rampProviderSchema,
+  providerReference: z.string().min(1),
+});
+
 export const listOnrampCurrenciesQuerySchema = z.object({
   source: rampFiatCurrencySchema.optional(),
   dest: onrampCryptoRailSchema.optional(),
@@ -386,6 +391,7 @@ export const transferStatusSchema = z.enum([
   "awaiting_payment",
   "settling",
   "completed",
+  "canceled",
   "expired",
 ]);
 

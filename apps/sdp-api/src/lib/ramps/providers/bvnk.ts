@@ -553,7 +553,8 @@ export interface CreateBvnkCustomerInput {
 }
 
 export interface CreateBvnkFiatWalletInput {
-  customerReference: string;
+  /** Omit to create a merchant-owned wallet (BVNK off-ramp dedicated wallet). */
+  customerReference?: string;
   name: string;
   currencyCode: string;
   walletProfile: string;
@@ -1021,10 +1022,12 @@ export class BvnkRampClient implements RampProvider {
    */
   async getFiatWalletProfile(
     { env, mode }: RampRuntimeContext,
-    input: { customerReference: string; currency: string }
+    input: { customerReference?: string; currency: string }
   ): Promise<string> {
     const config = readBvnkConfig(env, mode);
-    const query = `customerId:${input.customerReference} AND currency:${input.currency}`;
+    const query = input.customerReference
+      ? `customerId:${input.customerReference} AND currency:${input.currency}`
+      : `currency:${input.currency}`;
     const response = await this.request(
       config,
       `/ledger/v2/wallets/profiles?q=${encodeURIComponent(query)}`,
@@ -1062,7 +1065,7 @@ export class BvnkRampClient implements RampProvider {
       method: "POST",
       headers: { "Idempotency-Key": input.idempotencyKey },
       body: {
-        customerId: input.customerReference,
+        ...(input.customerReference ? { customerId: input.customerReference } : {}),
         currency: input.currencyCode,
         name: input.name,
         profileId: input.walletProfile,
@@ -1254,6 +1257,9 @@ export class BvnkRampClient implements RampProvider {
     if (!input.fiatCurrency) {
       throw badRequest("fiatCurrency is required for BVNK off-ramp.");
     }
+    if (!input.bvnkOfframpWalletId) {
+      throw internalError("BVNK off-ramp requires a provisioned wallet id.");
+    }
     const config = readBvnkConfig(env, mode);
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
     const fiatCurrency = input.fiatCurrency;
@@ -1266,7 +1272,7 @@ export class BvnkRampClient implements RampProvider {
     const estimate = await this.request<BvnkEstimateResponse>(config, "/api/v1/pay/estimate", {
       method: "POST",
       body: {
-        walletId: config.walletId,
+        walletId: input.bvnkOfframpWalletId,
         walletCurrency: fiatCurrency,
         paidCurrency: currency,
         paidRequiredAmount,
@@ -1285,7 +1291,7 @@ export class BvnkRampClient implements RampProvider {
       {
         method: "POST",
         body: {
-          customerId: input.customerId ?? input.externalCustomerId,
+          customerId: input.externalCustomerId,
           payOutDetails: { currency, address: input.sourceWalletAddress, network },
           complianceDetails,
         },
@@ -1340,11 +1346,6 @@ export class BvnkRampClient implements RampProvider {
     { env, mode }: RampRuntimeContext,
     input: BvnkExecuteOfframpInput
   ): Promise<BvnkPaymentRampExecution> {
-    const customerId = input.providerCustomer.customerReference;
-    if (!customerId) {
-      throw badRequest("providerCustomer.customerReference is required for BVNK off-ramp.");
-    }
-
     const config = readBvnkConfig(env, mode);
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
     const fiatCurrency = input.fiatCurrency;
@@ -1357,7 +1358,7 @@ export class BvnkRampClient implements RampProvider {
     const estimate = await this.request<BvnkEstimateResponse>(config, "/api/v1/pay/estimate", {
       method: "POST",
       body: {
-        walletId: config.walletId,
+        walletId: input.walletId,
         walletCurrency: fiatCurrency,
         paidCurrency: currency,
         paidRequiredAmount,
@@ -1376,7 +1377,7 @@ export class BvnkRampClient implements RampProvider {
       {
         method: "POST",
         body: {
-          customerId,
+          customerId: input.externalCustomerId,
           payOutDetails: { currency, address: input.sourceWalletAddress, network },
           complianceDetails,
         },
@@ -1447,7 +1448,8 @@ export interface BvnkExecuteOfframpInput {
   cryptoToken: string;
   fiatCurrency: RampFiatCurrency;
   cryptoAmount: string;
-  providerCustomer: BvnkCustomerResolution;
+  externalCustomerId: string;
+  walletId: string;
   bvnkCompliance?: BvnkComplianceInput;
 }
 
@@ -1470,6 +1472,28 @@ export function readBvnkWallets(
 ): Record<string, BvnkOnrampEntry> {
   const wallets = readBvnkData(providerData).wallets;
   return wallets && typeof wallets === "object" ? (wallets as Record<string, BvnkOnrampEntry>) : {};
+}
+
+/** Merchant-owned BVNK off-ramp wallet, one per fiat currency. */
+export interface BvnkOfframpWallet {
+  id: string;
+  status?: string;
+}
+
+export function readBvnkOfframpWallets(
+  providerData: CounterpartyRow["provider_data"]
+): Record<string, BvnkOfframpWallet> {
+  const offramp = asRecord(readBvnkData(providerData).offramp).wallets;
+  return offramp && typeof offramp === "object"
+    ? (offramp as Record<string, BvnkOfframpWallet>)
+    : {};
+}
+
+export function readBvnkOfframpWallet(
+  providerData: CounterpartyRow["provider_data"],
+  fiatCurrency: string
+): BvnkOfframpWallet | undefined {
+  return readBvnkOfframpWallets(providerData)[fiatCurrency];
 }
 
 export function bvnkOnrampKey(

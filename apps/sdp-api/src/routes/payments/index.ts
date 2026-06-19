@@ -6,6 +6,7 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
+  cancelRampTransfer,
   createOfframpQuote,
   createOnrampQuote,
   createRecurringPayment,
@@ -182,6 +183,7 @@ payments.post(
   requirePermissions("payments:write", "wallets:read"),
   executeOfframp
 );
+payments.post("/ramps/transfers/cancel", requirePermissions("payments:write"), cancelRampTransfer);
 payments.post(
   "/ramps/sandbox/simulate",
   requirePermissions("payments:write"),

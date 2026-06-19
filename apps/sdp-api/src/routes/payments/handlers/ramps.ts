@@ -50,8 +50,10 @@ import {
   rampRuntime,
   resolveSdpEnvironment,
 } from "../context";
+import { mapTransferRow } from "../mappers";
 import { assertWalletPolicyAllowsTransfer } from "../policy";
 import {
+  cancelRampTransferSchema,
   createOfframpQuoteSchema,
   createOnrampQuoteSchema,
   estimateOfframpSchema,
@@ -64,8 +66,14 @@ import {
   type submitCounterpartyRequirementsSchema,
 } from "../schemas";
 import { type ResolvedScope, resolveScope, resolveWalletAddress } from "../wallets";
-import { bvnkOnrampQuote, ensureBvnkCustomer, ensureBvnkPaymentRule } from "./ramps/bvnk";
+import {
+  bvnkOnrampQuote,
+  ensureBvnkCustomer,
+  ensureBvnkOfframpWallet,
+  ensureBvnkPaymentRule,
+} from "./ramps/bvnk";
 import { ensureLightsparkCustomer, ensureLightsparkPayoutAccount } from "./ramps/lightspark";
+import { updateTransferRecord } from "./transfers";
 
 type OnrampCurrencyPair = {
   source: (typeof ONRAMP_SUPPORT)[number]["source"];
@@ -399,15 +407,20 @@ async function executeOfframpWithProvider(
     }
     case "bvnk": {
       if (!input.fiatCurrency) throw badRequest("fiatCurrency is required for BVNK off-ramp.");
-      const providerCustomer = await ensureBvnkCustomer(c, counterparty, projectId, {
-        fiatCurrency: input.fiatCurrency,
-      });
+      const walletId = await ensureBvnkOfframpWallet(
+        c,
+        ctx,
+        counterparty,
+        projectId,
+        input.fiatCurrency
+      );
       return await RAMP_PROVIDER_CLIENTS.bvnk.executeOfframp(ctx, {
         sourceWalletAddress,
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
         cryptoAmount: input.cryptoAmount,
-        providerCustomer,
+        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        walletId,
         bvnkCompliance: input.bvnkCompliance,
       });
     }
@@ -683,14 +696,24 @@ export async function createOfframpQuote(c: AppContext) {
       break;
     }
     case "bvnk": {
+      if (!input.fiatCurrency) {
+        throw badRequest("fiatCurrency is required for BVNK off-ramp.");
+      }
+      const bvnkOfframpWalletId = await ensureBvnkOfframpWallet(
+        c,
+        rampRuntime(c),
+        counterparty,
+        projectId,
+        input.fiatCurrency
+      );
       quote = await RAMP_PROVIDER_CLIENTS.bvnk.createOfframpQuote(rampRuntime(c), {
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
         cryptoAmount: input.cryptoAmount,
         sourceWalletAddress,
         externalCustomerId: counterparty.external_id ?? counterparty.id,
-        customerId: counterparty.id,
         bvnkCompliance: buildBvnkPartyDetails(counterparty, "BENEFICIARY"),
+        bvnkOfframpWalletId,
         redirectUrl: input.redirectUrl,
       });
       break;
@@ -719,6 +742,44 @@ export async function createOfframpQuote(c: AppContext) {
   });
 
   return success(c, { quote });
+}
+
+const CANCELABLE_RAMP_TRANSFER_STATUSES: readonly PaymentTransferStatus[] = [
+  "pending",
+  "awaiting_payment",
+];
+
+export async function cancelRampTransfer(c: AppContext) {
+  const body = await c.req.json();
+  const parsed = cancelRampTransferSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  const input = parsed.data;
+  const scope = await resolveScope(c);
+  const projectId = requireProjectId(c);
+  const repository = getPaymentsRepository(c);
+
+  const transfer = await repository.getTransferByProviderReference({
+    provider: input.provider,
+    providerReference: input.providerReference,
+    organizationId: scope.auth.organizationId,
+    projectId,
+  });
+  if (!transfer) {
+    throw notFound("Transfer");
+  }
+  if (!CANCELABLE_RAMP_TRANSFER_STATUSES.includes(transfer.status)) {
+    throw badRequest(`Transfer can no longer be canceled (status: ${transfer.status}).`);
+  }
+
+  const updated = await updateTransferRecord(c, transfer.id, { status: "canceled" });
+
+  return success(c, { transfer: mapTransferRow(updated) });
 }
 
 export async function executeOnramp(c: AppContext) {

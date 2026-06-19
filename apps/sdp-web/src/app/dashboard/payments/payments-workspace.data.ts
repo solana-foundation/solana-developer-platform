@@ -384,6 +384,21 @@ export async function fetchTransferByProviderReference(input: {
   return body.data[0];
 }
 
+export async function cancelRampTransfer(input: {
+  provider: RampProviderId;
+  providerReference: string;
+}): Promise<void> {
+  const response = await fetch("/api/dashboard/payments/ramps/transfers/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json()) as ApiErrorBody;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Transfer cancellation failed (${response.status}).`));
+  }
+}
+
 export async function fetchRampEstimates(input: {
   direction: RampDirection;
   assetRail: CryptoRailId;
