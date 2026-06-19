@@ -2,8 +2,13 @@ import type {
   ApiKeyWalletPolicyBindingScope,
   PolicyDecision,
   PolicyDefaultAction,
+  PolicyEvaluationContext,
   PolicyProfileStatus,
+  PolicyRule,
+  WalletOperationActor,
+  WalletOperationContext,
   WalletOperationFamily,
+  WalletOperationProviderExtensions,
   WalletOperationStatus,
 } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
@@ -129,6 +134,7 @@ export interface PolicyEvaluationRow {
   reason_code: string;
   reason: string | null;
   matched_rules: Record<string, unknown>[];
+  evaluation_context: PolicyEvaluationContext | null;
   requires_approval: boolean;
   approval_request_id: string | null;
   created_at: string;
@@ -155,7 +161,7 @@ export interface CreateWalletControlProfileInput {
 
 export interface CreateWalletControlProfileRevisionInput {
   profileId: string;
-  rules?: Record<string, unknown>[];
+  rules?: PolicyRule[];
   defaultAction?: PolicyDefaultAction;
   createdBy?: string | null;
 }
@@ -177,7 +183,7 @@ export interface CreateApiKeyControlProfileInput {
 
 export interface CreateApiKeyControlProfileRevisionInput {
   profileId: string;
-  rules?: Record<string, unknown>[];
+  rules?: PolicyRule[];
   defaultAction?: PolicyDefaultAction;
   createdBy?: string | null;
 }
@@ -214,12 +220,15 @@ export interface CreateWalletOperationInput {
   custodyWalletId?: string | null;
   walletId: string;
   apiKeyId?: string | null;
+  actor?: WalletOperationActor | null;
   source?: string;
   operationFamily: WalletOperationFamily;
   operationType: string;
   asset?: string | null;
   amount?: string | null;
   destination?: string | null;
+  context?: WalletOperationContext;
+  providerExtensions?: WalletOperationProviderExtensions;
   rawPayload?: Record<string, unknown>;
   idempotencyKey?: string | null;
   status?: WalletOperationStatus;
@@ -233,6 +242,7 @@ export interface CreatePolicyEvaluationInput {
   reasonCode: string;
   reason?: string | null;
   matchedRules?: Record<string, unknown>[];
+  evaluationContext: PolicyEvaluationContext;
   requiresApproval?: boolean;
   approvalRequestId?: string | null;
 }

@@ -154,14 +154,65 @@ describe("PolicyRepository (postgres)", () => {
       custodyWalletId: TEST_CUSTODY_WALLET.id,
       walletId: TEST_CUSTODY_WALLET.walletId,
       apiKeyId: TEST_API_KEY.id,
+      actor: { type: "api_key", id: TEST_API_KEY.id, apiKeyId: TEST_API_KEY.id },
       operationFamily: "payment",
       operationType: "payment_request",
       asset: "USDC",
       amount: "12.50",
       destination: "recipient_1",
+      context: { requestId: "req_policy_1" },
+      providerExtensions: { provider: "future-provider" },
       rawPayload: { paymentRequestId: "payreq_1" },
     });
-    expect(operation?.raw_payload).toEqual({ paymentRequestId: "payreq_1" });
+    expect(operation?.raw_payload).toEqual({
+      paymentRequestId: "payreq_1",
+      actor: { type: "api_key", id: TEST_API_KEY.id, apiKeyId: TEST_API_KEY.id },
+      context: { requestId: "req_policy_1" },
+      providerExtensions: { provider: "future-provider" },
+    });
+    const evaluationContext = {
+      operation: {
+        id: operation?.id ?? "",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        custodyWalletId: TEST_CUSTODY_WALLET.id,
+        walletId: TEST_CUSTODY_WALLET.walletId,
+        apiKeyId: TEST_API_KEY.id,
+        actor: { type: "api_key", id: TEST_API_KEY.id, apiKeyId: TEST_API_KEY.id },
+        source: "api",
+        operationFamily: "payment" as const,
+        operationType: "payment_request",
+        asset: "USDC",
+        amount: "12.50",
+        destination: "recipient_1",
+        context: { requestId: "req_policy_1" },
+        providerExtensions: { provider: "future-provider" },
+        idempotencyKey: null,
+        rawPayload: {
+          paymentRequestId: "payreq_1",
+          actor: { type: "api_key", id: TEST_API_KEY.id, apiKeyId: TEST_API_KEY.id },
+          context: { requestId: "req_policy_1" },
+          providerExtensions: { provider: "future-provider" },
+        },
+        createdAt: operation?.created_at ?? "",
+      },
+      walletPolicy: {
+        source: "customer_profile" as const,
+        profileId: walletProfile?.id ?? null,
+        revisionId: walletRevision?.id ?? null,
+        defaultAction: "allow" as const,
+        decision: "allow" as const,
+        requiresApproval: false,
+      },
+      apiKeyPolicy: {
+        source: "customer_profile" as const,
+        profileId: apiKeyProfile?.id ?? null,
+        revisionId: apiKeyRevision?.id ?? null,
+        defaultAction: "allow" as const,
+        decision: "allow" as const,
+        requiresApproval: false,
+      },
+    };
 
     const evaluation = await repo.createPolicyEvaluation({
       walletOperationId: operation?.id ?? "",
@@ -170,6 +221,7 @@ describe("PolicyRepository (postgres)", () => {
       decision: "allow",
       reasonCode: "wallet_policy_match",
       matchedRules: [{ ruleId: "amount-limit" }],
+      evaluationContext,
     });
 
     expect(evaluation).toMatchObject({
@@ -179,6 +231,63 @@ describe("PolicyRepository (postgres)", () => {
       decision: "allow",
       reason_code: "wallet_policy_match",
       matched_rules: [{ ruleId: "amount-limit" }],
+      evaluation_context: evaluationContext,
+    });
+  });
+
+  it("maps legacy policy evaluation rows without a structured context to null", async () => {
+    const operation = await repo.createWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      operationFamily: "transfer",
+      operationType: "legacy_transfer",
+    });
+    expect(operation).not.toBeNull();
+
+    await getDb(env)
+      .prepare(
+        `INSERT INTO policy_evaluations (
+           id,
+           wallet_operation_id,
+           decision,
+           reason_code,
+           matched_rules,
+           evaluation_context
+         ) VALUES (?, ?, ?, ?, ?::jsonb, ?::jsonb)`
+      )
+      .bind("peval_legacy_context", operation?.id, "allow", "legacy_policy_evaluation", "[]", "{}")
+      .run();
+
+    const evaluations = await repo.listPolicyEvaluationsForOperation(operation?.id ?? "");
+
+    expect(evaluations).toHaveLength(1);
+    expect(evaluations[0]?.evaluation_context).toBeNull();
+  });
+
+  it("preserves an explicit null wallet operation actor through service mapping", async () => {
+    const service = new PolicyFoundationService(repo);
+
+    const operation = await service.recordWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      actor: null,
+      operationFamily: "program",
+      operationType: "program_call",
+      rawPayload: { programId: "program_1" },
+    });
+
+    expect(operation).toMatchObject({
+      apiKeyId: TEST_API_KEY.id,
+      actor: null,
+      rawPayload: {
+        programId: "program_1",
+        actor: null,
+      },
     });
   });
 

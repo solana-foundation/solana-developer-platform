@@ -1,0 +1,95 @@
+{
+  "uid": "kora-p95-latency-high",
+  "title": "kora: p95 latency > 3s for 10m",
+  "ruleGroup": "kora-paymaster",
+  "folderUID": "sdp",
+  "condition": "C",
+  "for": "10m",
+  "keep_firing_for": "15m",
+  "noDataState": "OK",
+  "execErrState": "Error",
+  "data": [
+    {
+      "refId": "A",
+      "datasourceUid": "grafanacloud-prom",
+      "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+      },
+      "model": {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "grafanacloud-prom"
+        },
+        "expr": "histogram_quantile(0.95, sum by (le, service) (rate(kora_http_request_duration_seconds_bucket[5m]))) and (sum by (service) (rate(kora_http_requests_total[5m])) > 0)",
+        "instant": true,
+        "refId": "A"
+      }
+    },
+    {
+      "refId": "B",
+      "datasourceUid": "__expr__",
+      "relativeTimeRange": {
+        "from": 0,
+        "to": 0
+      },
+      "model": {
+        "type": "reduce",
+        "refId": "B",
+        "expression": "A",
+        "reducer": "last",
+        "datasource": {
+          "type": "__expr__",
+          "uid": "__expr__"
+        }
+      }
+    },
+    {
+      "refId": "C",
+      "datasourceUid": "__expr__",
+      "relativeTimeRange": {
+        "from": 0,
+        "to": 0
+      },
+      "model": {
+        "type": "threshold",
+        "refId": "C",
+        "expression": "B",
+        "datasource": {
+          "type": "__expr__",
+          "uid": "__expr__"
+        },
+        "conditions": [
+          {
+            "evaluator": {
+              "type": "gt",
+              "params": [3]
+            },
+            "operator": {
+              "type": "and"
+            },
+            "query": {
+              "params": ["B"]
+            },
+            "reducer": {
+              "type": "last",
+              "params": []
+            },
+            "type": "query"
+          }
+        ]
+      }
+    }
+  ],
+  "labels": {
+    "service": "kora",
+    "severity": "warning",
+    "slack": "true"
+  },
+  "annotations": {
+    "summary": "Kora p95 latency > 3s",
+    "description": "Kora p95 request latency has exceeded 3s for 10 minutes \u2014 usually the Solana RPC roundtrip. Check the dashboard and RPC health.",
+    "runbook_url": "https://app.notion.com/p/382d36dad52d81ddb275c5c6ad3168c4"
+  },
+  "isPaused": true
+}

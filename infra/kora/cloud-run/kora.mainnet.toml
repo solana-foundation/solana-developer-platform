@@ -1,0 +1,134 @@
+# Kora config for SDP mainnet. TODO markers are decisions to confirm before rollout (PRO-1320).
+
+[kora]
+rate_limit = 100
+
+[kora.auth]
+# api_key / hmac_secret / recaptcha_secret come from env (Doppler), not this file. One MUST be set.
+max_timestamp_age = 300
+recaptcha_score_threshold = 0.5
+protected_methods = ["signTransaction", "signAndSendTransaction", "signBundle", "signAndSendBundle"]
+
+[kora.cache]
+enabled = true
+default_ttl = 300
+account_ttl = 60
+
+[kora.enabled_methods]
+liveness = true
+estimate_transaction_fee = true
+get_supported_tokens = true
+sign_transaction = true
+sign_and_send_transaction = true
+transfer_transaction = true
+get_blockhash = true
+get_config = true
+get_payer_signer = true
+get_version = true
+
+[validation]
+max_allowed_lamports = 10000000 # TODO: set from real mainnet fee + rent needs
+max_signatures = 10
+price_source = "Jupiter"
+allow_durable_transactions = false
+
+allowed_programs = [
+    "11111111111111111111111111111111",             # System
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",  # Token
+    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",  # Token-2022
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", # Associated Token
+    "TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP",  # Token-ACL (sRFC-37)
+    "GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz", # ABL / GATE
+    "SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2",  # MagicBlock private transfer
+    "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh", # MagicBlock delegation
+    "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44", # Subscriptions
+    "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",  # Memo
+    "AddressLookupTab1e1111111111111111111111111",  # Address Lookup Table
+    "ComputeBudget111111111111111111111111111111",  # Compute Budget
+]
+
+# TODO: confirm mainnet token set.
+allowed_tokens = [
+    "So11111111111111111111111111111111111111112", # Wrapped SOL
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", # USDC
+]
+allowed_spl_paid_tokens = []
+disallowed_accounts = []
+
+[validation.price]
+type = "free" # TODO: sponsored (free) vs token-fee (PRO-1320)
+
+# Default-deny: the fee payer only pays the lamports fee. Enable a flag only if SDP flows require the
+# fee payer as an authority (PRO-1316) — each `true` is a way to drain it.
+[validation.fee_payer_policy]
+
+[validation.fee_payer_policy.system]
+allow_transfer = false
+allow_assign = false
+allow_create_account = false
+allow_allocate = false
+
+[validation.fee_payer_policy.system.nonce]
+allow_initialize = false
+allow_advance = false
+allow_authorize = false
+allow_withdraw = false
+
+[validation.fee_payer_policy.spl_token]
+allow_transfer = false
+allow_burn = false
+allow_close_account = false
+allow_approve = false
+allow_revoke = false
+allow_set_authority = false
+allow_mint_to = false
+allow_initialize_mint = false
+allow_initialize_account = false
+allow_initialize_multisig = false
+allow_freeze_account = false
+allow_thaw_account = false
+
+[validation.fee_payer_policy.token_2022]
+allow_transfer = false
+allow_burn = false
+allow_close_account = false
+allow_approve = false
+allow_revoke = false
+allow_set_authority = false
+allow_mint_to = false
+allow_initialize_mint = false
+allow_initialize_account = false
+allow_initialize_multisig = false
+allow_freeze_account = false
+allow_thaw_account = false
+
+[validation.token2022]
+transfer_hook_policy = "deny_mutable_for_delayed_signing"
+blocked_mint_extensions = ["permanent_delegate", "transfer_hook"]
+blocked_account_extensions = []
+
+[metrics]
+# /metrics is served outside the API-key auth layer (currently public) — restrict before launch (PRO-1355).
+enabled = true
+endpoint = "/metrics"
+port = 8080
+scrape_interval = 60
+
+[metrics.fee_payer_balance]
+enabled = true
+expiry_seconds = 30
+
+[kora.usage_limit]
+enabled = true
+fallback_if_unavailable = false
+
+[[kora.usage_limit.rules]]
+type = "transaction"
+max = 1000
+window_seconds = 86400
+
+# Lighthouse only works with signTransaction/signBundle (it rewrites the message, breaking signAndSend*).
+# Enable only if clients move to sign -> re-sign -> send, and add its program to allowed_programs.
+# [kora.lighthouse]
+# enabled = true
+# fail_if_transaction_size_overflow = true

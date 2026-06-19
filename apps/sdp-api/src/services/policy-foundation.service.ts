@@ -7,7 +7,11 @@ import type {
   PolicyEvaluation,
   WalletControlProfile,
   WalletControlProfileRevision,
+  WalletOperationActor,
+  WalletOperationContext,
   WalletOperationEnvelope,
+  WalletOperationPolicyEvaluation,
+  WalletOperationProviderExtensions,
 } from "@sdp/types";
 import type {
   ApiKeyControlProfileRevisionRow,
@@ -21,6 +25,10 @@ import type {
   WalletControlProfileRow,
   WalletOperationRow,
 } from "@/db/repositories";
+import {
+  createPolicyEvaluationInput,
+  evaluateWalletOperationPolicies,
+} from "./policy-evaluation.service";
 
 export const IMPLICIT_DEFAULT_ALLOW_POLICY = {
   source: "implicit_default_allow",
@@ -90,6 +98,30 @@ export class PolicyFoundationService {
 
     return mapPolicyEvaluation(row);
   }
+
+  async evaluateWalletOperationPolicies(
+    operation: WalletOperationEnvelope
+  ): Promise<WalletOperationPolicyEvaluation> {
+    const walletPolicy = operation.custodyWalletId
+      ? await this.resolveEffectiveWalletPolicy(operation.custodyWalletId)
+      : IMPLICIT_DEFAULT_ALLOW_POLICY;
+    const apiKeyPolicy = operation.apiKeyId
+      ? await this.resolveEffectiveApiKeyPolicy(operation.apiKeyId)
+      : null;
+
+    return evaluateWalletOperationPolicies({
+      operation,
+      walletPolicy,
+      apiKeyPolicy,
+    });
+  }
+
+  async recordWalletOperationPolicyEvaluation(
+    operation: WalletOperationEnvelope
+  ): Promise<PolicyEvaluation> {
+    const result = await this.evaluateWalletOperationPolicies(operation);
+    return this.recordPolicyEvaluation(createPolicyEvaluationInput(result));
+  }
 }
 
 function mapWalletControlProfile(row: WalletControlProfileRow): WalletControlProfile {
@@ -116,7 +148,7 @@ function mapWalletControlProfileRevision(
     id: row.id,
     profileId: row.profile_id,
     revisionNumber: row.revision_number,
-    rules: row.rules,
+    rules: row.rules as unknown as WalletControlProfileRevision["rules"],
     defaultAction: row.default_action,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -148,7 +180,7 @@ function mapApiKeyControlProfileRevision(
     id: row.id,
     profileId: row.profile_id,
     revisionNumber: row.revision_number,
-    rules: row.rules,
+    rules: row.rules as unknown as ApiKeyControlProfileRevision["rules"],
     defaultAction: row.default_action,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -173,6 +205,8 @@ function mapApiKeyWalletPolicyBinding(
 }
 
 function mapWalletOperation(row: WalletOperationRow): WalletOperationEnvelope {
+  const actor = getWalletOperationActor(row);
+
   return {
     id: row.id,
     organizationId: row.organization_id,
@@ -180,18 +214,60 @@ function mapWalletOperation(row: WalletOperationRow): WalletOperationEnvelope {
     custodyWalletId: row.custody_wallet_id,
     walletId: row.wallet_id,
     apiKeyId: row.api_key_id,
+    actor,
     source: row.source,
     operationFamily: row.operation_family,
     operationType: row.operation_type,
     asset: row.asset,
     amount: row.amount,
     destination: row.destination,
+    context: getJsonObject(row.raw_payload.context),
+    providerExtensions: getWalletOperationProviderExtensions(row.raw_payload),
     rawPayload: row.raw_payload,
     idempotencyKey: row.idempotency_key,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function getWalletOperationActor(row: WalletOperationRow): WalletOperationActor | null {
+  if (Object.hasOwn(row.raw_payload, "actor")) {
+    return isJsonObject(row.raw_payload.actor)
+      ? (row.raw_payload.actor as WalletOperationActor)
+      : null;
+  }
+  if (isJsonObject(row.raw_payload.actor)) {
+    return row.raw_payload.actor as WalletOperationActor;
+  }
+  if (row.api_key_id) {
+    return {
+      type: "api_key",
+      id: row.api_key_id,
+      apiKeyId: row.api_key_id,
+    };
+  }
+  return null;
+}
+
+function getWalletOperationProviderExtensions(
+  rawPayload: Record<string, unknown>
+): WalletOperationProviderExtensions {
+  if (isJsonObject(rawPayload.providerExtensions)) {
+    return rawPayload.providerExtensions;
+  }
+  if (typeof rawPayload.provider === "string") {
+    return { provider: rawPayload.provider };
+  }
+  return {};
+}
+
+function getJsonObject(value: unknown): WalletOperationContext {
+  return isJsonObject(value) ? value : {};
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function mapPolicyEvaluation(row: PolicyEvaluationRow): PolicyEvaluation {
@@ -204,6 +280,7 @@ function mapPolicyEvaluation(row: PolicyEvaluationRow): PolicyEvaluation {
     reasonCode: row.reason_code,
     reason: row.reason,
     matchedRules: row.matched_rules,
+    evaluationContext: row.evaluation_context,
     requiresApproval: row.requires_approval,
     approvalRequestId: row.approval_request_id,
     createdAt: row.created_at,

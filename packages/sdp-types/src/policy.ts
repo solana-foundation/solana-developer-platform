@@ -39,6 +39,71 @@ export type PolicyEvaluationReasonCode =
   | "provider_mapping_partial"
   | "provider_mapping_failed";
 
+export type PolicyRuleAction = Exclude<PolicyDecision, "not_evaluated">;
+export type PolicyRuleScope = "wallet" | "api_key";
+
+interface PolicyRuleBase {
+  id?: string;
+  name?: string;
+  action?: PolicyRuleAction;
+  description?: string;
+}
+
+export interface OperationFamilyPolicyRule extends PolicyRuleBase {
+  kind: "operation_family";
+  family?: WalletOperationFamily;
+  families?: WalletOperationFamily[];
+}
+
+export interface OperationTypePolicyRule extends PolicyRuleBase {
+  kind: "operation_type";
+  operationType?: string;
+  operationTypes?: string[];
+}
+
+export interface AssetPolicyRule extends PolicyRuleBase {
+  kind: "asset";
+  asset?: string;
+  assets?: string[];
+}
+
+export interface DestinationPolicyRule extends PolicyRuleBase {
+  kind: "destination";
+  allowlist?: string[];
+  blocklist?: string[];
+  destination?: string;
+  destinations?: string[];
+}
+
+export interface AmountPolicyRule extends PolicyRuleBase {
+  kind: "amount";
+  min?: string;
+  max?: string;
+  asset?: string;
+  assets?: string[];
+}
+
+export interface ApprovalPolicyRule extends PolicyRuleBase {
+  kind: "approval";
+  families?: WalletOperationFamily[];
+  operationTypes?: string[];
+  assets?: string[];
+  approvalGroupId?: string;
+}
+
+export interface AlwaysPolicyRule extends PolicyRuleBase {
+  kind: "always";
+}
+
+export type PolicyRule =
+  | OperationFamilyPolicyRule
+  | OperationTypePolicyRule
+  | AssetPolicyRule
+  | DestinationPolicyRule
+  | AmountPolicyRule
+  | ApprovalPolicyRule
+  | AlwaysPolicyRule;
+
 export type ApiKeyWalletPolicyBindingScope = "all" | "selected";
 export type PolicyProviderSyncStatus =
   | "not_applicable"
@@ -74,7 +139,7 @@ export interface WalletControlProfileRevision {
   id: string;
   profileId: string;
   revisionNumber: number;
-  rules: Record<string, unknown>[];
+  rules: PolicyRule[];
   defaultAction: PolicyDefaultAction;
   createdBy: string | null;
   createdAt: string;
@@ -100,7 +165,7 @@ export interface ApiKeyControlProfileRevision {
   id: string;
   profileId: string;
   revisionNumber: number;
-  rules: Record<string, unknown>[];
+  rules: PolicyRule[];
   defaultAction: PolicyDefaultAction;
   createdBy: string | null;
   createdAt: string;
@@ -119,6 +184,15 @@ export interface ApiKeyWalletPolicyBinding {
   updatedAt: string;
 }
 
+export interface WalletOperationActor {
+  type: string;
+  id: string | null;
+  [key: string]: unknown;
+}
+
+export type WalletOperationContext = Record<string, unknown>;
+export type WalletOperationProviderExtensions = Record<string, unknown>;
+
 export interface WalletOperationEnvelope {
   id: string;
   organizationId: string;
@@ -126,12 +200,15 @@ export interface WalletOperationEnvelope {
   custodyWalletId: string | null;
   walletId: string;
   apiKeyId: string | null;
+  actor: WalletOperationActor | null;
   source: string;
   operationFamily: WalletOperationFamily;
   operationType: string;
   asset: string | null;
   amount: string | null;
   destination: string | null;
+  context: WalletOperationContext;
+  providerExtensions: WalletOperationProviderExtensions;
   rawPayload: Record<string, unknown>;
   idempotencyKey: string | null;
   status: WalletOperationStatus;
@@ -148,9 +225,80 @@ export interface PolicyEvaluation {
   reasonCode: PolicyEvaluationReasonCode | string;
   reason: string | null;
   matchedRules: Record<string, unknown>[];
+  evaluationContext: PolicyEvaluationContext | null;
   requiresApproval: boolean;
   approvalRequestId: string | null;
   createdAt: string;
+}
+
+export interface MatchedPolicyRule {
+  scope: PolicyRuleScope;
+  ruleId: string | null;
+  kind: string;
+  decision: PolicyDecision;
+  reason: string;
+  rule: Record<string, unknown>;
+}
+
+export interface PolicyScopeEvaluation {
+  scope: PolicyRuleScope;
+  source: EffectivePolicySource;
+  profileId: string | null;
+  revisionId: string | null;
+  defaultAction: PolicyDefaultAction;
+  decision: PolicyDecision;
+  reasonCode: PolicyEvaluationReasonCode | string;
+  reason: string;
+  matchedRules: MatchedPolicyRule[];
+  requiresApproval: boolean;
+}
+
+export interface PolicyEvaluationContext {
+  operation: {
+    id: string;
+    organizationId: string;
+    projectId: string | null;
+    custodyWalletId: string | null;
+    walletId: string;
+    apiKeyId: string | null;
+    actor: WalletOperationActor | null;
+    source: string;
+    operationFamily: WalletOperationFamily;
+    operationType: string;
+    asset: string | null;
+    amount: string | null;
+    destination: string | null;
+    context: WalletOperationContext;
+    providerExtensions: WalletOperationProviderExtensions;
+    idempotencyKey: string | null;
+    rawPayload: Record<string, unknown>;
+    createdAt: string;
+  };
+  walletPolicy: PolicyEvaluationPolicyContext;
+  apiKeyPolicy: PolicyEvaluationPolicyContext | null;
+}
+
+export interface PolicyEvaluationPolicyContext {
+  source: EffectivePolicySource;
+  profileId: string | null;
+  revisionId: string | null;
+  defaultAction: PolicyDefaultAction;
+  decision: PolicyDecision;
+  requiresApproval: boolean;
+}
+
+export interface WalletOperationPolicyEvaluation {
+  operation: WalletOperationEnvelope;
+  wallet: PolicyScopeEvaluation;
+  apiKey: PolicyScopeEvaluation | null;
+  decision: PolicyDecision;
+  reasonCode: PolicyEvaluationReasonCode | string;
+  reason: string;
+  matchedRules: MatchedPolicyRule[];
+  evaluationContext: PolicyEvaluationContext;
+  requiresApproval: boolean;
+  walletPolicyRevisionId: string | null;
+  apiKeyPolicyRevisionId: string | null;
 }
 
 export interface EffectivePolicy<TProfile, TRevision> {

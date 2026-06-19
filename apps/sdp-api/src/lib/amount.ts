@@ -43,6 +43,8 @@ const normalizeDecimalParts = (value: string): { whole: string; fraction: string
   return { whole, fraction };
 };
 
+const decimalScale = (value: string): number => normalizeDecimalParts(value.trim()).fraction.length;
+
 export const parseDecimalAmount = (value: string, decimals: number): bigint => {
   const normalized = value.trim();
 
@@ -69,6 +71,17 @@ export const parseDecimalAmount = (value: string, decimals: number): bigint => {
   const sanitized = startIndex >= combined.length ? "0" : combined.slice(startIndex);
 
   return BigInt(sanitized);
+};
+
+export const compareDecimalAmounts = (left: string, right: string): number => {
+  const decimals = Math.max(decimalScale(left), decimalScale(right));
+  const leftAmount = parseDecimalAmount(left, decimals);
+  const rightAmount = parseDecimalAmount(right, decimals);
+
+  if (leftAmount === rightAmount) {
+    return 0;
+  }
+  return leftAmount < rightAmount ? -1 : 1;
 };
 
 export const formatDecimalAmount = (value: string | bigint, decimals: number): string => {
