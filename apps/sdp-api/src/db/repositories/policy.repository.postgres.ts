@@ -11,6 +11,7 @@ import type {
   ApiKeyControlProfileRevisionRow,
   ApiKeyControlProfileRow,
   ApiKeyWalletPolicyBindingRow,
+  ApiKeyWalletPolicyTargetRow,
   CreateApiKeyControlProfileInput,
   CreateApiKeyControlProfileRevisionInput,
   CreatePolicyEvaluationInput,
@@ -112,6 +113,20 @@ function mapApiKeyWalletPolicyBindingRow(
       (row.api_key_control_profile_id as string | null | undefined) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
+  };
+}
+
+function mapApiKeyWalletPolicyTargetRow(row: Record<string, unknown>): ApiKeyWalletPolicyTargetRow {
+  return {
+    api_key_id: row.api_key_id as string,
+    organization_id: row.organization_id as string,
+    project_id: (row.project_id as string | null | undefined) ?? null,
+    wallet_id: row.wallet_id as string,
+    custody_wallet_id: row.custody_wallet_id as string,
+    wallet_project_id: (row.wallet_project_id as string | null | undefined) ?? null,
+    endpoint_binding_count: Number(row.endpoint_binding_count ?? 0),
+    endpoint_wallet_binding_id:
+      (row.endpoint_wallet_binding_id as string | null | undefined) ?? null,
   };
 }
 
@@ -438,6 +453,33 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
       };
     },
 
+    async getActiveWalletControlProfileByProfileId(profileId: string) {
+      const profile = await db
+        .prepare(
+          `SELECT *
+           FROM wallet_control_profiles
+           WHERE id = ?
+             AND status = 'active'
+           LIMIT 1`
+        )
+        .bind(profileId)
+        .first<Record<string, unknown>>();
+
+      if (!profile) {
+        return null;
+      }
+
+      const mappedProfile = mapWalletControlProfileRow(profile);
+      const revision = mappedProfile.active_revision_id
+        ? await getWalletControlProfileRevisionById(db, mappedProfile.active_revision_id)
+        : null;
+
+      return {
+        profile: mappedProfile,
+        revision,
+      };
+    },
+
     async createApiKeyControlProfile(input: CreateApiKeyControlProfileInput) {
       const id = generateApiKeyControlProfileId();
 
@@ -585,6 +627,33 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
       };
     },
 
+    async getActiveApiKeyControlProfileByProfileId(profileId: string) {
+      const profile = await db
+        .prepare(
+          `SELECT *
+           FROM api_key_control_profiles
+           WHERE id = ?
+             AND status = 'active'
+           LIMIT 1`
+        )
+        .bind(profileId)
+        .first<Record<string, unknown>>();
+
+      if (!profile) {
+        return null;
+      }
+
+      const mappedProfile = mapApiKeyControlProfileRow(profile);
+      const revision = mappedProfile.active_revision_id
+        ? await getApiKeyControlProfileRevisionById(db, mappedProfile.active_revision_id)
+        : null;
+
+      return {
+        profile: mappedProfile,
+        revision,
+      };
+    },
+
     async upsertApiKeyWalletPolicyBinding(input: UpsertApiKeyWalletPolicyBindingInput) {
       validateApiKeyWalletPolicyBindingInput(input);
 
@@ -639,6 +708,93 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
         .all<Record<string, unknown>>();
 
       return rows.results.map(mapApiKeyWalletPolicyBindingRow);
+    },
+
+    async hasApiKeyWalletPolicyBindings(apiKeyId: string) {
+      const row = await db
+        .prepare(
+          `SELECT 1 AS exists
+           FROM api_key_wallet_policy_bindings
+           WHERE api_key_id = ?
+           LIMIT 1`
+        )
+        .bind(apiKeyId)
+        .first<{ exists: number }>();
+
+      return Boolean(row);
+    },
+
+    async getApplicableApiKeyWalletPolicyBinding(apiKeyId: string, walletId: string) {
+      const row = await db
+        .prepare(
+          `SELECT *
+           FROM api_key_wallet_policy_bindings
+           WHERE api_key_id = ?
+             AND (
+               binding_scope = 'all'
+               OR (binding_scope = 'selected' AND wallet_id = ?)
+             )
+           ORDER BY
+             CASE WHEN binding_scope = 'selected' THEN 0 ELSE 1 END,
+             updated_at DESC,
+             created_at DESC
+           LIMIT 1`
+        )
+        .bind(apiKeyId, walletId)
+        .first<Record<string, unknown>>();
+
+      return row ? mapApiKeyWalletPolicyBindingRow(row) : null;
+    },
+
+    async getApiKeyWalletPolicyTarget(apiKeyId: string, walletId: string) {
+      const row = await db
+        .prepare(
+          `WITH target_api_key AS (
+             SELECT id, organization_id, project_id
+             FROM api_keys
+             WHERE id = ?
+               AND status = 'active'
+           ),
+           endpoint_scope AS (
+             SELECT api_key_id, COUNT(*) AS binding_count
+             FROM api_key_wallet_permissions
+             WHERE api_key_id = ?
+             GROUP BY api_key_id
+           )
+           SELECT
+             ak.id AS api_key_id,
+             ak.organization_id,
+             ak.project_id,
+             w.wallet_id,
+             w.id AS custody_wallet_id,
+             c.project_id AS wallet_project_id,
+             COALESCE(es.binding_count, 0) AS endpoint_binding_count,
+             perm.id AS endpoint_wallet_binding_id
+           FROM target_api_key ak
+           JOIN custody_configs c
+             ON c.organization_id = ak.organization_id
+            AND c.status = 'active'
+           JOIN custody_wallets w
+             ON w.custody_config_id = c.id
+            AND w.status = 'active'
+            AND w.wallet_id = ?
+           LEFT JOIN endpoint_scope es ON es.api_key_id = ak.id
+           LEFT JOIN api_key_wallet_permissions perm
+             ON perm.api_key_id = ak.id
+            AND perm.wallet_id = w.wallet_id
+           ORDER BY
+             CASE
+               WHEN c.project_id = ak.project_id THEN 0
+               WHEN c.project_id IS NULL THEN 1
+               ELSE 2
+             END,
+             w.created_at DESC
+           LIMIT 1`
+        )
+        .bind(apiKeyId, apiKeyId, walletId)
+        .first<Record<string, unknown>>();
+
+      return row ? mapApiKeyWalletPolicyTargetRow(row) : null;
     },
 
     async createWalletOperation(input: CreateWalletOperationInput) {

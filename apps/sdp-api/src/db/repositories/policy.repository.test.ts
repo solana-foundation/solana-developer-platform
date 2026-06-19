@@ -1,3 +1,4 @@
+import type { PolicyDefaultAction, PolicyRule } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { ApiKeyService } from "@/services/api-key.service";
@@ -8,8 +9,36 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import type { PolicyRepository } from "./policy.repository";
+import type {
+  ApiKeyControlProfileRevisionRow,
+  ApiKeyControlProfileRow,
+  PolicyRepository,
+} from "./policy.repository";
 import { createPostgresPolicyRepository } from "./policy.repository.postgres";
+
+const SECOND_CUSTODY_WALLET = {
+  id: "cw_policy_second",
+  walletId: "wallet_policy_second",
+  publicKey: "SecondPolicyWallet1111111111111111111111111",
+  label: "Second policy wallet",
+  purpose: "payments",
+};
+
+const OTHER_PROJECT = {
+  id: "prj_policy_other",
+  name: "Other policy project",
+  slug: "other-policy-project",
+  environment: "sandbox",
+};
+
+const OTHER_PROJECT_CUSTODY_CONFIG_ID = "ccfg_policy_other_project";
+const OTHER_PROJECT_CUSTODY_WALLET = {
+  id: "cw_policy_other_project",
+  walletId: "wallet_policy_other_project",
+  publicKey: "OtherProjectWallet1111111111111111111111",
+  label: "Other project policy wallet",
+  purpose: "payments",
+};
 
 describe("PolicyRepository (postgres)", () => {
   let repo: PolicyRepository;
@@ -326,6 +355,210 @@ describe("PolicyRepository (postgres)", () => {
     });
   });
 
+  it("resolves an all-wallet API key policy binding for every in-scope wallet", async () => {
+    const service = new PolicyFoundationService(repo);
+    await seedAdditionalCustodyWallet();
+    const { profile } = await createActiveApiKeyControlProfile(repo, {
+      name: "Shared all-wallet controls",
+      defaultAction: "review",
+    });
+
+    const binding = await service.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "all",
+      apiKeyControlProfileId: profile.id,
+    });
+    expect(binding.bindingScope).toBe("all");
+    expect(binding.walletId).toBeNull();
+
+    await expect(
+      service.resolveApiKeyWalletPolicyScope({
+        apiKeyId: TEST_API_KEY.id,
+        walletId: TEST_CUSTODY_WALLET.walletId,
+      })
+    ).resolves.toMatchObject({
+      binding: { bindingScope: "all", apiKeyControlProfileId: profile.id },
+      apiKeyPolicy: { profile: { id: profile.id }, defaultAction: "review" },
+    });
+
+    await expect(
+      service.resolveApiKeyWalletPolicyScope({
+        apiKeyId: TEST_API_KEY.id,
+        walletId: SECOND_CUSTODY_WALLET.walletId,
+      })
+    ).resolves.toMatchObject({
+      binding: { bindingScope: "all", apiKeyControlProfileId: profile.id },
+      apiKeyPolicy: { profile: { id: profile.id }, defaultAction: "review" },
+    });
+  });
+
+  it("resolves selected-wallet API key policy bindings for multiple endpoint-scoped wallets", async () => {
+    const service = new PolicyFoundationService(repo);
+    await seedAdditionalCustodyWallet();
+    await seedEndpointWalletPermission("akw_policy_selected_primary", TEST_CUSTODY_WALLET.walletId);
+    await seedEndpointWalletPermission(
+      "akw_policy_selected_second",
+      SECOND_CUSTODY_WALLET.walletId
+    );
+    const { profile } = await createActiveApiKeyControlProfile(repo, {
+      name: "Selected wallet controls",
+      defaultAction: "approval_required",
+    });
+
+    await service.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "selected",
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyControlProfileId: profile.id,
+    });
+    await service.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "selected",
+      walletId: SECOND_CUSTODY_WALLET.walletId,
+      apiKeyControlProfileId: profile.id,
+    });
+
+    const primary = await service.resolveApiKeyWalletPolicyScope({
+      apiKeyId: TEST_API_KEY.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+    });
+    const second = await service.resolveApiKeyWalletPolicyScope({
+      apiKeyId: TEST_API_KEY.id,
+      walletId: SECOND_CUSTODY_WALLET.walletId,
+    });
+
+    expect(primary).toMatchObject({
+      binding: { bindingScope: "selected", walletId: TEST_CUSTODY_WALLET.walletId },
+      apiKeyPolicy: { profile: { id: profile.id }, defaultAction: "approval_required" },
+    });
+    expect(second).toMatchObject({
+      binding: { bindingScope: "selected", walletId: SECOND_CUSTODY_WALLET.walletId },
+      apiKeyPolicy: { profile: { id: profile.id }, defaultAction: "approval_required" },
+    });
+  });
+
+  it("prefers a selected per-wallet policy override over an all-wallet shared policy", async () => {
+    const service = new PolicyFoundationService(repo);
+    await seedAdditionalCustodyWallet();
+    const shared = await createActiveApiKeyControlProfile(repo, {
+      name: "Shared key controls",
+      defaultAction: "allow",
+    });
+    const override = await createActiveApiKeyControlProfile(repo, {
+      name: "Second wallet override",
+      defaultAction: "review",
+    });
+
+    await service.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "all",
+      apiKeyControlProfileId: shared.profile.id,
+    });
+    await service.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "selected",
+      walletId: SECOND_CUSTODY_WALLET.walletId,
+      apiKeyControlProfileId: override.profile.id,
+    });
+
+    await expect(
+      service.resolveApiKeyWalletPolicyScope({
+        apiKeyId: TEST_API_KEY.id,
+        walletId: TEST_CUSTODY_WALLET.walletId,
+      })
+    ).resolves.toMatchObject({
+      binding: { bindingScope: "all" },
+      apiKeyPolicy: { profile: { id: shared.profile.id }, defaultAction: "allow" },
+    });
+
+    await expect(
+      service.resolveApiKeyWalletPolicyScope({
+        apiKeyId: TEST_API_KEY.id,
+        walletId: SECOND_CUSTODY_WALLET.walletId,
+      })
+    ).resolves.toMatchObject({
+      binding: { bindingScope: "selected", walletId: SECOND_CUSTODY_WALLET.walletId },
+      apiKeyPolicy: { profile: { id: override.profile.id }, defaultAction: "review" },
+    });
+  });
+
+  it("fails closed when policy bindings exist but the requested wallet has no binding", async () => {
+    const service = new PolicyFoundationService(repo);
+    await seedAdditionalCustodyWallet();
+    const { profile } = await createActiveApiKeyControlProfile(repo, {
+      name: "Primary wallet only",
+      defaultAction: "review",
+    });
+
+    await service.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "selected",
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyControlProfileId: profile.id,
+    });
+
+    await expect(
+      service.resolveApiKeyWalletPolicyScope({
+        apiKeyId: TEST_API_KEY.id,
+        walletId: SECOND_CUSTODY_WALLET.walletId,
+      })
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "API key policy binding is not configured for the requested wallet",
+    });
+  });
+
+  it("fails closed when an all-wallet policy binding would exceed selected endpoint wallet access", async () => {
+    const service = new PolicyFoundationService(repo);
+    await seedAdditionalCustodyWallet();
+    await seedEndpointWalletPermission("akw_policy_endpoint_primary", TEST_CUSTODY_WALLET.walletId);
+    const { profile } = await createActiveApiKeyControlProfile(repo, {
+      name: "All policy selected endpoint",
+      defaultAction: "review",
+    });
+
+    await service.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "all",
+      apiKeyControlProfileId: profile.id,
+    });
+
+    await expect(
+      service.resolveApiKeyWalletPolicyScope({
+        apiKeyId: TEST_API_KEY.id,
+        walletId: SECOND_CUSTODY_WALLET.walletId,
+      })
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "API key is not authorized for the requested wallet",
+    });
+  });
+
+  it("fails closed when an all-wallet policy binding is requested for another project wallet", async () => {
+    const service = new PolicyFoundationService(repo);
+    await seedOtherProjectCustodyWallet();
+    const { profile } = await createActiveApiKeyControlProfile(repo, {
+      name: "All policy project boundary",
+      defaultAction: "review",
+    });
+
+    await service.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "all",
+      apiKeyControlProfileId: profile.id,
+    });
+
+    await expect(
+      service.resolveApiKeyWalletPolicyScope({
+        apiKeyId: TEST_API_KEY.id,
+        walletId: OTHER_PROJECT_CUSTODY_WALLET.walletId,
+      })
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "Project API keys cannot use wallets from other projects",
+    });
+  });
+
   it("rejects policy wallet bindings that do not match their scope before querying Postgres", async () => {
     const selectedWithoutWalletId = {
       apiKeyId: TEST_API_KEY.id,
@@ -401,6 +634,11 @@ describe("PolicyRepository (postgres)", () => {
     });
     await repo.upsertApiKeyWalletPolicyBinding({
       apiKeyId: TEST_API_KEY.id,
+      bindingScope: "all",
+      apiKeyControlProfileId: apiKeyProfile?.id,
+    });
+    await repo.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
       bindingScope: "selected",
       walletId: TEST_CUSTODY_WALLET.walletId,
       custodyWalletId: TEST_CUSTODY_WALLET.id,
@@ -417,9 +655,18 @@ describe("PolicyRepository (postgres)", () => {
     expect(rotation).not.toBeNull();
 
     const clonedBindings = await repo.listApiKeyWalletPolicyBindings(rotation?.apiKey.id ?? "");
-    expect(clonedBindings).toHaveLength(1);
-    expect(clonedBindings[0].wallet_id).toBe(TEST_CUSTODY_WALLET.walletId);
-    expect(clonedBindings[0].api_key_control_profile_id).not.toBe(apiKeyProfile?.id);
+    expect(clonedBindings).toHaveLength(2);
+    const clonedAllBinding = clonedBindings.find((binding) => binding.binding_scope === "all");
+    const clonedSelectedBinding = clonedBindings.find(
+      (binding) => binding.binding_scope === "selected"
+    );
+    expect(clonedAllBinding).toMatchObject({
+      wallet_id: null,
+      custody_wallet_id: null,
+    });
+    expect(clonedSelectedBinding?.wallet_id).toBe(TEST_CUSTODY_WALLET.walletId);
+    expect(clonedAllBinding?.api_key_control_profile_id).not.toBe(apiKeyProfile?.id);
+    expect(clonedSelectedBinding?.api_key_control_profile_id).not.toBe(apiKeyProfile?.id);
 
     const clonedProfile = await repo.getActiveApiKeyControlProfileByApiKeyId(
       rotation?.apiKey.id ?? ""
@@ -428,7 +675,8 @@ describe("PolicyRepository (postgres)", () => {
     expect(clonedProfile?.revision?.rules).toEqual([
       { kind: "destination", allowlist: ["recipient_1"] },
     ]);
-    expect(clonedBindings[0].api_key_control_profile_id).toBe(clonedProfile?.profile.id);
+    expect(clonedAllBinding?.api_key_control_profile_id).toBe(clonedProfile?.profile.id);
+    expect(clonedSelectedBinding?.api_key_control_profile_id).toBe(clonedProfile?.profile.id);
 
     const clonedEndpointPermissions = await getDb(env)
       .prepare("SELECT permissions FROM api_key_wallet_permissions WHERE api_key_id = ?")
@@ -525,4 +773,138 @@ async function seedPolicyFoundationFixtures(): Promise<void> {
       TEST_CUSTODY_WALLET.purpose
     )
     .run();
+}
+
+async function seedAdditionalCustodyWallet(): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO custody_wallets (
+         id,
+         custody_config_id,
+         wallet_id,
+         public_key,
+         label,
+         purpose,
+         status
+       ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
+    )
+    .bind(
+      SECOND_CUSTODY_WALLET.id,
+      TEST_CUSTODY_CONFIG.id,
+      SECOND_CUSTODY_WALLET.walletId,
+      SECOND_CUSTODY_WALLET.publicKey,
+      SECOND_CUSTODY_WALLET.label,
+      SECOND_CUSTODY_WALLET.purpose
+    )
+    .run();
+}
+
+async function seedOtherProjectCustodyWallet(): Promise<void> {
+  const db = getDb(env);
+
+  await db
+    .prepare(
+      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+       VALUES (?, ?, ?, ?, ?, 'active', ?)`
+    )
+    .bind(
+      OTHER_PROJECT.id,
+      TEST_ORG.id,
+      OTHER_PROJECT.name,
+      OTHER_PROJECT.slug,
+      OTHER_PROJECT.environment,
+      TEST_USER.id
+    )
+    .run();
+
+  await db
+    .prepare(
+      `INSERT INTO custody_configs (
+         id,
+         organization_id,
+         project_id,
+         provider,
+         config_encrypted,
+         default_wallet_id,
+         status
+       ) VALUES (?, ?, ?, 'local', 'encrypted', ?, 'active')`
+    )
+    .bind(
+      OTHER_PROJECT_CUSTODY_CONFIG_ID,
+      TEST_ORG.id,
+      OTHER_PROJECT.id,
+      OTHER_PROJECT_CUSTODY_WALLET.walletId
+    )
+    .run();
+
+  await db
+    .prepare(
+      `INSERT INTO custody_wallets (
+         id,
+         custody_config_id,
+         wallet_id,
+         public_key,
+         label,
+         purpose,
+         status
+       ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
+    )
+    .bind(
+      OTHER_PROJECT_CUSTODY_WALLET.id,
+      OTHER_PROJECT_CUSTODY_CONFIG_ID,
+      OTHER_PROJECT_CUSTODY_WALLET.walletId,
+      OTHER_PROJECT_CUSTODY_WALLET.publicKey,
+      OTHER_PROJECT_CUSTODY_WALLET.label,
+      OTHER_PROJECT_CUSTODY_WALLET.purpose
+    )
+    .run();
+}
+
+async function seedEndpointWalletPermission(id: string, walletId: string): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+       VALUES (?, ?, ?, '["payments:write"]')`
+    )
+    .bind(id, TEST_API_KEY.id, walletId)
+    .run();
+}
+
+async function createActiveApiKeyControlProfile(
+  repository: PolicyRepository,
+  input: {
+    name: string;
+    defaultAction?: PolicyDefaultAction;
+    rules?: PolicyRule[];
+  }
+): Promise<{
+  profile: ApiKeyControlProfileRow;
+  revision: ApiKeyControlProfileRevisionRow;
+}> {
+  const profile = await repository.createApiKeyControlProfile({
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    apiKeyId: TEST_API_KEY.id,
+    name: input.name,
+    createdBy: TEST_USER.id,
+  });
+  expect(profile).not.toBeNull();
+
+  const revision = await repository.createApiKeyControlProfileRevision({
+    profileId: profile?.id ?? "",
+    rules: input.rules,
+    defaultAction: input.defaultAction,
+    createdBy: TEST_USER.id,
+  });
+  expect(revision).not.toBeNull();
+
+  await repository.activateApiKeyControlProfileRevision({
+    profileId: profile?.id ?? "",
+    revisionId: revision?.id ?? "",
+  });
+
+  return {
+    profile: profile as ApiKeyControlProfileRow,
+    revision: revision as ApiKeyControlProfileRevisionRow,
+  };
 }

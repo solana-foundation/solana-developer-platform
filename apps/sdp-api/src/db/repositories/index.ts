@@ -73,6 +73,7 @@ export type {
   ApiKeyControlProfileRevisionRow,
   ApiKeyControlProfileRow,
   ApiKeyWalletPolicyBindingRow,
+  ApiKeyWalletPolicyTargetRow,
   CreateApiKeyControlProfileInput,
   CreateApiKeyControlProfileRevisionInput,
   CreatePolicyEvaluationInput,
