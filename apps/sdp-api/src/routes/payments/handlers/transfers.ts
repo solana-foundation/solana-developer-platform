@@ -53,6 +53,7 @@ import {
 } from "@/services/payment-operation.service";
 import {
   enforceWalletOperationPolicy,
+  recordLegacyWalletPolicyDenial,
   walletOperationActorFromAuth,
 } from "@/services/policy-enforcement.service";
 import {
@@ -273,8 +274,8 @@ async function enforcePaymentTransferOperationPolicy(
     privateTransfer?: boolean;
     rawPayload?: Record<string, unknown>;
   }
-): Promise<void> {
-  await enforceWalletOperationPolicy(c.env, {
+) {
+  return enforceWalletOperationPolicy(c.env, {
     organizationId: scope.auth.organizationId,
     projectId: scope.auth.projectId,
     custodyWalletId: operation.sourceWallet.id,
@@ -966,7 +967,7 @@ export async function prepareTransfer(c: AppContext) {
   //       transaction based on the requested priority level. Not yet implemented.
 
   const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
-  await enforcePaymentTransferOperationPolicy(c, scope, operation, {
+  const enforcement = await enforcePaymentTransferOperationPolicy(c, scope, operation, {
     operationType: "payment_transfer_prepare",
     memo: parsed.data.memo,
     privateTransfer: Boolean(privateTransfer),
@@ -978,14 +979,19 @@ export async function prepareTransfer(c: AppContext) {
       referenceAddress: parsed.data.referenceAddress ?? null,
     },
   });
-  await assertWalletPolicyAllowsTransfer(c, {
-    organizationId: scope.auth.organizationId,
-    projectId: scope.auth.projectId,
-    wallet: operation.sourceWallet,
-    destinationAddress: operation.destinationAddress,
-    token: operation.token,
-    amount: operation.amount,
-  });
+  try {
+    await assertWalletPolicyAllowsTransfer(c, {
+      organizationId: scope.auth.organizationId,
+      projectId: scope.auth.projectId,
+      wallet: operation.sourceWallet,
+      destinationAddress: operation.destinationAddress,
+      token: operation.token,
+      amount: operation.amount,
+    });
+  } catch (error) {
+    await recordLegacyWalletPolicyDenial(c.env, enforcement, error);
+    throw error;
+  }
 
   let prepared: PreparedTransferPayload;
   let privateTransferMetadata: PreparedPrivateTransferMetadata | undefined;
@@ -1693,7 +1699,7 @@ export async function createTransfer(c: AppContext) {
   });
 
   const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
-  await enforcePaymentTransferOperationPolicy(c, scope, operation, {
+  const enforcement = await enforcePaymentTransferOperationPolicy(c, scope, operation, {
     operationType: "payment_transfer_execute",
     memo: parsed.data.memo,
     privateTransfer: Boolean(privateTransfer),
@@ -1704,14 +1710,19 @@ export async function createTransfer(c: AppContext) {
       amount: parsed.data.amount,
     },
   });
-  await assertWalletPolicyAllowsTransfer(c, {
-    organizationId: scope.auth.organizationId,
-    projectId: scope.auth.projectId,
-    wallet: operation.sourceWallet,
-    destinationAddress: operation.destinationAddress,
-    token: operation.token,
-    amount: operation.amount,
-  });
+  try {
+    await assertWalletPolicyAllowsTransfer(c, {
+      organizationId: scope.auth.organizationId,
+      projectId: scope.auth.projectId,
+      wallet: operation.sourceWallet,
+      destinationAddress: operation.destinationAddress,
+      token: operation.token,
+      amount: operation.amount,
+    });
+  } catch (error) {
+    await recordLegacyWalletPolicyDenial(c.env, enforcement, error);
+    throw error;
+  }
 
   if (privateTransfer) {
     assertMagicBlockKoraSponsoredExecutionOptions(privateTransfer.magicBlock);

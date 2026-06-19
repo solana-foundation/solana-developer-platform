@@ -93,8 +93,11 @@ function createRepository(options: {
   walletPolicy?: ActiveWalletControlProfileResult | null;
   apiKeyPolicy?: ActiveApiKeyControlProfileResult | null;
   evaluationError?: Error;
+  statusUpdateFailures?: number;
+  statusUpdateError?: Error;
 }) {
   const operations: WalletOperationRow[] = [];
+  let statusUpdateFailuresRemaining = options.statusUpdateFailures ?? 0;
 
   const repository = {
     createWalletOperation: vi.fn(async (input: CreateWalletOperationInput) => {
@@ -129,6 +132,10 @@ function createRepository(options: {
       return operations.find((operation) => operation.id === walletOperationId) ?? null;
     }),
     updateWalletOperationStatus: vi.fn(async (walletOperationId: string, status: string) => {
+      if (statusUpdateFailuresRemaining > 0) {
+        statusUpdateFailuresRemaining -= 1;
+        throw options.statusUpdateError ?? new Error("status update failed");
+      }
       const operation = operations.find((row) => row.id === walletOperationId);
       if (!operation) return null;
       operation.status = status as WalletOperationRow["status"];
@@ -186,6 +193,18 @@ describe("WalletPolicyEnforcementService", () => {
       expect.objectContaining({ status: "created" })
     );
     expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "evaluated");
+  });
+
+  it("marks the operation failed when the terminal status update throws", async () => {
+    const repository = createRepository({
+      statusUpdateFailures: 1,
+      statusUpdateError: new Error("status update unavailable"),
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(service.enforce(baseOperation)).rejects.toThrow("status update unavailable");
+    expect(repository.updateWalletOperationStatus).toHaveBeenNthCalledWith(1, "wop_1", "evaluated");
+    expect(repository.updateWalletOperationStatus).toHaveBeenNthCalledWith(2, "wop_1", "failed");
   });
 
   it("throws a deterministic forbidden response for denied operations", async () => {

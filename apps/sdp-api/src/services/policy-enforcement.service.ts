@@ -3,7 +3,6 @@ import type {
   PolicyEvaluation,
   WalletOperationActor,
   WalletOperationEnvelope,
-  WalletOperationPolicyEvaluation,
   WalletOperationStatus,
 } from "@sdp/types";
 import { getDb } from "@/db";
@@ -39,31 +38,34 @@ export class WalletPolicyEnforcementService {
       ...input,
       status: input.status ?? "created",
     });
-    let result: WalletOperationPolicyEvaluation;
-    let evaluation: PolicyEvaluation;
 
-    try {
-      result = await this.foundation.evaluateWalletOperationPolicies(operation);
-      evaluation = await this.foundation.recordPolicyEvaluation(
-        createPolicyEvaluationInput(result)
-      );
-    } catch (error) {
-      await this.repository.updateWalletOperationStatus(operation.id, "failed");
-      throw error;
-    }
+    const { result, evaluation, updatedOperation } = await (async () => {
+      try {
+        const result = await this.foundation.evaluateWalletOperationPolicies(operation);
+        const evaluation = await this.foundation.recordPolicyEvaluation(
+          createPolicyEvaluationInput(result)
+        );
+        const status = walletOperationStatusForDecision(result.decision);
+        const updated = await this.repository.updateWalletOperationStatus(operation.id, status);
 
-    const status = walletOperationStatusForDecision(result.decision);
-    const updated = await this.repository.updateWalletOperationStatus(operation.id, status);
+        if (!updated) {
+          throw internalError("Failed to update wallet operation policy status");
+        }
 
-    if (!updated) {
-      throw internalError("Failed to update wallet operation policy status");
-    }
-
-    const updatedOperation: WalletOperationEnvelope = {
-      ...operation,
-      status: updated.status,
-      updatedAt: updated.updated_at,
-    };
+        return {
+          result,
+          evaluation,
+          updatedOperation: {
+            ...operation,
+            status: updated.status,
+            updatedAt: updated.updated_at,
+          },
+        };
+      } catch (error) {
+        await markWalletOperationFailed(this.repository, operation.id);
+        throw error;
+      }
+    })();
 
     if (result.decision === "allow") {
       return {
@@ -73,6 +75,55 @@ export class WalletPolicyEnforcementService {
     }
 
     throw walletOperationPolicyDecisionError(updatedOperation, evaluation);
+  }
+}
+
+export async function recordLegacyWalletPolicyDenial(
+  env: Env,
+  enforcement: WalletOperationPolicyEnforcement,
+  error: unknown
+): Promise<void> {
+  const repository = createPolicyRepository(env);
+  const reason =
+    error instanceof Error && error.message
+      ? error.message
+      : "Legacy wallet policy denied wallet operation";
+
+  try {
+    if (enforcement.evaluation.evaluationContext) {
+      await repository.createPolicyEvaluation({
+        walletOperationId: enforcement.operation.id,
+        walletPolicyRevisionId: null,
+        apiKeyPolicyRevisionId: null,
+        decision: "deny",
+        reasonCode: "legacy_wallet_policy_denied",
+        reason,
+        matchedRules: [],
+        evaluationContext: enforcement.evaluation.evaluationContext,
+        requiresApproval: false,
+      });
+    }
+
+    await repository.updateWalletOperationStatus(enforcement.operation.id, "failed");
+  } catch (auditError) {
+    console.error("Failed to record legacy wallet policy denial", {
+      walletOperationId: enforcement.operation.id,
+      error: auditError instanceof Error ? auditError.message : String(auditError),
+    });
+  }
+}
+
+async function markWalletOperationFailed(
+  repository: PolicyRepository,
+  walletOperationId: string
+): Promise<void> {
+  try {
+    await repository.updateWalletOperationStatus(walletOperationId, "failed");
+  } catch (error) {
+    console.error("Failed to mark wallet operation failed", {
+      walletOperationId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

@@ -46,6 +46,7 @@ import { success } from "@/lib/response";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import {
   enforceWalletOperationPolicy,
+  recordLegacyWalletPolicyDenial,
   walletOperationActorFromAuth,
 } from "@/services/policy-enforcement.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
@@ -182,8 +183,8 @@ async function enforceRampWalletOperationPolicy(
     destination?: string | null;
     rawPayload?: Record<string, unknown>;
   }
-): Promise<void> {
-  await enforceWalletOperationPolicy(c.env, {
+) {
+  return enforceWalletOperationPolicy(c.env, {
     organizationId: input.scope.auth.organizationId,
     projectId: input.scope.auth.projectId,
     custodyWalletId: input.wallet.id,
@@ -445,7 +446,7 @@ async function executeOfframpWithProvider(
   if (!counterparty) throw notFound("Counterparty");
 
   if (sourceWallet) {
-    await enforceRampWalletOperationPolicy(c, {
+    const enforcement = await enforceRampWalletOperationPolicy(c, {
       scope,
       wallet: sourceWallet,
       operationType: "ramp_offramp_execute",
@@ -459,14 +460,19 @@ async function executeOfframpWithProvider(
         cryptoAmount: input.cryptoAmount,
       },
     });
-    await assertWalletPolicyAllowsTransfer(c, {
-      organizationId: scope.auth.organizationId,
-      projectId: scope.auth.projectId,
-      wallet: sourceWallet,
-      enforceDestinationAllowlist: false,
-      token: input.cryptoToken,
-      amount: input.cryptoAmount,
-    });
+    try {
+      await assertWalletPolicyAllowsTransfer(c, {
+        organizationId: scope.auth.organizationId,
+        projectId: scope.auth.projectId,
+        wallet: sourceWallet,
+        enforceDestinationAllowlist: false,
+        token: input.cryptoToken,
+        amount: input.cryptoAmount,
+      });
+    } catch (error) {
+      await recordLegacyWalletPolicyDenial(c.env, enforcement, error);
+      throw error;
+    }
   }
 
   switch (input.provider) {

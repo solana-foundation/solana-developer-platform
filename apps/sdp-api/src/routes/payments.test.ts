@@ -1851,15 +1851,24 @@ describe("Payments routes", () => {
       .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
       .first<{ status: string; operation_family: string; operation_type: string }>();
     expect(operation).toMatchObject({
-      status: "evaluated",
+      status: "failed",
       operation_family: "ramp",
       operation_type: "ramp_offramp_execute",
     });
 
-    const evaluation = await getDb(env)
-      .prepare("SELECT decision FROM policy_evaluations")
-      .first<{ decision: string }>();
-    expect(evaluation?.decision).toBe("allow");
+    const evaluations = await getDb(env)
+      .prepare("SELECT decision, reason_code FROM policy_evaluations")
+      .all<{ decision: string; reason_code: string }>();
+    expect(evaluations.results).toHaveLength(2);
+    expect(evaluations.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ decision: "allow" }),
+        expect.objectContaining({
+          decision: "deny",
+          reason_code: "legacy_wallet_policy_denied",
+        }),
+      ])
+    );
   });
 
   it("does not apply outbound wallet policy checks to MoonPay on-ramp", async () => {
@@ -3012,15 +3021,24 @@ describe("Payments routes", () => {
       .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
       .first<{ status: string; operation_family: string; operation_type: string }>();
     expect(operation).toMatchObject({
-      status: "evaluated",
+      status: "failed",
       operation_family: "payment",
       operation_type: "payment_transfer_prepare",
     });
 
-    const evaluation = await getDb(env)
-      .prepare("SELECT decision FROM policy_evaluations")
-      .first<{ decision: string }>();
-    expect(evaluation?.decision).toBe("allow");
+    const evaluations = await getDb(env)
+      .prepare("SELECT decision, reason_code FROM policy_evaluations")
+      .all<{ decision: string; reason_code: string }>();
+    expect(evaluations.results).toHaveLength(2);
+    expect(evaluations.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ decision: "allow" }),
+        expect.objectContaining({
+          decision: "deny",
+          reason_code: "legacy_wallet_policy_denied",
+        }),
+      ])
+    );
   });
 
   it("blocks prepare transfer when amount exceeds maxTransferAmount", async () => {
@@ -3812,15 +3830,24 @@ describe("Payments routes", () => {
       .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
       .first<{ status: string; operation_family: string; operation_type: string }>();
     expect(operation).toMatchObject({
-      status: "evaluated",
+      status: "failed",
       operation_family: "payment",
       operation_type: "payment_transfer_execute",
     });
 
-    const evaluation = await getDb(env)
-      .prepare("SELECT decision FROM policy_evaluations")
-      .first<{ decision: string }>();
-    expect(evaluation?.decision).toBe("allow");
+    const evaluations = await getDb(env)
+      .prepare("SELECT decision, reason_code FROM policy_evaluations")
+      .all<{ decision: string; reason_code: string }>();
+    expect(evaluations.results).toHaveLength(2);
+    expect(evaluations.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ decision: "allow" }),
+        expect.objectContaining({
+          decision: "deny",
+          reason_code: "legacy_wallet_policy_denied",
+        }),
+      ])
+    );
   });
 
   it("blocks create transfer with zero amount before creating a transfer record", async () => {
