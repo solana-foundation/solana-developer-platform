@@ -1,3 +1,9 @@
+# WIF is all-or-nothing via var.create_wif: the pool, provider, and the deployer SA's
+# workloadIdentityUser binding share one count, so a `create_wif=true` apply creates the
+# whole chain together (see the variable docs for the out-of-band caveat). Pool IDs are
+# project-scoped, so the trading-prod `mainnet` workspace and the SDP `mainnet-sdp` workspace
+# can each hold a `kora-mainnet` pool without colliding — as long as they target their own
+# projects (trading-prod via `-var project_id=trading-prod-494016`; see envs/mainnet.tfvars).
 resource "google_iam_workload_identity_pool" "github" {
   count                     = var.create_wif ? 1 : 0
   workload_identity_pool_id = local.name_prefix

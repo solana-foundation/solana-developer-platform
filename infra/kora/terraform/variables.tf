@@ -98,7 +98,14 @@ variable "redis_memory_gb" {
 variable "create_wif" {
   type        = bool
   default     = true
-  description = "Create the GitHub OIDC Workload Identity pool/provider. Requires iam.workloadIdentityPools.create; set false where the deployer lacks it (an admin provisions WIF separately)."
+  description = <<-EOT
+    Create the GitHub OIDC Workload Identity pool, provider, AND the deployer SA's
+    roles/iam.workloadIdentityUser binding as a single unit. Requires
+    iam.workloadIdentityPools.create. Set false where the caller lacks that permission;
+    an owner then provisions all three by re-running apply with create_wif=true. If WIF is
+    instead created out-of-band (e.g. gcloud), the deployer SA binding must be added
+    manually too — otherwise CI keyless auth fails despite a valid pool existing.
+  EOT
 }
 
 variable "github_repo" {
