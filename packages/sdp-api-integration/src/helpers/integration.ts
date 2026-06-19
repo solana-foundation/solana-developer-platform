@@ -48,6 +48,7 @@ let cachedCustodyAddress: string | null = null;
 // pushed the mint rent ~0.0004 SOL higher and tipped tests over.
 const PRIVY_INTEGRATION_AIRDROP_LAMPORTS = 50_000_000;
 const KORA_MAX_TRANSFER_LAMPORTS = 10_000_000n;
+const KORA_FUNDING_MAX_ATTEMPTS = 4;
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
@@ -367,30 +368,47 @@ async function fundAddressViaKoraFeePayer(
       remainingLamports > KORA_MAX_TRANSFER_LAMPORTS
         ? KORA_MAX_TRANSFER_LAMPORTS
         : remainingLamports;
-    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-    const minimumLamports = await getMinimumBalanceForRentExemption(rpc, 0);
-    const amount = requestedAmount > minimumLamports ? requestedAmount : minimumLamports + 1n;
 
-    const instruction = getTransferSolInstruction({
-      source: createNoopSigner(feePayer),
-      destination: address as Address,
-      amount,
-    });
+    for (let attempt = 0; attempt < KORA_FUNDING_MAX_ATTEMPTS; attempt++) {
+      try {
+        // Kora may simulate through a different RPC than SOLANA_RPC_URL. A finalized
+        // blockhash is less likely to race provider propagation during CI bootstrap.
+        const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "finalized");
+        const minimumLamports = await getMinimumBalanceForRentExemption(rpc, 0);
+        const amount = requestedAmount > minimumLamports ? requestedAmount : minimumLamports + 1n;
 
-    const message = pipe(
-      createTransactionMessage({ version: 0 }),
-      (m) => setTransactionMessageFeePayer(feePayer, m),
-      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-      (m) => appendTransactionMessageInstructions([instruction], m)
-    );
+        const instruction = getTransferSolInstruction({
+          source: createNoopSigner(feePayer),
+          destination: address as Address,
+          amount,
+        });
 
-    const compiled = compileTransaction(message);
-    const txBytes = new Uint8Array(getTransactionEncoder().encode(compiled));
-    const signature = await feePayment.signAndSend(txBytes);
-    const confirmation = await confirmTransaction(rpc, signature, { commitment: "confirmed" });
+        const message = pipe(
+          createTransactionMessage({ version: 0 }),
+          (m) => setTransactionMessageFeePayer(feePayer, m),
+          (m) =>
+            setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+          (m) => appendTransactionMessageInstructions([instruction], m)
+        );
 
-    if (confirmation.err) {
-      return false;
+        const compiled = compileTransaction(message);
+        const txBytes = new Uint8Array(getTransactionEncoder().encode(compiled));
+        const signature = await feePayment.signAndSend(txBytes);
+        const confirmation = await confirmTransaction(rpc, signature, { commitment: "confirmed" });
+
+        if (confirmation.err) {
+          return false;
+        }
+
+        break;
+      } catch (error) {
+        if (attempt < KORA_FUNDING_MAX_ATTEMPTS - 1 && isRetryableKoraFundingError(error)) {
+          await sleep((attempt + 1) * 1_500);
+          continue;
+        }
+
+        throw error;
+      }
     }
 
     remainingLamports -= requestedAmount;
@@ -538,6 +556,13 @@ function isRetryableSolanaRpcError(error: unknown): boolean {
     message.includes("502") ||
     message.includes("503") ||
     message.includes("504")
+  );
+}
+
+function isRetryableKoraFundingError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.message.toLowerCase().includes("blockhash not found") || isRetryableSolanaRpcError(error)
   );
 }
 
