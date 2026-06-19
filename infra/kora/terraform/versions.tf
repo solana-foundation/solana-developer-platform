@@ -8,8 +8,7 @@ terraform {
     }
   }
 
-  # Shared remote state (versioned GCS bucket). Per-env states are isolated by workspace
-  # (default / mainnet / mainnet-sdp), stored under <prefix>/<workspace>.tfstate.
+  # Shared remote state (versioned GCS bucket); per-env states are isolated by workspace.
   backend "gcs" {
     bucket = "solana-developer-platform-kora-tfstate"
     prefix = "kora"
