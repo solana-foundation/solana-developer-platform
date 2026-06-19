@@ -1,13 +1,23 @@
 {
   "receiver": "slack",
-  "group_by": ["grafana_folder", "alertname"],
+  "group_by": [
+    "grafana_folder",
+    "alertname",
+    "service"
+  ],
   "group_wait": "30s",
   "group_interval": "5m",
   "repeat_interval": "4h",
   "routes": [
     {
       "receiver": "pagerduty",
-      "object_matchers": [["pagerduty", "=", "true"]],
+      "object_matchers": [
+        [
+          "pagerduty",
+          "=",
+          "true"
+        ]
+      ],
       "continue": true,
       "group_wait": "30s",
       "group_interval": "5m",
@@ -15,7 +25,13 @@
     },
     {
       "receiver": "slack",
-      "object_matchers": [["slack", "=", "true"]],
+      "object_matchers": [
+        [
+          "slack",
+          "=",
+          "true"
+        ]
+      ],
       "group_wait": "30s",
       "group_interval": "5m",
       "repeat_interval": "4h"

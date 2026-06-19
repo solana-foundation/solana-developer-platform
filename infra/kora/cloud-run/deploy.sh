@@ -11,6 +11,19 @@ ENV="${ENV:?ENV=devnet|mainnet}"
 PROJECT="${PROJECT:?PROJECT=<gcp project id>}"
 REGION="${REGION:-us-central1}"
 
+# Env-scoped Doppler secrets (KORA_MAINNET_* / KORA_DEVNET_*) -> the names Kora's container reads,
+# so one Doppler config holds both envs without collisions.
+EP="KORA_$(printf '%s' "$ENV" | tr '[:lower:]' '[:upper:]')_"
+RPC_URL="$(printenv "${EP}RPC_URL" 2>/dev/null || true)"
+KORA_GCP_KMS_KEY_NAME="$(printenv "${EP}GCP_KMS_KEY_NAME" 2>/dev/null || true)"
+KORA_GCP_KMS_PUBLIC_KEY="$(printenv "${EP}GCP_KMS_PUBLIC_KEY" 2>/dev/null || true)"
+KORA_REDIS_URL="$(printenv "${EP}REDIS_URL" 2>/dev/null || true)"
+KORA_API_KEY="$(printenv "${EP}API_KEY" 2>/dev/null || true)"
+JUPITER_API_KEY="$(printenv "${EP}JUPITER_API_KEY" 2>/dev/null || true)"
+
+# Base Kora image to bake config onto. Pin a TLS-capable tag for prod; defaults to rolling edge.
+KORA_IMAGE="${KORA_IMAGE:-ghcr.io/solana-foundation/kora:edge}"
+
 : "${RPC_URL:?set via Doppler}"
 : "${KORA_GCP_KMS_KEY_NAME:?set via Doppler}"
 : "${KORA_GCP_KMS_PUBLIC_KEY:?set via Doppler}"
@@ -39,7 +52,7 @@ case "$ENV" in
 esac
 
 gcloud builds submit "$SCRIPT_DIR" --project "$PROJECT" --config "$SCRIPT_DIR/cloudbuild.yaml" \
-  --substitutions=_IMAGE="$IMAGE",_KCFG="$KCFG",_SCFG="$SCFG"
+  --substitutions=_IMAGE="$IMAGE",_KCFG="$KCFG",_SCFG="$SCFG",_KORA_IMAGE="$KORA_IMAGE"
 
 ENV_VARS="^##^RUST_LOG=info##RPC_URL=${RPC_URL}##KORA_GCP_KMS_KEY_NAME=${KORA_GCP_KMS_KEY_NAME}##KORA_GCP_KMS_PUBLIC_KEY=${KORA_GCP_KMS_PUBLIC_KEY}"
 [ -n "${KORA_REDIS_URL:-}" ] && ENV_VARS="${ENV_VARS}##KORA_REDIS_URL=${KORA_REDIS_URL}"

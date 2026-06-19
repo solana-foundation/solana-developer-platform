@@ -66,13 +66,17 @@
           {
             "evaluator": {
               "type": "gt",
-              "params": [0.01]
+              "params": [
+                0.01
+              ]
             },
             "operator": {
               "type": "and"
             },
             "query": {
-              "params": ["B"]
+              "params": [
+                "B"
+              ]
             },
             "reducer": {
               "type": "last",
@@ -85,7 +89,6 @@
     }
   ],
   "labels": {
-    "service": "kora",
     "severity": "critical",
     "pagerduty": "true",
     "slack": "true"

@@ -5,9 +5,13 @@ steps:
       - -t
       - '${_IMAGE}'
       - --build-arg
+      - 'KORA_IMAGE=${_KORA_IMAGE}'
+      - --build-arg
       - 'KORA_CONFIG=${_KCFG}'
       - --build-arg
       - 'SIGNERS_CONFIG=${_SCFG}'
       - .
 images:
   - '${_IMAGE}'
+substitutions:
+  _KORA_IMAGE: 'ghcr.io/solana-foundation/kora:edge'
