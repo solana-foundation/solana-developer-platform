@@ -47,6 +47,7 @@ interface RampWizardShellProps {
   hidePrimary?: boolean;
   /** Confirm before running the secondary action — used once a transaction is live. */
   confirmSecondary?: boolean;
+  secondaryDisabled?: boolean;
 }
 
 export function RampWizardShell({
@@ -66,6 +67,7 @@ export function RampWizardShell({
   footerActions,
   hidePrimary,
   confirmSecondary,
+  secondaryDisabled,
 }: RampWizardShellProps) {
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   return (
@@ -114,6 +116,7 @@ export function RampWizardShell({
           type="button"
           variant="secondary"
           className="h-14 rounded-full text-base"
+          disabled={secondaryDisabled}
           onClick={confirmSecondary ? () => setCancelConfirmOpen(true) : onSecondary}
         >
           {secondaryLabel ?? (stepIndex === 0 ? "Cancel" : "Previous")}

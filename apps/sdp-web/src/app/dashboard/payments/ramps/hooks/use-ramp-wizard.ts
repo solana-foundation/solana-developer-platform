@@ -137,6 +137,7 @@ export function useRampWizard<TId extends string>(
   const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
   const [quote, setQuote] = useState<PaymentRampQuote | null>(null);
   const [hostedQuoteLoading, setHostedQuoteLoading] = useState(false);
+  const [isCanceling, setIsCanceling] = useState(false);
   const { values: fields, setField } = useZodForm(rampSelectionSchema, {
     walletId: "",
     amount: "",
@@ -383,12 +384,17 @@ export function useRampWizard<TId extends string>(
     if (!quote) {
       throw new Error("Cannot cancel without an active quote.");
     }
+    if (isCanceling) {
+      return;
+    }
+    setIsCanceling(true);
     const toastId = toast.loading("Canceling transaction.", { position: "bottom-right" });
     try {
       await cancelRampTransfer({ provider: quote.provider, providerReference: quote.id });
       toast.success("Transaction canceled.", { id: toastId, position: "bottom-right" });
       finish();
     } catch (error) {
+      setIsCanceling(false);
       toast.error("Unable to cancel transaction.", {
         id: toastId,
         description: error instanceof Error ? error.message : "Cancellation failed.",
@@ -433,6 +439,7 @@ export function useRampWizard<TId extends string>(
     currentStepId,
     isLastStep,
     onTransactionStage,
+    isCanceling,
     canProceed,
     collectedData: requirements.collectedData,
     setCollectedField: requirements.setField,
