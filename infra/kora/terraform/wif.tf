@@ -1,10 +1,13 @@
+# Pool + provider + deployer SA binding are created as a unit, gated by var.create_wif.
 resource "google_iam_workload_identity_pool" "github" {
+  count                     = var.create_wif ? 1 : 0
   workload_identity_pool_id = local.name_prefix
   display_name              = "Kora ${var.env} GitHub OIDC"
 }
 
 resource "google_iam_workload_identity_pool_provider" "github" {
-  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
+  count                              = var.create_wif ? 1 : 0
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github[0].workload_identity_pool_id
   workload_identity_pool_provider_id = "github"
   display_name                       = "GitHub Actions"
 
@@ -23,7 +26,8 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 
 # GitHub Actions in github_repo may impersonate the deployer SA — keyless, no JSON key.
 resource "google_service_account_iam_member" "deployer_wif" {
+  count              = var.create_wif ? 1 : 0
   service_account_id = google_service_account.deployer.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repo}"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github[0].name}/attribute.repository/${var.github_repo}"
 }
