@@ -365,7 +365,7 @@ jobs:
             rpc_provider: quicknode
           - name: Mosaic
             test_files: src/tests/mosaic-token-acl.test.ts src/tests/mosaic-abl.test.ts src/tests/mosaic-templates.test.ts
-            rpc_provider: triton
+            rpc_provider: helius
           - name: Token Flows
             test_files: src/tests/deploy.test.ts src/tests/mint.test.ts src/tests/burn.test.ts src/tests/freeze.test.ts
             rpc_provider: quicknode
