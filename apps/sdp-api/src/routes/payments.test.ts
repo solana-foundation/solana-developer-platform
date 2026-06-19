@@ -86,6 +86,7 @@ const LIGHTSPARK_GRID_API_BASE_URL = "https://api.lightspark.com/grid/2025-10-13
 const TEST_BVNK_HAWK_AUTH_ID = "bvnk_hawk_auth_id";
 const TEST_BVNK_HAWK_SECRET_KEY = "bvnk_hawk_secret_key";
 const TEST_BVNK_WALLET_ID = "a:24122329329347:HsdJVhW:1";
+const TEST_BVNK_OFFRAMP_WALLET_ID = "a:99887766554433:OffRmpW:1";
 const TEST_BVNK_API_BASE_URL = "https://api.sandbox.bvnk.test";
 const TEST_MAGICBLOCK_API_BASE_URL = "https://payments.magicblock.test";
 const TEST_MAGICBLOCK_AUTH_TOKEN = "magicblock_auth_token";
@@ -2527,9 +2528,13 @@ describe("Payments routes", () => {
 
   it("creates and accepts a BVNK off-ramp estimate through the execute endpoint", async () => {
     const counterpartyId = await seedCounterparty({
+      externalId: "customer_456",
       identity: { address: { countryCode: "US" } },
       providerData: {
-        bvnk: { customer: { customerReference: "customer_456", status: "VERIFIED" } },
+        bvnk: {
+          customer: { customerReference: "customer_456", status: "VERIFIED" },
+          offramp: { wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } } },
+        },
       },
     });
     const fetchSpy = vi
@@ -2623,7 +2628,7 @@ describe("Payments routes", () => {
       network: string;
       complianceDetails: { partyDetails: Record<string, unknown>[] };
     };
-    expect(estimatePayload.walletId).toBe(TEST_BVNK_WALLET_ID);
+    expect(estimatePayload.walletId).toBe(TEST_BVNK_OFFRAMP_WALLET_ID);
     expect(estimatePayload.walletCurrency).toBe("USD");
     expect(estimatePayload.paidCurrency).toBe("USDC");
     expect(estimatePayload.paidRequiredAmount).toBe(75.25);
@@ -2645,9 +2650,13 @@ describe("Payments routes", () => {
 
   it("returns bad request when BVNK off-ramp is missing compliance party details", async () => {
     const counterpartyId = await seedCounterparty({
+      externalId: "customer_456",
       identity: { address: { countryCode: "US" } },
       providerData: {
-        bvnk: { customer: { customerReference: "customer_456", status: "VERIFIED" } },
+        bvnk: {
+          customer: { customerReference: "customer_456", status: "VERIFIED" },
+          offramp: { wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } } },
+        },
       },
     });
 
