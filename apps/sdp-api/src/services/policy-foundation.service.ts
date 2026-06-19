@@ -247,6 +247,8 @@ export class PolicyFoundationService {
       );
 
       if (resolution.total_binding_count > 0) {
+        // Once an API key has wallet policy bindings, an inactive or out-of-scope
+        // requested wallet must fail closed instead of falling back to legacy policy lookup.
         const input = {
           apiKeyId: operation.apiKeyId,
           walletId: operation.walletId,
