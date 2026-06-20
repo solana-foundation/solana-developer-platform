@@ -13,9 +13,13 @@ import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
-import { createRecurringPayment as createRecurringPaymentRecord } from "@/services/payments/recurring-payments";
+import {
+  activateRecurringPayment as activateRecurringPaymentRecord,
+  createRecurringPayment as createRecurringPaymentRecord,
+} from "@/services/payments/recurring-payments";
 import { type AppContext, getPaymentRecurringPaymentsRepository } from "../context";
 import {
+  activateRecurringPaymentSchema,
   createRecurringPaymentSchema,
   listRecurringPaymentsQuerySchema,
   recurringPaymentIdParamsSchema,
@@ -86,6 +90,65 @@ export const createRecurringPayment = async (c: AppContext) => {
     recurringPayment: mapRecurringPayment(recurringPayment),
   };
   return created(c, response);
+};
+
+async function readOptionalJsonBody(c: AppContext): Promise<unknown> {
+  const text = await c.req.text();
+  if (!text.trim()) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw badRequest("Invalid request body");
+  }
+}
+
+export const activateRecurringPayment = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
+
+  if (!params.success) {
+    throw badRequestParams();
+  }
+
+  const body = await readOptionalJsonBody(c);
+  const parsed = activateRecurringPaymentSchema.safeParse(body);
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
+  }
+
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:write"]);
+  const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
+    recurringPaymentId: params.data.id,
+    organizationId: auth.organizationId,
+    projectId,
+    sourceWalletIds: allowedWalletIds ?? undefined,
+  });
+
+  if (!recurringPayment) {
+    throw new AppError("NOT_FOUND", "Recurring payment not found");
+  }
+
+  const scope = await resolveScope(c);
+  const sourceWallet = resolveWallet(scope.wallets, recurringPayment.source_wallet_id);
+  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
+
+  const activated = await activateRecurringPaymentRecord({
+    env: c.env,
+    organizationId: auth.organizationId,
+    projectId,
+    sourceWallet,
+    recurringPayment,
+    createdBy: await resolveCreatorUserId(c),
+  });
+  const response: PaymentRecurringPaymentResponse = {
+    recurringPayment: mapRecurringPayment(activated),
+  };
+
+  return success(c, response);
 };
 
 export const listRecurringPayments = async (c: AppContext) => {

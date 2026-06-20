@@ -27,6 +27,7 @@ export type {
   ListPaymentRecurringPaymentsResult,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
+  UpdatePaymentRecurringPaymentActivationInput,
 } from "./payment-recurring-payments.repository";
 export { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 export type {

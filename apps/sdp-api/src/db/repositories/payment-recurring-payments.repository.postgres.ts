@@ -5,6 +5,7 @@ import type {
   ListPaymentRecurringPaymentsResult,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
+  UpdatePaymentRecurringPaymentActivationInput,
 } from "./payment-recurring-payments.repository";
 
 function buildInClause(length: number): string {
@@ -113,6 +114,104 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         organizationId: input.organizationId,
         projectId: input.projectId,
       });
+    },
+
+    async claimRecurringPaymentActivation(params) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET status = 'activating',
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'pending_activation'
+          RETURNING *`
+        )
+        .bind(params.updatedAt, params.recurringPaymentId, params.organizationId, params.projectId)
+        .first<Record<string, unknown>>();
+
+      return row ? mapRecurringPaymentRow(row) : null;
+    },
+
+    async resetRecurringPaymentActivationIfNotActive(params) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET status = 'pending_activation',
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'activating'
+          RETURNING *`
+        )
+        .bind(params.updatedAt, params.recurringPaymentId, params.organizationId, params.projectId)
+        .first<Record<string, unknown>>();
+
+      return row ? mapRecurringPaymentRow(row) : null;
+    },
+
+    async updateRecurringPaymentActivation(input: UpdatePaymentRecurringPaymentActivationInput) {
+      const allowActiveUpdate = input.status === "active";
+      const row = await db
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET status = COALESCE(?, status),
+                  plan_id = CASE WHEN ?::boolean THEN ? ELSE plan_id END,
+                  subscription_id = CASE WHEN ?::boolean THEN ? ELSE subscription_id END,
+                  plan_pda = CASE WHEN ?::boolean THEN ? ELSE plan_pda END,
+                  plan_created_at = CASE WHEN ?::boolean THEN ? ELSE plan_created_at END,
+                  plan_creation_signature =
+                    CASE WHEN ?::boolean THEN ? ELSE plan_creation_signature END,
+                  subscription_pda =
+                    CASE WHEN ?::boolean THEN ? ELSE subscription_pda END,
+                  subscription_authority_address =
+                    CASE WHEN ?::boolean THEN ? ELSE subscription_authority_address END,
+                  authorization_signature =
+                    CASE WHEN ?::boolean THEN ? ELSE authorization_signature END,
+                  next_collection_due_at =
+                    CASE WHEN ?::boolean THEN ? ELSE next_collection_due_at END,
+                  destination_token_account =
+                    CASE WHEN ?::boolean THEN ? ELSE destination_token_account END,
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND (status = 'activating' OR ?::boolean)
+          RETURNING *`
+        )
+        .bind(
+          input.status ?? null,
+          input.planId !== undefined,
+          input.planId ?? null,
+          input.subscriptionId !== undefined,
+          input.subscriptionId ?? null,
+          input.planPda !== undefined,
+          input.planPda ?? null,
+          input.planCreatedAt !== undefined,
+          input.planCreatedAt ?? null,
+          input.planCreationSignature !== undefined,
+          input.planCreationSignature ?? null,
+          input.subscriptionPda !== undefined,
+          input.subscriptionPda ?? null,
+          input.subscriptionAuthorityAddress !== undefined,
+          input.subscriptionAuthorityAddress ?? null,
+          input.authorizationSignature !== undefined,
+          input.authorizationSignature ?? null,
+          input.nextCollectionDueAt !== undefined,
+          input.nextCollectionDueAt ?? null,
+          input.destinationTokenAccount !== undefined,
+          input.destinationTokenAccount ?? null,
+          input.updatedAt,
+          input.recurringPaymentId,
+          input.organizationId,
+          input.projectId,
+          allowActiveUpdate
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapRecurringPaymentRow(row) : null;
     },
 
     async getRecurringPaymentById(params) {
