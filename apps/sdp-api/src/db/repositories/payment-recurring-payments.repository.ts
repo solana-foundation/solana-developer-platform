@@ -30,6 +30,23 @@ export interface PaymentRecurringPaymentRow {
   updated_at: string;
 }
 
+export type PaymentRecurringPaymentActivationAttemptStatus = "processing" | "confirmed" | "failed";
+
+export interface PaymentRecurringPaymentActivationAttemptRow {
+  id: string;
+  organization_id: string;
+  project_id: string;
+  recurring_payment_id: string;
+  status: PaymentRecurringPaymentActivationAttemptStatus;
+  stage: string;
+  plan_creation_signature: string | null;
+  authorization_signature: string | null;
+  error: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CreatePaymentRecurringPaymentInput {
   id: string;
   organizationId: string;
@@ -67,6 +84,34 @@ export interface UpdatePaymentRecurringPaymentActivationInput {
   updatedAt: string;
 }
 
+export interface CreatePaymentRecurringPaymentActivationAttemptInput {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  status: PaymentRecurringPaymentActivationAttemptStatus;
+  stage: string;
+  planCreationSignature: string | null;
+  authorizationSignature: string | null;
+  error: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdatePaymentRecurringPaymentActivationAttemptInput {
+  attemptId: string;
+  organizationId: string;
+  projectId: string;
+  status?: PaymentRecurringPaymentActivationAttemptStatus;
+  stage?: string;
+  planCreationSignature?: string | null;
+  authorizationSignature?: string | null;
+  error?: string | null;
+  metadata?: Record<string, unknown>;
+  updatedAt: string;
+}
+
 export interface ListPaymentRecurringPaymentsInput {
   organizationId: string;
   projectId: string;
@@ -91,6 +136,7 @@ export interface PaymentRecurringPaymentsRepository {
     organizationId: string;
     projectId: string;
     updatedAt: string;
+    staleBefore?: string;
   }): Promise<PaymentRecurringPaymentRow | null>;
   resetRecurringPaymentActivationIfNotActive(params: {
     recurringPaymentId: string;
@@ -101,6 +147,12 @@ export interface PaymentRecurringPaymentsRepository {
   updateRecurringPaymentActivation(
     input: UpdatePaymentRecurringPaymentActivationInput
   ): Promise<PaymentRecurringPaymentRow | null>;
+  createActivationAttempt(
+    input: CreatePaymentRecurringPaymentActivationAttemptInput
+  ): Promise<PaymentRecurringPaymentActivationAttemptRow | null>;
+  updateActivationAttempt(
+    input: UpdatePaymentRecurringPaymentActivationAttemptInput
+  ): Promise<PaymentRecurringPaymentActivationAttemptRow | null>;
   getRecurringPaymentById(params: {
     recurringPaymentId: string;
     organizationId: string;
