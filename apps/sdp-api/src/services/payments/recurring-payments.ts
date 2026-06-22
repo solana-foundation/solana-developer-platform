@@ -259,6 +259,7 @@ async function getOrCreateActivationSubscription(input: {
     projectId: input.projectId,
     planId: input.planId,
     counterpartyId: input.claimed.counterparty_id,
+    subscriberAddress: input.subscriberAddress,
     limit: 1,
     offset: 0,
   });
@@ -400,6 +401,72 @@ function assertActivationPreconditions(input: {
   }
 }
 
+async function journalActivationClaimConflict(input: {
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  recurringPayment: PaymentRecurringPaymentRow;
+  organizationId: string;
+  projectId: string;
+  nowIso: string;
+}): Promise<void> {
+  try {
+    await input.recurringRepo.createActivationAttempt({
+      id: `prpa_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      status: "failed",
+      stage: "claim",
+      planCreationSignature: input.recurringPayment.plan_creation_signature,
+      authorizationSignature: input.recurringPayment.authorization_signature,
+      error: "Recurring payment activation is already processing",
+      metadata: {},
+      createdAt: input.nowIso,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Failed to journal recurring payment activation claim conflict", {
+      error: error instanceof Error ? error.message : String(error),
+      recurringPaymentId: input.recurringPayment.id,
+    });
+  }
+}
+
+async function createClaimedActivationAttempt(input: {
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  claimed: PaymentRecurringPaymentRow;
+  organizationId: string;
+  projectId: string;
+  nowIso: string;
+}): Promise<PaymentRecurringPaymentActivationAttemptRow> {
+  const attempt = await input.recurringRepo.createActivationAttempt({
+    id: `prpa_${crypto.randomUUID()}`,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.claimed.id,
+    status: "processing",
+    stage: "create_plan",
+    planCreationSignature: input.claimed.plan_creation_signature,
+    authorizationSignature: input.claimed.authorization_signature,
+    error: null,
+    metadata: {},
+    createdAt: input.nowIso,
+    updatedAt: input.nowIso,
+  });
+
+  if (attempt) {
+    return attempt;
+  }
+
+  await resetRecurringPaymentActivationUnlessAlreadyActive({
+    recurringRepo: input.recurringRepo,
+    recurringPaymentId: input.claimed.id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    updatedAt: new Date().toISOString(),
+  });
+  throw new AppError("INTERNAL_ERROR", "Failed to journal recurring payment activation");
+}
+
 export async function activateRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -418,25 +485,6 @@ export async function activateRecurringPayment(input: {
     return input.recurringPayment;
   }
 
-  const attempt = await recurringRepo.createActivationAttempt({
-    id: `prpa_${crypto.randomUUID()}`,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPaymentId: input.recurringPayment.id,
-    status: "processing",
-    stage: "claim",
-    planCreationSignature: input.recurringPayment.plan_creation_signature,
-    authorizationSignature: input.recurringPayment.authorization_signature,
-    error: null,
-    metadata: {},
-    createdAt: nowIso,
-    updatedAt: nowIso,
-  });
-
-  if (!attempt) {
-    throw new AppError("INTERNAL_ERROR", "Failed to journal recurring payment activation");
-  }
-
   const claimed = await recurringRepo.claimRecurringPaymentActivation({
     recurringPaymentId: input.recurringPayment.id,
     organizationId: input.organizationId,
@@ -446,17 +494,23 @@ export async function activateRecurringPayment(input: {
   });
 
   if (!claimed) {
-    await recurringRepo.updateActivationAttempt({
-      attemptId: attempt.id,
+    await journalActivationClaimConflict({
+      recurringRepo,
+      recurringPayment: input.recurringPayment,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      status: "failed",
-      stage: "claim",
-      error: "Recurring payment activation is already processing",
-      updatedAt: new Date().toISOString(),
+      nowIso,
     });
     throw new AppError("CONFLICT", "Recurring payment activation is already processing");
   }
+
+  const attempt = await createClaimedActivationAttempt({
+    recurringRepo,
+    claimed,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    nowIso,
+  });
 
   let currentStage: ActivationAttemptStage = "create_plan";
   let planCreationSignature = claimed.plan_creation_signature as Signature | null;
@@ -670,6 +724,13 @@ export async function activateRecurringPayment(input: {
             initAuthorityInstruction,
           ],
           feePayer,
+        });
+        await recurringRepo.updateActivationAttempt({
+          attemptId: attempt.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          metadata: { initAuthoritySignature: initSignature },
+          updatedAt: new Date().toISOString(),
         });
         await confirmSubscriptionSignature(input.env, initSignature);
         subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
