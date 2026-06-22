@@ -1208,6 +1208,166 @@ describe("Payments routes", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(1);
   });
 
+  it("recovers stale authorized recurring payments without re-confirming old signatures", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    confirmTransactionMock.mockRejectedValue(new Error("transaction history expired"));
+    const signAndSendMock = vi.fn();
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const counterpartyId = await seedCounterparty({
+      externalId: `recurring_activation_authorized_stale_${crypto.randomUUID()}`,
+    });
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const createRes = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          sourceWalletId: TEST_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 24,
+        }),
+      },
+      env
+    );
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as {
+      data: { recurringPayment: { id: string } };
+    };
+    const planId = `psp_${crypto.randomUUID()}`;
+    const subscriptionId = `psub_${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    const staleUpdatedAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    const planCreationSignature =
+      "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature;
+    const authorizationSignature =
+      "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature;
+
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_subscription_plans (
+           id,
+           organization_id,
+           project_id,
+           owner_wallet_id,
+           owner_address,
+           token,
+           amount,
+           period_hours,
+           program_plan_id,
+           status,
+           created_by,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        planId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_WALLET_ID,
+        sourceSigner.address,
+        DEVNET_USDC_MINT,
+        "25.00",
+        24,
+        "1002",
+        "active",
+        TEST_USER.id,
+        now,
+        now
+      )
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_subscriptions (
+           id,
+           organization_id,
+           project_id,
+           plan_id,
+           counterparty_id,
+           subscriber_address,
+           authorization_signature,
+           status,
+           created_by,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        subscriptionId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        planId,
+        counterpartyId,
+        sourceSigner.address,
+        authorizationSignature,
+        "pending_authorization",
+        TEST_USER.id,
+        now,
+        now
+      )
+      .run();
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_recurring_payments
+            SET status = 'activating',
+                plan_id = ?,
+                subscription_id = ?,
+                plan_created_at = ?,
+                plan_creation_signature = ?,
+                authorization_signature = ?,
+                updated_at = ?
+          WHERE id = ?`
+      )
+      .bind(
+        planId,
+        subscriptionId,
+        "1770000000",
+        planCreationSignature,
+        authorizationSignature,
+        staleUpdatedAt,
+        createBody.data.recurringPayment.id
+      )
+      .run();
+
+    const staleRetryRes = await app.request(
+      `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(staleRetryRes.status).toBe(200);
+    const staleRetryBody = (await staleRetryRes.json()) as {
+      data: { recurringPayment: { status: string; authorizationSignature: string } };
+    };
+    expect(staleRetryBody.data.recurringPayment).toMatchObject({
+      status: "active",
+      authorizationSignature,
+    });
+    expect(confirmTransactionMock).not.toHaveBeenCalled();
+    expect(signAndSendMock).not.toHaveBeenCalled();
+  });
+
   it("journals failed on-chain activation attempts and retries with a fresh signature", async () => {
     env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();

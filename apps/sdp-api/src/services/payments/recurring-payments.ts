@@ -493,6 +493,35 @@ async function fetchConfirmedActivationPlan(input: {
   });
 }
 
+async function fetchConfirmedSubscriptionDelegation(input: {
+  env: Env;
+  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  subscriptionPda: Address;
+  authorizationSignature: Signature;
+  authorizedThisRun: boolean;
+}) {
+  if (input.authorizedThisRun) {
+    await confirmSubscriptionSignature(input.env, input.authorizationSignature);
+    return subscriptionsProgram.fetchMaybeSubscriptionDelegation(input.rpc, input.subscriptionPda, {
+      commitment: "confirmed",
+    });
+  }
+
+  const existingSubscription = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
+    input.rpc,
+    input.subscriptionPda,
+    { commitment: "confirmed" }
+  );
+  if (existingSubscription.exists) {
+    return existingSubscription;
+  }
+
+  await confirmSubscriptionSignature(input.env, input.authorizationSignature);
+  return subscriptionsProgram.fetchMaybeSubscriptionDelegation(input.rpc, input.subscriptionPda, {
+    commitment: "confirmed",
+  });
+}
+
 async function prepareSubscriptionAuthorityForActivation(input: {
   env: Env;
   recurringRepo: PaymentRecurringPaymentsRepository;
@@ -795,6 +824,7 @@ export async function activateRecurringPayment(input: {
       updatedAt: authorizationUpdatedAt,
     });
 
+    let authorizedThisRun = false;
     if (!authorizationSignature) {
       let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
         rpc,
@@ -860,15 +890,17 @@ export async function activateRecurringPayment(input: {
         authorizationSignature,
         updatedAt: signatureUpdatedAt,
       });
+      authorizedThisRun = true;
     }
-    await confirmSubscriptionSignature(input.env, authorizationSignature);
 
     currentStage = "finalize";
-    const onChainSubscription = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
+    const onChainSubscription = await fetchConfirmedSubscriptionDelegation({
+      env: input.env,
       rpc,
       subscriptionPda,
-      { commitment: "confirmed" }
-    );
+      authorizationSignature,
+      authorizedThisRun,
+    });
     if (!onChainSubscription.exists) {
       throw new AppError("TRANSACTION_FAILED", "Subscription authorization was not found on-chain");
     }
