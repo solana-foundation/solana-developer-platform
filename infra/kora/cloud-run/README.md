@@ -34,30 +34,32 @@ This applies to the active devnet Kora surfaces:
 - `dev_ci` Kora used by integration tests
 - shared dev/staging Kora used by local and staging environments
 
-The Cloud Run services mount Kora config from Secret Manager, so a checked-in TOML change must also be uploaded to the matching secret and rolled out to the running service. For the shared devnet service:
-
-```bash
-gcloud config set project solana-developer-platform
-
-gcloud secrets versions add kora-sdp-config \
-  --data-file=infra/kora/cloud-run/kora.devnet.toml
-
-gcloud run services update kora-sdp \
-  --region us-central1 \
-  --update-env-vars KORA_CONFIG_VERSION=$(date +%s)
-```
+The `kora-<env>` Cloud Run services (`kora-devnet` / `kora-mainnet`) mount Kora config from Secret
+Manager, and those secrets are **owned by Terraform** (`infra/kora/terraform/secrets.tf`): the
+`kora.<env>.toml` + `signers.<env>.toml` files in this folder are the source of truth. To roll out a
+config change, edit the TOML here, then `terraform apply` for the env (which adds a new secret version)
+and ship a new revision so the running service picks it up. See the repo-root README / PR
+`feat/kora-deploy-via-tag` for the full mainnet cutover steps.
 
 ## Deploy
 
-```bash
-gcloud config set project solana-developer-platform
-gcloud run services update kora-sdp --region us-central1
-```
+Deploys go through `.github/workflows/deploy-kora.yml`, which:
 
-If the service should be publicly reachable, allow unauthenticated invoker:
+1. Reads the pinned Kora image tag from `.github/kora-image-tag`.
+2. Mirrors `ghcr.io/solana-foundation/kora:<tag>` into this project's Artifact Registry
+   (`us-central1-docker.pkg.dev/<project>/kora-<env>/kora:<tag>`) — Cloud Run cannot pull from ghcr.io.
+3. Runs `gcloud run services update kora-<env> --image <AR>/kora:<tag>` with `KORA_<ENV>_*` env from
+   Doppler.
+
+**Bumping the deployed image:** edit `.github/kora-image-tag` to the new pinned tag and open a PR.
+Merging to `main` auto-deploys **devnet then mainnet**, in that order — mainnet only runs if devnet
+succeeds (the deploy job is an ordered, fail-fast matrix). A manual `workflow_dispatch` run can target
+`devnet`, `mainnet`, or `both`. Each env still goes through its `devnet`/`mainnet` GitHub Environment.
+
+If a service should be publicly reachable, allow unauthenticated invoker:
 
 ```bash
-gcloud run services add-iam-policy-binding kora-sdp \
+gcloud run services add-iam-policy-binding kora-devnet \
   --region us-central1 \
   --member=allUsers \
   --role=roles/run.invoker

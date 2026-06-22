@@ -19,7 +19,24 @@ resource "google_cloud_run_v2_service" "kora" {
     }
 
     containers {
-      image = var.bootstrap_image
+      # Pinned upstream Kora image, mirrored into this project's Artifact Registry (Cloud Run cannot
+      # pull ghcr.io). The live tag is bumped + deployed by the pipeline (see deploy-kora.yml); this is
+      # the bootstrap value and is ignored thereafter (ignore_changes below).
+      image = var.kora_image
+
+      # The official Kora image entrypoint is just `kora` (EXPOSE 8080); we supply the start command.
+      # Config + signers are mounted from Secret Manager at the paths below.
+      args = [
+        "kora",
+        "--config",
+        "/app/config/kora.toml",
+        "rpc",
+        "start",
+        "--signers-config",
+        "/app/signers/signers.toml",
+        "--port",
+        "8080",
+      ]
 
       ports {
         container_port = 8080
@@ -30,6 +47,18 @@ resource "google_cloud_run_v2_service" "kora" {
           cpu    = var.cpu
           memory = var.memory
         }
+      }
+
+      # kora.<env>.toml mounted from Secret Manager.
+      volume_mounts {
+        name       = "kora-config"
+        mount_path = "/app/config"
+      }
+
+      # signers.<env>.toml mounted from Secret Manager.
+      volume_mounts {
+        name       = "kora-signers"
+        mount_path = "/app/signers"
       }
 
       startup_probe {
@@ -43,10 +72,33 @@ resource "google_cloud_run_v2_service" "kora" {
         failure_threshold     = 6
       }
     }
+
+    volumes {
+      name = "kora-config"
+      secret {
+        secret = google_secret_manager_secret.kora_config.secret_id
+        items {
+          version = "latest"
+          path    = "kora.toml"
+        }
+      }
+    }
+
+    volumes {
+      name = "kora-signers"
+      secret {
+        secret = google_secret_manager_secret.kora_signers.secret_id
+        items {
+          version = "latest"
+          path    = "signers.toml"
+        }
+      }
+    }
   }
 
-  # Image + env are owned by the deploy pipeline (doppler run -- gcloud run deploy); config is baked
-  # into the image. No Secret Manager.
+  # Image + env are owned by the deploy pipeline (doppler run -- gcloud run services update): the
+  # pipeline mirrors a pinned ghcr tag into AR and deploys it, and sets KORA_<ENV>_* env from Doppler.
+  # Config files are delivered via the Secret Manager volumes above (Terraform-owned).
   lifecycle {
     ignore_changes = [
       template[0].containers[0].image,
@@ -56,7 +108,11 @@ resource "google_cloud_run_v2_service" "kora" {
     ]
   }
 
-  depends_on = [google_kms_crypto_key_iam_member.runtime_signer]
+  depends_on = [
+    google_kms_crypto_key_iam_member.runtime_signer,
+    google_secret_manager_secret_iam_member.runtime_config_accessor,
+    google_secret_manager_secret_iam_member.runtime_signers_accessor,
+  ]
 }
 
 resource "google_cloud_run_v2_service_iam_member" "deployer_admin" {
