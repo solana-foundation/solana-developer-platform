@@ -8,13 +8,13 @@ import {
   type Instruction,
   pipe,
   type Signature,
-  type TransactionSigner,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  type TransactionSigner,
 } from "@solana/kit";
-import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import * as subscriptionsProgram from "@solana/subscriptions";
+import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
@@ -678,10 +678,7 @@ export async function activateRecurringPayment(input: {
           { commitment: "confirmed" }
         );
         if (!subscriptionAuthority.exists) {
-          throw new AppError(
-            "TRANSACTION_FAILED",
-            "Subscription authority was not found on-chain"
-          );
+          throw new AppError("TRANSACTION_FAILED", "Subscription authority was not found on-chain");
         }
       }
 
