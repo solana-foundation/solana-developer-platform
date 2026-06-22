@@ -4,6 +4,7 @@ import {
   type PaymentTransferRow as TransferRow,
 } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
+import { mapMoneygramTransferDetails } from "./mappers/moneygram";
 
 export function mapTransferRow(row: TransferRow) {
   const base = {
@@ -45,6 +46,7 @@ export function mapTransferRow(row: TransferRow) {
   }
 
   const settlement = row.provider_data.settlement as RampTransferSettlement | undefined;
+  const moneygram = mapMoneygramTransferDetails(row);
   return {
     ...base,
     provider: row.provider,
@@ -54,5 +56,6 @@ export function mapTransferRow(row: TransferRow) {
     ...(row.fiat_currency ? { fiatCurrency: row.fiat_currency } : {}),
     ...(row.fiat_amount ? { fiatAmount: row.fiat_amount } : {}),
     ...(settlement ? { settlement } : {}),
+    ...(moneygram ? { moneygram } : {}),
   };
 }

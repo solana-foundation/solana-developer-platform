@@ -1,4 +1,5 @@
 import {
+  type MoneygramRampEvent,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
   type PrivateTransferRequest,
@@ -464,6 +465,7 @@ export const createOnrampQuoteSchema = z.object({
 
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
+  z.object({ provider: z.literal("moneygram"), direction: rampDirectionSchema }),
   z.discriminatedUnion("direction", [
     z.object({
       provider: z.literal("bvnk"),
@@ -506,6 +508,34 @@ export const executeOfframpSchema = z.object({
   redirectUrl: z.string().url().optional(),
   bvnkCompliance: bvnkComplianceSchema.optional(),
 });
+
+export const moneygramRampEventSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("signed"),
+    sessionId: z.string().min(1),
+    cryptoTransferId: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal("completed"),
+    sessionId: z.string().min(1),
+    cryptoTransferId: z.string().min(1),
+    transactionId: z.string().min(1),
+    payoutAmount: z.number().positive(),
+    payoutStatus: z.string().min(1),
+    referenceNumber: z.string().min(1).optional(),
+  }),
+  z.object({
+    kind: z.literal("errored"),
+    sessionId: z.string().min(1),
+    reason: z.string().min(1),
+    cryptoTransferId: z.string().min(1).optional(),
+    transactionId: z.string().min(1).optional(),
+  }),
+  z.object({
+    kind: z.literal("closed"),
+    sessionId: z.string().min(1),
+  }),
+]) satisfies z.ZodType<MoneygramRampEvent>;
 
 const simulateLightsparkSandboxTransferPayloadSchema = z.object({
   quoteId: z.string().min(1),

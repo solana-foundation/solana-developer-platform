@@ -191,6 +191,17 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
         return prod || sandbox;
       },
     },
+    moneygram: {
+      label: "MoneyGram",
+      isConfigured: (env, testMode) => {
+        const sandbox = hasAllEnv(env, [
+          "MONEYGRAM_SANDBOX_PUBLIC_KEY",
+          "MONEYGRAM_SANDBOX_SECRET_KEY",
+        ]);
+        if (testMode === false) return false;
+        return sandbox;
+      },
+    },
   },
 } as const satisfies ProviderAvailabilityDefinitions;
 

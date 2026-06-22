@@ -284,6 +284,8 @@ async function executeOnrampWithProvider(
         bvnkPaymentRule,
       });
     }
+    case "moneygram":
+      throw badRequest("MoneyGram on-ramp is not available.");
     default: {
       const _exhaustive: never = input.provider;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
@@ -298,6 +300,8 @@ export async function advanceCounterpartyRequirements(
   switch (input.provider) {
     case "moonpay":
       return readyCounterparty("moonpay", input.direction);
+    case "moneygram":
+      return readyCounterparty("moneygram", input.direction);
     case "lightspark": {
       const customer = await ensureLightsparkCustomer(c, {
         counterparty: input.counterparty,
@@ -424,6 +428,10 @@ async function executeOfframpWithProvider(
         bvnkCompliance: input.bvnkCompliance,
       });
     }
+    case "moneygram":
+      throw badRequest(
+        "MoneyGram off-ramp runs through the widget session created at quote time; execute is not supported."
+      );
     default: {
       const _exhaustive: never = input.provider;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
@@ -590,6 +598,8 @@ export async function createOnrampQuote(c: AppContext) {
       });
       break;
     }
+    case "moneygram":
+      throw badRequest("MoneyGram on-ramp is not available.");
     default: {
       const exhaustive: never = input.provider;
       throw new AppError(
@@ -716,6 +726,16 @@ export async function createOfframpQuote(c: AppContext) {
         bvnkCompliance: buildBvnkPartyDetails(counterparty, "BENEFICIARY"),
         bvnkOfframpWalletId,
         redirectUrl: input.redirectUrl,
+      });
+      break;
+    }
+    case "moneygram": {
+      quote = await RAMP_PROVIDER_CLIENTS.moneygram.createOfframpQuote(rampRuntime(c), {
+        cryptoToken: input.cryptoToken,
+        fiatCurrency: input.fiatCurrency,
+        cryptoAmount: input.cryptoAmount,
+        sourceWalletAddress,
+        externalCustomerId: counterparty.external_id ?? counterparty.id,
       });
       break;
     }
