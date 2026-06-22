@@ -52,7 +52,7 @@
             "groupBys": ["resource.label.service_name", "metric.label.response_code_class"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_DELTA",
-            "alignmentPeriod": "$__interval"
+            "alignmentPeriod": "60s"
           },
           "aliasBy": "{{resource.label.service_name}} {{metric.label.response_code_class}}"
         }
@@ -77,7 +77,7 @@
             "groupBys": ["resource.label.service_name", "metric.label.response_code_class"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_DELTA",
-            "alignmentPeriod": "$__interval"
+            "alignmentPeriod": "60s"
           },
           "aliasBy": "{{resource.label.service_name}} {{metric.label.response_code_class}}"
         }
@@ -102,7 +102,7 @@
             "groupBys": ["resource.label.service_name"],
             "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_PERCENTILE_50",
-            "alignmentPeriod": "$__interval"
+            "alignmentPeriod": "300s"
           },
           "aliasBy": "p50 {{resource.label.service_name}}"
         }
@@ -127,7 +127,7 @@
             "groupBys": ["resource.label.service_name"],
             "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_PERCENTILE_95",
-            "alignmentPeriod": "$__interval"
+            "alignmentPeriod": "300s"
           },
           "aliasBy": "p95 {{resource.label.service_name}}"
         }
@@ -153,7 +153,7 @@
             "groupBys": ["resource.label.service_name", "metric.label.state"],
             "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_MEAN",
-            "alignmentPeriod": "$__interval"
+            "alignmentPeriod": "60s"
           },
           "aliasBy": "{{resource.label.service_name}} {{metric.label.state}}"
         }
@@ -178,7 +178,7 @@
             "groupBys": ["resource.label.service_name"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
-            "alignmentPeriod": "$__interval"
+            "alignmentPeriod": "60s"
           },
           "aliasBy": "{{resource.label.service_name}}"
         }
@@ -203,7 +203,7 @@
             "groupBys": ["resource.label.service_name"],
             "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_PERCENTILE_95",
-            "alignmentPeriod": "$__interval"
+            "alignmentPeriod": "300s"
           },
           "aliasBy": "cpu p95 {{resource.label.service_name}}"
         }
@@ -228,7 +228,7 @@
             "groupBys": ["resource.label.service_name"],
             "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_PERCENTILE_95",
-            "alignmentPeriod": "$__interval"
+            "alignmentPeriod": "300s"
           },
           "aliasBy": "mem p95 {{resource.label.service_name}}"
         }
