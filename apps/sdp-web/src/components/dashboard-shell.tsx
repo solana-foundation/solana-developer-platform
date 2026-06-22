@@ -427,15 +427,9 @@ function isItemActive(
     return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
   }
   if (href === "/dashboard/payments") {
-    const isGatedPaymentsV2Route =
-      pathname.startsWith("/dashboard/payments/pay") ||
-      pathname.startsWith("/dashboard/payments/deposit");
-
-    return (
-      pathname.startsWith("/dashboard/payments") &&
-      !pathname.startsWith("/dashboard/payments/counterparty") &&
-      (featureFlags.paymentsV2 || !isGatedPaymentsV2Route)
-    );
+    if (pathname.startsWith("/dashboard/payments/counterparty")) return false;
+    if (featureFlags.paymentsV2) return pathname === "/dashboard/payments";
+    return pathname.startsWith("/dashboard/payments");
   }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
