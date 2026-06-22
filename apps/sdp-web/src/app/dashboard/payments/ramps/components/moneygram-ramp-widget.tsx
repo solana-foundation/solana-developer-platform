@@ -129,14 +129,19 @@ declare global {
   }
 }
 
+let rampsSdkPromise: Promise<NonNullable<Window["RampsSDK"]>> | null = null;
+
 function loadRampsSdk(sdkUrl: string): Promise<NonNullable<Window["RampsSDK"]>> {
   if (window.RampsSDK) {
     return Promise.resolve(window.RampsSDK);
   }
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${sdkUrl}"]`);
-    const script =
-      existing instanceof HTMLScriptElement ? existing : document.createElement("script");
+  if (rampsSdkPromise) {
+    return rampsSdkPromise;
+  }
+  rampsSdkPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = sdkUrl;
+    script.async = true;
     script.addEventListener("load", () => {
       if (window.RampsSDK) {
         resolve(window.RampsSDK);
@@ -147,12 +152,12 @@ function loadRampsSdk(sdkUrl: string): Promise<NonNullable<Window["RampsSDK"]>> 
     script.addEventListener("error", () =>
       reject(new Error("Failed to load the MoneyGram SDK script."))
     );
-    if (!(existing instanceof HTMLScriptElement)) {
-      script.src = sdkUrl;
-      script.async = true;
-      document.head.appendChild(script);
-    }
+    document.head.appendChild(script);
   });
+  rampsSdkPromise.catch(() => {
+    rampsSdkPromise = null;
+  });
+  return rampsSdkPromise;
 }
 
 function compactStrings(fields: Record<string, unknown>): Record<string, string> {
@@ -286,7 +291,7 @@ export function MoneygramRampWidget({
           container,
           sessionToken,
           widgetUrl,
-          devConfig: { apiBaseUrl: `${new URL(widgetUrl).origin}/api`, mockMode: true },
+          devConfig: { apiBaseUrl: `${new URL(widgetUrl).origin}/api`, mockMode: false },
           wallet: {
             address: sourceWalletAddress,
             chain: "solana",
@@ -319,7 +324,11 @@ export function MoneygramRampWidget({
               throw new Error(`Transfer did not return a signature (status: ${transfer.status}).`);
             }
             signedTransferIdRef.current = transfer.id;
-            post({ kind: "signed", sessionId, cryptoTransferId: transfer.id });
+            await postMoneygramRampEvent({
+              kind: "signed",
+              sessionId,
+              cryptoTransferId: transfer.id,
+            });
             return transfer.signature;
           },
           onComplete: (transaction) => {
@@ -344,10 +353,12 @@ export function MoneygramRampWidget({
             });
           },
           onError: (error) => {
+            const cryptoTransferId = signedTransferIdRef.current;
             post({
               kind: "errored",
               sessionId,
               reason: error.reason,
+              ...(cryptoTransferId ? { cryptoTransferId } : {}),
               ...(error.transactionId ? { transactionId: error.transactionId } : {}),
             });
           },

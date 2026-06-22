@@ -654,5 +654,11 @@ export type MoneygramRampEvent =
       payoutStatus: string;
       referenceNumber?: string;
     }
-  | { kind: "errored"; sessionId: string; reason: string; transactionId?: string }
+  | {
+      kind: "errored";
+      sessionId: string;
+      reason: string;
+      cryptoTransferId?: string;
+      transactionId?: string;
+    }
   | { kind: "closed"; sessionId: string };

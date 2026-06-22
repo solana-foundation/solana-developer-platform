@@ -185,6 +185,27 @@ export async function recordRampProviderEvent(c: AppContext) {
         });
         return transferResponse(c, updated);
       }
+      if (event.cryptoTransferId) {
+        const leg = await requireVerifiedCryptoLeg(c, transfer, event.cryptoTransferId, {
+          requireConfirmed: false,
+        });
+        const updated = await repo.updateTransfer({
+          transferId: transfer.id,
+          status: "settling",
+          amount: leg.amount,
+          providerData: {
+            ...transfer.provider_data,
+            moneygram: {
+              ...moneygram,
+              cryptoTransferId: leg.id,
+              solanaTxSignature: leg.signature,
+              lastWidgetError: event.reason,
+            },
+          },
+          updatedAt: now,
+        });
+        return transferResponse(c, updated);
+      }
       const updated = await repo.updateTransfer({
         transferId: transfer.id,
         status: "failed",
