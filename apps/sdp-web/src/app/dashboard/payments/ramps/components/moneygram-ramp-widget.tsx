@@ -27,11 +27,11 @@ function toMoneygramAlpha3(alpha2: string): string | undefined {
   return MONEYGRAM_ALPHA3_BY_ALPHA2[alpha2 as keyof typeof MONEYGRAM_ALPHA3_BY_ALPHA2];
 }
 
-const MONEYGRAM_SUBDIVISION_PREFIX = {
-  USA: "US",
-  MEX: "MX",
-  CAN: "CA",
-} as const;
+function toMoneygramSubdivision(alpha2CountryCode: string, subdivisionCode: string): string {
+  return subdivisionCode.includes("-")
+    ? subdivisionCode.toUpperCase()
+    : `${alpha2CountryCode.toUpperCase()}-${subdivisionCode.toUpperCase()}`;
+}
 
 function resolveDestinationSubdivision(
   destinationCountry: string | undefined,
@@ -47,14 +47,7 @@ function resolveDestinationSubdivision(
   if (toMoneygramAlpha3(address.countryCode) !== destinationCountry) {
     return undefined;
   }
-  const prefix =
-    MONEYGRAM_SUBDIVISION_PREFIX[destinationCountry as keyof typeof MONEYGRAM_SUBDIVISION_PREFIX];
-  if (!prefix) {
-    return address.subdivisionCode;
-  }
-  return address.subdivisionCode.includes("-")
-    ? address.subdivisionCode.toUpperCase()
-    : `${prefix}-${address.subdivisionCode.toUpperCase()}`;
+  return toMoneygramSubdivision(address.countryCode, address.subdivisionCode);
 }
 
 interface MoneygramOnChainTransaction {
@@ -195,7 +188,9 @@ function buildCustomerPrefill(counterparty: Counterparty | null): MoneygramRamps
           ...compactStrings({
             postalCode: address.postalCode,
             countryCode: toMoneygramAlpha3(address.countryCode),
-            countrySubdivisionCode: address.subdivisionCode,
+            countrySubdivisionCode: address.subdivisionCode
+              ? toMoneygramSubdivision(address.countryCode, address.subdivisionCode)
+              : undefined,
           }),
         }
       : {}),
@@ -291,7 +286,7 @@ export function MoneygramRampWidget({
           container,
           sessionToken,
           widgetUrl,
-          devConfig: { apiBaseUrl: `${new URL(widgetUrl).origin}/api`, mockMode: false },
+          devConfig: { apiBaseUrl: `${new URL(widgetUrl).origin}/api`, mockMode: true },
           wallet: {
             address: sourceWalletAddress,
             chain: "solana",

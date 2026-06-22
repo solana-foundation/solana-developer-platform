@@ -100,6 +100,16 @@ export interface LightsparkRampSettlement {
 
 export type RampTransferSettlement = MoonpayRampSettlement | LightsparkRampSettlement;
 
+export interface MoneygramTransferDetails {
+  transactionId?: string;
+  referenceNumber?: string;
+  payoutAmount?: number;
+  payoutStatus?: string;
+  cryptoTransferId?: string;
+  solanaTxSignature?: string;
+  lastWidgetError?: string;
+}
+
 export interface PaymentTransferSummary {
   id: string;
   status: string;
@@ -118,6 +128,7 @@ export interface PaymentTransferSummary {
   fiatCurrency?: string;
   fiatAmount?: string;
   settlement?: RampTransferSettlement;
+  moneygram?: MoneygramTransferDetails;
   createdAt?: string;
   updatedAt?: string;
 }
