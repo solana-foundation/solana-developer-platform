@@ -555,7 +555,7 @@
       "targets": [
         {
           "refId": "A",
-          "hide": true,
+          "hide": false,
           "datasource": {
             "type": "stackdriver",
             "uid": "sdp-gcm"
