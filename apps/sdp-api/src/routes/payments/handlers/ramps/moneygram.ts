@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { PaymentTransferRow, PaymentTransferStatus } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { isRampEventProvider } from "@/lib/ramps/shared";
 import { success } from "@/lib/response";
 import { type AppContext, getPaymentsRepository } from "../../context";
 import { mapTransferRow } from "../../mappers";
@@ -67,7 +68,12 @@ function transferResponse(c: AppContext, row: PaymentTransferRow | null) {
   return success(c, { transfer: mapTransferRow(row) });
 }
 
-export async function recordMoneygramRampEvent(c: AppContext) {
+export async function recordRampProviderEvent(c: AppContext) {
+  const provider = c.req.param("provider");
+  if (!isRampEventProvider(provider)) {
+    throw badRequest(`Unsupported ramp event provider: ${provider}.`);
+  }
+
   const body = await c.req.json();
   const parsed = moneygramRampEventSchema.safeParse(body);
   if (!parsed.success) {
@@ -82,7 +88,7 @@ export async function recordMoneygramRampEvent(c: AppContext) {
   const repo = getPaymentsRepository(c);
 
   const transfer = await repo.getTransferByProviderReference({
-    provider: "moneygram",
+    provider,
     providerReference: event.sessionId,
     organizationId: auth.organizationId,
     projectId,

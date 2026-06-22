@@ -1,5 +1,10 @@
+import { RAMP_EVENT_PROVIDERS, type RampEventProvider } from "@sdp/types";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { MutableProviderRampSupport } from "./types";
+
+export function isRampEventProvider(value: string | undefined): value is RampEventProvider {
+  return value !== undefined && (RAMP_EVENT_PROVIDERS as readonly string[]).includes(value);
+}
 
 export const SOLANA_CRYPTO_ASSETS = ["SOL", "USDC", "USDT", "USDG", "PYUSD"] as const;
 export type SolanaCryptoAsset = (typeof SOLANA_CRYPTO_ASSETS)[number];

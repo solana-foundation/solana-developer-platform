@@ -640,6 +640,9 @@ export type PaymentRampQuote =
       sdkUrl: string;
     });
 
+export const RAMP_EVENT_PROVIDERS = ["moneygram"] as const;
+export type RampEventProvider = (typeof RAMP_EVENT_PROVIDERS)[number];
+
 export type MoneygramRampEvent =
   | { kind: "signed"; sessionId: string; cryptoTransferId: string }
   | {
