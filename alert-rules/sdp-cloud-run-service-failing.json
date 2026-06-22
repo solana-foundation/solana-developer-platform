@@ -16,20 +16,16 @@
         "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
         "refId": "A",
         "intervalMs": 60000,
-        "queryType": "metrics",
-        "metricQuery": {
+        "queryType": "timeSeriesList",
+        "timeSeriesList": {
           "projectName": "solana-developer-platform",
-          "metricType": "logging.googleapis.com/user/sdp_cloud_run_service_failures",
-          "filters": [],
+          "filters": ["metric.type", "=", "logging.googleapis.com/user/sdp_cloud_run_service_failures"],
           "groupBys": ["metric.label.service_name"],
           "crossSeriesReducer": "REDUCE_SUM",
           "perSeriesAligner": "ALIGN_DELTA",
-          "alignmentPeriod": "300s",
-          "metricKind": "DELTA",
-          "valueType": "INT64",
-          "editorMode": "visual",
-          "aliasBy": "{{metric.label.service_name}}"
-        }
+          "alignmentPeriod": "300s"
+        },
+        "aliasBy": "{{metric.label.service_name}}"
       }
     },
     {

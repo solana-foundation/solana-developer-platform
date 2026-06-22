@@ -1,0 +1,239 @@
+{
+  "uid": "sdp-gcp",
+  "title": "SDP — GCP Cloud Run",
+  "description": "GCP Cloud Run health for all Solana Developer Platform services (kora-mainnet, kora-devnet, kora-sdp, bvnk-proxy-dev, sdp-collector, utila-cosigner). Sourced from Cloud Monitoring run.googleapis.com/* metrics via the sdp-gcm (stackdriver) datasource. Use the service_name variable (top-left) to filter.",
+  "tags": ["sdp", "gcp", "cloud-run"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service_name",
+        "label": "service",
+        "type": "query",
+        "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+        "query": {
+          "projectName": "solana-developer-platform",
+          "sloQuery": {},
+          "selectedQueryType": "labels",
+          "labelKey": "resource.label.service_name",
+          "metricType": "run.googleapis.com/container/instance_count"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": { "text": ["All"], "value": ["$__all"], "selected": true }
+      }
+    ]
+  },
+  "panels": [
+    { "id": 1, "type": "row", "title": "Traffic & latency", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Request count by response-code class",
+      "description": "run.googleapis.com/request_count grouped by service_name and response_code_class (1xx/2xx/3xx/4xx/5xx). Only services receiving HTTP traffic report this (kora-*, bvnk-proxy-dev).",
+      "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "solana-developer-platform",
+            "filters": ["metric.type", "=", "run.googleapis.com/request_count", "AND", "resource.label.service_name", "=~", "$service_name"],
+            "groupBys": ["resource.label.service_name", "metric.label.response_code_class"],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "$__interval"
+          },
+          "aliasBy": "{{resource.label.service_name}} {{metric.label.response_code_class}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Request latency p50",
+      "description": "run.googleapis.com/request_latencies (distribution), 50th percentile per series (ALIGN_PERCENTILE_50), by service.",
+      "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "solana-developer-platform",
+            "filters": ["metric.type", "=", "run.googleapis.com/request_latencies", "AND", "resource.label.service_name", "=~", "$service_name"],
+            "groupBys": ["resource.label.service_name"],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_PERCENTILE_50",
+            "alignmentPeriod": "$__interval"
+          },
+          "aliasBy": "p50 {{resource.label.service_name}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Request latency p95",
+      "description": "run.googleapis.com/request_latencies (distribution), 95th percentile per series (ALIGN_PERCENTILE_95), by service.",
+      "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "solana-developer-platform",
+            "filters": ["metric.type", "=", "run.googleapis.com/request_latencies", "AND", "resource.label.service_name", "=~", "$service_name"],
+            "groupBys": ["resource.label.service_name"],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_PERCENTILE_95",
+            "alignmentPeriod": "$__interval"
+          },
+          "aliasBy": "p95 {{resource.label.service_name}}"
+        }
+      ]
+    },
+    { "id": 10, "type": "row", "title": "Instances & resource utilization", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 } },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Container instance count by state",
+      "description": "run.googleapis.com/container/instance_count by service and state (active/idle).",
+      "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "solana-developer-platform",
+            "filters": ["metric.type", "=", "run.googleapis.com/container/instance_count", "AND", "resource.label.service_name", "=~", "$service_name"],
+            "groupBys": ["resource.label.service_name", "metric.label.state"],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "$__interval"
+          },
+          "aliasBy": "{{resource.label.service_name}} {{metric.label.state}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Container startup latency p95",
+      "description": "run.googleapis.com/container/startup_latencies (distribution), 95th percentile per series, by service. Reports only on cold starts / new revisions.",
+      "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "solana-developer-platform",
+            "filters": ["metric.type", "=", "run.googleapis.com/container/startup_latencies", "AND", "resource.label.service_name", "=~", "$service_name"],
+            "groupBys": ["resource.label.service_name"],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_PERCENTILE_95",
+            "alignmentPeriod": "$__interval"
+          },
+          "aliasBy": "startup p95 {{resource.label.service_name}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "CPU utilization (p95)",
+      "description": "run.googleapis.com/container/cpu/utilizations (distribution), 95th percentile per series, by service. 1.0 = 100% of allocated vCPU.",
+      "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "solana-developer-platform",
+            "filters": ["metric.type", "=", "run.googleapis.com/container/cpu/utilizations", "AND", "resource.label.service_name", "=~", "$service_name"],
+            "groupBys": ["resource.label.service_name"],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_PERCENTILE_95",
+            "alignmentPeriod": "$__interval"
+          },
+          "aliasBy": "cpu p95 {{resource.label.service_name}}"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Memory utilization (p95)",
+      "description": "run.googleapis.com/container/memory/utilizations (distribution), 95th percentile per series, by service. 1.0 = 100% of allocated memory.",
+      "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "solana-developer-platform",
+            "filters": ["metric.type", "=", "run.googleapis.com/container/memory/utilizations", "AND", "resource.label.service_name", "=~", "$service_name"],
+            "groupBys": ["resource.label.service_name"],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_PERCENTILE_95",
+            "alignmentPeriod": "$__interval"
+          },
+          "aliasBy": "mem p95 {{resource.label.service_name}}"
+        }
+      ]
+    },
+    { "id": 20, "type": "row", "title": "Service failures", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 } },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Cloud Run service failures (log-based)",
+      "description": "logging.googleapis.com/user/sdp_cloud_run_service_failures — counts container exits / startup-probe failures across all SDP Cloud Run services, grouped by service_name. Drives the sdp-cloud-run-service-failing alert. Zero series means no failures in range (healthy).",
+      "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 27 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars" }, "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "solana-developer-platform",
+            "filters": ["metric.type", "=", "logging.googleapis.com/user/sdp_cloud_run_service_failures"],
+            "groupBys": ["metric.label.service_name"],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "300s"
+          },
+          "aliasBy": "{{metric.label.service_name}}"
+        }
+      ]
+    }
+  ]
+}

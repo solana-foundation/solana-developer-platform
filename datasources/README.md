@@ -9,10 +9,16 @@ pointing at GCP project `solana-developer-platform`. It powers the generic
 
 - Service account `grafana-gcm-reader@solana-developer-platform.iam.gserviceaccount.com` — CREATED.
 - Log-based metric `sdp_cloud_run_service_failures` — CREATED (see `apply-log-metric.sh`).
-- IAM role `roles/monitoring.viewer` for the SA — **NOT GRANTED** (the operator who set this up
-  lacks `resourcemanager.projects.setIamPolicy` on the project). A project admin must grant it.
-- Datasource + alert rule — authored in the repo but **NOT pushed** to Grafana (would error
-  without a working datasource).
+- IAM role `roles/monitoring.viewer` for the SA — **GRANTED** by an SDP owner. SA key stored in
+  Doppler as `GCM_GRAFANA_SA_KEY` (full JSON) and `GCM_GRAFANA_SA_PRIVATE_KEY` (PEM private_key).
+- Datasource `sdp-gcm` — **CREATED** in Grafana Cloud; health check returns OK.
+- Alert rule `sdp-cloud-run-service-failing` + dashboard `sdp-gcp` ("SDP — GCP Cloud Run") —
+  **PUSHED** to Grafana and evaluating cleanly.
+
+> Grafana Cloud runs the Cloud Monitoring (stackdriver) plugin v12.5.x, which uses the
+> `timeSeriesList` query type with the metric type expressed in `filters`
+> (`["metric.type", "=", "<type>"]`). The legacy `metricQuery`/`metricType` shape is not parsed
+> by this plugin version; the alert rule and dashboard use `timeSeriesList`.
 
 ## Finishing steps (requires a principal with setIamPolicy + Doppler write)
 
@@ -32,9 +38,10 @@ doppler secrets set GCM_GRAFANA_SA_PRIVATE_KEY \
   -- "$(jq -r '.private_key' /tmp/gcm-key.json)"
 shred -u /tmp/gcm-key.json   # or rm
 
-# 3. Create the datasource in Grafana (expands ${GCM_GRAFANA_SA_PRIVATE_KEY})
+# 3. Create the datasource in Grafana (injects ${GCM_GRAFANA_SA_PRIVATE_KEY} via jq so the
+#    multiline PEM is JSON-escaped correctly). Use PUT by uid if it already exists.
 doppler run --project solana-developer-platform --config prd -- bash -c '
-  payload=$(envsubst < datasources/gcm-sdp.json)
+  payload=$(jq --arg pk "$GCM_GRAFANA_SA_PRIVATE_KEY" ".secureJsonData.privateKey = \$pk" datasources/gcm-sdp.json)
   curl -fsS -X POST "$GRAFANA_API_URL/api/datasources" \
     -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
     -H "Content-Type: application/json" --data "$payload"'
