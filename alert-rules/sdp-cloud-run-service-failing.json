@@ -19,7 +19,11 @@
         "queryType": "timeSeriesList",
         "timeSeriesList": {
           "projectName": "solana-developer-platform",
-          "filters": ["metric.type", "=", "logging.googleapis.com/user/sdp_cloud_run_service_failures"],
+          "filters": [
+            "metric.type",
+            "=",
+            "logging.googleapis.com/user/sdp_cloud_run_service_failures"
+          ],
           "groupBys": ["metric.label.service_name"],
           "crossSeriesReducer": "REDUCE_SUM",
           "perSeriesAligner": "ALIGN_DELTA",

@@ -62,17 +62,13 @@
           {
             "evaluator": {
               "type": "lt",
-              "params": [
-                0.5
-              ]
+              "params": [0.5]
             },
             "operator": {
               "type": "and"
             },
             "query": {
-              "params": [
-                "B"
-              ]
+              "params": ["B"]
             },
             "reducer": {
               "type": "last",

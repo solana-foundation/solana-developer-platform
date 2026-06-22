@@ -32,7 +32,12 @@
     ]
   },
   "panels": [
-    { "id": 1, "type": "row", "title": "Traffic & latency", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Traffic & latency",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
     {
       "id": 2,
       "type": "timeseries",
@@ -40,7 +45,14 @@
       "description": "run.googleapis.com/request_count filtered to response_code_class = 2xx, grouped by service_name. Only services receiving HTTP traffic report this (kora-*, bvnk-proxy-dev).",
       "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
       "gridPos": { "h": 8, "w": 6, "x": 0, "y": 1 },
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" } }, "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" } },
+          "color": { "mode": "fixed", "fixedColor": "green" }
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -48,7 +60,19 @@
           "queryType": "timeSeriesList",
           "timeSeriesList": {
             "projectName": "solana-developer-platform",
-            "filters": ["metric.type", "=", "run.googleapis.com/request_count", "AND", "resource.label.service_name", "=~", "${service_name:regex}", "AND", "metric.label.response_code_class", "=", "2xx"],
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/request_count",
+              "AND",
+              "resource.label.service_name",
+              "=~",
+              "${service_name:regex}",
+              "AND",
+              "metric.label.response_code_class",
+              "=",
+              "2xx"
+            ],
             "groupBys": ["resource.label.service_name", "metric.label.response_code_class"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_DELTA",
@@ -65,7 +89,13 @@
       "description": "run.googleapis.com/request_count filtered to response_code_class = 4xx or 5xx, grouped by service_name. Only services receiving HTTP traffic report this (kora-*, bvnk-proxy-dev). No series means no client/server errors in range.",
       "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
       "gridPos": { "h": 8, "w": 6, "x": 6, "y": 1 },
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" } }
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -73,7 +103,19 @@
           "queryType": "timeSeriesList",
           "timeSeriesList": {
             "projectName": "solana-developer-platform",
-            "filters": ["metric.type", "=", "run.googleapis.com/request_count", "AND", "resource.label.service_name", "=~", "${service_name:regex}", "AND", "metric.label.response_code_class", "=~", "(4xx|5xx)"],
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/request_count",
+              "AND",
+              "resource.label.service_name",
+              "=~",
+              "${service_name:regex}",
+              "AND",
+              "metric.label.response_code_class",
+              "=~",
+              "(4xx|5xx)"
+            ],
             "groupBys": ["resource.label.service_name", "metric.label.response_code_class"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_DELTA",
@@ -98,7 +140,15 @@
           "queryType": "timeSeriesList",
           "timeSeriesList": {
             "projectName": "solana-developer-platform",
-            "filters": ["metric.type", "=", "run.googleapis.com/request_latencies", "AND", "resource.label.service_name", "=~", "${service_name:regex}"],
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/request_latencies",
+              "AND",
+              "resource.label.service_name",
+              "=~",
+              "${service_name:regex}"
+            ],
             "groupBys": ["resource.label.service_name"],
             "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_PERCENTILE_50",
@@ -123,7 +173,15 @@
           "queryType": "timeSeriesList",
           "timeSeriesList": {
             "projectName": "solana-developer-platform",
-            "filters": ["metric.type", "=", "run.googleapis.com/request_latencies", "AND", "resource.label.service_name", "=~", "${service_name:regex}"],
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/request_latencies",
+              "AND",
+              "resource.label.service_name",
+              "=~",
+              "${service_name:regex}"
+            ],
             "groupBys": ["resource.label.service_name"],
             "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_PERCENTILE_95",
@@ -133,7 +191,12 @@
         }
       ]
     },
-    { "id": 10, "type": "row", "title": "Instances & resource utilization", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 } },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Instances & resource utilization",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 }
+    },
     {
       "id": 11,
       "type": "timeseries",
@@ -141,7 +204,13 @@
       "description": "run.googleapis.com/container/instance_count by service and state (active/idle).",
       "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "line", "stacking": { "mode": "normal" } }
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -149,7 +218,15 @@
           "queryType": "timeSeriesList",
           "timeSeriesList": {
             "projectName": "solana-developer-platform",
-            "filters": ["metric.type", "=", "run.googleapis.com/container/instance_count", "AND", "resource.label.service_name", "=~", "${service_name:regex}"],
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=~",
+              "${service_name:regex}"
+            ],
             "groupBys": ["resource.label.service_name", "metric.label.state"],
             "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_MEAN",
@@ -174,7 +251,15 @@
           "queryType": "timeSeriesList",
           "timeSeriesList": {
             "projectName": "solana-developer-platform",
-            "filters": ["metric.type", "=", "run.googleapis.com/container/billable_instance_time", "AND", "resource.label.service_name", "=~", "${service_name:regex}"],
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/billable_instance_time",
+              "AND",
+              "resource.label.service_name",
+              "=~",
+              "${service_name:regex}"
+            ],
             "groupBys": ["resource.label.service_name"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
@@ -199,7 +284,15 @@
           "queryType": "timeSeriesList",
           "timeSeriesList": {
             "projectName": "solana-developer-platform",
-            "filters": ["metric.type", "=", "run.googleapis.com/container/cpu/utilizations", "AND", "resource.label.service_name", "=~", "${service_name:regex}"],
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/cpu/utilizations",
+              "AND",
+              "resource.label.service_name",
+              "=~",
+              "${service_name:regex}"
+            ],
             "groupBys": ["resource.label.service_name"],
             "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_PERCENTILE_95",
@@ -224,7 +317,15 @@
           "queryType": "timeSeriesList",
           "timeSeriesList": {
             "projectName": "solana-developer-platform",
-            "filters": ["metric.type", "=", "run.googleapis.com/container/memory/utilizations", "AND", "resource.label.service_name", "=~", "${service_name:regex}"],
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/memory/utilizations",
+              "AND",
+              "resource.label.service_name",
+              "=~",
+              "${service_name:regex}"
+            ],
             "groupBys": ["resource.label.service_name"],
             "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_PERCENTILE_95",
@@ -234,7 +335,12 @@
         }
       ]
     },
-    { "id": 30, "type": "row", "title": "Billable cost", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 } },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Billable cost",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 }
+    },
     {
       "id": 31,
       "type": "timeseries",
@@ -242,7 +348,14 @@
       "description": "ESTIMATE — not actual billed cost. Aggregate Cloud Run instance-based cost across the selected services, in USD/hour. Derived from run.googleapis.com/container/billable_instance_time (ALIGN_RATE, summed across services = total billable instance-seconds per second), multiplied by a fixed per-instance-hour price.\n\nPricing assumptions (us-central1, Cloud Run instance-based / Tier 1, as of 2026-06): vCPU $0.00002400 /vCPU-s, memory $0.00000250 /GiB-s. Every SDP Cloud Run service is provisioned at 1 vCPU / 512 MiB (0.5 GiB) per Terraform, so per allocated instance-second the cost is (1 × 0.00002400) + (0.5 × 0.00000250) = $0.00002525 /instance-s = $0.0909 /instance-hour. Request-count and networking/egress charges are NOT included.\n\nMath: USD/hour = billable_instance_time(rate) × 0.0909. Because all services share the same 1 vCPU / 0.5 GiB shape, a single scalar applies to the summed rate. If any service is later resized, this constant must be revisited. For true billed cost, set up a Cloud Billing BigQuery export and query it directly.",
       "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 4, "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4,
+          "custom": { "drawStyle": "line", "fillOpacity": 10 }
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -251,7 +364,15 @@
           "queryType": "timeSeriesList",
           "timeSeriesList": {
             "projectName": "solana-developer-platform",
-            "filters": ["metric.type", "=", "run.googleapis.com/container/billable_instance_time", "AND", "resource.label.service_name", "=~", "${service_name:regex}"],
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/billable_instance_time",
+              "AND",
+              "resource.label.service_name",
+              "=~",
+              "${service_name:regex}"
+            ],
             "groupBys": [],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
@@ -276,7 +397,12 @@
         }
       ]
     },
-    { "id": 20, "type": "row", "title": "Service failures", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 } },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Service failures",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 }
+    },
     {
       "id": 21,
       "type": "timeseries",
@@ -284,7 +410,14 @@
       "description": "logging.googleapis.com/user/sdp_cloud_run_service_failures — counts container exits / startup-probe failures across all SDP Cloud Run services, grouped by service_name. Drives the sdp-cloud-run-service-failing alert. Zero series means no failures in range (healthy).",
       "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 36 },
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars" }, "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "bars" },
+          "color": { "mode": "fixed", "fixedColor": "red" }
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -292,7 +425,11 @@
           "queryType": "timeSeriesList",
           "timeSeriesList": {
             "projectName": "solana-developer-platform",
-            "filters": ["metric.type", "=", "logging.googleapis.com/user/sdp_cloud_run_service_failures"],
+            "filters": [
+              "metric.type",
+              "=",
+              "logging.googleapis.com/user/sdp_cloud_run_service_failures"
+            ],
             "groupBys": ["metric.label.service_name"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_DELTA",

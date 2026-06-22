@@ -63,17 +63,13 @@
           {
             "evaluator": {
               "type": "gt",
-              "params": [
-                3
-              ]
+              "params": [3]
             },
             "operator": {
               "type": "and"
             },
             "query": {
-              "params": [
-                "B"
-              ]
+              "params": ["B"]
             },
             "reducer": {
               "type": "last",
