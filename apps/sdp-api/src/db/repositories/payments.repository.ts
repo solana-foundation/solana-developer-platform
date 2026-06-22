@@ -16,7 +16,7 @@ export type RampTransferType = (typeof RAMP_TRANSFER_TYPES)[number];
 export function isRampTransferType(type: PaymentTransferType): type is RampTransferType {
   return type === "onramp" || type === "offramp";
 }
-export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions";
+export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
 export type { PaymentTransferStatus };
 export type PaymentWalletPolicyType = string;
 

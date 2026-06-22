@@ -6,6 +6,7 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
+  activateRecurringPayment,
   cancelRampTransfer,
   createOfframpQuote,
   createOnrampQuote,
@@ -37,6 +38,7 @@ import {
   prepareSubscriptionAuthorization,
   prepareSubscriptionCollection,
   prepareTransfer,
+  recordRampProviderEvent,
   simulateSandboxTransfer,
   updateSubscription,
   updateSubscriptionPlan,
@@ -93,6 +95,11 @@ payments.post(
   createRecurringPayment
 );
 payments.get("/recurring-payments", requirePermissions("payments:read"), listRecurringPayments);
+payments.post(
+  "/recurring-payments/:id/activate",
+  requirePermissions("payments:write", "wallets:read"),
+  activateRecurringPayment
+);
 payments.get("/recurring-payments/:id", requirePermissions("payments:read"), getRecurringPayment);
 payments.get("/subscription-plans", requirePermissions("payments:read"), listSubscriptionPlans);
 payments.post(
@@ -182,6 +189,11 @@ payments.post(
   "/ramps/offramp/execute",
   requirePermissions("payments:write", "wallets:read"),
   executeOfframp
+);
+payments.post(
+  "/ramps/:provider/events",
+  requirePermissions("payments:write"),
+  recordRampProviderEvent
 );
 payments.post("/ramps/transfers/cancel", requirePermissions("payments:write"), cancelRampTransfer);
 payments.post(

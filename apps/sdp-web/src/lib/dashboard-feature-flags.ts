@@ -5,7 +5,7 @@ export type DashboardFeatureFlags = {
 type PaymentsV2OverrideCookieValue = "enabled" | "disabled";
 
 export const DASHBOARD_FEATURE_FLAGS_DEFAULTS = {
-  paymentsV2: false,
+  paymentsV2: true,
 } as const satisfies DashboardFeatureFlags;
 
 export const DASHBOARD_PAYMENTS_V2_OVERRIDE_COOKIE_NAME = "sdp_dashboard_payments_v2_override";

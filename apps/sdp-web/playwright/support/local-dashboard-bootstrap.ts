@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
-import type { OrganizationTier, PaymentsDashboardWallet } from "@sdp/types";
+import type {
+  CounterpartyAccountResponse,
+  CounterpartyResponse,
+  OrganizationTier,
+  PaymentsDashboardWallet,
+} from "@sdp/types";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -734,6 +739,43 @@ export async function bootstrapLocalWalletFixtures(input: {
 export async function createExternalSolanaAddress(): Promise<string> {
   const signer = await generateKeyPairSigner();
   return signer.address;
+}
+
+export interface SeededCounterparty {
+  counterpartyId: string;
+  accountId: string;
+  destinationAddress: string;
+  displayName: string;
+}
+
+export async function seedCounterpartyWithSolanaAccount(
+  api: LocalApiClient,
+  input: {
+    displayName: string;
+    email: string;
+    accountLabel: string;
+    destinationAddress: string;
+  }
+): Promise<SeededCounterparty> {
+  const { counterparty } = await api.post<CounterpartyResponse>("/v1/counterparties", {
+    entityType: "individual",
+    displayName: input.displayName,
+    email: input.email,
+  });
+  const { account } = await api.post<CounterpartyAccountResponse>(
+    `/v1/counterparties/${counterparty.id}/accounts`,
+    {
+      accountKind: "crypto_wallet",
+      label: input.accountLabel,
+      details: { network: "solana", address: input.destinationAddress },
+    }
+  );
+  return {
+    counterpartyId: counterparty.id,
+    accountId: account.id,
+    destinationAddress: input.destinationAddress,
+    displayName: input.displayName,
+  };
 }
 
 export function getBootstrapApiBaseUrl(): string {

@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { OnchainSendWizard } from "../hooks/use-onchain-send-wizard";
 import { walletComboboxOptions } from "../wallet-options";
+import { AmountBalanceReadout } from "./amount-balance-readout";
 import { CounterpartyAccountSelector } from "./counterparty-account-selector";
 
 function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
@@ -53,6 +54,7 @@ export function OnchainSendStepContent({
     destinationAddress,
     assetOptions,
     availableAmount,
+    selectedAssetBalance,
     exceedsBalance,
     counterpartyId,
     fields,
@@ -117,41 +119,46 @@ export function OnchainSendStepContent({
           icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
           isLoading={walletsLoading}
         />
-        <Combobox
-          label="Asset"
-          value={fields.asset || null}
-          onChange={(value) => setField("asset", value)}
-          options={assetOptions.map((value) => ({ value, label: value }))}
-          placeholder="Select an asset"
-          searchable={false}
-        />
-        <div className="flex flex-col gap-2">
-          <Label className="text-sm font-medium text-text-low" htmlFor="onchain-send-amount">
-            Amount
-          </Label>
-          <Input
-            id="onchain-send-amount"
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="any"
-            value={fields.amount}
-            onChange={(event) => setField("amount", event.currentTarget.value)}
-            placeholder="1.0"
-            size="xl"
-            className="shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:border-0 [&>span:first-child]:bg-border-extra-light"
-          />
-          {availableAmount !== null ? (
-            <p
-              className={
-                exceedsBalance ? "text-sm text-status-error-text" : "text-sm text-text-low"
+        <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
+          <div className="flex flex-col gap-2">
+            <Label className="text-sm font-medium text-text-low" htmlFor="onchain-send-amount">
+              Amount
+            </Label>
+            <Input
+              id="onchain-send-amount"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="any"
+              value={fields.amount}
+              onChange={(event) => setField("amount", event.currentTarget.value)}
+              placeholder="1.0"
+              size="xl"
+              className="h-[var(--input-height-xl)] shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:border-0 [&>span:first-child]:bg-border-extra-light"
+              action={
+                availableAmount !== null ? (
+                  <AmountBalanceReadout
+                    available={selectedAssetBalance ? selectedAssetBalance.uiAmount : "0"}
+                    assetLabel={fields.asset}
+                    exceeds={exceedsBalance}
+                    onMax={
+                      selectedAssetBalance && availableAmount > 0
+                        ? () => setField("amount", String(selectedAssetBalance.uiAmount))
+                        : undefined
+                    }
+                  />
+                ) : undefined
               }
-            >
-              {exceedsBalance
-                ? `Amount exceeds the available ${fields.asset} balance (${availableAmount}).`
-                : `Available: ${availableAmount} ${fields.asset}`}
-            </p>
-          ) : null}
+            />
+          </div>
+          <Combobox
+            label="Asset"
+            value={fields.asset || null}
+            onChange={(value) => setField("asset", value)}
+            options={assetOptions.map((value) => ({ value, label: value }))}
+            placeholder="Select an asset"
+            searchable={false}
+          />
         </div>
         <div className="flex flex-col gap-2">
           <Label className="text-sm font-medium text-text-low" htmlFor="onchain-send-memo">
