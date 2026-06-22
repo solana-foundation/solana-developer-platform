@@ -161,6 +161,8 @@ export const createRecurringPaymentSchema = z.object({
   metadataUri: z.string().url().max(128).optional(),
 });
 
+export const activateRecurringPaymentSchema = z.object({}).strict();
+
 export const listRecurringPaymentsQuerySchema = z.object({
   counterpartyId: z.string().min(1).optional(),
   status: paymentRecurringPaymentStatusSchema.optional(),
@@ -323,6 +325,11 @@ export const rampFiatCurrencySchema = z.preprocess(
   z.enum(RAMP_FIAT_CURRENCIES)
 );
 
+export const cancelRampTransferSchema = z.object({
+  provider: rampProviderSchema,
+  providerReference: z.string().min(1),
+});
+
 export const listOnrampCurrenciesQuerySchema = z.object({
   source: rampFiatCurrencySchema.optional(),
   dest: onrampCryptoRailSchema.optional(),
@@ -386,6 +393,7 @@ export const transferStatusSchema = z.enum([
   "awaiting_payment",
   "settling",
   "completed",
+  "canceled",
   "expired",
 ]);
 

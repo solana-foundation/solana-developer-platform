@@ -6,6 +6,7 @@ import { hashString } from "@/lib/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import {
   type BvnkCustomerResolution,
+  type BvnkFiatWallet,
   type BvnkOnrampEntry,
   type BvnkOnrampRequestSpec,
   type BvnkPaymentRuleResolution,
@@ -20,6 +21,8 @@ import {
   normalizeBvnkCurrencyAndNetwork,
   readBvnkCustomer,
   readBvnkData,
+  readBvnkOfframpWallet,
+  readBvnkOfframpWallets,
   readBvnkOnrampEntry,
   readBvnkWallets,
 } from "@/lib/ramps/providers/bvnk";
@@ -86,6 +89,68 @@ async function persistBvnkOnrampState(
       },
     },
   });
+}
+
+/** Persists a merchant-owned off-ramp wallet to provider_data.bvnk.offramp.wallets. */
+async function persistBvnkOfframpWallet(
+  c: AppContext,
+  counterparty: CounterpartyRow,
+  projectId: string,
+  fiatCurrency: string,
+  wallet: BvnkFiatWallet
+): Promise<void> {
+  const repo = getCounterpartiesRepository(c);
+  const bvnk = readBvnkData(counterparty.provider_data);
+  const offramp =
+    bvnk.offramp && typeof bvnk.offramp === "object"
+      ? (bvnk.offramp as Record<string, unknown>)
+      : {};
+  const wallets = readBvnkOfframpWallets(counterparty.provider_data);
+  await repo.updateCounterparty({
+    counterpartyId: counterparty.id,
+    organizationId: counterparty.organization_id,
+    projectId,
+    providerData: {
+      ...counterparty.provider_data,
+      bvnk: {
+        ...bvnk,
+        offramp: {
+          ...offramp,
+          wallets: { ...wallets, [fiatCurrency]: { id: wallet.id, status: wallet.status } },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * Provisions (or reuses) a merchant-owned BVNK fiat wallet for an off-ramp,
+ * keyed per fiat currency in provider_data.bvnk.offramp.wallets — instead of the
+ * shared BVNK_WALLET_ID. No customer/KYC: the wallet is owned by the merchant.
+ */
+export async function ensureBvnkOfframpWallet(
+  c: AppContext,
+  ctx: RampRuntimeContext,
+  counterparty: CounterpartyRow,
+  projectId: string,
+  fiatCurrency: string
+): Promise<string> {
+  const existing = readBvnkOfframpWallet(counterparty.provider_data, fiatCurrency);
+  if (existing?.id) {
+    return existing.id;
+  }
+  const client = RAMP_PROVIDER_CLIENTS.bvnk;
+  const walletProfile = await client.getFiatWalletProfile(ctx, { currency: fiatCurrency });
+  const wallet = await client.createFiatWallet(ctx, {
+    name: `SDP offramp ${fiatCurrency} ${counterparty.id}`,
+    currencyCode: fiatCurrency,
+    walletProfile,
+    idempotencyKey: (
+      await hashString(`bvnk-offramp-wallet:${counterparty.id}:${fiatCurrency}`)
+    ).slice(0, 36),
+  });
+  await persistBvnkOfframpWallet(c, counterparty, projectId, fiatCurrency, wallet);
+  return wallet.id;
 }
 
 /**

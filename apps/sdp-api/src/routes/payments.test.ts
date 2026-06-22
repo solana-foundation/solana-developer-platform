@@ -15,6 +15,7 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
+import * as subscriptionsProgram from "@solana/subscriptions";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -39,6 +40,15 @@ const getSplTokenBalancesMock = vi.spyOn(tokenAccounts, "getSplTokenBalances");
 const getSplTokenAccountAddressesMock = vi.spyOn(tokenAccounts, "getSplTokenAccountAddresses");
 const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
+const fetchMaybePlanMock = vi.spyOn(subscriptionsProgram, "fetchMaybePlan");
+const fetchMaybeSubscriptionAuthorityMock = vi.spyOn(
+  subscriptionsProgram,
+  "fetchMaybeSubscriptionAuthority"
+);
+const fetchMaybeSubscriptionDelegationMock = vi.spyOn(
+  subscriptionsProgram,
+  "fetchMaybeSubscriptionDelegation"
+);
 
 const TEST_CONFIG_ID = "cust_cfg_payments_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_payments_test";
@@ -86,6 +96,7 @@ const LIGHTSPARK_GRID_API_BASE_URL = "https://api.lightspark.com/grid/2025-10-13
 const TEST_BVNK_HAWK_AUTH_ID = "bvnk_hawk_auth_id";
 const TEST_BVNK_HAWK_SECRET_KEY = "bvnk_hawk_secret_key";
 const TEST_BVNK_WALLET_ID = "a:24122329329347:HsdJVhW:1";
+const TEST_BVNK_OFFRAMP_WALLET_ID = "a:99887766554433:OffRmpW:1";
 const TEST_BVNK_API_BASE_URL = "https://api.sandbox.bvnk.test";
 const TEST_MAGICBLOCK_API_BASE_URL = "https://payments.magicblock.test";
 const TEST_MAGICBLOCK_AUTH_TOKEN = "magicblock_auth_token";
@@ -443,6 +454,34 @@ function expectPreparedSubscriptionTransaction(
   }
 }
 
+function mockRecurringActivationRpc() {
+  createRpcMock.mockReturnValue({
+    getTokenAccountsByOwner: () => ({
+      send: async () => ({
+        value: [
+          {
+            pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+            account: {
+              data: {
+                parsed: {
+                  info: {
+                    mint: DEVNET_USDC_MINT,
+                    tokenAmount: {
+                      amount: "1000000000",
+                      decimals: 6,
+                      uiAmountString: "1000",
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      }),
+    }),
+  } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+}
+
 describe("Payments routes", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -479,6 +518,20 @@ describe("Payments routes", () => {
     getSignaturesForAddressMock.mockResolvedValue([]);
     getSplTokenBalancesMock.mockResolvedValue([]);
     getSplTokenAccountAddressesMock.mockResolvedValue([]);
+    fetchMaybePlanMock.mockResolvedValue({
+      exists: true,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+      data: { data: { terms: { createdAt: 1_770_000_000n } } },
+    } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>>);
+    fetchMaybeSubscriptionAuthorityMock.mockResolvedValue({
+      exists: false,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionAuthority>>);
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValue({
+      exists: true,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+      data: {},
+    } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
@@ -665,6 +718,104 @@ describe("Payments routes", () => {
     };
     expect(getBody.data.recurringPayment.id).toBe(createBody.data.recurringPayment.id);
     expect(getBody.data.recurringPayment.status).toBe("pending_activation");
+  });
+
+  it("activates recurring payments through SDP API routes", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const counterpartyId = await seedCounterparty({
+      externalId: "recurring_activation_counterparty",
+    });
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const createRes = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          sourceWalletId: TEST_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 24,
+        }),
+      },
+      env
+    );
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as {
+      data: { recurringPayment: { id: string } };
+    };
+
+    const activateRes = await app.request(
+      `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
+      {
+        method: "POST",
+        headers,
+      },
+      env
+    );
+
+    expect(activateRes.status).toBe(200);
+    const activateBody = (await activateRes.json()) as {
+      data: {
+        recurringPayment: {
+          id: string;
+          status: string;
+          planId: string;
+          subscriptionId: string;
+          planPda: string;
+          planCreatedAt: string;
+          planCreationSignature: string;
+          subscriptionPda: string;
+          subscriptionAuthorityAddress: string;
+          authorizationSignature: string;
+          nextCollectionDueAt: string;
+        };
+      };
+    };
+    expect(activateBody.data.recurringPayment).toMatchObject({
+      id: createBody.data.recurringPayment.id,
+      status: "active",
+      planCreatedAt: "1770000000",
+      planCreationSignature:
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy",
+      authorizationSignature:
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV",
+    });
+    expect(activateBody.data.recurringPayment.planId).toMatch(/^psp_/);
+    expect(activateBody.data.recurringPayment.subscriptionId).toMatch(/^psub_/);
+    expect(activateBody.data.recurringPayment.planPda).toBeTruthy();
+    expect(activateBody.data.recurringPayment.subscriptionPda).toBeTruthy();
+    expect(activateBody.data.recurringPayment.subscriptionAuthorityAddress).toBeTruthy();
+    expect(activateBody.data.recurringPayment.nextCollectionDueAt).toBeTruthy();
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
   it("requires owner wallet access when updating subscription plans", async () => {
@@ -2527,9 +2678,13 @@ describe("Payments routes", () => {
 
   it("creates and accepts a BVNK off-ramp estimate through the execute endpoint", async () => {
     const counterpartyId = await seedCounterparty({
+      externalId: "customer_456",
       identity: { address: { countryCode: "US" } },
       providerData: {
-        bvnk: { customer: { customerReference: "customer_456", status: "VERIFIED" } },
+        bvnk: {
+          customer: { customerReference: "customer_456", status: "VERIFIED" },
+          offramp: { wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } } },
+        },
       },
     });
     const fetchSpy = vi
@@ -2623,7 +2778,7 @@ describe("Payments routes", () => {
       network: string;
       complianceDetails: { partyDetails: Record<string, unknown>[] };
     };
-    expect(estimatePayload.walletId).toBe(TEST_BVNK_WALLET_ID);
+    expect(estimatePayload.walletId).toBe(TEST_BVNK_OFFRAMP_WALLET_ID);
     expect(estimatePayload.walletCurrency).toBe("USD");
     expect(estimatePayload.paidCurrency).toBe("USDC");
     expect(estimatePayload.paidRequiredAmount).toBe(75.25);
@@ -2645,9 +2800,13 @@ describe("Payments routes", () => {
 
   it("returns bad request when BVNK off-ramp is missing compliance party details", async () => {
     const counterpartyId = await seedCounterparty({
+      externalId: "customer_456",
       identity: { address: { countryCode: "US" } },
       providerData: {
-        bvnk: { customer: { customerReference: "customer_456", status: "VERIFIED" } },
+        bvnk: {
+          customer: { customerReference: "customer_456", status: "VERIFIED" },
+          offramp: { wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } } },
+        },
       },
     });
 
@@ -2676,6 +2835,101 @@ describe("Payments routes", () => {
     const body = (await res.json()) as { error: { code: string; message: string } };
     expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.message).toContain("bvnkCompliance.partyDetails is required");
+  });
+
+  async function seedRampTransfer(input: {
+    id: string;
+    provider: string;
+    providerReference: string;
+    status: string;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers
+           (id, organization_id, project_id, wallet_id, token, amount, type, direction, status, provider, provider_reference, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        input.id,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_WALLET_ID,
+        "USDC",
+        null,
+        "offramp",
+        "outbound",
+        input.status,
+        input.provider,
+        input.providerReference,
+        now,
+        now
+      )
+      .run();
+  }
+
+  it("cancels a pending ramp transfer and marks the row canceled", async () => {
+    await seedRampTransfer({
+      id: "xfr_cancel_pending",
+      provider: "bvnk",
+      providerReference: "bvnk_ref_cancel_1",
+      status: "awaiting_payment",
+    });
+
+    const res = await app.request(
+      "/v1/payments/ramps/transfers/cancel",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ provider: "bvnk", providerReference: "bvnk_ref_cancel_1" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { transfer: { id: string; status: string } } };
+    expect(body.data.transfer.status).toBe("canceled");
+
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind("xfr_cancel_pending")
+      .first<{ status: string }>();
+    expect(row?.status).toBe("canceled");
+  });
+
+  it("refuses to cancel a ramp transfer that is already settling", async () => {
+    await seedRampTransfer({
+      id: "xfr_cancel_settling",
+      provider: "bvnk",
+      providerReference: "bvnk_ref_cancel_2",
+      status: "settling",
+    });
+
+    const res = await app.request(
+      "/v1/payments/ramps/transfers/cancel",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ provider: "bvnk", providerReference: "bvnk_ref_cancel_2" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("BAD_REQUEST");
+
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind("xfr_cancel_settling")
+      .first<{ status: string }>();
+    expect(row?.status).toBe("settling");
   });
 
   it("returns bad request when provider is not supported", async () => {

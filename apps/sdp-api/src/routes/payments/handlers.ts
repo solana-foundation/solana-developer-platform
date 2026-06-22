@@ -1,5 +1,6 @@
 export { getWalletBalances, getWalletPolicy, updateWalletPolicy } from "./handlers/balances";
 export {
+  cancelRampTransfer,
   createOfframpQuote,
   createOnrampQuote,
   estimateOfframp,
@@ -11,6 +12,7 @@ export {
   simulateSandboxTransfer,
 } from "./handlers/ramps";
 export {
+  activateRecurringPayment,
   createRecurringPayment,
   getRecurringPayment,
   listRecurringPayments,

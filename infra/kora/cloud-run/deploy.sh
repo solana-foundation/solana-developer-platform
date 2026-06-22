@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build a config-baked Kora image and deploy it to the kora-<ENV> Cloud Run service.
 # Secrets/env come from Doppler — run this under `doppler run`, e.g.:
-#   ENV=mainnet PROJECT=trading-prod-494016 \
-#     doppler run --project kora --config mainnet -- ./deploy.sh
+#   ENV=mainnet PROJECT=solana-developer-platform \
+#     doppler run --project solana-developer-platform --config prd -- ./deploy.sh
 # Only image + env are changed here; the rest of the service is Terraform-managed (ignore_changes).
 set -euo pipefail
 

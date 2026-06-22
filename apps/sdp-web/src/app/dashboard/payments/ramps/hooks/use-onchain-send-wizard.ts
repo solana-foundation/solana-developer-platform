@@ -17,6 +17,7 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { useZodForm } from "@/lib/use-zod-form";
 import { onchainDestinationSchema, onchainDetailsSchema, onchainSendSchema } from "../schema";
+import { findWalletBalanceForToken } from "../wallet-options";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
 export const ONCHAIN_SEND_STEPS = [
@@ -134,11 +135,14 @@ export function useOnchainSendWizard({
   };
 
   const selectedAssetBalance = useMemo(
-    () => selectedWallet?.balances?.find((balance) => balance.token === fields.asset) ?? null,
+    () => findWalletBalanceForToken(selectedWallet, fields.asset),
     [selectedWallet, fields.asset]
   );
 
-  const availableAmount = selectedAssetBalance ? Number(selectedAssetBalance.uiAmount) : null;
+  let availableAmount: number | null = null;
+  if (selectedWallet) {
+    availableAmount = selectedAssetBalance ? Number(selectedAssetBalance.uiAmount) : 0;
+  }
   const numericAmount = Number(fields.amount);
   const exceedsBalance =
     fields.amount.length > 0 && availableAmount !== null && numericAmount > availableAmount;

@@ -96,6 +96,8 @@ export function OnrampRail({
         ) : null
       }
       secondaryLabel={wizard.onTransactionStage ? "Cancel" : undefined}
+      confirmSecondary={wizard.onTransactionStage}
+      secondaryDisabled={wizard.isCanceling}
       footerActions={
         transferTerminal ? (
           <Button asChild type="button">

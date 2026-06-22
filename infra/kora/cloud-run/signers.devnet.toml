@@ -4,7 +4,8 @@
 strategy = "round_robin"
 
 [[signers]]
-name = "sdp_fee_payer"
-type = "memory"
-private_key_env = "SIGNER_PRIVATE_KEY"
+name = "sdp_devnet_fee_payer"
+type = "gcp_kms"
+key_name_env = "KORA_GCP_KMS_KEY_NAME"
+public_key_env = "KORA_GCP_KMS_PUBLIC_KEY"
 weight = 1

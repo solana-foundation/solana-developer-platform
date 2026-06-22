@@ -49,6 +49,24 @@ export interface CreatePaymentRecurringPaymentInput {
   updatedAt: string;
 }
 
+export interface UpdatePaymentRecurringPaymentActivationInput {
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  status?: PaymentRecurringPaymentStatus;
+  planId?: string | null;
+  subscriptionId?: string | null;
+  planPda?: string | null;
+  planCreatedAt?: string | null;
+  planCreationSignature?: string | null;
+  subscriptionPda?: string | null;
+  subscriptionAuthorityAddress?: string | null;
+  authorizationSignature?: string | null;
+  nextCollectionDueAt?: string | null;
+  destinationTokenAccount?: string | null;
+  updatedAt: string;
+}
+
 export interface ListPaymentRecurringPaymentsInput {
   organizationId: string;
   projectId: string;
@@ -67,6 +85,21 @@ export interface ListPaymentRecurringPaymentsResult {
 export interface PaymentRecurringPaymentsRepository {
   createRecurringPayment(
     input: CreatePaymentRecurringPaymentInput
+  ): Promise<PaymentRecurringPaymentRow | null>;
+  claimRecurringPaymentActivation(params: {
+    recurringPaymentId: string;
+    organizationId: string;
+    projectId: string;
+    updatedAt: string;
+  }): Promise<PaymentRecurringPaymentRow | null>;
+  resetRecurringPaymentActivationIfNotActive(params: {
+    recurringPaymentId: string;
+    organizationId: string;
+    projectId: string;
+    updatedAt: string;
+  }): Promise<PaymentRecurringPaymentRow | null>;
+  updateRecurringPaymentActivation(
+    input: UpdatePaymentRecurringPaymentActivationInput
   ): Promise<PaymentRecurringPaymentRow | null>;
   getRecurringPaymentById(params: {
     recurringPaymentId: string;

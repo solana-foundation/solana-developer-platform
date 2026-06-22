@@ -16,8 +16,7 @@ resource "google_kms_crypto_key" "fee_payer" {
     protection_level = var.kms_protection_level
   }
 
-  # Guard the signing key — it is the fee-payer identity. (prevent_destroy must be a literal, not a var;
-  # throwaway envs are cleaned up by deleting the whole project, since KMS keys can't be deleted anyway.)
+  # Guard the signing key — it is the fee-payer identity (prevent_destroy must be a literal, not a var).
   lifecycle {
     prevent_destroy = true
   }

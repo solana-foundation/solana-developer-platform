@@ -282,6 +282,28 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
+    method: "post",
+    path: "/v1/payments/recurring-payments/{id}/activate",
+    tags: ["Payments"],
+    summary: "Activate recurring payment",
+    operationId: "activatePaymentRecurringPayment",
+    description:
+      "Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment activated",
+        content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
     method: "get",
     path: "/v1/payments/recurring-payments/{id}",
     tags: ["Payments"],

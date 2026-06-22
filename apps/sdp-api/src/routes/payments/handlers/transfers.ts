@@ -1962,6 +1962,7 @@ export async function listTransfers(c: AppContext) {
       "awaiting_payment",
       "settling",
       "completed",
+      "canceled",
       "expired",
     ];
     const needsNonChainRecords =

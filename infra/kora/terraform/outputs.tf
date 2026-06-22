@@ -27,5 +27,5 @@ output "artifact_registry_repo" {
 
 output "wif_provider" {
   description = "For google-github-actions/auth (workload_identity_provider)."
-  value       = google_iam_workload_identity_pool_provider.github.name
+  value       = var.create_wif ? google_iam_workload_identity_pool_provider.github[0].name : null
 }

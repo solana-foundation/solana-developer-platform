@@ -14,6 +14,7 @@ import useSWR from "swr";
 import type { z } from "zod";
 import {
   type CounterpartiesResult,
+  cancelRampTransfer,
   fetchAllCounterparties,
   fetchWallets,
   getApiError,
@@ -33,7 +34,9 @@ const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
 
 export function isTerminalRampTransferStatus(status: string) {
-  return status === "completed" || status === "failed" || status === "expired";
+  return (
+    status === "completed" || status === "failed" || status === "expired" || status === "canceled"
+  );
 }
 
 export type RampWizardStep<TId extends string = string> = {
@@ -134,6 +137,7 @@ export function useRampWizard<TId extends string>(
   const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
   const [quote, setQuote] = useState<PaymentRampQuote | null>(null);
   const [hostedQuoteLoading, setHostedQuoteLoading] = useState(false);
+  const [isCanceling, setIsCanceling] = useState(false);
   const { values: fields, setField } = useZodForm(rampSelectionSchema, {
     walletId: "",
     amount: "",
@@ -376,8 +380,35 @@ export function useRampWizard<TId extends string>(
   // into amount/details would orphan the live quote, so back becomes an explicit exit.
   const onTransactionStage = isLastStep && quote !== null;
 
+  const cancelTransfer = async () => {
+    if (!quote) {
+      throw new Error("Cannot cancel without an active quote.");
+    }
+    if (isCanceling) {
+      return;
+    }
+    setIsCanceling(true);
+    const toastId = toast.loading("Canceling transaction.", { position: "bottom-right" });
+    try {
+      await cancelRampTransfer({ provider: quote.provider, providerReference: quote.id });
+      toast.success("Transaction canceled.", { id: toastId, position: "bottom-right" });
+      finish();
+    } catch (error) {
+      setIsCanceling(false);
+      toast.error("Unable to cancel transaction.", {
+        id: toastId,
+        description: error instanceof Error ? error.message : "Cancellation failed.",
+        position: "bottom-right",
+      });
+    }
+  };
+
   const handleSecondary = () => {
-    if (stepIndex === 0 || onTransactionStage) {
+    if (onTransactionStage) {
+      void cancelTransfer();
+      return;
+    }
+    if (stepIndex === 0) {
       finish();
       return;
     }
@@ -408,6 +439,7 @@ export function useRampWizard<TId extends string>(
     currentStepId,
     isLastStep,
     onTransactionStage,
+    isCanceling,
     canProceed,
     collectedData: requirements.collectedData,
     setCollectedField: requirements.setField,

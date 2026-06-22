@@ -133,6 +133,8 @@ export interface RampOfframpQuoteInput {
   customerId?: string;
   /** Handler-resolved Grid external payout account id (Lightspark). */
   payoutAccountId?: string;
+  /** Handler-provisioned merchant-owned BVNK off-ramp fiat wallet id. */
+  bvnkOfframpWalletId?: string;
   redirectUrl?: string;
   bvnkCompliance?: BvnkComplianceInput;
 }
