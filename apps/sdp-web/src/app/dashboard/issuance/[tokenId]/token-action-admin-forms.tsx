@@ -46,6 +46,7 @@ interface TokenActionAdminFormsProps {
   controlListEmptyState: string;
   freezeHint: string | null;
   signerWallets: PaymentsDashboardWallet[];
+  defaultSignerWalletId?: string;
   walletOptions: PaymentsDashboardWallet[];
   signerUnavailableReason: string | null;
   seizeValidationErrors: SeizeValidationErrors;
@@ -86,6 +87,7 @@ export function TokenActionAdminForms({
   controlListEmptyState,
   freezeHint,
   signerWallets,
+  defaultSignerWalletId = "",
   walletOptions,
   signerUnavailableReason,
   seizeValidationErrors,
@@ -351,7 +353,7 @@ export function TokenActionAdminForms({
           <div className="space-y-4">
             <TokenSignerSelect
               signerWallets={signerWallets}
-              signerWalletId={signerWallets[0].id} // Always single locked wallet
+              signerWalletId={defaultSignerWalletId} // Always single locked wallet
               signerUnavailableReason={signerUnavailableReason}
               onSignerWalletIdChange={onSignerWalletIdChange}
             />
@@ -404,7 +406,7 @@ export function TokenActionAdminForms({
           >
             <TokenSignerSelect
               signerWallets={signerWallets}
-              signerWalletId={signerWallets[0].id} // Always single locked wallet
+              signerWalletId={defaultSignerWalletId} // Always single locked wallet
               signerUnavailableReason={signerUnavailableReason}
               onSignerWalletIdChange={onSignerWalletIdChange}
             />

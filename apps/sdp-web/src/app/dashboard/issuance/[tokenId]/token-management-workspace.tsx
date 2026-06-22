@@ -1222,6 +1222,7 @@ export function TokenManagementWorkspace({
       case "freeze":
         return {
           signerWallets: freezeSignerSelection.wallets,
+          defaultSignerWalletId: freezeSignerSelection.defaultWalletId,
           signerUnavailableReason: freezeSignerSelection.unavailableReason,
           // Freeze authority is always single
           onSignerWalletIdChange: (_value: string) => {},
@@ -1229,6 +1230,7 @@ export function TokenManagementWorkspace({
       case "pause":
         return {
           signerWallets: pauseSignerSelection.wallets,
+          defaultSignerWalletId: pauseSignerSelection.defaultWalletId,
           signerUnavailableReason: pauseSignerSelection.unavailableReason,
           // Pause authority is always single
           onSignerWalletIdChange: (_value: string) => {},
@@ -1290,6 +1292,7 @@ export function TokenManagementWorkspace({
         controlListEmptyState={controlListCopy?.emptyState ?? "No allowlist entries yet."}
         freezeHint={controlListCopy?.freezeHint ?? null}
         signerWallets={visibleActionSignerProps.signerWallets}
+        defaultSignerWalletId={visibleActionSignerProps.defaultSignerWalletId}
         walletOptions={authorityWallets}
         signerUnavailableReason={visibleActionSignerProps.signerUnavailableReason}
         mintValidationErrors={mintValidationErrors}
@@ -1578,6 +1581,7 @@ export function TokenManagementWorkspace({
             controlListEmptyState={controlListCopy?.emptyState ?? "No allowlist entries yet."}
             freezeHint={controlListCopy?.freezeHint ?? null}
             signerWallets={fundManagementActionSignerProps.signerWallets}
+            defaultSignerWalletId={fundManagementActionSignerProps.defaultSignerWalletId}
             walletOptions={authorityWallets}
             signerUnavailableReason={fundManagementActionSignerProps.signerUnavailableReason}
             mintValidationErrors={mintValidationErrors}

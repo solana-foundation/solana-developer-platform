@@ -48,6 +48,7 @@ interface TokenActionFormsProps {
   controlListEmptyState: string;
   freezeHint: string | null;
   signerWallets: PaymentsDashboardWallet[];
+  defaultSignerWalletId?: string;
   walletOptions: PaymentsDashboardWallet[];
   signerUnavailableReason: string | null;
   mintValidationErrors: MintValidationErrors;
@@ -119,6 +120,7 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         controlListEmptyState={props.controlListEmptyState}
         freezeHint={props.freezeHint}
         signerWallets={props.signerWallets}
+        defaultSignerWalletId={props.defaultSignerWalletId}
         walletOptions={props.walletOptions}
         signerUnavailableReason={props.signerUnavailableReason}
         seizeValidationErrors={props.seizeValidationErrors}
