@@ -100,6 +100,16 @@ export interface LightsparkRampSettlement {
 
 export type RampTransferSettlement = MoonpayRampSettlement | LightsparkRampSettlement;
 
+export interface MoneygramTransferDetails {
+  transactionId?: string;
+  referenceNumber?: string;
+  payoutAmount?: number;
+  payoutStatus?: string;
+  cryptoTransferId?: string;
+  solanaTxSignature?: string;
+  lastWidgetError?: string;
+}
+
 export interface PaymentTransferSummary {
   id: string;
   status: string;
@@ -118,6 +128,7 @@ export interface PaymentTransferSummary {
   fiatCurrency?: string;
   fiatAmount?: string;
   settlement?: RampTransferSettlement;
+  moneygram?: MoneygramTransferDetails;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -545,7 +556,7 @@ export interface PaymentRampEstimateEnvelope {
   };
 }
 
-export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted";
+export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted" | "session_widget";
 
 export interface PaymentRampQuoteCurrency {
   code: string;
@@ -615,7 +626,39 @@ export type PaymentRampQuote =
       paymentInstructions: BvnkPaymentRampInstruction[];
     })
   | (BasePaymentRampQuote & {
-      provider: Exclude<RampProviderId, "lightspark">;
+      provider: "moonpay" | "bvnk";
       deliveryMode: "hosted";
       hostedUrl: string;
+    })
+  | (BasePaymentRampQuote & {
+      provider: "moneygram";
+      deliveryMode: "session_widget";
+      /** Short-lived (1h) widget session JWT minted from the MoneyGram session API. */
+      sessionToken: string;
+      sessionId: string;
+      widgetUrl: string;
+      sdkUrl: string;
     });
+
+export const RAMP_EVENT_PROVIDERS = ["moneygram"] as const;
+export type RampEventProvider = (typeof RAMP_EVENT_PROVIDERS)[number];
+
+export type MoneygramRampEvent =
+  | { kind: "signed"; sessionId: string; cryptoTransferId: string }
+  | {
+      kind: "completed";
+      sessionId: string;
+      cryptoTransferId: string;
+      transactionId: string;
+      payoutAmount: number;
+      payoutStatus: string;
+      referenceNumber?: string;
+    }
+  | {
+      kind: "errored";
+      sessionId: string;
+      reason: string;
+      cryptoTransferId?: string;
+      transactionId?: string;
+    }
+  | { kind: "closed"; sessionId: string };

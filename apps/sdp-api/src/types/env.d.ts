@@ -226,6 +226,10 @@ export interface Env {
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;
   BVNK_SANDBOX_WEBHOOK_SECRET?: string;
+
+  // MoneyGram ramps configuration
+  MONEYGRAM_SANDBOX_PUBLIC_KEY?: string;
+  MONEYGRAM_SANDBOX_SECRET_KEY?: string;
 }
 
 // Extend Hono's context with our bindings

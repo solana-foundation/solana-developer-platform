@@ -179,6 +179,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     ...wizard,
     transferStatus,
     transferStatusLoading,
+    sourceTokenMint,
     canSendOnchain,
     onchainSendLoading,
     onchainSendResult,

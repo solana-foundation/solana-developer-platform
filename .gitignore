@@ -22,6 +22,9 @@ apps/sdp-api/.wrangler.*.generated.toml
 *.swp
 *.swo
 
+docs/_devlog
+.gitignore
+
 # OS
 .DS_Store
 Thumbs.db

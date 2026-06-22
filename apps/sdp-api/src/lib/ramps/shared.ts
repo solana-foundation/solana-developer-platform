@@ -1,5 +1,10 @@
+import { RAMP_EVENT_PROVIDERS, type RampEventProvider } from "@sdp/types";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { MutableProviderRampSupport } from "./types";
+
+export function isRampEventProvider(value: string | undefined): value is RampEventProvider {
+  return value !== undefined && (RAMP_EVENT_PROVIDERS as readonly string[]).includes(value);
+}
 
 export const SOLANA_CRYPTO_ASSETS = ["SOL", "USDC", "USDT", "USDG", "PYUSD"] as const;
 export type SolanaCryptoAsset = (typeof SOLANA_CRYPTO_ASSETS)[number];
@@ -57,5 +62,8 @@ export const RAMP_RAIL_DUMPS = {
     cryptoAnon: { name: "bvnk/crypto__anon", file: dumpFile("bvnk/crypto__anon") },
     fiatAnon: { name: "bvnk/fiat__anon", file: dumpFile("bvnk/fiat__anon") },
     depositAnon: { name: "bvnk/deposit__anon", file: dumpFile("bvnk/deposit__anon") },
+  },
+  moneygram: {
+    currencies: { name: "moneygram/currencies", file: dumpFile("moneygram/currencies") },
   },
 } as const;

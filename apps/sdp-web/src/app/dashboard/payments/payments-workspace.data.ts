@@ -7,6 +7,7 @@ import type {
   CustodyWalletAggregate,
   ListCounterpartiesResponse,
   ListCounterpartyAccountsResponse,
+  MoneygramRampEvent,
   PaymentRampEstimateEnvelope,
   PaymentRampExecution,
   PaymentsWalletAggregateEnvelope,
@@ -513,6 +514,26 @@ export async function createTransfer(input: {
 
   if (!body.data?.transfer) {
     throw new Error("Transfer response is missing transfer details.");
+  }
+
+  return body.data.transfer;
+}
+
+export async function postMoneygramRampEvent(event: MoneygramRampEvent): Promise<TransferRecord> {
+  const response = await fetch("/api/dashboard/payments/ramps/moneygram/events", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(event),
+  });
+  const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `MoneyGram event request failed (${response.status}).`));
+  }
+
+  if (!body.data?.transfer) {
+    throw new Error("MoneyGram event response is missing transfer details.");
   }
 
   return body.data.transfer;

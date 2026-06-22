@@ -10,6 +10,9 @@ import {
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toRampCryptoToken } from "@/lib/ramps";
+import { findWalletBalanceForToken } from "../wallet-options";
+import { AmountBalanceReadout } from "./amount-balance-readout";
 import { useRampSelection } from "./ramp-selection-context";
 
 export function CurrencyPairSelector() {
@@ -54,6 +57,20 @@ export function CurrencyPairSelector() {
   );
 
   const isOfframp = direction === "offramp";
+
+  const offrampBalance = useMemo<number | null>(() => {
+    if (!isOfframp || !selectedWallet) {
+      return null;
+    }
+    const balance = findWalletBalanceForToken(
+      selectedWallet,
+      toRampCryptoToken(selectedPair.assetRail)
+    );
+    return balance ? Number(balance.uiAmount) : 0;
+  }, [isOfframp, selectedWallet, selectedPair.assetRail]);
+
+  const offrampExceeds =
+    offrampBalance !== null && amount !== "" && Number(amount) > offrampBalance;
 
   const fiatCombobox = (
     <Combobox
@@ -102,6 +119,18 @@ export function CurrencyPairSelector() {
             placeholder={isOfframp ? "1.0" : "20.00"}
             size="xl"
             className="h-[var(--input-height-xl)] shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:border-0 [&>span:first-child]:bg-border-extra-light"
+            action={
+              offrampBalance !== null ? (
+                <AmountBalanceReadout
+                  available={String(offrampBalance)}
+                  assetLabel={getCryptoRailAssetLabel(selectedPair.assetRail)}
+                  exceeds={offrampExceeds}
+                  onMax={
+                    offrampBalance > 0 ? () => onAmountChange(String(offrampBalance)) : undefined
+                  }
+                />
+              ) : undefined
+            }
           />
         </div>
         {isOfframp ? assetCombobox : fiatCombobox}
