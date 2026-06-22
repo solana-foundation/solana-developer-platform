@@ -28,12 +28,14 @@ export const RAMP_PROVIDER_LOGOS = {
   moonpay: "/provider-logos/moonpay.svg",
   lightspark: "/provider-logos/lightspark.svg",
   bvnk: "/provider-logos/bvnk.svg",
+  moneygram: "/provider-logos/moneygram.svg",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
   { id: "moonpay", title: "MoonPay" },
   { id: "lightspark", title: "Lightspark" },
   { id: "bvnk", title: "BVNK" },
+  { id: "moneygram", title: "MoneyGram" },
 ];
 
 export const ONRAMP_PAIRS: RampPair[] = ONRAMP_SUPPORT.map(({ source, dest, providers }) => ({

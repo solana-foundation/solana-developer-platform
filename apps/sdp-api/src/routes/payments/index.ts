@@ -38,6 +38,7 @@ import {
   prepareSubscriptionAuthorization,
   prepareSubscriptionCollection,
   prepareTransfer,
+  recordMoneygramRampEvent,
   simulateSandboxTransfer,
   updateSubscription,
   updateSubscriptionPlan,
@@ -188,6 +189,11 @@ payments.post(
   "/ramps/offramp/execute",
   requirePermissions("payments:write", "wallets:read"),
   executeOfframp
+);
+payments.post(
+  "/ramps/moneygram/events",
+  requirePermissions("payments:write"),
+  recordMoneygramRampEvent
 );
 payments.post("/ramps/transfers/cancel", requirePermissions("payments:write"), cancelRampTransfer);
 payments.post(

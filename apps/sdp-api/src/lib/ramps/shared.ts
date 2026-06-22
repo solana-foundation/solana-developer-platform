@@ -58,4 +58,7 @@ export const RAMP_RAIL_DUMPS = {
     fiatAnon: { name: "bvnk/fiat__anon", file: dumpFile("bvnk/fiat__anon") },
     depositAnon: { name: "bvnk/deposit__anon", file: dumpFile("bvnk/deposit__anon") },
   },
+  moneygram: {
+    currencies: { name: "moneygram/currencies", file: dumpFile("moneygram/currencies") },
+  },
 } as const;

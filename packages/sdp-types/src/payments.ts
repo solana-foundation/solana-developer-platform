@@ -545,7 +545,7 @@ export interface PaymentRampEstimateEnvelope {
   };
 }
 
-export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted";
+export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted" | "session_widget";
 
 export interface PaymentRampQuoteCurrency {
   code: string;
@@ -615,7 +615,30 @@ export type PaymentRampQuote =
       paymentInstructions: BvnkPaymentRampInstruction[];
     })
   | (BasePaymentRampQuote & {
-      provider: Exclude<RampProviderId, "lightspark">;
+      provider: "moonpay" | "bvnk";
       deliveryMode: "hosted";
       hostedUrl: string;
+    })
+  | (BasePaymentRampQuote & {
+      provider: "moneygram";
+      deliveryMode: "session_widget";
+      /** Short-lived (1h) widget session JWT minted from the MoneyGram session API. */
+      sessionToken: string;
+      sessionId: string;
+      widgetUrl: string;
+      sdkUrl: string;
     });
+
+export type MoneygramRampEvent =
+  | { kind: "signed"; sessionId: string; cryptoTransferId: string }
+  | {
+      kind: "completed";
+      sessionId: string;
+      cryptoTransferId: string;
+      transactionId: string;
+      payoutAmount: number;
+      payoutStatus: string;
+      referenceNumber?: string;
+    }
+  | { kind: "errored"; sessionId: string; reason: string; transactionId?: string }
+  | { kind: "closed"; sessionId: string };
