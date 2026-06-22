@@ -31,6 +31,11 @@ export interface PaymentRecurringPaymentRow {
 }
 
 export type PaymentRecurringPaymentActivationAttemptStatus = "processing" | "confirmed" | "failed";
+export type PaymentRecurringPaymentActivationAttemptStage =
+  | "claim"
+  | "create_plan"
+  | "authorize_subscription"
+  | "finalize";
 
 export interface PaymentRecurringPaymentActivationAttemptRow {
   id: string;
@@ -38,7 +43,7 @@ export interface PaymentRecurringPaymentActivationAttemptRow {
   project_id: string;
   recurring_payment_id: string;
   status: PaymentRecurringPaymentActivationAttemptStatus;
-  stage: string;
+  stage: PaymentRecurringPaymentActivationAttemptStage;
   plan_creation_signature: string | null;
   authorization_signature: string | null;
   error: string | null;
@@ -90,7 +95,7 @@ export interface CreatePaymentRecurringPaymentActivationAttemptInput {
   projectId: string;
   recurringPaymentId: string;
   status: PaymentRecurringPaymentActivationAttemptStatus;
-  stage: string;
+  stage: PaymentRecurringPaymentActivationAttemptStage;
   planCreationSignature: string | null;
   authorizationSignature: string | null;
   error: string | null;
@@ -104,7 +109,7 @@ export interface UpdatePaymentRecurringPaymentActivationAttemptInput {
   organizationId: string;
   projectId: string;
   status?: PaymentRecurringPaymentActivationAttemptStatus;
-  stage?: string;
+  stage?: PaymentRecurringPaymentActivationAttemptStage;
   planCreationSignature?: string | null;
   authorizationSignature?: string | null;
   error?: string | null;

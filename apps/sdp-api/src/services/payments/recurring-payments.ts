@@ -20,6 +20,7 @@ import {
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
   type PaymentRecurringPaymentActivationAttemptRow,
+  type PaymentRecurringPaymentActivationAttemptStage,
   type PaymentRecurringPaymentRow,
   type PaymentRecurringPaymentsRepository,
   type PaymentSubscriptionPlanRow,
@@ -44,8 +45,6 @@ import { resolveSolanaCounterpartyAccount } from "./counterparty-account-resolut
 
 const U64_MAX = 18_446_744_073_709_551_615n;
 const ACTIVATION_STALE_AFTER_MS = 15 * 60 * 1000;
-
-type ActivationAttemptStage = "claim" | "create_plan" | "authorize_subscription" | "finalize";
 
 function assertRecurringPaymentTokenMint(token: string): string {
   const normalized = normalizePaymentToken(token);
@@ -278,7 +277,7 @@ async function recordActivationFailure(input: {
   claimed: PaymentRecurringPaymentRow;
   organizationId: string;
   projectId: string;
-  stage: ActivationAttemptStage;
+  stage: PaymentRecurringPaymentActivationAttemptStage;
   error: unknown;
   failedAt: string;
 }): Promise<void> {
@@ -467,6 +466,111 @@ async function createClaimedActivationAttempt(input: {
   throw new AppError("INTERNAL_ERROR", "Failed to journal recurring payment activation");
 }
 
+async function fetchConfirmedActivationPlan(input: {
+  env: Env;
+  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  planPda: Address;
+  planCreationSignature: Signature;
+  createdPlanThisRun: boolean;
+}) {
+  if (input.createdPlanThisRun) {
+    await confirmSubscriptionSignature(input.env, input.planCreationSignature);
+    return subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, {
+      commitment: "confirmed",
+    });
+  }
+
+  const existingPlan = await subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, {
+    commitment: "confirmed",
+  });
+  if (existingPlan.exists) {
+    return existingPlan;
+  }
+
+  await confirmSubscriptionSignature(input.env, input.planCreationSignature);
+  return subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, {
+    commitment: "confirmed",
+  });
+}
+
+async function prepareSubscriptionAuthorityForActivation(input: {
+  env: Env;
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  attempt: PaymentRecurringPaymentActivationAttemptRow;
+  organizationId: string;
+  projectId: string;
+  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  sourceWallet: CustodyWallet;
+  sourceSigner: TransactionSigner;
+  sourceTokenAccount: { tokenAccount: Address; exists: boolean };
+  subscriptionAuthority: Awaited<
+    ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionAuthority>
+  >;
+  subscriptionAuthorityAddress: Address;
+  owner: Address;
+  mint: Address;
+  tokenProgram: Address;
+  feePayer: Address;
+}) {
+  if (input.subscriptionAuthority.exists && input.sourceTokenAccount.exists) {
+    return input.subscriptionAuthority;
+  }
+
+  const payer = createNoopSigner(input.feePayer);
+  const initAuthorityInstruction = input.subscriptionAuthority.exists
+    ? null
+    : await subscriptionsProgram.getInitSubscriptionAuthorityOverlayInstructionAsync({
+        owner: input.sourceSigner,
+        payer,
+        tokenMint: input.mint,
+        tokenProgram: input.tokenProgram,
+        userAta: input.sourceTokenAccount.tokenAccount,
+      });
+  const createSourceAtaInstruction = input.sourceTokenAccount.exists
+    ? null
+    : getCreateAssociatedTokenIdempotentInstruction({
+        payer,
+        ata: input.sourceTokenAccount.tokenAccount,
+        owner: input.owner,
+        mint: input.mint,
+        tokenProgram: input.tokenProgram,
+      });
+  const initSignature = await sendSubscriptionInstructions({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    sourceWallet: input.sourceWallet,
+    sourceSigner: input.sourceSigner,
+    instructions: [
+      ...(createSourceAtaInstruction ? [createSourceAtaInstruction] : []),
+      ...(initAuthorityInstruction ? [initAuthorityInstruction] : []),
+    ],
+    feePayer: input.feePayer,
+  });
+  await input.recurringRepo.updateActivationAttempt({
+    attemptId: input.attempt.id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    metadata: { initAuthoritySignature: initSignature },
+    updatedAt: new Date().toISOString(),
+  });
+  await confirmSubscriptionSignature(input.env, initSignature);
+
+  if (!initAuthorityInstruction) {
+    return input.subscriptionAuthority;
+  }
+
+  const subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
+    input.rpc,
+    input.subscriptionAuthorityAddress,
+    { commitment: "confirmed" }
+  );
+  if (!subscriptionAuthority.exists) {
+    throw new AppError("TRANSACTION_FAILED", "Subscription authority was not found on-chain");
+  }
+  return subscriptionAuthority;
+}
+
 export async function activateRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -512,7 +616,7 @@ export async function activateRecurringPayment(input: {
     nowIso,
   });
 
-  let currentStage: ActivationAttemptStage = "create_plan";
+  let currentStage: PaymentRecurringPaymentActivationAttemptStage = "create_plan";
   let planCreationSignature = claimed.plan_creation_signature as Signature | null;
   let authorizationSignature = claimed.authorization_signature as Signature | null;
 
@@ -574,6 +678,7 @@ export async function activateRecurringPayment(input: {
       stage: currentStage,
       updatedAt: new Date().toISOString(),
     });
+    let createdPlanThisRun = false;
     if (!planCreationSignature) {
       const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync(
         {
@@ -612,11 +717,15 @@ export async function activateRecurringPayment(input: {
         planCreationSignature,
         updatedAt: signatureUpdatedAt,
       });
+      createdPlanThisRun = true;
     }
-    await confirmSubscriptionSignature(input.env, planCreationSignature);
 
-    const onChainPlan = await subscriptionsProgram.fetchMaybePlan(rpc, planPda, {
-      commitment: "confirmed",
+    const onChainPlan = await fetchConfirmedActivationPlan({
+      env: input.env,
+      rpc,
+      planPda,
+      planCreationSignature,
+      createdPlanThisRun,
     });
     if (!onChainPlan.exists) {
       throw new AppError("TRANSACTION_FAILED", "Subscription plan was not found on-chain");
@@ -695,52 +804,25 @@ export async function activateRecurringPayment(input: {
       const feePayer = await createFeePaymentAdapter(input.env).getFeePayer();
       const payer = createNoopSigner(feePayer);
 
-      if (!subscriptionAuthority.exists || !sourceTokenAccount.exists) {
-        const initAuthorityInstruction =
-          await subscriptionsProgram.getInitSubscriptionAuthorityOverlayInstructionAsync({
-            owner: sourceSigner,
-            payer,
-            tokenMint: mint,
-            tokenProgram,
-            userAta: sourceTokenAccount.tokenAccount,
-          });
-        const createSourceAtaInstruction = sourceTokenAccount.exists
-          ? null
-          : getCreateAssociatedTokenIdempotentInstruction({
-              payer,
-              ata: sourceTokenAccount.tokenAccount,
-              owner,
-              mint,
-              tokenProgram,
-            });
-        const initSignature = await sendSubscriptionInstructions({
-          env: input.env,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          sourceWallet: input.sourceWallet,
-          sourceSigner,
-          instructions: [
-            ...(createSourceAtaInstruction ? [createSourceAtaInstruction] : []),
-            initAuthorityInstruction,
-          ],
-          feePayer,
-        });
-        await recurringRepo.updateActivationAttempt({
-          attemptId: attempt.id,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          metadata: { initAuthoritySignature: initSignature },
-          updatedAt: new Date().toISOString(),
-        });
-        await confirmSubscriptionSignature(input.env, initSignature);
-        subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
-          rpc,
-          subscriptionAuthorityAddress,
-          { commitment: "confirmed" }
-        );
-        if (!subscriptionAuthority.exists) {
-          throw new AppError("TRANSACTION_FAILED", "Subscription authority was not found on-chain");
-        }
+      subscriptionAuthority = await prepareSubscriptionAuthorityForActivation({
+        env: input.env,
+        recurringRepo,
+        attempt,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        rpc,
+        sourceWallet: input.sourceWallet,
+        sourceSigner,
+        sourceTokenAccount,
+        subscriptionAuthority,
+        subscriptionAuthorityAddress,
+        owner,
+        mint,
+        tokenProgram,
+        feePayer,
+      });
+      if (!subscriptionAuthority.exists) {
+        throw new AppError("TRANSACTION_FAILED", "Subscription authority was not found on-chain");
       }
 
       const subscribeInstruction = await subscriptionsProgram.getSubscribeOverlayInstructionAsync({

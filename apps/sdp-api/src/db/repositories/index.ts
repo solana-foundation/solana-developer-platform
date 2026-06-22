@@ -27,6 +27,7 @@ export type {
   ListPaymentRecurringPaymentsInput,
   ListPaymentRecurringPaymentsResult,
   PaymentRecurringPaymentActivationAttemptRow,
+  PaymentRecurringPaymentActivationAttemptStage,
   PaymentRecurringPaymentActivationAttemptStatus,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
