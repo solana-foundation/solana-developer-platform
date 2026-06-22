@@ -580,7 +580,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
     attemptId: input.attempt.id,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    metadata: { initAuthoritySignature: initSignature },
+    metadata: { authorizationSetupSignature: initSignature },
     updatedAt: new Date().toISOString(),
   });
   await confirmSubscriptionSignature(input.env, initSignature);

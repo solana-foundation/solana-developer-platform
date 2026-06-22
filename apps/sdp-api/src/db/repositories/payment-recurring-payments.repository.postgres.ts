@@ -308,7 +308,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async updateActivationAttempt(input: UpdatePaymentRecurringPaymentActivationAttemptInput) {
-      await db
+      const rowsAffected = await db
         .prepare(
           `UPDATE payment_recurring_payment_activation_attempts
               SET status = COALESCE(?, status),
@@ -341,6 +341,10 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.projectId
         )
         .run();
+
+      if (rowsAffected === 0) {
+        throw new Error("Activation attempt update did not match an existing attempt");
+      }
 
       return getActivationAttemptByIdInternal(db, {
         attemptId: input.attemptId,
