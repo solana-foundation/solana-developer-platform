@@ -73,7 +73,7 @@
     "slack": "true"
   },
   "annotations": {
-    "summary": "SDP Cloud Run service failing: {{ $labels.service_name }}",
+    "summary": "SDP Cloud Run service failing: {{ or (index $labels \"metric.label.service_name\") (index $labels \"service_name\") }}",
     "description": "One or more SDP Cloud Run services logged a non-zero container exit or a failed startup probe in the last 5 minutes (log-based metric logging.googleapis.com/user/sdp_cloud_run_service_failures, grouped by service_name). This is independent of per-service Kora app metrics and covers crash-loops, OOMs, exits, and startup-probe failures for any service in solana-developer-platform. Check Cloud Run logs: resource.type=cloud_run_revision for the affected service.",
     "runbook_url": "https://console.cloud.google.com/run?project=solana-developer-platform"
   },
