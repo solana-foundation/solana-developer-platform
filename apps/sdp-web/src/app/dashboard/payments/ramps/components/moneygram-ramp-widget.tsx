@@ -270,6 +270,9 @@ export function MoneygramRampWidget({
       return;
     }
     const { sessionId, sessionToken, widgetUrl, sdkUrl } = quote;
+    const mountPoint = document.createElement("div");
+    mountPoint.className = "h-full w-full";
+    container.appendChild(mountPoint);
     let cancelled = false;
     let handle: MoneygramRampsHandle | null = null;
 
@@ -288,7 +291,7 @@ export function MoneygramRampWidget({
           return;
         }
         handle = sdk.createRamps({
-          container,
+          container: mountPoint,
           sessionToken,
           widgetUrl,
           devConfig: { apiBaseUrl: `${new URL(widgetUrl).origin}/api`, mockMode: false },
@@ -379,6 +382,7 @@ export function MoneygramRampWidget({
     return () => {
       cancelled = true;
       handle?.destroy();
+      mountPoint.remove();
     };
   }, [
     quote,
