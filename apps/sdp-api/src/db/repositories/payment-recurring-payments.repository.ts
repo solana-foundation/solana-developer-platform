@@ -93,6 +93,7 @@ export interface UpdatePaymentRecurringPaymentCollectionInput {
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
+  currentCollectionDueAt: string;
   nextCollectionDueAt: string;
   destinationTokenAccount?: string | null;
   updatedAt: string;

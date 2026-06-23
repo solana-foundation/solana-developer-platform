@@ -137,6 +137,7 @@ export interface UpdatePaymentSubscriptionInput {
   status?: PaymentSubscriptionStatus;
   currentPeriodStartAt?: string | null;
   nextCollectionDueAt?: string | null;
+  expectedNextCollectionDueAt?: string | null;
   cancelAt?: string | null;
   canceledAt?: string | null;
   updatedAt: string;

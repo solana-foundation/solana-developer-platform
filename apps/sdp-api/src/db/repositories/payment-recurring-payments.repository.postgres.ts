@@ -280,6 +280,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               AND organization_id = ?
               AND project_id = ?
               AND status = 'active'
+              AND next_collection_due_at = ?
           RETURNING *`
         )
         .bind(
@@ -289,7 +290,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.updatedAt,
           input.recurringPaymentId,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          input.currentCollectionDueAt
         )
         .first<Record<string, unknown>>();
 

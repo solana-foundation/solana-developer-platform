@@ -1241,7 +1241,7 @@ describe("Payments routes", () => {
         dueAt,
         now,
         "processing",
-        submittedSignature,
+        null,
         JSON.stringify({ recurringPaymentId }),
         now,
         now

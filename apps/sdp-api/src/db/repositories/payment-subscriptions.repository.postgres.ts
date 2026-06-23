@@ -353,7 +353,7 @@ export function createPostgresPaymentSubscriptionsRepository(
       });
       if (!existing) return null;
 
-      await db
+      const row = await db
         .prepare(
           `UPDATE payment_subscriptions
               SET subscriber_token_account =
@@ -373,7 +373,9 @@ export function createPostgresPaymentSubscriptionsRepository(
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
-              AND project_id = ?`
+              AND project_id = ?
+              AND (?::boolean = false OR next_collection_due_at = ?)
+          RETURNING *`
         )
         .bind(
           input.subscriberTokenAccount !== undefined,
@@ -396,15 +398,13 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.updatedAt,
           input.subscriptionId,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          input.expectedNextCollectionDueAt !== undefined,
+          input.expectedNextCollectionDueAt ?? null
         )
-        .run();
+        .first<Record<string, unknown>>();
 
-      return getSubscriptionByIdInternal(db, {
-        subscriptionId: input.subscriptionId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
+      return row ? mapSubscriptionRow(row) : null;
     },
 
     getSubscriptionById(params) {
@@ -426,8 +426,8 @@ export function createPostgresPaymentSubscriptionsRepository(
       ];
 
       if (params.statuses?.length) {
-        clauses.push("status = ANY(?)");
-        values.push(params.statuses);
+        clauses.push(`status IN (${params.statuses.map(() => "?").join(", ")})`);
+        values.push(...params.statuses);
       }
 
       const row = await db
