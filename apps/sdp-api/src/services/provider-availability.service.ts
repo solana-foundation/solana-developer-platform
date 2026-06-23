@@ -204,8 +204,7 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     },
     coinbase: {
       label: "Coinbase Onramp",
-      isConfigured: (env) =>
-        hasAllEnv(env, ["CDP_ONRAMP_API_KEY_NAME", "CDP_ONRAMP_API_KEY_SECRET"]),
+      isConfigured: (env) => hasAllEnv(env, ["CDP_API_KEY", "CDP_API_SECRET"]),
     },
   },
 } as const satisfies ProviderAvailabilityDefinitions;

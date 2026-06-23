@@ -28,12 +28,12 @@ interface CoinbaseConfig {
 
 // biome-ignore lint/correctness/noUnusedVariables: called by capability skill implementations (estimate, quote, etc.)
 function readCoinbaseConfig(env: Record<string, string | undefined>): CoinbaseConfig {
-  const apiKeyName = env.CDP_ONRAMP_API_KEY_NAME?.trim();
-  const apiKeySecret = env.CDP_ONRAMP_API_KEY_SECRET?.trim();
+  const apiKeyName = env.CDP_API_KEY?.trim();
+  const apiKeySecret = env.CDP_API_SECRET?.trim();
 
   if (!apiKeyName || !apiKeySecret) {
     throw providerNotConfigured(
-      "Coinbase Onramp is not configured. Set CDP_ONRAMP_API_KEY_NAME and CDP_ONRAMP_API_KEY_SECRET."
+      "Coinbase Onramp is not configured. Set CDP_API_KEY and CDP_API_SECRET."
     );
   }
 
@@ -59,8 +59,8 @@ export class CoinbaseRampClient implements RampProvider {
     fetchJson,
     writeDump,
   }: Parameters<RampProvider["_discoverRails"]>[0]): Promise<void> {
-    const apiKeyName = requireEnv(env, "CDP_ONRAMP_API_KEY_NAME");
-    const apiKeySecret = requireEnv(env, "CDP_ONRAMP_API_KEY_SECRET");
+    const apiKeyName = requireEnv(env, "CDP_API_KEY");
+    const apiKeySecret = requireEnv(env, "CDP_API_SECRET");
     const base = env.CDP_ONRAMP_API_BASE_URL?.trim() || CDP_ONRAMP_API_BASE_URL;
 
     const jwt = await generateCdpJwt({
