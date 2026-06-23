@@ -21,8 +21,7 @@ type RestrictionCategoryId = "destinations" | "limits" | "operations" | "approva
 type OperationRuleId =
   | "payment_transfers"
   | "ramp_transactions"
-  | "token_issuance"
-  | "wallet_admin";
+  | "token_issuance";
 type ApprovalRuleId = "large_transfers" | "new_destinations" | "admin_actions";
 
 interface WalletPolicyStartingProfileFlowProps {
@@ -133,11 +132,6 @@ const OPERATION_RULE_OPTIONS = [
     id: "token_issuance",
     title: "Token issuance",
     description: "Allow minting, burning, freezing, and token administration actions.",
-  },
-  {
-    id: "wallet_admin",
-    title: "Wallet administration",
-    description: "Allow provider and wallet-management actions.",
   },
 ] as const satisfies readonly ToggleOption<OperationRuleId>[];
 
