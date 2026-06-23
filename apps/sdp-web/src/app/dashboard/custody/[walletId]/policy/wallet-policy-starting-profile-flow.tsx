@@ -9,8 +9,6 @@ import {
   LockKeyhole,
   MapPin,
   PauseCircle,
-  RotateCcw,
-  Save,
   ShieldCheck,
   SlidersHorizontal,
   Users,
@@ -346,18 +344,6 @@ export function WalletPolicyStartingProfileFlow({
     setStepIndex((current) => Math.max(current - 1, 0));
   }
 
-  function resetToLivePolicy() {
-    setSelectedCategories(categoriesFromPolicy(currentPolicy));
-    setDestinationText(currentPolicy.destinationAllowlist.join("\n"));
-    setMaxTransferAmount(currentPolicy.maxTransferAmount ?? "");
-    setMaxDailyAmount(currentPolicy.maxDailyAmount ?? "");
-    clearDraft();
-    toast.success("Draft cleared.", {
-      description: "The flow now reflects the live wallet policy.",
-      position: "bottom-right",
-    });
-  }
-
   async function activateProfile() {
     if (!canActivate) {
       persistDraft({ notify: true });
@@ -527,33 +513,9 @@ export function WalletPolicyStartingProfileFlow({
           >
             {stepIndex === 0 ? "Back" : "Previous"}
           </Button>
-          {savedDraft ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full sm:w-auto"
-              onClick={resetToLivePolicy}
-              iconLeft={<RotateCcw className="size-4" />}
-              disabled={isSubmitting}
-            >
-              Clear draft
-            </Button>
-          ) : null}
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row">
-          {stepIndex > 0 ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full sm:w-auto"
-              onClick={() => persistDraft({ notify: true })}
-              iconLeft={<Save className="size-4" />}
-              disabled={isSubmitting}
-            >
-              Save draft
-            </Button>
-          ) : null}
           {hasLivePolicy && currentStep.id === "review" ? (
             <Button
               type="button"
@@ -577,13 +539,13 @@ export function WalletPolicyStartingProfileFlow({
                 <ArrowRight className="size-4" />
               )
             }
-            disabled={isSubmitting || Boolean(policyError && currentStep.id === "review")}
+            disabled={
+              isSubmitting ||
+              Boolean(policyError && currentStep.id === "review") ||
+              (currentStep.id === "review" && !canActivate)
+            }
           >
-            {currentStep.id === "review"
-              ? canActivate
-                ? "Activate controls"
-                : "Save draft"
-              : "Continue"}
+            {currentStep.id === "review" ? "Activate controls" : "Continue"}
           </Button>
         </div>
       </footer>
