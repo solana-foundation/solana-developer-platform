@@ -366,9 +366,19 @@ export function WalletPolicyStartingProfileFlow({
       updatedAt: new Date().toISOString(),
     };
 
-    window.localStorage.setItem(draftStorageKey(wallet.walletId), JSON.stringify(draft));
-    setSavedDraft(draft);
-    setLocalStatus("draft");
+    try {
+      window.localStorage.setItem(draftStorageKey(wallet.walletId), JSON.stringify(draft));
+      setSavedDraft(draft);
+      setLocalStatus("draft");
+    } catch {
+      setSavedDraft(null);
+      setLocalStatus(null);
+      toast.error("Draft could not be saved.", {
+        description: "You can keep configuring, but changes may be lost if you leave.",
+        position: "bottom-right",
+      });
+      return;
+    }
 
     if (options.notify) {
       toast.success("Draft saved.", {
