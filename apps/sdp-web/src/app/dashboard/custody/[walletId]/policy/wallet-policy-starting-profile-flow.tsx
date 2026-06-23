@@ -14,7 +14,6 @@ import {
   Save,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -651,12 +650,12 @@ export function WalletPolicyStartingProfileFlow({
 }
 
 function ProfileStateBadge({ state }: { state: ProfileState }) {
-  const meta: Record<ProfileState, { label: string; className: string; icon: LucideIcon }> = {
-    empty: {
-      label: "Default allow",
-      className: "bg-[rgba(28,28,29,0.08)] text-text-extra-high",
-      icon: Sparkles,
-    },
+  if (state === "empty") return null;
+
+  const meta: Record<
+    Exclude<ProfileState, "empty">,
+    { label: string; className: string; icon: LucideIcon }
+  > = {
     draft: {
       label: "Draft",
       className: "bg-status-warning-bg text-status-warning-text",
