@@ -945,7 +945,7 @@ function RuleSection({
         type="button"
         aria-expanded={expanded}
         onClick={onToggle}
-        className="flex w-full items-start justify-between gap-4 px-4 py-4 text-left transition-colors hover:bg-gray-100"
+        className="flex w-full items-start justify-between gap-4 py-4 pr-3 text-left transition-colors hover:bg-gray-100"
       >
         <span className="min-w-0">
           <span className="block text-base font-semibold text-text-extra-high">
@@ -961,7 +961,7 @@ function RuleSection({
           <span className="sr-only">{expanded ? "Collapse" : "Expand"}</span>
         </span>
       </button>
-      {expanded ? <div className="px-4 pb-5">{children}</div> : null}
+      {expanded ? <div className="pb-5 pr-3">{children}</div> : null}
     </section>
   );
 }
