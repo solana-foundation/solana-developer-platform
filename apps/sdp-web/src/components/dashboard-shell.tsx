@@ -32,11 +32,6 @@ import { SentryUserContext } from "@/components/sentry-user-context";
 import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import {
-  DASHBOARD_PAYMENTS_V2_OVERRIDE_COOKIE_NAME,
-  DASHBOARD_PAYMENTS_V2_OVERRIDE_COOKIE_VALUES,
-  type DashboardFeatureFlags,
-} from "@/lib/dashboard-feature-flags";
 import { cn } from "@/lib/utils";
 
 type SubNavItem = {
@@ -58,35 +53,7 @@ type NavSection = {
   items: NavItem[];
 };
 
-type DashboardFeatureFlagsConsole = {
-  getPaymentsV2: () => boolean;
-  setPaymentsV2: (enabled: boolean) => void;
-};
-
-declare global {
-  interface Window {
-    sdpDashboardFeatureFlags: DashboardFeatureFlagsConsole;
-  }
-}
-
-const PAYMENTS_V2_OVERRIDE_COOKIE_MAX_AGE_SECONDS = 31_536_000;
-
-function getPaymentsV2OverrideCookieAttributes(maxAgeSeconds: number): string {
-  const secureAttribute = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `; Path=/; Max-Age=${maxAgeSeconds}; SameSite=Lax${secureAttribute}`;
-}
-
-function writePaymentsV2Override(enabled: boolean): void {
-  const value = enabled
-    ? DASHBOARD_PAYMENTS_V2_OVERRIDE_COOKIE_VALUES.enabled
-    : DASHBOARD_PAYMENTS_V2_OVERRIDE_COOKIE_VALUES.disabled;
-  document.cookie = `${DASHBOARD_PAYMENTS_V2_OVERRIDE_COOKIE_NAME}=${value}${getPaymentsV2OverrideCookieAttributes(
-    PAYMENTS_V2_OVERRIDE_COOKIE_MAX_AGE_SECONDS
-  )}`;
-  window.location.reload();
-}
-
-function getNavSections(featureFlags: DashboardFeatureFlags): NavSection[] {
+function getNavSections(): NavSection[] {
   return [
     {
       title: "Create",
@@ -103,13 +70,11 @@ function getNavSections(featureFlags: DashboardFeatureFlags): NavSection[] {
           label: "Payments",
           href: "/dashboard/payments",
           icon: ArrowLeftRightIcon,
-          children: featureFlags.paymentsV2
-            ? [
-                { label: "Counterparty", href: "/dashboard/payments/counterparty" },
-                { label: "Pay", href: "/dashboard/payments/pay" },
-                { label: "Deposit", href: "/dashboard/payments/deposit" },
-              ]
-            : [],
+          children: [
+            { label: "Counterparty", href: "/dashboard/payments/counterparty" },
+            { label: "Pay", href: "/dashboard/payments/pay" },
+            { label: "Deposit", href: "/dashboard/payments/deposit" },
+          ],
         },
         { label: "API keys", href: "/dashboard/api-keys", icon: KeyRoundIcon },
       ],
@@ -415,11 +380,7 @@ function resolvePageLoadingComponent(pathname: string): React.ComponentType {
   return DashboardLoading;
 }
 
-function isItemActive(
-  pathname: string,
-  href: string,
-  featureFlags: DashboardFeatureFlags
-): boolean {
+function isItemActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") {
     return pathname === "/dashboard";
   }
@@ -428,8 +389,7 @@ function isItemActive(
   }
   if (href === "/dashboard/payments") {
     if (pathname.startsWith("/dashboard/payments/counterparty")) return false;
-    if (featureFlags.paymentsV2) return pathname === "/dashboard/payments";
-    return pathname.startsWith("/dashboard/payments");
+    return pathname === "/dashboard/payments";
   }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -443,7 +403,6 @@ function SidebarGroup({
   title,
   items,
   pathname,
-  featureFlags,
   onNavigate,
   isCollapsed,
   showTopSeparator,
@@ -451,7 +410,6 @@ function SidebarGroup({
   title: string;
   items: NavItem[];
   pathname: string;
-  featureFlags: DashboardFeatureFlags;
   onNavigate?: () => void;
   isCollapsed: boolean;
   showTopSeparator: boolean;
@@ -475,7 +433,7 @@ function SidebarGroup({
       <div className="space-y-0.5">
         {items.map((item) => {
           const Icon = item.icon;
-          const active = isItemActive(pathname, item.href, featureFlags);
+          const active = isItemActive(pathname, item.href);
 
           return (
             <div key={item.label}>
@@ -496,7 +454,7 @@ function SidebarGroup({
               {!isCollapsed && item.children && item.children.length > 0 && (
                 <div className="ml-5 mt-2">
                   {item.children.map((child, i, siblings) => {
-                    const childActive = isItemActive(pathname, child.href, featureFlags);
+                    const childActive = isItemActive(pathname, child.href);
                     const isFirst = i === 0;
                     const isLast = i === siblings.length - 1;
                     return (
@@ -543,7 +501,6 @@ function DashboardSidebarContent({
   bottomNavItems,
   navSections,
   pathname,
-  featureFlags,
   onNavigate,
   onClose,
   isCollapsed,
@@ -552,7 +509,6 @@ function DashboardSidebarContent({
   bottomNavItems: NavItem[];
   navSections: NavSection[];
   pathname: string;
-  featureFlags: DashboardFeatureFlags;
   onNavigate?: () => void;
   onClose: () => void;
   isCollapsed: boolean;
@@ -585,7 +541,6 @@ function DashboardSidebarContent({
             title={section.title}
             items={section.items}
             pathname={pathname}
-            featureFlags={featureFlags}
             onNavigate={onNavigate}
             isCollapsed={isCollapsed}
             showTopSeparator={idx > 0}
@@ -624,7 +579,7 @@ function DashboardSidebarContent({
 export function DashboardShell({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const { dashboardAccess, featureFlags, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
+  const { dashboardAccess, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const PageLoadingComponent = resolvePageLoadingComponent(pathname);
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -632,7 +587,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const sidebarExpandedWidth = 296;
   const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(pathname);
-  const navSections = getNavSections(featureFlags);
+  const navSections = getNavSections();
   const bottomNavItems: NavItem[] = [
     { label: "API Docs", href: docsHref, icon: LibraryIcon, external: true },
     ...(dashboardAccess.capabilities.canManageOrgSettings
@@ -671,13 +626,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
-
-  useEffect(() => {
-    window.sdpDashboardFeatureFlags = {
-      getPaymentsV2: () => featureFlags.paymentsV2,
-      setPaymentsV2: writePaymentsV2Override,
-    };
-  }, [featureFlags.paymentsV2]);
 
   useEffect(() => {
     if (previousPathnameRef.current !== pathname) {
@@ -761,7 +709,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             bottomNavItems={bottomNavItems}
             navSections={navSections}
             pathname={pathname}
-            featureFlags={featureFlags}
             onNavigate={undefined}
             onClose={() => setSidebarOpen(false)}
             isCollapsed={!isSidebarOpen}
@@ -790,7 +737,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 bottomNavItems={bottomNavItems}
                 navSections={navSections}
                 pathname={pathname}
-                featureFlags={featureFlags}
                 onNavigate={() => setMobileSidebarOpen(false)}
                 onClose={() => setMobileSidebarOpen(false)}
                 isCollapsed={false}
