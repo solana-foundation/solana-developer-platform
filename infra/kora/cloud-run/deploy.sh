@@ -12,8 +12,13 @@ set -euo pipefail
 ENV="${ENV:?ENV=devnet|mainnet}"
 PROJECT="${PROJECT:?PROJECT=<gcp project id>}"
 REGION="${REGION:-us-central1}"
-KORA_TAG="${KORA_TAG:?KORA_TAG=<pinned image tag>}"
+KORA_TAG="${KORA_TAG:?KORA_TAG=<immutable git-sha tag>}"
 GHCR_REPO="${GHCR_REPO:-ghcr.io/solana-foundation/kora}"
+
+# Immutable tags only — refuse mutable tags so "what's deployed" is always traceable to one commit.
+case "$KORA_TAG" in
+  ""|latest|edge|beta) echo "refusing mutable/empty image tag '$KORA_TAG' — pin an immutable :<git-sha>" >&2; exit 1 ;;
+esac
 
 # Resolve env-scoped Doppler secrets (KORA_MAINNET_* / KORA_DEVNET_*) to the names Kora reads.
 EP="KORA_$(printf '%s' "$ENV" | tr '[:lower:]' '[:upper:]')_"
