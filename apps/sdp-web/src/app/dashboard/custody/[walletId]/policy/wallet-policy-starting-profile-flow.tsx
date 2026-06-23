@@ -870,7 +870,7 @@ function DetailsStep({
   );
 
   return (
-    <div className="overflow-hidden rounded-lg">
+    <div className="border-y border-border-light">
       {selected.map((category) => {
         const expanded = expandedRuleSet.has(category.id);
 
@@ -945,7 +945,7 @@ function RuleSection({
         type="button"
         aria-expanded={expanded}
         onClick={onToggle}
-        className="flex w-full items-start justify-between gap-4 py-4 pr-3 text-left transition-colors hover:bg-gray-100"
+        className="flex w-full items-start justify-between gap-4 py-3.5 pr-2 text-left"
       >
         <span className="min-w-0">
           <span className="block text-base font-semibold text-text-extra-high">
@@ -961,7 +961,7 @@ function RuleSection({
           <span className="sr-only">{expanded ? "Collapse" : "Expand"}</span>
         </span>
       </button>
-      {expanded ? <div className="pb-5 pr-3">{children}</div> : null}
+      {expanded ? <div className="pb-4 pr-2">{children}</div> : null}
     </section>
   );
 }
@@ -984,7 +984,7 @@ function DestinationRuleEditor({
         value={destinationText}
         onChange={(event) => setDestinationText(event.target.value)}
         rows={6}
-        className="mt-3 min-h-[140px] w-full resize-y rounded-lg border border-border-light bg-white px-3 py-3 font-mono text-sm text-text-extra-high outline-none transition-colors placeholder:text-text-extra-low focus:border-gray-1400"
+        className="mt-2 min-h-[128px] w-full resize-y rounded-lg border border-border-light bg-white px-3 py-3 font-mono text-sm text-text-extra-high outline-none transition-colors placeholder:text-text-extra-low focus:border-gray-1400"
         placeholder="address&#10;9xQeWvG816bUx9EPfuxEzHh9VY5k..."
       />
       {invalidDestinations.length > 0 ? (
