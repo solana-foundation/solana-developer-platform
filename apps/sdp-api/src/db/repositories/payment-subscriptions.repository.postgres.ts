@@ -546,14 +546,7 @@ export function createPostgresPaymentSubscriptionsRepository(
     },
 
     async updateCollectionAttempt(input: UpdatePaymentSubscriptionCollectionAttemptInput) {
-      const existing = await getAttemptByIdInternal(db, {
-        attemptId: input.attemptId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
-      if (!existing) return null;
-
-      await db
+      const row = await db
         .prepare(
           `UPDATE payment_subscription_collection_attempts
               SET transfer_id = CASE WHEN ?::boolean THEN ? ELSE transfer_id END,
@@ -565,7 +558,8 @@ export function createPostgresPaymentSubscriptionsRepository(
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
-              AND project_id = ?`
+              AND project_id = ?
+          RETURNING *`
         )
         .bind(
           input.transferId !== undefined,
@@ -584,13 +578,9 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.organizationId,
           input.projectId
         )
-        .run();
+        .first<Record<string, unknown>>();
 
-      return getAttemptByIdInternal(db, {
-        attemptId: input.attemptId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
+      return row ? mapAttemptRow(row) : null;
     },
 
     async listCollectionAttempts(params: ListPaymentSubscriptionCollectionAttemptsInput) {

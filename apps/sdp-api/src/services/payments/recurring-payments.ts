@@ -1401,11 +1401,10 @@ export async function collectRecurringPayment(input: {
         tokenProgram,
       });
 
-    await recurringRepo.updateRecurringPaymentActivation({
+    await recurringRepo.updateRecurringPaymentDestinationTokenAccount({
       recurringPaymentId: input.recurringPayment.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      status: "active",
       destinationTokenAccount: receiverAta,
       updatedAt: new Date().toISOString(),
     });

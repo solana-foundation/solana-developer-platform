@@ -98,6 +98,14 @@ export interface UpdatePaymentRecurringPaymentCollectionInput {
   updatedAt: string;
 }
 
+export interface UpdatePaymentRecurringPaymentDestinationTokenAccountInput {
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  destinationTokenAccount: string | null;
+  updatedAt: string;
+}
+
 export interface CreatePaymentRecurringPaymentActivationAttemptInput {
   id: string;
   organizationId: string;
@@ -163,6 +171,9 @@ export interface PaymentRecurringPaymentsRepository {
   ): Promise<PaymentRecurringPaymentRow | null>;
   updateRecurringPaymentCollection(
     input: UpdatePaymentRecurringPaymentCollectionInput
+  ): Promise<PaymentRecurringPaymentRow | null>;
+  updateRecurringPaymentDestinationTokenAccount(
+    input: UpdatePaymentRecurringPaymentDestinationTokenAccountInput
   ): Promise<PaymentRecurringPaymentRow | null>;
   createActivationAttempt(
     input: CreatePaymentRecurringPaymentActivationAttemptInput

@@ -11,6 +11,7 @@ import type {
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
   UpdatePaymentRecurringPaymentCollectionInput,
+  UpdatePaymentRecurringPaymentDestinationTokenAccountInput,
 } from "./payment-recurring-payments.repository";
 
 function buildInClause(length: number): string {
@@ -285,6 +286,32 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.nextCollectionDueAt,
           input.destinationTokenAccount !== undefined,
           input.destinationTokenAccount ?? null,
+          input.updatedAt,
+          input.recurringPaymentId,
+          input.organizationId,
+          input.projectId
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapRecurringPaymentRow(row) : null;
+    },
+
+    async updateRecurringPaymentDestinationTokenAccount(
+      input: UpdatePaymentRecurringPaymentDestinationTokenAccountInput
+    ) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET destination_token_account = ?,
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'active'
+          RETURNING *`
+        )
+        .bind(
+          input.destinationTokenAccount,
           input.updatedAt,
           input.recurringPaymentId,
           input.organizationId,
