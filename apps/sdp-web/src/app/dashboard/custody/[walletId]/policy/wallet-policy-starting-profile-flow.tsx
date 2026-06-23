@@ -6,7 +6,6 @@ import {
   ArrowRight,
   Check,
   CircleDollarSign,
-  ListChecks,
   LockKeyhole,
   MapPin,
   PauseCircle,
@@ -541,7 +540,6 @@ export function WalletPolicyStartingProfileFlow({
                     : 1;
                   setStepIndex(Math.max(1, draftStepIndex));
                 }}
-                onStart={() => setStepIndex(1)}
               />
             ) : null}
             {isLoaded && currentStep.id === "intent" ? (
@@ -735,15 +733,11 @@ function BaselineStep({
   state,
   policy,
   onResumeDraft,
-  onStart,
 }: {
   state: ProfileState;
   policy: PaymentWalletPolicy;
   onResumeDraft: () => void;
-  onStart: () => void;
 }) {
-  const hasPolicy = policyHasRestrictions(policy);
-
   return (
     <div className="space-y-5">
       <div className="rounded-lg border border-border-light bg-[rgba(28,28,29,0.03)] p-5">
@@ -773,8 +767,8 @@ function BaselineStep({
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        {state === "draft" ? (
+      {state === "draft" ? (
+        <div className="grid gap-3 md:grid-cols-2">
           <button
             type="button"
             onClick={onResumeDraft}
@@ -786,21 +780,8 @@ function BaselineStep({
               Continue the saved profile before anything is activated.
             </p>
           </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={onStart}
-          className="rounded-lg border border-border-light bg-white p-4 text-left transition-colors hover:bg-gray-100"
-        >
-          <ListChecks className="size-5 text-[color:var(--sdp-color-info-text)]" />
-          <p className="mt-3 text-sm font-semibold text-text-extra-high">
-            {hasPolicy ? "Edit restriction intent" : "Start restriction intent"}
-          </p>
-          <p className="mt-1 text-sm leading-6 text-text-medium">
-            Choose common policy goals before provider-specific setup.
-          </p>
-        </button>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
