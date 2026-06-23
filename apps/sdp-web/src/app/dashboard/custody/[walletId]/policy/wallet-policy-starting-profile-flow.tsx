@@ -2,7 +2,7 @@
 
 import type { PaymentWalletPolicy } from "@sdp/types";
 import { ArrowLeft, ArrowRight, Check, ChevronDown } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { updateWalletPolicy } from "@/app/dashboard/payments/payments-workspace.data";
@@ -185,7 +185,8 @@ function parseDestinationText(value: string): { addresses: string[]; invalid: st
 }
 
 function isPositiveAmount(value: string): boolean {
-  return value.trim() === "" || /^\d+(\.\d+)?$/.test(value.trim());
+  const trimmedValue = value.trim();
+  return trimmedValue === "" || (/^\d+(\.\d+)?$/.test(trimmedValue) && Number(trimmedValue) > 0);
 }
 
 function formatDateTime(value: string): string {
@@ -244,6 +245,11 @@ function formatCount(count: number, singular: string, plural = `${singular}s`): 
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
+function getWalletDetailHref(pathname: string, walletId: string): string {
+  const section = pathname.startsWith("/dashboard/custody/") ? "custody" : "wallets";
+  return `/dashboard/${section}/${encodeURIComponent(walletId)}`;
+}
+
 function getPolicyFlowValidationState({
   selectedCategories,
   selectedCategorySet,
@@ -295,6 +301,7 @@ export function WalletPolicyStartingProfileFlow({
   policyError,
 }: WalletPolicyStartingProfileFlowProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [currentPolicy, setCurrentPolicy] = useState(initialPolicy);
   const [stepIndex, setStepIndex] = useState(0);
   const [selectedCategories, setSelectedCategories] = useState<RestrictionCategoryId[]>(
@@ -334,6 +341,7 @@ export function WalletPolicyStartingProfileFlow({
   const expandedRuleSet = useMemo(() => new Set(expandedRuleIds), [expandedRuleIds]);
   const destinationParse = useMemo(() => parseDestinationText(destinationText), [destinationText]);
   const hasLivePolicy = policyHasRestrictions(currentPolicy);
+  const walletDetailHref = getWalletDetailHref(pathname, wallet.walletId);
   const { canActivateDestinations, canActivateLimits, canActivate, canSubmitReview } =
     getPolicyFlowValidationState({
       selectedCategories,
@@ -426,7 +434,7 @@ export function WalletPolicyStartingProfileFlow({
 
   function goBack() {
     if (stepIndex === 0) {
-      router.push(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`);
+      router.push(walletDetailHref);
       return;
     }
     setStepIndex((current) => Math.max(current - 1, 0));
@@ -466,7 +474,7 @@ export function WalletPolicyStartingProfileFlow({
       });
 
       if (!hasLivePolicy) {
-        router.replace(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`);
+        router.replace(walletDetailHref);
       }
     } catch (error) {
       toast.error("Activation failed.", {
