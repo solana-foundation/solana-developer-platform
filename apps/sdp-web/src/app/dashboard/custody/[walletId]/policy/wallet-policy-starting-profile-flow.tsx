@@ -4,6 +4,7 @@ import type { PaymentWalletPolicy } from "@sdp/types";
 import {
   ArrowLeft,
   ArrowRight,
+  ChevronDown,
   Check,
 } from "lucide-react";
 import Link from "next/link";
@@ -875,7 +876,7 @@ function DetailsStep({
   );
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border-light bg-white">
+    <div className="overflow-hidden rounded-lg border border-border-light">
       {selected.map((category) => {
         const expanded = expandedRuleSet.has(category.id);
 
@@ -958,8 +959,12 @@ function RuleSection({
           </span>
           <span className="mt-1 block text-sm leading-5 text-text-medium">{summary}</span>
         </span>
-        <span className="shrink-0 text-xs font-medium text-text-low">
-          {expanded ? "Collapse" : "Edit"}
+        <span className="flex size-6 shrink-0 items-center justify-center text-text-low">
+          <ChevronDown
+            aria-hidden="true"
+            className={cn("size-4 transition-transform duration-200", expanded && "rotate-180")}
+          />
+          <span className="sr-only">{expanded ? "Collapse" : "Expand"}</span>
         </span>
       </button>
       {expanded ? <div className="px-4 pb-5">{children}</div> : null}
