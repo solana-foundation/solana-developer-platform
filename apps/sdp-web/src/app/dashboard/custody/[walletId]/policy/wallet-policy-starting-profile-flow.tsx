@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-type FlowStep = "baseline" | "intent" | "details" | "review";
+type FlowStep = "intent" | "details" | "review";
 type RestrictionCategoryId = "destinations" | "limits" | "operations" | "approvals";
 
 interface WalletPolicyStartingProfileFlowProps {
@@ -57,16 +57,11 @@ interface StoredPolicyDraft {
 
 const FLOW_STEPS = [
   {
-    id: "baseline",
-    label: "Baseline",
-    title: "Default allow",
-    description: "Start open, then choose a few controls that match how this wallet is used.",
-  },
-  {
     id: "intent",
     label: "Intent",
-    title: "Restriction intent",
-    description: "Pick the policy areas that matter most. Two or three is usually enough.",
+    title: "Set wallet policies",
+    description:
+      "Choose a few guardrails for this wallet. Policies can limit where funds go, cap transfer amounts, narrow allowed operations, or require review before sensitive actions.",
   },
   {
     id: "details",
@@ -329,9 +324,7 @@ export function WalletPolicyStartingProfileFlow({
       }
     }
 
-    if (currentStep.id !== "baseline") {
-      persistDraft();
-    }
+    persistDraft();
 
     setStepIndex((current) => Math.min(current + 1, FLOW_STEPS.length - 1));
   }
@@ -407,7 +400,7 @@ export function WalletPolicyStartingProfileFlow({
 
       const disabledDraft: StoredPolicyDraft = {
         status: "disabled",
-        step: "baseline",
+        step: "intent",
         categories: [],
         destinationAllowlist: [],
         maxTransferAmount: "",
@@ -471,9 +464,6 @@ export function WalletPolicyStartingProfileFlow({
 
       <div className="mt-6 min-h-0 flex-1 overflow-y-auto px-1 py-1">
         {!isLoaded ? <LoadingState /> : null}
-        {isLoaded && currentStep.id === "baseline" ? (
-          <BaselineStep />
-        ) : null}
         {isLoaded && currentStep.id === "intent" ? (
           <IntentStep selectedCategories={selectedCategories} onToggle={toggleCategory} />
         ) : null}
@@ -584,39 +574,6 @@ function LoadingState() {
       <div className="h-20 animate-pulse rounded-lg bg-gray-100" />
       <div className="h-20 animate-pulse rounded-lg bg-gray-100" />
       <div className="h-20 animate-pulse rounded-lg bg-gray-100" />
-    </div>
-  );
-}
-
-function BaselineStep() {
-  return (
-    <div className="space-y-8">
-      <div className="space-y-6">
-        <div className="space-y-2">
-          <h2 className="text-lg font-medium text-text-extra-high">
-            Default allow stays the baseline.
-          </h2>
-          <p className="text-sm leading-6 text-text-medium">
-            A wallet can move funds unless a restriction is activated. Start with the open baseline,
-            then choose the few controls that reduce real risk for this wallet.
-          </p>
-        </div>
-
-        <div className="space-y-3">
-          <p className="text-xs font-medium tracking-[0.14em] text-text-extra-low uppercase">
-            What wallet policies do
-          </p>
-          <p className="text-sm leading-6 text-text-medium">
-            Wallet policies are guardrails for how this wallet can be used. They can limit where
-            funds go, cap transfer amounts, narrow operation types, or require review for sensitive
-            actions.
-          </p>
-          <p className="text-sm leading-6 text-text-medium">
-            Start with the controls that match the wallet's job. A treasury wallet might need
-            destination and transfer limits; an operations wallet might need approvals first.
-          </p>
-        </div>
-      </div>
     </div>
   );
 }
