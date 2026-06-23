@@ -295,6 +295,42 @@ async function recoverRecurringPaymentCollection(input: {
     throw new AppError("INTERNAL_ERROR", "Recurring payment collection transfer not found");
   }
 
+  if (existing.status === "processing") {
+    try {
+      await confirmSubscriptionSignature(
+        input.env,
+        existing.signature as Signature,
+        "Recurring payment collection failed on-chain"
+      );
+    } catch (error) {
+      const failedAt = new Date().toISOString();
+      const message = activationErrorMessage(error);
+      await input.subscriptionsRepo.updateCollectionAttempt({
+        attemptId: existing.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        status: "failed",
+        signature: existing.signature,
+        error: message,
+        metadata: {
+          ...existing.metadata,
+          recurringPaymentId: input.recurringPayment.id,
+          transferId: transfer.id,
+          ...collectionRetryMetadata(error),
+        },
+        updatedAt: failedAt,
+      });
+      await input.paymentsRepo.updateTransfer({
+        transferId: transfer.id,
+        status: "failed",
+        signature: existing.signature,
+        error: message,
+        updatedAt: failedAt,
+      });
+      throw error;
+    }
+  }
+
   return finalizeRecurringPaymentCollection({
     env: input.env,
     recurringRepo: input.recurringRepo,
@@ -308,7 +344,7 @@ async function recoverRecurringPaymentCollection(input: {
     transfer,
     signature: existing.signature as Signature,
     destinationTokenAccount: input.recurringPayment.destination_token_account,
-    confirmSubmittedSignature: existing.status === "processing",
+    confirmSubmittedSignature: false,
   });
 }
 
