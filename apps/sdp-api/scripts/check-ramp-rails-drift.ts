@@ -54,6 +54,10 @@ function sha256Json(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
+function shortHash(hash: string | undefined): string {
+  return hash ? hash.slice(0, 12) : "—";
+}
+
 function diffArrays(
   base: readonly string[],
   current: readonly string[]
@@ -135,6 +139,7 @@ function summarizeList(title: string, values: readonly string[]): void {
 }
 
 async function main(): Promise<void> {
+  const failOnDrift = process.argv.slice(2).includes("--fail-on-drift");
   const generatedDir = path.dirname(GENERATED_PATH);
   const baseTempPath = path.join(generatedDir, `.ramp-support.base-${process.pid}.generated.ts`);
   const baseSource = await readBaseGeneratedSource();
@@ -171,14 +176,28 @@ async function main(): Promise<void> {
 
     if (diffs.length > 0) {
       console.log(`Ramp rails drift detected for ${diffs.length} provider(s).`);
+      if (baseModule.RAMP_SUPPORT_HASH !== currentModule.RAMP_SUPPORT_HASH) {
+        console.log(
+          `  RAMP_SUPPORT_HASH ${shortHash(baseModule.RAMP_SUPPORT_HASH)} -> ${shortHash(currentModule.RAMP_SUPPORT_HASH)}`
+        );
+      }
       for (const diff of diffs) {
         console.log(
-          `\n[${diff.provider}] onramp ${diff.base.onramp.length} -> ${diff.current.onramp.length} (+${diff.addedOnramp.length}/-${diff.removedOnramp.length}), offramp ${diff.base.offramp.length} -> ${diff.current.offramp.length} (+${diff.addedOfframp.length}/-${diff.removedOfframp.length})`
+          `\n[${diff.provider}] hash ${shortHash(diff.baseHash)} -> ${shortHash(diff.currentHash)}; onramp ${diff.base.onramp.length} -> ${diff.current.onramp.length} (+${diff.addedOnramp.length}/-${diff.removedOnramp.length}), offramp ${diff.base.offramp.length} -> ${diff.current.offramp.length} (+${diff.addedOfframp.length}/-${diff.removedOfframp.length})`
         );
         summarizeList("Added on-ramp rails", diff.addedOnramp);
         summarizeList("Removed on-ramp rails", diff.removedOnramp);
         summarizeList("Added off-ramp rails", diff.addedOfframp);
         summarizeList("Removed off-ramp rails", diff.removedOfframp);
+      }
+      if (failOnDrift) {
+        console.error(
+          "\nThe committed ramp support matrix is out of sync with the provider rail code/dumps.\n" +
+            "Regenerate it from the committed dumps and commit the result:\n" +
+            "  pnpm --filter @sdp/api rails:generate\n" +
+            "  git add packages/sdp-types/src/generated/ramp-support.generated.ts\n"
+        );
+        process.exitCode = 1;
       }
     } else {
       console.log("No ramp rails drift detected.");
