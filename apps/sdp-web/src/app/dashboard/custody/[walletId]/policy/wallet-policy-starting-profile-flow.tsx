@@ -507,7 +507,6 @@ export function WalletPolicyStartingProfileFlow({
         maxDailyAmount: "",
         updatedAt: new Date().toISOString(),
       };
-      window.localStorage.setItem(draftStorageKey(wallet.walletId), JSON.stringify(disabledDraft));
 
       setCurrentPolicy(updated);
       setSelectedCategories([]);
@@ -518,6 +517,14 @@ export function WalletPolicyStartingProfileFlow({
       setSavedDraft(disabledDraft);
       setLocalStatus("disabled");
       setStepIndex(0);
+      try {
+        window.localStorage.setItem(
+          draftStorageKey(wallet.walletId),
+          JSON.stringify(disabledDraft)
+        );
+      } catch {
+        // The backend policy is already disabled; keep the UI in sync even if local storage is full.
+      }
 
       toast.success("Wallet controls disabled.", {
         id: toastId,
