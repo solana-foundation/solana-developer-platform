@@ -559,6 +559,13 @@ export function createPostgresPaymentSubscriptionsRepository(
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
+              AND (
+                ? IS NULL
+                OR ? = status
+                OR (? = 'processing' AND status = 'pending')
+                OR (? = 'confirmed' AND status IN ('pending', 'processing'))
+                OR (? = 'failed' AND status IN ('pending', 'processing'))
+              )
           RETURNING *`
         )
         .bind(
@@ -576,7 +583,12 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.updatedAt,
           input.attemptId,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          input.status ?? null,
+          input.status ?? null,
+          input.status ?? null,
+          input.status ?? null,
+          input.status ?? null
         )
         .first<Record<string, unknown>>();
 
