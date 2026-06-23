@@ -30,12 +30,14 @@ CREATE TABLE IF NOT EXISTS payment_requests (
     CONSTRAINT payment_requests_status_check
         CHECK (status IN ('awaiting_payment', 'paid', 'canceled', 'expired')),
     CONSTRAINT payment_requests_lifecycle_is_array
-        CHECK (jsonb_typeof(lifecycle) = 'array')
+        CHECK (jsonb_typeof(lifecycle) = 'array'),
+    CONSTRAINT payment_requests_canceled_by_only_when_canceled
+        CHECK (canceled_by IS NULL OR status = 'canceled')
 );
 
 CREATE INDEX IF NOT EXISTS idx_payment_requests_project_created
     ON payment_requests(organization_id, project_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_payment_requests_awaiting
-    ON payment_requests(status)
+    ON payment_requests(expires_at)
     WHERE status = 'awaiting_payment';
