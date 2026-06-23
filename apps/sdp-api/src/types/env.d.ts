@@ -232,13 +232,12 @@ export interface Env {
   MONEYGRAM_SANDBOX_SECRET_KEY?: string;
 
   // Coinbase Onramp (headless v2) configuration
+  // Sandbox mode uses the same keys — test transactions are identified by a
+  // "sandbox-" prefix on the partnerUserRef parameter, not separate credentials.
   CDP_ONRAMP_API_KEY_NAME?: string;
   CDP_ONRAMP_API_KEY_SECRET?: string;
   CDP_ONRAMP_WEBHOOK_SECRET?: string;
   CDP_ONRAMP_API_BASE_URL?: string;
-  CDP_ONRAMP_SANDBOX_API_KEY_NAME?: string;
-  CDP_ONRAMP_SANDBOX_API_KEY_SECRET?: string;
-  CDP_ONRAMP_SANDBOX_WEBHOOK_SECRET?: string;
 }
 
 // Extend Hono's context with our bindings

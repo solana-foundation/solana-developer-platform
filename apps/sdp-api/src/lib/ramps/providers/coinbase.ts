@@ -1,9 +1,4 @@
-import type {
-  Counterparty,
-  PaymentRampEstimate,
-  PaymentRampQuote,
-  SdpEnvironment,
-} from "@sdp/types";
+import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/types";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { badRequest, providerNotConfigured } from "@/lib/errors";
 import { type ProviderRequestInit, providerFetchJson } from "../fetch";
@@ -32,29 +27,20 @@ interface CoinbaseConfig {
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: called by capability skill implementations (estimate, quote, etc.)
-function readCoinbaseConfig(
-  env: Record<string, string | undefined>,
-  mode: SdpEnvironment
-): CoinbaseConfig {
-  const apiKeyName = (
-    mode === "sandbox" ? env.CDP_ONRAMP_SANDBOX_API_KEY_NAME : env.CDP_ONRAMP_API_KEY_NAME
-  )?.trim();
-  const apiKeySecret = (
-    mode === "sandbox" ? env.CDP_ONRAMP_SANDBOX_API_KEY_SECRET : env.CDP_ONRAMP_API_KEY_SECRET
-  )?.trim();
+function readCoinbaseConfig(env: Record<string, string | undefined>): CoinbaseConfig {
+  const apiKeyName = env.CDP_ONRAMP_API_KEY_NAME?.trim();
+  const apiKeySecret = env.CDP_ONRAMP_API_KEY_SECRET?.trim();
 
   if (!apiKeyName || !apiKeySecret) {
     throw providerNotConfigured(
-      mode === "sandbox"
-        ? "Coinbase Onramp sandbox is not configured. Set CDP_ONRAMP_SANDBOX_API_KEY_NAME and CDP_ONRAMP_SANDBOX_API_KEY_SECRET."
-        : "Coinbase Onramp is not configured. Set CDP_ONRAMP_API_KEY_NAME and CDP_ONRAMP_API_KEY_SECRET."
+      "Coinbase Onramp is not configured. Set CDP_ONRAMP_API_KEY_NAME and CDP_ONRAMP_API_KEY_SECRET."
     );
   }
 
   return {
     apiKeyName,
     apiKeySecret,
-    apiBaseUrl: CDP_ONRAMP_API_BASE_URL,
+    apiBaseUrl: env.CDP_ONRAMP_API_BASE_URL?.trim() || CDP_ONRAMP_API_BASE_URL,
   };
 }
 
@@ -73,8 +59,8 @@ export class CoinbaseRampClient implements RampProvider {
     fetchJson,
     writeDump,
   }: Parameters<RampProvider["_discoverRails"]>[0]): Promise<void> {
-    const apiKeyName = requireEnv(env, "CDP_ONRAMP_SANDBOX_API_KEY_NAME");
-    const apiKeySecret = requireEnv(env, "CDP_ONRAMP_SANDBOX_API_KEY_SECRET");
+    const apiKeyName = requireEnv(env, "CDP_ONRAMP_API_KEY_NAME");
+    const apiKeySecret = requireEnv(env, "CDP_ONRAMP_API_KEY_SECRET");
     const base = env.CDP_ONRAMP_API_BASE_URL?.trim() || CDP_ONRAMP_API_BASE_URL;
 
     const jwt = await generateCdpJwt({
