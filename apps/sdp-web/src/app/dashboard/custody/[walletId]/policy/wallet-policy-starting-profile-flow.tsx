@@ -26,7 +26,6 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 type FlowStep = "baseline" | "intent" | "details" | "review";
-type ProfileState = "empty" | "draft" | "active" | "disabled";
 type RestrictionCategoryId = "destinations" | "limits" | "operations" | "approvals";
 
 interface WalletPolicyStartingProfileFlowProps {
@@ -237,14 +236,6 @@ export function WalletPolicyStartingProfileFlow({
   const selectedCategorySet = useMemo(() => new Set(selectedCategories), [selectedCategories]);
   const destinationParse = useMemo(() => parseDestinationText(destinationText), [destinationText]);
   const hasLivePolicy = policyHasRestrictions(currentPolicy);
-  const hasDraft = Boolean(savedDraft && localStatus === "draft");
-  const profileState: ProfileState = localStatus === "disabled"
-    ? "disabled"
-    : hasDraft
-      ? "draft"
-      : hasLivePolicy
-        ? "active"
-        : "empty";
   const selectedLiveCategories = selectedCategories.filter(
     (categoryId) =>
       RESTRICTION_CATEGORIES.find((category) => category.id === categoryId)?.availability === "live"
@@ -495,16 +486,7 @@ export function WalletPolicyStartingProfileFlow({
       <div className="mt-6 min-h-0 flex-1 overflow-y-auto px-1 py-1">
         {!isLoaded ? <LoadingState /> : null}
         {isLoaded && currentStep.id === "baseline" ? (
-          <BaselineStep
-            state={profileState}
-            policy={currentPolicy}
-            onResumeDraft={() => {
-              const draftStepIndex = savedDraft
-                ? FLOW_STEPS.findIndex((step) => step.id === savedDraft.step)
-                : 1;
-              setStepIndex(Math.max(1, draftStepIndex));
-            }}
-          />
+          <BaselineStep policy={currentPolicy} />
         ) : null}
         {isLoaded && currentStep.id === "intent" ? (
           <IntentStep selectedCategories={selectedCategories} onToggle={toggleCategory} />
@@ -634,44 +616,6 @@ function StepIndicator({ stepIndex }: { stepIndex: number }) {
   );
 }
 
-function ProfileStateBadge({ state }: { state: ProfileState }) {
-  if (state === "empty") return null;
-
-  const meta: Record<
-    Exclude<ProfileState, "empty">,
-    { label: string; className: string; icon: LucideIcon }
-  > = {
-    draft: {
-      label: "Draft",
-      className: "bg-status-warning-bg text-status-warning-text",
-      icon: Save,
-    },
-    active: {
-      label: "Active",
-      className: "bg-status-success-bg text-status-success-text",
-      icon: ShieldCheck,
-    },
-    disabled: {
-      label: "Disabled",
-      className: "bg-[rgba(28,28,29,0.08)] text-text-medium",
-      icon: PauseCircle,
-    },
-  };
-  const Icon = meta[state].icon;
-
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold",
-        meta[state].className
-      )}
-    >
-      <Icon className="size-3.5" />
-      {meta[state].label}
-    </span>
-  );
-}
-
 function LoadingState() {
   return (
     <div className="grid gap-3">
@@ -683,19 +627,14 @@ function LoadingState() {
 }
 
 function BaselineStep({
-  state,
   policy,
-  onResumeDraft,
 }: {
-  state: ProfileState;
   policy: PaymentWalletPolicy;
-  onResumeDraft: () => void;
 }) {
   return (
     <div className="space-y-8">
       <div className="space-y-6">
         <div className="space-y-2">
-          <ProfileStateBadge state={state} />
           <h2 className="text-lg font-medium text-text-extra-high">
             Default allow stays the baseline.
           </h2>
@@ -723,22 +662,6 @@ function BaselineStep({
           </div>
         </div>
       </div>
-
-      {state === "draft" ? (
-        <div className="grid gap-3 md:grid-cols-2">
-          <button
-            type="button"
-            onClick={onResumeDraft}
-            className="rounded-lg border border-status-warning-border bg-status-warning-bg p-4 text-left transition-colors hover:bg-status-warning-bg/80"
-          >
-            <Save className="size-5 text-status-warning-text" />
-            <p className="mt-3 text-sm font-semibold text-text-extra-high">Resume draft</p>
-            <p className="mt-1 text-sm leading-6 text-text-medium">
-              Continue the saved profile before anything is activated.
-            </p>
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }
