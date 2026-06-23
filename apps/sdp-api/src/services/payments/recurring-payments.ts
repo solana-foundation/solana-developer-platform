@@ -14,7 +14,10 @@ import {
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import * as subscriptionsProgram from "@solana/subscriptions";
-import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
+import {
+  findAssociatedTokenPda,
+  getCreateAssociatedTokenIdempotentInstruction,
+} from "@solana-program/token-2022";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
@@ -23,9 +26,11 @@ import {
   type PaymentRecurringPaymentActivationAttemptStage,
   type PaymentRecurringPaymentRow,
   type PaymentRecurringPaymentsRepository,
+  type PaymentSubscriptionCollectionAttemptRow,
   type PaymentSubscriptionPlanRow,
   type PaymentSubscriptionRow,
   type PaymentSubscriptionsRepository,
+  type PaymentTransferRow,
 } from "@/db/repositories";
 import { parseDecimalAmount } from "@/lib/amount";
 import { AppError, badRequest } from "@/lib/errors";
@@ -120,14 +125,18 @@ async function sendSubscriptionInstructions(input: {
   return feePayment.signAndSend(txBytes);
 }
 
-async function confirmSubscriptionSignature(env: Env, signature: Signature): Promise<void> {
+async function confirmSubscriptionSignature(
+  env: Env,
+  signature: Signature,
+  message = "Recurring payment activation failed on-chain"
+): Promise<void> {
   const rpc = solanaRpc.createRpc(env);
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
     commitment: "confirmed",
   });
 
   if (confirmation.err) {
-    throw new AppError("TRANSACTION_FAILED", "Recurring payment activation failed on-chain");
+    throw new AppError("TRANSACTION_FAILED", message);
   }
 }
 
@@ -156,6 +165,151 @@ function isStaleActivation(row: PaymentRecurringPaymentRow, nowIso: string): boo
 
 function activationErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function nextCollectionDueAt(dueAt: string, periodHours: number): string {
+  return new Date(new Date(dueAt).getTime() + periodHours * 60 * 60 * 1000).toISOString();
+}
+
+function collectionRetryMetadata(error: unknown): Record<string, unknown> {
+  return {
+    error: activationErrorMessage(error),
+    retryAfterAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+  };
+}
+
+async function finalizeRecurringPaymentCollection(input: {
+  env: Env;
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  subscriptionsRepo: PaymentSubscriptionsRepository;
+  paymentsRepo: ReturnType<typeof createPaymentsRepository>;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscription: PaymentSubscriptionRow;
+  attempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow;
+  signature: Signature;
+  destinationTokenAccount?: string | null;
+  confirmSubmittedSignature: boolean;
+}): Promise<{
+  recurringPayment: PaymentRecurringPaymentRow;
+  collectionAttempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow;
+}> {
+  if (input.confirmSubmittedSignature) {
+    await confirmSubscriptionSignature(
+      input.env,
+      input.signature,
+      "Recurring payment collection failed on-chain"
+    );
+  }
+
+  const finalizedAt = new Date().toISOString();
+  const dueAt = input.attempt.due_at;
+  const nextDueAt = nextCollectionDueAt(dueAt, input.recurringPayment.period_hours);
+  const finalizedRecurringPayment = await input.recurringRepo.updateRecurringPaymentCollection({
+    recurringPaymentId: input.recurringPayment.id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    nextCollectionDueAt: nextDueAt,
+    destinationTokenAccount: input.destinationTokenAccount,
+    updatedAt: finalizedAt,
+  });
+  await input.subscriptionsRepo.updateSubscription({
+    subscriptionId: input.subscription.id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    currentPeriodStartAt: dueAt,
+    nextCollectionDueAt: nextDueAt,
+    updatedAt: finalizedAt,
+  });
+  const finalizedTransfer = await input.paymentsRepo.updateTransfer({
+    transferId: input.transfer.id,
+    status: "confirmed",
+    signature: input.signature,
+    error: null,
+    updatedAt: finalizedAt,
+  });
+  const finalizedAttempt = await input.subscriptionsRepo.updateCollectionAttempt({
+    attemptId: input.attempt.id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    status: "confirmed",
+    signature: input.signature,
+    error: null,
+    metadata: {
+      ...input.attempt.metadata,
+      recurringPaymentId: input.recurringPayment.id,
+      transferId: input.transfer.id,
+    },
+    updatedAt: finalizedAt,
+  });
+
+  if (!finalizedRecurringPayment || !finalizedAttempt || !finalizedTransfer) {
+    throw new AppError("INTERNAL_ERROR", "Failed to finalize recurring payment collection");
+  }
+
+  return {
+    recurringPayment: finalizedRecurringPayment,
+    collectionAttempt: finalizedAttempt,
+    transfer: finalizedTransfer,
+  };
+}
+
+async function recoverRecurringPaymentCollection(input: {
+  env: Env;
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  subscriptionsRepo: PaymentSubscriptionsRepository;
+  paymentsRepo: ReturnType<typeof createPaymentsRepository>;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscription: PaymentSubscriptionRow;
+  dueAt: string;
+}): Promise<{
+  recurringPayment: PaymentRecurringPaymentRow;
+  collectionAttempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow;
+} | null> {
+  const existing = await input.subscriptionsRepo.getCollectionAttemptByDue({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    subscriptionId: input.subscription.id,
+    dueAt: input.dueAt,
+    statuses: ["processing", "confirmed"],
+  });
+  if (!existing) {
+    return null;
+  }
+  if (!existing.signature || !existing.transfer_id) {
+    throw new AppError("CONFLICT", "Recurring payment collection is already processing");
+  }
+
+  const transfer = await input.paymentsRepo.getTransferById({
+    transferId: existing.transfer_id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  if (!transfer) {
+    throw new AppError("INTERNAL_ERROR", "Recurring payment collection transfer not found");
+  }
+
+  return finalizeRecurringPaymentCollection({
+    env: input.env,
+    recurringRepo: input.recurringRepo,
+    subscriptionsRepo: input.subscriptionsRepo,
+    paymentsRepo: input.paymentsRepo,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPayment: input.recurringPayment,
+    subscription: input.subscription,
+    attempt: existing,
+    transfer,
+    signature: existing.signature as Signature,
+    destinationTokenAccount: input.recurringPayment.destination_token_account,
+    confirmSubmittedSignature: existing.status === "processing",
+  });
 }
 
 async function getOrCreateActivationPlan(input: {
@@ -977,6 +1131,319 @@ export async function activateRecurringPayment(input: {
       });
     }
 
+    throw error;
+  }
+}
+
+export async function collectRecurringPayment(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  sourceWallet: CustodyWallet;
+  recurringPayment: PaymentRecurringPaymentRow;
+  initiatedByKeyId: string | null;
+}): Promise<{
+  recurringPayment: PaymentRecurringPaymentRow;
+  collectionAttempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow;
+}> {
+  if (input.recurringPayment.source_wallet_id !== input.sourceWallet.walletId) {
+    throw badRequest("Recurring payment source wallet does not match request");
+  }
+  if (input.recurringPayment.source_address !== input.sourceWallet.publicKey) {
+    throw badRequest("Recurring payment source address does not match wallet");
+  }
+  if (input.recurringPayment.status !== "active") {
+    throw new AppError("CONFLICT", "Recurring payment must be active before collection");
+  }
+  if (!input.recurringPayment.plan_id || !input.recurringPayment.subscription_id) {
+    throw new AppError("CONFLICT", "Recurring payment is missing subscription records");
+  }
+  if (!input.recurringPayment.plan_pda || !input.recurringPayment.subscription_pda) {
+    throw new AppError("CONFLICT", "Recurring payment is missing on-chain subscription records");
+  }
+  if (!input.recurringPayment.next_collection_due_at) {
+    throw new AppError("CONFLICT", "Recurring payment has no due collection");
+  }
+
+  const nowIso = new Date().toISOString();
+  const dueAt = input.recurringPayment.next_collection_due_at;
+  if (new Date(dueAt).getTime() > new Date(nowIso).getTime()) {
+    throw badRequest("Recurring payment collection is not due yet");
+  }
+
+  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env);
+  const paymentsRepo = createPaymentsRepository(input.env);
+  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
+  const plan = await subscriptionsRepo.getPlanById({
+    planId: input.recurringPayment.plan_id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  if (!plan) {
+    throw new AppError("NOT_FOUND", "Subscription plan not found");
+  }
+  if (plan.status !== "active") {
+    throw badRequest("Subscription plan must be active before collection");
+  }
+
+  const subscription = await subscriptionsRepo.getSubscriptionById({
+    subscriptionId: input.recurringPayment.subscription_id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  if (!subscription) {
+    throw new AppError("NOT_FOUND", "Subscription not found");
+  }
+  if (subscription.status !== "active") {
+    throw badRequest("Subscription must be active before collection");
+  }
+
+  const recovered = await recoverRecurringPaymentCollection({
+    env: input.env,
+    recurringRepo,
+    subscriptionsRepo,
+    paymentsRepo,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPayment: input.recurringPayment,
+    subscription,
+    dueAt,
+  });
+  if (recovered) {
+    return recovered;
+  }
+
+  let attempt = await subscriptionsRepo.createCollectionAttempt({
+    id: `psca_${crypto.randomUUID()}`,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    subscriptionId: subscription.id,
+    transferId: null,
+    token: input.recurringPayment.token,
+    amount: input.recurringPayment.amount,
+    dueAt,
+    attemptedAt: nowIso,
+    status: "processing",
+    signature: null,
+    error: null,
+    metadata: { recurringPaymentId: input.recurringPayment.id },
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  });
+  if (!attempt) {
+    const recoveredAfterConflict = await recoverRecurringPaymentCollection({
+      env: input.env,
+      recurringRepo,
+      subscriptionsRepo,
+      paymentsRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: input.recurringPayment,
+      subscription,
+      dueAt,
+    });
+    if (recoveredAfterConflict) {
+      return recoveredAfterConflict;
+    }
+    throw new AppError("CONFLICT", "Recurring payment collection is already processing");
+  }
+
+  let transfer: PaymentTransferRow | null = null;
+  try {
+    await assertWalletPolicyAllowsTransferWithRepository(paymentsRepo, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      wallet: input.sourceWallet,
+      destinationAddress: input.recurringPayment.destination_address,
+      token: input.recurringPayment.token,
+      amount: input.recurringPayment.amount,
+    });
+
+    const transferCreatedAt = new Date().toISOString();
+    transfer = await paymentsRepo.createTransfer({
+      id: `xfr_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      walletId: input.sourceWallet.walletId,
+      counterpartyId: input.recurringPayment.counterparty_id,
+      sourceAddress: input.sourceWallet.publicKey,
+      destinationAddress: input.recurringPayment.destination_address,
+      token: input.recurringPayment.token,
+      amount: input.recurringPayment.amount,
+      memo: null,
+      type: "transfer",
+      direction: "outbound",
+      status: "processing",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {
+        recurringPaymentId: input.recurringPayment.id,
+        subscriptionId: subscription.id,
+        collectionDueAt: dueAt,
+      },
+      serializedTx: null,
+      initiatedByKeyId: input.initiatedByKeyId,
+      createdAt: transferCreatedAt,
+      updatedAt: transferCreatedAt,
+    });
+    if (!transfer) {
+      throw new AppError("INTERNAL_ERROR", "Failed to create collection transfer");
+    }
+    attempt =
+      (await subscriptionsRepo.updateCollectionAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        transferId: transfer.id,
+        updatedAt: new Date().toISOString(),
+      })) ?? attempt;
+
+    const rpc = solanaRpc.createRpc(input.env);
+    const sourceOwner = assertValidAddress(input.recurringPayment.source_address, "sourceAddress");
+    const destinationOwner = assertValidAddress(
+      input.recurringPayment.destination_address,
+      "destinationAddress"
+    );
+    const mint = assertValidAddress(input.recurringPayment.token, "token") as Address;
+    const sourceSigner = await solanaServices.createOrgSigner(
+      input.env,
+      input.organizationId,
+      input.projectId,
+      input.sourceWallet.walletId
+    );
+    if (sourceSigner.address !== input.sourceWallet.publicKey) {
+      throw badRequest("Resolved signing wallet does not match source wallet");
+    }
+
+    const tokenProgram = await resolveMintTokenProgram(rpc, mint);
+    const sourceTokenAccount = await resolveSourceTokenAccountOrAta(
+      rpc,
+      sourceOwner,
+      mint,
+      tokenProgram
+    );
+    const amountBaseUnits = parseDecimalAmount(
+      input.recurringPayment.amount,
+      sourceTokenAccount.decimals
+    );
+    if (amountBaseUnits <= 0n) {
+      throw badRequest("Subscription amount must be greater than zero");
+    }
+
+    const [receiverAta] = await findAssociatedTokenPda({
+      owner: destinationOwner,
+      tokenProgram,
+      mint,
+    });
+    const planPda = assertValidAddress(input.recurringPayment.plan_pda, "planPda") as Address;
+    const subscriptionPda = assertValidAddress(
+      input.recurringPayment.subscription_pda,
+      "subscriptionPda"
+    ) as Address;
+    const feePayer = await createFeePaymentAdapter(input.env).getFeePayer();
+    const payer = createNoopSigner(feePayer);
+    const createDestinationAtaInstruction = getCreateAssociatedTokenIdempotentInstruction({
+      payer,
+      ata: receiverAta,
+      owner: destinationOwner,
+      mint,
+      tokenProgram,
+    });
+    const collectInstruction =
+      await subscriptionsProgram.getTransferSubscriptionOverlayInstructionAsync({
+        amount: amountBaseUnits,
+        caller: sourceSigner,
+        delegator: sourceOwner,
+        planPda,
+        receiverAta,
+        subscriptionPda,
+        tokenMint: mint,
+        tokenProgram,
+      });
+
+    await recurringRepo.updateRecurringPaymentActivation({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      status: "active",
+      destinationTokenAccount: receiverAta,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const signature = await sendSubscriptionInstructions({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      sourceWallet: input.sourceWallet,
+      sourceSigner,
+      instructions: [createDestinationAtaInstruction, collectInstruction],
+      feePayer,
+    });
+    const submittedAt = new Date().toISOString();
+    attempt =
+      (await subscriptionsRepo.updateCollectionAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        signature,
+        error: null,
+        updatedAt: submittedAt,
+      })) ?? attempt;
+    transfer = await paymentsRepo.updateTransfer({
+      transferId: transfer.id,
+      signature,
+      error: null,
+      updatedAt: submittedAt,
+    });
+
+    if (!transfer) {
+      throw new AppError("INTERNAL_ERROR", "Failed to update collection transfer");
+    }
+
+    return finalizeRecurringPaymentCollection({
+      env: input.env,
+      recurringRepo,
+      subscriptionsRepo,
+      paymentsRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: input.recurringPayment,
+      subscription,
+      attempt,
+      transfer,
+      signature,
+      destinationTokenAccount: receiverAta,
+      confirmSubmittedSignature: true,
+    });
+  } catch (error) {
+    const failedAt = new Date().toISOString();
+    const message = activationErrorMessage(error);
+    await subscriptionsRepo.updateCollectionAttempt({
+      attemptId: attempt.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      ...(transfer ? { transferId: transfer.id } : {}),
+      status: "failed",
+      error: message,
+      metadata: {
+        recurringPaymentId: input.recurringPayment.id,
+        ...(transfer ? { transferId: transfer.id } : {}),
+        ...collectionRetryMetadata(error),
+      },
+      updatedAt: failedAt,
+    });
+    if (transfer) {
+      await paymentsRepo.updateTransfer({
+        transferId: transfer.id,
+        status: "failed",
+        error: message,
+        updatedAt: failedAt,
+      });
+    }
     throw error;
   }
 }

@@ -1022,7 +1022,7 @@ POST /v1/issuance/tokens/{tokenId}/burn
 POST /v1/issuance/tokens/{tokenId}/force-burn
 ```
 
-The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`. This is not the raw smallest-unit integer from wallet balance responses.
+The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`.
 
 </Tab>
 </Tabs>
@@ -5085,11 +5085,14 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Execute burn |
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn/prepare` | Prepare burn transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | Deploy token |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/confirm` | Confirm non-custodial deploy |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare` | Prepare token deploy transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata` | Prepare metadata-URI follow-up transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/force-burn` | Execute force burn |
 | `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/prepare` | Prepare force burn transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze account |
 | `GET` | `/v1/issuance/tokens/{tokenId}/frozen` | List frozen accounts |
+| `GET` | `/v1/issuance/tokens/{tokenId}/metadata.json` | Get public token metadata JSON |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint` | Execute mint |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint/prepare` | Prepare mint transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/pause` | Pause token transfers |
@@ -5119,6 +5122,8 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/recurring-payments` | List recurring payments |
 | `POST` | `/v1/payments/recurring-payments` | Create recurring payment |
 | `GET` | `/v1/payments/recurring-payments/{id}` | Get recurring payment |
+| `POST` | `/v1/payments/recurring-payments/{id}/activate` | Activate recurring payment |
+| `POST` | `/v1/payments/recurring-payments/{id}/collect` | Collect recurring payment |
 | `GET` | `/v1/payments/subscription-plans` | List subscription plans |
 | `POST` | `/v1/payments/subscription-plans` | Create subscription plan |
 | `GET` | `/v1/payments/subscription-plans/{planId}` | Get subscription plan |

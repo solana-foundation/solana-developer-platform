@@ -681,6 +681,15 @@
           }
         },
         {
+          "name": "Get public token metadata JSON",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/metadata.json",
+            "description": "Public, unauthenticated endpoint serving the SDP-hosted Token-2022 / Metaplex fungible-compatible metadata JSON for a deployed token. This is the URL burned into the on-chain MetadataPointer when the issuer doesn't supply their own URI. Only deployed (on-chain) tokens are served; pending drafts return 404."
+          }
+        },
+        {
           "name": "Refresh cached token supply",
           "request": {
             "method": "POST",
@@ -714,6 +723,39 @@
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare",
             "description": "Builds an unsigned deploy transaction for client-side signing."
+          }
+        },
+        {
+          "name": "Confirm non-custodial deploy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/confirm",
+            "description": "Records the mint after the client signs and submits a prepared (non-custodial) deploy transaction. Verifies the transaction landed on-chain, then marks the token deployed.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signature\": \"5x...signature\",\n  \"mint\": \"So11111111111111111111111111111111111111112\",\n  \"listAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"wal_example\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare metadata-URI follow-up transaction",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare-metadata",
+            "description": "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Returns a null transaction when the on-chain URI already matches."
           }
         },
         {
@@ -1247,6 +1289,24 @@
                 }
               }
             }
+          }
+        },
+        {
+          "name": "Activate recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/activate",
+            "description": "Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures."
+          }
+        },
+        {
+          "name": "Collect recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/collect",
+            "description": "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time."
           }
         },
         {

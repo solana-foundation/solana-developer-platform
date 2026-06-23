@@ -163,6 +163,7 @@ export const createRecurringPaymentSchema = z.object({
 });
 
 export const activateRecurringPaymentSchema = z.object({}).strict();
+export const collectRecurringPaymentSchema = z.object({}).strict();
 
 export const listRecurringPaymentsQuerySchema = z.object({
   counterpartyId: z.string().min(1).optional(),

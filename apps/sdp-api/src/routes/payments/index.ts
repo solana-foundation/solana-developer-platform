@@ -8,6 +8,7 @@ import type { Env } from "@/types/env";
 import {
   activateRecurringPayment,
   cancelRampTransfer,
+  collectRecurringPayment,
   createOfframpQuote,
   createOnrampQuote,
   createRecurringPayment,
@@ -99,6 +100,11 @@ payments.post(
   "/recurring-payments/:id/activate",
   requirePermissions("payments:write", "wallets:read"),
   activateRecurringPayment
+);
+payments.post(
+  "/recurring-payments/:id/collect",
+  requirePermissions("payments:write", "wallets:read"),
+  collectRecurringPayment
 );
 payments.get("/recurring-payments/:id", requirePermissions("payments:read"), getRecurringPayment);
 payments.get("/subscription-plans", requirePermissions("payments:read"), listSubscriptionPlans);
