@@ -7,7 +7,6 @@ import {
   ChevronDown,
   Check,
 } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -501,14 +500,6 @@ export function WalletPolicyStartingProfileFlow({
 
   return (
     <div className="mx-auto flex h-[80vh] w-full max-w-xl flex-col px-4 py-4">
-      <Link
-        href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
-        className="mb-5 inline-flex w-fit items-center gap-2 text-sm font-medium text-text-medium hover:text-text-extra-high"
-      >
-        <ArrowLeft className="size-4" />
-        Wallet detail
-      </Link>
-
       <StepIndicator stepIndex={stepIndex} />
 
       <div className="mt-6 space-y-1">

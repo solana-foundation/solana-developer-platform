@@ -319,6 +319,20 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
       },
     };
   }
+  const walletPolicyRouteMatch = pathname.match(
+    /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/
+  );
+  if (walletPolicyRouteMatch) {
+    const [, section, walletId] = walletPolicyRouteMatch;
+    return {
+      title: "Wallets",
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: `/dashboard/${section}/${walletId}`,
+        label: "Back to wallet detail",
+      },
+    };
+  }
   if (
     (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
     (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup")
