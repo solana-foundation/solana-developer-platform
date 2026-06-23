@@ -216,7 +216,7 @@ async function finalizeRecurringPaymentCollection(input: {
     destinationTokenAccount: input.destinationTokenAccount,
     updatedAt: finalizedAt,
   });
-  await input.subscriptionsRepo.updateSubscription({
+  const finalizedSubscription = await input.subscriptionsRepo.updateSubscription({
     subscriptionId: input.subscription.id,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -246,7 +246,12 @@ async function finalizeRecurringPaymentCollection(input: {
     updatedAt: finalizedAt,
   });
 
-  if (!finalizedRecurringPayment || !finalizedAttempt || !finalizedTransfer) {
+  if (
+    !finalizedRecurringPayment ||
+    !finalizedSubscription ||
+    !finalizedAttempt ||
+    !finalizedTransfer
+  ) {
     throw new AppError("INTERNAL_ERROR", "Failed to finalize recurring payment collection");
   }
 
