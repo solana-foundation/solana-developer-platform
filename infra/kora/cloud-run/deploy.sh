@@ -47,10 +47,10 @@ gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 AR_IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/kora-${ENV}/kora:${KORA_TAG}"
 # Resolve the tag to an immutable digest first, log it, and copy by digest — so the exact bits
 # deployed are auditable and a mutated/overwritten upstream tag can't silently change the mirror.
-DIGEST="$(gcrane digest "${GHCR_REPO}:${KORA_TAG}")"
+DIGEST="$(crane digest "${GHCR_REPO}:${KORA_TAG}")"
 echo "Resolved ${GHCR_REPO}:${KORA_TAG} -> ${DIGEST}"
 echo "Mirroring ${GHCR_REPO}@${DIGEST} -> ${AR_IMAGE}"
-gcrane cp "${GHCR_REPO}@${DIGEST}" "${AR_IMAGE}"
+crane cp "${GHCR_REPO}@${DIGEST}" "${AR_IMAGE}"
 
 SERVICE="kora-${ENV}"
 ENV_VARS="^##^RUST_LOG=info##RPC_URL=${RPC_URL}##KORA_GCP_KMS_KEY_NAME=${KORA_GCP_KMS_KEY_NAME}##KORA_GCP_KMS_PUBLIC_KEY=${KORA_GCP_KMS_PUBLIC_KEY}"
