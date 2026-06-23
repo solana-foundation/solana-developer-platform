@@ -1,5 +1,6 @@
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { BvnkRampClient } from "./providers/bvnk";
+import { CoinbaseOnrampRampClient } from "./providers/coinbase_onramp";
 import { LightsparkRampClient } from "./providers/lightspark";
 import { MoneygramRampClient } from "./providers/moneygram";
 import { MoonpayRampClient } from "./providers/moonpay";
@@ -11,6 +12,7 @@ import type {
 } from "./types";
 
 export { BvnkRampClient } from "./providers/bvnk";
+export { CoinbaseOnrampRampClient } from "./providers/coinbase_onramp";
 export { LightsparkRampClient } from "./providers/lightspark";
 export { MoneygramRampClient } from "./providers/moneygram";
 export { MoonpayRampClient } from "./providers/moonpay";
@@ -30,6 +32,7 @@ export const RAMP_PROVIDER_CLIENTS = {
   lightspark: new LightsparkRampClient(),
   bvnk: new BvnkRampClient(),
   moneygram: new MoneygramRampClient(),
+  coinbase_onramp: new CoinbaseOnrampRampClient(),
 } as const satisfies Record<RampProviderId, RampProviderClient>;
 
 function assertRampProviderRegistryComplete(providers: Record<RampProviderId, RampProviderClient>) {

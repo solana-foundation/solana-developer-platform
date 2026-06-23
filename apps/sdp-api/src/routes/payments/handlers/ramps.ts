@@ -286,6 +286,8 @@ async function executeOnrampWithProvider(
     }
     case "moneygram":
       throw badRequest("MoneyGram on-ramp is not available.");
+    case "coinbase_onramp":
+      throw badRequest("Coinbase Onramp execute is not used; the payment link drives settlement.");
     default: {
       const _exhaustive: never = input.provider;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
@@ -344,6 +346,8 @@ export async function advanceCounterpartyRequirements(
       );
       return bvnkOnboardingRequirements(resolution, input.direction);
     }
+    case "coinbase_onramp":
+      return readyCounterparty("coinbase_onramp", input.direction);
     default: {
       const _exhaustive: never = input;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
@@ -432,6 +436,8 @@ async function executeOfframpWithProvider(
       throw badRequest(
         "MoneyGram off-ramp runs through the widget session created at quote time; execute is not supported."
       );
+    case "coinbase_onramp":
+      throw badRequest("Coinbase Onramp does not support off-ramp.");
     default: {
       const _exhaustive: never = input.provider;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
@@ -600,6 +606,16 @@ export async function createOnrampQuote(c: AppContext) {
     }
     case "moneygram":
       throw badRequest("MoneyGram on-ramp is not available.");
+    case "coinbase_onramp": {
+      quote = await RAMP_PROVIDER_CLIENTS.coinbase_onramp.createOnrampQuote(rampRuntime(c), {
+        cryptoToken: input.cryptoToken,
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        destinationWalletAddress,
+        externalCustomerId: counterparty.external_id ?? counterparty.id,
+      });
+      break;
+    }
     default: {
       const exhaustive: never = input.provider;
       throw new AppError(
@@ -739,6 +755,8 @@ export async function createOfframpQuote(c: AppContext) {
       });
       break;
     }
+    case "coinbase_onramp":
+      throw badRequest("Coinbase Onramp does not support off-ramp.");
     default: {
       const exhaustive: never = input.provider;
       throw new AppError(
