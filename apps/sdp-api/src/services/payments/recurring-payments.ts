@@ -227,7 +227,7 @@ async function finalizeRecurringPaymentCollection(input: {
     nextCollectionDueAt: nextDueAt,
     updatedAt: finalizedAt,
   });
-  const finalizedRecurringPayment = await input.recurringRepo.updateRecurringPaymentCollection({
+  const updatedRecurringPayment = await input.recurringRepo.updateRecurringPaymentCollection({
     recurringPaymentId: input.recurringPayment.id,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -235,9 +235,17 @@ async function finalizeRecurringPaymentCollection(input: {
     destinationTokenAccount: input.destinationTokenAccount,
     updatedAt: finalizedAt,
   });
+  const finalizedRecurringPayment =
+    updatedRecurringPayment ??
+    (await input.recurringRepo.getRecurringPaymentById({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    }));
 
   if (
     !finalizedRecurringPayment ||
+    (!updatedRecurringPayment && finalizedRecurringPayment.status === "active") ||
     !finalizedSubscription ||
     !finalizedAttempt ||
     !finalizedTransfer
