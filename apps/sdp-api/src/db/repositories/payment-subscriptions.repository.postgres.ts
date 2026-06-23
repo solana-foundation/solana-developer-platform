@@ -407,6 +407,10 @@ export function createPostgresPaymentSubscriptionsRepository(
         clauses.push("counterparty_id = ?");
         values.push(params.counterpartyId);
       }
+      if (params.subscriberAddress) {
+        clauses.push("subscriber_address = ?");
+        values.push(params.subscriberAddress);
+      }
       if (params.status) {
         clauses.push("status = ?");
         values.push(params.status);

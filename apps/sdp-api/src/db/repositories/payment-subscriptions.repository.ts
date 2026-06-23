@@ -147,6 +147,7 @@ export interface ListPaymentSubscriptionsInput {
   projectId: string;
   planId?: string;
   counterpartyId?: string;
+  subscriberAddress?: string;
   status?: PaymentSubscriptionStatus;
   dueBefore?: string;
   limit: number;
