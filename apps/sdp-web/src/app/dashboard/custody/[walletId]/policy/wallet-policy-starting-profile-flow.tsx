@@ -5,18 +5,10 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
-  CircleDollarSign,
-  LockKeyhole,
-  MapPin,
-  PauseCircle,
-  ShieldCheck,
-  SlidersHorizontal,
-  Users,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { updateWalletPolicy } from "@/app/dashboard/payments/payments-workspace.data";
 import { Button } from "@/components/ui/button";
@@ -25,6 +17,12 @@ import { cn } from "@/lib/utils";
 
 type FlowStep = "intent" | "details" | "review";
 type RestrictionCategoryId = "destinations" | "limits" | "operations" | "approvals";
+type OperationRuleId =
+  | "payment_transfers"
+  | "ramp_transactions"
+  | "token_issuance"
+  | "wallet_admin";
+type ApprovalRuleId = "large_transfers" | "new_destinations" | "admin_actions";
 
 interface WalletPolicyStartingProfileFlowProps {
   wallet: {
@@ -42,7 +40,12 @@ interface RestrictionCategory {
   title: string;
   description: string;
   availability: "live" | "next";
-  icon: LucideIcon;
+}
+
+interface ToggleOption<TValue extends string> {
+  id: TValue;
+  title: string;
+  description: string;
 }
 
 interface StoredPolicyDraft {
@@ -52,6 +55,9 @@ interface StoredPolicyDraft {
   destinationAllowlist: string[];
   maxTransferAmount: string;
   maxDailyAmount: string;
+  operationRules: OperationRuleId[];
+  approvalRules: ApprovalRuleId[];
+  approvalTransferAmount: string;
   updatedAt: string;
 }
 
@@ -67,13 +73,13 @@ const FLOW_STEPS = [
     id: "details",
     label: "Rules",
     title: "Starting rules",
-    description: "Add the rules that can be activated from this flow.",
+    description: "Configure the selected rule areas before review.",
   },
   {
     id: "review",
     label: "Review",
-    title: "Review before activation",
-    description: "Confirm the profile before any wallet controls become active.",
+    title: "Final review",
+    description: "Review the changes before applying supported controls.",
   },
 ] as const satisfies readonly {
   id: FlowStep;
@@ -88,32 +94,83 @@ const RESTRICTION_CATEGORIES = [
     title: "Allowed destinations",
     description: "Use when this wallet should only pay known addresses.",
     availability: "live",
-    icon: MapPin,
   },
   {
     id: "limits",
     title: "Transfer limits",
     description: "Use when this wallet needs spend caps or daily outflow limits.",
     availability: "live",
-    icon: CircleDollarSign,
   },
   {
     id: "operations",
     title: "Operation types",
     description: "Use when this wallet should only perform certain actions.",
     availability: "next",
-    icon: SlidersHorizontal,
   },
   {
     id: "approvals",
     title: "Approval review",
     description: "Use when sensitive actions should require human review.",
     availability: "next",
-    icon: Users,
   },
 ] as const satisfies readonly RestrictionCategory[];
 
+const RESTRICTION_CATEGORY_IDS = RESTRICTION_CATEGORIES.map((category) => category.id);
+
+const OPERATION_RULE_OPTIONS = [
+  {
+    id: "payment_transfers",
+    title: "Payment transfers",
+    description: "Allow standard outbound payment transfers from this wallet.",
+  },
+  {
+    id: "ramp_transactions",
+    title: "Ramp transactions",
+    description: "Allow on-ramp and off-ramp execution tied to this wallet.",
+  },
+  {
+    id: "token_issuance",
+    title: "Token issuance",
+    description: "Allow minting, burning, freezing, and token administration actions.",
+  },
+  {
+    id: "wallet_admin",
+    title: "Wallet administration",
+    description: "Allow provider and wallet-management actions.",
+  },
+] as const satisfies readonly ToggleOption<OperationRuleId>[];
+
+const OPERATION_RULE_IDS = OPERATION_RULE_OPTIONS.map((option) => option.id);
+
+const APPROVAL_RULE_OPTIONS = [
+  {
+    id: "large_transfers",
+    title: "Transfers above an amount",
+    description: "Require review before high-value transfers are signed.",
+  },
+  {
+    id: "new_destinations",
+    title: "New destinations",
+    description: "Require review before sending funds to a destination not seen before.",
+  },
+  {
+    id: "admin_actions",
+    title: "Administrative actions",
+    description: "Require review for provider, wallet, or policy administration.",
+  },
+] as const satisfies readonly ToggleOption<ApprovalRuleId>[];
+
+const APPROVAL_RULE_IDS = APPROVAL_RULE_OPTIONS.map((option) => option.id);
+
 const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const CSV_HEADER_VALUES = new Set([
+  "address",
+  "addresses",
+  "destination",
+  "destinations",
+  "pubkey",
+  "public_key",
+]);
 
 function draftStorageKey(walletId: string): string {
   return `sdp.wallet-policy-starting-profile.${walletId}`;
@@ -138,11 +195,70 @@ function uniqueValues(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
+function filterKnownValues<TValue extends string>(
+  values: unknown,
+  allowedValues: readonly TValue[]
+): TValue[] {
+  if (!Array.isArray(values)) return [];
+  const allowed = new Set<string>(allowedValues);
+  return values.filter((value): value is TValue => typeof value === "string" && allowed.has(value));
+}
+
+function parseCsvCells(line: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let isQuoted = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    const nextCharacter = line[index + 1];
+
+    if (character === '"' && nextCharacter === '"') {
+      current += '"';
+      index += 1;
+      continue;
+    }
+
+    if (character === '"') {
+      isQuoted = !isQuoted;
+      continue;
+    }
+
+    if (!isQuoted && (character === "," || character === "\t" || character === ";")) {
+      cells.push(current);
+      current = "";
+      continue;
+    }
+
+    current += character;
+  }
+
+  cells.push(current);
+  return cells;
+}
+
+function normalizeCsvCell(value: string): string {
+  return value.trim().replace(/^['"]|['"]$/g, "").trim();
+}
+
+function looksLikeAddressInput(value: string): boolean {
+  return /^[1-9A-HJ-NP-Za-km-z]{16,64}$/.test(value);
+}
+
 function parseDestinationText(value: string): { addresses: string[]; invalid: string[] } {
-  const parts = uniqueValues(value.split(/[\s,]+/));
+  const parts = uniqueValues(
+    value
+      .split(/\r?\n/)
+      .flatMap((line) => parseCsvCells(line))
+      .flatMap((cell) => normalizeCsvCell(cell).split(/\s+/))
+      .map(normalizeCsvCell)
+      .filter((part) => !CSV_HEADER_VALUES.has(part.toLowerCase()))
+  );
   return {
     addresses: parts.filter((part) => SOLANA_ADDRESS_PATTERN.test(part)),
-    invalid: parts.filter((part) => !SOLANA_ADDRESS_PATTERN.test(part)),
+    invalid: parts.filter(
+      (part) => !SOLANA_ADDRESS_PATTERN.test(part) && looksLikeAddressInput(part)
+    ),
   };
 }
 
@@ -171,8 +287,30 @@ function isStoredDraft(value: unknown): value is StoredPolicyDraft {
     Array.isArray(draft.destinationAllowlist) &&
     typeof draft.maxTransferAmount === "string" &&
     typeof draft.maxDailyAmount === "string" &&
+    (draft.operationRules === undefined || Array.isArray(draft.operationRules)) &&
+    (draft.approvalRules === undefined || Array.isArray(draft.approvalRules)) &&
+    (draft.approvalTransferAmount === undefined ||
+      typeof draft.approvalTransferAmount === "string") &&
     typeof draft.updatedAt === "string"
   );
+}
+
+function toggleValue<TValue extends string>(values: TValue[], value: TValue): TValue[] {
+  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
+}
+
+function formatCount(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function formatOptionTitles<TValue extends string>(
+  selectedIds: TValue[],
+  options: readonly ToggleOption<TValue>[]
+): string {
+  const selectedTitles = options
+    .filter((option) => selectedIds.includes(option.id))
+    .map((option) => option.title);
+  return selectedTitles.length > 0 ? selectedTitles.join(", ") : "None selected";
 }
 
 export function WalletPolicyStartingProfileFlow({
@@ -186,11 +324,17 @@ export function WalletPolicyStartingProfileFlow({
   const [selectedCategories, setSelectedCategories] = useState<RestrictionCategoryId[]>(
     categoriesFromPolicy(initialPolicy)
   );
+  const [expandedRuleIds, setExpandedRuleIds] = useState<RestrictionCategoryId[]>(
+    categoriesFromPolicy(initialPolicy)
+  );
   const [destinationText, setDestinationText] = useState(
     initialPolicy.destinationAllowlist.join("\n")
   );
   const [maxTransferAmount, setMaxTransferAmount] = useState(initialPolicy.maxTransferAmount ?? "");
   const [maxDailyAmount, setMaxDailyAmount] = useState(initialPolicy.maxDailyAmount ?? "");
+  const [selectedOperationRules, setSelectedOperationRules] = useState<OperationRuleId[]>([]);
+  const [selectedApprovalRules, setSelectedApprovalRules] = useState<ApprovalRuleId[]>([]);
+  const [approvalTransferAmount, setApprovalTransferAmount] = useState("");
   const [savedDraft, setSavedDraft] = useState<StoredPolicyDraft | null>(null);
   const [localStatus, setLocalStatus] = useState<"draft" | "disabled" | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -210,12 +354,17 @@ export function WalletPolicyStartingProfileFlow({
         return;
       }
 
+      const draftCategories = filterKnownValues(parsed.categories, RESTRICTION_CATEGORY_IDS);
       setSavedDraft(parsed);
       setLocalStatus(parsed.status);
-      setSelectedCategories(parsed.categories);
+      setSelectedCategories(draftCategories);
+      setExpandedRuleIds(draftCategories);
       setDestinationText(parsed.destinationAllowlist.join("\n"));
       setMaxTransferAmount(parsed.maxTransferAmount);
       setMaxDailyAmount(parsed.maxDailyAmount);
+      setSelectedOperationRules(filterKnownValues(parsed.operationRules, OPERATION_RULE_IDS));
+      setSelectedApprovalRules(filterKnownValues(parsed.approvalRules, APPROVAL_RULE_IDS));
+      setApprovalTransferAmount(parsed.approvalTransferAmount ?? "");
       const draftStepIndex = FLOW_STEPS.findIndex((step) => step.id === parsed.step);
       setStepIndex(Math.max(0, draftStepIndex));
     } catch {
@@ -227,6 +376,7 @@ export function WalletPolicyStartingProfileFlow({
 
   const currentStep = FLOW_STEPS[stepIndex] ?? FLOW_STEPS[0];
   const selectedCategorySet = useMemo(() => new Set(selectedCategories), [selectedCategories]);
+  const expandedRuleSet = useMemo(() => new Set(expandedRuleIds), [expandedRuleIds]);
   const destinationParse = useMemo(() => parseDestinationText(destinationText), [destinationText]);
   const hasLivePolicy = policyHasRestrictions(currentPolicy);
   const selectedLiveCategories = selectedCategories.filter(
@@ -245,6 +395,13 @@ export function WalletPolicyStartingProfileFlow({
     (Boolean(maxTransferAmount.trim() || maxDailyAmount.trim()) &&
       isPositiveAmount(maxTransferAmount) &&
       isPositiveAmount(maxDailyAmount));
+  const canConfigureOperations =
+    !selectedCategorySet.has("operations") || selectedOperationRules.length > 0;
+  const canConfigureApprovals =
+    !selectedCategorySet.has("approvals") ||
+    (selectedApprovalRules.length > 0 &&
+      (!selectedApprovalRules.includes("large_transfers") ||
+        (Boolean(approvalTransferAmount.trim()) && isPositiveAmount(approvalTransferAmount))));
   const hasActivatableRestriction =
     (selectedCategorySet.has("destinations") && destinationParse.addresses.length > 0) ||
     (selectedCategorySet.has("limits") &&
@@ -254,6 +411,14 @@ export function WalletPolicyStartingProfileFlow({
     hasActivatableRestriction &&
     canActivateDestinations &&
     canActivateLimits &&
+    !isSubmitting &&
+    !policyError;
+  const canSubmitReview =
+    selectedCategories.length > 0 &&
+    canActivateDestinations &&
+    canActivateLimits &&
+    canConfigureOperations &&
+    canConfigureApprovals &&
     !isSubmitting &&
     !policyError;
 
@@ -267,6 +432,9 @@ export function WalletPolicyStartingProfileFlow({
       destinationAllowlist: destinationParse.addresses,
       maxTransferAmount: maxTransferAmount.trim(),
       maxDailyAmount: maxDailyAmount.trim(),
+      operationRules: selectedOperationRules,
+      approvalRules: selectedApprovalRules,
+      approvalTransferAmount: approvalTransferAmount.trim(),
       updatedAt: new Date().toISOString(),
     };
 
@@ -291,11 +459,28 @@ export function WalletPolicyStartingProfileFlow({
   }
 
   function toggleCategory(categoryId: RestrictionCategoryId) {
-    setSelectedCategories((current) =>
-      current.includes(categoryId)
+    setSelectedCategories((current) => toggleValue(current, categoryId));
+    setExpandedRuleIds((current) =>
+      selectedCategorySet.has(categoryId)
         ? current.filter((item) => item !== categoryId)
-        : [...current, categoryId]
+        : current.includes(categoryId)
+          ? current
+          : [...current, categoryId]
     );
+    if (localStatus === "disabled") setLocalStatus(null);
+  }
+
+  function toggleExpandedRule(categoryId: RestrictionCategoryId) {
+    setExpandedRuleIds((current) => toggleValue(current, categoryId));
+  }
+
+  function toggleOperationRule(ruleId: OperationRuleId) {
+    setSelectedOperationRules((current) => toggleValue(current, ruleId));
+    if (localStatus === "disabled") setLocalStatus(null);
+  }
+
+  function toggleApprovalRule(ruleId: ApprovalRuleId) {
+    setSelectedApprovalRules((current) => toggleValue(current, ruleId));
     if (localStatus === "disabled") setLocalStatus(null);
   }
 
@@ -318,6 +503,20 @@ export function WalletPolicyStartingProfileFlow({
       if (!canActivateLimits) {
         toast.error("Check transfer limits.", {
           description: "Enter a positive number for each configured limit.",
+          position: "bottom-right",
+        });
+        return;
+      }
+      if (!canConfigureOperations) {
+        toast.error("Choose allowed operation types.", {
+          description: "Select at least one operation type before review.",
+          position: "bottom-right",
+        });
+        return;
+      }
+      if (!canConfigureApprovals) {
+        toast.error("Check approval rules.", {
+          description: "Choose at least one review trigger and complete any amount fields.",
           position: "bottom-right",
         });
         return;
@@ -405,6 +604,9 @@ export function WalletPolicyStartingProfileFlow({
         destinationAllowlist: [],
         maxTransferAmount: "",
         maxDailyAmount: "",
+        operationRules: [],
+        approvalRules: [],
+        approvalTransferAmount: "",
         updatedAt: new Date().toISOString(),
       };
       window.localStorage.setItem(draftStorageKey(wallet.walletId), JSON.stringify(disabledDraft));
@@ -414,6 +616,10 @@ export function WalletPolicyStartingProfileFlow({
       setDestinationText("");
       setMaxTransferAmount("");
       setMaxDailyAmount("");
+      setSelectedOperationRules([]);
+      setSelectedApprovalRules([]);
+      setApprovalTransferAmount("");
+      setExpandedRuleIds([]);
       setSavedDraft(disabledDraft);
       setLocalStatus("disabled");
       setStepIndex(0);
@@ -469,14 +675,23 @@ export function WalletPolicyStartingProfileFlow({
         ) : null}
         {isLoaded && currentStep.id === "details" ? (
           <DetailsStep
-            selectedCategorySet={selectedCategorySet}
+            selectedCategories={selectedCategories}
+            expandedRuleSet={expandedRuleSet}
+            onToggleExpandedRule={toggleExpandedRule}
             destinationText={destinationText}
             setDestinationText={setDestinationText}
+            destinationCount={destinationParse.addresses.length}
             invalidDestinations={destinationParse.invalid}
             maxTransferAmount={maxTransferAmount}
             setMaxTransferAmount={setMaxTransferAmount}
             maxDailyAmount={maxDailyAmount}
             setMaxDailyAmount={setMaxDailyAmount}
+            selectedOperationRules={selectedOperationRules}
+            onToggleOperationRule={toggleOperationRule}
+            selectedApprovalRules={selectedApprovalRules}
+            onToggleApprovalRule={toggleApprovalRule}
+            approvalTransferAmount={approvalTransferAmount}
+            setApprovalTransferAmount={setApprovalTransferAmount}
           />
         ) : null}
         {isLoaded && currentStep.id === "review" ? (
@@ -486,6 +701,9 @@ export function WalletPolicyStartingProfileFlow({
             invalidDestinationCount={destinationParse.invalid.length}
             maxTransferAmount={maxTransferAmount.trim()}
             maxDailyAmount={maxDailyAmount.trim()}
+            selectedOperationRules={selectedOperationRules}
+            selectedApprovalRules={selectedApprovalRules}
+            approvalTransferAmount={approvalTransferAmount.trim()}
             selectedNextCategories={selectedNextCategories}
             canActivate={canActivate}
           />
@@ -512,7 +730,6 @@ export function WalletPolicyStartingProfileFlow({
               variant="destructive"
               className="w-full sm:w-auto"
               onClick={disableProfile}
-              iconLeft={<PauseCircle className="size-4" />}
               disabled={isSubmitting}
             >
               Disable
@@ -522,20 +739,18 @@ export function WalletPolicyStartingProfileFlow({
             type="button"
             className="w-full sm:w-auto"
             onClick={currentStep.id === "review" ? activateProfile : goNext}
-            iconRight={
-              currentStep.id === "review" ? (
-                <ShieldCheck className="size-4" />
-              ) : (
-                <ArrowRight className="size-4" />
-              )
-            }
+            iconRight={currentStep.id === "review" ? undefined : <ArrowRight className="size-4" />}
             disabled={
               isSubmitting ||
               Boolean(policyError && currentStep.id === "review") ||
-              (currentStep.id === "review" && !canActivate)
+              (currentStep.id === "review" && !canSubmitReview)
             }
           >
-            {currentStep.id === "review" ? "Activate controls" : "Continue"}
+            {currentStep.id === "review"
+              ? canActivate
+                ? "Apply controls"
+                : "Save draft"
+              : "Continue"}
           </Button>
         </div>
       </footer>
@@ -619,116 +834,319 @@ function IntentStep({
 }
 
 function DetailsStep({
-  selectedCategorySet,
+  selectedCategories,
+  expandedRuleSet,
+  onToggleExpandedRule,
   destinationText,
   setDestinationText,
+  destinationCount,
   invalidDestinations,
   maxTransferAmount,
   setMaxTransferAmount,
   maxDailyAmount,
   setMaxDailyAmount,
+  selectedOperationRules,
+  onToggleOperationRule,
+  selectedApprovalRules,
+  onToggleApprovalRule,
+  approvalTransferAmount,
+  setApprovalTransferAmount,
 }: {
-  selectedCategorySet: Set<RestrictionCategoryId>;
+  selectedCategories: RestrictionCategoryId[];
+  expandedRuleSet: Set<RestrictionCategoryId>;
+  onToggleExpandedRule: (category: RestrictionCategoryId) => void;
+  destinationText: string;
+  setDestinationText: (value: string) => void;
+  destinationCount: number;
+  invalidDestinations: string[];
+  maxTransferAmount: string;
+  setMaxTransferAmount: (value: string) => void;
+  maxDailyAmount: string;
+  setMaxDailyAmount: (value: string) => void;
+  selectedOperationRules: OperationRuleId[];
+  onToggleOperationRule: (rule: OperationRuleId) => void;
+  selectedApprovalRules: ApprovalRuleId[];
+  onToggleApprovalRule: (rule: ApprovalRuleId) => void;
+  approvalTransferAmount: string;
+  setApprovalTransferAmount: (value: string) => void;
+}) {
+  const selected = RESTRICTION_CATEGORIES.filter((category) =>
+    selectedCategories.includes(category.id)
+  );
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border-light bg-white">
+      {selected.map((category) => {
+        const expanded = expandedRuleSet.has(category.id);
+
+        return (
+          <RuleSection
+            key={category.id}
+            category={category}
+            expanded={expanded}
+            summary={getRuleSummary({
+              categoryId: category.id,
+              destinationCount,
+              maxTransferAmount,
+              maxDailyAmount,
+              selectedOperationRules,
+              selectedApprovalRules,
+            })}
+            onToggle={() => onToggleExpandedRule(category.id)}
+          >
+            {category.id === "destinations" ? (
+              <DestinationRuleEditor
+                destinationText={destinationText}
+                setDestinationText={setDestinationText}
+                invalidDestinations={invalidDestinations}
+              />
+            ) : null}
+            {category.id === "limits" ? (
+              <LimitRuleEditor
+                maxTransferAmount={maxTransferAmount}
+                setMaxTransferAmount={setMaxTransferAmount}
+                maxDailyAmount={maxDailyAmount}
+                setMaxDailyAmount={setMaxDailyAmount}
+              />
+            ) : null}
+            {category.id === "operations" ? (
+              <ToggleOptionList
+                options={OPERATION_RULE_OPTIONS}
+                selectedValues={selectedOperationRules}
+                onToggle={onToggleOperationRule}
+              />
+            ) : null}
+            {category.id === "approvals" ? (
+              <ApprovalRuleEditor
+                selectedApprovalRules={selectedApprovalRules}
+                onToggleApprovalRule={onToggleApprovalRule}
+                approvalTransferAmount={approvalTransferAmount}
+                setApprovalTransferAmount={setApprovalTransferAmount}
+              />
+            ) : null}
+          </RuleSection>
+        );
+      })}
+    </div>
+  );
+}
+
+function RuleSection({
+  category,
+  expanded,
+  summary,
+  onToggle,
+  children,
+}: {
+  category: RestrictionCategory;
+  expanded: boolean;
+  summary: string;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <section className="border-t border-border-light first:border-t-0">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={onToggle}
+        className="flex w-full items-start justify-between gap-4 px-4 py-4 text-left transition-colors hover:bg-gray-100"
+      >
+        <span className="min-w-0">
+          <span className="block text-base font-semibold text-text-extra-high">
+            {category.title}
+          </span>
+          <span className="mt-1 block text-sm leading-5 text-text-medium">{summary}</span>
+        </span>
+        <span className="shrink-0 text-xs font-medium text-text-low">
+          {expanded ? "Collapse" : "Edit"}
+        </span>
+      </button>
+      {expanded ? <div className="px-4 pb-5">{children}</div> : null}
+    </section>
+  );
+}
+
+function DestinationRuleEditor({
+  destinationText,
+  setDestinationText,
+  invalidDestinations,
+}: {
   destinationText: string;
   setDestinationText: (value: string) => void;
   invalidDestinations: string[];
+}) {
+  return (
+    <div>
+      <p className="text-sm leading-6 text-text-medium">
+        Paste Solana addresses separated by line breaks, commas, semicolons, tabs, or a CSV column.
+      </p>
+      <textarea
+        value={destinationText}
+        onChange={(event) => setDestinationText(event.target.value)}
+        rows={6}
+        className="mt-3 min-h-[140px] w-full resize-y rounded-lg border border-border-light bg-white px-3 py-3 font-mono text-sm text-text-extra-high outline-none transition-colors placeholder:text-text-extra-low focus:border-gray-1400"
+        placeholder="address&#10;9xQeWvG816bUx9EPfuxEzHh9VY5k..."
+      />
+      {invalidDestinations.length > 0 ? (
+        <p className="mt-2 text-sm text-status-error-text">
+          Invalid address{invalidDestinations.length === 1 ? "" : "es"}:{" "}
+          {invalidDestinations.join(", ")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function LimitRuleEditor({
+  maxTransferAmount,
+  setMaxTransferAmount,
+  maxDailyAmount,
+  setMaxDailyAmount,
+}: {
   maxTransferAmount: string;
   setMaxTransferAmount: (value: string) => void;
   maxDailyAmount: string;
   setMaxDailyAmount: (value: string) => void;
 }) {
   return (
+    <div>
+      <p className="text-sm leading-6 text-text-medium">
+        Configure one or both caps. Amounts are interpreted by the payment policy endpoint.
+      </p>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-text-extra-high">Per transfer cap</span>
+          <Input
+            value={maxTransferAmount}
+            onChange={(event) => setMaxTransferAmount(event.target.value)}
+            placeholder="1000"
+            inputMode="decimal"
+          />
+          {!isPositiveAmount(maxTransferAmount) ? (
+            <span className="block text-sm text-status-error-text">Enter a positive number.</span>
+          ) : null}
+        </label>
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-text-extra-high">Daily cap</span>
+          <Input
+            value={maxDailyAmount}
+            onChange={(event) => setMaxDailyAmount(event.target.value)}
+            placeholder="5000"
+            inputMode="decimal"
+          />
+          {!isPositiveAmount(maxDailyAmount) ? (
+            <span className="block text-sm text-status-error-text">Enter a positive number.</span>
+          ) : null}
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function ToggleOptionList<TValue extends string>({
+  options,
+  selectedValues,
+  onToggle,
+}: {
+  options: readonly ToggleOption<TValue>[];
+  selectedValues: TValue[];
+  onToggle: (value: TValue) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      {options.map((option) => (
+        <label key={option.id} className="flex items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={selectedValues.includes(option.id)}
+            onChange={() => onToggle(option.id)}
+            className="mt-1 size-4 rounded border-border-light accent-gray-1400"
+          />
+          <span>
+            <span className="block font-medium text-text-extra-high">{option.title}</span>
+            <span className="mt-1 block leading-5 text-text-medium">{option.description}</span>
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function ApprovalRuleEditor({
+  selectedApprovalRules,
+  onToggleApprovalRule,
+  approvalTransferAmount,
+  setApprovalTransferAmount,
+}: {
+  selectedApprovalRules: ApprovalRuleId[];
+  onToggleApprovalRule: (rule: ApprovalRuleId) => void;
+  approvalTransferAmount: string;
+  setApprovalTransferAmount: (value: string) => void;
+}) {
+  return (
     <div className="space-y-4">
-      {selectedCategorySet.has("destinations") ? (
-        <section className="rounded-lg border border-border-light bg-white p-4">
-          <div className="flex items-start gap-3">
-            <MapPin className="mt-0.5 size-5 text-[color:var(--sdp-color-info-text)]" />
-            <div className="min-w-0 flex-1">
-              <h2 className="text-base font-semibold text-text-extra-high">Allowed destinations</h2>
-              <p className="mt-1 text-sm leading-6 text-text-medium">
-                Add one Solana address per line. Only these destinations will be allowed for
-                outbound payment transfers.
-              </p>
-              <textarea
-                value={destinationText}
-                onChange={(event) => setDestinationText(event.target.value)}
-                rows={6}
-                className="mt-4 min-h-[150px] w-full resize-y rounded-lg border border-border-light bg-white px-3 py-3 font-mono text-sm text-text-extra-high outline-none transition-colors placeholder:text-text-extra-low focus:border-gray-1400"
-                placeholder="9xQeWvG816bUx9EPfuxEzHh9VY5k..."
-              />
-              {invalidDestinations.length > 0 ? (
-                <p className="mt-2 text-sm text-status-error-text">
-                  Invalid address{invalidDestinations.length === 1 ? "" : "es"}:{" "}
-                  {invalidDestinations.join(", ")}
-                </p>
-              ) : null}
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      {selectedCategorySet.has("limits") ? (
-        <section className="rounded-lg border border-border-light bg-white p-4">
-          <div className="flex items-start gap-3">
-            <CircleDollarSign className="mt-0.5 size-5 text-[color:var(--sdp-color-info-text)]" />
-            <div className="min-w-0 flex-1">
-              <h2 className="text-base font-semibold text-text-extra-high">Transfer limits</h2>
-              <p className="mt-1 text-sm leading-6 text-text-medium">
-                Configure one or both caps. Amounts are interpreted by the payment policy endpoint.
-              </p>
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                <label className="space-y-2">
-                  <span className="text-sm font-medium text-text-extra-high">Per transfer cap</span>
-                  <Input
-                    value={maxTransferAmount}
-                    onChange={(event) => setMaxTransferAmount(event.target.value)}
-                    placeholder="1000"
-                    inputMode="decimal"
-                  />
-                  {!isPositiveAmount(maxTransferAmount) ? (
-                    <span className="block text-sm text-status-error-text">
-                      Enter a positive number.
-                    </span>
-                  ) : null}
-                </label>
-                <label className="space-y-2">
-                  <span className="text-sm font-medium text-text-extra-high">Daily cap</span>
-                  <Input
-                    value={maxDailyAmount}
-                    onChange={(event) => setMaxDailyAmount(event.target.value)}
-                    placeholder="5000"
-                    inputMode="decimal"
-                  />
-                  {!isPositiveAmount(maxDailyAmount) ? (
-                    <span className="block text-sm text-status-error-text">
-                      Enter a positive number.
-                    </span>
-                  ) : null}
-                </label>
-              </div>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      {selectedCategorySet.has("operations") || selectedCategorySet.has("approvals") ? (
-        <section className="rounded-lg border border-status-warning-border bg-status-warning-bg p-4">
-          <div className="flex items-start gap-3">
-            <LockKeyhole className="mt-0.5 size-5 text-status-warning-text" />
-            <div>
-              <h2 className="text-base font-semibold text-text-extra-high">
-                Detailed rule setup follows this starting profile.
-              </h2>
-              <p className="mt-1 text-sm leading-6 text-text-medium">
-                Operation-type and approval-review intent is saved in the draft, then configured in
-                the detailed rule setup flow.
-              </p>
-            </div>
-          </div>
-        </section>
+      <ToggleOptionList
+        options={APPROVAL_RULE_OPTIONS}
+        selectedValues={selectedApprovalRules}
+        onToggle={onToggleApprovalRule}
+      />
+      {selectedApprovalRules.includes("large_transfers") ? (
+        <label className="block max-w-xs space-y-2">
+          <span className="text-sm font-medium text-text-extra-high">Review transfer amount</span>
+          <Input
+            value={approvalTransferAmount}
+            onChange={(event) => setApprovalTransferAmount(event.target.value)}
+            placeholder="1000"
+            inputMode="decimal"
+          />
+          {!isPositiveAmount(approvalTransferAmount) ? (
+            <span className="block text-sm text-status-error-text">Enter a positive number.</span>
+          ) : null}
+        </label>
       ) : null}
     </div>
   );
+}
+
+function getRuleSummary({
+  categoryId,
+  destinationCount,
+  maxTransferAmount,
+  maxDailyAmount,
+  selectedOperationRules,
+  selectedApprovalRules,
+}: {
+  categoryId: RestrictionCategoryId;
+  destinationCount: number;
+  maxTransferAmount: string;
+  maxDailyAmount: string;
+  selectedOperationRules: OperationRuleId[];
+  selectedApprovalRules: ApprovalRuleId[];
+}) {
+  if (categoryId === "destinations") {
+    return destinationCount > 0
+      ? formatCount(destinationCount, "address", "addresses")
+      : "Paste approved Solana addresses or a CSV address column.";
+  }
+
+  if (categoryId === "limits") {
+    const parts = [
+      maxTransferAmount.trim() ? `Per transfer ${maxTransferAmount.trim()}` : null,
+      maxDailyAmount.trim() ? `Daily ${maxDailyAmount.trim()}` : null,
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(" / ") : "Set a per-transfer cap, daily cap, or both.";
+  }
+
+  if (categoryId === "operations") {
+    return selectedOperationRules.length > 0
+      ? formatOptionTitles(selectedOperationRules, OPERATION_RULE_OPTIONS)
+      : "Choose the operations this wallet should be allowed to perform.";
+  }
+
+  return selectedApprovalRules.length > 0
+    ? formatOptionTitles(selectedApprovalRules, APPROVAL_RULE_OPTIONS)
+    : "Choose which sensitive actions should require review.";
 }
 
 function ReviewStep({
@@ -737,6 +1155,9 @@ function ReviewStep({
   invalidDestinationCount,
   maxTransferAmount,
   maxDailyAmount,
+  selectedOperationRules,
+  selectedApprovalRules,
+  approvalTransferAmount,
   selectedNextCategories,
   canActivate,
 }: {
@@ -745,6 +1166,9 @@ function ReviewStep({
   invalidDestinationCount: number;
   maxTransferAmount: string;
   maxDailyAmount: string;
+  selectedOperationRules: OperationRuleId[];
+  selectedApprovalRules: ApprovalRuleId[];
+  approvalTransferAmount: string;
   selectedNextCategories: RestrictionCategoryId[];
   canActivate: boolean;
 }) {
@@ -754,22 +1178,7 @@ function ReviewStep({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-lg border border-border-light bg-[rgba(28,28,29,0.03)] p-4">
-        <div className="flex items-start gap-3">
-          <ShieldCheck className="mt-0.5 size-5 text-[color:var(--sdp-color-info-text)]" />
-          <div>
-            <h2 className="text-base font-semibold text-text-extra-high">
-              Default allow plus selected restrictions
-            </h2>
-            <p className="mt-1 text-sm leading-6 text-text-medium">
-              Activation writes the controls supported by the current wallet policy API. Draft-only
-              categories remain recoverable for detailed rule setup.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <div className="grid gap-3">
+      <div className="overflow-hidden rounded-lg border border-border-light bg-white">
         {selected.length > 0 ? (
           selected.map((category) => (
             <ReviewCategory
@@ -779,10 +1188,13 @@ function ReviewStep({
               invalidDestinationCount={invalidDestinationCount}
               maxTransferAmount={maxTransferAmount}
               maxDailyAmount={maxDailyAmount}
+              selectedOperationRules={selectedOperationRules}
+              selectedApprovalRules={selectedApprovalRules}
+              approvalTransferAmount={approvalTransferAmount}
             />
           ))
         ) : (
-          <div className="rounded-lg border border-border-light bg-white p-4 text-sm text-text-medium">
+          <div className="p-4 text-sm text-text-medium">
             No restriction category selected.
           </div>
         )}
@@ -790,15 +1202,16 @@ function ReviewStep({
 
       {!canActivate ? (
         <div className="rounded-lg border border-status-warning-border bg-status-warning-bg p-4 text-sm leading-6 text-text-medium">
-          Add at least one activatable destination or transfer limit before activation. Saving a
-          draft keeps this profile inactive.
+          No destination or transfer limit is ready to apply yet. Continuing saves the configured
+          profile as a draft.
         </div>
       ) : null}
 
       {selectedNextCategories.length > 0 ? (
         <div className="rounded-lg border border-border-light bg-white p-4 text-sm leading-6 text-text-medium">
-          {selectedNextCategories.length} draft-only category
-          {selectedNextCategories.length === 1 ? "" : "ies"} will remain saved after activation.
+          {canActivate
+            ? "Destination and transfer limits can be applied now. Operation and approval settings are reviewed here and saved for detailed policy support."
+            : "Operation and approval settings are reviewed here and saved for detailed policy support."}
         </div>
       ) : null}
     </div>
@@ -811,14 +1224,19 @@ function ReviewCategory({
   invalidDestinationCount,
   maxTransferAmount,
   maxDailyAmount,
+  selectedOperationRules,
+  selectedApprovalRules,
+  approvalTransferAmount,
 }: {
   category: RestrictionCategory;
   destinationCount: number;
   invalidDestinationCount: number;
   maxTransferAmount: string;
   maxDailyAmount: string;
+  selectedOperationRules: OperationRuleId[];
+  selectedApprovalRules: ApprovalRuleId[];
+  approvalTransferAmount: string;
 }) {
-  const Icon = category.icon;
   let value = "Saved for rule setup";
   if (category.id === "destinations") {
     value =
@@ -835,28 +1253,31 @@ function ReviewCategory({
     ].filter(Boolean);
     value = parts.length > 0 ? parts.join(" / ") : "No cap";
   }
+  if (category.id === "operations") {
+    value = formatOptionTitles(selectedOperationRules, OPERATION_RULE_OPTIONS);
+  }
+  if (category.id === "approvals") {
+    const approvalValue = formatOptionTitles(selectedApprovalRules, APPROVAL_RULE_OPTIONS);
+    value =
+      selectedApprovalRules.includes("large_transfers") && approvalTransferAmount
+        ? `${approvalValue} / amount ${approvalTransferAmount}`
+        : approvalValue;
+  }
 
   return (
-    <div className="flex items-start justify-between gap-3 rounded-lg border border-border-light bg-white p-4">
-      <div className="flex min-w-0 items-start gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[rgba(33,99,182,0.12)] text-[color:var(--sdp-color-info-text)]">
-          <Icon className="size-4" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-text-extra-high">{category.title}</p>
-          <p className="mt-1 text-sm leading-6 text-text-medium">{value}</p>
-        </div>
+    <div className="border-t border-border-light p-4 first:border-t-0">
+      <div className="flex items-start justify-between gap-4">
+        <p className="text-sm font-semibold text-text-extra-high">{category.title}</p>
+        <p className="shrink-0 text-xs text-text-extra-low">
+          {category.availability === "live" ? "Applies now" : "Saved for later"}
+        </p>
       </div>
-      <span
-        className={cn(
-          "shrink-0 rounded-md px-2 py-1 text-xs font-semibold",
-          category.availability === "live"
-            ? "bg-status-success-bg text-status-success-text"
-            : "bg-status-warning-bg text-status-warning-text"
-        )}
-      >
-        {category.availability === "live" ? "Activation" : "Draft"}
-      </span>
+      <p className="mt-1 text-sm leading-6 text-text-medium">{value}</p>
+      {category.availability === "next" ? (
+        <p className="mt-1 text-xs leading-5 text-text-extra-low">
+          This rule is configured here but not written by the current payment policy endpoint.
+        </p>
+      ) : null}
     </div>
   );
 }
