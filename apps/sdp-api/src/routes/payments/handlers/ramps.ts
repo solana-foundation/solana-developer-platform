@@ -286,7 +286,7 @@ async function executeOnrampWithProvider(
     }
     case "moneygram":
       throw badRequest("MoneyGram on-ramp is not available.");
-    case "coinbase_onramp":
+    case "coinbase":
       throw badRequest("Coinbase Onramp execute is not used; the payment link drives settlement.");
     default: {
       const _exhaustive: never = input.provider;
@@ -346,8 +346,8 @@ export async function advanceCounterpartyRequirements(
       );
       return bvnkOnboardingRequirements(resolution, input.direction);
     }
-    case "coinbase_onramp":
-      return readyCounterparty("coinbase_onramp", input.direction);
+    case "coinbase":
+      return readyCounterparty("coinbase", input.direction);
     default: {
       const _exhaustive: never = input;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
@@ -436,7 +436,7 @@ async function executeOfframpWithProvider(
       throw badRequest(
         "MoneyGram off-ramp runs through the widget session created at quote time; execute is not supported."
       );
-    case "coinbase_onramp":
+    case "coinbase":
       throw badRequest("Coinbase Onramp does not support off-ramp.");
     default: {
       const _exhaustive: never = input.provider;
@@ -606,8 +606,8 @@ export async function createOnrampQuote(c: AppContext) {
     }
     case "moneygram":
       throw badRequest("MoneyGram on-ramp is not available.");
-    case "coinbase_onramp": {
-      quote = await RAMP_PROVIDER_CLIENTS.coinbase_onramp.createOnrampQuote(rampRuntime(c), {
+    case "coinbase": {
+      quote = await RAMP_PROVIDER_CLIENTS.coinbase.createOnrampQuote(rampRuntime(c), {
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
@@ -755,7 +755,7 @@ export async function createOfframpQuote(c: AppContext) {
       });
       break;
     }
-    case "coinbase_onramp":
+    case "coinbase":
       throw badRequest("Coinbase Onramp does not support off-ramp.");
     default: {
       const exhaustive: never = input.provider;

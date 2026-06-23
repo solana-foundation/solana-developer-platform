@@ -17,7 +17,7 @@ import { ProjectService } from "@/services/project.service";
 import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 import { handleBvnkRampWebhook } from "./ramps/bvnk";
-import { handleCoinbaseOnrampRampWebhook } from "./ramps/coinbase_onramp";
+import { handleCoinbaseRampWebhook } from "./ramps/coinbase";
 import { handleLightsparkRampWebhook } from "./ramps/lightspark";
 import { handleMoonpayRampWebhook } from "./ramps/moonpay";
 
@@ -618,8 +618,8 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
         break;
       case "moneygram":
         throw badRequest("MoneyGram does not deliver webhooks.");
-      case "coinbase_onramp":
-        await handleCoinbaseOnrampRampWebhook(c, result.payload);
+      case "coinbase":
+        await handleCoinbaseRampWebhook(c, result.payload);
         break;
       default:
         throw badRequest(`Unsupported ramp webhook provider: ${result.provider satisfies never}`);

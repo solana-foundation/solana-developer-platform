@@ -19,7 +19,7 @@ export const RAMP_PROVIDER_SUPPORT_HASHES = {
   bvnk: "e2d1af10de70f562d5fcc6c8f7f28180d106760f835fbf71aed2d07157689754",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   moneygram: "d13d7ca60131cce86bc8e7b5405e007fc15661bfb440795fe4156f8523f6436e",
-  coinbase_onramp: "",
+  coinbase: "",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_SUPPORT_COUNTS = {
@@ -27,7 +27,7 @@ export const RAMP_PROVIDER_SUPPORT_COUNTS = {
   lightspark: { onramp: 1, offramp: 1 },
   bvnk: { onramp: 8, offramp: 412 },
   moneygram: { onramp: 0, offramp: 198 },
-  coinbase_onramp: { onramp: 0, offramp: 0 },
+  coinbase: { onramp: 0, offramp: 0 },
 } as const satisfies Record<RampProviderId, { onramp: number; offramp: number }>;
 
 export const RAMP_FIAT_CURRENCIES = [

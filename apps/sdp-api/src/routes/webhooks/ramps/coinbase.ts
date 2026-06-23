@@ -5,13 +5,10 @@ import { applyRampSettlementEvent } from "./settlements";
 
 type AppContext = Context<{ Bindings: Env }>;
 
-export async function handleCoinbaseOnrampRampWebhook(
-  c: AppContext,
-  payload: unknown
-): Promise<void> {
-  const event = RAMP_PROVIDER_CLIENTS.coinbase_onramp.parseSettlementEvent(payload);
+export async function handleCoinbaseRampWebhook(c: AppContext, payload: unknown): Promise<void> {
+  const event = RAMP_PROVIDER_CLIENTS.coinbase.parseSettlementEvent(payload);
   if (event.kind === "ignore") {
-    console.log(`[coinbase_onramp webhook] ignored event: ${event.reason}`);
+    console.log(`[coinbase webhook] ignored event: ${event.reason}`);
     return;
   }
   await applyRampSettlementEvent(c, event);

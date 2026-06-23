@@ -25,17 +25,17 @@ import type {
 
 const CDP_ONRAMP_API_BASE_URL = "https://api.developer.coinbase.com";
 
-interface CoinbaseOnrampConfig {
+interface CoinbaseConfig {
   apiKeyName: string;
   apiKeySecret: string;
   apiBaseUrl: string;
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: called by capability skill implementations (estimate, quote, etc.)
-function readCoinbaseOnrampConfig(
+function readCoinbaseConfig(
   env: Record<string, string | undefined>,
   mode: SdpEnvironment
-): CoinbaseOnrampConfig {
+): CoinbaseConfig {
   const apiKeyName = (
     mode === "sandbox" ? env.CDP_ONRAMP_SANDBOX_API_KEY_NAME : env.CDP_ONRAMP_API_KEY_NAME
   )?.trim();
@@ -58,14 +58,14 @@ function readCoinbaseOnrampConfig(
   };
 }
 
-export class CoinbaseOnrampRampClient implements RampProvider {
-  readonly id = "coinbase_onramp";
+export class CoinbaseRampClient implements RampProvider {
+  readonly id = "coinbase";
 
   validateCounterparty(
     _counterparty: Counterparty,
     _options: ValidateCounterpartyOptions
   ): CounterpartyRequirements {
-    throw new Error("validateCounterparty not yet implemented for coinbase_onramp");
+    throw new Error("validateCounterparty not yet implemented for coinbase");
   }
 
   async _discoverRails({
@@ -86,7 +86,7 @@ export class CoinbaseOnrampRampClient implements RampProvider {
     });
 
     await writeDump(
-      RAMP_RAIL_DUMPS.coinbase_onramp.buyOptions.name,
+      RAMP_RAIL_DUMPS.coinbase.buyOptions.name,
       await fetchJson(
         this.id,
         "GET /onramp/v1/buy/options",
@@ -99,25 +99,25 @@ export class CoinbaseOnrampRampClient implements RampProvider {
   async readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport> {
     const support = createProviderRampSupport();
     // TODO(integrate-estimate): parse buy options dump and populate onrampFiats/onrampCryptos
-    await readDump(RAMP_RAIL_DUMPS.coinbase_onramp.buyOptions.file);
+    await readDump(RAMP_RAIL_DUMPS.coinbase.buyOptions.file);
     return support;
   }
 
   async validateWebhook(
-    context: RampWebhookValidationContext
+    _context: RampWebhookValidationContext
   ): Promise<RampWebhookValidationResult> {
-    throw new Error("validateWebhook not yet implemented for coinbase_onramp");
+    throw new Error("validateWebhook not yet implemented for coinbase");
   }
 
-  parseSettlementEvent(payload: unknown): RampSettlementEvent {
-    throw new Error("parseSettlementEvent not yet implemented for coinbase_onramp");
+  parseSettlementEvent(_payload: unknown): RampSettlementEvent {
+    throw new Error("parseSettlementEvent not yet implemented for coinbase");
   }
 
   async estimateOnramp(
     _ctx: RampRuntimeContext,
     _input: RampEstimateOnrampInput
   ): Promise<PaymentRampEstimate> {
-    throw new Error("estimateOnramp not yet implemented for coinbase_onramp");
+    throw new Error("estimateOnramp not yet implemented for coinbase");
   }
 
   async estimateOfframp(
@@ -131,7 +131,7 @@ export class CoinbaseOnrampRampClient implements RampProvider {
     _ctx: RampRuntimeContext,
     _input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote> {
-    throw new Error("createOnrampQuote not yet implemented for coinbase_onramp");
+    throw new Error("createOnrampQuote not yet implemented for coinbase");
   }
 
   async createOfframpQuote(
@@ -142,7 +142,7 @@ export class CoinbaseOnrampRampClient implements RampProvider {
   }
 
   private async request<TResponse, TBody = never>(
-    config: CoinbaseOnrampConfig,
+    config: CoinbaseConfig,
     path: string,
     init: ProviderRequestInit<TBody>
   ): Promise<TResponse> {
