@@ -267,6 +267,36 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(paid?.lifecycle[1]).toMatchObject({ status: "paid" });
     });
 
+    it("rejects a paid transition with no settling transfer (paid_requires_transfer)", async () => {
+      const created = await repo.createPaymentRequest(createInput());
+
+      await expect(
+        repo.markPaymentRequest({
+          requestId: created.id,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          status: "paid",
+          fulfilledByTransferId: null,
+          canceledBy: null,
+        })
+      ).rejects.toThrow();
+    });
+
+    it("rejects canceled_by on a non-cancel transition (canceled_by_only_when_canceled)", async () => {
+      const created = await repo.createPaymentRequest(createInput());
+
+      await expect(
+        repo.markPaymentRequest({
+          requestId: created.id,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          status: "expired",
+          fulfilledByTransferId: null,
+          canceledBy: TEST_USER.id,
+        })
+      ).rejects.toThrow();
+    });
+
     it("expires an awaiting request", async () => {
       const created = await repo.createPaymentRequest(createInput());
 

@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS payment_requests (
     CONSTRAINT payment_requests_lifecycle_is_array
         CHECK (jsonb_typeof(lifecycle) = 'array'),
     CONSTRAINT payment_requests_canceled_by_only_when_canceled
-        CHECK (canceled_by IS NULL OR status = 'canceled')
+        CHECK (canceled_by IS NULL OR status = 'canceled'),
+    CONSTRAINT payment_requests_paid_requires_transfer
+        CHECK (status != 'paid' OR fulfilled_by_transfer_id IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS idx_payment_requests_project_created
