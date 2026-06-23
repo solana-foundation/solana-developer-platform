@@ -208,22 +208,6 @@ async function finalizeRecurringPaymentCollection(input: {
   const finalizedAt = new Date().toISOString();
   const dueAt = input.attempt.due_at;
   const nextDueAt = nextCollectionDueAt(dueAt, input.recurringPayment.period_hours);
-  const finalizedRecurringPayment = await input.recurringRepo.updateRecurringPaymentCollection({
-    recurringPaymentId: input.recurringPayment.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    nextCollectionDueAt: nextDueAt,
-    destinationTokenAccount: input.destinationTokenAccount,
-    updatedAt: finalizedAt,
-  });
-  const finalizedSubscription = await input.subscriptionsRepo.updateSubscription({
-    subscriptionId: input.subscription.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    currentPeriodStartAt: dueAt,
-    nextCollectionDueAt: nextDueAt,
-    updatedAt: finalizedAt,
-  });
   const finalizedTransfer = await input.paymentsRepo.updateTransfer({
     transferId: input.transfer.id,
     status: "confirmed",
@@ -243,6 +227,22 @@ async function finalizeRecurringPaymentCollection(input: {
       recurringPaymentId: input.recurringPayment.id,
       transferId: input.transfer.id,
     },
+    updatedAt: finalizedAt,
+  });
+  const finalizedRecurringPayment = await input.recurringRepo.updateRecurringPaymentCollection({
+    recurringPaymentId: input.recurringPayment.id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    nextCollectionDueAt: nextDueAt,
+    destinationTokenAccount: input.destinationTokenAccount,
+    updatedAt: finalizedAt,
+  });
+  const finalizedSubscription = await input.subscriptionsRepo.updateSubscription({
+    subscriptionId: input.subscription.id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    currentPeriodStartAt: dueAt,
+    nextCollectionDueAt: nextDueAt,
     updatedAt: finalizedAt,
   });
 
