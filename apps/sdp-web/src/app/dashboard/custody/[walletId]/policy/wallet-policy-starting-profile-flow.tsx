@@ -479,9 +479,6 @@ export function WalletPolicyStartingProfileFlow({
                 <p className="truncate text-xs text-text-low">{providerLabel}</p>
               </div>
             </div>
-            <div className="mt-4">
-              <ProfileStateBadge state={profileState} />
-            </div>
             {savedDraft?.updatedAt && localStatus === "draft" ? (
               <p className="mt-3 text-xs text-text-low">
                 Draft saved {formatDateTime(savedDraft.updatedAt)}
