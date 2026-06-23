@@ -29,6 +29,7 @@ const POSTGRES_TEST_TABLES = [
   "payment_recurring_payments",
   "payment_subscriptions",
   "payment_subscription_plans",
+  "payment_requests",
   "payment_transfers",
   "payment_wallet_policies",
   "frozen_accounts",

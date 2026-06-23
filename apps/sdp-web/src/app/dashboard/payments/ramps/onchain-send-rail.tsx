@@ -25,12 +25,19 @@ function sendPrimaryLabel(wizard: OnchainSendWizard): string {
 export function OnchainSendRail({
   wallets,
   walletsError,
+  issuedTokenSymbolsByMint,
   counterpartyId,
   counterpartyName,
   preSteps,
   onExit,
 }: RailProps) {
-  const wizard = useOnchainSendWizard({ wallets, walletsError, counterpartyId, onExit });
+  const wizard = useOnchainSendWizard({
+    wallets,
+    walletsError,
+    issuedTokenSymbolsByMint,
+    counterpartyId,
+    onExit,
+  });
 
   return (
     <RampWizardShell

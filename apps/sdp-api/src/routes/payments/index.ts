@@ -38,6 +38,7 @@ import {
   prepareSubscriptionAuthorization,
   prepareSubscriptionCollection,
   prepareTransfer,
+  recordRampProviderEvent,
   simulateSandboxTransfer,
   updateSubscription,
   updateSubscriptionPlan,
@@ -188,6 +189,11 @@ payments.post(
   "/ramps/offramp/execute",
   requirePermissions("payments:write", "wallets:read"),
   executeOfframp
+);
+payments.post(
+  "/ramps/:provider/events",
+  requirePermissions("payments:write"),
+  recordRampProviderEvent
 );
 payments.post("/ramps/transfers/cancel", requirePermissions("payments:write"), cancelRampTransfer);
 payments.post(

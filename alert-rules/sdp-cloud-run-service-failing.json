@@ -1,0 +1,81 @@
+{
+  "uid": "sdp-cloud-run-service-failing",
+  "title": "sdp: Cloud Run service failing (container exit / startup-probe failure)",
+  "ruleGroup": "sdp-cloud-run",
+  "folderUID": "sdp",
+  "condition": "C",
+  "for": "5m",
+  "noDataState": "OK",
+  "execErrState": "Error",
+  "data": [
+    {
+      "refId": "A",
+      "datasourceUid": "sdp-gcm",
+      "relativeTimeRange": { "from": 600, "to": 0 },
+      "model": {
+        "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+        "refId": "A",
+        "intervalMs": 60000,
+        "queryType": "timeSeriesList",
+        "timeSeriesList": {
+          "projectName": "solana-developer-platform",
+          "filters": [
+            "metric.type",
+            "=",
+            "logging.googleapis.com/user/sdp_cloud_run_service_failures"
+          ],
+          "groupBys": ["metric.label.service_name"],
+          "crossSeriesReducer": "REDUCE_SUM",
+          "perSeriesAligner": "ALIGN_DELTA",
+          "alignmentPeriod": "300s"
+        },
+        "aliasBy": "{{metric.label.service_name}}"
+      }
+    },
+    {
+      "refId": "B",
+      "datasourceUid": "__expr__",
+      "relativeTimeRange": { "from": 0, "to": 0 },
+      "model": {
+        "type": "reduce",
+        "refId": "B",
+        "expression": "A",
+        "reducer": "sum",
+        "settings": { "mode": "replaceNN", "replaceWithValue": 0 },
+        "datasource": { "type": "__expr__", "uid": "__expr__" }
+      }
+    },
+    {
+      "refId": "C",
+      "datasourceUid": "__expr__",
+      "relativeTimeRange": { "from": 0, "to": 0 },
+      "model": {
+        "type": "threshold",
+        "refId": "C",
+        "expression": "B",
+        "datasource": { "type": "__expr__", "uid": "__expr__" },
+        "conditions": [
+          {
+            "evaluator": { "type": "gt", "params": [0] },
+            "operator": { "type": "and" },
+            "query": { "params": ["B"] },
+            "reducer": { "type": "last", "params": [] },
+            "type": "query"
+          }
+        ]
+      }
+    }
+  ],
+  "labels": {
+    "service": "sdp-cloud-run",
+    "severity": "critical",
+    "pagerduty": "true",
+    "slack": "true"
+  },
+  "annotations": {
+    "summary": "SDP Cloud Run service failing: {{ or (index $labels \"metric.label.service_name\") (index $labels \"service_name\") }}",
+    "description": "One or more SDP Cloud Run services logged a non-zero container exit or a failed startup probe in the last 5 minutes (log-based metric logging.googleapis.com/user/sdp_cloud_run_service_failures, grouped by service_name). This is independent of per-service Kora app metrics and covers crash-loops, OOMs, exits, and startup-probe failures for any service in solana-developer-platform. Check Cloud Run logs: resource.type=cloud_run_revision for the affected service.",
+    "runbook_url": "https://console.cloud.google.com/run?project=solana-developer-platform"
+  },
+  "isPaused": false
+}

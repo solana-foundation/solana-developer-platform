@@ -491,7 +491,8 @@ function TransferDetailModal({
 
   const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
   const walletAddress = isInbound ? transfer.destination : transfer.source;
-  const signature = transfer.signature;
+  const moneygram = transfer.moneygram;
+  const signature = transfer.signature ?? moneygram?.solanaTxSignature ?? null;
   const flow = resolveTransferFlow(transfer);
   const counterpartyParty = transfer.fiatCurrency
     ? `${counterpartyName} · ${transfer.fiatCurrency.toUpperCase()}`
@@ -572,6 +573,50 @@ function TransferDetailModal({
             ) : null}
             {transfer.memo ? <DetailRow label="Memo" value={transfer.memo} /> : null}
             {transfer.settlement ? <RampSettlementRows settlement={transfer.settlement} /> : null}
+            {moneygram?.referenceNumber ? (
+              <DetailRow
+                label="Cash pickup code"
+                value={moneygram.referenceNumber}
+                mono
+                copyValue={moneygram.referenceNumber}
+              />
+            ) : null}
+            {moneygram?.transactionId ? (
+              <DetailRow
+                label="MoneyGram transaction ID"
+                value={moneygram.transactionId}
+                mono
+                copyValue={moneygram.transactionId}
+              />
+            ) : null}
+            {moneygram?.payoutStatus ? (
+              <DetailRow label="Payout status" value={toTitleCase(moneygram.payoutStatus)} />
+            ) : null}
+            {moneygram?.payoutAmount !== undefined && transfer.fiatCurrency ? (
+              <DetailRow
+                label="Payout amount"
+                value={formatDisplayAmount(String(moneygram.payoutAmount), transfer.fiatCurrency)}
+              />
+            ) : null}
+            {moneygram?.cryptoTransferId ? (
+              <DetailRow
+                label="Crypto transfer ID"
+                value={moneygram.cryptoTransferId}
+                mono
+                copyValue={moneygram.cryptoTransferId}
+              />
+            ) : null}
+            {moneygram?.solanaTxSignature ? (
+              <DetailRow
+                label="Solana signature"
+                value={shortenAddress(moneygram.solanaTxSignature)}
+                mono
+                copyValue={moneygram.solanaTxSignature}
+              />
+            ) : null}
+            {moneygram?.lastWidgetError ? (
+              <DetailRow label="MoneyGram error" value={moneygram.lastWidgetError} />
+            ) : null}
             {transfer.updatedAt ? (
               <DetailRow label="Last updated" value={formatTimestamp(transfer.updatedAt)} />
             ) : null}

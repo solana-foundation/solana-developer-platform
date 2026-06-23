@@ -11,6 +11,7 @@ export {
   listOnrampCurrencies,
   simulateSandboxTransfer,
 } from "./handlers/ramps";
+export { recordRampProviderEvent } from "./handlers/ramps/moneygram";
 export {
   activateRecurringPayment,
   createRecurringPayment,

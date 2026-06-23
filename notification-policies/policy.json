@@ -1,6 +1,6 @@
 {
   "receiver": "slack",
-  "group_by": ["grafana_folder", "alertname"],
+  "group_by": ["grafana_folder", "alertname", "service"],
   "group_wait": "30s",
   "group_interval": "5m",
   "repeat_interval": "4h",

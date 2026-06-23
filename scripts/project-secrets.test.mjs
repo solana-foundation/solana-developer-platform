@@ -70,10 +70,14 @@ test("cloudflare output stays valid JSON without committed or local-only keys", 
     SOLANA_NETWORK: "mainnet-beta",
     DATABASE_URL: "postgresql://localhost/sdp",
     CLERK_SECRET_KEY: "sk_test_clerk",
+    MONEYGRAM_SANDBOX_PUBLIC_KEY: "moneygram_public",
+    MONEYGRAM_SANDBOX_SECRET_KEY: "moneygram_secret",
   });
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.CLERK_SECRET_KEY, "sk_test_clerk");
+  assert.equal(payload.MONEYGRAM_SANDBOX_PUBLIC_KEY, "moneygram_public");
+  assert.equal(payload.MONEYGRAM_SANDBOX_SECRET_KEY, "moneygram_secret");
   assert.equal(payload.SDP_RUNTIME, undefined);
   assert.equal(payload.SOLANA_NETWORK, undefined);
   assert.equal(payload.DATABASE_URL, undefined);

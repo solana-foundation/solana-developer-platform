@@ -216,6 +216,13 @@ export function providerUnavailable(message?: string, details?: Record<string, u
   return new AppError("PROVIDER_UNAVAILABLE", message, details);
 }
 
+export function estimateNotAvailable(
+  message?: string,
+  details?: Record<string, unknown>
+): AppError {
+  return new AppError("ESTIMATE_NOT_AVAILABLE", message, details);
+}
+
 export function unsupportedCounterparty(
   provider: RampProviderId,
   direction: RampDirection,

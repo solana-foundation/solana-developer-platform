@@ -43,6 +43,7 @@ const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 export interface RailProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
+  issuedTokenSymbolsByMint: Record<string, string>;
   enabledRampProviders: RampProviderId[];
   counterpartiesResult: CounterpartiesResult;
   counterpartyId: string;
@@ -117,6 +118,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
     const railProps: RailProps = {
       wallets: props.wallets,
       walletsError: props.walletsError,
+      issuedTokenSymbolsByMint: props.issuedTokenSymbolsByMint,
       enabledRampProviders,
       counterpartiesResult: liveCounterparties,
       counterpartyId,
