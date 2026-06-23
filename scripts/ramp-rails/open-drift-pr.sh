@@ -48,7 +48,7 @@ else
   git push origin "$BRANCH"
 fi
 
-existing="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || true)"
+existing="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
 if [ -n "$existing" ]; then
   gh pr edit "$existing" --title "$TITLE" --body-file "$BODY_FILE"
   echo "Updated existing refresh PR #$existing."
