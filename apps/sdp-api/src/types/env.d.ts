@@ -236,7 +236,7 @@ export interface Env {
   // "sandbox-" prefix on the partnerUserRef parameter, not separate credentials.
   CDP_API_KEY?: string;
   CDP_API_SECRET?: string;
-  CDP_WEBHOOK_URL?: string;
+  CDP_WEBHOOK_SECRET?: string;
   CDP_ONRAMP_API_BASE_URL?: string;
 }
 
