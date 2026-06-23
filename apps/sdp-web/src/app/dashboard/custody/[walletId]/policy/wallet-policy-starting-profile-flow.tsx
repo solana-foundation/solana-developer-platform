@@ -20,10 +20,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import {
-  formatCustodyProviderName,
-  isKnownCustodyProvider,
-} from "@/app/dashboard/custody/provider-catalog";
 import { updateWalletPolicy } from "@/app/dashboard/payments/payments-workspace.data";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,11 +59,36 @@ interface StoredPolicyDraft {
 }
 
 const FLOW_STEPS = [
-  { id: "baseline", label: "Baseline", title: "Start from default allow" },
-  { id: "intent", label: "Intent", title: "Choose what to restrict" },
-  { id: "details", label: "Rules", title: "Add the starting rules" },
-  { id: "review", label: "Review", title: "Review before activation" },
-] as const satisfies readonly { id: FlowStep; label: string; title: string }[];
+  {
+    id: "baseline",
+    label: "Baseline",
+    title: "Default allow",
+    description: "Start open, then add only the controls this wallet needs.",
+  },
+  {
+    id: "intent",
+    label: "Intent",
+    title: "Restriction intent",
+    description: "Choose common policy goals before provider-specific setup.",
+  },
+  {
+    id: "details",
+    label: "Rules",
+    title: "Starting rules",
+    description: "Add the rules that can be activated from this flow.",
+  },
+  {
+    id: "review",
+    label: "Review",
+    title: "Review before activation",
+    description: "Confirm the profile before any wallet controls become active.",
+  },
+] as const satisfies readonly {
+  id: FlowStep;
+  label: string;
+  title: string;
+  description: string;
+}[];
 
 const RESTRICTION_CATEGORIES = [
   {
@@ -135,17 +156,6 @@ function parseDestinationText(value: string): { addresses: string[]; invalid: st
 
 function isPositiveAmount(value: string): boolean {
   return value.trim() === "" || /^\d+(\.\d+)?$/.test(value.trim());
-}
-
-function formatWalletLabel(label: string | null, publicKey: string): string {
-  const trimmed = label?.trim();
-  if (trimmed) return trimmed;
-  return `${publicKey.slice(0, 6)}...${publicKey.slice(-6)}`;
-}
-
-function formatProvider(provider: string | null): string {
-  if (!provider) return "Wallet";
-  return isKnownCustodyProvider(provider) ? formatCustodyProviderName(provider) : provider;
 }
 
 function formatDateTime(value: string): string {
@@ -262,9 +272,6 @@ export function WalletPolicyStartingProfileFlow({
     canActivateLimits &&
     !isSubmitting &&
     !policyError;
-
-  const walletLabel = formatWalletLabel(wallet.label, wallet.publicKey);
-  const providerLabel = formatProvider(wallet.provider);
 
   function persistDraft(options: { notify: boolean } = { notify: false }) {
     if (typeof window === "undefined") return;
@@ -458,188 +465,171 @@ export function WalletPolicyStartingProfileFlow({
   }
 
   return (
-    <div className="mx-auto flex min-h-[80vh] w-full max-w-6xl flex-col px-3 py-6 md:px-6">
-      <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <aside className="space-y-4">
-          <Link
-            href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
-            className="inline-flex items-center gap-2 text-sm font-medium text-text-medium hover:text-text-extra-high"
-          >
-            <ArrowLeft className="size-4" />
-            Wallet detail
-          </Link>
+    <div className="mx-auto flex h-[80vh] w-full max-w-xl flex-col px-4 py-4">
+      <Link
+        href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
+        className="mb-5 inline-flex w-fit items-center gap-2 text-sm font-medium text-text-medium hover:text-text-extra-high"
+      >
+        <ArrowLeft className="size-4" />
+        Wallet detail
+      </Link>
 
-          <div className="rounded-lg border border-border-light bg-white p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-[rgba(33,99,182,0.12)] text-[color:var(--sdp-color-info-text)]">
-                <ShieldCheck className="size-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-text-extra-high">{walletLabel}</p>
-                <p className="truncate text-xs text-text-low">{providerLabel}</p>
-              </div>
-            </div>
-            {savedDraft?.updatedAt && localStatus === "draft" ? (
-              <p className="mt-3 text-xs text-text-low">
-                Draft saved {formatDateTime(savedDraft.updatedAt)}
-              </p>
-            ) : null}
-          </div>
+      <StepIndicator stepIndex={stepIndex} />
 
-          <StepRail stepIndex={stepIndex} />
-        </aside>
-
-        <main className="flex min-h-0 flex-col rounded-lg border border-border-light bg-white">
-          <header className="border-b border-border-light px-5 py-4 md:px-6">
-            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <p className="text-xs font-medium text-text-extra-low uppercase">
-                    Step {stepIndex + 1} of {FLOW_STEPS.length}
-                  </p>
-                  <div className="flex items-center gap-1">
-                    {FLOW_STEPS.map((step, index) => (
-                      <span
-                        key={step.id}
-                        className={cn(
-                          "h-1.5 rounded-full transition-all",
-                          index === stepIndex
-                            ? "w-5 bg-gray-1400"
-                            : index < stepIndex
-                              ? "w-2 bg-gray-1400"
-                              : "w-2 bg-border-light"
-                        )}
-                      />
-                    ))}
-                  </div>
-                </div>
-                <h1 className="mt-2 text-2xl font-medium text-text-extra-high md:text-3xl">
-                  {currentStep.title}
-                </h1>
-              </div>
-              {policyError ? (
-                <div className="rounded-md border border-status-error-border bg-status-error-bg px-3 py-2 text-sm text-status-error-text">
-                  {policyError}
-                </div>
-              ) : null}
-            </div>
-          </header>
-
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 md:px-6 md:py-6">
-            {!isLoaded ? <LoadingState /> : null}
-            {isLoaded && currentStep.id === "baseline" ? (
-              <BaselineStep
-                state={profileState}
-                policy={currentPolicy}
-                onResumeDraft={() => {
-                  const draftStepIndex = savedDraft
-                    ? FLOW_STEPS.findIndex((step) => step.id === savedDraft.step)
-                    : 1;
-                  setStepIndex(Math.max(1, draftStepIndex));
-                }}
-              />
-            ) : null}
-            {isLoaded && currentStep.id === "intent" ? (
-              <IntentStep selectedCategories={selectedCategories} onToggle={toggleCategory} />
-            ) : null}
-            {isLoaded && currentStep.id === "details" ? (
-              <DetailsStep
-                selectedCategorySet={selectedCategorySet}
-                destinationText={destinationText}
-                setDestinationText={setDestinationText}
-                invalidDestinations={destinationParse.invalid}
-                maxTransferAmount={maxTransferAmount}
-                setMaxTransferAmount={setMaxTransferAmount}
-                maxDailyAmount={maxDailyAmount}
-                setMaxDailyAmount={setMaxDailyAmount}
-              />
-            ) : null}
-            {isLoaded && currentStep.id === "review" ? (
-              <ReviewStep
-                selectedCategories={selectedCategories}
-                destinationCount={destinationParse.addresses.length}
-                invalidDestinationCount={destinationParse.invalid.length}
-                maxTransferAmount={maxTransferAmount.trim()}
-                maxDailyAmount={maxDailyAmount.trim()}
-                selectedNextCategories={selectedNextCategories}
-                canActivate={canActivate}
-              />
-            ) : null}
-          </div>
-
-          <footer className="flex flex-col gap-3 border-t border-border-light px-5 py-4 sm:flex-row sm:items-center sm:justify-between md:px-6">
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full sm:w-auto"
-                onClick={goBack}
-                iconLeft={<ArrowLeft className="size-4" />}
-              >
-                {stepIndex === 0 ? "Back" : "Previous"}
-              </Button>
-              {savedDraft ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full sm:w-auto"
-                  onClick={resetToLivePolicy}
-                  iconLeft={<RotateCcw className="size-4" />}
-                  disabled={isSubmitting}
-                >
-                  Clear draft
-                </Button>
-              ) : null}
-            </div>
-
-            <div className="flex flex-col gap-2 sm:flex-row">
-              {stepIndex > 0 ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full sm:w-auto"
-                  onClick={() => persistDraft({ notify: true })}
-                  iconLeft={<Save className="size-4" />}
-                  disabled={isSubmitting}
-                >
-                  Save draft
-                </Button>
-              ) : null}
-              {hasLivePolicy && currentStep.id === "review" ? (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  className="w-full sm:w-auto"
-                  onClick={disableProfile}
-                  iconLeft={<PauseCircle className="size-4" />}
-                  disabled={isSubmitting}
-                >
-                  Disable
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                className="w-full sm:w-auto"
-                onClick={currentStep.id === "review" ? activateProfile : goNext}
-                iconRight={
-                  currentStep.id === "review" ? (
-                    <ShieldCheck className="size-4" />
-                  ) : (
-                    <ArrowRight className="size-4" />
-                  )
-                }
-                disabled={isSubmitting || Boolean(policyError && currentStep.id === "review")}
-              >
-                {currentStep.id === "review"
-                  ? canActivate
-                    ? "Activate controls"
-                    : "Save draft"
-                  : "Continue"}
-              </Button>
-            </div>
-          </footer>
-        </main>
+      <div className="mt-6 space-y-1">
+        <h1 className="text-2xl font-medium text-text-extra-high">{currentStep.title}</h1>
+        <p className="text-sm text-text-medium">{currentStep.description}</p>
+        {savedDraft?.updatedAt && localStatus === "draft" ? (
+          <p className="pt-1 text-xs text-text-extra-low">
+            Draft saved {formatDateTime(savedDraft.updatedAt)}
+          </p>
+        ) : null}
       </div>
+
+      {policyError ? (
+        <div className="mt-4 rounded-md border border-status-error-border bg-status-error-bg px-3 py-2 text-sm text-status-error-text">
+          {policyError}
+        </div>
+      ) : null}
+
+      <div className="mt-6 min-h-0 flex-1 overflow-y-auto px-1 py-1">
+        {!isLoaded ? <LoadingState /> : null}
+        {isLoaded && currentStep.id === "baseline" ? (
+          <BaselineStep
+            state={profileState}
+            policy={currentPolicy}
+            onResumeDraft={() => {
+              const draftStepIndex = savedDraft
+                ? FLOW_STEPS.findIndex((step) => step.id === savedDraft.step)
+                : 1;
+              setStepIndex(Math.max(1, draftStepIndex));
+            }}
+          />
+        ) : null}
+        {isLoaded && currentStep.id === "intent" ? (
+          <IntentStep selectedCategories={selectedCategories} onToggle={toggleCategory} />
+        ) : null}
+        {isLoaded && currentStep.id === "details" ? (
+          <DetailsStep
+            selectedCategorySet={selectedCategorySet}
+            destinationText={destinationText}
+            setDestinationText={setDestinationText}
+            invalidDestinations={destinationParse.invalid}
+            maxTransferAmount={maxTransferAmount}
+            setMaxTransferAmount={setMaxTransferAmount}
+            maxDailyAmount={maxDailyAmount}
+            setMaxDailyAmount={setMaxDailyAmount}
+          />
+        ) : null}
+        {isLoaded && currentStep.id === "review" ? (
+          <ReviewStep
+            selectedCategories={selectedCategories}
+            destinationCount={destinationParse.addresses.length}
+            invalidDestinationCount={destinationParse.invalid.length}
+            maxTransferAmount={maxTransferAmount.trim()}
+            maxDailyAmount={maxDailyAmount.trim()}
+            selectedNextCategories={selectedNextCategories}
+            canActivate={canActivate}
+          />
+        ) : null}
+      </div>
+
+      <footer className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full sm:w-auto"
+            onClick={goBack}
+            iconLeft={<ArrowLeft className="size-4" />}
+          >
+            {stepIndex === 0 ? "Back" : "Previous"}
+          </Button>
+          {savedDraft ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={resetToLivePolicy}
+              iconLeft={<RotateCcw className="size-4" />}
+              disabled={isSubmitting}
+            >
+              Clear draft
+            </Button>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {stepIndex > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={() => persistDraft({ notify: true })}
+              iconLeft={<Save className="size-4" />}
+              disabled={isSubmitting}
+            >
+              Save draft
+            </Button>
+          ) : null}
+          {hasLivePolicy && currentStep.id === "review" ? (
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full sm:w-auto"
+              onClick={disableProfile}
+              iconLeft={<PauseCircle className="size-4" />}
+              disabled={isSubmitting}
+            >
+              Disable
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            className="w-full sm:w-auto"
+            onClick={currentStep.id === "review" ? activateProfile : goNext}
+            iconRight={
+              currentStep.id === "review" ? (
+                <ShieldCheck className="size-4" />
+              ) : (
+                <ArrowRight className="size-4" />
+              )
+            }
+            disabled={isSubmitting || Boolean(policyError && currentStep.id === "review")}
+          >
+            {currentStep.id === "review"
+              ? canActivate
+                ? "Activate controls"
+                : "Save draft"
+              : "Continue"}
+          </Button>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+function StepIndicator({ stepIndex }: { stepIndex: number }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex items-center gap-1.5">
+        {FLOW_STEPS.map((step, index) => (
+          <div
+            key={step.id}
+            className={cn(
+              "h-1.5 rounded-full transition-all duration-200",
+              index === stepIndex
+                ? "w-4 bg-gray-1400"
+                : index < stepIndex
+                  ? "w-1.5 bg-gray-1400"
+                  : "w-1.5 bg-border-light"
+            )}
+          />
+        ))}
+      </div>
+      <span className="text-xs text-text-extra-low">
+        Step {stepIndex + 1} of {FLOW_STEPS.length}
+      </span>
     </div>
   );
 }
@@ -679,40 +669,6 @@ function ProfileStateBadge({ state }: { state: ProfileState }) {
       <Icon className="size-3.5" />
       {meta[state].label}
     </span>
-  );
-}
-
-function StepRail({ stepIndex }: { stepIndex: number }) {
-  return (
-    <nav className="rounded-lg border border-border-light bg-white p-3" aria-label="Policy steps">
-      {FLOW_STEPS.map((step, index) => (
-        <div key={step.id} className="flex items-start gap-3 px-1 py-2">
-          <div
-            className={cn(
-              "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-medium",
-              index < stepIndex
-                ? "border-gray-1400 bg-gray-1400 text-white"
-                : index === stepIndex
-                  ? "border-gray-1400 bg-white text-gray-1400"
-                  : "border-border-light bg-white text-text-extra-low"
-            )}
-          >
-            {index < stepIndex ? <Check className="size-3.5" /> : index + 1}
-          </div>
-          <div className="min-w-0">
-            <p
-              className={cn(
-                "text-sm font-medium",
-                index <= stepIndex ? "text-text-extra-high" : "text-text-low"
-              )}
-            >
-              {step.label}
-            </p>
-            <p className="text-xs leading-5 text-text-extra-low">{step.title}</p>
-          </div>
-        </div>
-      ))}
-    </nav>
   );
 }
 
@@ -793,7 +749,6 @@ function IntentStep({
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {RESTRICTION_CATEGORIES.map((category) => {
-        const Icon = category.icon;
         const selected = selectedCategories.includes(category.id);
 
         return (
@@ -803,42 +758,20 @@ function IntentStep({
             onClick={() => onToggle(category.id)}
             aria-pressed={selected}
             className={cn(
-              "min-h-[150px] rounded-lg border p-4 text-left transition-colors",
+              "relative min-h-[150px] rounded-lg border p-4 pr-14 text-left transition-colors",
               selected
-                ? "border-gray-1400 bg-[rgba(28,28,29,0.04)]"
+                ? "border-[rgba(28,28,29,0.72)] bg-[rgba(28,28,29,0.04)] shadow-[inset_0_0_0_1px_rgba(28,28,29,0.72)]"
                 : "border-border-light bg-white hover:bg-gray-100"
             )}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-[rgba(33,99,182,0.12)] text-[color:var(--sdp-color-info-text)]">
-                <Icon className="size-5" />
-              </div>
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold",
-                  category.availability === "live"
-                    ? "bg-status-success-bg text-status-success-text"
-                    : "bg-status-warning-bg text-status-warning-text"
-                )}
-              >
-                {category.availability === "live" ? "Can activate" : "Rule setup next"}
-              </span>
-            </div>
-            <p className="mt-4 text-base font-semibold text-text-extra-high">{category.title}</p>
+            <p className="text-base font-semibold text-text-extra-high">{category.title}</p>
             <p className="mt-2 text-sm leading-6 text-text-medium">{category.description}</p>
-            <span className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-text-extra-high">
-              <span
-                className={cn(
-                  "flex size-5 items-center justify-center rounded border",
-                  selected
-                    ? "border-gray-1400 bg-gray-1400 text-white"
-                    : "border-border-medium bg-white"
-                )}
-              >
-                {selected ? <Check className="size-3.5" /> : null}
+            {selected ? (
+              <span className="absolute right-4 bottom-4 flex size-6 items-center justify-center rounded-full bg-gray-1400 text-white">
+                <Check className="size-4" />
+                <span className="sr-only">Selected</span>
               </span>
-              {selected ? "Selected" : "Select"}
-            </span>
+            ) : null}
           </button>
         );
       })}
