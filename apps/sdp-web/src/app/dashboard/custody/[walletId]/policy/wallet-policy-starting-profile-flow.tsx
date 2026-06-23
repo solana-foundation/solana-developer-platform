@@ -1010,10 +1010,7 @@ function LimitRuleEditor({
 }) {
   return (
     <div>
-      <p className="text-sm leading-6 text-text-medium">
-        Configure one or both caps. Amounts are interpreted by the payment policy endpoint.
-      </p>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2">
         <label className="space-y-2">
           <span className="text-sm font-medium text-text-extra-high">Per transfer cap</span>
           <Input
