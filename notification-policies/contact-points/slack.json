@@ -3,7 +3,7 @@
   "type": "slack",
   "settings": {
     "url": "${SLACK_ALERT_WEBHOOK_URL}",
-    "title": "[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}",
+    "title": "[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{{ if .CommonLabels.service }} [{{ .CommonLabels.service }}]{{ end }}",
     "text": "{{ range .Alerts }}*{{ .Annotations.summary }}*\n{{ .Annotations.description }}\nlabels: {{ .Labels }}{{ if .Annotations.runbook_url }}\n:book: <{{ .Annotations.runbook_url }}|Runbook>{{ end }}\n{{ end }}"
   },
   "disableResolveMessage": false

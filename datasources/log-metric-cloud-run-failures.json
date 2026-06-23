@@ -1,0 +1,21 @@
+{
+  "name": "sdp_cloud_run_service_failures",
+  "description": "Counts Cloud Run container exit(non-zero) and startup-probe-failed log lines across all SDP services. Used by the generic 'SDP Cloud Run service failing' Grafana alert.",
+  "filter": "resource.type=\"cloud_run_revision\" AND ((textPayload:\"Container called exit\" AND NOT textPayload:\"Container called exit(0)\") OR (textPayload:\"STARTUP\" AND textPayload:\"probe failed\" AND textPayload:\"The instance was not started\") OR textPayload:\"Container terminated on signal\")",
+  "metricDescriptor": {
+    "metricKind": "DELTA",
+    "valueType": "INT64",
+    "unit": "1",
+    "displayName": "SDP Cloud Run service failures",
+    "labels": [
+      {
+        "key": "service_name",
+        "valueType": "STRING",
+        "description": "Cloud Run service name"
+      }
+    ]
+  },
+  "labelExtractors": {
+    "service_name": "EXTRACT(resource.labels.service_name)"
+  }
+}

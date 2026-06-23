@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.32.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.31.0...v0.32.0) (2026-06-23)
+
+### Features
+
+* **payments:** payment_requests data layer ([#505](https://github.com/solana-foundation/solana-developer-platform/pull/505)) ([7215859](https://github.com/solana-foundation/solana-developer-platform/commit/72158598b4e2bd241aae9f792efb423060544e70))
+* **observability:** SDP Cloud Run observability + Kora SDP cutover ([#496](https://github.com/solana-foundation/solana-developer-platform/pull/496)) ([7106be6](https://github.com/solana-foundation/solana-developer-platform/commit/7106be68db2542ad6cd6c646ade5a4387057a9e6))
+* **kora:** deploy by pinned tag, config from Secret Manager, auto devnet→mainnet ([#498](https://github.com/solana-foundation/solana-developer-platform/pull/498)) ([aaa804a](https://github.com/solana-foundation/solana-developer-platform/commit/aaa804aa752a48e6fe05a58bbbb0e5b452244bb2))
+* add moneygram credentials to cf workers ([#497](https://github.com/solana-foundation/solana-developer-platform/pull/497)) ([9c7d7c6](https://github.com/solana-foundation/solana-developer-platform/commit/9c7d7c66d693e23cd4dec9e42777ac99bee665d3))
+* turn on paymentsv2 feature flag ([#492](https://github.com/solana-foundation/solana-developer-platform/pull/492)) ([aa05a93](https://github.com/solana-foundation/solana-developer-platform/commit/aa05a9360b3f7d8c510356a47d4bbb6bd2fdfc98))
+* **payments:** add MoneyGram as an SDP ramps provider ([#491](https://github.com/solana-foundation/solana-developer-platform/pull/491)) ([38ed43c](https://github.com/solana-foundation/solana-developer-platform/commit/38ed43c88672e6ff658ee049b8318ab56c706701))
+* set max transferrable amount in the UI for clarity ([#490](https://github.com/solana-foundation/solana-developer-platform/pull/490)) ([4c10f53](https://github.com/solana-foundation/solana-developer-platform/commit/4c10f53850a80b987871727319e76f1bf7a4a1ad))
+* **api:** add recurring payment activation ([af7409b](https://github.com/solana-foundation/solana-developer-platform/commit/af7409be995146f04a5842f751c46ee4a5606298))
+* **payments:** confirm + cancel ramp transfers from the wizard [PRO-1395] ([#482](https://github.com/solana-foundation/solana-developer-platform/pull/482)) ([8c751d4](https://github.com/solana-foundation/solana-developer-platform/commit/8c751d488f38317c5923d134033fa6f0dc552c99))
+* **kora:** move devnet config to the new KMS + Redis structure ([#484](https://github.com/solana-foundation/solana-developer-platform/pull/484)) ([a1a66a0](https://github.com/solana-foundation/solana-developer-platform/commit/a1a66a088422c90f8d1c6f22deab6aeead1d965e))
+* **api:** [PRO-1360] scope API key wallet policies ([#480](https://github.com/solana-foundation/solana-developer-platform/pull/480)) ([b5bc6b9](https://github.com/solana-foundation/solana-developer-platform/commit/b5bc6b90b5524c3ee478b8779a4441a1abc36060))
+* **skills:** PRO-1390 partner ramp-provider integration skills ([#479](https://github.com/solana-foundation/solana-developer-platform/pull/479)) ([96b3d98](https://github.com/solana-foundation/solana-developer-platform/commit/96b3d988fe32aaab321e3dcacc59d333b2e548e5))
+* **api:** [PRO-1359] wallet operation envelope and policy evaluation engine ([#470](https://github.com/solana-foundation/solana-developer-platform/pull/470)) ([7995cc3](https://github.com/solana-foundation/solana-developer-platform/commit/7995cc3c5536db7b076f40f0d58a65d1580be860))
+* **kora:** Phase-1: mainnet paymaster infra (Terraform + KMS signer + Doppler deploy) ([#455](https://github.com/solana-foundation/solana-developer-platform/pull/455)) ([d2469b5](https://github.com/solana-foundation/solana-developer-platform/commit/d2469b536af5791dfb633b6120216b4a5e4a3759))
+* standardize ramp webhook verification & processing + capture settlement economics ([#478](https://github.com/solana-foundation/solana-developer-platform/pull/478)) ([ae25864](https://github.com/solana-foundation/solana-developer-platform/commit/ae25864875e5aeb9153f44cd8c52f9c438b45d9f))
+* **sdp-api:** route BVNK calls through static-egress proxy ([#476](https://github.com/solana-foundation/solana-developer-platform/pull/476)) ([217e4f1](https://github.com/solana-foundation/solana-developer-platform/commit/217e4f1753224aea7ab6f0f575b0999bc13bb8a6))
+* **payments:** PRO-1389 redesign on-ramp success screen ([#477](https://github.com/solana-foundation/solana-developer-platform/pull/477)) ([f5888bf](https://github.com/solana-foundation/solana-developer-platform/commit/f5888bfc2dc1a90f0eae7baf13e17742e4f4ca7d))
+* **payments:** PRO-1388 wire Lightspark on-ramp estimate ([#475](https://github.com/solana-foundation/solana-developer-platform/pull/475)) ([3e51db1](https://github.com/solana-foundation/solana-developer-platform/commit/3e51db146419151b142a10f23f84c32c8a254bc8))
+* **payments:** PRO-1371 gate off-ramp quote on counterparty requirements ([#474](https://github.com/solana-foundation/solana-developer-platform/pull/474)) ([ca5a2d2](https://github.com/solana-foundation/solana-developer-platform/commit/ca5a2d2176f7d28c0bb69c55765345a19d6cd1c0))
+
+### Bug Fixes
+
+* **payments:** isolate MoneyGram SDK DOM to prevent removeChild crash ([#494](https://github.com/solana-foundation/solana-developer-platform/pull/494)) ([8277645](https://github.com/solana-foundation/solana-developer-platform/commit/8277645da6d26fd85f116312a8f6437e9b8cc40c))
+* tab highlights ([#489](https://github.com/solana-foundation/solana-developer-platform/pull/489)) ([3c0c3ec](https://github.com/solana-foundation/solana-developer-platform/commit/3c0c3ec54fd7c6bfad089904f409749f45492c7e))
+* **web:** [PRO-1396] redirect counterparty not-found to list + branded 404 page ([#481](https://github.com/solana-foundation/solana-developer-platform/pull/481)) ([4c8b7b7](https://github.com/solana-foundation/solana-developer-platform/commit/4c8b7b777d7127a026e33fd9cf14445a30031b72))
+
+### Refactors
+
+* **sdp-api:** remove provisioning from on-ramp quotes ([#471](https://github.com/solana-foundation/solana-developer-platform/pull/471)) ([2c1cf60](https://github.com/solana-foundation/solana-developer-platform/commit/2c1cf602b941458874e61bb38c9fde3eb62c023d))
+* **api:** reuse Postgres row helpers ([#468](https://github.com/solana-foundation/solana-developer-platform/pull/468)) ([0d8fc00](https://github.com/solana-foundation/solana-developer-platform/commit/0d8fc00d73caf9a790df84f1d0766000ee5152d5))
+
+### Maintenance
+
+* **ramp-rails:** HOO-678 enforce ramp rails matrix codegen drift ([#503](https://github.com/solana-foundation/solana-developer-platform/pull/503)) ([570e99f](https://github.com/solana-foundation/solana-developer-platform/commit/570e99ff0c17b340ce06062fb29a9fba29f822fb))
+* **kora:** GCS state backend + optional WIF creation ([#483](https://github.com/solana-foundation/solana-developer-platform/pull/483)) ([549bb38](https://github.com/solana-foundation/solana-developer-platform/commit/549bb38bcc0fd01a8f36df7131782e5d41dabb69))
+
+### Other Changes
+
+* revert erroneous commit ([#493](https://github.com/solana-foundation/solana-developer-platform/pull/493)) ([1d22deb](https://github.com/solana-foundation/solana-developer-platform/commit/1d22debe0b8ead1b331031f4b1a32cbffea1edb3))
+
 ## [0.31.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.30.0...v0.31.0) (2026-06-18)
 
 ### Features
