@@ -24,6 +24,11 @@ on:
         options: [both, devnet, mainnet]
         default: both
         required: true
+      image_sha:
+        description: "Immutable kora image tag (git SHA) to deploy/roll back to; blank = use .github/kora-image-tag"
+        type: string
+        default: ""
+        required: false
 
 permissions:
   contents: read
@@ -71,8 +76,11 @@ jobs:
         id: tag
         run: |
           set -euo pipefail
-          TAG="$(tr -d '[:space:]' < .github/kora-image-tag)"
-          [ -n "$TAG" ] || { echo "::error::.github/kora-image-tag is empty" >&2; exit 1; }
+          # workflow_dispatch image_sha overrides the pinned file (manual deploy / rollback to any prior SHA)
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.image_sha || '' }}"
+          [ -n "$TAG" ] || TAG="$(tr -d '[:space:]' < .github/kora-image-tag)"
+          [ -n "$TAG" ] || { echo "::error::no image tag (input or .github/kora-image-tag)" >&2; exit 1; }
+          case "$TAG" in latest|edge|beta) echo "::error::mutable tag '$TAG' not allowed — pin an immutable :<git-sha>" >&2; exit 1 ;; esac
           echo "kora_tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Install Doppler CLI
