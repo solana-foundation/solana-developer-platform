@@ -436,6 +436,10 @@ export function WalletPolicyStartingProfileFlow({
         description: "The selected restrictions are now active.",
         position: "bottom-right",
       });
+
+      if (!hasLivePolicy) {
+        router.replace(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`);
+      }
     } catch (error) {
       toast.error("Activation failed.", {
         id: toastId,
