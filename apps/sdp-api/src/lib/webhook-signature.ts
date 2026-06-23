@@ -30,7 +30,7 @@ function decodeSignature(signature: string, encoding: "base64" | "hex"): Uint8Ar
   return Uint8Array.from(Buffer.from(signature, "base64"));
 }
 
-async function verifyHmacSha256(
+export async function verifyHmacSha256(
   secret: string,
   signedPayload: string,
   signatureBytes: Uint8Array
