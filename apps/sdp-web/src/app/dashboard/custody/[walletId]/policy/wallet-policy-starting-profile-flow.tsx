@@ -486,7 +486,7 @@ export function WalletPolicyStartingProfileFlow({
       <div className="mt-6 min-h-0 flex-1 overflow-y-auto px-1 py-1">
         {!isLoaded ? <LoadingState /> : null}
         {isLoaded && currentStep.id === "baseline" ? (
-          <BaselineStep policy={currentPolicy} />
+          <BaselineStep />
         ) : null}
         {isLoaded && currentStep.id === "intent" ? (
           <IntentStep selectedCategories={selectedCategories} onToggle={toggleCategory} />
@@ -626,11 +626,7 @@ function LoadingState() {
   );
 }
 
-function BaselineStep({
-  policy,
-}: {
-  policy: PaymentWalletPolicy;
-}) {
+function BaselineStep() {
   return (
     <div className="space-y-8">
       <div className="space-y-6">
@@ -644,22 +640,19 @@ function BaselineStep({
           </p>
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-3">
           <p className="text-xs font-medium tracking-[0.14em] text-text-extra-low uppercase">
-            Current controls
+            What wallet policies do
           </p>
-          <div className="divide-y divide-border-light">
-            <PolicySummaryRow
-              label="Destinations"
-              value={
-                policy.destinationAllowlist.length
-                  ? `${policy.destinationAllowlist.length} allowed`
-                  : "Open"
-              }
-            />
-            <PolicySummaryRow label="Per transfer" value={policy.maxTransferAmount ?? "No cap"} />
-            <PolicySummaryRow label="Daily" value={policy.maxDailyAmount ?? "No cap"} />
-          </div>
+          <p className="text-sm leading-6 text-text-medium">
+            Wallet policies are guardrails for how this wallet can be used. They can limit where
+            funds go, cap transfer amounts, narrow operation types, or require review for sensitive
+            actions.
+          </p>
+          <p className="text-sm leading-6 text-text-medium">
+            Start with the controls that match the wallet's job. A treasury wallet might need
+            destination and transfer limits; an operations wallet might need approvals first.
+          </p>
         </div>
       </div>
     </div>
@@ -944,17 +937,6 @@ function ReviewCategory({
         )}
       >
         {category.availability === "live" ? "Activation" : "Draft"}
-      </span>
-    </div>
-  );
-}
-
-function PolicySummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-3 text-sm">
-      <span className="text-text-low">{label}</span>
-      <span className="truncate font-medium text-text-extra-high" title={value}>
-        {value}
       </span>
     </div>
   );
