@@ -4,7 +4,7 @@ import type {
   CustodyWalletTokenBalance,
   PaymentWalletPolicy,
 } from "@sdp/types";
-import { ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
@@ -25,7 +25,6 @@ import { WalletCategoryBadge } from "@/app/dashboard/custody/wallet-category-bad
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
@@ -375,38 +374,30 @@ function WalletControlsPanel({
   return (
     <section className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
       <div className="flex flex-col gap-5 p-6 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex min-w-0 gap-4">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[rgba(33,99,182,0.12)] text-[color:var(--sdp-color-info-text)]">
-            <ShieldCheck className="size-5" />
+        <div className="min-w-0 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-2xl font-medium text-[#1c1c1d]">Wallet controls</h3>
           </div>
-          <div className="min-w-0 space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-2xl font-medium text-[#1c1c1d]">Wallet controls</h3>
-              <Badge variant={hasRestrictions ? "success" : "default"}>
-                {hasRestrictions ? "Active" : "Default allow"}
-              </Badge>
+          <p className="max-w-2xl text-sm leading-6 text-[rgba(28,28,29,0.62)]">
+            {hasRestrictions
+              ? "This wallet has outbound payment restrictions active."
+              : "This wallet starts from default allow. Add restrictions only where control is needed."}
+          </p>
+          {policyError ? (
+            <p className="text-sm text-status-error-text">{policyError}</p>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-3">
+              <WalletControlMetric
+                label="Destinations"
+                value={destinationCount > 0 ? String(destinationCount) : "Open"}
+              />
+              <WalletControlMetric
+                label="Per transfer"
+                value={policy?.maxTransferAmount ?? "No cap"}
+              />
+              <WalletControlMetric label="Daily" value={policy?.maxDailyAmount ?? "No cap"} />
             </div>
-            <p className="max-w-2xl text-sm leading-6 text-[rgba(28,28,29,0.62)]">
-              {hasRestrictions
-                ? "This wallet has outbound payment restrictions active."
-                : "This wallet starts from default allow. Add restrictions only where control is needed."}
-            </p>
-            {policyError ? (
-              <p className="text-sm text-status-error-text">{policyError}</p>
-            ) : (
-              <div className="grid gap-2 sm:grid-cols-3">
-                <WalletControlMetric
-                  label="Destinations"
-                  value={destinationCount > 0 ? String(destinationCount) : "Open"}
-                />
-                <WalletControlMetric
-                  label="Per transfer"
-                  value={policy?.maxTransferAmount ?? "No cap"}
-                />
-                <WalletControlMetric label="Daily" value={policy?.maxDailyAmount ?? "No cap"} />
-              </div>
-            )}
-          </div>
+          )}
         </div>
         <Button
           asChild
