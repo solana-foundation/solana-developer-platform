@@ -63,13 +63,13 @@ const FLOW_STEPS = [
     id: "baseline",
     label: "Baseline",
     title: "Default allow",
-    description: "Start open, then add only the controls this wallet needs.",
+    description: "Start open, then choose a few controls that match how this wallet is used.",
   },
   {
     id: "intent",
     label: "Intent",
     title: "Restriction intent",
-    description: "Choose common policy goals before provider-specific setup.",
+    description: "Pick the policy areas that matter most. Two or three is usually enough.",
   },
   {
     id: "details",
@@ -94,28 +94,28 @@ const RESTRICTION_CATEGORIES = [
   {
     id: "destinations",
     title: "Allowed destinations",
-    description: "Limit outbound transfers to reviewed Solana addresses.",
+    description: "Use when this wallet should only pay known addresses.",
     availability: "live",
     icon: MapPin,
   },
   {
     id: "limits",
     title: "Transfer limits",
-    description: "Set per-transfer or daily caps before funds leave the wallet.",
+    description: "Use when this wallet needs spend caps or daily outflow limits.",
     availability: "live",
     icon: CircleDollarSign,
   },
   {
     id: "operations",
     title: "Operation types",
-    description: "Narrow signing, program, issuance, or provider-admin actions.",
+    description: "Use when this wallet should only perform certain actions.",
     availability: "next",
     icon: SlidersHorizontal,
   },
   {
     id: "approvals",
     title: "Approval review",
-    description: "Route sensitive wallet operations through a human review path.",
+    description: "Use when sensitive actions should require human review.",
     availability: "next",
     icon: Users,
   },
@@ -692,20 +692,24 @@ function BaselineStep({
   onResumeDraft: () => void;
 }) {
   return (
-    <div className="space-y-5">
-      <div className="rounded-lg border border-border-light bg-[rgba(28,28,29,0.03)] p-5">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div className="max-w-2xl">
-            <ProfileStateBadge state={state} />
-            <h2 className="mt-4 text-xl font-medium text-text-extra-high">
-              Default allow stays the baseline.
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-text-medium">
-              A wallet can move funds unless a restriction is activated. This flow starts with the
-              open baseline, adds only the controls you choose, and keeps drafts inactive.
-            </p>
-          </div>
-          <div className="grid min-w-[220px] gap-2 rounded-lg border border-border-light bg-white p-3">
+    <div className="space-y-8">
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <ProfileStateBadge state={state} />
+          <h2 className="text-lg font-medium text-text-extra-high">
+            Default allow stays the baseline.
+          </h2>
+          <p className="text-sm leading-6 text-text-medium">
+            A wallet can move funds unless a restriction is activated. Start with the open baseline,
+            then choose the few controls that reduce real risk for this wallet.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium tracking-[0.14em] text-text-extra-low uppercase">
+            Current controls
+          </p>
+          <div className="divide-y divide-border-light">
             <PolicySummaryRow
               label="Destinations"
               value={
@@ -1024,7 +1028,7 @@ function ReviewCategory({
 
 function PolicySummaryRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 text-sm">
+    <div className="flex items-center justify-between gap-3 py-3 text-sm">
       <span className="text-text-low">{label}</span>
       <span className="truncate font-medium text-text-extra-high" title={value}>
         {value}
