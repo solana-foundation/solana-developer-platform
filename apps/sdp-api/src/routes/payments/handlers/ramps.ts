@@ -44,6 +44,11 @@ import { readyCounterparty } from "@/lib/ramps/requirements";
 import type { RampRuntimeContext } from "@/lib/ramps/types";
 import { success } from "@/lib/response";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
+import {
+  enforceWalletOperationPolicy,
+  recordLegacyWalletPolicyDenial,
+  walletOperationActorFromAuth,
+} from "@/services/policy-enforcement.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   type AppContext,
@@ -126,6 +131,12 @@ export async function assertRampProviderAvailable(
 type RampQuoteDirection = "onramp" | "offramp";
 type ScopedRampWallet = ResolvedScope["wallets"][number];
 
+type RampPolicyOperationType =
+  | "ramp_onramp_quote"
+  | "ramp_offramp_quote"
+  | "ramp_onramp_execute"
+  | "ramp_offramp_execute";
+
 interface PersistRampQuoteTransferInput {
   scope: ResolvedScope;
   projectId: string;
@@ -157,6 +168,41 @@ function requireRampTransferWallet(
     throw badRequest(`${fieldName} must reference an SDP wallet.`);
   }
   return wallet;
+}
+
+async function enforceRampWalletOperationPolicy(
+  c: AppContext,
+  input: {
+    scope: ResolvedScope;
+    wallet: ScopedRampWallet;
+    operationType: RampPolicyOperationType;
+    provider: RampProviderId;
+    counterpartyId: string;
+    asset: string;
+    amount?: string | null;
+    destination?: string | null;
+    rawPayload?: Record<string, unknown>;
+  }
+) {
+  return enforceWalletOperationPolicy(c.env, {
+    organizationId: input.scope.auth.organizationId,
+    projectId: input.scope.auth.projectId,
+    custodyWalletId: input.wallet.id,
+    walletId: input.wallet.walletId,
+    apiKeyId: input.scope.auth.apiKeyId,
+    actor: walletOperationActorFromAuth(input.scope.auth),
+    operationFamily: "ramp",
+    operationType: input.operationType,
+    asset: input.asset,
+    amount: input.amount ?? null,
+    destination: input.destination ?? null,
+    providerExtensions: { provider: input.provider },
+    rawPayload: {
+      provider: input.provider,
+      counterpartyId: input.counterpartyId,
+      ...(input.rawPayload ?? {}),
+    },
+  });
 }
 
 function rampQuoteTransferStatus(quote: PaymentRampQuote): PaymentTransferStatus {
@@ -230,6 +276,10 @@ async function executeOnrampWithProvider(
     scope.auth,
     ["payments:write"]
   );
+  const destinationWallet = scope.wallets.find(
+    (wallet) =>
+      wallet.walletId === input.destinationWallet || wallet.publicKey === destinationWalletAddress
+  );
 
   const projectId = requireProjectId(c);
   const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
@@ -238,6 +288,24 @@ async function executeOnrampWithProvider(
     projectId,
   });
   if (!counterparty) throw notFound("Counterparty");
+
+  if (destinationWallet) {
+    await enforceRampWalletOperationPolicy(c, {
+      scope,
+      wallet: destinationWallet,
+      operationType: "ramp_onramp_execute",
+      provider: input.provider,
+      counterpartyId: input.counterpartyId,
+      asset: input.cryptoToken,
+      amount: input.fiatAmount ?? null,
+      destination: destinationWalletAddress,
+      rawPayload: {
+        fiatCurrency: input.fiatCurrency ?? null,
+        fiatAmount: input.fiatAmount ?? null,
+        cryptoToken: input.cryptoToken,
+      },
+    });
+  }
 
   switch (input.provider) {
     case "moonpay":
@@ -362,21 +430,12 @@ async function executeOfframpWithProvider(
   const sourceWallet = scope.wallets.find(
     (wallet) => wallet.walletId === input.sourceWallet || wallet.publicKey === input.sourceWallet
   );
-  if (sourceWallet) {
-    await assertWalletPolicyAllowsTransfer(c, {
-      organizationId: scope.auth.organizationId,
-      projectId: scope.auth.projectId,
-      wallet: sourceWallet,
-      enforceDestinationAllowlist: false,
-      token: input.cryptoToken,
-      amount: input.cryptoAmount,
-    });
-  }
 
-  // Lightspark off-ramp source is a Grid account id passed through as-is; other
-  // providers draw from an SDP wallet whose address we resolve here.
+  // Lightspark off-ramp source may be an external Grid account id. When it is
+  // one of our SDP wallets, resolve it normally so permissions and policy checks
+  // apply to the wallet address used by the provider.
   const sourceWalletAddress =
-    input.provider === "lightspark"
+    input.provider === "lightspark" && !sourceWallet
       ? input.sourceWallet
       : resolveWalletAddress(scope.wallets, input.sourceWallet, "sourceWallet", scope.auth, [
           "payments:write",
@@ -389,6 +448,36 @@ async function executeOfframpWithProvider(
     projectId,
   });
   if (!counterparty) throw notFound("Counterparty");
+
+  if (sourceWallet) {
+    const enforcement = await enforceRampWalletOperationPolicy(c, {
+      scope,
+      wallet: sourceWallet,
+      operationType: "ramp_offramp_execute",
+      provider: input.provider,
+      counterpartyId: input.counterpartyId,
+      asset: input.cryptoToken,
+      amount: input.cryptoAmount,
+      rawPayload: {
+        fiatCurrency: input.fiatCurrency ?? null,
+        cryptoToken: input.cryptoToken,
+        cryptoAmount: input.cryptoAmount,
+      },
+    });
+    try {
+      await assertWalletPolicyAllowsTransfer(c, {
+        organizationId: scope.auth.organizationId,
+        projectId: scope.auth.projectId,
+        wallet: sourceWallet,
+        enforceDestinationAllowlist: false,
+        token: input.cryptoToken,
+        amount: input.cryptoAmount,
+      });
+    } catch (error) {
+      await recordLegacyWalletPolicyDenial(c.env, enforcement, error);
+      throw error;
+    }
+  }
 
   switch (input.provider) {
     case "moonpay":
@@ -559,6 +648,21 @@ export async function createOnrampQuote(c: AppContext) {
     destinationWalletAddress,
     "destinationWallet"
   );
+  await enforceRampWalletOperationPolicy(c, {
+    scope,
+    wallet: destinationWallet,
+    operationType: "ramp_onramp_quote",
+    provider: input.provider,
+    counterpartyId: input.counterpartyId,
+    asset: input.cryptoToken,
+    amount: input.fiatAmount,
+    destination: destinationWalletAddress,
+    rawPayload: {
+      fiatCurrency: input.fiatCurrency,
+      fiatAmount: input.fiatAmount,
+      cryptoToken: input.cryptoToken,
+    },
+  });
 
   let quote: PaymentRampQuote;
   switch (input.provider) {
@@ -664,6 +768,20 @@ export async function createOfframpQuote(c: AppContext) {
     sourceWalletAddress,
     "sourceWallet"
   );
+  await enforceRampWalletOperationPolicy(c, {
+    scope,
+    wallet: sourceWallet,
+    operationType: "ramp_offramp_quote",
+    provider: input.provider,
+    counterpartyId: input.counterpartyId,
+    asset: input.cryptoToken,
+    amount: input.cryptoAmount,
+    rawPayload: {
+      fiatCurrency: input.fiatCurrency,
+      cryptoToken: input.cryptoToken,
+      cryptoAmount: input.cryptoAmount,
+    },
+  });
 
   let quote: PaymentRampQuote;
   switch (input.provider) {

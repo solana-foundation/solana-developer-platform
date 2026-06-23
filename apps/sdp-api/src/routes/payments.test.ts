@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey, PolicyDefaultAction, PolicyRule } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import {
   address,
@@ -20,6 +20,7 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
@@ -337,6 +338,40 @@ async function seedWalletPolicy(params: {
         now
       ),
   ]);
+}
+
+async function seedWalletControlProfile(params: {
+  rules: PolicyRule[];
+  defaultAction?: PolicyDefaultAction;
+}): Promise<void> {
+  const repo = createPostgresPolicyRepository(getDb(env));
+  const profile = await repo.createWalletControlProfile({
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    custodyWalletId: TEST_CUSTODY_WALLET_ID,
+    name: "Payment controls",
+    createdBy: TEST_USER.id,
+  });
+
+  if (!profile) {
+    throw new Error("Failed to create wallet control profile");
+  }
+
+  const revision = await repo.createWalletControlProfileRevision({
+    profileId: profile.id,
+    rules: params.rules,
+    defaultAction: params.defaultAction,
+    createdBy: TEST_USER.id,
+  });
+
+  if (!revision) {
+    throw new Error("Failed to create wallet control profile revision");
+  }
+
+  await repo.activateWalletControlProfileRevision({
+    profileId: profile.id,
+    revisionId: revision.id,
+  });
 }
 
 async function seedCounterparty(params?: {
@@ -2764,6 +2799,29 @@ describe("Payments routes", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("FORBIDDEN");
+
+    const operation = await getDb(env)
+      .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
+      .first<{ status: string; operation_family: string; operation_type: string }>();
+    expect(operation).toMatchObject({
+      status: "failed",
+      operation_family: "ramp",
+      operation_type: "ramp_offramp_execute",
+    });
+
+    const evaluations = await getDb(env)
+      .prepare("SELECT decision, reason_code FROM policy_evaluations")
+      .all<{ decision: string; reason_code: string }>();
+    expect(evaluations.results).toHaveLength(2);
+    expect(evaluations.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ decision: "allow" }),
+        expect.objectContaining({
+          decision: "deny",
+          reason_code: "legacy_wallet_policy_denied",
+        }),
+      ])
+    );
   });
 
   it("does not apply outbound wallet policy checks to MoonPay on-ramp", async () => {
@@ -3911,6 +3969,29 @@ describe("Payments routes", () => {
       id: string;
     }>();
     expect(transfers.results).toHaveLength(0);
+
+    const operation = await getDb(env)
+      .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
+      .first<{ status: string; operation_family: string; operation_type: string }>();
+    expect(operation).toMatchObject({
+      status: "failed",
+      operation_family: "payment",
+      operation_type: "payment_transfer_prepare",
+    });
+
+    const evaluations = await getDb(env)
+      .prepare("SELECT decision, reason_code FROM policy_evaluations")
+      .all<{ decision: string; reason_code: string }>();
+    expect(evaluations.results).toHaveLength(2);
+    expect(evaluations.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ decision: "allow" }),
+        expect.objectContaining({
+          decision: "deny",
+          reason_code: "legacy_wallet_policy_denied",
+        }),
+      ])
+    );
   });
 
   it("blocks prepare transfer when amount exceeds maxTransferAmount", async () => {
@@ -4697,6 +4778,29 @@ describe("Payments routes", () => {
       }>();
     expect(transfers.results).toHaveLength(1);
     expect(transfers.results[0]?.id).toBe("xfr_existing_daily_limit");
+
+    const operation = await getDb(env)
+      .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
+      .first<{ status: string; operation_family: string; operation_type: string }>();
+    expect(operation).toMatchObject({
+      status: "failed",
+      operation_family: "payment",
+      operation_type: "payment_transfer_execute",
+    });
+
+    const evaluations = await getDb(env)
+      .prepare("SELECT decision, reason_code FROM policy_evaluations")
+      .all<{ decision: string; reason_code: string }>();
+    expect(evaluations.results).toHaveLength(2);
+    expect(evaluations.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ decision: "allow" }),
+        expect.objectContaining({
+          decision: "deny",
+          reason_code: "legacy_wallet_policy_denied",
+        }),
+      ])
+    );
   });
 
   it("blocks create transfer with zero amount before creating a transfer record", async () => {
@@ -4766,6 +4870,68 @@ describe("Payments routes", () => {
   }
 
   describe("execute transfer — happy path", () => {
+    it("blocks a transfer denied by an active wallet control profile before signing", async () => {
+      await seedWalletControlProfile({
+        rules: [{ id: "small-transfer-only", kind: "amount", max: "0.5" }],
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as {
+        error: {
+          code: string;
+          details: {
+            walletOperationId: string;
+            policyEvaluationId: string;
+            decision: string;
+          };
+        };
+      };
+      expect(body.error.code).toBe("FORBIDDEN");
+      expect(body.error.details).toMatchObject({
+        decision: "deny",
+      });
+      expect(body.error.details.walletOperationId).toMatch(/^wop_/);
+      expect(body.error.details.policyEvaluationId).toMatch(/^peval_/);
+      expect(createOrgSignerMock).not.toHaveBeenCalled();
+
+      const operation = await getDb(env)
+        .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
+        .first<{ status: string; operation_family: string; operation_type: string }>();
+      expect(operation).toMatchObject({
+        status: "failed",
+        operation_family: "payment",
+        operation_type: "payment_transfer_execute",
+      });
+
+      const evaluation = await getDb(env)
+        .prepare("SELECT decision FROM policy_evaluations")
+        .first<{ decision: string }>();
+      expect(evaluation?.decision).toBe("deny");
+
+      const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
+        id: string;
+      }>();
+      expect(transfers.results).toHaveLength(0);
+    });
+
     it("executes a SOL transfer and returns a confirmed transfer record", async () => {
       const res = await app.request(
         "/v1/payments/transfers",

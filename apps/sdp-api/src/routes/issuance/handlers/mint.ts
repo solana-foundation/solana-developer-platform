@@ -19,6 +19,7 @@ import {
   getOnChainAllowlistMutationForMint,
 } from "./access-control";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { enforceIssuanceWalletOperationPolicy } from "./policy";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -359,6 +360,21 @@ export const executeMint = async (c: AppContext) => {
   );
   const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
   const destination = assertValidAddress(parsed.data.mint.destination, "destination");
+
+  await enforceIssuanceWalletOperationPolicy(c, {
+    auth,
+    token,
+    walletId: signingWalletId,
+    operationType: "issuance_mint_execute",
+    amount: parsed.data.mint.amount,
+    destination: parsed.data.mint.destination,
+    rawPayload: {
+      action: "mint",
+      destination: parsed.data.mint.destination,
+      amount: parsed.data.mint.amount,
+      memo: parsed.data.mint.memo ?? null,
+    },
+  });
 
   // Resolve signer + sync the destination on-chain BEFORE createTransaction.
   // If sync (or its inner revoke check) throws inside the try block below,
