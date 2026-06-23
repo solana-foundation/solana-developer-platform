@@ -171,6 +171,12 @@ function nextCollectionDueAt(dueAt: string, periodHours: number): string {
   return new Date(new Date(dueAt).getTime() + periodHours * 60 * 60 * 1000).toISOString();
 }
 
+function hasAdvancedPastDueAt(nextDueAt: string | null, dueAt: string): boolean {
+  const nextDueTime = nextDueAt ? new Date(nextDueAt).getTime() : NaN;
+  const dueTime = new Date(dueAt).getTime();
+  return Number.isFinite(nextDueTime) && Number.isFinite(dueTime) && nextDueTime > dueTime;
+}
+
 function collectionRetryMetadata(error: unknown): Record<string, unknown> {
   return {
     error: activationErrorMessage(error),
@@ -255,12 +261,10 @@ async function finalizeRecurringPaymentCollection(input: {
   if (
     !finalizedRecurringPayment ||
     (!updatedRecurringPayment &&
-      finalizedRecurringPayment.status === "active" &&
-      finalizedRecurringPayment.next_collection_due_at === dueAt) ||
+      !hasAdvancedPastDueAt(finalizedRecurringPayment.next_collection_due_at, dueAt)) ||
     !finalizedSubscription ||
     (!updatedSubscription &&
-      finalizedSubscription.status === "active" &&
-      finalizedSubscription.next_collection_due_at === dueAt) ||
+      !hasAdvancedPastDueAt(finalizedSubscription.next_collection_due_at, dueAt)) ||
     !finalizedAttempt ||
     !finalizedTransfer
   ) {

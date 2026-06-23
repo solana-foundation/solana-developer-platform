@@ -374,7 +374,7 @@ export function createPostgresPaymentSubscriptionsRepository(
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND (?::boolean = false OR next_collection_due_at = ?)
+              AND (?::boolean = false OR next_collection_due_at IS NOT DISTINCT FROM ?)
           RETURNING *`
         )
         .bind(
