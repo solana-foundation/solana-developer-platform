@@ -348,7 +348,7 @@ async function recoverRecurringPaymentCollection(input: {
     attempt: existing,
     transfer,
     signature: existing.signature as Signature,
-    destinationTokenAccount: input.recurringPayment.destination_token_account,
+    destinationTokenAccount: input.recurringPayment.destination_token_account ?? undefined,
     confirmSubmittedSignature: false,
   });
 }
