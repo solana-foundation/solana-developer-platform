@@ -876,7 +876,7 @@ function DetailsStep({
   );
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border-light">
+    <div className="overflow-hidden rounded-lg">
       {selected.map((category) => {
         const expanded = expandedRuleSet.has(category.id);
 
