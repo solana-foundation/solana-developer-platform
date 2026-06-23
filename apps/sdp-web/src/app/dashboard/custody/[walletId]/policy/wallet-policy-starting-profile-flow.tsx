@@ -1,12 +1,7 @@
 "use client";
 
 import type { PaymentWalletPolicy } from "@sdp/types";
-import {
-  ArrowLeft,
-  ArrowRight,
-  ChevronDown,
-  Check,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -162,7 +157,10 @@ function parseCsvCells(line: string): string[] {
 }
 
 function normalizeCsvCell(value: string): string {
-  return value.trim().replace(/^['"]|['"]$/g, "").trim();
+  return value
+    .trim()
+    .replace(/^['"]|['"]$/g, "")
+    .trim();
 }
 
 function looksLikeAddressInput(value: string): boolean {
@@ -215,12 +213,80 @@ function isStoredDraft(value: unknown): value is StoredPolicyDraft {
   );
 }
 
+function readStoredDraft(walletId: string): StoredPolicyDraft | null {
+  try {
+    const raw = window.localStorage.getItem(draftStorageKey(walletId));
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isStoredDraft(parsed)) return null;
+
+    const draftCategories = filterKnownValues(parsed.categories, RESTRICTION_CATEGORY_IDS);
+    if (parsed.status === "draft" && draftCategories.length === 0) {
+      window.localStorage.removeItem(draftStorageKey(walletId));
+      return null;
+    }
+
+    return {
+      ...parsed,
+      categories: draftCategories,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function toggleValue<TValue extends string>(values: TValue[], value: TValue): TValue[] {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 }
 
 function formatCount(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function getPolicyFlowValidationState({
+  selectedCategories,
+  selectedCategorySet,
+  destinationParse,
+  maxTransferAmount,
+  maxDailyAmount,
+  isSubmitting,
+  policyError,
+}: {
+  selectedCategories: RestrictionCategoryId[];
+  selectedCategorySet: ReadonlySet<RestrictionCategoryId>;
+  destinationParse: ReturnType<typeof parseDestinationText>;
+  maxTransferAmount: string;
+  maxDailyAmount: string;
+  isSubmitting: boolean;
+  policyError: string | null;
+}) {
+  const hasDestinationRule = selectedCategorySet.has("destinations");
+  const hasLimitRule = selectedCategorySet.has("limits");
+  const hasLimitAmount = Boolean(maxTransferAmount.trim() || maxDailyAmount.trim());
+  const canActivateDestinations =
+    !hasDestinationRule ||
+    (destinationParse.addresses.length > 0 && destinationParse.invalid.length === 0);
+  const canActivateLimits =
+    !hasLimitRule ||
+    (hasLimitAmount && isPositiveAmount(maxTransferAmount) && isPositiveAmount(maxDailyAmount));
+  const hasActivatableRestriction =
+    (hasDestinationRule && destinationParse.addresses.length > 0) ||
+    (hasLimitRule && hasLimitAmount);
+  const canSubmit =
+    selectedCategories.length > 0 &&
+    hasActivatableRestriction &&
+    canActivateDestinations &&
+    canActivateLimits &&
+    !isSubmitting &&
+    !policyError;
+
+  return {
+    canActivateDestinations,
+    canActivateLimits,
+    canActivate: canSubmit,
+    canSubmitReview: canSubmit,
+  };
 }
 
 export function WalletPolicyStartingProfileFlow({
@@ -248,40 +314,19 @@ export function WalletPolicyStartingProfileFlow({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(draftStorageKey(wallet.walletId));
-      if (!raw) {
-        setIsLoaded(true);
-        return;
-      }
-
-      const parsed = JSON.parse(raw) as unknown;
-      if (!isStoredDraft(parsed)) {
-        setIsLoaded(true);
-        return;
-      }
-
-      const draftCategories = filterKnownValues(parsed.categories, RESTRICTION_CATEGORY_IDS);
-      if (parsed.status === "draft" && draftCategories.length === 0) {
-        window.localStorage.removeItem(draftStorageKey(wallet.walletId));
-        setIsLoaded(true);
-        return;
-      }
-
-      setSavedDraft(parsed);
-      setLocalStatus(parsed.status);
-      setSelectedCategories(draftCategories);
-      setExpandedRuleIds(draftCategories);
-      setDestinationText(parsed.destinationAllowlist.join("\n"));
-      setMaxTransferAmount(parsed.maxTransferAmount);
-      setMaxDailyAmount(parsed.maxDailyAmount);
-      const draftStepIndex = FLOW_STEPS.findIndex((step) => step.id === parsed.step);
+    const draft = readStoredDraft(wallet.walletId);
+    if (draft) {
+      setSavedDraft(draft);
+      setLocalStatus(draft.status);
+      setSelectedCategories(draft.categories);
+      setExpandedRuleIds(draft.categories);
+      setDestinationText(draft.destinationAllowlist.join("\n"));
+      setMaxTransferAmount(draft.maxTransferAmount);
+      setMaxDailyAmount(draft.maxDailyAmount);
+      const draftStepIndex = FLOW_STEPS.findIndex((step) => step.id === draft.step);
       setStepIndex(Math.max(0, draftStepIndex));
-    } catch {
-      // Ignore malformed local draft data.
-    } finally {
-      setIsLoaded(true);
     }
+    setIsLoaded(true);
   }, [wallet.walletId]);
 
   const currentStep = FLOW_STEPS[stepIndex] ?? FLOW_STEPS[0];
@@ -289,32 +334,16 @@ export function WalletPolicyStartingProfileFlow({
   const expandedRuleSet = useMemo(() => new Set(expandedRuleIds), [expandedRuleIds]);
   const destinationParse = useMemo(() => parseDestinationText(destinationText), [destinationText]);
   const hasLivePolicy = policyHasRestrictions(currentPolicy);
-  const canActivateDestinations =
-    !selectedCategorySet.has("destinations") ||
-    (destinationParse.addresses.length > 0 && destinationParse.invalid.length === 0);
-  const canActivateLimits =
-    !selectedCategorySet.has("limits") ||
-    (Boolean(maxTransferAmount.trim() || maxDailyAmount.trim()) &&
-      isPositiveAmount(maxTransferAmount) &&
-      isPositiveAmount(maxDailyAmount));
-  const hasActivatableRestriction =
-    (selectedCategorySet.has("destinations") && destinationParse.addresses.length > 0) ||
-    (selectedCategorySet.has("limits") &&
-      Boolean(maxTransferAmount.trim() || maxDailyAmount.trim()));
-  const canActivate =
-    selectedCategories.length > 0 &&
-    hasActivatableRestriction &&
-    canActivateDestinations &&
-    canActivateLimits &&
-    !isSubmitting &&
-    !policyError;
-  const canSubmitReview =
-    selectedCategories.length > 0 &&
-    canActivateDestinations &&
-    canActivateLimits &&
-    hasActivatableRestriction &&
-    !isSubmitting &&
-    !policyError;
+  const { canActivateDestinations, canActivateLimits, canActivate, canSubmitReview } =
+    getPolicyFlowValidationState({
+      selectedCategories,
+      selectedCategorySet,
+      destinationParse,
+      maxTransferAmount,
+      maxDailyAmount,
+      isSubmitting,
+      policyError,
+    });
 
   function persistDraft(options: { notify: boolean } = { notify: false }) {
     if (typeof window === "undefined") return;
@@ -822,9 +851,10 @@ function LimitRuleEditor({
   return (
     <div>
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="space-y-2">
+        <label className="space-y-2" htmlFor="wallet-policy-max-transfer-amount">
           <span className="text-sm font-medium text-text-extra-high">Per transfer cap</span>
           <Input
+            id="wallet-policy-max-transfer-amount"
             value={maxTransferAmount}
             onChange={(event) => setMaxTransferAmount(event.target.value)}
             placeholder="1000"
@@ -834,9 +864,10 @@ function LimitRuleEditor({
             <span className="block text-sm text-status-error-text">Enter a positive number.</span>
           ) : null}
         </label>
-        <label className="space-y-2">
+        <label className="space-y-2" htmlFor="wallet-policy-max-daily-amount">
           <span className="text-sm font-medium text-text-extra-high">Daily cap</span>
           <Input
+            id="wallet-policy-max-daily-amount"
             value={maxDailyAmount}
             onChange={(event) => setMaxDailyAmount(event.target.value)}
             placeholder="5000"
@@ -911,9 +942,7 @@ function ReviewStep({
             />
           ))
         ) : (
-          <div className="p-4 text-sm text-text-medium">
-            No restriction category selected.
-          </div>
+          <div className="p-4 text-sm text-text-medium">No restriction category selected.</div>
         )}
       </div>
     </div>

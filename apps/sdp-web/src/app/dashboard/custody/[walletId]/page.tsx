@@ -305,7 +305,6 @@ export default async function WalletDetailPage({
 
       <WalletControlsPanel
         walletId={resolvedWalletId}
-        walletLabel={wallet.label}
         policy={walletPolicyResult.policy}
         policyError={walletPolicyResult.error}
       />
@@ -358,12 +357,10 @@ function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolea
 
 function WalletControlsPanel({
   walletId,
-  walletLabel,
   policy,
   policyError,
 }: {
   walletId: string;
-  walletLabel: string | null;
   policy: PaymentWalletPolicy | null;
   policyError: string | null;
 }) {
