@@ -63,20 +63,6 @@ wait_for_json_rpc() {
   return 1
 }
 
-wait_for_http() {
-  local label="$1"
-  local url="$2"
-  local attempts="${3:-60}"
-  for _ in $(seq 1 "${attempts}"); do
-    if curl -fsS "${url}" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 1
-  done
-  echo "${label} did not become healthy at ${url}." >&2
-  return 1
-}
-
 wait_for_kora() {
   local attempts="${1:-60}"
   for _ in $(seq 1 "${attempts}"); do
@@ -150,11 +136,11 @@ NODE
     fi
     (
       cd "${ROOT_DIR}/packages/sdp-api-integration"
-      KORA_SHIM_HOST="${KORA_SHIM_HOST}" \
-        KORA_SHIM_PORT="${KORA_SHIM_PORT}" \
-        SOLANA_RPC_URL="${SURFPOOL_RPC_URL}" \
-        SIGNER_PRIVATE_KEY="${SIGNER_PRIVATE_KEY}" \
-        pnpm exec node scripts/kora-surfpool-shim.mjs
+      export KORA_SHIM_HOST
+      export KORA_SHIM_PORT
+      export SOLANA_RPC_URL="${SURFPOOL_RPC_URL}"
+      export SIGNER_PRIVATE_KEY
+      exec node scripts/kora-surfpool-shim.mjs
     ) >"${KORA_SHIM_LOG}" 2>&1 &
     echo "$!" >"${KORA_SHIM_PID_FILE}"
     ;;
