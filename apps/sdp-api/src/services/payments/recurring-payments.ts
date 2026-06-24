@@ -23,6 +23,9 @@ import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
+  createPostgresPaymentRecurringPaymentsRepository,
+  createPostgresPaymentSubscriptionsRepository,
+  createPostgresPaymentsRepository,
   type PaymentRecurringPaymentActivationAttemptRow,
   type PaymentRecurringPaymentActivationAttemptStage,
   type PaymentRecurringPaymentRow,
@@ -284,9 +287,7 @@ async function markRecurringPaymentCollectionFailed(input: {
 }
 
 async function finalizeRecurringPaymentCollection(input: {
-  recurringRepo: PaymentRecurringPaymentsRepository;
-  subscriptionsRepo: PaymentSubscriptionsRepository;
-  paymentsRepo: ReturnType<typeof createPaymentsRepository>;
+  env: Env;
   organizationId: string;
   projectId: string;
   recurringPayment: PaymentRecurringPaymentRow;
@@ -303,98 +304,105 @@ async function finalizeRecurringPaymentCollection(input: {
   const finalizedAt = new Date().toISOString();
   const dueAt = input.attempt.due_at;
   const nextDueAt = nextCollectionDueAt(dueAt, input.recurringPayment.period_hours);
-  const updatedTransfer = await input.paymentsRepo.updateTransfer({
-    transferId: input.transfer.id,
-    status: "confirmed",
-    signature: input.signature,
-    error: null,
-    updatedAt: finalizedAt,
-  });
-  const finalizedTransfer =
-    updatedTransfer ??
-    (await input.paymentsRepo.getTransferById({
+
+  return getDb(input.env).transaction(async (tx) => {
+    const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    const paymentsRepo = createPostgresPaymentsRepository(tx);
+
+    const updatedTransfer = await paymentsRepo.updateTransfer({
       transferId: input.transfer.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-    }));
-  const updatedAttempt = await input.subscriptionsRepo.updateCollectionAttempt({
-    attemptId: input.attempt.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    transferId: input.transfer.id,
-    status: "confirmed",
-    signature: input.signature,
-    error: null,
-    metadata: {
-      ...input.attempt.metadata,
-      recurringPaymentId: input.recurringPayment.id,
-      transferId: input.transfer.id,
-    },
-    updatedAt: finalizedAt,
-  });
-  const finalizedAttempt =
-    updatedAttempt ??
-    (await input.subscriptionsRepo.getCollectionAttemptById({
+      status: "confirmed",
+      signature: input.signature,
+      error: null,
+      updatedAt: finalizedAt,
+    });
+    const finalizedTransfer =
+      updatedTransfer ??
+      (await paymentsRepo.getTransferById({
+        transferId: input.transfer.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      }));
+    const updatedAttempt = await subscriptionsRepo.updateCollectionAttempt({
       attemptId: input.attempt.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
-    }));
-  const updatedSubscription = await input.subscriptionsRepo.updateSubscription({
-    subscriptionId: input.subscription.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    currentPeriodStartAt: dueAt,
-    nextCollectionDueAt: nextDueAt,
-    expectedNextCollectionDueAt: dueAt,
-    updatedAt: finalizedAt,
-  });
-  const finalizedSubscription =
-    updatedSubscription ??
-    (await input.subscriptionsRepo.getSubscriptionById({
+      transferId: input.transfer.id,
+      status: "confirmed",
+      signature: input.signature,
+      error: null,
+      metadata: {
+        ...input.attempt.metadata,
+        recurringPaymentId: input.recurringPayment.id,
+        transferId: input.transfer.id,
+      },
+      updatedAt: finalizedAt,
+    });
+    const finalizedAttempt =
+      updatedAttempt ??
+      (await subscriptionsRepo.getCollectionAttemptById({
+        attemptId: input.attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      }));
+    const updatedSubscription = await subscriptionsRepo.updateSubscription({
       subscriptionId: input.subscription.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
-    }));
-  const updatedRecurringPayment = await input.recurringRepo.updateRecurringPaymentCollection({
-    recurringPaymentId: input.recurringPayment.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    currentCollectionDueAt: dueAt,
-    nextCollectionDueAt: nextDueAt,
-    destinationTokenAccount: input.destinationTokenAccount,
-    updatedAt: finalizedAt,
-  });
-  const finalizedRecurringPayment =
-    updatedRecurringPayment ??
-    (await input.recurringRepo.getRecurringPaymentById({
+      currentPeriodStartAt: dueAt,
+      nextCollectionDueAt: nextDueAt,
+      expectedNextCollectionDueAt: dueAt,
+      updatedAt: finalizedAt,
+    });
+    const finalizedSubscription =
+      updatedSubscription ??
+      (await subscriptionsRepo.getSubscriptionById({
+        subscriptionId: input.subscription.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      }));
+    const updatedRecurringPayment = await recurringRepo.updateRecurringPaymentCollection({
       recurringPaymentId: input.recurringPayment.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
-    }));
+      currentCollectionDueAt: dueAt,
+      nextCollectionDueAt: nextDueAt,
+      destinationTokenAccount: input.destinationTokenAccount,
+      updatedAt: finalizedAt,
+    });
+    const finalizedRecurringPayment =
+      updatedRecurringPayment ??
+      (await recurringRepo.getRecurringPaymentById({
+        recurringPaymentId: input.recurringPayment.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      }));
 
-  if (
-    !finalizedRecurringPayment ||
-    (!updatedRecurringPayment &&
-      !hasAdvancedPastDueAt(finalizedRecurringPayment.next_collection_due_at, dueAt)) ||
-    !finalizedSubscription ||
-    (!updatedSubscription &&
-      !hasAdvancedPastDueAt(finalizedSubscription.next_collection_due_at, dueAt)) ||
-    !finalizedAttempt ||
-    finalizedAttempt.status !== "confirmed" ||
-    finalizedAttempt.signature !== input.signature ||
-    finalizedAttempt.transfer_id !== input.transfer.id ||
-    !finalizedTransfer ||
-    finalizedTransfer.status !== "confirmed" ||
-    finalizedTransfer.signature !== input.signature
-  ) {
-    throw new AppError("INTERNAL_ERROR", "Failed to finalize recurring payment collection");
-  }
+    if (
+      !finalizedRecurringPayment ||
+      (!updatedRecurringPayment &&
+        !hasAdvancedPastDueAt(finalizedRecurringPayment.next_collection_due_at, dueAt)) ||
+      !finalizedSubscription ||
+      (!updatedSubscription &&
+        !hasAdvancedPastDueAt(finalizedSubscription.next_collection_due_at, dueAt)) ||
+      !finalizedAttempt ||
+      finalizedAttempt.status !== "confirmed" ||
+      finalizedAttempt.signature !== input.signature ||
+      finalizedAttempt.transfer_id !== input.transfer.id ||
+      !finalizedTransfer ||
+      finalizedTransfer.status !== "confirmed" ||
+      finalizedTransfer.signature !== input.signature
+    ) {
+      throw new AppError("INTERNAL_ERROR", "Failed to finalize recurring payment collection");
+    }
 
-  return {
-    recurringPayment: finalizedRecurringPayment,
-    collectionAttempt: finalizedAttempt,
-    transfer: finalizedTransfer,
-  };
+    return {
+      recurringPayment: finalizedRecurringPayment,
+      collectionAttempt: finalizedAttempt,
+      transfer: finalizedTransfer,
+    };
+  });
 }
 
 async function journalRecurringPaymentCollectionError(input: {
@@ -442,6 +450,22 @@ async function journalRecurringPaymentCollectionError(input: {
         "INTERNAL_ERROR",
         "Failed to journal submitted recurring payment collection signature"
       );
+    }
+    if (input.transfer && attemptJournaled !== transferJournaled) {
+      console.error("Partially journaled submitted recurring payment collection signature", {
+        attemptId: input.attempt.id,
+        attemptJournaled,
+        attemptJournalError:
+          attemptResult.status === "rejected" ? activationErrorMessage(attemptResult.reason) : null,
+        recurringPaymentId: input.recurringPaymentId,
+        submittedSignature: input.submittedSignature,
+        transferId: input.transfer.id,
+        transferJournaled,
+        transferJournalError:
+          transferResult.status === "rejected"
+            ? activationErrorMessage(transferResult.reason)
+            : null,
+      });
     }
     return;
   }
@@ -581,9 +605,7 @@ async function recoverRecurringPaymentCollection(input: {
     }));
 
   return finalizeRecurringPaymentCollection({
-    recurringRepo: input.recurringRepo,
-    subscriptionsRepo: input.subscriptionsRepo,
-    paymentsRepo: input.paymentsRepo,
+    env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
     recurringPayment: currentRecurringPayment,
@@ -1702,9 +1724,7 @@ export async function collectRecurringPayment(input: {
     );
 
     return finalizeRecurringPaymentCollection({
-      recurringRepo,
-      subscriptionsRepo,
-      paymentsRepo,
+      env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
       recurringPayment: input.recurringPayment,

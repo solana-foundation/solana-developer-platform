@@ -1,4 +1,4 @@
-import type { AppDb } from "@/db";
+import type { DatabaseExecutor } from "@/db";
 import type {
   CreatePaymentTransferInput,
   ListTransfersByStatusInput,
@@ -88,7 +88,7 @@ function buildTransferScopeWhere(params: {
 }
 
 async function getTransferByIdInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
   transferId: string
 ): Promise<PaymentTransferRow | null> {
   const row = await db
@@ -100,7 +100,7 @@ async function getTransferByIdInternal(
 }
 
 async function getWalletPoliciesInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
   custodyWalletId: string
 ): Promise<PaymentWalletPolicyRow[]> {
   const rows = await db
@@ -116,7 +116,7 @@ async function getWalletPoliciesInternal(
   return rows.results.map(mapPolicyRow);
 }
 
-export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository {
+export function createPostgresPaymentsRepository(db: DatabaseExecutor): PaymentsRepository {
   return {
     async createTransfer(input: CreatePaymentTransferInput) {
       await db

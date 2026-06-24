@@ -1,4 +1,4 @@
-import type { AppDb } from "@/db";
+import type { DatabaseExecutor } from "@/db";
 import type {
   CreatePaymentSubscriptionCollectionAttemptInput,
   CreatePaymentSubscriptionInput,
@@ -87,7 +87,7 @@ function mapAttemptRow(row: Record<string, unknown>): PaymentSubscriptionCollect
 }
 
 async function getPlanByIdInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
   params: { planId: string; organizationId: string; projectId: string }
 ): Promise<PaymentSubscriptionPlanRow | null> {
   const row = await db
@@ -105,7 +105,7 @@ async function getPlanByIdInternal(
 }
 
 async function getSubscriptionByIdInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
   params: { subscriptionId: string; organizationId: string; projectId: string }
 ): Promise<PaymentSubscriptionRow | null> {
   const row = await db
@@ -123,7 +123,7 @@ async function getSubscriptionByIdInternal(
 }
 
 async function getAttemptByIdInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
   params: { attemptId: string; organizationId?: string; projectId?: string }
 ): Promise<PaymentSubscriptionCollectionAttemptRow | null> {
   const clauses = ["id = ?"];
@@ -149,7 +149,7 @@ async function getAttemptByIdInternal(
 }
 
 export function createPostgresPaymentSubscriptionsRepository(
-  db: AppDb
+  db: DatabaseExecutor
 ): PaymentSubscriptionsRepository {
   return {
     async createPlan(input: CreatePaymentSubscriptionPlanInput) {
