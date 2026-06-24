@@ -431,6 +431,32 @@ async function journalRecurringPaymentCollectionError(input: {
   await markRecurringPaymentCollectionFailed(input);
 }
 
+async function safeJournalRecurringPaymentCollectionError(input: {
+  env: Env;
+  subscriptionsRepo: PaymentSubscriptionsRepository;
+  paymentsRepo: ReturnType<typeof createPaymentsRepository>;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  attempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow | null;
+  submittedSignature: Signature | null;
+  error: unknown;
+}): Promise<void> {
+  try {
+    await journalRecurringPaymentCollectionError(input);
+  } catch (journalError) {
+    console.error("Failed to journal recurring payment collection after failure", {
+      attemptId: input.attempt.id,
+      error: activationErrorMessage(journalError),
+      hasSubmittedSignature: input.submittedSignature !== null,
+      originalError: activationErrorMessage(input.error),
+      recurringPaymentId: input.recurringPaymentId,
+      transferId: input.transfer?.id ?? null,
+    });
+  }
+}
+
 async function recoverRecurringPaymentCollection(input: {
   env: Env;
   recurringRepo: PaymentRecurringPaymentsRepository;
@@ -1664,7 +1690,7 @@ export async function collectRecurringPayment(input: {
     });
   } catch (error) {
     if (attempt) {
-      await journalRecurringPaymentCollectionError({
+      await safeJournalRecurringPaymentCollectionError({
         env: input.env,
         subscriptionsRepo,
         paymentsRepo,
