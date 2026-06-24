@@ -614,10 +614,16 @@ export type MoonpayPaymentRampExecution = BasePaymentRampExecution & {
   paymentInstructions?: never;
 };
 
+export type CoinbasePaymentRampExecution = BasePaymentRampExecution & {
+  provider: "coinbase";
+  paymentInstructions?: never;
+};
+
 export type PaymentRampExecution =
   | LightsparkPaymentRampExecution
   | BvnkPaymentRampExecution
-  | MoonpayPaymentRampExecution;
+  | MoonpayPaymentRampExecution
+  | CoinbasePaymentRampExecution;
 
 interface BasePaymentRampQuote {
   id: string;

@@ -111,7 +111,13 @@ const ENTERPRISE_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
     "trm",
     "chainalysis",
   ]),
-  ramps: createBooleanRecord(RAMP_PROVIDERS, ["moonpay", "lightspark", "bvnk", "moneygram", "coinbase"]),
+  ramps: createBooleanRecord(RAMP_PROVIDERS, [
+    "moonpay",
+    "lightspark",
+    "bvnk",
+    "moneygram",
+    "coinbase",
+  ]),
 };
 
 export function resolveOrganizationProviderEntitlements(input: {

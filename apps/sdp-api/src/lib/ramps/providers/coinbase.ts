@@ -1,4 +1,10 @@
-import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/types";
+import type {
+  CoinbasePaymentRampExecution,
+  Counterparty,
+  PaymentRampEstimate,
+  PaymentRampQuote,
+} from "@sdp/types";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { badRequest, providerNotConfigured } from "@/lib/errors";
 import { type ProviderRequestInit, providerFetchJson } from "../fetch";
@@ -42,6 +48,13 @@ function readCoinbaseConfig(env: Record<string, string | undefined>): CoinbaseCo
     apiKeySecret,
     apiBaseUrl: env.CDP_ONRAMP_API_BASE_URL?.trim() || CDP_ONRAMP_API_BASE_URL,
   };
+}
+
+export interface CoinbaseExecuteOnrampInput {
+  destinationWalletAddress: string;
+  cryptoToken: string;
+  fiatCurrency?: RampFiatCurrency;
+  fiatAmount: string;
 }
 
 export class CoinbaseRampClient implements RampProvider {
@@ -118,6 +131,13 @@ export class CoinbaseRampClient implements RampProvider {
     _input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote> {
     throw new Error("createOnrampQuote not yet implemented for coinbase");
+  }
+
+  async executeOnramp(
+    _ctx: RampRuntimeContext,
+    _input: CoinbaseExecuteOnrampInput
+  ): Promise<CoinbasePaymentRampExecution> {
+    throw new Error("executeOnramp not yet implemented for coinbase");
   }
 
   async createOfframpQuote(

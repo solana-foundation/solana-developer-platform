@@ -29,6 +29,7 @@ export const RAMP_PROVIDER_LOGOS = {
   lightspark: "/provider-logos/lightspark.svg",
   bvnk: "/provider-logos/bvnk.svg",
   moneygram: "/provider-logos/moneygram.svg",
+  coinbase: "/provider-logos/coinbase.svg",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
