@@ -242,6 +242,11 @@ export interface PaymentSubscriptionsRepository {
   getCollectionAttemptByDue(
     params: GetPaymentSubscriptionCollectionAttemptByDueInput
   ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
+  getCollectionAttemptById(params: {
+    attemptId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
   createCollectionAttempt(
     input: CreatePaymentSubscriptionCollectionAttemptInput
   ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;

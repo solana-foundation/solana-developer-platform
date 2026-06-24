@@ -444,6 +444,10 @@ export function createPostgresPaymentSubscriptionsRepository(
       return row ? mapAttemptRow(row) : null;
     },
 
+    getCollectionAttemptById(params) {
+      return getAttemptByIdInternal(db, params);
+    },
+
     async listSubscriptions(params: ListPaymentSubscriptionsInput) {
       const clauses = ["organization_id = ?", "project_id = ?"];
       const values: unknown[] = [params.organizationId, params.projectId];

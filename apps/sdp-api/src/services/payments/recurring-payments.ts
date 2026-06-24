@@ -204,14 +204,21 @@ async function finalizeRecurringPaymentCollection(input: {
   const finalizedAt = new Date().toISOString();
   const dueAt = input.attempt.due_at;
   const nextDueAt = nextCollectionDueAt(dueAt, input.recurringPayment.period_hours);
-  const finalizedTransfer = await input.paymentsRepo.updateTransfer({
+  const updatedTransfer = await input.paymentsRepo.updateTransfer({
     transferId: input.transfer.id,
     status: "confirmed",
     signature: input.signature,
     error: null,
     updatedAt: finalizedAt,
   });
-  const finalizedAttempt = await input.subscriptionsRepo.updateCollectionAttempt({
+  const finalizedTransfer =
+    updatedTransfer ??
+    (await input.paymentsRepo.getTransferById({
+      transferId: input.transfer.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    }));
+  const updatedAttempt = await input.subscriptionsRepo.updateCollectionAttempt({
     attemptId: input.attempt.id,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -225,6 +232,13 @@ async function finalizeRecurringPaymentCollection(input: {
     },
     updatedAt: finalizedAt,
   });
+  const finalizedAttempt =
+    updatedAttempt ??
+    (await input.subscriptionsRepo.getCollectionAttemptById({
+      attemptId: input.attempt.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    }));
   const updatedSubscription = await input.subscriptionsRepo.updateSubscription({
     subscriptionId: input.subscription.id,
     organizationId: input.organizationId,
@@ -266,7 +280,12 @@ async function finalizeRecurringPaymentCollection(input: {
     (!updatedSubscription &&
       !hasAdvancedPastDueAt(finalizedSubscription.next_collection_due_at, dueAt)) ||
     !finalizedAttempt ||
-    !finalizedTransfer
+    finalizedAttempt.status !== "confirmed" ||
+    finalizedAttempt.signature !== input.signature ||
+    finalizedAttempt.transfer_id !== input.transfer.id ||
+    !finalizedTransfer ||
+    finalizedTransfer.status !== "confirmed" ||
+    finalizedTransfer.signature !== input.signature
   ) {
     throw new AppError("INTERNAL_ERROR", "Failed to finalize recurring payment collection");
   }
