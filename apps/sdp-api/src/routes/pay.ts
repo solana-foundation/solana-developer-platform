@@ -7,7 +7,7 @@ import type { Env } from "@/types/env";
 
 const pay = new Hono<{ Bindings: Env }>();
 
-pay.get("/r/:token", async (c) => {
+pay.get("/:token", async (c) => {
   const request = await createPaymentRequestsRepository(c.env).getPaymentRequestByPublicToken(
     c.req.param("token")
   );
