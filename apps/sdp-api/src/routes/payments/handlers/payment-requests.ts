@@ -8,6 +8,7 @@ import { badRequest, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import type { AppContext } from "../context";
+import { paymentAmountSchema } from "../schemas";
 import { resolveScope, resolveWallet } from "../wallets";
 
 const listPaymentRequestsQuerySchema = z.object({
@@ -67,7 +68,7 @@ export async function listPaymentRequests(c: AppContext) {
 const createPaymentRequestSchema = z.object({
   walletId: z.string().min(1),
   token: z.string().min(1),
-  amount: z.string().refine((value) => Number(value) > 0, "amount must be a positive number"),
+  amount: paymentAmountSchema,
   // Optional counterparty (the payer). When set, payment is expected from this
   // counterparty's crypto account; when null the link is payable by anyone.
   counterpartyId: z.string().min(1).nullable().default(null),
