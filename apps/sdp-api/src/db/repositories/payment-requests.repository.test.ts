@@ -137,6 +137,29 @@ describe("PaymentRequestsRepository (postgres)", () => {
       const row = await repo.createPaymentRequest(createInput({ counterpartyId: null }));
       expect(row?.counterparty_id).toBeNull();
     });
+
+    it("generates a public_token distinct from the id", async () => {
+      const first = await repo.createPaymentRequest(createInput());
+      const second = await repo.createPaymentRequest(createInput());
+
+      expect(first?.public_token).toMatch(/^[A-Za-z0-9_-]{16}$/);
+      expect(first?.public_token).not.toBe(first?.id);
+      expect(first?.public_token).not.toBe(second?.public_token);
+    });
+  });
+
+  describe("getPaymentRequestByPublicToken", () => {
+    it("resolves a row by its public token, unscoped by org/project", async () => {
+      const created = await repo.createPaymentRequest(createInput());
+
+      const row = await repo.getPaymentRequestByPublicToken(created?.public_token ?? "");
+      expect(row?.id).toBe(created?.id);
+    });
+
+    it("returns null for an unknown token", async () => {
+      const row = await repo.getPaymentRequestByPublicToken("does_not_exist0");
+      expect(row).toBeNull();
+    });
   });
 
   describe("getPaymentRequestById", () => {

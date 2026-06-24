@@ -1,7 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { getDashboardFeatureFlags } from "@/lib/dashboard-feature-flags.server";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../../onboarding-status";
@@ -16,10 +15,6 @@ export default async function PaymentsDepositPage() {
   }
   if (!orgId) {
     redirect("/dashboard");
-  }
-  const featureFlags = await getDashboardFeatureFlags();
-  if (!featureFlags.paymentsV2) {
-    redirect("/dashboard/payments/receive");
   }
 
   const apiClient = await createSdpApiClient();

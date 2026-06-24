@@ -51,8 +51,7 @@ export function PaymentsWorkspace({
   transfers,
   transfersError,
 }: PaymentsWorkspaceProps) {
-  const { featureFlags, issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
-    useDashboardWorkspace();
+  const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
   const isPlaygroundTab = issuanceTab === "playground";
 
   useEffect(() => {
@@ -103,7 +102,6 @@ export function PaymentsWorkspace({
         <PaymentsOverview
           aggregate={aggregate}
           aggregateError={aggregateError}
-          paymentsV2={featureFlags.paymentsV2}
           issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
           transfers={transfers}
           transfersError={transfersError}
