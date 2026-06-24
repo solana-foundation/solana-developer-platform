@@ -1488,6 +1488,68 @@ describe("Payments routes", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
+  it("resets recurring payment cancellation claims when subscription validation fails", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET status = 'paused' WHERE id = ?")
+      .bind(activated.subscriptionId)
+      .run();
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(cancelRes.status).toBe(409);
+    const cancelBody = (await cancelRes.json()) as { error: { message: string } };
+    expect(cancelBody.error.message).toContain("Subscription cannot be canceled");
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_recurring_payments WHERE id = ?")
+      .bind(activated.id)
+      .first<{ status: string }>();
+    expect(row?.status).toBe("active");
+    const lifecycleAttempt = await getDb(env)
+      .prepare(
+        `SELECT operation, status, stage, error
+           FROM payment_recurring_payment_lifecycle_attempts
+          WHERE recurring_payment_id = ?
+          ORDER BY created_at DESC`
+      )
+      .bind(activated.id)
+      .first<{ operation: string; status: string; stage: string; error: string | null }>();
+    expect(lifecycleAttempt).toMatchObject({
+      operation: "cancel",
+      status: "failed",
+      stage: "claim",
+    });
+    expect(lifecycleAttempt?.error).toContain("Subscription cannot be canceled");
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+  });
+
   it("recovers confirmed recurring payment collections before cancellation", async () => {
     env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();

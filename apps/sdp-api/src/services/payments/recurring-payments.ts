@@ -202,6 +202,10 @@ function lifecycleConfirmationMessage(operation: PaymentRecurringPaymentLifecycl
     : "Recurring payment resume failed on-chain";
 }
 
+function lifecycleErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function nextCollectionDueAt(dueAt: string, periodHours: number): string {
   return new Date(new Date(dueAt).getTime() + periodHours * 60 * 60 * 1000).toISOString();
 }
@@ -1038,7 +1042,7 @@ async function recordLifecycleFailure(input: {
     projectId: input.projectId,
     status: "failed",
     stage: input.stage,
-    error: activationErrorMessage(input.error),
+    error: lifecycleErrorMessage(input.error),
     updatedAt: input.failedAt,
   });
 
@@ -1074,12 +1078,12 @@ async function preserveRecoverableLifecycleAttempt(input: {
       projectId: input.projectId,
       stage: input.stage,
       signature: input.signature,
-      error: activationErrorMessage(input.error),
+      error: lifecycleErrorMessage(input.error),
       updatedAt: input.failedAt,
     });
   } catch (journalError) {
     console.error("Failed to preserve recoverable recurring payment lifecycle attempt", {
-      error: activationErrorMessage(journalError),
+      error: lifecycleErrorMessage(journalError),
       operation: input.operation,
       recurringPaymentId: input.recurringPaymentId,
     });
@@ -1087,7 +1091,7 @@ async function preserveRecoverableLifecycleAttempt(input: {
 
   console.error("Recurring payment lifecycle left recoverable after submission", {
     confirmedOnChain: input.confirmedOnChain,
-    error: activationErrorMessage(input.error),
+    error: lifecycleErrorMessage(input.error),
     operation: input.operation,
     recurringPaymentId: input.recurringPaymentId,
   });
@@ -1875,34 +1879,6 @@ async function runRecurringPaymentLifecycle(input: {
     throw new AppError("CONFLICT", `Recurring payment ${input.operation} is already processing`);
   }
 
-  if (!claimed.plan_pda || !claimed.subscription_id || !claimed.subscription_pda) {
-    throw new AppError("CONFLICT", "Recurring payment is missing on-chain subscription records");
-  }
-
-  const subscription =
-    settled.subscription?.id === claimed.subscription_id
-      ? settled.subscription
-      : await subscriptionsRepo.getSubscriptionById({
-          subscriptionId: claimed.subscription_id,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-        });
-  if (!subscription) {
-    throw new AppError("NOT_FOUND", "Subscription not found");
-  }
-
-  const expectedSubscriptionStatus = input.operation === "cancel" ? "active" : "canceled";
-  const finalSubscriptionStatus = input.operation === "cancel" ? "canceled" : "active";
-  if (
-    subscription.status !== expectedSubscriptionStatus &&
-    subscription.status !== finalSubscriptionStatus
-  ) {
-    throw new AppError(
-      "CONFLICT",
-      `Subscription cannot be ${input.operation === "cancel" ? "canceled" : "resumed"} from this status`
-    );
-  }
-
   let attempt = await getOrCreateLifecycleAttempt({
     recurringRepo,
     claimed,
@@ -1917,6 +1893,34 @@ async function runRecurringPaymentLifecycle(input: {
   let confirmedOnChain = false;
 
   try {
+    if (!claimed.plan_pda || !claimed.subscription_id || !claimed.subscription_pda) {
+      throw new AppError("CONFLICT", "Recurring payment is missing on-chain subscription records");
+    }
+
+    const subscription =
+      settled.subscription?.id === claimed.subscription_id
+        ? settled.subscription
+        : await subscriptionsRepo.getSubscriptionById({
+            subscriptionId: claimed.subscription_id,
+            organizationId: input.organizationId,
+            projectId: input.projectId,
+          });
+    if (!subscription) {
+      throw new AppError("NOT_FOUND", "Subscription not found");
+    }
+
+    const expectedSubscriptionStatus = input.operation === "cancel" ? "active" : "canceled";
+    const finalSubscriptionStatus = input.operation === "cancel" ? "canceled" : "active";
+    if (
+      subscription.status !== expectedSubscriptionStatus &&
+      subscription.status !== finalSubscriptionStatus
+    ) {
+      throw new AppError(
+        "CONFLICT",
+        `Subscription cannot be ${input.operation === "cancel" ? "canceled" : "resumed"} from this status`
+      );
+    }
+
     const sourceSigner = await solanaServices.createOrgSigner(
       input.env,
       input.organizationId,
