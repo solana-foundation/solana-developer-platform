@@ -219,7 +219,14 @@ function collectionRetryMetadata(error: unknown): Record<string, unknown> {
   };
 }
 
-async function markRecurringPaymentCollectionFailed(input: {
+/**
+ * Atomically settles a failed collection attempt and its linked transfer.
+ *
+ * Keep these status writes in one database transaction. Splitting them into
+ * independent repository calls can strand a processing transfer behind a failed
+ * attempt and block the due-period retry path.
+ */
+async function markRecurringPaymentCollectionFailedAtomically(input: {
   env: Env;
   organizationId: string;
   projectId: string;
@@ -534,7 +541,7 @@ async function journalRecurringPaymentCollectionError(input: {
     return;
   }
 
-  await markRecurringPaymentCollectionFailed(input);
+  await markRecurringPaymentCollectionFailedAtomically(input);
 }
 
 async function safeJournalRecurringPaymentCollectionError(input: {
@@ -592,7 +599,7 @@ async function recoverRecurringPaymentCollection(input: {
     if (!isStaleCollectionAttempt(existing)) {
       throw new AppError("CONFLICT", "Recurring payment collection is already processing");
     }
-    await markRecurringPaymentCollectionFailed({
+    await markRecurringPaymentCollectionFailedAtomically({
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -620,7 +627,7 @@ async function recoverRecurringPaymentCollection(input: {
     if (!isStaleCollectionAttempt(existing)) {
       throw new AppError("CONFLICT", "Recurring payment collection is already processing");
     }
-    await markRecurringPaymentCollectionFailed({
+    await markRecurringPaymentCollectionFailedAtomically({
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -645,7 +652,7 @@ async function recoverRecurringPaymentCollection(input: {
         "Recurring payment collection failed on-chain"
       );
     } catch (error) {
-      await markRecurringPaymentCollectionFailed({
+      await markRecurringPaymentCollectionFailedAtomically({
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -668,6 +675,12 @@ async function recoverRecurringPaymentCollection(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
     })) ?? input.recurringPayment;
+  const currentSubscription =
+    (await input.subscriptionsRepo.getSubscriptionById({
+      subscriptionId: input.subscription.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    })) ?? input.subscription;
   const destinationTokenAccount =
     currentRecurringPayment.destination_token_account ??
     (await resolveDestinationTokenAccount({
@@ -681,7 +694,7 @@ async function recoverRecurringPaymentCollection(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
     recurringPayment: currentRecurringPayment,
-    subscription: input.subscription,
+    subscription: currentSubscription,
     attempt: recoveredAttempt,
     transfer,
     signature: recoveredSignature as Signature,
