@@ -1682,16 +1682,17 @@ export async function collectRecurringPayment(input: {
         error: null,
         updatedAt: submittedAt,
       })) ?? attempt;
-    transfer = await paymentsRepo.updateTransfer({
+    const submittedTransfer = await paymentsRepo.updateTransfer({
       transferId: transfer.id,
       signature,
       error: null,
       updatedAt: submittedAt,
     });
 
-    if (!transfer) {
+    if (!submittedTransfer) {
       throw new AppError("INTERNAL_ERROR", "Failed to update collection transfer");
     }
+    transfer = submittedTransfer;
 
     await confirmSubscriptionSignature(
       input.env,
