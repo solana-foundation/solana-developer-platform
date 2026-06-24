@@ -1420,40 +1420,11 @@ export async function collectRecurringPayment(input: {
     throw badRequest("Subscription must be active before collection");
   }
 
-  const recovered = await recoverRecurringPaymentCollection({
-    env: input.env,
-    recurringRepo,
-    subscriptionsRepo,
-    paymentsRepo,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPayment: input.recurringPayment,
-    subscription,
-    dueAt,
-  });
-  if (recovered) {
-    return recovered;
-  }
-
-  let attempt = await subscriptionsRepo.createCollectionAttempt({
-    id: `psca_${crypto.randomUUID()}`,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    subscriptionId: subscription.id,
-    transferId: null,
-    token: input.recurringPayment.token,
-    amount: input.recurringPayment.amount,
-    dueAt,
-    attemptedAt: nowIso,
-    status: "processing",
-    signature: null,
-    error: null,
-    metadata: { recurringPaymentId: input.recurringPayment.id },
-    createdAt: nowIso,
-    updatedAt: nowIso,
-  });
-  if (!attempt) {
-    const recoveredAfterConflict = await recoverRecurringPaymentCollection({
+  let attempt: PaymentSubscriptionCollectionAttemptRow | null = null;
+  let transfer: PaymentTransferRow | null = null;
+  let submittedSignature: Signature | null = null;
+  try {
+    const recovered = await recoverRecurringPaymentCollection({
       env: input.env,
       recurringRepo,
       subscriptionsRepo,
@@ -1464,15 +1435,45 @@ export async function collectRecurringPayment(input: {
       subscription,
       dueAt,
     });
-    if (recoveredAfterConflict) {
-      return recoveredAfterConflict;
+    if (recovered) {
+      return recovered;
     }
-    throw new AppError("CONFLICT", "Recurring payment collection is already processing");
-  }
 
-  let transfer: PaymentTransferRow | null = null;
-  let submittedSignature: Signature | null = null;
-  try {
+    attempt = await subscriptionsRepo.createCollectionAttempt({
+      id: `psca_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      subscriptionId: subscription.id,
+      transferId: null,
+      token: input.recurringPayment.token,
+      amount: input.recurringPayment.amount,
+      dueAt,
+      attemptedAt: nowIso,
+      status: "processing",
+      signature: null,
+      error: null,
+      metadata: { recurringPaymentId: input.recurringPayment.id },
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+    if (!attempt) {
+      const recoveredAfterConflict = await recoverRecurringPaymentCollection({
+        env: input.env,
+        recurringRepo,
+        subscriptionsRepo,
+        paymentsRepo,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPayment: input.recurringPayment,
+        subscription,
+        dueAt,
+      });
+      if (recoveredAfterConflict) {
+        return recoveredAfterConflict;
+      }
+      throw new AppError("CONFLICT", "Recurring payment collection is already processing");
+    }
+
     await assertWalletPolicyAllowsTransferWithRepository(paymentsRepo, {
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1646,18 +1647,20 @@ export async function collectRecurringPayment(input: {
       destinationTokenAccount: receiverAta,
     });
   } catch (error) {
-    await journalRecurringPaymentCollectionError({
-      env: input.env,
-      subscriptionsRepo,
-      paymentsRepo,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      recurringPaymentId: input.recurringPayment.id,
-      attempt,
-      transfer,
-      submittedSignature,
-      error,
-    });
+    if (attempt) {
+      await journalRecurringPaymentCollectionError({
+        env: input.env,
+        subscriptionsRepo,
+        paymentsRepo,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: input.recurringPayment.id,
+        attempt,
+        transfer,
+        submittedSignature,
+        error,
+      });
+    }
     throw error;
   }
 }
