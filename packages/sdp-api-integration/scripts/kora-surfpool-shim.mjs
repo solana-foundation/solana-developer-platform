@@ -32,6 +32,7 @@ const signerAddress = base58.decode(
 );
 
 const server = http.createServer(async (request, response) => {
+  let requestId = 1;
   try {
     if (request.method === "GET" && (request.url === "/health" || request.url === "/liveness")) {
       sendJson(response, 200, { status: "ok" });
@@ -45,15 +46,17 @@ const server = http.createServer(async (request, response) => {
 
     const body = await readBody(request);
     const payload = JSON.parse(body);
+    requestId = payload.id ?? 1;
     const result = await handleRpc(payload.method, payload.params);
-    sendJson(response, 200, { jsonrpc: "2.0", id: payload.id ?? 1, result });
+    sendJson(response, 200, { jsonrpc: "2.0", id: requestId, result });
   } catch (error) {
+    console.error("Kora Surfpool shim request failed", error);
     sendJson(response, 200, {
       jsonrpc: "2.0",
-      id: 1,
+      id: requestId,
       error: {
         code: -32000,
-        message: error instanceof Error ? error.message : String(error),
+        message: "Kora Surfpool shim request failed. See local shim logs for details.",
       },
     });
   }
