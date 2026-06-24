@@ -64,14 +64,17 @@ pnpm kora:surfpool:up
 
 This starts:
 
-- Surfpool on `http://127.0.0.1:8899`
+- an embedded Surfpool `Surfnet` with a dynamically allocated local RPC URL
 - a Kora-compatible local JSON-RPC shim on `http://127.0.0.1:18080`
 - a test-only Kora memory signer funded on Surfpool
 
 SDP still uses `FEE_PAYMENT_PROVIDER=kora` and `KORA_RPC_URL`; the shim exists
 only so local deterministic tests can exercise the regular Kora adapter/client
-without depending on hosted devnet Kora. To try the real Kora Docker container
-instead, set `KORA_SURFPOOL_MODE=docker`. The local compose file defaults to
+without depending on hosted devnet Kora. To use the Surfpool CLI sidecar instead
+of embedded Surfnet, set `KORA_SURFPOOL_RUNTIME=cli`. To try the real Kora
+Docker container instead of the shim, set `KORA_SURFPOOL_MODE=docker`.
+
+The local compose file defaults to
 `ghcr.io/solana-foundation/kora:61add05`, matching the repo-pinned Kora image
 in `.github/kora-image-tag`. Override `KORA_IMAGE` only when validating a
 deliberate Kora server upgrade. The pinned image is amd64-only, so local Docker
@@ -83,9 +86,8 @@ The local Docker image currently exposes `GET /health`; hosted Kora exposes
 Then run Kora-wired tests with local overrides:
 
 ```bash
-SOLANA_RPC_URL=http://127.0.0.1:8899 \
+source .secrets/kora-surfpool/runtime.env
 SOLANA_RPC_CI_PREFERRED_PROVIDER=default \
-KORA_RPC_URL=http://127.0.0.1:18080 \
 FEE_PAYMENT_PROVIDER=kora \
 RUN_INTEGRATION_TESTS=true \
 pnpm test:integration -- src/tests/kora.test.ts

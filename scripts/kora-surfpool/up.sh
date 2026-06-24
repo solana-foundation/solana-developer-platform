@@ -4,19 +4,18 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_DIR="${KORA_SURFPOOL_STATE_DIR:-"${ROOT_DIR}/.secrets/kora-surfpool"}"
 ENV_FILE="${STATE_DIR}/kora.env"
+RUNTIME_ENV_FILE="${STATE_DIR}/runtime.env"
 SURFPOOL_LOG="${STATE_DIR}/surfpool.log"
 SURFPOOL_PID_FILE="${STATE_DIR}/surfpool.pid"
+SURFPOOL_INFO_FILE="${STATE_DIR}/surfpool.json"
 
-SURFPOOL_HOST="${SURFPOOL_HOST:-127.0.0.1}"
-SURFPOOL_PORT="${SURFPOOL_PORT:-8899}"
-SURFPOOL_RPC_URL="${SURFPOOL_RPC_URL:-http://${SURFPOOL_HOST}:${SURFPOOL_PORT}}"
-KORA_RPC_URL="${KORA_RPC_URL:-http://127.0.0.1:18080}"
-KORA_DOCKER_RPC_URL="${KORA_DOCKER_RPC_URL:-http://host.docker.internal:${SURFPOOL_PORT}}"
 KORA_FEE_PAYER_LAMPORTS="${KORA_FEE_PAYER_LAMPORTS:-10000000000}"
 KORA_IMAGE="${KORA_IMAGE:-ghcr.io/solana-foundation/kora:61add05}"
 KORA_PLATFORM="${KORA_PLATFORM:-linux/amd64}"
 KORA_REDIS_PORT="${KORA_REDIS_PORT:-0}"
+KORA_RPC_URL="${KORA_RPC_URL:-http://127.0.0.1:18080}"
 KORA_SURFPOOL_MODE="${KORA_SURFPOOL_MODE:-shim}"
+KORA_SURFPOOL_RUNTIME="${KORA_SURFPOOL_RUNTIME:-embedded}"
 KORA_SHIM_LOG="${STATE_DIR}/kora-shim.log"
 KORA_SHIM_PID_FILE="${STATE_DIR}/kora-shim.pid"
 
@@ -49,6 +48,29 @@ if (!payload.result?.value?.blockhash) process.exit(1);
 NODE
 }
 
+json_file_field() {
+  local file="$1"
+  local field="$2"
+  node - "${file}" "${field}" <<'NODE'
+const [file, field] = process.argv.slice(2);
+const fs = await import("node:fs/promises");
+const payload = JSON.parse(await fs.readFile(file, "utf8"));
+const value = payload[field];
+if (typeof value !== "string" || value.length === 0) {
+  process.exit(1);
+}
+process.stdout.write(value);
+NODE
+}
+
+url_port() {
+  local url="$1"
+  node - "${url}" <<'NODE'
+const parsed = new URL(process.argv[2]);
+process.stdout.write(parsed.port || (parsed.protocol === "https:" ? "443" : "80"));
+NODE
+}
+
 wait_for_json_rpc() {
   local label="$1"
   local url="$2"
@@ -60,6 +82,22 @@ wait_for_json_rpc() {
     sleep 1
   done
   echo "${label} did not become healthy at ${url}." >&2
+  return 1
+}
+
+wait_for_surfpool_info() {
+  local attempts="${1:-60}"
+  for _ in $(seq 1 "${attempts}"); do
+    if [ -f "${SURFPOOL_INFO_FILE}" ]; then
+      SURFPOOL_RPC_URL="$(json_file_field "${SURFPOOL_INFO_FILE}" rpcUrl)"
+      if json_rpc_ok "${SURFPOOL_RPC_URL}"; then
+        export SURFPOOL_RPC_URL
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  echo "Embedded Surfpool did not become healthy. See ${SURFPOOL_LOG}." >&2
   return 1
 }
 
@@ -78,19 +116,103 @@ wait_for_kora() {
   return 1
 }
 
+stop_pid_file() {
+  local pid_file="$1"
+  if [ ! -f "${pid_file}" ]; then
+    return 0
+  fi
+  local pid
+  pid="$(cat "${pid_file}")"
+  if [ -n "${pid}" ] && kill -0 "${pid}" >/dev/null 2>&1; then
+    kill -- -"${pid}" >/dev/null 2>&1 || kill "${pid}" >/dev/null 2>&1 || true
+  fi
+  rm -f "${pid_file}"
+}
+
+start_embedded_surfpool() {
+  if [ -f "${SURFPOOL_PID_FILE}" ]; then
+    local old_pid
+    old_pid="$(cat "${SURFPOOL_PID_FILE}")"
+    if [ -n "${old_pid}" ] && kill -0 "${old_pid}" >/dev/null 2>&1; then
+      if [ -f "${SURFPOOL_INFO_FILE}" ]; then
+        SURFPOOL_RPC_URL="$(json_file_field "${SURFPOOL_INFO_FILE}" rpcUrl)"
+        if json_rpc_ok "${SURFPOOL_RPC_URL}"; then
+          export SURFPOOL_RPC_URL
+          echo "Embedded Surfpool RPC is already healthy at ${SURFPOOL_RPC_URL}."
+          return 0
+        fi
+      fi
+      stop_pid_file "${SURFPOOL_PID_FILE}"
+    fi
+  fi
+
+  echo "Starting embedded Surfpool RPC."
+  rm -f "${SURFPOOL_INFO_FILE}"
+  (
+    cd "${ROOT_DIR}/packages/sdp-api-integration"
+    export SURFPOOL_INFO_FILE
+    exec node scripts/kora-surfpool-surfnet.mjs
+  ) >"${SURFPOOL_LOG}" 2>&1 &
+  echo "$!" >"${SURFPOOL_PID_FILE}"
+  wait_for_surfpool_info 90
+}
+
+start_cli_surfpool() {
+  require_command surfpool
+  local surfpool_host="${SURFPOOL_HOST:-127.0.0.1}"
+  local surfpool_port="${SURFPOOL_PORT:-8899}"
+  SURFPOOL_RPC_URL="${SURFPOOL_RPC_URL:-http://${surfpool_host}:${surfpool_port}}"
+  export SURFPOOL_RPC_URL
+
+  if json_rpc_ok "${SURFPOOL_RPC_URL}"; then
+    echo "Surfpool RPC is already healthy at ${SURFPOOL_RPC_URL}."
+    return 0
+  fi
+
+  echo "Starting Surfpool CLI RPC at ${SURFPOOL_RPC_URL}."
+  NO_DNA=1 surfpool start --ci --host "${surfpool_host}" --port "${surfpool_port}" --no-deploy >"${SURFPOOL_LOG}" 2>&1 &
+  echo "$!" >"${SURFPOOL_PID_FILE}"
+  wait_for_json_rpc "Surfpool" "${SURFPOOL_RPC_URL}" 90
+}
+
+write_runtime_env() {
+  umask 077
+  cat >"${RUNTIME_ENV_FILE}" <<EOF
+SURFPOOL_RPC_URL=${SURFPOOL_RPC_URL}
+SOLANA_RPC_URL=${SURFPOOL_RPC_URL}
+SOLANA_RPC_CI_PREFERRED_PROVIDER=default
+KORA_RPC_URL=${KORA_RPC_URL}
+FEE_PAYMENT_PROVIDER=kora
+RUN_INTEGRATION_TESTS=true
+KORA_SURFPOOL_SHIM=$([ "${KORA_SURFPOOL_MODE}" = "shim" ] && echo "true" || echo "false")
+PRIVY_APP_ID=${PRIVY_APP_ID:-kora-surfpool-local}
+PRIVY_APP_SECRET=${PRIVY_APP_SECRET:-kora-surfpool-local}
+EOF
+}
+
 require_command curl
 require_command node
 require_command pnpm
-require_command surfpool
 
-if json_rpc_ok "${SURFPOOL_RPC_URL}"; then
-  echo "Surfpool RPC is already healthy at ${SURFPOOL_RPC_URL}."
-else
-  echo "Starting Surfpool RPC at ${SURFPOOL_RPC_URL}."
-  NO_DNA=1 surfpool start --ci --host "${SURFPOOL_HOST}" --port "${SURFPOOL_PORT}" --no-deploy >"${SURFPOOL_LOG}" 2>&1 &
-  echo "$!" >"${SURFPOOL_PID_FILE}"
-  wait_for_json_rpc "Surfpool" "${SURFPOOL_RPC_URL}" 90
-fi
+case "${KORA_SURFPOOL_RUNTIME}" in
+  embedded)
+    start_embedded_surfpool
+    ;;
+  cli)
+    start_cli_surfpool
+    ;;
+  external)
+    if [ -z "${SURFPOOL_RPC_URL:-}" ]; then
+      echo "SURFPOOL_RPC_URL is required when KORA_SURFPOOL_RUNTIME=external." >&2
+      exit 1
+    fi
+    wait_for_json_rpc "External Surfpool" "${SURFPOOL_RPC_URL}" 30
+    ;;
+  *)
+    echo "Unsupported KORA_SURFPOOL_RUNTIME=${KORA_SURFPOOL_RUNTIME}. Expected 'embedded', 'cli', or 'external'." >&2
+    exit 1
+    ;;
+esac
 
 if [ -f "${ENV_FILE}" ] && [ -z "${SIGNER_PRIVATE_KEY:-}" ]; then
   SIGNER_PRIVATE_KEY="$(
@@ -102,6 +224,8 @@ if [ -z "${SIGNER_PRIVATE_KEY:-}" ]; then
   echo "Generating test-only Kora memory signer."
   SIGNER_PRIVATE_KEY="$(pnpm --silent --filter @sdp/api keygen:local --quiet)"
 fi
+
+KORA_DOCKER_RPC_URL="${KORA_DOCKER_RPC_URL:-http://host.docker.internal:$(url_port "${SURFPOOL_RPC_URL}")}"
 
 umask 077
 cat >"${ENV_FILE}" <<EOF
@@ -127,13 +251,7 @@ process.stdout.write(parsed.port || (parsed.protocol === "https:" ? "443" : "80"
 NODE
     )"
     echo "Starting Kora-compatible shim with upstream RPC ${SURFPOOL_RPC_URL}."
-    if [ -f "${KORA_SHIM_PID_FILE}" ]; then
-      old_pid="$(cat "${KORA_SHIM_PID_FILE}")"
-      if [ -n "${old_pid}" ] && kill -0 "${old_pid}" >/dev/null 2>&1; then
-        kill -- -"${old_pid}" >/dev/null 2>&1 || kill "${old_pid}" >/dev/null 2>&1 || true
-      fi
-      rm -f "${KORA_SHIM_PID_FILE}"
-    fi
+    stop_pid_file "${KORA_SHIM_PID_FILE}"
     (
       cd "${ROOT_DIR}/packages/sdp-api-integration"
       export KORA_SHIM_HOST
@@ -204,6 +322,8 @@ for (let attempt = 0; attempt < 30; attempt += 1) {
 throw new Error(`Kora fee payer ${address} was not funded on Surfpool.`);
 NODE
 echo
+
+write_runtime_env
 
 cat <<EOF
 Local Kora-on-Surfpool is ready.
