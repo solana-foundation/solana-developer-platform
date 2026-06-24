@@ -130,7 +130,7 @@ NODE
     if [ -f "${KORA_SHIM_PID_FILE}" ]; then
       old_pid="$(cat "${KORA_SHIM_PID_FILE}")"
       if [ -n "${old_pid}" ] && kill -0 "${old_pid}" >/dev/null 2>&1; then
-        kill "${old_pid}" >/dev/null 2>&1 || true
+        kill -- -"${old_pid}" >/dev/null 2>&1 || kill "${old_pid}" >/dev/null 2>&1 || true
       fi
       rm -f "${KORA_SHIM_PID_FILE}"
     fi

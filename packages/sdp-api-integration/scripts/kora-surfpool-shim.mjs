@@ -49,8 +49,8 @@ const server = http.createServer(async (request, response) => {
     requestId = payload.id ?? 1;
     const result = await handleRpc(payload.method, payload.params);
     sendJson(response, 200, { jsonrpc: "2.0", id: requestId, result });
-  } catch (error) {
-    console.error("Kora Surfpool shim request failed", error);
+  } catch {
+    console.error("Kora Surfpool shim request failed.");
     sendJson(response, 200, {
       jsonrpc: "2.0",
       id: requestId,

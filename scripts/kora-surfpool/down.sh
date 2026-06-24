@@ -19,7 +19,7 @@ fi
 if [ -f "${KORA_SHIM_PID_FILE}" ]; then
   pid="$(cat "${KORA_SHIM_PID_FILE}")"
   if [ -n "${pid}" ] && kill -0 "${pid}" >/dev/null 2>&1; then
-    kill "${pid}" >/dev/null 2>&1 || true
+    kill -- -"${pid}" >/dev/null 2>&1 || kill "${pid}" >/dev/null 2>&1 || true
   fi
   rm -f "${KORA_SHIM_PID_FILE}"
 fi
