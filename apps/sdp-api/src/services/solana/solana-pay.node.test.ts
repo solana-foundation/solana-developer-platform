@@ -168,4 +168,17 @@ describe("validateTransfer", () => {
       })
     ).rejects.toThrow(/not found/);
   });
+
+  it("throws loudly on a malformed balance amount instead of mis-reading it as zero", async () => {
+    const rpc = stubTransaction({
+      meta: {
+        err: null,
+        preTokenBalances: [],
+        postTokenBalances: [balance(RECIPIENT, MINT, "")],
+      },
+    });
+    await expect(
+      validateTransfer(rpc, SIG, { recipient: RECIPIENT, splToken: MINT, amount: 1_000_000n })
+    ).rejects.toThrow(/Invalid decimal amount/);
+  });
 });
