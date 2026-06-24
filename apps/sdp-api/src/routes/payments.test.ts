@@ -1863,6 +1863,13 @@ describe("Payments routes", () => {
         now
       )
       .run();
+    confirmTransactionMock.mockImplementation(async (_rpc, signature) => ({
+      signature,
+      slot: 101n,
+      confirmationStatus: "confirmed",
+      err: signature === submittedSignature ? { InstructionError: [0, "Custom"] } : null,
+    }));
+
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
       { method: "POST", headers },
@@ -2033,13 +2040,6 @@ describe("Payments routes", () => {
         now
       )
       .run();
-    confirmTransactionMock.mockResolvedValueOnce({
-      signature: submittedSignature,
-      slot: 101n,
-      confirmationStatus: "confirmed",
-      err: { InstructionError: [0, "Custom"] },
-    } as Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>);
-
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
       { method: "POST", headers },
