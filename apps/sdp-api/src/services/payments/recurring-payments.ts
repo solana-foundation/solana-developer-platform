@@ -996,20 +996,33 @@ async function getOrCreateLifecycleAttempt(input: {
     return existing;
   }
 
-  const attempt = await input.recurringRepo.createLifecycleAttempt({
-    id: `prpl_${crypto.randomUUID()}`,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPaymentId: input.claimed.id,
-    operation: input.operation,
-    status: "processing",
-    stage: "claim",
-    signature: null,
-    error: null,
-    metadata: {},
-    createdAt: input.nowIso,
-    updatedAt: input.nowIso,
-  });
+  let attempt: PaymentRecurringPaymentLifecycleAttemptRow | null = null;
+  try {
+    attempt = await input.recurringRepo.createLifecycleAttempt({
+      id: `prpl_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.claimed.id,
+      operation: input.operation,
+      status: "processing",
+      stage: "claim",
+      signature: null,
+      error: null,
+      metadata: {},
+      createdAt: input.nowIso,
+      updatedAt: input.nowIso,
+    });
+  } catch (error) {
+    await input.recurringRepo.updateRecurringPaymentLifecycle({
+      recurringPaymentId: input.claimed.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      status: lifecycleClaimableStatus(input.operation),
+      expectedStatus: lifecycleProcessingStatus(input.operation),
+      updatedAt: new Date().toISOString(),
+    });
+    throw error;
+  }
 
   if (!attempt) {
     await input.recurringRepo.updateRecurringPaymentLifecycle({
