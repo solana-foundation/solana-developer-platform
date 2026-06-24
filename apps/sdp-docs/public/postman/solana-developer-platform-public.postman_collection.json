@@ -1301,12 +1301,30 @@
           }
         },
         {
+          "name": "Cancel recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/cancel",
+            "description": "Cancels an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction and storing the resulting lifecycle state."
+          }
+        },
+        {
           "name": "Collect recurring payment",
           "request": {
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/collect",
             "description": "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time."
+          }
+        },
+        {
+          "name": "Resume recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/resume",
+            "description": "Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status."
           }
         },
         {

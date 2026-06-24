@@ -574,6 +574,31 @@ async function createRecurringPaymentForActivation(headers: Record<string, strin
   return createBody.data.recurringPayment.id;
 }
 
+async function activateRecurringPaymentForTest(headers: Record<string, string>) {
+  const recurringPaymentId = await createRecurringPaymentForActivation(headers);
+  const activateRes = await app.request(
+    `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+    {
+      method: "POST",
+      headers,
+    },
+    env
+  );
+  expect(activateRes.status).toBe(200);
+  const activateBody = (await activateRes.json()) as {
+    data: {
+      recurringPayment: {
+        id: string;
+        status: string;
+        subscriptionId: string;
+        nextCollectionDueAt: string;
+      };
+    };
+  };
+  expect(activateBody.data.recurringPayment.status).toBe("active");
+  return activateBody.data.recurringPayment;
+}
+
 describe("Payments routes", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -1005,6 +1030,608 @@ describe("Payments routes", () => {
       .bind(activateBody.data.recurringPayment.subscriptionId)
       .first<{ subscriber_token_account: string | null }>();
     expect(subscriptionRow?.subscriber_token_account).toBe(expectedSourceAta);
+  });
+
+  it("cancels active recurring payments through SDP API routes", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const cancelSignature =
+      "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      )
+      .mockResolvedValueOnce(cancelSignature);
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(cancelRes.status).toBe(200);
+    const cancelBody = (await cancelRes.json()) as {
+      data: { recurringPayment: { id: string; status: string } };
+    };
+    expect(cancelBody.data.recurringPayment).toMatchObject({
+      id: activated.id,
+      status: "canceled",
+    });
+    const lifecycleAttempt = await getDb(env)
+      .prepare(
+        `SELECT operation, status, stage, signature
+           FROM payment_recurring_payment_lifecycle_attempts
+          WHERE recurring_payment_id = ?
+          ORDER BY created_at DESC`
+      )
+      .bind(activated.id)
+      .first<{ operation: string; status: string; stage: string; signature: string | null }>();
+    expect(lifecycleAttempt).toMatchObject({
+      operation: "cancel",
+      status: "confirmed",
+      stage: "finalize",
+      signature: cancelSignature,
+    });
+    const subscriptionRow = await getDb(env)
+      .prepare("SELECT status, cancel_at, canceled_at FROM payment_subscriptions WHERE id = ?")
+      .bind(activated.subscriptionId)
+      .first<{ status: string; cancel_at: string | null; canceled_at: string | null }>();
+    expect(subscriptionRow?.status).toBe("canceled");
+    expect(subscriptionRow?.cancel_at).toBeTruthy();
+    expect(subscriptionRow?.canceled_at).toBeTruthy();
+
+    const replayRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(replayRes.status).toBe(200);
+    const replayBody = (await replayRes.json()) as {
+      data: { recurringPayment: { id: string; status: string } };
+    };
+    expect(replayBody.data.recurringPayment).toMatchObject({
+      id: activated.id,
+      status: "canceled",
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("resumes canceled recurring payments through SDP API routes", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const cancelSignature =
+      "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
+    const resumeSignature =
+      "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe" as Signature;
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      )
+      .mockResolvedValueOnce(cancelSignature)
+      .mockResolvedValueOnce(resumeSignature);
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers },
+      env
+    );
+    expect(cancelRes.status).toBe(200);
+
+    const resumeRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/resume`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(resumeRes.status).toBe(200);
+    const resumeBody = (await resumeRes.json()) as {
+      data: { recurringPayment: { id: string; status: string } };
+    };
+    expect(resumeBody.data.recurringPayment).toMatchObject({
+      id: activated.id,
+      status: "active",
+    });
+    const lifecycleAttempt = await getDb(env)
+      .prepare(
+        `SELECT operation, status, stage, signature
+           FROM payment_recurring_payment_lifecycle_attempts
+          WHERE recurring_payment_id = ? AND operation = 'resume'
+          ORDER BY created_at DESC`
+      )
+      .bind(activated.id)
+      .first<{ operation: string; status: string; stage: string; signature: string | null }>();
+    expect(lifecycleAttempt).toMatchObject({
+      operation: "resume",
+      status: "confirmed",
+      stage: "finalize",
+      signature: resumeSignature,
+    });
+    const subscriptionRow = await getDb(env)
+      .prepare("SELECT status, cancel_at, canceled_at FROM payment_subscriptions WHERE id = ?")
+      .bind(activated.subscriptionId)
+      .first<{ status: string; cancel_at: string | null; canceled_at: string | null }>();
+    expect(subscriptionRow).toMatchObject({
+      status: "active",
+      cancel_at: null,
+      canceled_at: null,
+    });
+
+    const replayRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/resume`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(replayRes.status).toBe(200);
+    expect(signAndSendMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("recovers submitted recurring payment cancel attempts", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const cancelSignature =
+      "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const staleUpdatedAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    const attemptId = `prpl_${crypto.randomUUID()}`;
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_recurring_payments SET status = 'canceling', updated_at = ? WHERE id = ?"
+      )
+      .bind(staleUpdatedAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_payment_lifecycle_attempts (
+           id,
+           organization_id,
+           project_id,
+           recurring_payment_id,
+           operation,
+           status,
+           stage,
+           signature,
+           metadata,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+      )
+      .bind(
+        attemptId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        activated.id,
+        "cancel",
+        "processing",
+        "submit",
+        cancelSignature,
+        JSON.stringify({}),
+        staleUpdatedAt,
+        staleUpdatedAt
+      )
+      .run();
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(cancelRes.status).toBe(200);
+    const cancelBody = (await cancelRes.json()) as {
+      data: { recurringPayment: { status: string } };
+    };
+    expect(cancelBody.data.recurringPayment.status).toBe("canceled");
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(confirmTransactionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      cancelSignature,
+      expect.objectContaining({ commitment: "confirmed" })
+    );
+    const recoveredAttempt = await getDb(env)
+      .prepare(
+        "SELECT status, stage, signature FROM payment_recurring_payment_lifecycle_attempts WHERE id = ?"
+      )
+      .bind(attemptId)
+      .first<{ status: string; stage: string; signature: string | null }>();
+    expect(recoveredAttempt).toMatchObject({
+      status: "confirmed",
+      stage: "finalize",
+      signature: cancelSignature,
+    });
+  });
+
+  it("recovers submitted recurring payment resume attempts", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const cancelSignature =
+      "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
+    const resumeSignature =
+      "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe" as Signature;
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      )
+      .mockResolvedValueOnce(cancelSignature);
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers },
+      env
+    );
+    expect(cancelRes.status).toBe(200);
+
+    const staleUpdatedAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    const attemptId = `prpl_${crypto.randomUUID()}`;
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_recurring_payments SET status = 'resuming', updated_at = ? WHERE id = ?"
+      )
+      .bind(staleUpdatedAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_payment_lifecycle_attempts (
+           id,
+           organization_id,
+           project_id,
+           recurring_payment_id,
+           operation,
+           status,
+           stage,
+           signature,
+           metadata,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+      )
+      .bind(
+        attemptId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        activated.id,
+        "resume",
+        "processing",
+        "submit",
+        resumeSignature,
+        JSON.stringify({}),
+        staleUpdatedAt,
+        staleUpdatedAt
+      )
+      .run();
+
+    const resumeRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/resume`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(resumeRes.status).toBe(200);
+    const resumeBody = (await resumeRes.json()) as {
+      data: { recurringPayment: { status: string } };
+    };
+    expect(resumeBody.data.recurringPayment.status).toBe("active");
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+    expect(confirmTransactionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      resumeSignature,
+      expect.objectContaining({ commitment: "confirmed" })
+    );
+    const recoveredAttempt = await getDb(env)
+      .prepare(
+        "SELECT status, stage, signature FROM payment_recurring_payment_lifecycle_attempts WHERE id = ?"
+      )
+      .bind(attemptId)
+      .first<{ status: string; stage: string; signature: string | null }>();
+    expect(recoveredAttempt).toMatchObject({
+      status: "confirmed",
+      stage: "finalize",
+      signature: resumeSignature,
+    });
+  });
+
+  it("blocks recurring payment cancellation while a fresh collection is processing", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    const now = new Date().toISOString();
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.subscriptionId)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_subscription_collection_attempts (
+           id,
+           organization_id,
+           project_id,
+           subscription_id,
+           transfer_id,
+           token,
+           amount,
+           due_at,
+           attempted_at,
+           status,
+           metadata,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+      )
+      .bind(
+        `psca_${crypto.randomUUID()}`,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        activated.subscriptionId,
+        DEVNET_USDC_MINT,
+        "25.00",
+        dueAt,
+        now,
+        "processing",
+        JSON.stringify({ recurringPaymentId: activated.id }),
+        now,
+        now
+      )
+      .run();
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(cancelRes.status).toBe(409);
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_recurring_payments WHERE id = ?")
+      .bind(activated.id)
+      .first<{ status: string }>();
+    expect(row?.status).toBe("active");
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers confirmed recurring payment collections before cancellation", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const collectionSignature =
+      "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13" as Signature;
+    const cancelSignature =
+      "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe" as Signature;
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      )
+      .mockResolvedValueOnce(cancelSignature);
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    const now = new Date().toISOString();
+    const transferId = `xfr_${crypto.randomUUID()}`;
+    const attemptId = `psca_${crypto.randomUUID()}`;
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.subscriptionId)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id,
+           organization_id,
+           project_id,
+           wallet_id,
+           counterparty_id,
+           source_address,
+           destination_address,
+           token,
+           amount,
+           memo,
+           type,
+           direction,
+           status,
+           provider_data,
+           signature,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?::jsonb, ?, ?, ?)`
+      )
+      .bind(
+        transferId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_WALLET_ID,
+        sourceSigner.address,
+        TEST_SOLANA_ADDRESSES.wallet2,
+        DEVNET_USDC_MINT,
+        "25.00",
+        "transfer",
+        "outbound",
+        "confirmed",
+        JSON.stringify({ recurringPaymentId: activated.id }),
+        collectionSignature,
+        now,
+        now
+      )
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_subscription_collection_attempts (
+           id,
+           organization_id,
+           project_id,
+           subscription_id,
+           transfer_id,
+           token,
+           amount,
+           due_at,
+           attempted_at,
+           status,
+           signature,
+           metadata,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+      )
+      .bind(
+        attemptId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        activated.subscriptionId,
+        transferId,
+        DEVNET_USDC_MINT,
+        "25.00",
+        dueAt,
+        now,
+        "confirmed",
+        collectionSignature,
+        JSON.stringify({ recurringPaymentId: activated.id }),
+        now,
+        now
+      )
+      .run();
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(cancelRes.status).toBe(200);
+    const cancelBody = (await cancelRes.json()) as {
+      data: { recurringPayment: { status: string; nextCollectionDueAt: string } };
+    };
+    expect(cancelBody.data.recurringPayment.status).toBe("canceled");
+    expect(new Date(cancelBody.data.recurringPayment.nextCollectionDueAt).getTime()).toBe(
+      new Date(dueAt).getTime() + 24 * 60 * 60 * 1000
+    );
+    const recoveredAttempt = await getDb(env)
+      .prepare(
+        "SELECT status, signature FROM payment_subscription_collection_attempts WHERE id = ?"
+      )
+      .bind(attemptId)
+      .first<{ status: string; signature: string | null }>();
+    expect(recoveredAttempt).toMatchObject({
+      status: "confirmed",
+      signature: collectionSignature,
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
   });
 
   it("collects due recurring payments through SDP API routes", async () => {

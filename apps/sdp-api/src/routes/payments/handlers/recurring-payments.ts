@@ -18,17 +18,21 @@ import {
 } from "@/services/api-key-scope.service";
 import {
   activateRecurringPayment as activateRecurringPaymentRecord,
+  cancelRecurringPayment as cancelRecurringPaymentRecord,
   collectRecurringPayment as collectRecurringPaymentRecord,
   createRecurringPayment as createRecurringPaymentRecord,
+  resumeRecurringPayment as resumeRecurringPaymentRecord,
 } from "@/services/payments/recurring-payments";
 import { type AppContext, getPaymentRecurringPaymentsRepository } from "../context";
 import { mapTransferRow } from "../mappers";
 import {
   activateRecurringPaymentSchema,
+  cancelRecurringPaymentSchema,
   collectRecurringPaymentSchema,
   createRecurringPaymentSchema,
   listRecurringPaymentsQuerySchema,
   recurringPaymentIdParamsSchema,
+  resumeRecurringPaymentSchema,
 } from "../schemas";
 import { resolveScope, resolveWallet } from "../wallets";
 
@@ -178,6 +182,69 @@ export const activateRecurringPayment = async (c: AppContext) => {
 
   return success(c, response);
 };
+
+async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel" | "resume") {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
+
+  if (!params.success) {
+    throw badRequestParams();
+  }
+
+  const body = await readOptionalJsonBody(c);
+  const parsed =
+    operation === "cancel"
+      ? cancelRecurringPaymentSchema.safeParse(body)
+      : resumeRecurringPaymentSchema.safeParse(body);
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
+  }
+
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:write"]);
+  const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
+    recurringPaymentId: params.data.id,
+    organizationId: auth.organizationId,
+    projectId,
+    sourceWalletIds: allowedWalletIds ?? undefined,
+  });
+
+  if (!recurringPayment) {
+    throw new AppError("NOT_FOUND", "Recurring payment not found");
+  }
+
+  const scope = await resolveScope(c);
+  const sourceWallet = resolveWallet(scope.wallets, recurringPayment.source_wallet_id);
+  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
+
+  const updated =
+    operation === "cancel"
+      ? await cancelRecurringPaymentRecord({
+          env: c.env,
+          organizationId: auth.organizationId,
+          projectId,
+          sourceWallet,
+          recurringPayment,
+        })
+      : await resumeRecurringPaymentRecord({
+          env: c.env,
+          organizationId: auth.organizationId,
+          projectId,
+          sourceWallet,
+          recurringPayment,
+        });
+  const response: PaymentRecurringPaymentResponse = {
+    recurringPayment: mapRecurringPayment(updated),
+  };
+
+  return success(c, response);
+}
+
+export const cancelRecurringPayment = async (c: AppContext) =>
+  mutateRecurringPaymentLifecycle(c, "cancel");
+
+export const resumeRecurringPayment = async (c: AppContext) =>
+  mutateRecurringPaymentLifecycle(c, "resume");
 
 export const collectRecurringPayment = async (c: AppContext) => {
   const auth = getAuth(c);

@@ -36,6 +36,9 @@ export type PaymentRecurringPaymentActivationAttemptStage =
   | "create_plan"
   | "authorize_subscription"
   | "finalize";
+export type PaymentRecurringPaymentLifecycleOperation = "cancel" | "resume";
+export type PaymentRecurringPaymentLifecycleAttemptStatus = "processing" | "confirmed" | "failed";
+export type PaymentRecurringPaymentLifecycleAttemptStage = "claim" | "submit" | "finalize";
 
 export interface PaymentRecurringPaymentActivationAttemptRow {
   id: string;
@@ -46,6 +49,21 @@ export interface PaymentRecurringPaymentActivationAttemptRow {
   stage: PaymentRecurringPaymentActivationAttemptStage;
   plan_creation_signature: string | null;
   authorization_signature: string | null;
+  error: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PaymentRecurringPaymentLifecycleAttemptRow {
+  id: string;
+  organization_id: string;
+  project_id: string;
+  recurring_payment_id: string;
+  operation: PaymentRecurringPaymentLifecycleOperation;
+  status: PaymentRecurringPaymentLifecycleAttemptStatus;
+  stage: PaymentRecurringPaymentLifecycleAttemptStage;
+  signature: string | null;
   error: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -107,6 +125,24 @@ export interface UpdatePaymentRecurringPaymentDestinationTokenAccountInput {
   updatedAt: string;
 }
 
+export interface ClaimPaymentRecurringPaymentLifecycleInput {
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  operation: PaymentRecurringPaymentLifecycleOperation;
+  updatedAt: string;
+  staleBefore?: string;
+}
+
+export interface UpdatePaymentRecurringPaymentLifecycleInput {
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  status: PaymentRecurringPaymentStatus;
+  expectedStatus: PaymentRecurringPaymentStatus;
+  updatedAt: string;
+}
+
 export interface CreatePaymentRecurringPaymentActivationAttemptInput {
   id: string;
   organizationId: string;
@@ -133,6 +169,41 @@ export interface UpdatePaymentRecurringPaymentActivationAttemptInput {
   error?: string | null;
   metadata?: Record<string, unknown>;
   updatedAt: string;
+}
+
+export interface CreatePaymentRecurringPaymentLifecycleAttemptInput {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  operation: PaymentRecurringPaymentLifecycleOperation;
+  status: PaymentRecurringPaymentLifecycleAttemptStatus;
+  stage: PaymentRecurringPaymentLifecycleAttemptStage;
+  signature: string | null;
+  error: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdatePaymentRecurringPaymentLifecycleAttemptInput {
+  attemptId: string;
+  organizationId: string;
+  projectId: string;
+  status?: PaymentRecurringPaymentLifecycleAttemptStatus;
+  stage?: PaymentRecurringPaymentLifecycleAttemptStage;
+  signature?: string | null;
+  error?: string | null;
+  metadata?: Record<string, unknown>;
+  updatedAt: string;
+}
+
+export interface GetLatestPaymentRecurringPaymentLifecycleAttemptInput {
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  operation: PaymentRecurringPaymentLifecycleOperation;
+  statuses?: PaymentRecurringPaymentLifecycleAttemptStatus[];
 }
 
 export interface ListPaymentRecurringPaymentsInput {
@@ -176,12 +247,27 @@ export interface PaymentRecurringPaymentsRepository {
   updateRecurringPaymentDestinationTokenAccount(
     input: UpdatePaymentRecurringPaymentDestinationTokenAccountInput
   ): Promise<PaymentRecurringPaymentRow | null>;
+  claimRecurringPaymentLifecycle(
+    input: ClaimPaymentRecurringPaymentLifecycleInput
+  ): Promise<PaymentRecurringPaymentRow | null>;
+  updateRecurringPaymentLifecycle(
+    input: UpdatePaymentRecurringPaymentLifecycleInput
+  ): Promise<PaymentRecurringPaymentRow | null>;
   createActivationAttempt(
     input: CreatePaymentRecurringPaymentActivationAttemptInput
   ): Promise<PaymentRecurringPaymentActivationAttemptRow | null>;
   updateActivationAttempt(
     input: UpdatePaymentRecurringPaymentActivationAttemptInput
   ): Promise<PaymentRecurringPaymentActivationAttemptRow | null>;
+  createLifecycleAttempt(
+    input: CreatePaymentRecurringPaymentLifecycleAttemptInput
+  ): Promise<PaymentRecurringPaymentLifecycleAttemptRow | null>;
+  updateLifecycleAttempt(
+    input: UpdatePaymentRecurringPaymentLifecycleAttemptInput
+  ): Promise<PaymentRecurringPaymentLifecycleAttemptRow | null>;
+  getLatestLifecycleAttempt(
+    input: GetLatestPaymentRecurringPaymentLifecycleAttemptInput
+  ): Promise<PaymentRecurringPaymentLifecycleAttemptRow | null>;
   getRecurringPaymentById(params: {
     recurringPaymentId: string;
     organizationId: string;

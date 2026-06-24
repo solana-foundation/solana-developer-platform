@@ -8,6 +8,7 @@ import type { Env } from "@/types/env";
 import {
   activateRecurringPayment,
   cancelRampTransfer,
+  cancelRecurringPayment,
   collectRecurringPayment,
   createOfframpQuote,
   createOnrampQuote,
@@ -40,6 +41,7 @@ import {
   prepareSubscriptionCollection,
   prepareTransfer,
   recordRampProviderEvent,
+  resumeRecurringPayment,
   simulateSandboxTransfer,
   updateSubscription,
   updateSubscriptionPlan,
@@ -102,9 +104,19 @@ payments.post(
   activateRecurringPayment
 );
 payments.post(
+  "/recurring-payments/:id/cancel",
+  requirePermissions("payments:write", "wallets:read"),
+  cancelRecurringPayment
+);
+payments.post(
   "/recurring-payments/:id/collect",
   requirePermissions("payments:write", "wallets:read"),
   collectRecurringPayment
+);
+payments.post(
+  "/recurring-payments/:id/resume",
+  requirePermissions("payments:write", "wallets:read"),
+  resumeRecurringPayment
 );
 payments.get("/recurring-payments/:id", requirePermissions("payments:read"), getRecurringPayment);
 payments.get("/subscription-plans", requirePermissions("payments:read"), listSubscriptionPlans);
