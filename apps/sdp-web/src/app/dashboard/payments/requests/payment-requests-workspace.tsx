@@ -180,29 +180,11 @@ function CreateRequestModal({
   });
   const [submitting, setSubmitting] = useState(false);
 
-  // The DS Select shows the selected value verbatim, so we key options by their
-  // human label and map back to the real id/mint at submit time.
-  const mintBySymbol = useMemo(
-    () => new Map(tokens.map((token) => [token.symbol, token.mintAddress])),
-    [tokens]
-  );
-  const walletIdByName = useMemo(
-    () =>
-      new Map(
-        wallets.map((wallet) => [
-          wallet.label ? wallet.label : shortenAddress(wallet.publicKey),
-          wallet.walletId,
-        ])
-      ),
-    [wallets]
-  );
-  const counterpartyIdByName = useMemo(
-    () =>
-      new Map(counterparties.map((counterparty) => [counterparty.displayName, counterparty.id])),
-    [counterparties]
-  );
-
-  const selectedCounterpartyId = counterpartyIdByName.get(form.values.counterparty);
+  // Option values are the unique id/mint/walletId (not the display label), so
+  // wallets or tokens sharing a label/symbol can't collapse onto each other. The
+  // DS Select mirrors each item's text in the trigger, so the label still shows.
+  const selectedCounterpartyId =
+    form.values.counterparty === ANYONE_OPTION ? undefined : form.values.counterparty;
   const {
     data: counterpartyAccounts,
     isLoading: accountsLoading,
@@ -231,23 +213,18 @@ function CreateRequestModal({
     if (!result.ok) {
       return;
     }
-    const mint = mintBySymbol.get(result.data.token);
-    const walletId = walletIdByName.get(result.data.wallet);
-    if (!mint || !walletId) {
-      toast.error("Pick a token and wallet from the list");
-      return;
-    }
-    const counterpartyId = counterpartyIdByName.get(result.data.counterparty);
+    const counterpartyId =
+      result.data.counterparty === ANYONE_OPTION ? null : result.data.counterparty;
     const expiresAt = resolveExpiryDate(result.data.expiry);
 
     setSubmitting(true);
     const res = await dashboardFetch("/api/dashboard/payments/requests", {
       method: "POST",
       body: {
-        walletId,
-        token: mint,
+        walletId: result.data.wallet,
+        token: result.data.token,
         amount: result.data.amount,
-        counterpartyId: counterpartyId ? counterpartyId : null,
+        counterpartyId,
         expiresAt: expiresAt ? expiresAt.toISOString() : null,
       },
     });
@@ -307,7 +284,7 @@ function CreateRequestModal({
                 onValueChange={(value) => form.setField("token", value === null ? "" : value)}
               >
                 {tokens.map((token) => (
-                  <SelectItem key={token.mintAddress} value={token.symbol}>
+                  <SelectItem key={token.mintAddress} value={token.mintAddress}>
                     {token.symbol}
                   </SelectItem>
                 ))}
@@ -331,7 +308,7 @@ function CreateRequestModal({
               {wallets.map((wallet) => {
                 const name = wallet.label ? wallet.label : shortenAddress(wallet.publicKey);
                 return (
-                  <SelectItem key={wallet.walletId} value={name}>
+                  <SelectItem key={wallet.walletId} value={wallet.walletId}>
                     {name}
                   </SelectItem>
                 );
@@ -355,7 +332,7 @@ function CreateRequestModal({
             >
               <SelectItem value={ANYONE_OPTION}>{ANYONE_OPTION}</SelectItem>
               {counterparties.map((counterparty) => (
-                <SelectItem key={counterparty.id} value={counterparty.displayName}>
+                <SelectItem key={counterparty.id} value={counterparty.id}>
                   {counterparty.displayName}
                 </SelectItem>
               ))}
