@@ -1692,6 +1692,7 @@ export async function collectRecurringPayment(input: {
         organizationId: input.organizationId,
         projectId: input.projectId,
         transferId: transfer.id,
+        status: "processing",
         updatedAt: new Date().toISOString(),
       })) ?? attempt;
 
