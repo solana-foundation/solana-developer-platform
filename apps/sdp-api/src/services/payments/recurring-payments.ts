@@ -181,6 +181,14 @@ function hasAdvancedPastDueAt(nextDueAt: string | null, dueAt: string): boolean 
   return Number.isFinite(nextDueTime) && Number.isFinite(dueTime) && nextDueTime > dueTime;
 }
 
+function hasStoppedRecurringCollections(row: PaymentRecurringPaymentRow): boolean {
+  return row.status !== "active";
+}
+
+function hasStoppedSubscriptionCollections(row: PaymentSubscriptionRow): boolean {
+  return row.status !== "active";
+}
+
 async function resolveDestinationTokenAccount(input: {
   env: Env;
   destinationAddress: string;
@@ -353,6 +361,7 @@ async function finalizeRecurringPaymentCollection(input: {
       currentPeriodStartAt: dueAt,
       nextCollectionDueAt: nextDueAt,
       expectedNextCollectionDueAt: dueAt,
+      expectedStatus: "active",
       updatedAt: finalizedAt,
     });
     const finalizedSubscription =
@@ -382,9 +391,11 @@ async function finalizeRecurringPaymentCollection(input: {
     if (
       !finalizedRecurringPayment ||
       (!updatedRecurringPayment &&
+        !hasStoppedRecurringCollections(finalizedRecurringPayment) &&
         !hasAdvancedPastDueAt(finalizedRecurringPayment.next_collection_due_at, dueAt)) ||
       !finalizedSubscription ||
       (!updatedSubscription &&
+        !hasStoppedSubscriptionCollections(finalizedSubscription) &&
         !hasAdvancedPastDueAt(finalizedSubscription.next_collection_due_at, dueAt)) ||
       !finalizedAttempt ||
       finalizedAttempt.status !== "confirmed" ||

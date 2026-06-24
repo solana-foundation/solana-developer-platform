@@ -280,6 +280,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               AND organization_id = ?
               AND project_id = ?
               AND next_collection_due_at = ?
+              AND status = 'active'
           RETURNING *`
         )
         .bind(

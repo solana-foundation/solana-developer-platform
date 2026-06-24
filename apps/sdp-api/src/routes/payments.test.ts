@@ -1442,7 +1442,7 @@ describe("Payments routes", () => {
     };
     expect(collectBody.data.recurringPayment.status).toBe("canceled");
     expect(new Date(collectBody.data.recurringPayment.nextCollectionDueAt).getTime()).toBe(
-      new Date(dueAt).getTime() + 24 * 60 * 60 * 1000
+      new Date(dueAt).getTime()
     );
     expect(collectBody.data.collectionAttempt).toMatchObject({
       id: attemptId,

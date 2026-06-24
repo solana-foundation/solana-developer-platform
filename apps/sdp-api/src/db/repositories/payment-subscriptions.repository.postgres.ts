@@ -375,6 +375,7 @@ export function createPostgresPaymentSubscriptionsRepository(
               AND organization_id = ?
               AND project_id = ?
               AND (?::boolean = false OR next_collection_due_at IS NOT DISTINCT FROM ?)
+              AND (?::boolean = false OR status = ?::text)
           RETURNING *`
         )
         .bind(
@@ -400,7 +401,9 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.organizationId,
           input.projectId,
           input.expectedNextCollectionDueAt !== undefined,
-          input.expectedNextCollectionDueAt ?? null
+          input.expectedNextCollectionDueAt ?? null,
+          input.expectedStatus !== undefined,
+          input.expectedStatus ?? null
         )
         .first<Record<string, unknown>>();
 
