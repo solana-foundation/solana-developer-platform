@@ -279,7 +279,6 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND status = 'active'
               AND next_collection_due_at = ?
           RETURNING *`
         )

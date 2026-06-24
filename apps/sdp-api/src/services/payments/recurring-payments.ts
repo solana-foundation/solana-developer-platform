@@ -1384,9 +1384,6 @@ export async function collectRecurringPayment(input: {
   if (input.recurringPayment.source_address !== input.sourceWallet.publicKey) {
     throw badRequest("Recurring payment source address does not match wallet");
   }
-  if (input.recurringPayment.status !== "active") {
-    throw new AppError("CONFLICT", "Recurring payment must be active before collection");
-  }
   if (!input.recurringPayment.plan_id || !input.recurringPayment.subscription_id) {
     throw new AppError("CONFLICT", "Recurring payment is missing subscription records");
   }
@@ -1399,25 +1396,10 @@ export async function collectRecurringPayment(input: {
 
   const nowIso = new Date().toISOString();
   const dueAt = input.recurringPayment.next_collection_due_at;
-  if (new Date(dueAt).getTime() > new Date(nowIso).getTime()) {
-    throw badRequest("Recurring payment collection is not due yet");
-  }
 
   const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env);
   const paymentsRepo = createPaymentsRepository(input.env);
   const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
-  const plan = await subscriptionsRepo.getPlanById({
-    planId: input.recurringPayment.plan_id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-  });
-  if (!plan) {
-    throw new AppError("NOT_FOUND", "Subscription plan not found");
-  }
-  if (plan.status !== "active") {
-    throw badRequest("Subscription plan must be active before collection");
-  }
-
   const subscription = await subscriptionsRepo.getSubscriptionById({
     subscriptionId: input.recurringPayment.subscription_id,
     organizationId: input.organizationId,
@@ -1425,9 +1407,6 @@ export async function collectRecurringPayment(input: {
   });
   if (!subscription) {
     throw new AppError("NOT_FOUND", "Subscription not found");
-  }
-  if (subscription.status !== "active") {
-    throw badRequest("Subscription must be active before collection");
   }
 
   let attempt: PaymentSubscriptionCollectionAttemptRow | null = null;
@@ -1447,6 +1426,28 @@ export async function collectRecurringPayment(input: {
     });
     if (recovered) {
       return recovered;
+    }
+
+    if (input.recurringPayment.status !== "active") {
+      throw new AppError("CONFLICT", "Recurring payment must be active before collection");
+    }
+    if (new Date(dueAt).getTime() > new Date(nowIso).getTime()) {
+      throw badRequest("Recurring payment collection is not due yet");
+    }
+
+    const plan = await subscriptionsRepo.getPlanById({
+      planId: input.recurringPayment.plan_id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    if (!plan) {
+      throw new AppError("NOT_FOUND", "Subscription plan not found");
+    }
+    if (plan.status !== "active") {
+      throw badRequest("Subscription plan must be active before collection");
+    }
+    if (subscription.status !== "active") {
+      throw badRequest("Subscription must be active before collection");
     }
 
     attempt = await subscriptionsRepo.createCollectionAttempt({
