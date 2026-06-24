@@ -27,8 +27,11 @@ describe("encodeSolanaPayURL", () => {
       amount: "0.01",
       splToken: MINT,
       reference: REFERENCE,
+      memo: "preq_abc123",
     });
-    expect(url).toBe(`solana:${RECIPIENT}?amount=0.01&spl-token=${MINT}&reference=${REFERENCE}`);
+    expect(url).toBe(
+      `solana:${RECIPIENT}?amount=0.01&spl-token=${MINT}&reference=${REFERENCE}&memo=preq_abc123`
+    );
   });
 
   it("percent-encodes label and message spaces", () => {
@@ -37,11 +40,23 @@ describe("encodeSolanaPayURL", () => {
       amount: "1",
       splToken: MINT,
       reference: REFERENCE,
+      memo: "preq_abc123",
       label: "Acme Inc",
       message: "Invoice 42",
     });
     expect(url).toContain("label=Acme%20Inc");
     expect(url).toContain("message=Invoice%2042");
+  });
+
+  it("carries the payment request id as the on-chain memo", () => {
+    const url = encodeSolanaPayURL({
+      recipient: RECIPIENT,
+      amount: "1",
+      splToken: MINT,
+      reference: REFERENCE,
+      memo: "preq_abc123",
+    });
+    expect(url).toContain("memo=preq_abc123");
   });
 });
 

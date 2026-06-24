@@ -6,6 +6,7 @@ export interface SolanaPayTransferRequest {
   amount: string;
   splToken: Address;
   reference: Address;
+  memo: string;
   label?: string;
   message?: string;
 }
@@ -15,6 +16,7 @@ export function encodeSolanaPayURL(request: SolanaPayTransferRequest): string {
   params.set("amount", request.amount);
   params.set("spl-token", request.splToken);
   params.append("reference", request.reference);
+  params.set("memo", request.memo);
   if (request.label) {
     params.set("label", request.label);
   }

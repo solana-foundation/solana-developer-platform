@@ -9,11 +9,15 @@ import type {
   PaymentRequestRow,
   PaymentRequestsRepository,
 } from "./payment-requests.repository";
-import { generatePaymentRequestId } from "./payment-requests.repository";
+import {
+  generatePaymentRequestId,
+  generatePaymentRequestPublicToken,
+} from "./payment-requests.repository";
 
 function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
   return {
     id: row.id as string,
+    public_token: row.public_token as string,
     organization_id: row.organization_id as string,
     project_id: row.project_id as string | null,
     counterparty_id: row.counterparty_id as string | null,
@@ -37,11 +41,13 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
   return {
     async createPaymentRequest(input: CreatePaymentRequestInput) {
       const id = generatePaymentRequestId();
+      const publicToken = generatePaymentRequestPublicToken();
 
       const row = await db
         .prepare(
           `INSERT INTO payment_requests (
              id,
+             public_token,
              organization_id,
              project_id,
              counterparty_id,
@@ -54,13 +60,14 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              created_by,
              lifecycle
            ) VALUES (
-             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
              jsonb_build_array(jsonb_build_object('status', 'awaiting_payment', 'at', sdp_iso_now()))
            )
            RETURNING *`
         )
         .bind(
           id,
+          publicToken,
           input.organizationId,
           input.projectId,
           input.counterpartyId,
@@ -120,6 +127,14 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
                AND project_id = ?`
         )
         .bind(params.requestId, params.organizationId, params.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapPaymentRequestRow(row) : null;
+    },
+
+    async getPaymentRequestByPublicToken(publicToken) {
+      const row = await db
+        .prepare(`SELECT * FROM payment_requests WHERE public_token = ?`)
+        .bind(publicToken)
         .first<Record<string, unknown>>();
       return row ? mapPaymentRequestRow(row) : null;
     },
