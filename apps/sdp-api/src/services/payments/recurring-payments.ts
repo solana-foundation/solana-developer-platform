@@ -361,6 +361,8 @@ async function finalizeRecurringPaymentCollection(input: {
   const nextDueAt = nextCollectionDueAt(dueAt, input.recurringPayment.period_hours);
 
   return getDb(input.env).transaction(async (tx) => {
+    // Keep the externally submitted artifacts durable before advancing the due period.
+    // Recovery can safely re-run this transaction because the period updates below are CAS-guarded.
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
     const paymentsRepo = createPostgresPaymentsRepository(tx);
@@ -613,6 +615,8 @@ async function recoverRecurringPaymentCollection(input: {
   }
   const recoveredSignature = existing.signature ?? transfer.signature;
   if (!recoveredSignature) {
+    // A fresh unsigned attempt means another request is between local persistence and Kora
+    // submission; wait for it to either submit or become stale instead of creating a second transfer.
     if (!isStaleCollectionAttempt(existing)) {
       throw new AppError("CONFLICT", "Recurring payment collection is already processing");
     }
