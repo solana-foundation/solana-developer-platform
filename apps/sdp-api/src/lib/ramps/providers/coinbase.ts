@@ -5,10 +5,17 @@ import type {
   PaymentRampQuote,
 } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import { parseFiatCurrency } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { badRequest, providerNotConfigured } from "@/lib/errors";
 import { type ProviderRequestInit, providerFetchJson } from "../fetch";
-import { createProviderRampSupport, RAMP_RAIL_DUMPS, requireEnv } from "../shared";
+import {
+  createProviderRampSupport,
+  isSolanaCryptoAsset,
+  RAMP_RAIL_DUMPS,
+  requireEnv,
+  SOLANA_ASSET_TO_RAIL,
+} from "../shared";
 import type {
   ProviderRampSupport,
   RampDumpReader,
@@ -53,6 +60,55 @@ function readCoinbaseConfig(env: Record<string, string | undefined>): CoinbaseCo
   };
 }
 
+interface BuyOptionsNetwork {
+  name: string;
+  display_name: string;
+  chain_id: number;
+  contract_address: string;
+}
+
+interface BuyOptionsPurchaseCurrency {
+  id: string;
+  name: string;
+  symbol: string;
+  icon_url: string;
+  networks: BuyOptionsNetwork[];
+}
+
+interface BuyOptionsPaymentCurrencyLimit {
+  id: string;
+  min: string;
+  max: string;
+}
+
+interface BuyOptionsPaymentCurrency {
+  id: string;
+  limits: BuyOptionsPaymentCurrencyLimit[];
+}
+
+interface BuyOptionsDump {
+  payment_currencies: BuyOptionsPaymentCurrency[];
+  purchase_currencies: BuyOptionsPurchaseCurrency[];
+}
+
+function extractSupport(dump: BuyOptionsDump): ProviderRampSupport {
+  const support = createProviderRampSupport();
+
+  // Headless v2 only supports USD — don't derive from payment_currencies.
+  const usd = parseFiatCurrency("USD");
+  if (usd) support.onrampFiats.add(usd);
+
+  for (const currency of dump.purchase_currencies) {
+    const hassolana = currency.networks.some((n) => n.name === "solana");
+    if (!hassolana) continue;
+    const symbol = currency.symbol.toUpperCase();
+    if (!isSolanaCryptoAsset(symbol)) continue;
+    support.onrampCryptos.add(SOLANA_ASSET_TO_RAIL[symbol]);
+  }
+
+  return support;
+}
+
 export interface CoinbaseExecuteOnrampInput {
   destinationWalletAddress: string;
   cryptoToken: string;
@@ -91,17 +147,14 @@ export class CoinbaseRampClient implements RampProvider {
       await fetchJson(
         this.id,
         "GET /onramp/v1/buy/options",
-        `${CDP_V1_API_BASE_URL}/onramp/v1/buy/options?country=US`,
+        `${CDP_V1_API_BASE_URL}/onramp/v1/buy/options?country=US&networks=solana`,
         { headers: { Authorization: `Bearer ${jwt}` } }
       )
     );
   }
 
   async readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport> {
-    const support = createProviderRampSupport();
-    // TODO(integrate-estimate): parse buy options dump and populate onrampFiats/onrampCryptos
-    await readDump(RAMP_RAIL_DUMPS.coinbase.buyOptions.file);
-    return support;
+    return extractSupport(await readDump<BuyOptionsDump>(RAMP_RAIL_DUMPS.coinbase.buyOptions.file));
   }
 
   async validateWebhook(

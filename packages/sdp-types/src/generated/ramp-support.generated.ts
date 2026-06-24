@@ -27,7 +27,7 @@ export const RAMP_PROVIDER_SUPPORT_COUNTS = {
   lightspark: { onramp: 1, offramp: 1 },
   bvnk: { onramp: 8, offramp: 412 },
   moneygram: { onramp: 0, offramp: 198 },
-  coinbase: { onramp: 0, offramp: 0 },
+  coinbase: { onramp: 3, offramp: 0 },
 } as const satisfies Record<RampProviderId, { onramp: number; offramp: number }>;
 
 export const RAMP_FIAT_CURRENCIES = [
@@ -511,10 +511,11 @@ export const ONRAMP_SUPPORT = [
   { source: "THB", dest: "sol.solana", providers: ["moonpay"] },
   { source: "TRY", dest: "sol.solana", providers: ["moonpay"] },
   { source: "TWD", dest: "sol.solana", providers: ["moonpay"] },
-  { source: "USD", dest: "sol.solana", providers: ["moonpay", "bvnk"] },
-  { source: "USD", dest: "usdc.solana", providers: ["lightspark", "bvnk"] },
+  { source: "USD", dest: "sol.solana", providers: ["moonpay", "bvnk", "coinbase"] },
+  { source: "USD", dest: "usdc.solana", providers: ["lightspark", "bvnk", "coinbase"] },
   { source: "USD", dest: "usdt.solana", providers: ["bvnk"] },
   { source: "USD", dest: "usdg.solana", providers: ["bvnk"] },
+  { source: "USD", dest: "pyusd.solana", providers: ["coinbase"] },
   { source: "VND", dest: "sol.solana", providers: ["moonpay"] },
   { source: "ZAR", dest: "sol.solana", providers: ["moonpay"] },
 ] as const satisfies readonly OnrampPairSupport<RampFiatCurrency>[];
