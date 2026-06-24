@@ -87,6 +87,8 @@ jobs:
         uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
 
       - name: Notify Slack — deploy started
+        # A Slack hiccup (429/5xx) must never block the deploy — this runs before it.
+        continue-on-error: true
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
           SERVICE: kora
@@ -119,6 +121,9 @@ jobs:
 
       - name: Notify Slack — deploy result
         if: always()
+        # Don't let a Slack error flip an otherwise-successful deploy to failed (which would also
+        # skip mainnet via fail-fast); the deploy outcome already stands by this point.
+        continue-on-error: true
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
           SERVICE: kora
