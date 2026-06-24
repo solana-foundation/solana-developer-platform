@@ -456,7 +456,17 @@ async function recoverRecurringPaymentCollection(input: {
     return null;
   }
   if (!existing.transfer_id) {
-    throw new AppError("CONFLICT", "Recurring payment collection is already processing");
+    await markRecurringPaymentCollectionFailed({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      attempt: existing,
+      transfer: null,
+      submittedSignature: null,
+      error: new Error("Recurring payment collection was interrupted before transfer creation"),
+    });
+    return null;
   }
 
   const transfer = await input.paymentsRepo.getTransferById({
@@ -1588,13 +1598,17 @@ export async function collectRecurringPayment(input: {
         tokenProgram,
       });
 
-    await recurringRepo.updateRecurringPaymentDestinationTokenAccount({
-      recurringPaymentId: input.recurringPayment.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      destinationTokenAccount: receiverAta,
-      updatedAt: new Date().toISOString(),
-    });
+    const recurringPaymentWithDestination =
+      await recurringRepo.updateRecurringPaymentDestinationTokenAccount({
+        recurringPaymentId: input.recurringPayment.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        destinationTokenAccount: receiverAta,
+        updatedAt: new Date().toISOString(),
+      });
+    if (!recurringPaymentWithDestination) {
+      throw new AppError("CONFLICT", "Recurring payment is no longer active");
+    }
 
     const signature = await sendSubscriptionInstructions({
       env: input.env,
