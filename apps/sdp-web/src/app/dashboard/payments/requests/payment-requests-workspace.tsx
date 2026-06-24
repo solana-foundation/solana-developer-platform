@@ -151,7 +151,14 @@ function resolveAccountAddress(account: CounterpartyAccount): string {
 }
 
 const createRequestSchema = z.object({
-  amount: z.string().refine((value) => Number(value) > 0, "Enter a valid amount"),
+  // Decimal-only (no scientific notation / Infinity) to match the API's
+  // isDecimalString check, so the modal can't submit an amount the server rejects.
+  amount: z
+    .string()
+    .refine(
+      (value) => /^\d+(\.\d+)?$/.test(value.trim()) && Number(value) > 0,
+      "Enter a valid amount"
+    ),
   token: z.string().min(1, "Select a token"),
   wallet: z.string().min(1, "Select a wallet"),
   counterparty: z.string().min(1),
