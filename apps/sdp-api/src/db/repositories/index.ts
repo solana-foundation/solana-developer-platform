@@ -22,11 +22,16 @@ export type {
 } from "./counterparty-account.repository";
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
+  CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
   ListPaymentRecurringPaymentsInput,
   ListPaymentRecurringPaymentsResult,
+  PaymentRecurringPaymentActivationAttemptRow,
+  PaymentRecurringPaymentActivationAttemptStage,
+  PaymentRecurringPaymentActivationAttemptStatus,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
+  UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
 } from "./payment-recurring-payments.repository";
 export { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";

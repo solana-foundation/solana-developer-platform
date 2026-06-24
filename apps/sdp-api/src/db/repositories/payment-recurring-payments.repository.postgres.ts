@@ -1,10 +1,14 @@
 import type { DatabaseExecutor } from "@/db";
 import type {
+  CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
   ListPaymentRecurringPaymentsInput,
   ListPaymentRecurringPaymentsResult,
+  PaymentRecurringPaymentActivationAttemptRow,
+  PaymentRecurringPaymentActivationAttemptStage,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
+  UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
 } from "./payment-recurring-payments.repository";
 
@@ -45,6 +49,25 @@ function mapRecurringPaymentRow(row: Record<string, unknown>): PaymentRecurringP
   };
 }
 
+function mapActivationAttemptRow(
+  row: Record<string, unknown>
+): PaymentRecurringPaymentActivationAttemptRow {
+  return {
+    id: row.id as string,
+    organization_id: row.organization_id as string,
+    project_id: row.project_id as string,
+    recurring_payment_id: row.recurring_payment_id as string,
+    status: row.status as PaymentRecurringPaymentActivationAttemptRow["status"],
+    stage: row.stage as PaymentRecurringPaymentActivationAttemptStage,
+    plan_creation_signature: (row.plan_creation_signature as string | null | undefined) ?? null,
+    authorization_signature: (row.authorization_signature as string | null | undefined) ?? null,
+    error: (row.error as string | null | undefined) ?? null,
+    metadata: (row.metadata as Record<string, unknown> | null | undefined) ?? {},
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+  };
+}
+
 async function getRecurringPaymentByIdInternal(
   db: DatabaseExecutor,
   params: { recurringPaymentId: string; organizationId: string; projectId: string }
@@ -61,6 +84,24 @@ async function getRecurringPaymentByIdInternal(
     .first<Record<string, unknown>>();
 
   return row ? mapRecurringPaymentRow(row) : null;
+}
+
+async function getActivationAttemptByIdInternal(
+  db: DatabaseExecutor,
+  params: { attemptId: string; organizationId: string; projectId: string }
+): Promise<PaymentRecurringPaymentActivationAttemptRow | null> {
+  const row = await db
+    .prepare(
+      `SELECT *
+         FROM payment_recurring_payment_activation_attempts
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?`
+    )
+    .bind(params.attemptId, params.organizationId, params.projectId)
+    .first<Record<string, unknown>>();
+
+  return row ? mapActivationAttemptRow(row) : null;
 }
 
 export function createPostgresPaymentRecurringPaymentsRepository(
@@ -117,6 +158,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async claimRecurringPaymentActivation(params) {
+      const staleBefore = params.staleBefore ?? null;
       const row = await db
         .prepare(
           `UPDATE payment_recurring_payments
@@ -125,10 +167,20 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND status = 'pending_activation'
+              AND (
+                status = 'pending_activation'
+                OR (status = 'activating' AND ?::text IS NOT NULL AND updated_at <= ?)
+              )
           RETURNING *`
         )
-        .bind(params.updatedAt, params.recurringPaymentId, params.organizationId, params.projectId)
+        .bind(
+          params.updatedAt,
+          params.recurringPaymentId,
+          params.organizationId,
+          params.projectId,
+          staleBefore,
+          staleBefore
+        )
         .first<Record<string, unknown>>();
 
       return row ? mapRecurringPaymentRow(row) : null;
@@ -212,6 +264,93 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .first<Record<string, unknown>>();
 
       return row ? mapRecurringPaymentRow(row) : null;
+    },
+
+    async createActivationAttempt(input: CreatePaymentRecurringPaymentActivationAttemptInput) {
+      await db
+        .prepare(
+          `INSERT INTO payment_recurring_payment_activation_attempts (
+             id,
+             organization_id,
+             project_id,
+             recurring_payment_id,
+             status,
+             stage,
+             plan_creation_signature,
+             authorization_signature,
+             error,
+             metadata,
+             created_at,
+             updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+        )
+        .bind(
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.recurringPaymentId,
+          input.status,
+          input.stage,
+          input.planCreationSignature,
+          input.authorizationSignature,
+          input.error,
+          JSON.stringify(input.metadata),
+          input.createdAt,
+          input.updatedAt
+        )
+        .run();
+
+      return getActivationAttemptByIdInternal(db, {
+        attemptId: input.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
+    },
+
+    async updateActivationAttempt(input: UpdatePaymentRecurringPaymentActivationAttemptInput) {
+      const rowsAffected = await db
+        .prepare(
+          `UPDATE payment_recurring_payment_activation_attempts
+              SET status = COALESCE(?, status),
+                  stage = COALESCE(?, stage),
+                  plan_creation_signature =
+                    CASE WHEN ?::boolean THEN ? ELSE plan_creation_signature END,
+                  authorization_signature =
+                    CASE WHEN ?::boolean THEN ? ELSE authorization_signature END,
+                  error = CASE WHEN ?::boolean THEN ? ELSE error END,
+                  metadata = CASE WHEN ?::boolean THEN ?::jsonb ELSE metadata END,
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?`
+        )
+        .bind(
+          input.status ?? null,
+          input.stage ?? null,
+          input.planCreationSignature !== undefined,
+          input.planCreationSignature ?? null,
+          input.authorizationSignature !== undefined,
+          input.authorizationSignature ?? null,
+          input.error !== undefined,
+          input.error ?? null,
+          input.metadata !== undefined,
+          JSON.stringify(input.metadata ?? {}),
+          input.updatedAt,
+          input.attemptId,
+          input.organizationId,
+          input.projectId
+        )
+        .run();
+
+      if (rowsAffected === 0) {
+        throw new Error("Activation attempt update did not match an existing attempt");
+      }
+
+      return getActivationAttemptByIdInternal(db, {
+        attemptId: input.attemptId,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
     },
 
     async getRecurringPaymentById(params) {

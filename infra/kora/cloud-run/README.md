@@ -45,16 +45,19 @@ and ship a new revision so the running service picks it up. See the repo-root RE
 
 Deploys go through `.github/workflows/deploy-kora.yml`, which:
 
-1. Reads the pinned Kora image tag from `.github/kora-image-tag`.
-2. Mirrors `ghcr.io/solana-foundation/kora:<tag>` into this project's Artifact Registry
-   (`us-central1-docker.pkg.dev/<project>/kora-<env>/kora:<tag>`) — Cloud Run cannot pull from ghcr.io.
-3. Runs `gcloud run services update kora-<env> --image <AR>/kora:<tag>` with `KORA_<ENV>_*` env from
-   Doppler.
+1. Reads the pinned Kora image tag from `.github/kora-image-tag` — always an **immutable git SHA**
+   (e.g. `61add05`), never a mutable tag like `:edge`/`:latest`. `deploy.sh` refuses mutable tags.
+2. Mirrors `ghcr.io/solana-foundation/kora:<sha>` into this project's Artifact Registry
+   (`us-central1-docker.pkg.dev/<project>/kora-<env>/kora:<sha>`, resolved to a digest) — Cloud Run
+   cannot pull from ghcr.io.
+3. Runs `gcloud run services update kora-<env> --image <AR>/kora:<sha>` with `KORA_<ENV>_*` env from
+   Doppler. Config + signers are mounted from Secret Manager (Terraform-owned).
 
-**Bumping the deployed image:** edit `.github/kora-image-tag` to the new pinned tag and open a PR.
-Merging to `main` auto-deploys **devnet then mainnet**, in that order — mainnet only runs if devnet
-succeeds (the deploy job is an ordered, fail-fast matrix). A manual `workflow_dispatch` run can target
-`devnet`, `mainnet`, or `both`. Each env still goes through its `devnet`/`mainnet` GitHub Environment.
+**Bumping the deployed image:** find the kora `main` short SHA (`git rev-parse --short=7 origin/main`
+in the kora repo — the edge workflow publishes that `:<sha>` tag), edit `.github/kora-image-tag` to it,
+and open a PR. Merging auto-deploys **devnet then mainnet** (ordered, fail-fast — mainnet only if devnet
+succeeds). **Rollback / manual deploy:** `workflow_dispatch` with `image_sha=<prior sha>` (any SHA still
+in Artifact Registry), `environment` = `devnet`/`mainnet`/`both`. Each env goes through its GitHub Environment.
 
 If a service should be publicly reachable, allow unauthenticated invoker:
 

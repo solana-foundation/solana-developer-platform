@@ -888,6 +888,24 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
       return getWalletOperationByIdInternal(db, walletOperationId);
     },
 
+    async updateWalletOperationStatus(
+      walletOperationId: string,
+      status: WalletOperationRow["status"]
+    ) {
+      const row = await db
+        .prepare(
+          `UPDATE wallet_operations
+           SET status = ?,
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+           RETURNING *`
+        )
+        .bind(status, walletOperationId)
+        .first<Record<string, unknown>>();
+
+      return row ? mapWalletOperationRow(row) : null;
+    },
+
     async createPolicyEvaluation(input: CreatePolicyEvaluationInput) {
       const id = generatePolicyEvaluationId();
 
