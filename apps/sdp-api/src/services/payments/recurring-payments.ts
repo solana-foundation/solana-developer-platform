@@ -215,7 +215,8 @@ async function markRecurringPaymentCollectionFailed(input: {
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
-              AND project_id = ?`
+              AND project_id = ?
+              AND status IN ('pending', 'processing', 'failed')`
         )
         .bind(
           input.submittedSignature !== null,
