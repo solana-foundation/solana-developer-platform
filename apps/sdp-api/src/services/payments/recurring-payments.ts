@@ -367,6 +367,8 @@ async function finalizeRecurringPaymentCollection(input: {
 
     const updatedTransfer = await paymentsRepo.updateTransfer({
       transferId: input.transfer.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
       status: "confirmed",
       signature: input.signature,
       error: null,
@@ -492,6 +494,8 @@ async function journalRecurringPaymentCollectionError(input: {
       input.transfer
         ? input.paymentsRepo.updateTransfer({
             transferId: input.transfer.id,
+            organizationId: input.organizationId,
+            projectId: input.projectId,
             signature: input.submittedSignature,
             updatedAt,
           })
@@ -1771,6 +1775,8 @@ export async function collectRecurringPayment(input: {
       })) ?? attempt;
     const submittedTransfer = await paymentsRepo.updateTransfer({
       transferId: transfer.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
       signature,
       error: null,
       updatedAt: submittedAt,
