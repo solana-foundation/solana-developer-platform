@@ -12,6 +12,7 @@ import type {
 import {
   generatePaymentRequestId,
   generatePaymentRequestPublicToken,
+  generatePaymentRequestReference,
 } from "./payment-requests.repository";
 
 function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
@@ -42,6 +43,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
     async createPaymentRequest(input: CreatePaymentRequestInput) {
       const id = generatePaymentRequestId();
       const publicToken = generatePaymentRequestPublicToken();
+      const reference = await generatePaymentRequestReference();
 
       const row = await db
         .prepare(
@@ -75,7 +77,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           input.destinationAddress,
           input.token,
           input.amount,
-          input.reference,
+          reference,
           input.expiresAt,
           input.createdBy
         )
@@ -135,6 +137,37 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       const row = await db
         .prepare(`SELECT * FROM payment_requests WHERE public_token = ?`)
         .bind(publicToken)
+        .first<Record<string, unknown>>();
+      return row ? mapPaymentRequestRow(row) : null;
+    },
+
+    async listAwaitingPaymentRequests(limit) {
+      const result = await db
+        .prepare(
+          `SELECT * FROM payment_requests
+             WHERE status = 'awaiting_payment'
+             ORDER BY created_at ASC
+             LIMIT ?`
+        )
+        .bind(limit)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapPaymentRequestRow);
+    },
+
+    async settlePaymentRequest(requestId, status) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_requests
+             SET status = ?,
+                 lifecycle = lifecycle || jsonb_build_array(
+                   jsonb_build_object('status', ?::text, 'at', sdp_iso_now())
+                 ),
+                 updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND status = 'awaiting_payment'
+           RETURNING *`
+        )
+        .bind(status, status, requestId)
         .first<Record<string, unknown>>();
       return row ? mapPaymentRequestRow(row) : null;
     },

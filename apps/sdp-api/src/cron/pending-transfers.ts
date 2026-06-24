@@ -10,10 +10,12 @@
 
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
+import { trackPendingPaymentRequests } from "@/services/jobs/track-pending-payment-requests";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import type { Env } from "@/types/env";
 
 export const PENDING_TRANSFERS_MONITOR = "sdp-api-track-pending-transfers";
+export const PAYMENT_REQUESTS_MONITOR = "sdp-api-track-pending-payment-requests";
 export const PENDING_TRANSFERS_CRON = "* * * * *";
 
 export interface PendingTransfersReconciliationDeps {
@@ -23,18 +25,24 @@ export interface PendingTransfersReconciliationDeps {
 }
 
 export function runPendingTransfersReconciliation(deps: PendingTransfersReconciliationDeps): void {
-  const work = () => trackPendingTransfers(deps.env);
+  // Both branches must hand bg.run() a promise — never invoke the work fns
+  // eagerly, since a sync throw before the first await (e.g. repository
+  // construction) would otherwise propagate to the runtime entrypoint instead
+  // of becoming a rejected promise the BackgroundRunner can track and log.
+  deps.bg.run(runMonitored(deps, PENDING_TRANSFERS_MONITOR, () => trackPendingTransfers(deps.env)));
+  deps.bg.run(
+    runMonitored(deps, PAYMENT_REQUESTS_MONITOR, () => trackPendingPaymentRequests(deps.env))
+  );
+}
 
-  // Both branches must hand bg.run() a promise — never invoke `work` eagerly,
-  // since a sync throw before the first await inside trackPendingTransfers
-  // (e.g. createPaymentsRepository construction) would otherwise propagate to
-  // the runtime entrypoint instead of becoming a rejected promise the
-  // BackgroundRunner can track and the platform can log.
-  const promise = deps.observability
-    ? deps.observability.withMonitor(PENDING_TRANSFERS_MONITOR, work, {
+function runMonitored(
+  deps: PendingTransfersReconciliationDeps,
+  monitor: string,
+  work: () => Promise<void>
+): Promise<void> {
+  return deps.observability
+    ? deps.observability.withMonitor(monitor, work, {
         schedule: { type: "crontab", value: PENDING_TRANSFERS_CRON },
       })
     : Promise.resolve().then(work);
-
-  deps.bg.run(promise);
 }

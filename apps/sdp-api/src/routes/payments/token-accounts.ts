@@ -23,7 +23,7 @@ const KNOWN_TOKEN_LABELS_BY_MINT = new Map<string, string>([
   [MAINNET_USDC_MINT, "USDC"],
 ]);
 
-function resolveTokenLabel(mint: string): string {
+export function resolveTokenLabel(mint: string): string {
   return KNOWN_TOKEN_LABELS_BY_MINT.get(mint) ?? mint;
 }
 
