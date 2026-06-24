@@ -560,11 +560,11 @@ export function createPostgresPaymentSubscriptionsRepository(
               AND organization_id = ?
               AND project_id = ?
               AND (
-                ? IS NULL
-                OR ? = status
-                OR (? = 'processing' AND status = 'pending')
-                OR (? = 'confirmed' AND status IN ('pending', 'processing'))
-                OR (? = 'failed' AND status IN ('pending', 'processing'))
+                ?::text IS NULL
+                OR ?::text = status
+                OR (?::text = 'processing' AND status = 'pending')
+                OR (?::text = 'confirmed' AND status IN ('pending', 'processing'))
+                OR (?::text = 'failed' AND status IN ('pending', 'processing'))
               )
           RETURNING *`
         )
