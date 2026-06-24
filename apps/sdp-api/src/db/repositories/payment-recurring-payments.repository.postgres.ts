@@ -556,7 +556,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async updateLifecycleAttempt(input: UpdatePaymentRecurringPaymentLifecycleAttemptInput) {
-      const rowsAffected = await db
+      const row = await db
         .prepare(
           `UPDATE payment_recurring_payment_lifecycle_attempts
               SET status = COALESCE(?, status),
@@ -567,7 +567,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
-              AND project_id = ?`
+              AND project_id = ?
+          RETURNING *`
         )
         .bind(
           input.status ?? null,
@@ -583,17 +584,13 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.organizationId,
           input.projectId
         )
-        .run();
+        .first<Record<string, unknown>>();
 
-      if (rowsAffected === 0) {
+      if (!row) {
         throw new Error("Lifecycle attempt update did not match an existing attempt");
       }
 
-      return getLifecycleAttemptByIdInternal(db, {
-        attemptId: input.attemptId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
+      return mapLifecycleAttemptRow(row);
     },
 
     async getLatestLifecycleAttempt(input: GetLatestPaymentRecurringPaymentLifecycleAttemptInput) {

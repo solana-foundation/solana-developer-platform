@@ -56,9 +56,10 @@ import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "./counterparty-account-resolution";
 
 const U64_MAX = 18_446_744_073_709_551_615n;
-const ACTIVATION_STALE_AFTER_MS = 15 * 60 * 1000;
-const COLLECTION_STALE_AFTER_MS = 15 * 60 * 1000;
-const LIFECYCLE_STALE_AFTER_MS = 15 * 60 * 1000;
+const OPERATION_STALE_AFTER_MS = 15 * 60 * 1000;
+const ACTIVATION_STALE_AFTER_MS = OPERATION_STALE_AFTER_MS;
+const COLLECTION_STALE_AFTER_MS = OPERATION_STALE_AFTER_MS;
+const LIFECYCLE_STALE_AFTER_MS = OPERATION_STALE_AFTER_MS;
 
 function assertRecurringPaymentTokenMint(token: string): string {
   const normalized = normalizePaymentToken(token);
