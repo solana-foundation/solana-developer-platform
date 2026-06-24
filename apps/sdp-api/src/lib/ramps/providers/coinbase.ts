@@ -1,3 +1,4 @@
+import { generateJwt } from "@coinbase/cdp-sdk/auth";
 import type {
   CoinbasePaymentRampExecution,
   Counterparty,
@@ -134,8 +135,8 @@ export class CoinbaseRampClient implements RampProvider {
     const apiKeyName = requireEnv(env, "CDP_API_KEY");
     const apiKeySecret = requireEnv(env, "CDP_API_SECRET");
 
-    const jwt = await generateCdpJwt({
-      apiKeyName,
+    const jwt = await generateJwt({
+      apiKeyId: apiKeyName,
       apiKeySecret,
       requestMethod: "GET",
       requestHost: new URL(CDP_V1_API_BASE_URL).host,
@@ -210,8 +211,8 @@ export class CoinbaseRampClient implements RampProvider {
     const base = config.apiBaseUrl.endsWith("/") ? config.apiBaseUrl : `${config.apiBaseUrl}/`;
     const url = new URL(path, base);
 
-    const jwt = await generateCdpJwt({
-      apiKeyName: config.apiKeyName,
+    const jwt = await generateJwt({
+      apiKeyId: config.apiKeyName,
       apiKeySecret: config.apiKeySecret,
       requestMethod: init.method,
       requestHost: url.host,
@@ -226,67 +227,4 @@ export class CoinbaseRampClient implements RampProvider {
       },
     });
   }
-}
-
-interface CdpJwtOptions {
-  apiKeyName: string;
-  apiKeySecret: string;
-  requestMethod: string;
-  requestHost: string;
-  requestPath: string;
-}
-
-async function generateCdpJwt(opts: CdpJwtOptions): Promise<string> {
-  const { apiKeyName, apiKeySecret, requestMethod, requestHost, requestPath } = opts;
-
-  const uri = `${requestMethod.toUpperCase()} ${requestHost}${requestPath}`;
-  const now = Math.floor(Date.now() / 1000);
-  const nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-
-  const header = { alg: "ES256", typ: "JWT", kid: apiKeyName, nonce };
-  const payload = {
-    sub: apiKeyName,
-    iss: "cdp",
-    aud: ["cdp_service"],
-    nbf: now,
-    exp: now + 120,
-    uri,
-  };
-
-  const encodedHeader = base64url(JSON.stringify(header));
-  const encodedPayload = base64url(JSON.stringify(payload));
-  const message = `${encodedHeader}.${encodedPayload}`;
-
-  const privateKey = await importEcPrivateKey(apiKeySecret);
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    new TextEncoder().encode(message)
-  );
-
-  return `${message}.${base64url(signature)}`;
-}
-
-function base64url(input: string | ArrayBuffer): string {
-  const bytes = typeof input === "string" ? new TextEncoder().encode(input) : new Uint8Array(input);
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-}
-
-async function importEcPrivateKey(pemOrBase64: string): Promise<CryptoKey> {
-  const cleaned = pemOrBase64
-    .replace(/-----BEGIN EC PRIVATE KEY-----/, "")
-    .replace(/-----END EC PRIVATE KEY-----/, "")
-    .replace(/-----BEGIN PRIVATE KEY-----/, "")
-    .replace(/-----END PRIVATE KEY-----/, "")
-    .replace(/\s/g, "");
-
-  const der = Uint8Array.from(atob(cleaned), (c) => c.charCodeAt(0));
-
-  return crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, [
-    "sign",
-  ]);
 }
