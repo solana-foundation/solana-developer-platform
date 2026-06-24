@@ -18,6 +18,7 @@ import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
 } from "@solana-program/token-2022";
+import { getDb } from "@/db";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
@@ -185,8 +186,7 @@ function collectionRetryMetadata(error: unknown): Record<string, unknown> {
 }
 
 async function markRecurringPaymentCollectionFailed(input: {
-  subscriptionsRepo: PaymentSubscriptionsRepository;
-  paymentsRepo: ReturnType<typeof createPaymentsRepository>;
+  env: Env;
   organizationId: string;
   projectId: string;
   recurringPaymentId: string;
@@ -197,30 +197,71 @@ async function markRecurringPaymentCollectionFailed(input: {
 }): Promise<void> {
   const failedAt = new Date().toISOString();
   const message = activationErrorMessage(input.error);
-  if (input.transfer) {
-    await input.paymentsRepo.updateTransfer({
-      transferId: input.transfer.id,
-      status: "failed",
-      ...(input.submittedSignature ? { signature: input.submittedSignature } : {}),
-      error: message,
-      updatedAt: failedAt,
-    });
-  }
-  await input.subscriptionsRepo.updateCollectionAttempt({
-    attemptId: input.attempt.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
+  const metadata = {
+    ...input.attempt.metadata,
+    recurringPaymentId: input.recurringPaymentId,
     ...(input.transfer ? { transferId: input.transfer.id } : {}),
-    status: "failed",
-    ...(input.submittedSignature ? { signature: input.submittedSignature } : {}),
-    error: message,
-    metadata: {
-      ...input.attempt.metadata,
-      recurringPaymentId: input.recurringPaymentId,
-      ...(input.transfer ? { transferId: input.transfer.id } : {}),
-      ...collectionRetryMetadata(input.error),
-    },
-    updatedAt: failedAt,
+    ...collectionRetryMetadata(input.error),
+  };
+
+  await getDb(input.env).transaction(async (tx) => {
+    if (input.transfer) {
+      const transferRows = await tx
+        .prepare(
+          `UPDATE payment_transfers
+              SET status = 'failed',
+                  signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
+                  error = ?,
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?`
+        )
+        .bind(
+          input.submittedSignature !== null,
+          input.submittedSignature,
+          message,
+          failedAt,
+          input.transfer.id,
+          input.organizationId,
+          input.projectId
+        )
+        .run();
+      if (transferRows === 0) {
+        throw new AppError("INTERNAL_ERROR", "Failed to mark collection transfer failed");
+      }
+    }
+
+    const attemptRows = await tx
+      .prepare(
+        `UPDATE payment_subscription_collection_attempts
+            SET transfer_id = CASE WHEN ?::boolean THEN ? ELSE transfer_id END,
+                status = 'failed',
+                signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
+                error = ?,
+                metadata = ?::jsonb,
+                updated_at = ?
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+            AND status IN ('pending', 'processing', 'failed')`
+      )
+      .bind(
+        input.transfer !== null,
+        input.transfer?.id ?? null,
+        input.submittedSignature !== null,
+        input.submittedSignature,
+        message,
+        JSON.stringify(metadata),
+        failedAt,
+        input.attempt.id,
+        input.organizationId,
+        input.projectId
+      )
+      .run();
+    if (attemptRows === 0) {
+      throw new AppError("INTERNAL_ERROR", "Failed to mark collection attempt failed");
+    }
   });
 }
 
@@ -338,6 +379,7 @@ async function finalizeRecurringPaymentCollection(input: {
 }
 
 async function journalRecurringPaymentCollectionError(input: {
+  env: Env;
   subscriptionsRepo: PaymentSubscriptionsRepository;
   paymentsRepo: ReturnType<typeof createPaymentsRepository>;
   organizationId: string;
@@ -428,8 +470,7 @@ async function recoverRecurringPaymentCollection(input: {
   const recoveredSignature = existing.signature ?? transfer.signature;
   if (!recoveredSignature) {
     await markRecurringPaymentCollectionFailed({
-      subscriptionsRepo: input.subscriptionsRepo,
-      paymentsRepo: input.paymentsRepo,
+      env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
       recurringPaymentId: input.recurringPayment.id,
@@ -454,8 +495,7 @@ async function recoverRecurringPaymentCollection(input: {
       );
     } catch (error) {
       await markRecurringPaymentCollectionFailed({
-        subscriptionsRepo: input.subscriptionsRepo,
-        paymentsRepo: input.paymentsRepo,
+        env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
         recurringPaymentId: input.recurringPayment.id,
@@ -464,6 +504,9 @@ async function recoverRecurringPaymentCollection(input: {
         submittedSignature: recoveredSignature as Signature,
         error,
       });
+      if (error instanceof AppError && error.code === "TRANSACTION_FAILED") {
+        return null;
+      }
       throw error;
     }
   }
@@ -1604,6 +1647,7 @@ export async function collectRecurringPayment(input: {
     });
   } catch (error) {
     await journalRecurringPaymentCollectionError({
+      env: input.env,
       subscriptionsRepo,
       paymentsRepo,
       organizationId: input.organizationId,

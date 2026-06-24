@@ -1591,18 +1591,19 @@ describe("Payments routes", () => {
       err: { InstructionError: [0, "Custom"] },
     } as Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>);
 
-    const failedCollectRes = await app.request(
+    const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
       { method: "POST", headers },
       env
     );
 
-    expect(failedCollectRes.status).toBe(400);
-    const failedCollectBody = (await failedCollectRes.json()) as {
-      error: { code: string; message: string };
+    expect(collectRes.status).toBe(200);
+    const collectBody = (await collectRes.json()) as {
+      data: {
+        collectionAttempt: { id: string; status: string; signature: string };
+        transfer: { status: string; signature: string };
+      };
     };
-    expect(failedCollectBody.error.code).toBe("TRANSACTION_FAILED");
-    expect(failedCollectBody.error.message).toContain("collection failed on-chain");
     const failedAttempt = await getDb(env)
       .prepare(
         `SELECT status, error, metadata
@@ -1623,26 +1624,12 @@ describe("Payments routes", () => {
       signature: submittedSignature,
     });
     expect(failedTransfer?.error).toContain("collection failed on-chain");
-
-    const retryCollectRes = await app.request(
-      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
-      env
-    );
-
-    expect(retryCollectRes.status).toBe(200);
-    const retryCollectBody = (await retryCollectRes.json()) as {
-      data: {
-        collectionAttempt: { id: string; status: string; signature: string };
-        transfer: { status: string; signature: string };
-      };
-    };
-    expect(retryCollectBody.data.collectionAttempt).toMatchObject({
+    expect(collectBody.data.collectionAttempt).toMatchObject({
       status: "confirmed",
       signature: retrySignature,
     });
-    expect(retryCollectBody.data.collectionAttempt.id).not.toBe(attemptId);
-    expect(retryCollectBody.data.transfer).toMatchObject({
+    expect(collectBody.data.collectionAttempt.id).not.toBe(attemptId);
+    expect(collectBody.data.transfer).toMatchObject({
       status: "confirmed",
       signature: retrySignature,
     });
