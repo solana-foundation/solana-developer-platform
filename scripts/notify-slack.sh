@@ -2,7 +2,7 @@
 # Generic deploy/result notifier for the Slack deploy webhook — reusable by any service's CI.
 # Reads the webhook from Doppler (SLACK_DEPLOY_WEBHOOK_URL).
 #
-# Required env: SERVICE, STATUS, DOPPLER_PROJECT, DOPPLER_CONFIG, DOPPLER_TOKEN
+# Required env: SERVICE, STATUS (started|success|failure/<other>), DOPPLER_PROJECT, DOPPLER_CONFIG, DOPPLER_TOKEN
 # Optional env: ENV (e.g. mainnet/devnet), VERSION (tag/sha), ACTOR, RUN_URL, RUN_ID
 set -euo pipefail
 
@@ -16,7 +16,11 @@ if [ -z "$SLACK" ]; then echo "::warning::SLACK_DEPLOY_WEBHOOK_URL missing — s
 echo "::add-mask::$SLACK"
 
 LABEL="$SERVICE"; [ -n "$ENV" ] && LABEL="$SERVICE ($ENV)"
-if [ "$STATUS" = "success" ]; then MARKER="[DONE] Deploy $LABEL"; COLOR="#36a64f"; else MARKER="[FAILED] Deploy $LABEL"; COLOR="#cc0000"; fi
+case "$STATUS" in
+  started) MARKER="[STARTED] Deploy $LABEL"; COLOR="#dbab09" ;;
+  success) MARKER="[SUCCESS] Deploy $LABEL"; COLOR="#36a64f" ;;
+  *)       MARKER="[FAILED] Deploy $LABEL";  COLOR="#cc0000" ;;
+esac
 
 FIELDS=$(jq -n --arg label "$LABEL" --arg ver "$VERSION" --arg actor "$ACTOR" --arg run "$RUN_URL" --arg rid "$RUN_ID" \
   '[ {type:"mrkdwn",text:("*Service:*\n`"+$label+"`")} ]

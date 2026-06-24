@@ -1,11 +1,17 @@
 import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types";
+import { nanoid } from "nanoid";
 
 export function generatePaymentRequestId(): string {
   return `preq_${crypto.randomUUID()}`;
 }
 
+export function generatePaymentRequestPublicToken(): string {
+  return nanoid(16);
+}
+
 export interface PaymentRequestRow {
   id: string;
+  public_token: string;
   organization_id: string;
   project_id: string | null;
   counterparty_id: string | null;
@@ -67,5 +73,6 @@ export interface PaymentRequestsRepository {
     organizationId: string;
     projectId: string;
   }): Promise<PaymentRequestRow | null>;
+  getPaymentRequestByPublicToken(publicToken: string): Promise<PaymentRequestRow | null>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;
 }
