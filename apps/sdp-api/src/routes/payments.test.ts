@@ -1758,13 +1758,6 @@ describe("Payments routes", () => {
         now
       )
       .run();
-    confirmTransactionMock.mockResolvedValueOnce({
-      signature: submittedSignature,
-      slot: 101n,
-      confirmationStatus: "confirmed",
-      err: { InstructionError: [0, "Custom"] },
-    } as Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>);
-
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
       { method: "POST", headers },
