@@ -263,6 +263,24 @@ function getCounterpartyRoutePageConfig(pathname: string): DashboardPageConfig |
   return null;
 }
 
+function getWalletBackAction(pathname: string): DashboardPageConfig["backAction"] {
+  const walletPolicyRouteMatch = pathname.match(
+    /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/
+  );
+  if (!walletPolicyRouteMatch) {
+    return {
+      href: "/dashboard/wallets",
+      label: "Back to wallets",
+    };
+  }
+
+  const [, section, walletId] = walletPolicyRouteMatch;
+  return {
+    href: `/dashboard/${section}/${walletId}`,
+    label: "Back to wallet detail",
+  };
+}
+
 function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname === "/dashboard") {
     return {
@@ -304,10 +322,7 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
     return {
       title: "Wallets",
       contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/wallets",
-        label: "Back to wallets",
-      },
+      backAction: getWalletBackAction(pathname),
     };
   }
   if (pathname === "/dashboard/api-keys") {
