@@ -159,6 +159,23 @@ pnpm kora:up
 curl http://127.0.0.1:8080/health
 ```
 
+### Run regular Kora wiring against Surfpool
+
+For local deterministic Kora-wired smoke coverage, use the Kora-compatible shim
+with an embedded Surfpool `Surfnet` as its upstream Solana RPC:
+
+```bash
+pnpm kora:surfpool:up
+pnpm kora:surfpool:test
+pnpm kora:surfpool:down
+```
+
+The test command still runs SDP through `FEE_PAYMENT_PROVIDER=kora` and
+`KORA_RPC_URL=http://127.0.0.1:18080`; only the JSON-RPC server behind that URL
+is local test infrastructure. It signs with a test-only fee payer and submits to
+the embedded Surfnet RPC URL written by `pnpm kora:surfpool:up`. Use
+`KORA_SURFPOOL_RUNTIME=cli` to validate against the Surfpool CLI sidecar instead.
+
 ### "Devnet airdrop failed"
 - Airdrop limit is ~2 SOL per request
 - Wait a few seconds between airdrop requests

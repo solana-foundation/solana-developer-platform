@@ -322,6 +322,7 @@ export interface PaymentRequestLifecycleEvent {
 
 export interface PaymentRequest {
   id: string;
+  publicToken: string;
   organizationId: string;
   projectId: string | null;
   counterpartyId: string | null;
