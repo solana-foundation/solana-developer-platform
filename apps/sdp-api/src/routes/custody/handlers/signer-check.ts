@@ -17,6 +17,11 @@ import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
+import {
+  enforceWalletOperationPolicy,
+  resolvePolicyCustodyWallet,
+  walletOperationActorFromAuth,
+} from "@/services/policy-enforcement.service";
 import { FeePaymentError, SigningError } from "@/services/ports";
 import { resolveRpcTarget } from "@/services/rpc-relay.service";
 import { createOrgSigner } from "@/services/solana";
@@ -60,6 +65,25 @@ export const signerCheck = async (c: AppContext) => {
   if (!resolvedWalletId) {
     throw badRequest("API key is not bound to a signing wallet");
   }
+
+  const policyWallet = await resolvePolicyCustodyWallet(c.env, auth, resolvedWalletId);
+  await enforceWalletOperationPolicy(c.env, {
+    organizationId: auth.organizationId,
+    projectId: auth.projectId,
+    custodyWalletId: policyWallet?.id ?? null,
+    walletId: resolvedWalletId,
+    apiKeyId: auth.apiKeyId,
+    actor: walletOperationActorFromAuth(auth),
+    operationFamily: "raw_sign",
+    operationType: "custody_signer_check",
+    context: {
+      memo,
+    },
+    rawPayload: {
+      requestedWalletId: parsed.data.walletId ?? null,
+      memo,
+    },
+  });
 
   try {
     const signer = await createOrgSigner(

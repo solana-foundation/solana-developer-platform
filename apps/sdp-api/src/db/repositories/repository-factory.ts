@@ -6,6 +6,8 @@ import type { CounterpartyAccountsRepository } from "./counterparty-account.repo
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
+import type { PaymentRequestsRepository } from "./payment-requests.repository";
+import { createPostgresPaymentRequestsRepository } from "./payment-requests.repository.postgres";
 import type { PaymentSubscriptionsRepository } from "./payment-subscriptions.repository";
 import { createPostgresPaymentSubscriptionsRepository } from "./payment-subscriptions.repository.postgres";
 import type { PaymentsRepository } from "./payments.repository";
@@ -27,6 +29,10 @@ export function createPaymentRecurringPaymentsRepository(
   env: Env
 ): PaymentRecurringPaymentsRepository {
   return createPostgresPaymentRecurringPaymentsRepository(getDb(env));
+}
+
+export function createPaymentRequestsRepository(env: Env): PaymentRequestsRepository {
+  return createPostgresPaymentRequestsRepository(getDb(env));
 }
 
 export function createCounterpartiesRepository(env: Env): CounterpartiesRepository {

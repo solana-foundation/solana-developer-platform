@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import type { Env } from "@/types/env";
 
-type AppContext = Context<{ Bindings: Env }>;
+export type AppContext = Context<{ Bindings: Env }>;
 
 /**
  * Resolve project scope for issuance routes. The projectContextMiddleware

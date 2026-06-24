@@ -1,4 +1,5 @@
 import type { Address } from "@solana/kit";
+import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { formatDecimalAmount } from "@/lib/amount";
 import { badRequest } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
@@ -232,6 +233,53 @@ export async function resolveSourceTokenAccount(
   mint: Address,
   tokenProgram: Address
 ): Promise<{ tokenAccount: Address; decimals: number }> {
+  const selected = await findSourceTokenAccount(rpc, owner, mint, tokenProgram);
+
+  if (!selected) {
+    throw badRequest("Source wallet has no token account for this mint");
+  }
+
+  return {
+    tokenAccount: selected.tokenAccount,
+    decimals: selected.decimals,
+  };
+}
+
+export async function resolveSourceTokenAccountOrAta(
+  rpc: ReturnType<typeof createRpc>,
+  owner: Address,
+  mint: Address,
+  tokenProgram: Address
+): Promise<{ tokenAccount: Address; decimals: number; exists: boolean }> {
+  const selected = await findSourceTokenAccount(rpc, owner, mint, tokenProgram);
+
+  if (selected) {
+    return {
+      ...selected,
+      exists: true,
+    };
+  }
+
+  const [tokenAccount] = await findAssociatedTokenPda({
+    owner,
+    tokenProgram,
+    mint,
+  });
+  const decimals = await resolveMintDecimals(rpc, mint);
+
+  return {
+    tokenAccount,
+    decimals,
+    exists: false,
+  };
+}
+
+async function findSourceTokenAccount(
+  rpc: ReturnType<typeof createRpc>,
+  owner: Address,
+  mint: Address,
+  tokenProgram: Address
+): Promise<{ tokenAccount: Address; decimals: number; amount: bigint } | null> {
   const response = await getTokenAccountsByOwnerJsonParsed(rpc, owner, tokenProgram);
   let selected: { tokenAccount: Address; decimals: number; amount: bigint } | null = null;
 
@@ -255,12 +303,5 @@ export async function resolveSourceTokenAccount(
     }
   }
 
-  if (!selected) {
-    throw badRequest("Source wallet has no token account for this mint");
-  }
-
-  return {
-    tokenAccount: selected.tokenAccount,
-    decimals: selected.decimals,
-  };
+  return selected;
 }
