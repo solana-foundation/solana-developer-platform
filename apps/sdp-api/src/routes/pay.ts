@@ -21,7 +21,6 @@ import { createPaymentRequestsRepository } from "@/db/repositories/repository-fa
 import { parseDecimalAmount } from "@/lib/amount";
 import { badRequest, notFound } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
-import { reconcilePaymentRequest } from "@/services/payments/reconcile-payment-request";
 import * as solanaRpc from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 import {
@@ -49,29 +48,6 @@ const pay = new Hono<{ Bindings: Env }>();
 // Solana Pay transaction request — the wallet GETs the label to display.
 pay.get("/:token/tx", (c) => {
   return c.json({ label: REQUEST_LABEL });
-});
-
-// On-demand reconciliation for the pay page to poll — reconciles the request
-// against the chain on read so the payer sees "paid" the moment it lands,
-// without waiting for the cron tick. The cron remains the backstop.
-pay.get("/:token/status", async (c) => {
-  const request = await createPaymentRequestsRepository(c.env).getPaymentRequestByPublicToken(
-    c.req.param("token")
-  );
-  if (!request) {
-    throw notFound("Payment request");
-  }
-
-  const expired = request.expires_at !== null && Date.parse(request.expires_at) <= Date.now();
-  if (request.status === "awaiting_payment" && !expired) {
-    const settled = await reconcilePaymentRequest(c.env, request);
-    if (settled) {
-      return c.json({ status: settled.status });
-    }
-  }
-
-  const status = expired && request.status === "awaiting_payment" ? "expired" : request.status;
-  return c.json({ status });
 });
 
 // Solana Pay transaction request — the wallet POSTs its account, we return a

@@ -72,10 +72,9 @@ export function buildPaymentRequestsPlaygroundEndpointConfigs(
         tokenField,
         { key: "amount", label: "amount", placeholder: "10.00", required: true },
         {
-          key: "expiresInHours",
-          label: "expiresInHours",
-          placeholder: "24",
-          valueType: "number",
+          key: "expiresAt",
+          label: "expiresAt",
+          placeholder: "2026-07-01T00:00:00.000Z",
         },
       ],
       expectedResponse: exampleRequest,

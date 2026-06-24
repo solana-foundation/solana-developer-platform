@@ -141,37 +141,6 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       return row ? mapPaymentRequestRow(row) : null;
     },
 
-    async listAwaitingPaymentRequests(limit) {
-      const result = await db
-        .prepare(
-          `SELECT * FROM payment_requests
-             WHERE status = 'awaiting_payment'
-             ORDER BY created_at ASC
-             LIMIT ?`
-        )
-        .bind(limit)
-        .all<Record<string, unknown>>();
-      return result.results.map(mapPaymentRequestRow);
-    },
-
-    async settlePaymentRequest(requestId, status) {
-      const row = await db
-        .prepare(
-          `UPDATE payment_requests
-             SET status = ?,
-                 lifecycle = lifecycle || jsonb_build_array(
-                   jsonb_build_object('status', ?::text, 'at', sdp_iso_now())
-                 ),
-                 updated_at = sdp_iso_now()
-           WHERE id = ?
-             AND status = 'awaiting_payment'
-           RETURNING *`
-        )
-        .bind(status, status, requestId)
-        .first<Record<string, unknown>>();
-      return row ? mapPaymentRequestRow(row) : null;
-    },
-
     async listPaymentRequests(
       params: ListPaymentRequestsInput
     ): Promise<ListPaymentRequestsResult> {

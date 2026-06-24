@@ -38,9 +38,7 @@ export {
   findReference,
   type SolanaPayTransferRequest,
   type TransferValidation,
-  type ValidateNativeTransferParams,
   type ValidateTransferParams,
-  validateNativeTransfer,
   validateTransfer,
 } from "./solana-pay";
 // Token-2022 operations

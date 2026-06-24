@@ -9,7 +9,6 @@ import {
   shortenAddress,
 } from "../../dashboard/payments/payments-overview.utils";
 import { resolvePlaygroundApiBaseUrl } from "../../dashboard/playground-api-data";
-import { PaymentStatusWatcher } from "./payment-status-watcher";
 
 export const dynamic = "force-dynamic";
 
@@ -86,7 +85,6 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-b from-[#e9e7de] to-[#f5f4ef] px-4 py-12">
-      {request.status === "awaiting_payment" ? <PaymentStatusWatcher token={token} /> : null}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0"

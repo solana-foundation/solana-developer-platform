@@ -84,12 +84,4 @@ export interface PaymentRequestsRepository {
   }): Promise<PaymentRequestRow | null>;
   getPaymentRequestByPublicToken(publicToken: string): Promise<PaymentRequestRow | null>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;
-  // System reconciliation (cron + on-demand): scans every org's open requests,
-  // so these are scoped by primary id + status guard rather than by parent —
-  // the caller is a trusted background job, not a tenant-facing request.
-  listAwaitingPaymentRequests(limit: number): Promise<PaymentRequestRow[]>;
-  settlePaymentRequest(
-    requestId: string,
-    status: Extract<PaymentRequestStatus, "paid" | "expired">
-  ): Promise<PaymentRequestRow | null>;
 }
