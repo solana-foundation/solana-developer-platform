@@ -1788,6 +1788,7 @@ export async function collectRecurringPayment(input: {
         organizationId: input.organizationId,
         projectId: input.projectId,
         signature,
+        status: "processing",
         error: null,
         updatedAt: submittedAt,
       })) ?? attempt;
