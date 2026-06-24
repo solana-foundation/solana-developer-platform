@@ -410,6 +410,13 @@ async function recoverRecurringPaymentCollection(input: {
     } catch (error) {
       const failedAt = new Date().toISOString();
       const message = activationErrorMessage(error);
+      await input.paymentsRepo.updateTransfer({
+        transferId: transfer.id,
+        status: "failed",
+        signature: recoveredSignature,
+        error: message,
+        updatedAt: failedAt,
+      });
       await input.subscriptionsRepo.updateCollectionAttempt({
         attemptId: existing.id,
         organizationId: input.organizationId,
@@ -425,16 +432,16 @@ async function recoverRecurringPaymentCollection(input: {
         },
         updatedAt: failedAt,
       });
-      await input.paymentsRepo.updateTransfer({
-        transferId: transfer.id,
-        status: "failed",
-        signature: recoveredSignature,
-        error: message,
-        updatedAt: failedAt,
-      });
       throw error;
     }
   }
+
+  const currentRecurringPayment =
+    (await input.recurringRepo.getRecurringPaymentById({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    })) ?? input.recurringPayment;
 
   return finalizeRecurringPaymentCollection({
     recurringRepo: input.recurringRepo,
@@ -442,12 +449,12 @@ async function recoverRecurringPaymentCollection(input: {
     paymentsRepo: input.paymentsRepo,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    recurringPayment: input.recurringPayment,
+    recurringPayment: currentRecurringPayment,
     subscription: input.subscription,
     attempt: recoveredAttempt,
     transfer,
     signature: recoveredSignature as Signature,
-    destinationTokenAccount: input.recurringPayment.destination_token_account ?? undefined,
+    destinationTokenAccount: currentRecurringPayment.destination_token_account ?? undefined,
   });
 }
 
