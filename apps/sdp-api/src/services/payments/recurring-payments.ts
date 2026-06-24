@@ -54,6 +54,7 @@ import { resolveSolanaCounterpartyAccount } from "./counterparty-account-resolut
 
 const U64_MAX = 18_446_744_073_709_551_615n;
 const ACTIVATION_STALE_AFTER_MS = 15 * 60 * 1000;
+const COLLECTION_STALE_AFTER_MS = 15 * 60 * 1000;
 
 function assertRecurringPaymentTokenMint(token: string): string {
   const normalized = normalizePaymentToken(token);
@@ -187,6 +188,11 @@ function hasStoppedRecurringCollections(row: PaymentRecurringPaymentRow): boolea
 
 function hasStoppedSubscriptionCollections(row: PaymentSubscriptionRow): boolean {
   return row.status !== "active";
+}
+
+function isStaleCollectionAttempt(row: PaymentSubscriptionCollectionAttemptRow): boolean {
+  const updatedAt = new Date(row.updated_at).getTime();
+  return Number.isFinite(updatedAt) && updatedAt <= Date.now() - COLLECTION_STALE_AFTER_MS;
 }
 
 async function resolveDestinationTokenAccount(input: {
@@ -577,6 +583,9 @@ async function recoverRecurringPaymentCollection(input: {
     return null;
   }
   if (!existing.transfer_id) {
+    if (!isStaleCollectionAttempt(existing)) {
+      throw new AppError("CONFLICT", "Recurring payment collection is already processing");
+    }
     await markRecurringPaymentCollectionFailed({
       env: input.env,
       organizationId: input.organizationId,
@@ -600,6 +609,9 @@ async function recoverRecurringPaymentCollection(input: {
   }
   const recoveredSignature = existing.signature ?? transfer.signature;
   if (!recoveredSignature) {
+    if (!isStaleCollectionAttempt(existing)) {
+      throw new AppError("CONFLICT", "Recurring payment collection is already processing");
+    }
     await markRecurringPaymentCollectionFailed({
       env: input.env,
       organizationId: input.organizationId,

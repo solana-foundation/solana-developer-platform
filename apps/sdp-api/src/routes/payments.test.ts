@@ -1497,6 +1497,7 @@ describe("Payments routes", () => {
     };
     const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
     const now = new Date().toISOString();
+    const staleAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
     const transferId = `xfr_${crypto.randomUUID()}`;
     const attemptId = `psca_${crypto.randomUUID()}`;
     await getDb(env)
@@ -1543,8 +1544,8 @@ describe("Payments routes", () => {
         "processing",
         JSON.stringify({ recurringPaymentId }),
         null,
-        now,
-        now
+        staleAt,
+        staleAt
       )
       .run();
     await getDb(env)
@@ -1579,8 +1580,8 @@ describe("Payments routes", () => {
         "processing",
         null,
         JSON.stringify({ recurringPaymentId }),
-        now,
-        now
+        staleAt,
+        staleAt
       )
       .run();
 
@@ -1628,6 +1629,110 @@ describe("Payments routes", () => {
     });
     expect(staleTransfer?.error).toContain("interrupted before submission");
     expect(signAndSendMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not fail fresh transferless recurring payment attempts during recovery", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPaymentId = await createRecurringPaymentForActivation(headers);
+
+    const activateRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+      { method: "POST", headers },
+      env
+    );
+    expect(activateRes.status).toBe(200);
+    const activateBody = (await activateRes.json()) as {
+      data: { recurringPayment: { subscriptionId: string } };
+    };
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    const now = new Date().toISOString();
+    const attemptId = `psca_${crypto.randomUUID()}`;
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, recurringPaymentId)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activateBody.data.recurringPayment.subscriptionId)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_subscription_collection_attempts (
+           id,
+           organization_id,
+           project_id,
+           subscription_id,
+           transfer_id,
+           token,
+           amount,
+           due_at,
+           attempted_at,
+           status,
+           signature,
+           metadata,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?::jsonb, ?, ?)`
+      )
+      .bind(
+        attemptId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        activateBody.data.recurringPayment.subscriptionId,
+        DEVNET_USDC_MINT,
+        "25.00",
+        dueAt,
+        now,
+        "processing",
+        JSON.stringify({ recurringPaymentId }),
+        now,
+        now
+      )
+      .run();
+
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(collectRes.status).toBe(409);
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT status, transfer_id, error
+           FROM payment_subscription_collection_attempts
+          WHERE id = ?`
+      )
+      .bind(attemptId)
+      .first<{ status: string; transfer_id: string | null; error: string | null }>();
+    expect(attempt).toMatchObject({
+      status: "processing",
+      transfer_id: null,
+      error: null,
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
   it("journals failed recovered recurring payment collection attempts and allows retry", async () => {
