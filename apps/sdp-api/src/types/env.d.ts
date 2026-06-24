@@ -237,7 +237,6 @@ export interface Env {
   CDP_API_KEY?: string;
   CDP_API_SECRET?: string;
   CDP_WEBHOOK_SECRET?: string;
-  CDP_ONRAMP_API_BASE_URL?: string;
 }
 
 // Extend Hono's context with our bindings

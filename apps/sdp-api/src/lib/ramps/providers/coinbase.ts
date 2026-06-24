@@ -24,7 +24,10 @@ import type {
   ValidateCounterpartyOptions,
 } from "../types";
 
-const CDP_ONRAMP_API_BASE_URL = "https://api.developer.coinbase.com";
+// v1 API: buy options, quotes, transaction status
+const CDP_V1_API_BASE_URL = "https://api.developer.coinbase.com";
+// v2 API: create onramp order (POST /platform/v2/onramp/orders)
+const CDP_V2_API_BASE_URL = "https://api.cdp.coinbase.com/platform";
 
 interface CoinbaseConfig {
   apiKeyName: string;
@@ -46,7 +49,7 @@ function readCoinbaseConfig(env: Record<string, string | undefined>): CoinbaseCo
   return {
     apiKeyName,
     apiKeySecret,
-    apiBaseUrl: env.CDP_ONRAMP_API_BASE_URL?.trim() || CDP_ONRAMP_API_BASE_URL,
+    apiBaseUrl: CDP_V2_API_BASE_URL,
   };
 }
 
@@ -74,13 +77,12 @@ export class CoinbaseRampClient implements RampProvider {
   }: Parameters<RampProvider["_discoverRails"]>[0]): Promise<void> {
     const apiKeyName = requireEnv(env, "CDP_API_KEY");
     const apiKeySecret = requireEnv(env, "CDP_API_SECRET");
-    const base = env.CDP_ONRAMP_API_BASE_URL?.trim() || CDP_ONRAMP_API_BASE_URL;
 
     const jwt = await generateCdpJwt({
       apiKeyName,
       apiKeySecret,
       requestMethod: "GET",
-      requestHost: new URL(base).host,
+      requestHost: new URL(CDP_V1_API_BASE_URL).host,
       requestPath: "/onramp/v1/buy/options",
     });
 
@@ -89,7 +91,7 @@ export class CoinbaseRampClient implements RampProvider {
       await fetchJson(
         this.id,
         "GET /onramp/v1/buy/options",
-        `${base}/onramp/v1/buy/options?country=US`,
+        `${CDP_V1_API_BASE_URL}/onramp/v1/buy/options?country=US`,
         { headers: { Authorization: `Bearer ${jwt}` } }
       )
     );
