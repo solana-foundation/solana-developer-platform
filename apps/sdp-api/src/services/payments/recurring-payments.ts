@@ -233,6 +233,8 @@ async function markRecurringPaymentCollectionFailed(input: {
   };
 
   await getDb(input.env).transaction(async (tx) => {
+    let confirmedTransferSignature: Signature | null = null;
+
     if (input.transfer) {
       const transferRows = await tx
         .prepare(
@@ -257,15 +259,48 @@ async function markRecurringPaymentCollectionFailed(input: {
         )
         .run();
       if (transferRows === 0) {
-        throw new AppError("INTERNAL_ERROR", "Failed to mark collection transfer failed");
+        const currentTransfer = await tx
+          .prepare(
+            `SELECT status, signature
+               FROM payment_transfers
+              WHERE id = ?
+                AND organization_id = ?
+                AND project_id = ?`
+          )
+          .bind(input.transfer.id, input.organizationId, input.projectId)
+          .first<{ status: string; signature: string | null }>();
+
+        if (currentTransfer?.status !== "confirmed") {
+          throw new AppError("INTERNAL_ERROR", "Failed to mark collection transfer failed");
+        }
+
+        confirmedTransferSignature = (currentTransfer.signature ??
+          input.submittedSignature) as Signature | null;
+        if (!confirmedTransferSignature) {
+          throw new AppError(
+            "INTERNAL_ERROR",
+            "Confirmed collection transfer is missing signature"
+          );
+        }
       }
     }
+
+    const attemptStatus = confirmedTransferSignature ? "confirmed" : "failed";
+    const attemptSignature = confirmedTransferSignature ?? input.submittedSignature;
+    const attemptError = confirmedTransferSignature ? null : message;
+    const attemptMetadata = confirmedTransferSignature
+      ? {
+          ...input.attempt.metadata,
+          recurringPaymentId: input.recurringPaymentId,
+          ...(input.transfer ? { transferId: input.transfer.id } : {}),
+        }
+      : metadata;
 
     const attemptRows = await tx
       .prepare(
         `UPDATE payment_subscription_collection_attempts
             SET transfer_id = CASE WHEN ?::boolean THEN ? ELSE transfer_id END,
-                status = 'failed',
+                status = ?,
                 signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
                 error = ?,
                 metadata = ?::jsonb,
@@ -273,19 +308,25 @@ async function markRecurringPaymentCollectionFailed(input: {
           WHERE id = ?
             AND organization_id = ?
             AND project_id = ?
-            AND status IN ('pending', 'processing', 'failed')`
+            AND (
+              (?::text = 'confirmed' AND status IN ('pending', 'processing', 'confirmed'))
+              OR (?::text = 'failed' AND status IN ('pending', 'processing', 'failed'))
+            )`
       )
       .bind(
         input.transfer !== null,
         input.transfer?.id ?? null,
-        input.submittedSignature !== null,
-        input.submittedSignature,
-        message,
-        JSON.stringify(metadata),
+        attemptStatus,
+        attemptSignature !== null,
+        attemptSignature,
+        attemptError,
+        JSON.stringify(attemptMetadata),
         failedAt,
         input.attempt.id,
         input.organizationId,
-        input.projectId
+        input.projectId,
+        attemptStatus,
+        attemptStatus
       )
       .run();
     if (attemptRows === 0) {
