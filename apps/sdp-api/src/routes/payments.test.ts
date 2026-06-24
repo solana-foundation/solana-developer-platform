@@ -1969,6 +1969,11 @@ describe("Payments routes", () => {
     expect(new Date(collectBody.data.recurringPayment.nextCollectionDueAt).getTime()).toBe(
       new Date(dueAt).getTime() + 24 * 60 * 60 * 1000
     );
+    expect(confirmTransactionMock).not.toHaveBeenCalledWith(
+      expect.anything(),
+      submittedSignature,
+      expect.anything()
+    );
     const attempt = await getDb(env)
       .prepare("SELECT status, error FROM payment_subscription_collection_attempts WHERE id = ?")
       .bind(attemptId)

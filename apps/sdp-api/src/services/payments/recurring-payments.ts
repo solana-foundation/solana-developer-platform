@@ -617,7 +617,7 @@ async function recoverRecurringPaymentCollection(input: {
       ? existing
       : { ...existing, signature: recoveredSignature };
 
-  if (existing.status === "processing") {
+  if (existing.status === "processing" && transfer.status !== "confirmed") {
     try {
       await confirmSubscriptionSignature(
         input.env,
