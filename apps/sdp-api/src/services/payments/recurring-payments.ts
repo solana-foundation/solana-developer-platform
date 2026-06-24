@@ -321,6 +321,7 @@ async function finalizeRecurringPaymentCollection(input: {
     attemptId: input.attempt.id,
     organizationId: input.organizationId,
     projectId: input.projectId,
+    transferId: input.transfer.id,
     status: "confirmed",
     signature: input.signature,
     error: null,
