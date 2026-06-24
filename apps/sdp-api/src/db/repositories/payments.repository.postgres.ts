@@ -201,19 +201,19 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
         )
         .bind(
           input.status ?? existing.status,
-          input.signature ?? existing.signature,
-          input.serializedTx ?? existing.serialized_tx,
-          input.slot ?? existing.slot,
-          input.blockTime ?? existing.block_time,
-          input.fee ?? existing.fee,
-          input.amount ?? existing.amount,
-          input.fiatAmount ?? existing.fiat_amount,
+          input.signature !== undefined ? input.signature : existing.signature,
+          input.serializedTx !== undefined ? input.serializedTx : existing.serialized_tx,
+          input.slot !== undefined ? input.slot : existing.slot,
+          input.blockTime !== undefined ? input.blockTime : existing.block_time,
+          input.fee !== undefined ? input.fee : existing.fee,
+          input.amount !== undefined ? input.amount : existing.amount,
+          input.fiatAmount !== undefined ? input.fiatAmount : existing.fiat_amount,
           JSON.stringify(
             input.providerData
               ? { ...existing.provider_data, ...input.providerData }
               : existing.provider_data
           ),
-          input.error ?? existing.error,
+          input.error !== undefined ? input.error : existing.error,
           input.updatedAt,
           input.transferId
         )

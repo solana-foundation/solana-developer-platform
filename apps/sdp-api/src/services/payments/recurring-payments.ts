@@ -1483,7 +1483,7 @@ export async function collectRecurringPayment(input: {
     if (input.recurringPayment.status !== "active") {
       throw new AppError("CONFLICT", "Recurring payment must be active before collection");
     }
-    if (new Date(dueAt).getTime() > new Date(nowIso).getTime()) {
+    if (new Date(dueAt).getTime() > Date.now()) {
       throw badRequest("Recurring payment collection is not due yet");
     }
 
