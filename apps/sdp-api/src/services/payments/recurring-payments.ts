@@ -178,6 +178,23 @@ function hasAdvancedPastDueAt(nextDueAt: string | null, dueAt: string): boolean 
   return Number.isFinite(nextDueTime) && Number.isFinite(dueTime) && nextDueTime > dueTime;
 }
 
+async function resolveDestinationTokenAccount(input: {
+  env: Env;
+  destinationAddress: string;
+  token: string;
+}): Promise<Address> {
+  const rpc = solanaRpc.createRpc(input.env);
+  const destinationOwner = assertValidAddress(input.destinationAddress, "destinationAddress");
+  const mint = assertValidAddress(input.token, "token") as Address;
+  const tokenProgram = await resolveMintTokenProgram(rpc, mint);
+  const [receiverAta] = await findAssociatedTokenPda({
+    owner: destinationOwner,
+    tokenProgram,
+    mint,
+  });
+  return receiverAta;
+}
+
 function collectionRetryMetadata(error: unknown): Record<string, unknown> {
   return {
     error: activationErrorMessage(error),
@@ -554,6 +571,13 @@ async function recoverRecurringPaymentCollection(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
     })) ?? input.recurringPayment;
+  const destinationTokenAccount =
+    currentRecurringPayment.destination_token_account ??
+    (await resolveDestinationTokenAccount({
+      env: input.env,
+      destinationAddress: currentRecurringPayment.destination_address,
+      token: currentRecurringPayment.token,
+    }));
 
   return finalizeRecurringPaymentCollection({
     recurringRepo: input.recurringRepo,
@@ -566,7 +590,7 @@ async function recoverRecurringPaymentCollection(input: {
     attempt: recoveredAttempt,
     transfer,
     signature: recoveredSignature as Signature,
-    destinationTokenAccount: currentRecurringPayment.destination_token_account ?? undefined,
+    destinationTokenAccount,
   });
 }
 

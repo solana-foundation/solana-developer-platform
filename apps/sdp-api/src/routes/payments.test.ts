@@ -1247,6 +1247,11 @@ describe("Payments routes", () => {
         now
       )
       .run();
+    const [expectedDestinationAta] = await findAssociatedTokenPda({
+      owner: address(TEST_SOLANA_ADDRESSES.wallet2),
+      tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+      mint: address(DEVNET_USDC_MINT),
+    });
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
@@ -1257,11 +1262,12 @@ describe("Payments routes", () => {
     expect(collectRes.status).toBe(200);
     const collectBody = (await collectRes.json()) as {
       data: {
-        recurringPayment: { nextCollectionDueAt: string };
+        recurringPayment: { destinationTokenAccount: string; nextCollectionDueAt: string };
         collectionAttempt: { id: string; status: string; signature: string };
         transfer: { id: string; status: string; signature: string };
       };
     };
+    expect(collectBody.data.recurringPayment.destinationTokenAccount).toBe(expectedDestinationAta);
     expect(collectBody.data.collectionAttempt).toMatchObject({
       id: attemptId,
       status: "confirmed",
