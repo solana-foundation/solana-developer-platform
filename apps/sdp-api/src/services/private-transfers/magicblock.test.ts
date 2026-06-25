@@ -1,3 +1,4 @@
+import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -9,7 +10,7 @@ import { env } from "@/test/helpers/env";
 const TEST_MAGICBLOCK_API_BASE_URL = "https://payments.magicblock.test";
 const TEST_SOURCE = address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ");
 const TEST_DESTINATION = address("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU");
-const DEVNET_USDC_MINT = address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+const DEVNET_USDC_MINT = address(WELL_KNOWN_TOKENS.USDC.mints.devnet);
 
 let originalMagicBlockApiBaseUrl: string | undefined;
 let originalSolanaNetwork: "devnet" | "mainnet-beta" | undefined;
