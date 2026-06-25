@@ -341,6 +341,13 @@ export interface PaymentRequest {
   updatedAt: string;
 }
 
+export interface ListPaymentRequestsResponse {
+  paymentRequests: PaymentRequest[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface CreatePaymentSubscriptionPlanRequest {
   ownerWalletId: string;
   token: string;

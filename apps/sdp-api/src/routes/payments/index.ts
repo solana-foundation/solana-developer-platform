@@ -11,6 +11,7 @@ import {
   collectRecurringPayment,
   createOfframpQuote,
   createOnrampQuote,
+  createPaymentRequest,
   createRecurringPayment,
   createSubscription,
   createSubscriptionCollectionAttempt,
@@ -28,6 +29,7 @@ import {
   getWalletPolicy,
   listOfframpCurrencies,
   listOnrampCurrencies,
+  listPaymentRequests,
   listRecurringPayments,
   listSubscriptionCollectionAttempts,
   listSubscriptionPlans,
@@ -171,6 +173,12 @@ payments.get(
 );
 payments.post("/transfers", requirePermissions("payments:write", "wallets:read"), createTransfer);
 payments.get("/transfers", requirePermissions("payments:read"), listTransfers);
+payments.get("/requests", requirePermissions("payments:read"), listPaymentRequests);
+payments.post(
+  "/requests",
+  requirePermissions("payments:write", "wallets:read"),
+  createPaymentRequest
+);
 payments.get("/transfers/:transferId", requirePermissions("payments:read"), getTransfer);
 payments.get("/ramps/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
 payments.get("/ramps/offramp/currency", requirePermissions("payments:read"), listOfframpCurrencies);

@@ -151,10 +151,6 @@ interface PersistRampQuoteTransferInput {
   fiatAmount: string | null;
 }
 
-function paymentTransferId(): string {
-  return `xfr_${crypto.randomUUID()}`;
-}
-
 function requireRampTransferWallet(
   scope: ResolvedScope,
   walletIdOrAddress: string,
@@ -228,10 +224,8 @@ async function persistRampQuoteTransfer(
   }
 
   const apiKey = c.get("apiKey");
-  const now = new Date().toISOString();
   const isOnramp = input.direction === "onramp";
   const created = await repository.createTransfer({
-    id: paymentTransferId(),
     organizationId: input.scope.auth.organizationId,
     projectId: input.projectId,
     walletId: input.wallet.walletId,
@@ -251,9 +245,9 @@ async function persistRampQuoteTransfer(
     fiatAmount: input.fiatAmount,
     providerData: {},
     serializedTx: null,
+    signature: null,
+    slot: null,
     initiatedByKeyId: apiKey ? apiKey.id : null,
-    createdAt: now,
-    updatedAt: now,
   });
 
   if (!created) {

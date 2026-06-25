@@ -10,12 +10,6 @@ import { createPostgresPaymentRequestsRepository } from "./payment-requests.repo
 const TEST_PROJECT_ID = "prj_preq_repo_test";
 const OTHER_PROJECT_ID = "prj_preq_repo_test_other";
 
-let referenceCounter = 0;
-function nextReference(): string {
-  referenceCounter += 1;
-  return `ref_${referenceCounter}`;
-}
-
 describe("PaymentRequestsRepository (postgres)", () => {
   let repo: PaymentRequestsRepository;
 
@@ -103,7 +97,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       destinationAddress: "OurWallet",
       token: "USDC",
       amount: "25.00",
-      reference: nextReference(),
       expiresAt: "2026-07-01T00:00:00.000Z",
       createdBy: TEST_USER.id,
       ...overrides,

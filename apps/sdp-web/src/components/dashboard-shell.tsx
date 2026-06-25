@@ -53,6 +53,13 @@ type NavSection = {
   items: NavItem[];
 };
 
+const PAYMENTS_ACTIONS: readonly SubNavItem[] = [
+  { label: "Counterparty", href: "/dashboard/payments/counterparty" },
+  { label: "Pay", href: "/dashboard/payments/pay" },
+  { label: "Deposit", href: "/dashboard/payments/deposit" },
+  { label: "Requests", href: "/dashboard/payments/requests" },
+];
+
 function getNavSections(): NavSection[] {
   return [
     {
@@ -70,11 +77,7 @@ function getNavSections(): NavSection[] {
           label: "Payments",
           href: "/dashboard/payments",
           icon: ArrowLeftRightIcon,
-          children: [
-            { label: "Counterparty", href: "/dashboard/payments/counterparty" },
-            { label: "Pay", href: "/dashboard/payments/pay" },
-            { label: "Deposit", href: "/dashboard/payments/deposit" },
-          ],
+          children: [...PAYMENTS_ACTIONS],
         },
         { label: "API keys", href: "/dashboard/api-keys", icon: KeyRoundIcon },
       ],
@@ -220,22 +223,32 @@ function DashboardTopBar({
   );
 }
 
+function actionPageConfig(config: {
+  centeredTitle: string;
+  backHref: string;
+  backLabel: string;
+  contentWidthClass: string;
+}): DashboardPageConfig {
+  return {
+    title: "",
+    hideTitle: true,
+    showHeaderNavRow: true,
+    centeredTitle: config.centeredTitle,
+    topBarLeadingContent: (
+      <HeaderBackAction href={config.backHref} label={config.backLabel} compactOnMobile />
+    ),
+    contentWidthClass: config.contentWidthClass,
+  };
+}
+
 function getCounterpartyRoutePageConfig(pathname: string): DashboardPageConfig | null {
   if (pathname === "/dashboard/payments/counterparty/create") {
-    return {
-      title: "",
-      hideTitle: true,
-      showHeaderNavRow: true,
+    return actionPageConfig({
       centeredTitle: "New Counterparty",
-      topBarLeadingContent: (
-        <HeaderBackAction
-          href="/dashboard/payments/counterparty"
-          label="Back to Counterparty"
-          compactOnMobile
-        />
-      ),
+      backHref: "/dashboard/payments/counterparty",
+      backLabel: "Back to Counterparty",
       contentWidthClass: "max-w-xl",
-    };
+    });
   }
   if (pathname.startsWith("/dashboard/payments/counterparty/")) {
     return {
@@ -354,25 +367,27 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
       contentWidthClass: "max-w-none",
     };
   }
-  if (pathname.startsWith("/dashboard/payments/")) {
-    const actionTitle = pathname.startsWith("/dashboard/payments/deposit")
-      ? "Deposit"
-      : pathname.startsWith("/dashboard/payments/pay")
-        ? "Pay"
-        : pathname.endsWith("/receive")
-          ? "Receive"
-          : "Send";
-
+  if (pathname === "/dashboard/payments/requests") {
     return {
-      title: "",
-      hideTitle: true,
-      showHeaderNavRow: true,
-      centeredTitle: actionTitle,
-      topBarLeadingContent: (
-        <HeaderBackAction href="/dashboard/payments" label="Back to payments" compactOnMobile />
-      ),
+      title: "Requests",
+      headerNav: <CounterpartyHeaderTabs />,
       contentWidthClass: "max-w-none",
     };
+  }
+  if (pathname.startsWith("/dashboard/payments/")) {
+    const action = PAYMENTS_ACTIONS.find((item) => pathname.startsWith(item.href));
+    const centeredTitle = action
+      ? action.label
+      : pathname.endsWith("/receive")
+        ? "Receive"
+        : "Send";
+
+    return actionPageConfig({
+      centeredTitle,
+      backHref: "/dashboard/payments",
+      backLabel: "Back to payments",
+      contentWidthClass: "max-w-none",
+    });
   }
   if (pathname.startsWith("/dashboard/members")) {
     return { title: "Members" };
@@ -638,6 +653,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     pathname === "/dashboard/payments/counterparty" ||
     (pathname.startsWith("/dashboard/payments/counterparty/") &&
       pathname !== "/dashboard/payments/counterparty/create") ||
+    pathname === "/dashboard/payments/requests" ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;

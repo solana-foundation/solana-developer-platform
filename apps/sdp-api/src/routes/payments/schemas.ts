@@ -69,7 +69,7 @@ export const updateWalletPolicySchema = z.object({
     .optional(),
 });
 
-const paymentAmountSchema = z
+export const paymentAmountSchema = z
   .string()
   .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
   // Avoid adding a second error when the decimal-format check already failed.

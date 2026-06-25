@@ -1,13 +1,12 @@
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import {
+  type CustodyWalletTokenBalance,
+  WELL_KNOWN_TOKEN_BY_MINT,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types";
 import { getDb } from "@/db";
 import { formatDecimalAmount } from "@/lib/amount";
 import { withHeliusApiKey } from "@/services/rpc-relay.service";
 import type { Env } from "@/types/env";
-
-// biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
-const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-// biome-ignore lint/security/noSecrets: Mainnet USDC mint address constant, not a secret.
-const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 interface TrackedAssetDefinition {
   decimals: number;
@@ -66,10 +65,15 @@ interface HeliusGetAssetBatchResponse {
 
 async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetDefinition>> {
   const network = env.SOLANA_NETWORK ?? "devnet";
-  const trackedAssets: TrackedAssetDefinition[] =
-    network === "mainnet-beta"
-      ? [{ token: "USDC", mint: MAINNET_USDC_MINT, decimals: 6, isUsdStable: true }]
-      : [{ token: "USDC", mint: DEVNET_USDC_MINT, decimals: 6, isUsdStable: true }];
+  const usdc = WELL_KNOWN_TOKENS.USDC;
+  const trackedAssets: TrackedAssetDefinition[] = [
+    {
+      token: usdc.symbol,
+      mint: usdc.mints[network],
+      decimals: usdc.decimals,
+      isUsdStable: usdc.isUsdStable,
+    },
+  ];
 
   const trackedAssetsByMint = new Map(trackedAssets.map((asset) => [asset.mint, asset]));
 
@@ -123,17 +127,17 @@ function resolveKnownUsdPrice(
   balance: Pick<CustodyWalletTokenBalance, "mint" | "token">,
   trackedAssets: Map<string, TrackedAssetDefinition>
 ): number | null {
-  const trackedAsset = trackedAssets.get(balance.mint.trim());
+  const normalizedMint = balance.mint.trim();
+  const trackedAsset = trackedAssets.get(normalizedMint);
   if (trackedAsset?.isUsdStable) {
     return 1;
   }
 
   const normalizedToken = balance.token.trim().toUpperCase();
-  if (
-    normalizedToken === "USDC" ||
-    balance.mint === DEVNET_USDC_MINT ||
-    balance.mint === MAINNET_USDC_MINT
-  ) {
+  const wellKnown =
+    WELL_KNOWN_TOKEN_BY_MINT.get(normalizedMint) ??
+    Object.values(WELL_KNOWN_TOKENS).find((token) => token.symbol === normalizedToken);
+  if (wellKnown?.isUsdStable) {
     return 1;
   }
 
