@@ -1,5 +1,10 @@
 import { createHmac } from "node:crypto";
-import type { CachedApiKey, PolicyDefaultAction, PolicyRule } from "@sdp/types";
+import {
+  type CachedApiKey,
+  type PolicyDefaultAction,
+  type PolicyRule,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import {
   address,
@@ -103,7 +108,7 @@ const TEST_BVNK_API_BASE_URL = "https://api.sandbox.bvnk.test";
 const TEST_MAGICBLOCK_API_BASE_URL = "https://payments.magicblock.test";
 const TEST_MAGICBLOCK_AUTH_TOKEN = "magicblock_auth_token";
 const TEST_MAGICBLOCK_SPONSOR_FEE_PAYER = "CrankS2fXgMGvQJ3VBrZmRfGrfogDY6pq5YcgkPEpSNf";
-const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet;
 const MOONPAY_PARAM_BASE_CURRENCY_AMOUNT = "baseCurrencyAmount";
 const MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID = "externalCustomerId";
 const MOONPAY_PARAM_QUOTE_CURRENCY_CODE = "quoteCurrencyCode";
@@ -6425,7 +6430,7 @@ describe("Payments routes", () => {
                 preTokenBalances: [
                   {
                     accountIndex: 0,
-                    mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                    mint: DEVNET_USDC_MINT,
                     owner: TEST_SOLANA_ADDRESSES.wallet2,
                     uiTokenAmount: {
                       amount: "10000000",
@@ -6435,7 +6440,7 @@ describe("Payments routes", () => {
                   },
                   {
                     accountIndex: 1,
-                    mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                    mint: DEVNET_USDC_MINT,
                     owner: TEST_SOLANA_ADDRESSES.wallet1,
                     uiTokenAmount: {
                       amount: "0",
@@ -6447,7 +6452,7 @@ describe("Payments routes", () => {
                 postTokenBalances: [
                   {
                     accountIndex: 0,
-                    mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                    mint: DEVNET_USDC_MINT,
                     owner: TEST_SOLANA_ADDRESSES.wallet2,
                     uiTokenAmount: {
                       amount: "0",
@@ -6457,7 +6462,7 @@ describe("Payments routes", () => {
                   },
                   {
                     accountIndex: 1,
-                    mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                    mint: DEVNET_USDC_MINT,
                     owner: TEST_SOLANA_ADDRESSES.wallet1,
                     uiTokenAmount: {
                       amount: "10000000",
@@ -6481,7 +6486,7 @@ describe("Payments routes", () => {
                         info: {
                           source: "SrcTokenAcct111111111111111111111111111111",
                           destination: "DstTokenAcct111111111111111111111111111111",
-                          mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                          mint: DEVNET_USDC_MINT,
                           tokenAmount: {
                             amount: "10000000",
                             decimals: 6,

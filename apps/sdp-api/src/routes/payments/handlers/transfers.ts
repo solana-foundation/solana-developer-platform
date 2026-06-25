@@ -1,4 +1,4 @@
-import type { Permission, PrivateTransferRequest } from "@sdp/types";
+import { type Permission, type PrivateTransferRequest, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import {
   addSignersToTransactionMessage,
@@ -89,10 +89,6 @@ import {
 } from "../token-accounts";
 import { type ResolvedScope, resolveScope, resolveWallet } from "../wallets";
 
-// biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
-const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-// biome-ignore lint/security/noSecrets: Mainnet USDC mint address constant, not a secret.
-const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SIGNATURE_HISTORY_LOOKUP_CONCURRENCY = 5;
 
 interface ParsedInstructionPayload {
@@ -1093,8 +1089,9 @@ function resolveObservedTokenSymbol(mint: string, tokenSymbolsByMint: Map<string
     return known;
   }
 
-  if (normalizedMint === DEVNET_USDC_MINT || normalizedMint === MAINNET_USDC_MINT) {
-    return "USDC";
+  const wellKnownSymbol = WELL_KNOWN_TOKEN_BY_MINT.get(normalizedMint)?.symbol;
+  if (wellKnownSymbol) {
+    return wellKnownSymbol;
   }
 
   return normalizedMint;
@@ -1302,10 +1299,7 @@ async function resolveWalletTokenAccountAddresses(
 }
 
 async function resolveObservedTokenSymbols(env: Env): Promise<Map<string, string>> {
-  const symbolsByMint = new Map<string, string>([
-    [DEVNET_USDC_MINT, "USDC"],
-    [MAINNET_USDC_MINT, "USDC"],
-  ]);
+  const symbolsByMint = new Map<string, string>();
 
   try {
     const result = await getDb(env)
