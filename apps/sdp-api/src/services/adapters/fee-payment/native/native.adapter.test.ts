@@ -78,10 +78,7 @@ async function buildSourceSignedTransfer(feePayer: Address): Promise<{
 describe("NativeAdapter", () => {
   // The Workers test pool shares one module registry across files (isolate: false),
   // so a top-level `vi.mock("@/services/solana/rpc")` doesn't reliably intercept once
-  // another test file has already imported the real module. Spy on the live namespace
-  // instead — the adapter calls these through the same `solanaRpc` object, so the
-  // stubs always apply regardless of file load order. Restore afterwards so the spies
-  // don't leak into other test files sharing the isolate.
+  // another test file has already imported the real module.
   beforeEach(() => {
     vi.spyOn(solanaRpc, "createRpc").mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
     vi.spyOn(solanaRpc, "sendTransaction").mockResolvedValue("1".repeat(64) as Signature);
@@ -116,10 +113,8 @@ describe("NativeAdapter", () => {
     const signedBytes = await adapter.signAsFeePayer(txBytes);
     const after = decoder.decode(signedBytes);
 
-    // Fee payer slot is now filled, and the transaction is fully signed.
     expect(after.signatures[feePayer.address]).not.toBeNull();
     expect(() => getSignatureFromTransaction(after)).not.toThrow();
-    // Source signature is untouched.
     expect(after.signatures[source]).toEqual(before.signatures[source]);
   });
 
@@ -136,7 +131,6 @@ describe("NativeAdapter", () => {
     expect(signature).toBe(expectedSignature);
     expect(solanaRpc.sendTransaction).toHaveBeenCalledTimes(1);
 
-    // The bytes submitted to RPC carry the fee payer signature.
     const submitted = vi.mocked(solanaRpc.sendTransaction).mock.calls[0]?.[1] as Uint8Array;
     expect(decoder.decode(submitted).signatures[feePayer.address]).not.toBeNull();
   });
