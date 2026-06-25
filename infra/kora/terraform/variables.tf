@@ -43,6 +43,18 @@ variable "bootstrap_image" {
   description = "Initial apply only; real image+env are deployed by the pipeline (ignored thereafter)."
 }
 
+variable "kora_image" {
+  type        = string
+  default     = "us-central1-docker.pkg.dev/solana-developer-platform/kora-devnet/kora:v0.3.0"
+  description = <<-EOT
+    Pinned Kora image in this project's Artifact Registry (Cloud Run cannot pull ghcr.io directly).
+    The deploy pipeline mirrors ghcr.io/solana-foundation/kora:<tag> into the kora-<env> AR repo and
+    deploys that tag. This is the bootstrap value for `terraform apply`; the live image is owned by the
+    pipeline thereafter (see ignore_changes in cloud_run.tf). Bump the deployed tag via
+    .github/kora-image-tag (see deploy-kora.yml), not here.
+  EOT
+}
+
 variable "min_scale" {
   type    = number
   default = 1

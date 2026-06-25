@@ -1,9 +1,12 @@
 import type {
   ListPaymentRecurringPaymentsResponse,
   PaymentRecurringPayment,
+  PaymentRecurringPaymentCollectionResponse,
   PaymentRecurringPaymentResponse,
+  PaymentSubscriptionCollectionAttempt,
 } from "@sdp/types";
 import { z } from "zod";
+import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
@@ -15,11 +18,14 @@ import {
 } from "@/services/api-key-scope.service";
 import {
   activateRecurringPayment as activateRecurringPaymentRecord,
+  collectRecurringPayment as collectRecurringPaymentRecord,
   createRecurringPayment as createRecurringPaymentRecord,
 } from "@/services/payments/recurring-payments";
 import { type AppContext, getPaymentRecurringPaymentsRepository } from "../context";
+import { mapTransferRow } from "../mappers";
 import {
   activateRecurringPaymentSchema,
+  collectRecurringPaymentSchema,
   createRecurringPaymentSchema,
   listRecurringPaymentsQuerySchema,
   recurringPaymentIdParamsSchema,
@@ -53,6 +59,28 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
     status: row.status,
     metadataUri: row.metadata_uri,
     createdBy: row.created_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapCollectionAttempt(
+  row: PaymentSubscriptionCollectionAttemptRow
+): PaymentSubscriptionCollectionAttempt {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    subscriptionId: row.subscription_id,
+    transferId: row.transfer_id,
+    token: row.token,
+    amount: row.amount,
+    dueAt: row.due_at,
+    attemptedAt: row.attempted_at,
+    status: row.status,
+    signature: row.signature,
+    error: row.error,
+    metadata: row.metadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -146,6 +174,54 @@ export const activateRecurringPayment = async (c: AppContext) => {
   });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(activated),
+  };
+
+  return success(c, response);
+};
+
+export const collectRecurringPayment = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
+
+  if (!params.success) {
+    throw badRequestParams();
+  }
+
+  const body = await readOptionalJsonBody(c);
+  const parsed = collectRecurringPaymentSchema.safeParse(body);
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
+  }
+
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:write"]);
+  const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
+    recurringPaymentId: params.data.id,
+    organizationId: auth.organizationId,
+    projectId,
+    sourceWalletIds: allowedWalletIds ?? undefined,
+  });
+
+  if (!recurringPayment) {
+    throw new AppError("NOT_FOUND", "Recurring payment not found");
+  }
+
+  const scope = await resolveScope(c);
+  const sourceWallet = resolveWallet(scope.wallets, recurringPayment.source_wallet_id);
+  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
+
+  const collected = await collectRecurringPaymentRecord({
+    env: c.env,
+    organizationId: auth.organizationId,
+    projectId,
+    sourceWallet,
+    recurringPayment,
+    initiatedByKeyId: auth.authType === "api_key" ? auth.id : null,
+  });
+  const response: PaymentRecurringPaymentCollectionResponse = {
+    recurringPayment: mapRecurringPayment(collected.recurringPayment),
+    collectionAttempt: mapCollectionAttempt(collected.collectionAttempt),
+    transfer: mapTransferRow(collected.transfer),
   };
 
   return success(c, response);

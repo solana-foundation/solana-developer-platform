@@ -1,4 +1,4 @@
-import type { Permission } from "@sdp/types";
+import { type Permission, SOL_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { isDecimalString } from "@/lib/amount";
 import type { ApiKeyContext } from "@/lib/auth";
@@ -7,8 +7,7 @@ import { assertValidAddress } from "@/lib/solana";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 
-// biome-ignore lint/security/noSecrets: Solana native SOL mint address constant, not a secret.
-export const SOL_MINT = "So11111111111111111111111111111111111111112";
+export { SOL_MINT };
 
 export interface OutboundPaymentOperation {
   sourceWallet: CustodyWallet;

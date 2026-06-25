@@ -60,8 +60,11 @@ export interface PaymentTransferRow {
   updated_at: string;
 }
 
+export function generatePaymentTransferId(): string {
+  return `xfr_${crypto.randomUUID()}`;
+}
+
 export interface CreatePaymentTransferInput {
-  id: string;
   organizationId: string;
   projectId: string | null;
   walletId: string;
@@ -81,13 +84,15 @@ export interface CreatePaymentTransferInput {
   fiatAmount: string | null;
   providerData: Record<string, unknown>;
   serializedTx: string | null;
+  signature: string | null;
+  slot: number | null;
   initiatedByKeyId: string | null;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface UpdatePaymentTransferInput {
   transferId: string;
+  organizationId?: string;
+  projectId?: string | null;
   status?: PaymentTransferStatus;
   signature?: string | null;
   serializedTx?: string | null;

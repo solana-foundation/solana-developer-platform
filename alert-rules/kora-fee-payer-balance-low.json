@@ -11,9 +11,15 @@
     {
       "refId": "A",
       "datasourceUid": "grafanacloud-prom",
-      "relativeTimeRange": { "from": 600, "to": 0 },
+      "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+      },
       "model": {
-        "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "grafanacloud-prom"
+        },
         "expr": "signer_balance_lamports / 1e9",
         "instant": true,
         "refId": "A"
@@ -22,37 +28,63 @@
     {
       "refId": "B",
       "datasourceUid": "__expr__",
-      "relativeTimeRange": { "from": 0, "to": 0 },
+      "relativeTimeRange": {
+        "from": 0,
+        "to": 0
+      },
       "model": {
         "type": "reduce",
         "refId": "B",
         "expression": "A",
         "reducer": "last",
-        "datasource": { "type": "__expr__", "uid": "__expr__" }
+        "datasource": {
+          "type": "__expr__",
+          "uid": "__expr__"
+        }
       }
     },
     {
       "refId": "C",
       "datasourceUid": "__expr__",
-      "relativeTimeRange": { "from": 0, "to": 0 },
+      "relativeTimeRange": {
+        "from": 0,
+        "to": 0
+      },
       "model": {
         "type": "threshold",
         "refId": "C",
         "expression": "B",
-        "datasource": { "type": "__expr__", "uid": "__expr__" },
+        "datasource": {
+          "type": "__expr__",
+          "uid": "__expr__"
+        },
         "conditions": [
           {
-            "evaluator": { "type": "lt", "params": [0.5] },
-            "operator": { "type": "and" },
-            "query": { "params": ["B"] },
-            "reducer": { "type": "last", "params": [] },
+            "evaluator": {
+              "type": "lt",
+              "params": [0.5]
+            },
+            "operator": {
+              "type": "and"
+            },
+            "query": {
+              "params": ["B"]
+            },
+            "reducer": {
+              "type": "last",
+              "params": []
+            },
             "type": "query"
           }
         ]
       }
     }
   ],
-  "labels": { "service": "kora", "severity": "critical", "pagerduty": "true", "slack": "true" },
+  "labels": {
+    "severity": "critical",
+    "pagerduty": "true",
+    "slack": "true"
+  },
   "annotations": {
     "summary": "Kora fee-payer SOL balance below 0.5",
     "description": "max(signer_balance_lamports)/1e9 < 0.5 SOL. The paymaster will stop sponsoring transactions when it runs out — top up the fee-payer.",

@@ -727,6 +727,14 @@ export const paymentRecurringPaymentResponseSchema = z
   })
   .openapi({ description: "Recurring payment response payload." });
 
+export const paymentRecurringPaymentCollectionResponseSchema = z
+  .object({
+    recurringPayment: paymentRecurringPaymentSchema,
+    collectionAttempt: z.lazy(() => paymentSubscriptionCollectionAttemptSchema),
+    transfer: z.lazy(() => transferSchema),
+  })
+  .openapi({ description: "Recurring payment collection response payload." });
+
 export const paymentRecurringPaymentListResponseSchema = z
   .object({
     recurringPayments: z.array(paymentRecurringPaymentSchema),

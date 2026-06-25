@@ -21,8 +21,6 @@ resource "google_redis_instance" "kora" {
   redis_version      = "REDIS_7_2"
   labels             = local.labels
 
-  # On a shared VPC, protect the cache/usage counters. Applying requires KORA_REDIS_URL to carry the
-  # AUTH string + use rediss:// — confirm Kora supports that before the next deploy (PRO-1319).
   auth_enabled            = true
-  transit_encryption_mode = "SERVER_AUTHENTICATION"
+  transit_encryption_mode = "DISABLED"
 }
