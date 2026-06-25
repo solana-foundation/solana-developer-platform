@@ -20,3 +20,4 @@ export * from "./provider-access";
 export * from "./sessions";
 export * from "./site";
 export * from "./tokens";
+export * from "./well-known-tokens";

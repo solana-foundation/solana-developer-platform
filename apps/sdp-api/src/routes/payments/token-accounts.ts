@@ -1,30 +1,19 @@
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { formatDecimalAmount } from "@/lib/amount";
 import { badRequest } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
-import { SOL_MINT } from "@/services/payment-operation.service";
 import { type createRpc, getAccountInfo } from "@/services/solana/rpc";
 
 export { SOL_MINT } from "@/services/payment-operation.service";
 
-// biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
-const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-// biome-ignore lint/security/noSecrets: Mainnet USDC mint address constant, not a secret.
-const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-// biome-ignore lint/security/noSecrets: Solana SPL Token program ID, not a secret.
-const SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" as Address;
-// biome-ignore lint/security/noSecrets: Solana Token-2022 program ID, not a secret.
-const SPL_TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" as Address;
+const SPL_TOKEN_PROGRAM_ID = SPL_TOKEN_PROGRAMS["spl-token"] as Address;
+const SPL_TOKEN_2022_PROGRAM_ID = SPL_TOKEN_PROGRAMS["token-2022"] as Address;
 const SPL_TOKEN_PROGRAM_IDS = [SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID] as const;
-const KNOWN_TOKEN_LABELS_BY_MINT = new Map<string, string>([
-  [SOL_MINT, "SOL"],
-  [DEVNET_USDC_MINT, "USDC"],
-  [MAINNET_USDC_MINT, "USDC"],
-]);
 
 function resolveTokenLabel(mint: string): string {
-  return KNOWN_TOKEN_LABELS_BY_MINT.get(mint) ?? mint;
+  return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? mint;
 }
 
 type JsonParsedTokenAccountEntry = {
