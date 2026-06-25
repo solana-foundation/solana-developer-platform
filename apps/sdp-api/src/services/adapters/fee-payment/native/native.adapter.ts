@@ -18,6 +18,7 @@ import {
   partiallySignTransaction,
   type Signature,
 } from "@solana/kit";
+import { isTransientRpcError } from "@/lib/rpc";
 import type { FeePaymentErrorCode, FeePaymentPort } from "@/services/ports";
 import { FeePaymentError } from "@/services/ports";
 import * as solanaRpc from "@/services/solana/rpc";
@@ -76,7 +77,7 @@ export class NativeAdapter implements FeePaymentPort {
   async signAndSend(transaction: Uint8Array): Promise<Signature> {
     const signedTransaction = await this.signTransactionAsFeePayer(transaction);
     const signedBytes = new Uint8Array(getTransactionEncoder().encode(signedTransaction));
-    return this.submitWithRetry(solanaRpc.createRpc(this.env), signedBytes, 0);
+    return this.submitWithRetry(solanaRpc.createRpc(this.env), signedBytes);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -107,12 +108,12 @@ export class NativeAdapter implements FeePaymentPort {
   private async submitWithRetry(
     rpc: ReturnType<typeof solanaRpc.createRpc>,
     signedBytes: Uint8Array,
-    attempt: number
+    attempt: number = 1
   ): Promise<Signature> {
     try {
       return await solanaRpc.sendTransaction(rpc, signedBytes);
     } catch (error) {
-      if (attempt >= MAX_SUBMIT_RETRIES || !isRetryableSubmitError(error)) {
+      if (attempt >= MAX_SUBMIT_RETRIES || !isTransientRpcError(error)) {
         throw wrapError(error, "Failed to submit transaction", "SUBMISSION_FAILED");
       }
 
@@ -164,19 +165,6 @@ function wrapError(error: unknown, message: string, code: FeePaymentErrorCode): 
     `${message}: ${error instanceof Error ? error.message : "Unknown error"}`,
     code,
     error instanceof Error ? error : undefined
-  );
-}
-
-function isRetryableSubmitError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("502") ||
-    message.includes("503") ||
-    message.includes("bad gateway") ||
-    message.includes("service unavailable") ||
-    message.includes("fetch failed") ||
-    message.includes("timeout")
   );
 }
 
