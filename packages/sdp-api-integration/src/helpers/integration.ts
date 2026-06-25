@@ -220,12 +220,45 @@ export async function cleanupIntegrationSuite() {
   await clearTestDatabase(env);
 }
 
-export function request(url: string, init?: RequestInit) {
-  return app.request(url, init, env);
+type IntegrationRequestInit = RequestInit & {
+  timeoutMs?: number;
+};
+
+export async function request(url: string, init: IntegrationRequestInit = {}) {
+  const { timeoutMs, ...requestInit } = init;
+
+  if (!timeoutMs || timeoutMs <= 0) {
+    return app.request(url, requestInit, env);
+  }
+
+  const controller = new AbortController();
+  const operation = app.request(url, { ...requestInit, signal: controller.signal }, env);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  void operation.catch(() => undefined);
+
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<Response>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          controller.abort();
+          reject(
+            new Error(
+              `Timed out waiting for ${requestInit.method ?? "GET"} ${url} after ${timeoutMs}ms`
+            )
+          );
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 export function requestWithApiKey(apiKey: string = TEST_PROJECT_API_KEY.raw) {
-  return (url: string, init: RequestInit = {}) => {
+  return (url: string, init: IntegrationRequestInit = {}) => {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${apiKey}`);
     return request(url, { ...init, headers });

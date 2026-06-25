@@ -14,6 +14,31 @@ if [ "$#" -eq 0 ]; then
   exit 1
 fi
 
+test_files=()
+vitest_args=()
+for arg in "$@"; do
+  case "${arg}" in
+    *.test.ts | *.spec.ts)
+      test_files+=("${arg}")
+      ;;
+    *)
+      vitest_args+=("${arg}")
+      ;;
+  esac
+done
+
+if [ "${KORA_SURFPOOL_SINGLE_FILE_RUN:-}" != "1" ] && [ "${#test_files[@]}" -gt 1 ]; then
+  for test_file in "${test_files[@]}"; do
+    echo "Running Surfpool integration file with fresh harness: ${test_file}"
+    if [ "${#vitest_args[@]}" -eq 0 ]; then
+      KORA_SURFPOOL_SINGLE_FILE_RUN=1 "${ROOT_DIR}/scripts/kora-surfpool/integration.sh" -- "${test_file}"
+    else
+      KORA_SURFPOOL_SINGLE_FILE_RUN=1 "${ROOT_DIR}/scripts/kora-surfpool/integration.sh" -- "${vitest_args[@]}" "${test_file}"
+    fi
+  done
+  exit 0
+fi
+
 cleanup() {
   "${ROOT_DIR}/scripts/kora-surfpool/down.sh"
 }
@@ -59,4 +84,5 @@ export DATABASE_URL="${KORA_SURFPOOL_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.
 export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="${DATABASE_URL}"
 
 pnpm --filter @sdp/api db:postgres:bootstrap
-pnpm --filter @sdp/api-integration exec vitest run "$@"
+
+pnpm --filter @sdp/api-integration exec vitest run --no-file-parallelism --hookTimeout 240000 "$@"

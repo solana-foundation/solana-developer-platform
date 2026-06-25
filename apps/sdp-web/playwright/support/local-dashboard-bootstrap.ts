@@ -422,7 +422,6 @@ async function getLatestBlockhash(api: LocalApiClient): Promise<{
   const response = await api.post<RpcRelayResponse>("/v1/rpc/proxy", {
     jsonrpc: "2.0",
     id: "wallet-latest-blockhash",
-    // biome-ignore lint/security/noSecrets: Solana RPC method name, not a credential.
     method: "getLatestBlockhash",
     params: [{ commitment: "confirmed" }],
   });
@@ -717,6 +716,7 @@ export async function bootstrapLocalWalletFixtures(input: {
   identity: ClerkTestIdentity;
   bearerToken: BearerTokenProvider;
   provider?: PlaywrightCustodyProvider;
+  walletLabel?: string;
   walletCount?: number;
   fundSourceWallet?: boolean;
   fundSourceAmountSol?: number;
@@ -743,12 +743,9 @@ export async function bootstrapLocalWalletFixtures(input: {
   const projectId = await resolvePlaywrightProjectId(runtimeEnv.localApiBaseUrl, bearerToken);
   const api = createLocalApiClient(runtimeEnv.localApiBaseUrl, bearerToken, projectId);
 
-  const initialized = await api.post<InitializeWalletResponse>("/v1/wallets/initialize", {
-    provider,
-    walletLabel: "Treasury",
-  });
-
-  const createdWalletIds = [initialized.walletId];
+  const createdWalletIds = [
+    await initializeOrCreateWallet(api, provider, input.walletLabel ?? "Treasury"),
+  ];
 
   for (let index = 1; index < walletCount; index += 1) {
     const created = await api.post<CreateWalletResponse>("/v1/wallets", {
@@ -787,6 +784,35 @@ export async function bootstrapLocalWalletFixtures(input: {
     },
     wallets,
   };
+}
+
+async function initializeOrCreateWallet(
+  api: LocalApiClient,
+  provider: PlaywrightCustodyProvider,
+  label: string
+): Promise<string> {
+  try {
+    const initialized = await api.post<InitializeWalletResponse>("/v1/wallets/initialize", {
+      provider,
+      walletLabel: label,
+    });
+    return initialized.walletId;
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !error.message.includes("Signing already initialized for org")
+    ) {
+      throw error;
+    }
+  }
+
+  const created = await api.post<CreateWalletResponse>("/v1/wallets", {
+    provider,
+    label,
+    purpose: "root",
+    setDefault: true,
+  });
+  return created.wallet.walletId;
 }
 
 export async function createExternalSolanaAddress(): Promise<string> {

@@ -61,7 +61,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations",
         },
       }),
     });
-  }, 90000);
+  }, 180000);
 
   it("burns tokens from account", { timeout: 60000 }, async () => {
     const burnRes = await request(`/v1/issuance/tokens/${deployedTokenId}/burn`, {

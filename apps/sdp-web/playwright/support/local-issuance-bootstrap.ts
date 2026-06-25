@@ -28,6 +28,14 @@ interface BootstrapOptions {
   tier?: OrganizationTier;
 }
 
+export interface PaymentDashboardFixtures {
+  projectId: string;
+  wallets: {
+    treasury: PlaywrightWalletFixture;
+  };
+  token: IssuanceFixtureToken;
+}
+
 interface TokenResponse {
   token: Token;
 }
@@ -231,6 +239,46 @@ export async function bootstrapLocalIssuanceFixtures({
 
   writeIssuanceFixtures(fixtures);
   return fixtures;
+}
+
+export async function bootstrapLocalPaymentFixtures({
+  identity,
+  bearerToken,
+  tier,
+}: BootstrapOptions): Promise<PaymentDashboardFixtures> {
+  const custodyProvider = getPlaywrightCustodyProvider();
+  const walletBootstrap = await bootstrapLocalWalletFixtures({
+    identity,
+    bearerToken,
+    provider: custodyProvider,
+    walletCount: 1,
+    tier,
+    fundSourceWallet: true,
+    fundSourceAmountSol: 0.05,
+  });
+  const projectId = await resolvePlaywrightProjectId(getBootstrapApiBaseUrl(), bearerToken);
+  const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken, projectId);
+  const treasuryWallet = requireWallet(
+    walletBootstrap.wallets,
+    walletBootstrap.wallets[0]?.walletId,
+    0
+  );
+  const openDraft = await createFixtureToken(api, {
+    name: "E2E Open Stable",
+    symbol: "E2EOPN",
+    uri: "https://example.com/metadata/e2e-open-stable.json",
+    requiresAllowlist: false,
+    signingWalletId: treasuryWallet.walletId,
+  });
+  const openToken = await deployFixtureToken(api, openDraft.id, treasuryWallet.walletId);
+
+  return {
+    projectId,
+    wallets: {
+      treasury: treasuryWallet,
+    },
+    token: toFixtureToken(openToken),
+  };
 }
 
 export { getBootstrapApiBaseUrl, getBootstrapClerkJwtTemplate, seedLocalClerkOrganizationMapping };
