@@ -151,7 +151,6 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
         </div>
 
         <div className="flex items-center justify-center gap-1.5 border-t border-border-light bg-[rgba(28,28,29,0.015)] py-3.5">
-          <span className="size-1.5 rounded-full bg-gradient-to-r from-[#9945ff] to-[#14f195]" />
           <span className="text-xs text-text-low">Secured by Solana Pay</span>
         </div>
       </div>
