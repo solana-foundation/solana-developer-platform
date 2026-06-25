@@ -2,7 +2,7 @@ import { encodeURL } from "@solana/pay";
 import { Hono } from "hono";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { notFound } from "@/lib/errors";
-import { assertValidAddress } from "@/lib/solana";
+import { assertValidAddress, getSolanaConfig } from "@/lib/solana";
 import type { Env } from "@/types/env";
 import { resolveTokenLabel, SOL_MINT } from "./payments/token-accounts";
 
@@ -47,6 +47,7 @@ pay.get("/:token", async (c) => {
     reference: request.reference,
     status,
     expiresAt: request.expires_at,
+    network: getSolanaConfig(c.env).network,
     solanaPayUrl,
   });
 });
