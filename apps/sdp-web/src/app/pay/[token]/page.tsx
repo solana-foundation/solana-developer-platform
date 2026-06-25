@@ -1,4 +1,4 @@
-import type { SolanaCluster } from "@sdp/types";
+import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types";
 import { CheckCircle2Icon, ClockIcon, XCircleIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
@@ -23,11 +23,6 @@ interface PayRequest {
   network: SolanaCluster;
   solanaPayUrl: string | null;
 }
-
-const NETWORK_LABELS = {
-  devnet: "Devnet",
-  "mainnet-beta": "Mainnet",
-} as const satisfies Record<SolanaCluster, string>;
 
 interface StatusPanel {
   icon: ReactNode;
@@ -109,7 +104,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
                 Payment request
               </p>
               <span className="inline-flex items-center rounded-full bg-[var(--sdp-color-info-bg)] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--sdp-color-info-text)]">
-                {NETWORK_LABELS[request.network]}
+                {SOLANA_CLUSTER_LABELS[request.network]}
               </span>
             </div>
             <p className="text-5xl font-medium tracking-tight text-text-extra-high">

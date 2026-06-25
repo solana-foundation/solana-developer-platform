@@ -1,5 +1,10 @@
 export type SolanaCluster = "devnet" | "mainnet-beta";
 
+export const SOLANA_CLUSTER_LABELS = {
+  devnet: "Devnet",
+  "mainnet-beta": "Mainnet",
+} as const satisfies Record<SolanaCluster, string>;
+
 export const SPL_TOKEN_PROGRAMS = {
   // biome-ignore lint/security/noSecrets: Solana SPL Token program ID, not a secret.
   "spl-token": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
