@@ -370,7 +370,6 @@ test.describe
       const fixtures = await bootstrapLocalWalletFixtures({
         identity: session.identity,
         bearerToken: session.getBearerToken,
-        provider: "privy",
         walletCount: 1,
         tier: "enterprise",
       });
