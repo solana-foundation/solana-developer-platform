@@ -224,11 +224,8 @@ async function createTransferRecord(
   }
 ): Promise<TransferRow> {
   const repository = getPaymentsRepository(c);
-  const id = `xfr_${crypto.randomUUID()}`;
-  const now = new Date().toISOString();
 
   const createdRow = await repository.createTransfer({
-    id,
     organizationId: input.organizationId,
     projectId: input.projectId,
     walletId: input.walletId,
@@ -248,9 +245,9 @@ async function createTransferRecord(
     fiatAmount: null,
     providerData: {},
     serializedTx: input.serializedTx ?? null,
+    signature: null,
+    slot: null,
     initiatedByKeyId: input.initiatedByKeyId ?? null,
-    createdAt: now,
-    updatedAt: now,
   });
 
   if (!createdRow) {
