@@ -1,0 +1,74 @@
+# Offline gate: regenerate the ramp-support matrix from committed dumps and fail if it drifts.
+name: Ramp Rails Drift
+
+on:
+  pull_request:
+    paths:
+      - 'apps/sdp-api/scripts/discover-ramp-rails.ts'
+      - 'apps/sdp-api/scripts/check-ramp-rails-drift.ts'
+      - 'apps/sdp-api/src/lib/ramps/**'
+      - 'apps/sdp-api/.ramp-rails/**'
+      - 'packages/sdp-types/src/generated/ramp-support.generated.ts'
+      - 'packages/sdp-types/src/payment-rails.ts'
+      - 'packages/sdp-types/src/provider-access.ts'
+      - '.github/workflows/ramp-rails-drift.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/sdp-api/scripts/discover-ramp-rails.ts'
+      - 'apps/sdp-api/scripts/check-ramp-rails-drift.ts'
+      - 'apps/sdp-api/src/lib/ramps/**'
+      - 'apps/sdp-api/.ramp-rails/**'
+      - 'packages/sdp-types/src/generated/ramp-support.generated.ts'
+      - 'packages/sdp-types/src/payment-rails.ts'
+      - 'packages/sdp-types/src/provider-access.ts'
+      - '.github/workflows/ramp-rails-drift.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ramp-rails-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: Matrix in sync with dumps
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Check for committed dumps
+        id: dumps
+        run: |
+          if [ -n "$(find apps/sdp-api/.ramp-rails -type f -name '*.json' 2>/dev/null)" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Ramp rails drift skipped::No committed dumps under apps/sdp-api/.ramp-rails/ yet. The matrix cannot be regenerated offline; the scheduled ramp-rails-refresh job seeds them via auto-PR."
+          fi
+
+      - name: Regenerate matrix from committed dumps
+        if: steps.dumps.outputs.present == 'true'
+        run: pnpm --filter @sdp/api rails:generate
+
+      - name: Fail on drift
+        if: steps.dumps.outputs.present == 'true'
+        run: pnpm --filter @sdp/api rails:drift -- --fail-on-drift

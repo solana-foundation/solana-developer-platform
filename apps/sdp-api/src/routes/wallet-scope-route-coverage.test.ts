@@ -78,6 +78,7 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /ramps/onramp/quote",
       "POST /recurring-payments",
       "POST /recurring-payments/:id/activate",
+      "POST /recurring-payments/:id/collect",
       "POST /subscription-plans",
       "POST /subscription-plans/:planId/prepare-create",
       "POST /subscriptions/:subscriptionId/prepare-collection",

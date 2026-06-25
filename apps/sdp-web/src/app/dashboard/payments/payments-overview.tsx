@@ -1,8 +1,8 @@
 "use client";
 
 import type { CustodyWalletAggregate, PaymentTransferSummary as TransferRecord } from "@sdp/types";
-import { ArrowDownLeft, ArrowUpRight, ExternalLink, RefreshCwIcon } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { ExternalLink, RefreshCwIcon } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,6 @@ import {
 interface PaymentsOverviewProps {
   aggregate: CustodyWalletAggregate | null;
   aggregateError: string | null;
-  paymentsV2: boolean;
   issuedTokenSymbolsByMint: Record<string, string>;
   transfers: TransferRecord[];
   transfersError: string | null;
@@ -119,12 +118,10 @@ function TruncatedTableText({
 export function PaymentsOverview({
   aggregate,
   aggregateError,
-  paymentsV2,
   issuedTokenSymbolsByMint,
   transfers,
   transfersError,
 }: PaymentsOverviewProps) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const refreshSeed = searchParams.get("refresh") ?? "default";
   const {
@@ -187,7 +184,6 @@ export function PaymentsOverview({
   );
   const totalBalance = resolveTotalBalance(aggregateBalances);
   const walletCount = liveAggregate?.walletCount ?? 0;
-  const hasWallets = walletCount > 0;
 
   const handleRefresh = () => {
     void Promise.all([mutateAggregate(), mutateTransfers()]);
@@ -195,31 +191,6 @@ export function PaymentsOverview({
 
   return (
     <div className="grid min-w-0 gap-6 overflow-x-hidden">
-      {paymentsV2 ? null : (
-        <SectionEntry>
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              className="rounded-full px-5 whitespace-nowrap"
-              disabled={!hasWallets}
-              iconLeft={<ArrowUpRight className="size-4" />}
-              onClick={() => router.push("/dashboard/payments/send")}
-            >
-              Send
-            </Button>
-            <Button
-              type="button"
-              className="rounded-full px-5 whitespace-nowrap"
-              disabled={!hasWallets}
-              iconLeft={<ArrowDownLeft className="size-4" />}
-              onClick={() => router.push("/dashboard/payments/receive")}
-            >
-              Receive
-            </Button>
-          </div>
-        </SectionEntry>
-      )}
-
       <SectionEntry delay={0.04}>
         <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,1fr)]">
           <div className="flex min-h-[244px] flex-col justify-center rounded-[4px] bg-[rgba(28,28,29,0.04)] px-8 py-10 sm:px-14">

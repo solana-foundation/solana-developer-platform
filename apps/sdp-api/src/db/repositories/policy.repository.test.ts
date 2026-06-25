@@ -262,6 +262,16 @@ describe("PolicyRepository (postgres)", () => {
       matched_rules: [{ ruleId: "amount-limit" }],
       evaluation_context: evaluationContext,
     });
+
+    const updatedOperation = await repo.updateWalletOperationStatus(
+      operation?.id ?? "",
+      "pending_approval"
+    );
+    expect(updatedOperation).toMatchObject({
+      id: operation?.id,
+      status: "pending_approval",
+    });
+    expect(updatedOperation?.updated_at).not.toBe(operation?.updated_at);
   });
 
   it("maps legacy policy evaluation rows without a structured context to null", async () => {

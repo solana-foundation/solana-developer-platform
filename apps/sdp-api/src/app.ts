@@ -34,6 +34,7 @@ import members from "@/routes/members";
 import onboarding from "@/routes/onboarding";
 import openapi from "@/routes/openapi";
 import organizations from "@/routes/organizations";
+import pay from "@/routes/pay";
 import payments from "@/routes/payments";
 import places from "@/routes/places";
 import projects from "@/routes/projects";
@@ -213,6 +214,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/docs", docs);
   app.route("/llms.txt", llms);
   app.route("/webhooks", webhooks);
+  app.route("/pay", pay);
 
   // API v1
   const v1 = new Hono<{ Bindings: Env }>();

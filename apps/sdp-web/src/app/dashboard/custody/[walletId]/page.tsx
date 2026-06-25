@@ -1,5 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyWalletByIdResponse, CustodyWalletTokenBalance } from "@sdp/types";
+import type {
+  CustodyWalletByIdResponse,
+  CustodyWalletTokenBalance,
+  PaymentWalletPolicy,
+} from "@sdp/types";
+import { SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
@@ -20,6 +25,7 @@ import { WalletCategoryBadge } from "@/app/dashboard/custody/wallet-category-bad
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { Button } from "@/components/ui/button";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { formatDisplayLabel } from "@/lib/utils";
@@ -39,6 +45,11 @@ interface WalletBalancesResponse {
 
 interface WalletTrackedBalancesResult {
   balances: CustodyWalletTokenBalance[];
+  error: string | null;
+}
+
+interface WalletPolicyResult {
+  policy: PaymentWalletPolicy | null;
   error: string | null;
 }
 
@@ -92,6 +103,44 @@ async function getWalletTrackedBalances(
     return {
       balances: [],
       error: "Tracked balances are unavailable right now. Showing wallet-reported balance.",
+    };
+  }
+}
+
+async function getWalletPolicy(
+  request: SdpApiClient["request"],
+  walletId: string
+): Promise<WalletPolicyResult> {
+  try {
+    const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/policies`);
+    if (response.status === 404) {
+      return {
+        policy: {
+          walletId,
+          destinationAllowlist: [],
+        },
+        error: null,
+      };
+    }
+    if (!response.ok) {
+      return {
+        policy: null,
+        error: "Wallet controls are unavailable right now.",
+      };
+    }
+
+    const json = (await response.json()) as { data?: { policy?: PaymentWalletPolicy } };
+    return {
+      policy: json.data?.policy ?? {
+        walletId,
+        destinationAllowlist: [],
+      },
+      error: null,
+    };
+  } catch {
+    return {
+      policy: null,
+      error: "Wallet controls are unavailable right now.",
     };
   }
 }
@@ -155,12 +204,14 @@ export default async function WalletDetailPage({
   const { walletId } = await params;
   const resolvedWalletId = decodeURIComponent(walletId);
   const apiClient = await createSdpApiClient();
-  const [wallet, trackedBalancesResult, ownedTokensByMint, walletActivity] = await Promise.all([
-    getWalletDetail(apiClient.request, resolvedWalletId),
-    getWalletTrackedBalances(apiClient.request, resolvedWalletId),
-    getOwnedTokenRoutes(apiClient.request),
-    getWalletActivity(apiClient.request, resolvedWalletId),
-  ]);
+  const [wallet, trackedBalancesResult, walletPolicyResult, ownedTokensByMint, walletActivity] =
+    await Promise.all([
+      getWalletDetail(apiClient.request, resolvedWalletId),
+      getWalletTrackedBalances(apiClient.request, resolvedWalletId),
+      getWalletPolicy(apiClient.request, resolvedWalletId),
+      getOwnedTokenRoutes(apiClient.request),
+      getWalletActivity(apiClient.request, resolvedWalletId),
+    ]);
 
   const provider =
     wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
@@ -252,6 +303,12 @@ export default async function WalletDetailPage({
         </section>
       </div>
 
+      <WalletControlsPanel
+        walletId={resolvedWalletId}
+        policy={walletPolicyResult.policy}
+        policyError={walletPolicyResult.error}
+      />
+
       <section className="space-y-3">
         <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
           Balances
@@ -286,6 +343,82 @@ export default async function WalletDetailPage({
 
       <WalletActivitySection walletId={resolvedWalletId} initialActivity={walletActivity} />
     </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolean {
+  if (!policy) return false;
+  return (
+    policy.destinationAllowlist.length > 0 ||
+    Boolean(policy.maxTransferAmount) ||
+    Boolean(policy.maxDailyAmount)
+  );
+}
+
+function WalletControlsPanel({
+  walletId,
+  policy,
+  policyError,
+}: {
+  walletId: string;
+  policy: PaymentWalletPolicy | null;
+  policyError: string | null;
+}) {
+  const hasRestrictions = walletPolicyHasRestrictions(policy);
+  const destinationCount = policy?.destinationAllowlist.length ?? 0;
+  const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+      <div className="flex flex-col gap-5 p-6 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-2xl font-medium text-[#1c1c1d]">Wallet controls</h3>
+          </div>
+          <p className="max-w-2xl text-sm leading-6 text-[rgba(28,28,29,0.62)]">
+            {hasRestrictions
+              ? "This wallet has outbound payment restrictions active."
+              : "This wallet starts from default allow. Add restrictions only where control is needed."}
+          </p>
+          {policyError ? (
+            <p className="text-sm text-status-error-text">{policyError}</p>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-3">
+              <WalletControlMetric
+                label="Destinations"
+                value={destinationCount > 0 ? String(destinationCount) : "Open"}
+              />
+              <WalletControlMetric
+                label="Per transfer"
+                value={policy?.maxTransferAmount ?? "No cap"}
+              />
+              <WalletControlMetric label="Daily" value={policy?.maxDailyAmount ?? "No cap"} />
+            </div>
+          )}
+        </div>
+        <Button
+          asChild
+          variant={hasRestrictions ? "secondary" : "default"}
+          className="w-full shrink-0 sm:w-auto"
+        >
+          <Link href={policyHref}>
+            <SlidersHorizontal className="size-4" />
+            {hasRestrictions ? "Review controls" : "Start profile"}
+          </Link>
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function WalletControlMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-3 py-2">
+      <p className="text-xs font-medium text-[rgba(28,28,29,0.48)]">{label}</p>
+      <p className="mt-1 truncate text-sm font-medium text-[#1c1c1d]" title={value}>
+        {value}
+      </p>
+    </div>
   );
 }
 

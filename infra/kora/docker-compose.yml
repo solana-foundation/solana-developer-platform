@@ -2,7 +2,7 @@ services:
   redis:
     image: redis:8-alpine
     ports:
-      - "6379:6379"
+      - "${KORA_REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
       - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
@@ -10,9 +10,12 @@ services:
     command: redis-server /usr/local/etc/redis/redis.conf
 
   kora:
-    image: ghcr.io/solana-foundation/kora:latest
+    image: ${KORA_IMAGE:-ghcr.io/solana-foundation/kora:61add05}
+    platform: ${KORA_PLATFORM:-linux/amd64}
     ports:
       - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./kora.toml:/app/kora.toml:ro
       - ./signers.toml:/app/signers.toml:ro

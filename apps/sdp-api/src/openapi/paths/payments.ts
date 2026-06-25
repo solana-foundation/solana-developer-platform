@@ -39,6 +39,7 @@ import {
   onrampCurrenciesResponse,
   onrampExecutionResponse,
   onrampQuoteResponse,
+  paymentRecurringPaymentCollectionResponse,
   paymentRecurringPaymentListResponse,
   paymentRecurringPaymentResponse,
   paymentSubscriptionCollectionAttemptListResponse,
@@ -298,6 +299,28 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       200: {
         description: "Recurring payment activated",
         content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/recurring-payments/{id}/collect",
+    tags: ["Payments"],
+    summary: "Collect recurring payment",
+    operationId: "collectPaymentRecurringPayment",
+    description:
+      "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment collected",
+        content: jsonContent(paymentRecurringPaymentCollectionResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
