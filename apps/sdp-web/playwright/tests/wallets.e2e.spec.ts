@@ -366,10 +366,16 @@ test.describe
       browser,
       page,
     }) => {
+      test.skip(
+        usesKoraSurfpoolShim,
+        "Dashboard wallet activity refresh uses live wallet detail balance reads; keep it in non-shim dashboard E2E."
+      );
+
       const session = await getPlaywrightAdminSession(browser);
       const fixtures = await bootstrapLocalWalletFixtures({
         identity: session.identity,
         bearerToken: session.getBearerToken,
+        provider: "privy",
         walletCount: 1,
         tier: "enterprise",
       });
