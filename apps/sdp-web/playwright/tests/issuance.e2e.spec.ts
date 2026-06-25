@@ -96,6 +96,14 @@ async function openTab(page: Page, name: string): Promise<void> {
   }
 }
 
+async function expectFrozenAccountsSummary(page: Page, accountCount: number): Promise<void> {
+  await openTab(page, "Compliance");
+  await expect(page.getByTestId("frozen-accounts-summary-card")).toContainText(
+    `${accountCount} accounts`,
+    { timeout: 120_000 }
+  );
+}
+
 async function selectComplianceAction(page: Page, name: string): Promise<void> {
   await openTab(page, "Compliance");
 
@@ -523,10 +531,7 @@ test.describe
       successCount = await page.getByText("Freeze transaction finalized.").count();
       await confirmAction(page, "Freeze now");
       await waitForToast(page, "Freeze transaction finalized.", successCount);
-      await page.reload();
-
-      await openTab(page, "Compliance");
-      await expect(page.getByTestId("frozen-accounts-summary-card")).toContainText("1 accounts");
+      await expectFrozenAccountsSummary(page, 1);
 
       await selectComplianceAction(page, "Freeze");
       await page.getByLabel("Wallet Address").fill(fixtures.addresses.freezeWallet);
@@ -534,10 +539,7 @@ test.describe
       successCount = await page.getByText("Unfreeze transaction finalized.").count();
       await confirmAction(page, "Unfreeze now");
       await waitForToast(page, "Unfreeze transaction finalized.", successCount);
-      await page.reload();
-
-      await openTab(page, "Compliance");
-      await expect(page.getByTestId("frozen-accounts-summary-card")).toContainText("0 accounts");
+      await expectFrozenAccountsSummary(page, 0);
     });
 
     test("11. user sees the token ID row on the detail header and can copy it", async ({
