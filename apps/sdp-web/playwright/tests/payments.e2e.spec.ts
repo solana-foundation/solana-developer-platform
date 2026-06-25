@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
   createExternalSolanaAddress,
+  seedCounterpartyWithSolanaAccount,
   seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 import {
@@ -13,6 +15,8 @@ import {
 test.describe
   .serial("dashboard payments e2e", () => {
     let destinationAddress = "";
+    let counterpartyName = "";
+    let accountLabel = "";
     let sourceWalletLabel = "";
     let sourceWalletId = "";
     let transferTokenSymbol = "";
@@ -42,7 +46,18 @@ test.describe
       sourceWalletId = fixtures.wallets.treasury.walletId;
       transferTokenSymbol = fixtures.tokens.open.symbol;
       bootstrapProjectId = fixtures.projectId;
+
       destinationAddress = await createExternalSolanaAddress();
+      const suffix = randomUUID().slice(0, 8);
+      counterpartyName = `E2E Payee ${suffix}`;
+      accountLabel = `E2E Solana ${suffix}`;
+      await seedCounterpartyWithSolanaAccount(api, {
+        displayName: counterpartyName,
+        email: `e2e-payee-${suffix}@example.com`,
+        accountLabel,
+        destinationAddress,
+      });
+
       await api.put(`/v1/payments/wallets/${sourceWalletId}/policies`, {
         destinationAllowlist: [destinationAddress],
       });
@@ -57,39 +72,48 @@ test.describe
       page,
     }) => {
       const app = page.locator("main");
+      const next = app.getByRole("button", { name: "Next", exact: true });
 
-      await page.goto("/dashboard/payments");
-      await app.getByRole("button", { name: "Send" }).click();
+      await page.goto("/dashboard/payments/pay");
 
-      await expect(page).toHaveURL(/\/dashboard\/payments\/send/);
-      await app.getByRole("button", { name: "Wallet transfer" }).click();
+      await app.getByRole("button", { name: "Counterparty", exact: true }).click();
+      await page.getByPlaceholder("Search counterparties").fill(counterpartyName);
+      await page.getByRole("button", { name: counterpartyName }).click();
+      await expect(next).toBeEnabled({ timeout: 120_000 });
+      await next.click();
 
-      const walletSelect = app.getByRole("combobox", { name: "Source wallet" });
-      await walletSelect.click();
-      await page.getByRole("option").filter({ hasText: sourceWalletLabel }).first().click();
+      const onchainMethod = app.getByRole("button", { name: "Onchain transfer" });
+      const destinationSelect = app.getByRole("button", { name: "Destination account" });
+      await expect(onchainMethod.or(destinationSelect)).toBeVisible({ timeout: 120_000 });
+      if (await onchainMethod.isVisible()) {
+        await onchainMethod.click();
+        await expect(next).toBeEnabled();
+        await next.click();
+      }
 
-      const assetSelect = app.getByRole("combobox", { name: "Asset" });
-      await assetSelect.click();
-      await expect(page.getByRole("option", { name: "SOL", exact: true })).toHaveCount(0);
-      await page.getByRole("option", { name: transferTokenSymbol, exact: true }).click();
-      await expect(assetSelect).toContainText(transferTokenSymbol);
-      await app.getByLabel("Amount").fill("1");
-      await app.getByLabel("Destination address").fill(destinationAddress);
-      await expect(
-        app.getByText("This destination is already on the source wallet allowlist.")
-      ).toBeVisible({ timeout: 120_000 });
+      await destinationSelect.click();
+      await page.getByRole("button", { name: accountLabel }).click();
+      await expect(next).toBeEnabled({ timeout: 120_000 });
+      await next.click();
 
-      const nextButton = app.getByRole("button", { name: "Next", exact: true });
-      await expect(nextButton).toBeEnabled({ timeout: 120_000 });
-      await nextButton.click();
+      await app.getByRole("button", { name: "Source wallet" }).click();
+      await page.getByPlaceholder("Search wallets").fill(sourceWalletLabel);
+      await page.getByRole("button", { name: sourceWalletLabel }).click();
+
+      await app.getByRole("button", { name: "Asset" }).click();
+      await page.getByRole("button", { name: transferTokenSymbol, exact: true }).click();
+
+      await app.getByLabel("Amount", { exact: true }).fill("1");
+      await expect(next).toBeEnabled({ timeout: 120_000 });
+      await next.click();
+
       await expect(app.getByText("Review transfer")).toBeVisible();
+      const sendButton = app.getByRole("button", { name: "Send transfer", exact: true });
+      await expect(sendButton).toBeEnabled({ timeout: 120_000 });
+      await sendButton.click();
 
-      const confirmButton = app.getByRole("button", { name: "Confirm", exact: true });
-      await expect(confirmButton).toBeEnabled({ timeout: 120_000 });
-      await confirmButton.click();
       await expect(app.getByText("Transfer submitted")).toBeVisible({ timeout: 120_000 });
-
-      await page.getByRole("link", { name: "Back to payments" }).click();
+      await app.getByRole("button", { name: "Done", exact: true }).click();
       await expect(page).toHaveURL(/\/dashboard\/payments(?:\?.*)?$/);
 
       const transferRow = app.locator("tbody tr").filter({ hasText: destinationAddress }).first();

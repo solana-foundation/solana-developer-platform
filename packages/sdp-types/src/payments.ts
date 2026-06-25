@@ -313,6 +313,41 @@ export interface PaymentRecurringPayment {
   updatedAt: string;
 }
 
+export type PaymentRequestStatus = "awaiting_payment" | "paid" | "canceled" | "expired";
+
+export interface PaymentRequestLifecycleEvent {
+  status: PaymentRequestStatus;
+  at: string;
+}
+
+export interface PaymentRequest {
+  id: string;
+  publicToken: string;
+  organizationId: string;
+  projectId: string | null;
+  counterpartyId: string | null;
+  walletId: string;
+  destinationAddress: string;
+  token: string;
+  amount: string;
+  reference: string;
+  status: PaymentRequestStatus;
+  expiresAt: string | null;
+  fulfilledByTransferId: string | null;
+  canceledBy: string | null;
+  lifecycle: PaymentRequestLifecycleEvent[];
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListPaymentRequestsResponse {
+  paymentRequests: PaymentRequest[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface CreatePaymentSubscriptionPlanRequest {
   ownerWalletId: string;
   token: string;
@@ -384,6 +419,12 @@ export interface CreatePaymentRecurringPaymentRequest {
 
 export interface PaymentRecurringPaymentResponse {
   recurringPayment: PaymentRecurringPayment;
+}
+
+export interface PaymentRecurringPaymentCollectionResponse {
+  recurringPayment: PaymentRecurringPayment;
+  collectionAttempt: PaymentSubscriptionCollectionAttempt;
+  transfer: PaymentTransferSummary;
 }
 
 export interface ListPaymentRecurringPaymentsResponse {

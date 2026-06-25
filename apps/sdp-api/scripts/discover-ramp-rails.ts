@@ -188,7 +188,7 @@ function renderGeneratedFile(input: {
   return `// AUTO-GENERATED - do not edit by hand.
 // Refresh dumps + regenerate:   pnpm --filter @sdp/api rails:discover --emit
 // Regenerate from existing dumps: pnpm --filter @sdp/api rails:generate
-// Source dumps live in apps/sdp-api/.ramp-rails/ (gitignored).
+// Source dumps live in apps/sdp-api/.ramp-rails/ (committed).
 
 import type { OfframpPairSupport, OnrampPairSupport } from "../payment-rails";
 import type { RampProviderId } from "../provider-access";

@@ -82,13 +82,12 @@
     }
   ],
   "labels": {
-    "service": "kora",
     "severity": "warning",
     "slack": "true"
   },
   "annotations": {
     "summary": "Kora p95 latency > 3s",
-    "description": "Kora p95 request latency has exceeded 3s for 10 minutes \u2014 usually the Solana RPC roundtrip. Check the dashboard and RPC health.",
+    "description": "Kora p95 request latency has exceeded 3s for 10 minutes — usually the Solana RPC roundtrip. Check the dashboard and RPC health.",
     "runbook_url": "https://app.notion.com/p/382d36dad52d81ddb275c5c6ad3168c4"
   },
   "isPaused": true

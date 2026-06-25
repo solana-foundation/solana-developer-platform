@@ -9,7 +9,6 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { isSolBalance } from "@/app/dashboard/payments/payments-overview.utils";
 import {
   createTransfer,
   fetchCounterpartyAccounts,
@@ -17,7 +16,7 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { useZodForm } from "@/lib/use-zod-form";
 import { onchainDestinationSchema, onchainDetailsSchema, onchainSendSchema } from "../schema";
-import { findWalletBalanceForToken } from "../wallet-options";
+import { findWalletBalanceForDisplayToken, resolveWalletAssetOptions } from "../wallet-options";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
 export const ONCHAIN_SEND_STEPS = [
@@ -38,19 +37,10 @@ function resolveAccountAddress(account: CounterpartyAccount | null): string {
   return typeof address === "string" ? address : "";
 }
 
-function resolveWalletAssets(wallet: PaymentsDashboardWallet | null): string[] {
-  const assetSet = new Set<string>(["USDC"]);
-  for (const balance of wallet?.balances ?? []) {
-    if (!isSolBalance(balance) && balance.token) {
-      assetSet.add(balance.token);
-    }
-  }
-  return [...assetSet];
-}
-
 export interface UseOnchainSendWizardProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
+  issuedTokenSymbolsByMint: Record<string, string>;
   counterpartyId: string;
   onExit: () => void;
 }
@@ -58,6 +48,7 @@ export interface UseOnchainSendWizardProps {
 export function useOnchainSendWizard({
   wallets,
   walletsError,
+  issuedTokenSymbolsByMint,
   counterpartyId,
   onExit,
 }: UseOnchainSendWizardProps) {
@@ -123,20 +114,23 @@ export function useOnchainSendWizard({
   );
   const destinationAddress = resolveAccountAddress(selectedAccount);
 
-  const assetOptions = useMemo(() => resolveWalletAssets(selectedWallet), [selectedWallet]);
+  const assetOptions = useMemo(
+    () => resolveWalletAssetOptions(selectedWallet, issuedTokenSymbolsByMint),
+    [issuedTokenSymbolsByMint, selectedWallet]
+  );
 
   const selectWallet = (walletId: string) => {
     setField("walletId", walletId);
     const nextWallet = liveWallets.find((wallet) => wallet.walletId === walletId) ?? null;
-    const nextAssets = resolveWalletAssets(nextWallet);
+    const nextAssets = resolveWalletAssetOptions(nextWallet, issuedTokenSymbolsByMint);
     if (!nextAssets.includes(fields.asset)) {
       setField("asset", nextAssets[0] ?? "");
     }
   };
 
   const selectedAssetBalance = useMemo(
-    () => findWalletBalanceForToken(selectedWallet, fields.asset),
-    [selectedWallet, fields.asset]
+    () => findWalletBalanceForDisplayToken(selectedWallet, fields.asset, issuedTokenSymbolsByMint),
+    [issuedTokenSymbolsByMint, selectedWallet, fields.asset]
   );
 
   let availableAmount: number | null = null;

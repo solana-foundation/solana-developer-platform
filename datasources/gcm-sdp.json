@@ -1,0 +1,16 @@
+{
+  "uid": "sdp-gcm",
+  "name": "gcm-sdp",
+  "type": "stackdriver",
+  "access": "proxy",
+  "isDefault": false,
+  "jsonData": {
+    "authenticationType": "jwt",
+    "defaultProject": "solana-developer-platform",
+    "tokenUri": "https://oauth2.googleapis.com/token",
+    "clientEmail": "grafana-gcm-reader@solana-developer-platform.iam.gserviceaccount.com"
+  },
+  "secureJsonData": {
+    "privateKey": "${GCM_GRAFANA_SA_PRIVATE_KEY}"
+  }
+}

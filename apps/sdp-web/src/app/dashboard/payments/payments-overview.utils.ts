@@ -1,18 +1,13 @@
-import type {
-  CustodyWalletAggregate,
-  CustodyWalletTokenBalance,
-  RampDirection,
-  PaymentTransferSummary as TransferRecord,
-  PaymentsDashboardWallet as WalletRecord,
+import {
+  type CustodyWalletAggregate,
+  type CustodyWalletTokenBalance,
+  type RampDirection,
+  SOL_MINT,
+  type PaymentTransferSummary as TransferRecord,
+  type PaymentsDashboardWallet as WalletRecord,
+  WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import { toTitleCase } from "../activity-format-utils";
-
-// biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
-const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-// biome-ignore lint/security/noSecrets: Mainnet USDC mint address constant, not a secret.
-const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-// biome-ignore lint/security/noSecrets: Solana native mint address constant, not a secret.
-const SOL_MINT = "So11111111111111111111111111111111111111112";
 
 function parseIntegerAmount(value: string): bigint | null {
   if (!/^\d+$/.test(value)) {
@@ -44,8 +39,7 @@ function resolveFallbackUsdValue(
   const normalizedToken = balance.token.trim().toUpperCase();
   if (
     normalizedToken !== "USDC" &&
-    balance.mint !== DEVNET_USDC_MINT &&
-    balance.mint !== MAINNET_USDC_MINT
+    !WELL_KNOWN_TOKEN_BY_MINT.get(balance.mint.trim())?.isUsdStable
   ) {
     return null;
   }

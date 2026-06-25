@@ -8,7 +8,6 @@ dist/
 .next/
 apps/**/.next/
 apps/sdp-api/generated/
-apps/sdp-api/.ramp-rails/
 apps/sdp-api/.wrangler.*.generated.toml
 
 # Cloudflare
