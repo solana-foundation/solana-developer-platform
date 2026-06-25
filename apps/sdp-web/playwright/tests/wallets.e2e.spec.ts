@@ -311,7 +311,7 @@ test.describe
       await waitForWalletTokenBalance(api, wallet.walletId, mintAddress, 3);
       await session.page.close();
 
-      await page.goto(`/dashboard/wallets/${wallet.walletId}`);
+      await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
 
       const balancesSection = page.locator("section").filter({
         has: page.getByRole("heading", { name: "Balances" }),
@@ -425,7 +425,7 @@ test.describe
         });
       });
 
-      await page.goto(`/dashboard/wallets/${wallet.walletId}`);
+      await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
       const activityRow = page.locator("tr").filter({ hasText: "5.00 USDC" });
       await expect(activityRow).toBeVisible({ timeout: 120_000 });
       await expect(activityRow).toContainText("Incoming");
