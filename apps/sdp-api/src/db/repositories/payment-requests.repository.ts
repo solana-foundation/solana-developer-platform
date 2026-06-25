@@ -1,12 +1,22 @@
 import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types";
-import { nanoid } from "nanoid";
+import { generateKeyPairSigner } from "@solana/kit";
+import { customAlphabet } from "nanoid";
+
+// URL-safe, dash-only alphabet (nanoid's default also includes "_").
+// biome-ignore lint/security/noSecrets: token alphabet constant, not a secret.
+const PUBLIC_TOKEN_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-";
+const generatePublicToken = customAlphabet(PUBLIC_TOKEN_ALPHABET, 16);
 
 export function generatePaymentRequestId(): string {
   return `preq_${crypto.randomUUID()}`;
 }
 
 export function generatePaymentRequestPublicToken(): string {
-  return nanoid(16);
+  return generatePublicToken();
+}
+
+export async function generatePaymentRequestReference(): Promise<string> {
+  return (await generateKeyPairSigner()).address;
 }
 
 export interface PaymentRequestRow {
@@ -38,7 +48,6 @@ export interface CreatePaymentRequestInput {
   destinationAddress: string;
   token: string;
   amount: string;
-  reference: string;
   expiresAt: string | null;
   createdBy: string | null;
 }

@@ -70,9 +70,17 @@ This starts:
 
 SDP still uses `FEE_PAYMENT_PROVIDER=kora` and `KORA_RPC_URL`; the shim exists
 only so local deterministic tests can exercise the regular Kora adapter/client
-without depending on hosted devnet Kora. To use the Surfpool CLI sidecar instead
-of embedded Surfnet, set `KORA_SURFPOOL_RUNTIME=cli`. To try the real Kora
-Docker container instead of the shim, set `KORA_SURFPOOL_MODE=docker`.
+without depending on hosted devnet Kora. Embedded Surfnet selects the same
+managed Solana RPC provider used by the integration test runner, honoring
+`SOLANA_RPC_CI_PREFERRED_PROVIDER`, and passes it to Surfpool as
+`SURFPOOL_REMOTE_RPC_URL`. Set `SURFPOOL_REMOTE_RPC_URL` directly to override
+that selection, or omit all managed RPC env vars to run embedded Surfpool
+offline. To use the Surfpool CLI sidecar instead of embedded Surfnet, set
+`KORA_SURFPOOL_RUNTIME=cli`. To try the real Kora Docker container instead of
+the shim, set `KORA_SURFPOOL_MODE=docker`. When running under Doppler, the
+harness ignores Doppler's hosted `KORA_RPC_URL` and binds local Kora-compatible
+traffic to `http://127.0.0.1:18080`; use `KORA_SURFPOOL_KORA_RPC_URL` to change
+that local endpoint.
 
 The local compose file defaults to
 `ghcr.io/solana-foundation/kora:61add05`, matching the repo-pinned Kora image

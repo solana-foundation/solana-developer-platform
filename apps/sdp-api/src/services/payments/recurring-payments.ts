@@ -2202,9 +2202,7 @@ export async function collectRecurringPayment(input: {
       amount: input.recurringPayment.amount,
     });
 
-    const transferCreatedAt = new Date().toISOString();
     transfer = await paymentsRepo.createTransfer({
-      id: `xfr_${crypto.randomUUID()}`,
       organizationId: input.organizationId,
       projectId: input.projectId,
       walletId: input.sourceWallet.walletId,
@@ -2228,9 +2226,9 @@ export async function collectRecurringPayment(input: {
         collectionDueAt: dueAt,
       },
       serializedTx: null,
+      signature: null,
+      slot: null,
       initiatedByKeyId: input.initiatedByKeyId,
-      createdAt: transferCreatedAt,
-      updatedAt: transferCreatedAt,
     });
     if (!transfer) {
       throw new AppError("INTERNAL_ERROR", "Failed to create collection transfer");

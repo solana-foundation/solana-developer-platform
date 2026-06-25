@@ -10,7 +10,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-export KORA_RPC_URL="${KORA_RPC_URL:-http://127.0.0.1:18080}"
+if [ -n "${KORA_SURFPOOL_KORA_RPC_URL:-}" ]; then
+  export KORA_RPC_URL="${KORA_SURFPOOL_KORA_RPC_URL}"
+elif [ "${DOPPLER_RUN_ACTIVE:-}" = "1" ]; then
+  export KORA_RPC_URL="http://127.0.0.1:18080"
+else
+  export KORA_RPC_URL="${KORA_RPC_URL:-http://127.0.0.1:18080}"
+fi
 export FEE_PAYMENT_PROVIDER="${FEE_PAYMENT_PROVIDER:-kora}"
 export RUN_INTEGRATION_TESTS="${RUN_INTEGRATION_TESTS:-true}"
 export KORA_SURFPOOL_SHIM="${KORA_SURFPOOL_SHIM:-true}"

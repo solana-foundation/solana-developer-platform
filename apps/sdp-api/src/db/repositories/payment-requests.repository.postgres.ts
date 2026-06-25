@@ -12,6 +12,7 @@ import type {
 import {
   generatePaymentRequestId,
   generatePaymentRequestPublicToken,
+  generatePaymentRequestReference,
 } from "./payment-requests.repository";
 
 function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
@@ -37,11 +38,38 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
   };
 }
 
+// "expired" is computed from expires_at and never written to the status column,
+// so it (and awaiting_payment) filter the awaiting_payment rows partitioned by
+// expiry. Text comparison is exact: expires_at and sdp_iso_now() share the same
+// ISO-8601 UTC format, and the partial index on (expires_at) covers the predicate.
+function paymentRequestStatusFilter(status: PaymentRequestStatus | undefined): {
+  sql: string;
+  binds: string[];
+} {
+  switch (status) {
+    case undefined:
+      return { sql: "TRUE", binds: [] };
+    case "awaiting_payment":
+      return {
+        sql: "status = 'awaiting_payment' AND (expires_at IS NULL OR expires_at > sdp_iso_now())",
+        binds: [],
+      };
+    case "expired":
+      return {
+        sql: "status = 'awaiting_payment' AND expires_at IS NOT NULL AND expires_at <= sdp_iso_now()",
+        binds: [],
+      };
+    default:
+      return { sql: "status = ?", binds: [status] };
+  }
+}
+
 export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentRequestsRepository {
   return {
     async createPaymentRequest(input: CreatePaymentRequestInput) {
       const id = generatePaymentRequestId();
       const publicToken = generatePaymentRequestPublicToken();
+      const reference = await generatePaymentRequestReference();
 
       const row = await db
         .prepare(
@@ -75,7 +103,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           input.destinationAddress,
           input.token,
           input.amount,
-          input.reference,
+          reference,
           input.expiresAt,
           input.createdBy
         )
@@ -142,40 +170,20 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
     async listPaymentRequests(
       params: ListPaymentRequestsInput
     ): Promise<ListPaymentRequestsResult> {
+      const filter = paymentRequestStatusFilter(params.status);
+      const where = `WHERE organization_id = ? AND project_id = ? AND ${filter.sql}`;
+      const scopeBinds = [params.organizationId, params.projectId, ...filter.binds];
+
       const [rowsResult, countRow] = await Promise.all([
         db
           .prepare(
-            `SELECT *
-               FROM payment_requests
-              WHERE organization_id = ?
-                AND project_id = ?
-                AND (?::text IS NULL OR status = ?::text)
-              ORDER BY created_at DESC
-              LIMIT ? OFFSET ?`
+            `SELECT * FROM payment_requests ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`
           )
-          .bind(
-            params.organizationId,
-            params.projectId,
-            params.status ?? null,
-            params.status ?? null,
-            params.limit,
-            params.offset
-          )
+          .bind(...scopeBinds, params.limit, params.offset)
           .all<Record<string, unknown>>(),
         db
-          .prepare(
-            `SELECT COUNT(*)::int AS total
-               FROM payment_requests
-              WHERE organization_id = ?
-                AND project_id = ?
-                AND (?::text IS NULL OR status = ?::text)`
-          )
-          .bind(
-            params.organizationId,
-            params.projectId,
-            params.status ?? null,
-            params.status ?? null
-          )
+          .prepare(`SELECT COUNT(*)::int AS total FROM payment_requests ${where}`)
+          .bind(...scopeBinds)
           .first<{ total: number }>(),
       ]);
 

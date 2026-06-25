@@ -1,41 +1,59 @@
+import { encodeURL } from "@solana/pay";
 import { Hono } from "hono";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { notFound } from "@/lib/errors";
-import { assertValidAddress } from "@/lib/solana";
-import { encodeSolanaPayURL } from "@/services/solana";
+import { assertValidAddress, getSolanaConfig } from "@/lib/solana";
+import {
+  isPaymentRequestExpired,
+  reconcilePaymentRequestBestEffort,
+} from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
+import { resolveTokenLabel, SOL_MINT } from "./payments/token-accounts";
+
+const REQUEST_LABEL = "Solana Developer Platform";
 
 const pay = new Hono<{ Bindings: Env }>();
 
 pay.get("/:token", async (c) => {
-  const request = await createPaymentRequestsRepository(c.env).getPaymentRequestByPublicToken(
+  const existing = await createPaymentRequestsRepository(c.env).getPaymentRequestByPublicToken(
     c.req.param("token")
   );
-  if (!request) {
+  if (!existing) {
     throw notFound("Payment request");
   }
+  const request = await reconcilePaymentRequestBestEffort(c.env, existing);
 
-  const expired = request.expires_at !== null && Date.parse(request.expires_at) <= Date.now();
+  const expired = isPaymentRequestExpired(request.expires_at);
   const status = expired && request.status === "awaiting_payment" ? "expired" : request.status;
   const payable = status === "awaiting_payment";
 
-  const solanaPayUrl = payable
-    ? encodeSolanaPayURL({
-        recipient: assertValidAddress(request.destination_address, "destinationAddress"),
-        amount: request.amount,
-        splToken: assertValidAddress(request.token, "token"),
-        reference: assertValidAddress(request.reference, "reference"),
-        memo: request.id,
-      })
-    : null;
+  let solanaPayUrl: string | null = null;
+  if (payable) {
+    const recipient = assertValidAddress(request.destination_address, "destinationAddress");
+    const reference = assertValidAddress(request.reference, "reference");
+    const tokenLabel = resolveTokenLabel(request.token);
+    const url = encodeURL({
+      recipient,
+      reference,
+      label: REQUEST_LABEL,
+      message: `Pay ${request.amount} ${tokenLabel} to ${REQUEST_LABEL}`,
+      ...(request.token === SOL_MINT
+        ? {}
+        : { splToken: assertValidAddress(request.token, "token") }),
+    });
+    url.searchParams.set("amount", request.amount);
+    solanaPayUrl = url.toString();
+  }
 
   return c.json({
     amount: request.amount,
     token: request.token,
+    tokenSymbol: resolveTokenLabel(request.token),
     recipient: request.destination_address,
     reference: request.reference,
     status,
     expiresAt: request.expires_at,
+    network: getSolanaConfig(c.env).network,
     solanaPayUrl,
   });
 });

@@ -10,6 +10,7 @@ import type {
   UpdatePaymentTransferInput,
   UpsertPaymentWalletPolicyInput,
 } from "./payments.repository";
+import { generatePaymentTransferId } from "./payments.repository";
 
 function buildInClause(length: number): string {
   return Array.from({ length }, () => "?").join(", ");
@@ -87,18 +88,6 @@ function buildTransferScopeWhere(params: {
   };
 }
 
-async function getTransferByIdInternal(
-  db: DatabaseExecutor,
-  transferId: string
-): Promise<PaymentTransferRow | null> {
-  const row = await db
-    .prepare("SELECT * FROM payment_transfers WHERE id = ?")
-    .bind(transferId)
-    .first<Record<string, unknown>>();
-
-  return row ? mapTransferRow(row) : null;
-}
-
 async function getWalletPoliciesInternal(
   db: DatabaseExecutor,
   custodyWalletId: string
@@ -119,7 +108,7 @@ async function getWalletPoliciesInternal(
 export function createPostgresPaymentsRepository(db: DatabaseExecutor): PaymentsRepository {
   return {
     async createTransfer(input: CreatePaymentTransferInput) {
-      await db
+      const row = await db
         .prepare(
           `INSERT INTO payment_transfers (
              id,
@@ -142,13 +131,16 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
              fiat_amount,
              provider_data,
              serialized_tx,
+             signature,
+             slot,
              initiated_by_key_id,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, sdp_iso_now(), sdp_iso_now())
+           RETURNING *`
         )
         .bind(
-          input.id,
+          generatePaymentTransferId(),
           input.organizationId,
           input.projectId,
           input.walletId,
@@ -168,13 +160,13 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
           input.fiatAmount,
           JSON.stringify(input.providerData),
           input.serializedTx,
-          input.initiatedByKeyId,
-          input.createdAt,
-          input.updatedAt
+          input.signature,
+          input.slot,
+          input.initiatedByKeyId
         )
-        .run();
+        .first<Record<string, unknown>>();
 
-      return getTransferByIdInternal(db, input.id);
+      return row ? mapTransferRow(row) : null;
     },
 
     async updateTransfer(input: UpdatePaymentTransferInput) {
