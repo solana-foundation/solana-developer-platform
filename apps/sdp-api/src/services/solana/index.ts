@@ -32,15 +32,6 @@ export {
   type KeyPairSigner,
   signerControlsAddress,
 } from "./signer";
-// Solana Pay primitives (link encoding + reference reconciliation)
-export {
-  encodeSolanaPayURL,
-  findReference,
-  type SolanaPayTransferRequest,
-  type TransferValidation,
-  type ValidateTransferParams,
-  validateTransfer,
-} from "./solana-pay";
 // Token-2022 operations
 export {
   type BurnOptions,

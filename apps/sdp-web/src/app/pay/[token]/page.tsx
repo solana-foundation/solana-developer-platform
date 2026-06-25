@@ -1,7 +1,6 @@
 import { CheckCircle2Icon, ClockIcon, XCircleIcon } from "lucide-react";
 import Image from "next/image";
 import { notFound } from "next/navigation";
-import QRCode from "qrcode";
 import type { ReactNode } from "react";
 import {
   formatDisplayAmount,
@@ -9,6 +8,7 @@ import {
   shortenAddress,
 } from "../../dashboard/payments/payments-overview.utils";
 import { resolvePlaygroundApiBaseUrl } from "../../dashboard/playground-api-data";
+import { PayQrCode } from "./pay-qr-code";
 
 export const dynamic = "force-dynamic";
 
@@ -72,15 +72,6 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
   const request = (await response.json()) as PayRequest;
 
   const payUrl = request.solanaPayUrl;
-  const qrDataUri = payUrl
-    ? `data:image/svg+xml,${encodeURIComponent(
-        await QRCode.toString(payUrl, {
-          type: "svg",
-          margin: 0,
-          color: { dark: "#1c1c1d", light: "#ffffff" },
-        })
-      )}`
-    : null;
   const statusPanel = request.status === "awaiting_payment" ? null : STATUS_PANELS[request.status];
 
   return (
@@ -126,11 +117,10 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
             </p>
           </div>
 
-          {payUrl && qrDataUri ? (
+          {payUrl ? (
             <div className="mt-7 flex flex-col items-center gap-5">
               <div className="rounded-2xl border border-border-light bg-white p-4 shadow-[0_2px_12px_rgba(28,28,29,0.05)]">
-                {/* biome-ignore lint/performance/noImgElement: static QR data URI, not a remote asset. */}
-                <img src={qrDataUri} alt="Solana Pay QR code" className="size-52" />
+                <PayQrCode url={payUrl} size={208} />
               </div>
               <p className="text-sm text-text-medium">Scan with a Solana wallet to pay</p>
               <a

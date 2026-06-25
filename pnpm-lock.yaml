@@ -119,6 +119,9 @@ importers:
       '@solana/mosaic-sdk':
         specifier: 'catalog:'
         version: 0.1.1(patch_hash=b814110d007b64ff76f72cf843d93ba928a9c4f39acc34dbc2ee3e27d1149689)(typescript@6.0.3)
+      '@solana/pay':
+        specifier: 1.0.0-beta.14
+        version: 1.0.0-beta.14(@solana-program/memo@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana-program/system@0.12.2(@solana/kit@6.8.0(typescript@6.0.3)))(@solana-program/token-2022@0.9.0(@solana/kit@6.8.0(typescript@6.0.3))(@solana/sysvars@6.8.0(typescript@6.0.3)))(@solana-program/token@0.13.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/keys@6.9.0(typescript@6.0.3))(@solana/kit@6.8.0(typescript@6.0.3))(@solana/rpc-subscriptions-api@6.8.0(typescript@6.0.3))(@solana/rpc-subscriptions-spec@6.9.0(typescript@6.0.3))(typescript@6.0.3)
       '@solana/signers':
         specifier: 'catalog:'
         version: 6.8.0(typescript@6.0.3)
@@ -280,6 +283,9 @@ importers:
       '@solana/design-system':
         specifier: 1.0.1
         version: 1.0.1(@base-ui/react@1.5.0(@date-fns/tz@1.4.1)(@types/react@19.2.17)(date-fns@4.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(motion@12.40.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.0)
+      '@solana/qr-code-styling':
+        specifier: 1.6.0
+        version: 1.6.0
       clsx:
         specifier: 2.1.1
         version: 2.1.1
@@ -3910,6 +3916,23 @@ packages:
       typescript:
         optional: true
 
+  '@solana/pay@1.0.0-beta.14':
+    resolution: {integrity: sha512-/mzDqnY4uZuOwpwKWBm/makCiDuexzo1eoUtuEYrZVmhL9hG6pq1hSw74C9lWLjxDlj9n618lPn4ct3kUTNf0g==}
+    engines: {node: '>=20'}
+    hasBin: true
+    peerDependencies:
+      '@solana-program/memo': ^0.11.0
+      '@solana-program/system': ^0.12.0
+      '@solana-program/token': ^0.12.0
+      '@solana-program/token-2022': ^0.9.0
+      '@solana/keys': ^6.5.0
+      '@solana/kit': ^6.5.0
+      '@solana/kit-plugin-instruction-plan': ^0.8.0
+      '@solana/kit-plugin-payer': ^0.8.0
+      '@solana/kit-plugin-rpc': ^0.8.0
+      '@solana/rpc-subscriptions-api': ^6.5.0
+      '@solana/rpc-subscriptions-spec': ^6.5.0
+
   '@solana/plugin-core@5.5.1':
     resolution: {integrity: sha512-VUZl30lDQFJeiSyNfzU1EjYt2QZvoBFKEwjn1lilUJw7KgqD5z7mbV7diJhT+dLFs36i0OsjXvq5kSygn8YJ3A==}
     engines: {node: '>=20.18.0'}
@@ -4008,6 +4031,9 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
+
+  '@solana/qr-code-styling@1.6.0':
+    resolution: {integrity: sha512-KyBmyFKPxQPhUkP0jjnxV2ZeF1R1guTD8Hrd0YvHvMnhtrNEoEEdv4Jpp4W0GN4qCGG2KYOM5d3TgoLD+CNf9Q==}
 
   '@solana/rpc-api@5.5.1':
     resolution: {integrity: sha512-XWOQQPhKl06Vj0xi3RYHAc6oEQd8B82okYJ04K7N0Vvy3J4PN2cxeK7klwkjgavdcN9EVkYCChm2ADAtnztKnA==}
@@ -4364,6 +4390,7 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@solana/surfpool@1.4.0':
     resolution: {integrity: sha512-YAHZz4Gkq4JKg82pVt4yENs+zxvcUliyS1Nz5JVBYiww3LZp9SG0Fsf/vHakQdgyuEaBwPuLVhS/PritsEhUbA==}
@@ -7134,6 +7161,9 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
+
+  qrcode-generator@1.5.2:
+    resolution: {integrity: sha512-pItrW0Z9HnDBnFmgiNrY1uxRdri32Uh9EjNYLPVC2zZ3ZRIIEqBoDgm4DkvDwNNDHTK7FNkmr8zAa77BYc9xNw==}
 
   qrcode@1.5.4:
     resolution: {integrity: sha512-1ca71Zgiu6ORjHqFBDpnSMTR2ReToX4l1Au1VFLyVeBTFavzQnv5JxMFr3ukHVKpSrSA2MCk0lNJSykjUfz7Zg==}
@@ -10697,6 +10727,10 @@ snapshots:
     dependencies:
       '@solana/kit': 5.5.1(typescript@6.0.3)
 
+  '@solana-program/memo@0.10.0(@solana/kit@6.8.0(typescript@6.0.3))':
+    dependencies:
+      '@solana/kit': 6.8.0(typescript@6.0.3)
+
   '@solana-program/system@0.10.0(@solana/kit@5.5.1(typescript@6.0.3))':
     dependencies:
       '@solana/kit': 5.5.1(typescript@6.0.3)
@@ -11377,6 +11411,22 @@ snapshots:
     transitivePeerDependencies:
       - fastestsmallesttextencoderdecoder
 
+  '@solana/pay@1.0.0-beta.14(@solana-program/memo@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana-program/system@0.12.2(@solana/kit@6.8.0(typescript@6.0.3)))(@solana-program/token-2022@0.9.0(@solana/kit@6.8.0(typescript@6.0.3))(@solana/sysvars@6.8.0(typescript@6.0.3)))(@solana-program/token@0.13.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/keys@6.9.0(typescript@6.0.3))(@solana/kit@6.8.0(typescript@6.0.3))(@solana/rpc-subscriptions-api@6.8.0(typescript@6.0.3))(@solana/rpc-subscriptions-spec@6.9.0(typescript@6.0.3))(typescript@6.0.3)':
+    dependencies:
+      '@solana-program/memo': 0.10.0(@solana/kit@6.8.0(typescript@6.0.3))
+      '@solana-program/system': 0.12.2(@solana/kit@6.8.0(typescript@6.0.3))
+      '@solana-program/token': 0.13.0(@solana/kit@6.8.0(typescript@6.0.3))
+      '@solana-program/token-2022': 0.9.0(@solana/kit@6.8.0(typescript@6.0.3))(@solana/sysvars@6.8.0(typescript@6.0.3))
+      '@solana/keys': 6.9.0(typescript@6.0.3)
+      '@solana/kit': 6.8.0(typescript@6.0.3)
+      '@solana/plugin-interfaces': 6.9.0(typescript@6.0.3)
+      '@solana/qr-code-styling': 1.6.0
+      '@solana/rpc-subscriptions-api': 6.8.0(typescript@6.0.3)
+      '@solana/rpc-subscriptions-spec': 6.9.0(typescript@6.0.3)
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+      - typescript
+
   '@solana/plugin-core@5.5.1(typescript@6.0.3)':
     optionalDependencies:
       typescript: 6.0.3
@@ -11474,6 +11524,10 @@ snapshots:
   '@solana/promises@6.9.0(typescript@6.0.3)':
     optionalDependencies:
       typescript: 6.0.3
+
+  '@solana/qr-code-styling@1.6.0':
+    dependencies:
+      qrcode-generator: 1.5.2
 
   '@solana/rpc-api@5.5.1(typescript@6.0.3)':
     dependencies:
@@ -15302,6 +15356,8 @@ snapshots:
       once: 1.4.0
 
   punycode@2.3.1: {}
+
+  qrcode-generator@1.5.2: {}
 
   qrcode@1.5.4:
     dependencies:

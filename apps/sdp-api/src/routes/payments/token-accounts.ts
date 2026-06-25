@@ -12,7 +12,7 @@ const SPL_TOKEN_PROGRAM_ID = SPL_TOKEN_PROGRAMS["spl-token"] as Address;
 const SPL_TOKEN_2022_PROGRAM_ID = SPL_TOKEN_PROGRAMS["token-2022"] as Address;
 const SPL_TOKEN_PROGRAM_IDS = [SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID] as const;
 
-function resolveTokenLabel(mint: string): string {
+export function resolveTokenLabel(mint: string): string {
   return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? mint;
 }
 
