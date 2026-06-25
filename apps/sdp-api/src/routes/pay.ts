@@ -3,6 +3,10 @@ import { Hono } from "hono";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { notFound } from "@/lib/errors";
 import { assertValidAddress, getSolanaConfig } from "@/lib/solana";
+import {
+  isPaymentRequestExpired,
+  reconcilePaymentRequest,
+} from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
 import { resolveTokenLabel, SOL_MINT } from "./payments/token-accounts";
 
@@ -11,14 +15,15 @@ const REQUEST_LABEL = "Solana Developer Platform";
 const pay = new Hono<{ Bindings: Env }>();
 
 pay.get("/:token", async (c) => {
-  const request = await createPaymentRequestsRepository(c.env).getPaymentRequestByPublicToken(
+  const existing = await createPaymentRequestsRepository(c.env).getPaymentRequestByPublicToken(
     c.req.param("token")
   );
-  if (!request) {
+  if (!existing) {
     throw notFound("Payment request");
   }
+  const request = await reconcilePaymentRequest(c.env, existing);
 
-  const expired = request.expires_at !== null && Date.parse(request.expires_at) <= Date.now();
+  const expired = isPaymentRequestExpired(request.expires_at);
   const status = expired && request.status === "awaiting_payment" ? "expired" : request.status;
   const payable = status === "awaiting_payment";
 

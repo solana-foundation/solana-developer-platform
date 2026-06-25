@@ -8,6 +8,10 @@ import { badRequest, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { isAddress } from "@/lib/solana";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
+import {
+  isPaymentRequestExpired,
+  reconcilePaymentRequest,
+} from "@/services/payments/payment-requests";
 import type { AppContext } from "../context";
 import { paymentAmountSchema } from "../schemas";
 import { resolveScope, resolveWallet } from "../wallets";
@@ -19,7 +23,7 @@ const listPaymentRequestsQuerySchema = z.object({
 });
 
 function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
-  const expired = row.expires_at !== null && Date.parse(row.expires_at) <= Date.now();
+  const expired = isPaymentRequestExpired(row.expires_at);
   return {
     id: row.id,
     publicToken: row.public_token,
@@ -57,8 +61,10 @@ export async function listPaymentRequests(c: AppContext) {
     offset: (page - 1) * pageSize,
   });
 
+  const reconciledRows = await Promise.all(rows.map((row) => reconcilePaymentRequest(c.env, row)));
+
   const response: ListPaymentRequestsResponse = {
-    paymentRequests: rows.map(mapPaymentRequest),
+    paymentRequests: reconciledRows.map(mapPaymentRequest),
     total,
     page,
     pageSize,
