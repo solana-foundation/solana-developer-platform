@@ -137,6 +137,8 @@ export interface UpdatePaymentSubscriptionInput {
   status?: PaymentSubscriptionStatus;
   currentPeriodStartAt?: string | null;
   nextCollectionDueAt?: string | null;
+  expectedNextCollectionDueAt?: string | null;
+  expectedStatus?: PaymentSubscriptionStatus;
   cancelAt?: string | null;
   canceledAt?: string | null;
   updatedAt: string;
@@ -172,6 +174,19 @@ export interface CreatePaymentSubscriptionCollectionAttemptInput {
   updatedAt: string;
 }
 
+export interface UpdatePaymentSubscriptionCollectionAttemptInput {
+  attemptId: string;
+  organizationId: string;
+  projectId: string;
+  transferId?: string | null;
+  attemptedAt?: string | null;
+  status?: PaymentSubscriptionCollectionAttemptStatus;
+  signature?: string | null;
+  error?: string | null;
+  metadata?: Record<string, unknown>;
+  updatedAt: string;
+}
+
 export interface ListPaymentSubscriptionCollectionAttemptsInput {
   organizationId: string;
   projectId: string;
@@ -179,6 +194,14 @@ export interface ListPaymentSubscriptionCollectionAttemptsInput {
   status?: PaymentSubscriptionCollectionAttemptStatus;
   limit: number;
   offset: number;
+}
+
+export interface GetPaymentSubscriptionCollectionAttemptByDueInput {
+  organizationId: string;
+  projectId: string;
+  subscriptionId: string;
+  dueAt: string;
+  statuses?: PaymentSubscriptionCollectionAttemptStatus[];
 }
 
 export interface ListPaymentSubscriptionPlansResult {
@@ -217,8 +240,19 @@ export interface PaymentSubscriptionsRepository {
     projectId: string;
   }): Promise<PaymentSubscriptionRow | null>;
   listSubscriptions(params: ListPaymentSubscriptionsInput): Promise<ListPaymentSubscriptionsResult>;
+  getCollectionAttemptByDue(
+    params: GetPaymentSubscriptionCollectionAttemptByDueInput
+  ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
+  getCollectionAttemptById(params: {
+    attemptId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
   createCollectionAttempt(
     input: CreatePaymentSubscriptionCollectionAttemptInput
+  ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
+  updateCollectionAttempt(
+    input: UpdatePaymentSubscriptionCollectionAttemptInput
   ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
   listCollectionAttempts(
     params: ListPaymentSubscriptionCollectionAttemptsInput

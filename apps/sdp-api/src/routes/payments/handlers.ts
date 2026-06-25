@@ -15,6 +15,7 @@ export {
 export { recordRampProviderEvent } from "./handlers/ramps/moneygram";
 export {
   activateRecurringPayment,
+  collectRecurringPayment,
   createRecurringPayment,
   getRecurringPayment,
   listRecurringPayments,

@@ -10,6 +10,8 @@ import type {
   PaymentRecurringPaymentsRepository,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
+  UpdatePaymentRecurringPaymentCollectionInput,
+  UpdatePaymentRecurringPaymentDestinationTokenAccountInput,
 } from "./payment-recurring-payments.repository";
 
 function buildInClause(length: number): string {
@@ -260,6 +262,62 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.organizationId,
           input.projectId,
           allowActiveUpdate
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapRecurringPaymentRow(row) : null;
+    },
+
+    async updateRecurringPaymentCollection(input: UpdatePaymentRecurringPaymentCollectionInput) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET next_collection_due_at = ?,
+                  destination_token_account =
+                    CASE WHEN ?::boolean THEN ? ELSE destination_token_account END,
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND next_collection_due_at = ?
+              AND status = 'active'
+          RETURNING *`
+        )
+        .bind(
+          input.nextCollectionDueAt,
+          input.destinationTokenAccount !== undefined,
+          input.destinationTokenAccount ?? null,
+          input.updatedAt,
+          input.recurringPaymentId,
+          input.organizationId,
+          input.projectId,
+          input.currentCollectionDueAt
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapRecurringPaymentRow(row) : null;
+    },
+
+    async updateRecurringPaymentDestinationTokenAccount(
+      input: UpdatePaymentRecurringPaymentDestinationTokenAccountInput
+    ) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET destination_token_account = ?,
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'active'
+          RETURNING *`
+        )
+        .bind(
+          input.destinationTokenAccount,
+          input.updatedAt,
+          input.recurringPaymentId,
+          input.organizationId,
+          input.projectId
         )
         .first<Record<string, unknown>>();
 

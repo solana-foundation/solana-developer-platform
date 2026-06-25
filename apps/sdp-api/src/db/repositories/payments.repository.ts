@@ -88,6 +88,8 @@ export interface CreatePaymentTransferInput {
 
 export interface UpdatePaymentTransferInput {
   transferId: string;
+  organizationId?: string;
+  projectId?: string | null;
   status?: PaymentTransferStatus;
   signature?: string | null;
   serializedTx?: string | null;

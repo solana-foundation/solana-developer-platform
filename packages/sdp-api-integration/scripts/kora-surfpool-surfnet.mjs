@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Surfnet } from "@solana/surfpool";
@@ -27,6 +28,9 @@ const state = {
   instanceId: surfnet.instanceId,
   payer: surfnet.payer,
   pid: process.pid,
+  remoteRpcUrlSha256: process.env.SURFPOOL_REMOTE_RPC_URL
+    ? createHash("sha256").update(process.env.SURFPOOL_REMOTE_RPC_URL).digest("hex")
+    : undefined,
   rpcUrl: surfnet.rpcUrl,
   wsUrl: surfnet.wsUrl,
 };

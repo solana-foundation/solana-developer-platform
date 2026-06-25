@@ -1,4 +1,4 @@
-import type { AppDb } from "@/db";
+import type { DatabaseExecutor } from "@/db";
 import type {
   CreatePaymentTransferInput,
   ListTransfersByStatusInput,
@@ -88,7 +88,7 @@ function buildTransferScopeWhere(params: {
 }
 
 async function getTransferByIdInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
   transferId: string
 ): Promise<PaymentTransferRow | null> {
   const row = await db
@@ -100,7 +100,7 @@ async function getTransferByIdInternal(
 }
 
 async function getWalletPoliciesInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
   custodyWalletId: string
 ): Promise<PaymentWalletPolicyRow[]> {
   const rows = await db
@@ -116,7 +116,7 @@ async function getWalletPoliciesInternal(
   return rows.results.map(mapPolicyRow);
 }
 
-export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository {
+export function createPostgresPaymentsRepository(db: DatabaseExecutor): PaymentsRepository {
   return {
     async createTransfer(input: CreatePaymentTransferInput) {
       await db
@@ -178,48 +178,61 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
     },
 
     async updateTransfer(input: UpdatePaymentTransferInput) {
-      const existing = await getTransferByIdInternal(db, input.transferId);
-      if (!existing) {
-        return null;
+      const clauses = ["id = ?"];
+      const values: unknown[] = [input.transferId];
+
+      if (input.organizationId) {
+        clauses.push("organization_id = ?");
+        values.push(input.organizationId);
+      }
+      if (input.projectId !== undefined) {
+        clauses.push("project_id IS NOT DISTINCT FROM ?");
+        values.push(input.projectId);
       }
 
-      await db
+      const row = await db
         .prepare(
           `UPDATE payment_transfers
-           SET status = ?,
-               signature = ?,
-               serialized_tx = ?,
-               slot = ?,
-               block_time = ?,
-               fee = ?,
-               amount = ?,
-               fiat_amount = ?,
-               provider_data = ?::jsonb,
-               error = ?,
+           SET status = COALESCE(?, status),
+               signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
+               serialized_tx = CASE WHEN ?::boolean THEN ? ELSE serialized_tx END,
+               slot = CASE WHEN ?::boolean THEN ? ELSE slot END,
+               block_time = CASE WHEN ?::boolean THEN ? ELSE block_time END,
+               fee = CASE WHEN ?::boolean THEN ? ELSE fee END,
+               amount = CASE WHEN ?::boolean THEN ? ELSE amount END,
+               fiat_amount = CASE WHEN ?::boolean THEN ? ELSE fiat_amount END,
+               provider_data = CASE WHEN ?::boolean THEN provider_data || ?::jsonb ELSE provider_data END,
+               error = CASE WHEN ?::boolean THEN ? ELSE error END,
                updated_at = ?
-           WHERE id = ?`
+           WHERE ${clauses.join(" AND ")}
+           RETURNING *`
         )
         .bind(
-          input.status ?? existing.status,
-          input.signature ?? existing.signature,
-          input.serializedTx ?? existing.serialized_tx,
-          input.slot ?? existing.slot,
-          input.blockTime ?? existing.block_time,
-          input.fee ?? existing.fee,
-          input.amount ?? existing.amount,
-          input.fiatAmount ?? existing.fiat_amount,
-          JSON.stringify(
-            input.providerData
-              ? { ...existing.provider_data, ...input.providerData }
-              : existing.provider_data
-          ),
-          input.error ?? existing.error,
+          input.status ?? null,
+          input.signature !== undefined,
+          input.signature ?? null,
+          input.serializedTx !== undefined,
+          input.serializedTx ?? null,
+          input.slot !== undefined,
+          input.slot ?? null,
+          input.blockTime !== undefined,
+          input.blockTime ?? null,
+          input.fee !== undefined,
+          input.fee ?? null,
+          input.amount !== undefined,
+          input.amount ?? null,
+          input.fiatAmount !== undefined,
+          input.fiatAmount ?? null,
+          input.providerData !== undefined,
+          JSON.stringify(input.providerData ?? {}),
+          input.error !== undefined,
+          input.error ?? null,
           input.updatedAt,
-          input.transferId
+          ...values
         )
-        .run();
+        .first<Record<string, unknown>>();
 
-      return getTransferByIdInternal(db, input.transferId);
+      return row ? mapTransferRow(row) : null;
     },
 
     async updateTransferStatusGuarded(input) {

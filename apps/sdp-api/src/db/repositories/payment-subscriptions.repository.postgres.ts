@@ -1,8 +1,9 @@
-import type { AppDb } from "@/db";
+import type { DatabaseExecutor } from "@/db";
 import type {
   CreatePaymentSubscriptionCollectionAttemptInput,
   CreatePaymentSubscriptionInput,
   CreatePaymentSubscriptionPlanInput,
+  GetPaymentSubscriptionCollectionAttemptByDueInput,
   ListPaymentSubscriptionCollectionAttemptsInput,
   ListPaymentSubscriptionCollectionAttemptsResult,
   ListPaymentSubscriptionPlansInput,
@@ -13,6 +14,7 @@ import type {
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
   PaymentSubscriptionsRepository,
+  UpdatePaymentSubscriptionCollectionAttemptInput,
   UpdatePaymentSubscriptionInput,
   UpdatePaymentSubscriptionPlanInput,
 } from "./payment-subscriptions.repository";
@@ -85,7 +87,7 @@ function mapAttemptRow(row: Record<string, unknown>): PaymentSubscriptionCollect
 }
 
 async function getPlanByIdInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
   params: { planId: string; organizationId: string; projectId: string }
 ): Promise<PaymentSubscriptionPlanRow | null> {
   const row = await db
@@ -103,7 +105,7 @@ async function getPlanByIdInternal(
 }
 
 async function getSubscriptionByIdInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
   params: { subscriptionId: string; organizationId: string; projectId: string }
 ): Promise<PaymentSubscriptionRow | null> {
   const row = await db
@@ -121,19 +123,33 @@ async function getSubscriptionByIdInternal(
 }
 
 async function getAttemptByIdInternal(
-  db: AppDb,
-  id: string
+  db: DatabaseExecutor,
+  params: { attemptId: string; organizationId?: string; projectId?: string }
 ): Promise<PaymentSubscriptionCollectionAttemptRow | null> {
+  const clauses = ["id = ?"];
+  const values: unknown[] = [params.attemptId];
+
+  if (params.organizationId) {
+    clauses.push("organization_id = ?");
+    values.push(params.organizationId);
+  }
+  if (params.projectId) {
+    clauses.push("project_id = ?");
+    values.push(params.projectId);
+  }
+
   const row = await db
-    .prepare("SELECT * FROM payment_subscription_collection_attempts WHERE id = ?")
-    .bind(id)
+    .prepare(
+      `SELECT * FROM payment_subscription_collection_attempts WHERE ${clauses.join(" AND ")}`
+    )
+    .bind(...values)
     .first<Record<string, unknown>>();
 
   return row ? mapAttemptRow(row) : null;
 }
 
 export function createPostgresPaymentSubscriptionsRepository(
-  db: AppDb
+  db: DatabaseExecutor
 ): PaymentSubscriptionsRepository {
   return {
     async createPlan(input: CreatePaymentSubscriptionPlanInput) {
@@ -337,7 +353,7 @@ export function createPostgresPaymentSubscriptionsRepository(
       });
       if (!existing) return null;
 
-      await db
+      const row = await db
         .prepare(
           `UPDATE payment_subscriptions
               SET subscriber_token_account =
@@ -357,7 +373,10 @@ export function createPostgresPaymentSubscriptionsRepository(
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
-              AND project_id = ?`
+              AND project_id = ?
+              AND (?::boolean = false OR next_collection_due_at IS NOT DISTINCT FROM ?)
+              AND (?::boolean = false OR status = ?::text)
+          RETURNING *`
         )
         .bind(
           input.subscriberTokenAccount !== undefined,
@@ -380,19 +399,56 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.updatedAt,
           input.subscriptionId,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          input.expectedNextCollectionDueAt !== undefined,
+          input.expectedNextCollectionDueAt ?? null,
+          input.expectedStatus !== undefined,
+          input.expectedStatus ?? null
         )
-        .run();
+        .first<Record<string, unknown>>();
 
-      return getSubscriptionByIdInternal(db, {
-        subscriptionId: input.subscriptionId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
+      return row ? mapSubscriptionRow(row) : null;
     },
 
     getSubscriptionById(params) {
       return getSubscriptionByIdInternal(db, params);
+    },
+
+    async getCollectionAttemptByDue(params: GetPaymentSubscriptionCollectionAttemptByDueInput) {
+      const clauses = [
+        "organization_id = ?",
+        "project_id = ?",
+        "subscription_id = ?",
+        "due_at = ?",
+      ];
+      const values: unknown[] = [
+        params.organizationId,
+        params.projectId,
+        params.subscriptionId,
+        params.dueAt,
+      ];
+
+      if (params.statuses?.length) {
+        clauses.push(`status IN (${params.statuses.map(() => "?").join(", ")})`);
+        values.push(...params.statuses);
+      }
+
+      const row = await db
+        .prepare(
+          `SELECT *
+             FROM payment_subscription_collection_attempts
+            WHERE ${clauses.join(" AND ")}
+            ORDER BY updated_at DESC
+            LIMIT 1`
+        )
+        .bind(...values)
+        .first<Record<string, unknown>>();
+
+      return row ? mapAttemptRow(row) : null;
+    },
+
+    getCollectionAttemptById(params) {
+      return getAttemptByIdInternal(db, params);
     },
 
     async listSubscriptions(params: ListPaymentSubscriptionsInput) {
@@ -489,7 +545,61 @@ export function createPostgresPaymentSubscriptionsRepository(
         )
         .run();
 
-      return getAttemptByIdInternal(db, input.id);
+      return getAttemptByIdInternal(db, {
+        attemptId: input.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
+    },
+
+    async updateCollectionAttempt(input: UpdatePaymentSubscriptionCollectionAttemptInput) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_subscription_collection_attempts
+              SET transfer_id = CASE WHEN ?::boolean THEN ? ELSE transfer_id END,
+                  attempted_at = CASE WHEN ?::boolean THEN ? ELSE attempted_at END,
+                  status = COALESCE(?, status),
+                  signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
+                  error = CASE WHEN ?::boolean THEN ? ELSE error END,
+                  metadata = CASE WHEN ?::boolean THEN ?::jsonb ELSE metadata END,
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND (
+                ?::text IS NULL
+                OR ?::text = status
+                OR (?::text = 'processing' AND status = 'pending')
+                OR (?::text = 'confirmed' AND status IN ('pending', 'processing'))
+                OR (?::text = 'failed' AND status IN ('pending', 'processing'))
+              )
+          RETURNING *`
+        )
+        .bind(
+          input.transferId !== undefined,
+          input.transferId ?? null,
+          input.attemptedAt !== undefined,
+          input.attemptedAt ?? null,
+          input.status ?? null,
+          input.signature !== undefined,
+          input.signature ?? null,
+          input.error !== undefined,
+          input.error ?? null,
+          input.metadata !== undefined,
+          JSON.stringify(input.metadata ?? {}),
+          input.updatedAt,
+          input.attemptId,
+          input.organizationId,
+          input.projectId,
+          input.status ?? null,
+          input.status ?? null,
+          input.status ?? null,
+          input.status ?? null,
+          input.status ?? null
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapAttemptRow(row) : null;
     },
 
     async listCollectionAttempts(params: ListPaymentSubscriptionCollectionAttemptsInput) {

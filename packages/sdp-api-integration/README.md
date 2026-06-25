@@ -173,7 +173,14 @@ pnpm kora:surfpool:down
 The test command still runs SDP through `FEE_PAYMENT_PROVIDER=kora` and
 `KORA_RPC_URL=http://127.0.0.1:18080`; only the JSON-RPC server behind that URL
 is local test infrastructure. It signs with a test-only fee payer and submits to
-the embedded Surfnet RPC URL written by `pnpm kora:surfpool:up`. Use
+the embedded Surfnet RPC URL written by `pnpm kora:surfpool:up`. Embedded
+Surfnet uses the same managed Solana RPC selection as the integration test
+runner, including `SOLANA_RPC_CI_PREFERRED_PROVIDER`, as its
+`SURFPOOL_REMOTE_RPC_URL`; set `SURFPOOL_REMOTE_RPC_URL` directly to override it
+or omit managed RPC env vars to run Surfpool offline. When this command is run
+under Doppler, the harness ignores Doppler's hosted `KORA_RPC_URL` and uses
+`http://127.0.0.1:18080` for the local Kora-compatible endpoint; set
+`KORA_SURFPOOL_KORA_RPC_URL` to change that local endpoint. Use
 `KORA_SURFPOOL_RUNTIME=cli` to validate against the Surfpool CLI sidecar instead.
 
 ### "Devnet airdrop failed"

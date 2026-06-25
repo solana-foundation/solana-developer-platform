@@ -421,6 +421,12 @@ export interface PaymentRecurringPaymentResponse {
   recurringPayment: PaymentRecurringPayment;
 }
 
+export interface PaymentRecurringPaymentCollectionResponse {
+  recurringPayment: PaymentRecurringPayment;
+  collectionAttempt: PaymentSubscriptionCollectionAttempt;
+  transfer: PaymentTransferSummary;
+}
+
 export interface ListPaymentRecurringPaymentsResponse {
   recurringPayments: PaymentRecurringPayment[];
   total: number;

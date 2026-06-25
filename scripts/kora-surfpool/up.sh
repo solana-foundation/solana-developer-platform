@@ -13,7 +13,13 @@ KORA_FEE_PAYER_LAMPORTS="${KORA_FEE_PAYER_LAMPORTS:-10000000000}"
 KORA_IMAGE="${KORA_IMAGE:-ghcr.io/solana-foundation/kora:61add05}"
 KORA_PLATFORM="${KORA_PLATFORM:-linux/amd64}"
 KORA_REDIS_PORT="${KORA_REDIS_PORT:-0}"
-KORA_RPC_URL="${KORA_RPC_URL:-http://127.0.0.1:18080}"
+if [ -n "${KORA_SURFPOOL_KORA_RPC_URL:-}" ]; then
+  KORA_RPC_URL="${KORA_SURFPOOL_KORA_RPC_URL}"
+elif [ "${DOPPLER_RUN_ACTIVE:-}" = "1" ]; then
+  KORA_RPC_URL="http://127.0.0.1:18080"
+else
+  KORA_RPC_URL="${KORA_RPC_URL:-http://127.0.0.1:18080}"
+fi
 KORA_SURFPOOL_MODE="${KORA_SURFPOOL_MODE:-shim}"
 KORA_SURFPOOL_RUNTIME="${KORA_SURFPOOL_RUNTIME:-embedded}"
 KORA_SHIM_LOG="${STATE_DIR}/kora-shim.log"
@@ -60,6 +66,49 @@ if (typeof value !== "string" || value.length === 0) {
   process.exit(1);
 }
 process.stdout.write(value);
+NODE
+}
+
+shell_quote() {
+  local value="$1"
+  node - "${value}" <<'NODE'
+const value = process.argv[2] ?? "";
+process.stdout.write(`'${value.replaceAll("'", `'"'"'`)}'`);
+NODE
+}
+
+configure_embedded_remote_rpc() {
+  if [ -n "${SURFPOOL_REMOTE_RPC_URL:-}" ]; then
+    echo "Using explicit Surfpool remote RPC override."
+    export SURFPOOL_REMOTE_RPC_URL
+    return 0
+  fi
+
+  local remote_rpc_url
+  remote_rpc_url="$(node "${ROOT_DIR}/scripts/kora-surfpool/select-remote-rpc.mjs")"
+  if [ -n "${remote_rpc_url}" ]; then
+    SURFPOOL_REMOTE_RPC_URL="${remote_rpc_url}"
+    export SURFPOOL_REMOTE_RPC_URL
+  fi
+}
+
+embedded_surfpool_config_matches() {
+  local file="$1"
+  local remote_rpc_url="${SURFPOOL_REMOTE_RPC_URL:-}"
+  node - "${file}" "${remote_rpc_url}" <<'NODE'
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+
+const [file, remoteRpcUrl] = process.argv.slice(2);
+const payload = JSON.parse(await readFile(file, "utf8"));
+const expectedDigest = remoteRpcUrl
+  ? createHash("sha256").update(remoteRpcUrl).digest("hex")
+  : undefined;
+const actualDigest = payload.remoteRpcUrlSha256;
+
+if (actualDigest !== expectedDigest) {
+  process.exit(1);
+}
 NODE
 }
 
@@ -136,7 +185,7 @@ start_embedded_surfpool() {
     if [ -n "${old_pid}" ] && kill -0 "${old_pid}" >/dev/null 2>&1; then
       if [ -f "${SURFPOOL_INFO_FILE}" ]; then
         SURFPOOL_RPC_URL="$(json_file_field "${SURFPOOL_INFO_FILE}" rpcUrl)"
-        if json_rpc_ok "${SURFPOOL_RPC_URL}"; then
+        if embedded_surfpool_config_matches "${SURFPOOL_INFO_FILE}" && json_rpc_ok "${SURFPOOL_RPC_URL}"; then
           export SURFPOOL_RPC_URL
           echo "Embedded Surfpool RPC is already healthy at ${SURFPOOL_RPC_URL}."
           return 0
@@ -177,17 +226,18 @@ start_cli_surfpool() {
 
 write_runtime_env() {
   umask 077
-  cat >"${RUNTIME_ENV_FILE}" <<EOF
-SURFPOOL_RPC_URL=${SURFPOOL_RPC_URL}
-SOLANA_RPC_URL=${SURFPOOL_RPC_URL}
-SOLANA_RPC_CI_PREFERRED_PROVIDER=default
-KORA_RPC_URL=${KORA_RPC_URL}
-FEE_PAYMENT_PROVIDER=kora
-RUN_INTEGRATION_TESTS=true
-KORA_SURFPOOL_SHIM=$([ "${KORA_SURFPOOL_MODE}" = "shim" ] && echo "true" || echo "false")
-PRIVY_APP_ID=${PRIVY_APP_ID:-kora-surfpool-local}
-PRIVY_APP_SECRET=${PRIVY_APP_SECRET:-kora-surfpool-local}
-EOF
+  {
+    echo "SURFPOOL_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
+    echo "SURFPOOL_REMOTE_RPC_URL=$(shell_quote "${SURFPOOL_REMOTE_RPC_URL:-}")"
+    echo "SOLANA_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
+    echo "SOLANA_RPC_CI_PREFERRED_PROVIDER=default"
+    echo "KORA_RPC_URL=$(shell_quote "${KORA_RPC_URL}")"
+    echo "FEE_PAYMENT_PROVIDER=kora"
+    echo "RUN_INTEGRATION_TESTS=true"
+    echo "KORA_SURFPOOL_SHIM=$([ "${KORA_SURFPOOL_MODE}" = "shim" ] && echo "true" || echo "false")"
+    echo "PRIVY_APP_ID=$(shell_quote "${PRIVY_APP_ID:-kora-surfpool-local}")"
+    echo "PRIVY_APP_SECRET=$(shell_quote "${PRIVY_APP_SECRET:-kora-surfpool-local}")"
+  } >"${RUNTIME_ENV_FILE}"
 }
 
 require_command curl
@@ -196,6 +246,7 @@ require_command pnpm
 
 case "${KORA_SURFPOOL_RUNTIME}" in
   embedded)
+    configure_embedded_remote_rpc
     start_embedded_surfpool
     ;;
   cli)
