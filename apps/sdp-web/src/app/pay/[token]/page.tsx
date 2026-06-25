@@ -1,5 +1,4 @@
 import { CheckCircle2Icon, ClockIcon, XCircleIcon } from "lucide-react";
-import Image from "next/image";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -81,22 +80,17 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
         className="pointer-events-none absolute inset-0"
         style={{
           backgroundImage:
-            "linear-gradient(rgba(28,28,29,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(28,28,29,0.04) 1px, transparent 1px)",
-          backgroundSize: "34px 34px",
-          maskImage: "radial-gradient(ellipse 70% 55% at 50% 45%, #000, transparent)",
-          WebkitMaskImage: "radial-gradient(ellipse 70% 55% at 50% 45%, #000, transparent)",
+            "radial-gradient(rgba(28,28,29,0.09) 1.25px, transparent 1.25px), radial-gradient(rgba(28,28,29,0.05) 1.25px, transparent 1.25px)",
+          backgroundSize: "26px 26px",
+          backgroundPosition: "0 0, 13px 13px",
+          maskImage: "radial-gradient(ellipse 80% 62% at 50% 38%, #000 8%, transparent 78%)",
+          WebkitMaskImage: "radial-gradient(ellipse 80% 62% at 50% 38%, #000 8%, transparent 78%)",
         }}
       />
 
       <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-[rgba(28,28,29,0.08)] bg-white shadow-[0_24px_70px_-24px_rgba(28,28,29,0.22)]">
         <div className="p-8">
-          <div className="flex items-center justify-center gap-2.5 border-b border-border-light pb-6">
-            <Image
-              src="/landing/solana-logo.svg"
-              alt="Solana Developer Platform"
-              width={22}
-              height={20}
-            />
+          <div className="flex items-center justify-center border-b border-border-light pb-6">
             <span className="text-sm font-semibold tracking-tight text-text-extra-high">
               Solana Developer Platform
             </span>
@@ -151,7 +145,14 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
         </div>
 
         <div className="flex items-center justify-center gap-1.5 border-t border-border-light bg-[rgba(28,28,29,0.015)] py-3.5">
-          <span className="text-xs text-text-low">Secured by Solana Pay</span>
+          <a
+            href="https://solana.com/docs/tools/solana-pay"
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-text-low transition-colors hover:text-text-medium"
+          >
+            Secured by Solana Pay
+          </a>
         </div>
       </div>
     </main>
