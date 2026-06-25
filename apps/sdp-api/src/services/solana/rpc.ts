@@ -14,6 +14,7 @@ import {
   createSolanaRpcSubscriptions,
   type Signature,
 } from "@solana/kit";
+import { isTransientRpcError } from "@/lib/rpc";
 import { getSolanaConfig } from "@/lib/solana";
 import type { Env } from "@/types/env";
 
@@ -92,16 +93,6 @@ async function withTransientRpcRetry<T>(operation: () => Promise<T>): Promise<T>
   }
 
   throw lastError;
-}
-
-function isTransientRpcError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return (
-    /\b(429|500|502|503|504)\b/.test(message) ||
-    /service unavailable|too many requests|timed? out|unable to complete|fetch failed|econnreset/i.test(
-      message
-    )
-  );
 }
 
 function assertAllowedRpcHeaders(
