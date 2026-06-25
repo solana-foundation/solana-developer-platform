@@ -134,7 +134,10 @@ function resolveKnownUsdPrice(
   }
 
   const normalizedToken = balance.token.trim().toUpperCase();
-  if (normalizedToken === "USDC" || WELL_KNOWN_TOKEN_BY_MINT.get(normalizedMint)?.isUsdStable) {
+  const wellKnown =
+    WELL_KNOWN_TOKEN_BY_MINT.get(normalizedMint) ??
+    Object.values(WELL_KNOWN_TOKENS).find((token) => token.symbol === normalizedToken);
+  if (wellKnown?.isUsdStable) {
     return 1;
   }
 

@@ -74,6 +74,6 @@ export type WellKnownTokenSymbol = keyof typeof WELL_KNOWN_TOKENS;
 /** Lookup from any cluster's mint address to its well-known token definition. */
 export const WELL_KNOWN_TOKEN_BY_MINT: ReadonlyMap<string, WellKnownToken> = new Map(
   Object.values(WELL_KNOWN_TOKENS).flatMap((token) =>
-    Object.values(token.mints).map((mint): [string, WellKnownToken] => [mint, token])
+    [...new Set(Object.values(token.mints))].map((mint): [string, WellKnownToken] => [mint, token])
   )
 );
