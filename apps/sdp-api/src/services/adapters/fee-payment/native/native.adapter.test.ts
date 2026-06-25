@@ -17,15 +17,10 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as solanaRpc from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 import { NativeAdapter } from "./native.adapter";
-
-vi.mock("@/services/solana/rpc", () => ({
-  createRpc: vi.fn(() => ({})),
-  sendTransaction: vi.fn(),
-}));
 
 const base58 = getBase58Codec();
 const decoder = getTransactionDecoder();
@@ -81,8 +76,19 @@ async function buildSourceSignedTransfer(feePayer: Address): Promise<{
 }
 
 describe("NativeAdapter", () => {
+  // The Workers test pool shares one module registry across files (isolate: false),
+  // so a top-level `vi.mock("@/services/solana/rpc")` doesn't reliably intercept once
+  // another test file has already imported the real module. Spy on the live namespace
+  // instead — the adapter calls these through the same `solanaRpc` object, so the
+  // stubs always apply regardless of file load order. Restore afterwards so the spies
+  // don't leak into other test files sharing the isolate.
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.spyOn(solanaRpc, "createRpc").mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
+    vi.spyOn(solanaRpc, "sendTransaction").mockResolvedValue("1".repeat(64) as Signature);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("getFeePayer returns the address of the configured keypair", async () => {
