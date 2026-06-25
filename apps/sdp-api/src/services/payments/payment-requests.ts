@@ -4,7 +4,9 @@ import {
   ValidateTransferError,
   validateTransfer,
 } from "@solana/pay";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
+import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import {
   createPaymentRequestsRepository,
   createPaymentsRepository,
@@ -62,35 +64,56 @@ export async function reconcilePaymentRequest(
     throw err;
   }
 
-  const transfer = await createPaymentsRepository(env).createTransfer({
-    organizationId: row.organization_id,
-    projectId,
-    walletId: row.wallet_id,
-    counterpartyId: row.counterparty_id,
-    sourceAddress: null,
-    destinationAddress: row.destination_address,
-    token: row.token,
-    amount: row.amount,
-    memo: null,
-    type: "transfer",
-    direction: "inbound",
-    status: "confirmed",
-    provider: null,
-    providerReference: null,
-    deliveryMode: null,
-    fiatCurrency: null,
-    fiatAmount: null,
-    providerData: {},
-    serializedTx: null,
-    signature: found.signature,
-    slot: Number(found.slot),
-    initiatedByKeyId: null,
-  });
+  const paymentsRepo = createPaymentsRepository(env);
+  let transfer: PaymentTransferRow | null;
+  try {
+    transfer = await paymentsRepo.createTransfer({
+      organizationId: row.organization_id,
+      projectId,
+      walletId: row.wallet_id,
+      counterpartyId: row.counterparty_id,
+      sourceAddress: null,
+      destinationAddress: row.destination_address,
+      token: row.token,
+      amount: row.amount,
+      memo: null,
+      type: "transfer",
+      direction: "inbound",
+      status: "confirmed",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {},
+      serializedTx: null,
+      signature: found.signature,
+      slot: Number(found.slot),
+      initiatedByKeyId: null,
+    });
+  } catch (err) {
+    // A concurrent reconcile of the same request inserts the same signature
+    // (payment_transfers.signature is UNIQUE); converge on its row instead of
+    // bubbling the duplicate-insert error.
+    if (!isPostgresUniqueViolation(err)) {
+      throw err;
+    }
+    const recorded = await paymentsRepo.listTransfersBySignatures({
+      signatures: [found.signature],
+      organizationId: row.organization_id,
+      projectId,
+    });
+    if (recorded.length === 0) {
+      throw err;
+    }
+    transfer = recorded[0];
+  }
   if (!transfer) {
     throw internalError("Failed to record inbound transfer for payment request settlement");
   }
 
-  const settled = await createPaymentRequestsRepository(env).markPaymentRequest({
+  const requestsRepo = createPaymentRequestsRepository(env);
+  const settled = await requestsRepo.markPaymentRequest({
     requestId: row.id,
     organizationId: row.organization_id,
     projectId,
@@ -101,5 +124,13 @@ export async function reconcilePaymentRequest(
   if (settled) {
     return settled;
   }
-  return row;
+  const current = await requestsRepo.getPaymentRequestById({
+    requestId: row.id,
+    organizationId: row.organization_id,
+    projectId,
+  });
+  if (!current) {
+    throw internalError("payment request not found after settlement");
+  }
+  return current;
 }

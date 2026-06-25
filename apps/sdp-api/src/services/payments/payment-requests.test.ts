@@ -135,6 +135,20 @@ describe("reconcilePaymentRequest", () => {
     expect(fields.splToken).toBe("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
   });
 
+  it("converges concurrent reconciles of the same request to a single settlement", async () => {
+    mockSettlementSucceeds();
+    const request = await createRequest();
+
+    const [a, b] = await Promise.all([
+      reconcilePaymentRequest(env, request),
+      reconcilePaymentRequest(env, request),
+    ]);
+
+    expect(a.status).toBe("paid");
+    expect(b.status).toBe("paid");
+    expect(await listInboundTransfers()).toHaveLength(1);
+  });
+
   it("leaves the request awaiting when no transfer references it", async () => {
     findReferenceSpy.mockRejectedValue(new FindReferenceError("not found"));
 
