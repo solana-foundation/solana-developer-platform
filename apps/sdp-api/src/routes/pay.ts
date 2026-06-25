@@ -5,7 +5,7 @@ import { notFound } from "@/lib/errors";
 import { assertValidAddress, getSolanaConfig } from "@/lib/solana";
 import {
   isPaymentRequestExpired,
-  reconcilePaymentRequest,
+  reconcilePaymentRequestBestEffort,
 } from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
 import { resolveTokenLabel, SOL_MINT } from "./payments/token-accounts";
@@ -21,7 +21,7 @@ pay.get("/:token", async (c) => {
   if (!existing) {
     throw notFound("Payment request");
   }
-  const request = await reconcilePaymentRequest(c.env, existing);
+  const request = await reconcilePaymentRequestBestEffort(c.env, existing);
 
   const expired = isPaymentRequestExpired(request.expires_at);
   const status = expired && request.status === "awaiting_payment" ? "expired" : request.status;

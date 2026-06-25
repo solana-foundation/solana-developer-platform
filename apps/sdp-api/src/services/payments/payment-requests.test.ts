@@ -18,7 +18,7 @@ import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { reconcilePaymentRequest } from "./payment-requests";
+import { reconcilePaymentRequest, reconcilePaymentRequestBestEffort } from "./payment-requests";
 
 const TEST_PROJECT_ID = "prj_preq_handler_test";
 const TEST_WALLET_ID = "wal_preq_handler_test";
@@ -177,6 +177,18 @@ describe("reconcilePaymentRequest", () => {
     await expect(reconcilePaymentRequest(env, await createRequest())).rejects.toThrow(
       "rpc exploded"
     );
+  });
+
+  it("best-effort returns the stored row and logs when reconcile errors unexpectedly", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    findReferenceSpy.mockRejectedValue(new Error("rpc exploded"));
+    const request = await createRequest();
+
+    const result = await reconcilePaymentRequestBestEffort(env, request);
+
+    expect(result).toBe(request);
+    expect(errorSpy).toHaveBeenCalled();
+    expect(await listInboundTransfers()).toHaveLength(0);
   });
 
   it("short-circuits non-awaiting requests without touching the chain", async () => {
