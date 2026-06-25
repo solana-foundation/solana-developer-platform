@@ -27,16 +27,17 @@ pay.get("/:token", async (c) => {
     const recipient = assertValidAddress(request.destination_address, "destinationAddress");
     const reference = assertValidAddress(request.reference, "reference");
     const tokenLabel = resolveTokenLabel(request.token);
-    solanaPayUrl = encodeURL({
+    const url = encodeURL({
       recipient,
-      amount: Number(request.amount),
       reference,
       label: REQUEST_LABEL,
       message: `Pay ${request.amount} ${tokenLabel} to ${REQUEST_LABEL}`,
       ...(request.token === SOL_MINT
         ? {}
         : { splToken: assertValidAddress(request.token, "token") }),
-    }).toString();
+    });
+    url.searchParams.set("amount", request.amount);
+    solanaPayUrl = url.toString();
   }
 
   return c.json({

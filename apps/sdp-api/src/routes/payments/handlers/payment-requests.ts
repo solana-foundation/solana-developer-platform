@@ -6,6 +6,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import { isAddress } from "@/lib/solana";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import type { AppContext } from "../context";
 import { paymentAmountSchema } from "../schemas";
@@ -67,7 +68,7 @@ export async function listPaymentRequests(c: AppContext) {
 
 const createPaymentRequestSchema = z.object({
   walletId: z.string().min(1),
-  token: z.string().min(1),
+  token: z.string().refine(isAddress, "token must be a valid Solana mint address"),
   amount: paymentAmountSchema,
   // Optional counterparty (the payer). When set, payment is expected from this
   // counterparty's crypto account; when null the link is payable by anyone.
