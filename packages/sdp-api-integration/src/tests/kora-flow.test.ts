@@ -13,6 +13,16 @@ type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
   | { jsonrpc: "2.0"; id: number; error: { code: number; message: string; data?: unknown } };
 
+class SolanaRpcError extends Error {
+  constructor(
+    message: string,
+    readonly code: number
+  ) {
+    super(message);
+    this.name = "SolanaRpcError";
+  }
+}
+
 type ParsedAccountKey = string | { pubkey: string; signer?: boolean };
 type ParsedInstruction = { programId?: string; parsed?: unknown };
 
@@ -51,7 +61,10 @@ async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
 
   const payload = (await response.json()) as SolanaRpcResponse<T>;
   if ("error" in payload) {
-    throw new Error(payload.error.message ?? `RPC error calling ${method}`);
+    throw new SolanaRpcError(
+      payload.error.message ?? `RPC error calling ${method}`,
+      payload.error.code
+    );
   }
 
   return payload.result;
@@ -80,6 +93,9 @@ async function getConfirmedTransaction(signature: string): Promise<ParsedTransac
         return tx;
       }
     } catch (error) {
+      if (!isRetryableTransactionLookupError(error)) {
+        throw error;
+      }
       lastError = error;
     }
 
@@ -89,6 +105,31 @@ async function getConfirmedTransaction(signature: string): Promise<ParsedTransac
   const suffix = lastError instanceof Error ? ` Last RPC error: ${lastError.message}` : "";
   throw new Error(
     `Unable to fetch confirmed Kora signer-check transaction ${signature} from SOLANA_RPC_URL after ${TRANSACTION_LOOKUP_TIMEOUT_MS}ms.${suffix}`
+  );
+}
+
+function isRetryableTransactionLookupError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  if (error instanceof SolanaRpcError && [-32600, -32601, -32602].includes(error.code)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("unable to complete request") ||
+    message.includes("request timed out") ||
+    message.includes("timed out") ||
+    message.includes("service unavailable") ||
+    message.includes("try again") ||
+    message.includes("too many requests") ||
+    message.includes("429") ||
+    message.includes("500") ||
+    message.includes("502") ||
+    message.includes("503") ||
+    message.includes("504")
   );
 }
 
