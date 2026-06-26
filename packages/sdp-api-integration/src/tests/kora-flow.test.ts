@@ -16,7 +16,7 @@ type SolanaRpcResponse<T> =
 class SolanaRpcError extends Error {
   constructor(
     message: string,
-    readonly code: number
+    readonly code?: number
   ) {
     super(message);
     this.name = "SolanaRpcError";
@@ -59,7 +59,22 @@ async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
 
-  const payload = (await response.json()) as SolanaRpcResponse<T>;
+  const responseText = await response.text();
+  if (!response.ok) {
+    throw new SolanaRpcError(
+      `HTTP ${response.status} calling ${method}: ${responseText.slice(0, 200)}`,
+      response.status
+    );
+  }
+
+  let payload: SolanaRpcResponse<T>;
+  try {
+    payload = JSON.parse(responseText) as SolanaRpcResponse<T>;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new SolanaRpcError(`Invalid JSON response calling ${method}: ${message}`);
+  }
+
   if ("error" in payload) {
     throw new SolanaRpcError(
       payload.error.message ?? `RPC error calling ${method}`,
@@ -113,8 +128,14 @@ function isRetryableTransactionLookupError(error: unknown): boolean {
     return false;
   }
 
-  if (error instanceof SolanaRpcError && [-32600, -32601, -32602].includes(error.code)) {
-    return false;
+  if (error instanceof SolanaRpcError) {
+    if (error.code && [-32600, -32601, -32602].includes(error.code)) {
+      return false;
+    }
+
+    if (error.code && (error.code === 429 || (error.code >= 500 && error.code <= 599))) {
+      return true;
+    }
   }
 
   const message = error.message.toLowerCase();
@@ -125,6 +146,9 @@ function isRetryableTransactionLookupError(error: unknown): boolean {
     message.includes("service unavailable") ||
     message.includes("try again") ||
     message.includes("too many requests") ||
+    message.includes("invalid json response") ||
+    message.includes("bad gateway") ||
+    message.includes("gateway timeout") ||
     message.includes("429") ||
     message.includes("500") ||
     message.includes("502") ||
