@@ -4,6 +4,8 @@ import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
   createExternalSolanaAddress,
+  ensureLinkedOrg,
+  resolvePlaywrightProjectId,
   seedCounterpartyWithSolanaAccount,
   seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
@@ -11,6 +13,61 @@ import {
   bootstrapLocalPaymentFixtures,
   getBootstrapApiBaseUrl,
 } from "../support/local-issuance-bootstrap";
+
+const recurringPaymentsEnabled = process.env.NEXT_PUBLIC_PAYMENTS_RECURRING_ENABLED === "true";
+
+test.describe
+  .serial("dashboard recurring payments feature flag", () => {
+    let bootstrapProjectId = "";
+
+    test.beforeAll(async ({ browser }) => {
+      const session = await getPlaywrightAdminSession(browser);
+      await ensureLinkedOrg(session.identity, { tier: "enterprise" });
+      bootstrapProjectId = await resolvePlaywrightProjectId(
+        getBootstrapApiBaseUrl(),
+        session.getBearerToken
+      );
+      await session.page.close();
+    });
+
+    test.beforeEach(async ({ page }) => {
+      await seedProjectCookie(page, bootstrapProjectId);
+    });
+
+    test("hides recurring payments when the dashboard feature flag is disabled", async ({
+      page,
+    }) => {
+      test.skip(recurringPaymentsEnabled, "Covered by the feature-enabled recurring payment test");
+
+      await page.goto("/dashboard/payments");
+
+      await expect(page.getByRole("link", { name: "Recurring" })).toHaveCount(0);
+
+      await page.goto("/dashboard/payments/recurring");
+      await expect(
+        page.getByRole("heading", { name: "Recurring payments unavailable" })
+      ).toBeVisible();
+      await expect(page.getByText("No recurring payments yet.")).toHaveCount(0);
+    });
+
+    test("shows recurring payments when the dashboard feature flag is enabled", async ({
+      page,
+    }) => {
+      test.skip(!recurringPaymentsEnabled, "Requires NEXT_PUBLIC_PAYMENTS_RECURRING_ENABLED=true");
+
+      await page.goto("/dashboard/payments");
+
+      await expect(page.getByRole("link", { name: "Recurring" })).toBeVisible();
+      await page.getByRole("link", { name: "Recurring" }).click();
+      await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
+      await expect(
+        page.locator("main").getByRole("heading", { name: "Recurring payments" }).first()
+      ).toBeVisible();
+      await expect(
+        page.getByText("No recurring payments yet.").or(page.locator("tbody tr").first())
+      ).toBeVisible({ timeout: 120_000 });
+    });
+  });
 
 test.describe
   .serial("dashboard payments e2e", () => {
