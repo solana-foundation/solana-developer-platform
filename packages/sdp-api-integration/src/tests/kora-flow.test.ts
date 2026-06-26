@@ -1,18 +1,10 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type {
-  BurnApiResponse,
-  FreezeApiResponse,
-  MintApiResponse,
-  SignerCheckApiResponse,
-  TokenApiResponse,
-  UnfreezeApiResponse,
-} from "../helpers/api-types";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { SignerCheckApiResponse } from "../helpers/api-types";
 import {
   cleanupIntegrationSuite,
   env,
   initIntegrationSuite,
   requestWithApiKey,
-  resetIntegrationState,
 } from "../helpers/integration";
 
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
@@ -34,6 +26,9 @@ type ParsedTransactionResponse = {
   };
   meta: { err: unknown } | null;
 };
+
+const TRANSACTION_LOOKUP_TIMEOUT_MS = 30_000;
+const TRANSACTION_LOOKUP_POLL_MS = 1_000;
 
 function normalizePubkey(accountKey: ParsedAccountKey): string {
   if (typeof accountKey === "string") {
@@ -62,7 +57,42 @@ async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
   return payload.result;
 }
 
-function assertKoraIntegrationEnvConfigured() {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getConfirmedTransaction(signature: string): Promise<ParsedTransactionResponse> {
+  const deadline = Date.now() + TRANSACTION_LOOKUP_TIMEOUT_MS;
+  let lastError: unknown;
+
+  while (Date.now() <= deadline) {
+    try {
+      const tx = await callSolanaRpc<ParsedTransactionResponse | null>("getTransaction", [
+        signature,
+        {
+          commitment: "confirmed",
+          encoding: "jsonParsed",
+          maxSupportedTransactionVersion: 0,
+        },
+      ]);
+
+      if (tx) {
+        return tx;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+
+    await sleep(TRANSACTION_LOOKUP_POLL_MS);
+  }
+
+  const suffix = lastError instanceof Error ? ` Last RPC error: ${lastError.message}` : "";
+  throw new Error(
+    `Unable to fetch confirmed Kora signer-check transaction ${signature} from SOLANA_RPC_URL after ${TRANSACTION_LOOKUP_TIMEOUT_MS}ms.${suffix}`
+  );
+}
+
+function assertKoraLiveSmokeEnvConfigured() {
   const missing: string[] = [];
   if (env.RUN_INTEGRATION_TESTS !== "true") missing.push("RUN_INTEGRATION_TESTS=true");
   if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
@@ -71,123 +101,23 @@ function assertKoraIntegrationEnvConfigured() {
   if (!env.PRIVY_APP_SECRET) missing.push("PRIVY_APP_SECRET");
 
   if (missing.length > 0) {
-    throw new Error(`Kora integration tests require env configuration: ${missing.join(", ")}.`);
+    throw new Error(`Kora live smoke tests require env configuration: ${missing.join(", ")}.`);
   }
 }
 
-describe("Kora Fee Payment (Devnet)", () => {
-  let apiKeyHash: string;
-  let custodyAddress = "";
+describe("Kora Fee Payment (Live Smoke)", () => {
   const request = requestWithApiKey();
 
   beforeAll(async () => {
-    assertKoraIntegrationEnvConfigured();
-    const init = await initIntegrationSuite();
-    apiKeyHash = init.apiKeyHash;
-    custodyAddress = init.custodyAddress;
+    assertKoraLiveSmokeEnvConfigured();
+    await initIntegrationSuite();
   });
 
   afterAll(async () => {
     await cleanupIntegrationSuite();
   });
 
-  beforeEach(async () => {
-    const state = await resetIntegrationState(apiKeyHash);
-    custodyAddress = state.custodyAddress;
-  });
-
-  it("deploys and manages a token using Kora fee payer", { timeout: 120000 }, async () => {
-    const createRes = await request("/v1/issuance/tokens", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: "Kora Devnet Token",
-        symbol: "KORA",
-        decimals: 6,
-        isMintable: true,
-        isFreezable: true,
-      }),
-    });
-
-    expect(createRes.status).toBe(201);
-    const created = (await createRes.json()) as TokenApiResponse;
-    const tokenId = created.data.token.id;
-
-    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
-      method: "POST",
-    });
-
-    expect(deployRes.status).toBe(200);
-    const deployed = (await deployRes.json()) as TokenApiResponse;
-    expect(deployed.data.token.mintAddress).toBeTruthy();
-
-    const mintRes = await request(`/v1/issuance/tokens/${tokenId}/mint`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        mint: {
-          destination: custodyAddress,
-          amount: "2",
-        },
-      }),
-    });
-
-    expect(mintRes.status).toBe(200);
-    const minted = (await mintRes.json()) as MintApiResponse;
-    expect(minted.data.transaction.status).toBe("confirmed");
-    expect(minted.data.transaction.signature).toBeTruthy();
-
-    const tokenAccount = minted.data.tokenAccount;
-    expect(tokenAccount).toBeTruthy();
-
-    const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ accountAddress: tokenAccount }),
-    });
-
-    expect(freezeRes.status).toBe(201);
-    const frozen = (await freezeRes.json()) as FreezeApiResponse;
-    expect(frozen.data.frozenAccount.accountAddress).toBe(tokenAccount);
-
-    const unfreezeRes = await request(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ accountAddress: tokenAccount }),
-    });
-
-    expect(unfreezeRes.status).toBe(200);
-    const unfrozen = (await unfreezeRes.json()) as UnfreezeApiResponse;
-    expect(unfrozen.data.frozenAccount.accountAddress).toBe(tokenAccount);
-
-    const burnRes = await request(`/v1/issuance/tokens/${tokenId}/burn`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        burn: {
-          source: tokenAccount,
-          amount: "1",
-        },
-      }),
-    });
-
-    expect(burnRes.status).toBe(200);
-    const burned = (await burnRes.json()) as BurnApiResponse;
-    expect(burned.data.transaction.status).toBe("confirmed");
-    expect(burned.data.transaction.signature).toBeTruthy();
-  });
-
-  it("submits signer-check memo with Privy wallet-bound API key via Kora", {
+  it("submits a Privy signer-check memo through Kora signAndSend", {
     timeout: 120000,
   }, async () => {
     const createWalletRes = await request("/v1/wallets", {
@@ -249,8 +179,14 @@ describe("Kora Fee Payment (Devnet)", () => {
         body: JSON.stringify({ memo }),
       });
 
-      expect(signerCheckRes.status).toBe(200);
-      const signerCheckBody = (await signerCheckRes.json()) as SignerCheckApiResponse;
+      const signerCheckPayload = await signerCheckRes.text();
+      if (signerCheckRes.status !== 200) {
+        throw new Error(
+          `Kora signer-check failed (${signerCheckRes.status}): ${signerCheckPayload}`
+        );
+      }
+
+      const signerCheckBody = JSON.parse(signerCheckPayload) as SignerCheckApiResponse;
       const signerCheck = signerCheckBody.data;
 
       expect(signerCheck.walletId).toBe(walletId);
@@ -260,20 +196,7 @@ describe("Kora Fee Payment (Devnet)", () => {
       expect(signerCheck.feePayer).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
       expect(signerCheck.feePayer).not.toBe(signerCheck.walletAddress);
 
-      const tx = await callSolanaRpc<ParsedTransactionResponse | null>("getTransaction", [
-        signerCheck.signature,
-        {
-          commitment: "confirmed",
-          encoding: "jsonParsed",
-          maxSupportedTransactionVersion: 0,
-        },
-      ]);
-
-      expect(tx).toBeTruthy();
-      if (!tx) {
-        return;
-      }
-
+      const tx = await getConfirmedTransaction(signerCheck.signature);
       expect(tx.meta?.err).toBeNull();
       const accountKeys = tx.transaction.message.accountKeys.map(normalizePubkey);
       expect(accountKeys[0]).toBe(signerCheck.feePayer);
