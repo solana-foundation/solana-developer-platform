@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { isRecurringPaymentsDashboardEnabled } from "@/lib/recurring-payments-feature";
-import { fetchCounterparties } from "../counterparty/counterparty-page.data";
+import { fetchCounterparty } from "../counterparty/counterparty-page.data";
 import { fetchPaymentsWallets } from "../payments-page.data";
 import { fetchRecurringPayments } from "./recurring-payments.data";
 import { RecurringPaymentsWorkspace } from "./recurring-payments-workspace";
@@ -26,15 +26,23 @@ export default async function RecurringPaymentsPage() {
   return withDashboardPageTrace(
     "dashboard.recurring-payments.page",
     async ({ trace, apiClient }) => {
-      const [recurringPaymentsResult, walletsResult, counterpartiesResult] = await Promise.all([
+      const [recurringPaymentsResult, walletsResult] = await Promise.all([
         trace.step("fetch_recurring_payments", () => fetchRecurringPayments(apiClient.request)),
         trace.step("fetch_wallets", () =>
           fetchPaymentsWallets(apiClient.request, { includeBalances: true })
         ),
-        trace.step("fetch_counterparties", () =>
-          fetchCounterparties(apiClient.request, { pageSize: 100 })
-        ),
       ]);
+      const counterpartyIds = [
+        ...new Set(recurringPaymentsResult.data.map((payment) => payment.counterpartyId)),
+      ];
+      const counterparties = await trace.step("fetch_recurring_payment_counterparties", () =>
+        Promise.all(
+          counterpartyIds.map((counterpartyId) =>
+            fetchCounterparty(apiClient.request, counterpartyId)
+          )
+        )
+      );
+      const resolvedCounterparties = counterparties.filter((counterparty) => counterparty !== null);
 
       trace.log({
         ok: recurringPaymentsResult.ok,
@@ -42,8 +50,8 @@ export default async function RecurringPaymentsPage() {
         recurringPaymentTotal: recurringPaymentsResult.total,
         walletsOk: walletsResult.ok,
         walletCount: walletsResult.data?.length ?? 0,
-        counterpartiesOk: counterpartiesResult.ok,
-        counterpartyCount: counterpartiesResult.data.length,
+        counterpartiesOk: resolvedCounterparties.length === counterpartyIds.length,
+        counterpartyCount: resolvedCounterparties.length,
       });
 
       return (
@@ -58,18 +66,18 @@ export default async function RecurringPaymentsPage() {
               publicKey: wallet.publicKey,
               balances: wallet.balances ?? [],
             }))}
-            counterparties={counterpartiesResult.data.map((counterparty) => ({
+            counterparties={resolvedCounterparties.map((counterparty) => ({
               id: counterparty.id,
               displayName: counterparty.displayName,
             }))}
             lookupError={
-              walletsResult.ok && counterpartiesResult.ok
+              walletsResult.ok && resolvedCounterparties.length === counterpartyIds.length
                 ? undefined
                 : [
                     walletsResult.ok ? null : (walletsResult.error ?? "Unable to load wallets"),
-                    counterpartiesResult.ok
+                    resolvedCounterparties.length === counterpartyIds.length
                       ? null
-                      : (counterpartiesResult.error ?? "Unable to load counterparties"),
+                      : "Unable to load some counterparties",
                   ]
                     .filter(Boolean)
                     .join(" ")

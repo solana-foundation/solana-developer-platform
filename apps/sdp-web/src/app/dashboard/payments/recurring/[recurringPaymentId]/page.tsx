@@ -1,9 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { fetchCounterparties } from "../../counterparty/counterparty-page.data";
+import { isRecurringPaymentsDashboardEnabled } from "@/lib/recurring-payments-feature";
+import { fetchCounterparty } from "../../counterparty/counterparty-page.data";
 import { formatDisplayAmount, shortenAddress } from "../../payments-overview.utils";
 import { fetchPaymentsWallets } from "../../payments-page.data";
 import { fetchRecurringPaymentById } from "../recurring-payments.data";
@@ -16,6 +17,10 @@ export default async function RecurringPaymentDetailRoute({
 }: {
   params: Promise<{ recurringPaymentId: string }>;
 }) {
+  if (!isRecurringPaymentsDashboardEnabled()) {
+    notFound();
+  }
+
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -29,22 +34,18 @@ export default async function RecurringPaymentDetailRoute({
   return withDashboardPageTrace(
     "dashboard.recurring-payments.detail.page",
     async ({ trace, apiClient }) => {
-      const [recurringPaymentResult, walletsResult, counterpartiesResult] = await Promise.all([
+      const [recurringPaymentResult, walletsResult] = await Promise.all([
         trace.step("fetch_recurring_payment", () =>
           fetchRecurringPaymentById(apiClient.request, recurringPaymentId)
         ),
         trace.step("fetch_wallets", () =>
           fetchPaymentsWallets(apiClient.request, { includeBalances: true })
         ),
-        trace.step("fetch_counterparties", () =>
-          fetchCounterparties(apiClient.request, { pageSize: 100 })
-        ),
       ]);
 
       trace.log({
         ok: recurringPaymentResult.ok,
         walletsOk: walletsResult.ok,
-        counterpartiesOk: counterpartiesResult.ok,
       });
 
       if (!recurringPaymentResult.data) {
@@ -60,10 +61,10 @@ export default async function RecurringPaymentDetailRoute({
       }));
       const wallet =
         wallets.find((entry) => entry.walletId === recurringPayment.sourceWalletId) ?? null;
-      const counterpartyLabel =
-        counterpartiesResult.data.find(
-          (counterparty) => counterparty.id === recurringPayment.counterpartyId
-        )?.displayName ?? "Counterparty unavailable";
+      const counterparty = await trace.step("fetch_recurring_payment_counterparty", () =>
+        fetchCounterparty(apiClient.request, recurringPayment.counterpartyId)
+      );
+      const counterpartyLabel = counterparty?.displayName ?? "Counterparty unavailable";
       const knownToken = WELL_KNOWN_TOKEN_BY_MINT.get(recurringPayment.token);
       const tokenLabel =
         knownToken?.symbol ??

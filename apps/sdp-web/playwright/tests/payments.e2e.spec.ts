@@ -108,6 +108,11 @@ test.describe
         page.getByRole("heading", { name: "Recurring payments unavailable" })
       ).toBeVisible();
       await expect(page.getByText("No recurring payments yet.")).toHaveCount(0);
+
+      await page.goto("/dashboard/payments/recurring/prp_disabled_flag_test");
+      await expect(
+        page.getByRole("heading", { name: "Recurring payments unavailable" })
+      ).toBeVisible();
     });
 
     test("shows recurring payments when the dashboard feature flag is enabled", async ({
