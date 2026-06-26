@@ -1,6 +1,12 @@
 import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp-support.generated";
 import type { CryptoAssetSymbol, CryptoRailId } from "./payment-rails";
+import type {
+  PolicyDefaultAction,
+  PolicyProfileStatus,
+  PolicyProviderSyncStatus,
+  PolicyRule,
+} from "./policy";
 import type { PrivateTransferRequest } from "./private-transfers";
 import type { RampProviderId } from "./provider-access";
 
@@ -35,6 +41,23 @@ export interface PaymentWalletPolicy {
   destinationAllowlist: string[];
   maxTransferAmount?: string;
   maxDailyAmount?: string;
+  defaultAction?: PolicyDefaultAction;
+  rules?: PolicyRule[];
+  controlProfile?: PaymentWalletControlProfileSummary;
+}
+
+export interface PaymentWalletControlProfileSummary {
+  id: string;
+  status: PolicyProfileStatus;
+  activeRevisionId: string | null;
+  revisionId: string | null;
+  revisionNumber: number | null;
+  defaultAction: PolicyDefaultAction;
+  rules: PolicyRule[];
+  providerMappingStatus: PolicyProviderSyncStatus;
+  createdAt: string;
+  updatedAt: string;
+  activatedAt: string | null;
 }
 
 export interface PaymentWalletPolicyEnvelope {
