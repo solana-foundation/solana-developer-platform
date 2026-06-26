@@ -161,14 +161,15 @@ function categoriesFromPolicy(policy: PaymentWalletPolicy): RestrictionCategoryI
 }
 
 function blockedOperationFamiliesFromRules(rules: PolicyRule[]): WalletOperationFamily[] {
-  return rules
-    .filter(
-      (rule): rule is Extract<PolicyRule, { kind: "operation_family" }> =>
-        rule.kind === "operation_family" &&
-        rule.action === "deny" &&
-        !advancedDeniedFamiliesFromOperationRule(rule).length
-    )
-    .flatMap((rule) => rule.families ?? (rule.family ? [rule.family] : []));
+  return uniqueValues(
+    rules
+      .filter(
+        (rule): rule is Extract<PolicyRule, { kind: "operation_family" }> =>
+          rule.kind === "operation_family" && rule.action === "deny"
+      )
+      .flatMap((rule) => rule.families ?? (rule.family ? [rule.family] : []))
+      .filter((family) => family !== "raw_sign" && family !== "program")
+  ) as WalletOperationFamily[];
 }
 
 function advancedDeniedFamiliesFromRules(rules: PolicyRule[]): AdvancedFamily[] {
