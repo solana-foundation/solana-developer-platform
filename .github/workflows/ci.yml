@@ -357,27 +357,38 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          - name: Kora
+          - name: Kora / Live Smoke
+            provider: kora
             test_files: src/tests/kora.test.ts src/tests/kora-flow.test.ts
             rpc_provider: alchemy
-          - name: Issuance
+            custody_provider: privy
+          - name: Surfpool / Issuance
+            provider: surfpool
             test_files: src/tests/issuance-endpoints.test.ts src/tests/token2022.test.ts
             rpc_provider: quicknode
-          - name: Mosaic
+            custody_provider: local
+          - name: Surfpool / Mosaic
+            provider: surfpool
             test_files: src/tests/mosaic-token-acl.test.ts src/tests/mosaic-abl.test.ts src/tests/mosaic-templates.test.ts
             rpc_provider: triton
-          - name: Token Flows
+            custody_provider: local
+          - name: Surfpool / Token Flows
+            provider: surfpool
             test_files: src/tests/deploy.test.ts src/tests/mint.test.ts src/tests/burn.test.ts src/tests/freeze.test.ts
             rpc_provider: quicknode
-          - name: Access
+            custody_provider: local
+          - name: Surfpool / Access
+            provider: surfpool
             test_files: src/tests/payments-wallet-scope.test.ts src/tests/api-keys-flow.test.ts src/tests/api-keys-rotation.test.ts src/tests/custody-local.test.ts
             rpc_provider: alchemy
+            custody_provider: privy
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       SOLANA_NETWORK: devnet
       INTEGRATION_TEST_FILES: ${{ matrix.test_files }}
       SOLANA_RPC_CI_PREFERRED_PROVIDER: ${{ matrix.rpc_provider }}
+      SDP_INTEGRATION_CUSTODY_PROVIDER: ${{ matrix.custody_provider }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -413,7 +424,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Validate Doppler bootstrap secret
-        if: env.CI_IS_FORK_PULL_REQUEST != 'true'
+        if: matrix.provider == 'kora' && env.CI_IS_FORK_PULL_REQUEST != 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
@@ -427,7 +438,7 @@ jobs:
         uses: dopplerhq/cli-action@v4
 
       - name: Validate integration runtime secrets
-        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        if: matrix.provider == 'kora' && env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
@@ -443,8 +454,25 @@ jobs:
           fi
           EOF
 
-      - name: Integration tests
-        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+      - name: Surfpool integration tests
+        if: matrix.provider == 'surfpool'
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_CONFIG: dev_ci
+          SDP_INTEGRATION_CUSTODY_PROVIDER: ${{ matrix.custody_provider }}
+        run: |
+          read -r -a test_files <<< "${INTEGRATION_TEST_FILES}"
+          if [ "${CI_HAS_DOPPLER_TOKEN}" = "true" ]; then
+            scripts/doppler/run-with-config.sh pnpm kora:surfpool:integration -- "${test_files[@]}"
+          elif [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ]; then
+            echo "::notice title=Fork-safe Surfpool integration skip::Forked pull requests cannot access managed Solana RPC secrets, so Surfpool-backed integration shards are skipped."
+          else
+            echo "DOPPLER_TOKEN_CI must be configured for Surfpool integration shards." >&2
+            exit 1
+          fi
+
+      - name: Live Kora integration tests
+        if: matrix.provider == 'kora' && env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
@@ -453,12 +481,12 @@ jobs:
           pnpm test:integration -- "${test_files[@]}"
 
       - name: Skip secret-backed integration tests for fork
-        if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
+        if: matrix.provider == 'kora' && env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
           echo "::notice title=Fork-safe integration skip::Forked pull requests cannot access DOPPLER_TOKEN_CI, so Kora/Privy-backed integration tests are skipped. Run this PR from an upstream branch before merge if secret-backed coverage is required."
 
   integration_tests:
-    name: Integration Tests (Devnet/Kora)
+    name: Integration Tests (Surfpool/Kora)
     runs-on: ubuntu-latest
     needs:
       - integration_tests_shard
@@ -496,8 +524,8 @@ jobs:
           - name: Dashboard E2E
             test_script: test:e2e:dashboard
             artifact_suffix: dashboard
-          - name: Issuance E2E
-            test_script: test:e2e:issuance
+          - name: Issuance E2E (Surfpool Shards)
+            test_script: kora:surfpool:e2e:issuance
             artifact_suffix: issuance
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
@@ -508,6 +536,9 @@ jobs:
       PLAYWRIGHT_API_PERSIST_PATH: .wrangler/state-playwright
       PLAYWRIGHT_USE_NEXT_START: "1"
       PLAYWRIGHT_NEXT_DIST_DIR: .next-playwright
+      NEXT_PUBLIC_DISABLE_SENTRY: "1"
+      NEXT_PUBLIC_SENTRY_DSN: ""
+      PLAYWRIGHT_DISABLE_SENTRY: "1"
     services:
       postgres:
         image: postgres:16-alpine
@@ -620,7 +651,12 @@ jobs:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
           SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
-        run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web run ${{ matrix.test_script }}
+        run: |
+          if [ "${{ matrix.test_script }}" = "kora:surfpool:e2e:issuance" ]; then
+            scripts/doppler/run-with-config.sh pnpm ${{ matrix.test_script }}
+          else
+            scripts/doppler/run-with-config.sh pnpm kora:surfpool:run -- pnpm --filter sdp-web run ${{ matrix.test_script }}
+          fi
 
       - name: Skip secret-backed browser e2e for fork
         if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'

@@ -45,6 +45,9 @@ if (process.env.NEXT_BUILD_STANDALONE === "1") {
   nextConfig.outputFileTracingRoot = path.resolve(import.meta.dirname, "../..");
 }
 
+const sentryDisabled =
+  process.env.NEXT_PUBLIC_DISABLE_SENTRY === "1" || process.env.PLAYWRIGHT_DISABLE_SENTRY === "1";
+
 export default withSentryConfig(nextConfig, {
   // For all available options, see:
   // https://www.npmjs.com/package/@sentry/webpack-plugin#options
@@ -62,11 +65,15 @@ export default withSentryConfig(nextConfig, {
   // Upload a larger set of source maps for prettier stack traces (increases build time)
   widenClientFileUpload: true,
 
-  // Route browser requests to Sentry through a Next.js rewrite to circumvent ad-blockers.
-  // This can increase your server load as well as your hosting bill.
-  // Note: Check that the configured route will not match with your Next.js middleware, otherwise reporting of client-
-  // side errors will fail.
-  tunnelRoute: "/monitoring",
+  ...(sentryDisabled
+    ? {}
+    : {
+        // Route browser requests to Sentry through a Next.js rewrite to circumvent ad-blockers.
+        // This can increase your server load as well as your hosting bill.
+        // Note: Check that the configured route will not match with your Next.js middleware, otherwise reporting of client-
+        // side errors will fail.
+        tunnelRoute: "/monitoring",
+      }),
 
   // Automatically tree-shake Sentry logger statements to reduce bundle size.
   disableLogger: true,

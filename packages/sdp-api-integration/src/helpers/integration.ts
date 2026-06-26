@@ -32,11 +32,16 @@ import {
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { env } from "#env-impl";
+import { getIntegrationCustodyProvider } from "./custody-provider";
 
 const PRIVY_CONFIGURED = !!env.PRIVY_APP_ID && !!env.PRIVY_APP_SECRET;
-const SOLANA_CONFIGURED = !!env.SOLANA_RPC_URL && PRIVY_CONFIGURED;
 const KORA_CONFIGURED = !!env.KORA_RPC_URL;
 const RUN_INTEGRATION_TESTS = env.RUN_INTEGRATION_TESTS === "true";
+const INTEGRATION_CUSTODY_PROVIDER = getIntegrationCustodyProvider();
+const LOCAL_CUSTODY_CONFIGURED = !!env.CUSTODY_PRIVATE_KEY;
+const INTEGRATION_CUSTODY_CONFIGURED =
+  INTEGRATION_CUSTODY_PROVIDER === "local" ? LOCAL_CUSTODY_CONFIGURED : PRIVY_CONFIGURED;
+const SOLANA_CONFIGURED = !!env.SOLANA_RPC_URL && INTEGRATION_CUSTODY_CONFIGURED;
 
 let cachedKeyHash: string | null = null;
 let cachedCustodyAddress: string | null = null;
@@ -46,12 +51,26 @@ let cachedCustodyAddress: string | null = null;
 // rent-exempt). Earlier 0.01-SOL budget was a razor-thin fit for the
 // stablecoin shape; the ScaledUiAmount extension on tokenized-security
 // pushed the mint rent ~0.0004 SOL higher and tipped tests over.
-const PRIVY_INTEGRATION_AIRDROP_LAMPORTS = 50_000_000;
+const INTEGRATION_CUSTODY_FUND_LAMPORTS = 50_000_000;
 const KORA_MAX_TRANSFER_LAMPORTS = 10_000_000n;
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
   | { jsonrpc: "2.0"; id: number; error: { code: number; message: string; data?: unknown } };
+
+function getOrganizationSettingsForIntegration(): string | null {
+  if (INTEGRATION_CUSTODY_PROVIDER !== "local") {
+    return null;
+  }
+
+  return JSON.stringify({
+    providerOverrides: {
+      custody: {
+        local: true,
+      },
+    },
+  });
+}
 
 async function computeApiKeyHash(): Promise<string> {
   if (cachedKeyHash) {
@@ -131,9 +150,9 @@ export async function resetIntegrationState(
 
   await db
     .prepare(
-      "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+      "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, 'individual', 'active', ?)"
     )
-    .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+    .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, getOrganizationSettingsForIntegration())
     .run();
 
   await db
@@ -176,7 +195,7 @@ export async function resetIntegrationState(
     .run();
 
   await apiKeysKV.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
-  cachedCustodyAddress = await ensurePrivyCustodyAddress();
+  cachedCustodyAddress = await ensureIntegrationCustodyAddress();
   return { custodyAddress: cachedCustodyAddress };
 }
 
@@ -184,12 +203,45 @@ export async function cleanupIntegrationSuite() {
   await clearTestDatabase(env);
 }
 
-export function request(url: string, init?: RequestInit) {
-  return app.request(url, init, env);
+type IntegrationRequestInit = RequestInit & {
+  timeoutMs?: number;
+};
+
+export async function request(url: string, init: IntegrationRequestInit = {}) {
+  const { timeoutMs, ...requestInit } = init;
+
+  if (!timeoutMs || timeoutMs <= 0) {
+    return app.request(url, requestInit, env);
+  }
+
+  const controller = new AbortController();
+  const operation = app.request(url, { ...requestInit, signal: controller.signal }, env);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  void operation.catch(() => undefined);
+
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<Response>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          controller.abort();
+          reject(
+            new Error(
+              `Timed out waiting for ${requestInit.method ?? "GET"} ${url} after ${timeoutMs}ms`
+            )
+          );
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 export function requestWithApiKey(apiKey: string = TEST_PROJECT_API_KEY.raw) {
-  return (url: string, init: RequestInit = {}) => {
+  return (url: string, init: IntegrationRequestInit = {}) => {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${apiKey}`);
     return request(url, { ...init, headers });
@@ -291,8 +343,71 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
   await ensureAddressAccountExists(address);
   // Top up existing wallets too — sRFC-37 deploy paths now have custody pay
   // directly, so a 1M-lamport bootstrap left over from older runs isn't enough.
-  await fundAddressToLamports(address, PRIVY_INTEGRATION_AIRDROP_LAMPORTS);
+  await fundAddressToLamports(address, INTEGRATION_CUSTODY_FUND_LAMPORTS);
   return address;
+}
+
+async function ensureIntegrationCustodyAddress(): Promise<string> {
+  if (INTEGRATION_CUSTODY_PROVIDER === "local") {
+    return ensureLocalCustodyAddress();
+  }
+
+  return ensurePrivyCustodyAddress();
+}
+
+async function ensureLocalCustodyAddress(): Promise<string> {
+  if (!SOLANA_CONFIGURED) {
+    return "";
+  }
+
+  const db = getDb(env);
+  const signingService = createSigningService(env);
+  const existing = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "local");
+
+  if (!existing) {
+    const initialized = await signingService.initializeLocalSigning(TEST_ORG.id, undefined, {
+      walletLabel: "Integration Local Root Wallet",
+    });
+    await ensureAddressAccountExists(initialized.publicKey);
+    await fundAddressToLamports(initialized.publicKey, INTEGRATION_CUSTODY_FUND_LAMPORTS);
+    return initialized.publicKey;
+  }
+
+  await signingService.setDefaultProvider(TEST_ORG.id, undefined, "local");
+  const config = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "local");
+  if (!config) {
+    throw new Error("Integration precondition failed: local signer configuration not found.");
+  }
+
+  const wallet = await db
+    .prepare(
+      `SELECT wallet_id, public_key
+       FROM custody_wallets
+       WHERE custody_config_id = ? AND status = 'active'
+       ORDER BY CASE WHEN wallet_id = ? THEN 0 ELSE 1 END, created_at ASC
+       LIMIT 1`
+    )
+    .bind(config.id, config.defaultWalletId ?? "")
+    .first<{ wallet_id: string; public_key: string }>();
+
+  if (!wallet) {
+    throw new Error("Integration precondition failed: local signer has no active wallets.");
+  }
+
+  if (wallet.wallet_id !== config.defaultWalletId) {
+    await db
+      .prepare(
+        `UPDATE custody_configs
+         SET default_wallet_id = ?, updated_at = datetime('now')
+         WHERE id = ?`
+      )
+      .bind(wallet.wallet_id, config.id)
+      .run();
+  }
+
+  await ensureAddressAccountExists(wallet.public_key);
+  await fundAddressToLamports(wallet.public_key, INTEGRATION_CUSTODY_FUND_LAMPORTS);
+  return wallet.public_key;
 }
 
 async function ensureAddressAccountExists(address: string): Promise<void> {
@@ -317,7 +432,7 @@ async function ensureAddressAccountExists(address: string): Promise<void> {
   }
 
   try {
-    await solanaRequestAirdrop(rpcUrl, address, PRIVY_INTEGRATION_AIRDROP_LAMPORTS);
+    await solanaRequestAirdrop(rpcUrl, address, INTEGRATION_CUSTODY_FUND_LAMPORTS);
     await waitForAccountExistence(rpcUrl, address, 30_000);
   } catch (airdropError) {
     const koraMessage =
@@ -350,7 +465,7 @@ async function getAddressLamports(address: string): Promise<number> {
 
 async function fundAddressViaKoraFeePayer(
   address: string,
-  lamports: bigint = BigInt(PRIVY_INTEGRATION_AIRDROP_LAMPORTS)
+  lamports: bigint = BigInt(INTEGRATION_CUSTODY_FUND_LAMPORTS)
 ): Promise<boolean> {
   const rpcUrl = env.SOLANA_RPC_URL;
   if (!rpcUrl || !env.KORA_RPC_URL) {
@@ -568,6 +683,7 @@ export {
   createToken2022Service,
   ensurePrivyCustodyAddress,
   env,
+  INTEGRATION_CUSTODY_PROVIDER,
   KORA_CONFIGURED,
   PRIVY_CONFIGURED,
   RUN_INTEGRATION_TESTS,

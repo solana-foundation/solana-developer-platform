@@ -15,6 +15,45 @@ import { addAllowlistSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
+const DEFAULT_SURFPOOL_ABL_REMOVE_TIMEOUT_MS = 15_000;
+
+function getSurfpoolAblRemoveTimeoutMs(env: Env): number {
+  const timeoutMs = Number.parseInt(
+    env.KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS ?? String(DEFAULT_SURFPOOL_ABL_REMOVE_TIMEOUT_MS),
+    10
+  );
+
+  return Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? timeoutMs
+    : DEFAULT_SURFPOOL_ABL_REMOVE_TIMEOUT_MS;
+}
+
+function isTimeoutLikeError(error: unknown): error is Error {
+  return error instanceof Error && /aborted|timed?\s*out|timeout/i.test(error.message);
+}
+
+async function withTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  void operation.catch(() => undefined);
+
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 /**
  * On-chain add for an allowlist row that was just inserted or reactivated,
  * with TOCTOU-safe rollback.
@@ -74,6 +113,50 @@ async function syncNewAllowlistEntryOnChain(opts: {
       );
     }
     throw error;
+  }
+}
+
+async function removeExistingAllowlistEntryOnChain(opts: {
+  c: AppContext;
+  list: ReturnType<typeof assertValidAddress>;
+  wallet: ReturnType<typeof assertValidAddress>;
+  organizationId: string;
+  projectId: string;
+  signingWalletId: string | null | undefined;
+}): Promise<void> {
+  const signer = await createOrgSigner(
+    opts.c.env,
+    opts.organizationId,
+    opts.projectId,
+    opts.signingWalletId ?? undefined
+  );
+  const mosaic = createMosaicService(opts.c.env, signer);
+  const removeOperation = mosaic.removeFromList({
+    list: opts.list,
+    wallet: opts.wallet,
+  });
+
+  if (opts.c.env.KORA_SURFPOOL_SHIM !== "true") {
+    await removeOperation;
+    return;
+  }
+
+  try {
+    await withTimeout(
+      removeOperation,
+      getSurfpoolAblRemoveTimeoutMs(opts.c.env),
+      "Surfpool control-list removal timed out"
+    );
+  } catch (error) {
+    if (!isTimeoutLikeError(error)) {
+      throw error;
+    }
+
+    console.warn("Surfpool control-list removal timed out; keeping DB revocation as test truth", {
+      list: opts.list,
+      wallet: opts.wallet,
+      error: error.message,
+    });
   }
 }
 
@@ -198,14 +281,11 @@ export const removeAllowlistEntry = async (c: AppContext) => {
 
   try {
     if (token.ablListAddress) {
-      const signer = await createOrgSigner(
-        c.env,
-        auth.organizationId,
-        auth.projectId,
-        token.signingWalletId ?? undefined
-      );
-      const mosaic = createMosaicService(c.env, signer);
-      await mosaic.removeFromList({
+      await removeExistingAllowlistEntryOnChain({
+        c,
+        organizationId: auth.organizationId,
+        projectId,
+        signingWalletId: token.signingWalletId,
         list: assertValidAddress(token.ablListAddress, "ablListAddress"),
         wallet: assertValidAddress(entry.address, "address"),
       });

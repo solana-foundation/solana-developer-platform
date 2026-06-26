@@ -13,7 +13,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
     );
 
     const walletsResult = await trace.step("fetch_authority_wallets", () =>
-      fetchPaymentsWallets(apiClient.request, { view: "summary" })
+      fetchPaymentsWallets(apiClient.request, { view: "summary", includeBalances: false })
     );
 
     const response = NextResponse.json(

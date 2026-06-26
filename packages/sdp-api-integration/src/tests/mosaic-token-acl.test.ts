@@ -28,9 +28,7 @@ import {
 
 // Test wallet addresses (valid Base58)
 const TEST_WALLETS = {
-  // biome-ignore lint/security/noSecrets: Test Solana address
   wallet1: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-  // biome-ignore lint/security/noSecrets: Test Solana address
   wallet2: "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
 };
 
@@ -149,7 +147,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     console.log(`Freeze signature: ${frozen.data.frozenAccount.signature}`);
   });
 
-  it("thaws a frozen token account", { timeout: 150000 }, async () => {
+  it("thaws a frozen token account and rejects repeat thaw", { timeout: 150000 }, async () => {
     // Create and deploy freezable token
     const { tokenId, mintAddress } = await createAndDeployFreezableToken("Thaw Test Token", "THWT");
     console.log(`Deployed token: ${mintAddress}`);
@@ -193,6 +191,22 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     expect(thawed.data.frozenAccount.signature).toBeTruthy();
 
     console.log(`Thaw signature: ${thawed.data.frozenAccount.signature}`);
+
+    const repeatThawRes = await request(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        accountAddress: tokenAccount,
+      }),
+    });
+
+    expect(repeatThawRes.status).toBe(400);
+    const repeatThawError = (await repeatThawRes.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(repeatThawError.error.code).toBe("ACCOUNT_NOT_FROZEN");
   });
 
   it("lists frozen accounts for a token", { timeout: 120000 }, async () => {
@@ -293,27 +307,5 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     expect(freezeRes.status).toBe(400);
     const error = (await freezeRes.json()) as { error: { code: string; message: string } };
     expect(error.error.message).toContain("freeze");
-  });
-
-  it("rejects thaw for account that is not frozen", { timeout: 120000 }, async () => {
-    // Create and deploy freezable token
-    const { tokenId } = await createAndDeployFreezableToken("Not Frozen Token", "NOTF");
-
-    // Mint to create the token account (but don't freeze)
-    const mintResult = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1");
-
-    // Try to thaw without freezing first - should fail
-    const thawRes = await request(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        accountAddress: mintResult.data.tokenAccount,
-      }),
-    });
-
-    // Should return 404 (no frozen record) or 400 (not frozen)
-    expect([400, 404]).toContain(thawRes.status);
   });
 });

@@ -4,6 +4,25 @@ import { authStatePath } from "./auth-state";
 import type { ClerkTestIdentity } from "./clerk-admin";
 import { ensureClerkAdminUser } from "./clerk-admin";
 
+async function readClerkBearerToken(page: Page, template: string): Promise<string | null> {
+  return page.evaluate(
+    async ({ template }) => {
+      const clerkClient = (
+        window as unknown as {
+          Clerk?: {
+            session?: {
+              getToken: (params?: { template?: string }) => Promise<string | null>;
+            };
+          };
+        }
+      ).Clerk;
+
+      return clerkClient?.session?.getToken({ template }) ?? null;
+    },
+    { template }
+  );
+}
+
 export async function getClerkBearerToken(page: Page): Promise<string> {
   const env = getE2EEnv();
 
@@ -24,26 +43,7 @@ export async function getClerkBearerToken(page: Page): Promise<string> {
     return Boolean(clerkClient?.session);
   });
 
-  const token = await page.evaluate(
-    async ({ template }) => {
-      const clerkClient = (
-        window as unknown as {
-          Clerk?: {
-            session?: {
-              getToken: (params?: { template?: string }) => Promise<string | null>;
-            };
-          };
-        }
-      ).Clerk;
-
-      if (!clerkClient?.session) {
-        throw new Error("Clerk session is unavailable for Playwright bootstrap");
-      }
-
-      return clerkClient.session.getToken({ template });
-    },
-    { template: env.clerkJwtTemplate }
-  );
+  const token = await readClerkBearerToken(page, env.clerkJwtTemplate);
 
   if (!token) {
     throw new Error("Failed to acquire a Clerk JWT for Playwright bootstrap");
@@ -58,18 +58,33 @@ export async function openAuthenticatedBootstrapPage(browser: Browser): Promise<
   });
 }
 
+export function createClerkBearerTokenProvider(page: Page): () => Promise<string> {
+  return async () => {
+    const env = getE2EEnv();
+    const token = await readClerkBearerToken(page, env.clerkJwtTemplate).catch(() => null);
+    if (token) {
+      return token;
+    }
+
+    return getClerkBearerToken(page);
+  };
+}
+
 export async function getPlaywrightAdminSession(browser: Browser): Promise<{
   identity: ClerkTestIdentity;
   page: Page;
   bearerToken: string;
+  getBearerToken: () => Promise<string>;
 }> {
   const identity = await ensureClerkAdminUser();
   const page = await openAuthenticatedBootstrapPage(browser);
   const bearerToken = await getClerkBearerToken(page);
+  const getBearerToken = createClerkBearerTokenProvider(page);
 
   return {
     identity,
     page,
     bearerToken,
+    getBearerToken,
   };
 }

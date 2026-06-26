@@ -8,7 +8,7 @@ import {
   seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 import {
-  bootstrapLocalIssuanceFixtures,
+  bootstrapLocalPaymentFixtures,
   getBootstrapApiBaseUrl,
 } from "../support/local-issuance-bootstrap";
 
@@ -24,18 +24,18 @@ test.describe
 
     test.beforeAll(async ({ browser }) => {
       const session = await getPlaywrightAdminSession(browser);
-      const fixtures = await bootstrapLocalIssuanceFixtures({
+      const fixtures = await bootstrapLocalPaymentFixtures({
         identity: session.identity,
-        bearerToken: session.bearerToken,
+        bearerToken: session.getBearerToken,
         tier: "enterprise",
       });
       const api = createLocalApiClient(
         getBootstrapApiBaseUrl(),
-        session.bearerToken,
+        session.getBearerToken,
         fixtures.projectId
       );
 
-      await api.post(`/v1/issuance/tokens/${fixtures.tokens.open.id}/mint`, {
+      await api.post(`/v1/issuance/tokens/${fixtures.token.id}/mint`, {
         mint: {
           destination: fixtures.wallets.treasury.publicKey,
           amount: "25",
@@ -44,7 +44,7 @@ test.describe
 
       sourceWalletLabel = fixtures.wallets.treasury.label ?? fixtures.wallets.treasury.publicKey;
       sourceWalletId = fixtures.wallets.treasury.walletId;
-      transferTokenSymbol = fixtures.tokens.open.symbol;
+      transferTokenSymbol = fixtures.token.symbol;
       bootstrapProjectId = fixtures.projectId;
 
       destinationAddress = await createExternalSolanaAddress();
@@ -113,7 +113,9 @@ test.describe
       await sendButton.click();
 
       await expect(app.getByText("Transfer submitted")).toBeVisible({ timeout: 120_000 });
-      await app.getByRole("button", { name: "Done", exact: true }).click();
+      const doneButton = app.getByRole("button", { name: "Done", exact: true });
+      await doneButton.focus();
+      await doneButton.press("Enter");
       await expect(page).toHaveURL(/\/dashboard\/payments(?:\?.*)?$/);
 
       const transferRow = app.locator("tbody tr").filter({ hasText: destinationAddress }).first();

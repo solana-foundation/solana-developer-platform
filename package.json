@@ -56,6 +56,9 @@
     "kora:logs": "docker compose -f infra/kora/docker-compose.yml logs -f kora",
     "kora:surfpool:up": "scripts/kora-surfpool/up.sh",
     "kora:surfpool:down": "scripts/kora-surfpool/down.sh",
+    "kora:surfpool:run": "scripts/kora-surfpool/run.sh",
+    "kora:surfpool:e2e:issuance": "scripts/kora-surfpool/e2e-issuance.sh",
+    "kora:surfpool:integration": "scripts/kora-surfpool/integration.sh",
     "kora:surfpool:test": "scripts/kora-surfpool/test.sh",
     "kora:devnet:check": "infra/kora/cloud-run/check.sh",
     "kora:devnet:test": "pnpm --filter @sdp/api-integration test -- src/tests/kora.test.ts"

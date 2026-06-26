@@ -1,5 +1,6 @@
 import { KoraClient } from "@sdp/api/services/adapters";
 import { env } from "#env-impl";
+import { getIntegrationCustodyProvider } from "./custody-provider";
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
@@ -32,11 +33,16 @@ export async function ensureIntegrationPreflight(): Promise<void> {
 }
 
 async function runPreflight(): Promise<void> {
+  const integrationCustodyProvider = getIntegrationCustodyProvider();
   const missing: string[] = [];
   if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
-  if (!env.PRIVY_APP_ID) missing.push("PRIVY_APP_ID");
-  if (!env.PRIVY_APP_SECRET) missing.push("PRIVY_APP_SECRET");
   if (!env.KORA_RPC_URL) missing.push("KORA_RPC_URL");
+  if (integrationCustodyProvider === "local") {
+    if (!env.CUSTODY_PRIVATE_KEY) missing.push("CUSTODY_PRIVATE_KEY");
+  } else {
+    if (!env.PRIVY_APP_ID) missing.push("PRIVY_APP_ID");
+    if (!env.PRIVY_APP_SECRET) missing.push("PRIVY_APP_SECRET");
+  }
 
   if (missing.length > 0) {
     throw new Error(

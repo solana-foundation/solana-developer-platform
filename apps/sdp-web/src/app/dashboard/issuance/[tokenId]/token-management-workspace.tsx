@@ -1059,11 +1059,40 @@ export function TokenManagementWorkspace({
   };
 
   const handleRemoveAllowlist = (entryId: string) => {
-    runAction({
-      label: controlListCopy?.removeActionLabel ?? "Remove allowlist entry",
-      method: "DELETE",
-      path: `${tokenBasePath}/allowlist/${entryId}`,
-    });
+    runAction(
+      {
+        label: controlListCopy?.removeActionLabel ?? "Remove allowlist entry",
+        method: "DELETE",
+        path: `${tokenBasePath}/allowlist/${entryId}`,
+      },
+      {
+        onSuccess: async () => {
+          await mutateSupportingData(
+            (current) => {
+              if (!current) {
+                return current;
+              }
+
+              const allowlistEntries = current.allowlistEntries.filter(
+                (entry) => entry.id !== entryId
+              );
+              const removedCount = current.allowlistEntries.length - allowlistEntries.length;
+              const allowlistTotal =
+                current.allowlistTotal === null
+                  ? null
+                  : Math.max(0, current.allowlistTotal - removedCount);
+
+              return {
+                ...current,
+                allowlistEntries,
+                allowlistTotal,
+              };
+            },
+            { revalidate: false }
+          );
+        },
+      }
+    );
   };
 
   const handleAuthorityModalOpen = (row: PermissionRow) => {
@@ -1411,7 +1440,7 @@ export function TokenManagementWorkspace({
       ) : null}
 
       {activeTab === "permissions" ? (
-        supportingDataLoading ? (
+        authorityWalletsLoading ? (
           <LoadingSection message="Loading authority wallet access…" />
         ) : (
           <div className="space-y-4">

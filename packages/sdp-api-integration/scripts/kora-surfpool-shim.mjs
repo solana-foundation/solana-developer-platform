@@ -13,6 +13,11 @@ import {
 const host = process.env.KORA_SHIM_HOST ?? "127.0.0.1";
 const port = Number.parseInt(process.env.KORA_SHIM_PORT ?? "8080", 10);
 const solanaRpcUrl = process.env.SOLANA_RPC_URL ?? "http://127.0.0.1:8899";
+const solanaRpcTimeoutMs = Number.parseInt(process.env.KORA_SHIM_RPC_TIMEOUT_MS ?? "120000", 10);
+const sendTransactionTimeoutMs = Number.parseInt(
+  process.env.KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS ?? "30000",
+  10
+);
 const privateKey = process.env.SIGNER_PRIVATE_KEY;
 
 if (!privateKey) {
@@ -47,16 +52,21 @@ const server = http.createServer(async (request, response) => {
     const body = await readBody(request);
     const payload = JSON.parse(body);
     requestId = payload.id ?? 1;
+    const startedAt = Date.now();
+    console.log(`Kora Surfpool shim ${payload.method} started.`);
     const result = await handleRpc(payload.method, payload.params);
+    console.log(`Kora Surfpool shim ${payload.method} completed in ${Date.now() - startedAt}ms.`);
     sendJson(response, 200, { jsonrpc: "2.0", id: requestId, result });
-  } catch {
-    console.error("Kora Surfpool shim request failed.");
+  } catch (error) {
+    console.error("Kora Surfpool shim request failed.", error);
     sendJson(response, 200, {
       jsonrpc: "2.0",
       id: requestId,
       error: {
         code: -32000,
-        message: "Kora Surfpool shim request failed. See local shim logs for details.",
+        message: `Kora Surfpool shim request failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
       },
     });
   }
@@ -102,13 +112,18 @@ async function handleRpc(method, params) {
     }
     case "signAndSendTransaction": {
       const signedTransaction = await signTransaction(params.transaction);
-      const signature = await solanaRpc("sendTransaction", [
-        signedTransaction,
-        {
-          encoding: "base64",
-          preflightCommitment: "confirmed",
-        },
-      ]);
+      const signature = await solanaRpc(
+        "sendTransaction",
+        [
+          signedTransaction,
+          {
+            encoding: "base64",
+            skipPreflight: true,
+            preflightCommitment: "confirmed",
+          },
+        ],
+        { timeoutMs: sendTransactionTimeoutMs }
+      );
       return {
         signature,
         signed_transaction: signedTransaction,
@@ -130,11 +145,15 @@ async function signTransaction(base64Transaction) {
   return getBase64EncodedWireTransaction(signed);
 }
 
-async function solanaRpc(method, params = []) {
+async function solanaRpc(method, params = [], options = {}) {
+  const timeoutMs = options.timeoutMs ?? solanaRpcTimeoutMs;
+  const signal =
+    Number.isFinite(timeoutMs) && timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
   const response = await fetch(solanaRpcUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    signal,
   });
   const payload = await response.json();
   if (payload.error) {

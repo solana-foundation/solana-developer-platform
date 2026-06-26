@@ -25,7 +25,11 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { Client } from "pg";
 import { getE2EEnv } from "../env";
 import { type ClerkTestIdentity, setClerkOrganizationTier } from "./clerk-admin";
-import { createLocalApiClient, type LocalApiClient } from "./local-api-client";
+import {
+  type BearerTokenProvider,
+  createLocalApiClient,
+  type LocalApiClient,
+} from "./local-api-client";
 
 const PROJECT_COOKIE_NAME = "sdp_selected_project_id";
 
@@ -52,6 +56,8 @@ interface PlaywrightApiRuntimeEnv {
   koraRpcUrl: string | null;
   solanaRpcUrl: string;
 }
+
+type PlaywrightCustodyProvider = "local" | "privy";
 
 interface CreateWalletResponse {
   wallet: PlaywrightWalletFixture;
@@ -150,6 +156,21 @@ function getLocalDevVar(name: string): string | null {
   }
 
   return getLocalDevVars().get(name) ?? null;
+}
+
+export function getPlaywrightCustodyProvider(): PlaywrightCustodyProvider {
+  const configuredProvider = process.env.SDP_INTEGRATION_CUSTODY_PROVIDER?.trim();
+  if (!configuredProvider) {
+    return "privy";
+  }
+
+  if (configuredProvider === "local" || configuredProvider === "privy") {
+    return configuredProvider;
+  }
+
+  throw new Error(
+    `Invalid SDP_INTEGRATION_CUSTODY_PROVIDER: ${configuredProvider}. Expected "local" or "privy".`
+  );
 }
 
 function getPlaywrightDatabaseUrl(): string {
@@ -297,6 +318,26 @@ async function clearPlaywrightOrganizations(
   }
 }
 
+async function enableLocalCustodyForPlaywrightOrg(organizationId: string): Promise<void> {
+  await withDatabaseClient(async (client) => {
+    await client.query(
+      `UPDATE organizations
+       SET settings = $2, updated_at = sdp_datetime_now()
+       WHERE id = $1`,
+      [
+        organizationId,
+        JSON.stringify({
+          providerOverrides: {
+            custody: {
+              local: true,
+            },
+          },
+        }),
+      ]
+    );
+  });
+}
+
 async function listWallets(api: LocalApiClient): Promise<PaymentsDashboardWallet[]> {
   // biome-ignore lint/security/noSecrets: Local API path with query params for wallet listing.
   const data = await api.get<ListWalletsResponse>("/v1/wallets?includeAllProviders=true");
@@ -316,7 +357,7 @@ export async function seedProjectCookie(page: Page, projectId: string): Promise<
 
 export async function resolvePlaywrightProjectId(
   localApiBaseUrl: string,
-  bearerToken: string
+  bearerToken: BearerTokenProvider
 ): Promise<string> {
   const projectsApi = createLocalApiClient(localApiBaseUrl, bearerToken);
   const { projects } = await projectsApi.get<{ projects: Array<{ id: string; slug: string }> }>(
@@ -381,7 +422,6 @@ async function getLatestBlockhash(api: LocalApiClient): Promise<{
   const response = await api.post<RpcRelayResponse>("/v1/rpc/proxy", {
     jsonrpc: "2.0",
     id: "wallet-latest-blockhash",
-    // biome-ignore lint/security/noSecrets: Solana RPC method name, not a credential.
     method: "getLatestBlockhash",
     params: [{ commitment: "confirmed" }],
   });
@@ -504,11 +544,12 @@ async function getWalletLamports(api: LocalApiClient, walletAddress: string): Pr
 async function waitForWalletLamports(
   api: LocalApiClient,
   walletAddress: string,
-  minimumLamports: number
+  minimumLamports: number,
+  timeoutMs = 60_000
 ): Promise<void> {
   const startedAt = Date.now();
 
-  while (Date.now() - startedAt < 60_000) {
+  while (Date.now() - startedAt < timeoutMs) {
     const lamports = await getWalletLamports(api, walletAddress);
     if (lamports >= minimumLamports) {
       return;
@@ -544,8 +585,12 @@ async function fundWalletToLamports(
   });
 
   if (koraFunded) {
-    await waitForWalletLamports(api, walletAddress, minimumLamports);
-    return;
+    try {
+      await waitForWalletLamports(api, walletAddress, minimumLamports, 15_000);
+      return;
+    } catch (error) {
+      koraFundingError = error;
+    }
   }
 
   try {
@@ -669,8 +714,9 @@ export async function ensureLinkedOrg(
 
 export async function bootstrapLocalWalletFixtures(input: {
   identity: ClerkTestIdentity;
-  bearerToken: string;
-  provider?: "privy";
+  bearerToken: BearerTokenProvider;
+  provider?: PlaywrightCustodyProvider;
+  walletLabel?: string;
   walletCount?: number;
   fundSourceWallet?: boolean;
   fundSourceAmountSol?: number;
@@ -678,24 +724,28 @@ export async function bootstrapLocalWalletFixtures(input: {
 }): Promise<WalletBootstrapResult> {
   const { identity, bearerToken } = input;
   const walletCount = Math.max(1, input.walletCount ?? 1);
-  const provider = input.provider ?? "privy";
+  const provider = input.provider ?? getPlaywrightCustodyProvider();
   const fundSourceWallet = input.fundSourceWallet ?? false;
   const fundSourceAmountSol = input.fundSourceAmountSol ?? 1;
   const runtimeEnv = getPlaywrightApiRuntimeEnv();
 
+  if (provider === "local" && walletCount > 1) {
+    throw new Error("Local custody supports one seeded Playwright wallet");
+  }
+
   const organization = await ensureLinkedOrg(identity, {
     tier: input.tier,
   });
+  if (provider === "local") {
+    await enableLocalCustodyForPlaywrightOrg(organization.id);
+  }
 
   const projectId = await resolvePlaywrightProjectId(runtimeEnv.localApiBaseUrl, bearerToken);
   const api = createLocalApiClient(runtimeEnv.localApiBaseUrl, bearerToken, projectId);
 
-  const initialized = await api.post<InitializeWalletResponse>("/v1/wallets/initialize", {
-    provider,
-    walletLabel: "Treasury",
-  });
-
-  const createdWalletIds = [initialized.walletId];
+  const createdWalletIds = [
+    await initializeOrCreateWallet(api, provider, input.walletLabel ?? "Treasury"),
+  ];
 
   for (let index = 1; index < walletCount; index += 1) {
     const created = await api.post<CreateWalletResponse>("/v1/wallets", {
@@ -734,6 +784,35 @@ export async function bootstrapLocalWalletFixtures(input: {
     },
     wallets,
   };
+}
+
+async function initializeOrCreateWallet(
+  api: LocalApiClient,
+  provider: PlaywrightCustodyProvider,
+  label: string
+): Promise<string> {
+  try {
+    const initialized = await api.post<InitializeWalletResponse>("/v1/wallets/initialize", {
+      provider,
+      walletLabel: label,
+    });
+    return initialized.walletId;
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !error.message.includes("Signing already initialized for org")
+    ) {
+      throw error;
+    }
+  }
+
+  const created = await api.post<CreateWalletResponse>("/v1/wallets", {
+    provider,
+    label,
+    purpose: "root",
+    setDefault: true,
+  });
+  return created.wallet.walletId;
 }
 
 export async function createExternalSolanaAddress(): Promise<string> {

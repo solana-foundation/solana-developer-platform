@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.describe("public auth entry e2e", () => {
   test("signed-out homepage stays in waitlist mode", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/", { waitUntil: "domcontentloaded" });
 
     await expect(page.getByRole("link", { name: "Join the waitlist" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Sign in" })).toHaveCount(0);

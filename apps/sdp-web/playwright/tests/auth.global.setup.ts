@@ -7,6 +7,7 @@ import { authStatePath } from "../support/auth-state";
 import { ensureClerkAdminUser } from "../support/clerk-admin";
 
 setup("authenticate admin test user and save auth state", async ({ page }) => {
+  setup.setTimeout(360_000);
   const env = getE2EEnv();
   const identity = await ensureClerkAdminUser();
 

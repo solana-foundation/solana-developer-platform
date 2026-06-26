@@ -15,7 +15,6 @@ import {
   resetIntegrationState,
 } from "../helpers/integration";
 
-// biome-ignore lint/security/noSecrets: Solana Memo program id constant, not a secret.
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 
 type SolanaRpcResponse<T> =

@@ -34,9 +34,13 @@ export function useTokenActionRunner() {
 
       if (result.ok) {
         setActionConfirmation(null);
-        await options.onSuccess?.(result);
-        router.refresh();
         toast.success(successToast, { id: toastId, position: "bottom-right" });
+        try {
+          await options.onSuccess?.(result);
+          router.refresh();
+        } catch (refreshError) {
+          console.error("Token action post-success refresh failed", refreshError);
+        }
         return result;
       }
 

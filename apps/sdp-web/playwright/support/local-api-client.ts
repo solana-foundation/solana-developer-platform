@@ -6,6 +6,8 @@ export interface LocalApiClient {
   delete<T>(path: string): Promise<T>;
 }
 
+export type BearerTokenProvider = string | (() => Promise<string>);
+
 function extractErrorMessage(body: unknown): string {
   if (typeof body === "string") {
     return body;
@@ -46,14 +48,16 @@ async function parseResponse<T>(response: Response): Promise<T> {
 
 export function createLocalApiClient(
   baseUrl: string,
-  bearerToken: string,
+  bearerToken: BearerTokenProvider,
   projectId?: string
 ): LocalApiClient {
   const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
 
   const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+    const resolvedBearerToken =
+      typeof bearerToken === "function" ? await bearerToken() : bearerToken;
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${bearerToken}`,
+      Authorization: `Bearer ${resolvedBearerToken}`,
       "Content-Type": "application/json",
     };
     if (projectId) {

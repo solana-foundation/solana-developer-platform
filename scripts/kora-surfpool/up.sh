@@ -22,6 +22,9 @@ else
 fi
 KORA_SURFPOOL_MODE="${KORA_SURFPOOL_MODE:-shim}"
 KORA_SURFPOOL_RUNTIME="${KORA_SURFPOOL_RUNTIME:-embedded}"
+KORA_SHIM_RPC_TIMEOUT_MS="${KORA_SHIM_RPC_TIMEOUT_MS:-120000}"
+KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS="${KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS:-30000}"
+KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS="${KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS:-15000}"
 KORA_SHIM_LOG="${STATE_DIR}/kora-shim.log"
 KORA_SHIM_PID_FILE="${STATE_DIR}/kora-shim.pid"
 
@@ -231,7 +234,11 @@ write_runtime_env() {
     echo "SURFPOOL_REMOTE_RPC_URL=$(shell_quote "${SURFPOOL_REMOTE_RPC_URL:-}")"
     echo "SOLANA_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
     echo "SOLANA_RPC_CI_PREFERRED_PROVIDER=default"
+    echo "SOLANA_RPC_DEFAULT_PROVIDER=default"
     echo "KORA_RPC_URL=$(shell_quote "${KORA_RPC_URL}")"
+    echo "KORA_SHIM_RPC_TIMEOUT_MS=$(shell_quote "${KORA_SHIM_RPC_TIMEOUT_MS}")"
+    echo "KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS=$(shell_quote "${KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS}")"
+    echo "KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS=$(shell_quote "${KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS}")"
     echo "FEE_PAYMENT_PROVIDER=kora"
     echo "RUN_INTEGRATION_TESTS=true"
     echo "KORA_SURFPOOL_SHIM=$([ "${KORA_SURFPOOL_MODE}" = "shim" ] && echo "true" || echo "false")"
@@ -307,6 +314,8 @@ NODE
       cd "${ROOT_DIR}/packages/sdp-api-integration"
       export KORA_SHIM_HOST
       export KORA_SHIM_PORT
+      export KORA_SHIM_RPC_TIMEOUT_MS
+      export KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS
       export SOLANA_RPC_URL="${SURFPOOL_RPC_URL}"
       export SIGNER_PRIVATE_KEY
       exec node scripts/kora-surfpool-shim.mjs
@@ -382,6 +391,7 @@ Local Kora-on-Surfpool is ready.
 Use these environment overrides with Doppler-backed commands:
   export SOLANA_RPC_URL=${SURFPOOL_RPC_URL}
   export SOLANA_RPC_CI_PREFERRED_PROVIDER=default
+  export SOLANA_RPC_DEFAULT_PROVIDER=default
   export KORA_RPC_URL=${KORA_RPC_URL}
   export FEE_PAYMENT_PROVIDER=kora
   export RUN_INTEGRATION_TESTS=true

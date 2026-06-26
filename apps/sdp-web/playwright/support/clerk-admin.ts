@@ -25,9 +25,25 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function isRetryableClerkError(error: unknown): boolean {
   const record = asRecord(error);
   const status = record?.status ?? record?.statusCode;
+  const statusNumber =
+    typeof status === "number" ? status : typeof status === "string" ? Number(status) : null;
   const message = error instanceof Error ? error.message : String(error);
+  const name = error instanceof Error ? error.name : record?.name;
+  const clerkErrors = Array.isArray(record?.errors)
+    ? record.errors
+        .map((entry) => asRecord(entry))
+        .map((entry) => `${String(entry?.code ?? "")} ${String(entry?.message ?? "")}`)
+        .join(" ")
+    : "";
 
-  return (typeof status === "number" && status >= 500) || message.includes("Internal Server Error");
+  return (
+    (typeof statusNumber === "number" && statusNumber >= 500) ||
+    name === "ClerkAPIResponseError" ||
+    message.includes("Internal Server Error") ||
+    message.includes("fetch failed") ||
+    message.includes("timed out") ||
+    clerkErrors.includes("unexpected_error")
+  );
 }
 
 async function wait(ms: number): Promise<void> {
