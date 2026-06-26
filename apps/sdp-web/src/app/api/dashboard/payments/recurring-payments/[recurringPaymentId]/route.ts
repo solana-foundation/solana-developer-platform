@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isRecurringPaymentsDashboardEnabled } from "@/lib/recurring-payments-feature";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { getRecurringPaymentsProxyClient } from "../proxy-guard";
 
 type RouteContext = { params: Promise<{ recurringPaymentId: string }> };
 
@@ -28,10 +28,12 @@ export async function GET(request: Request, context: RouteContext) {
 
   try {
     const { recurringPaymentId } = await context.params;
-    const apiClient = await createSdpApiClient(
-      trace.childContext("route.dashboard.recurring-payments.api")
-    );
-    const response = await apiClient.request(
+    const proxyClient = await getRecurringPaymentsProxyClient(trace);
+    if (!proxyClient.ok) {
+      return proxyClient.response;
+    }
+
+    const response = await proxyClient.apiClient.request(
       `/v1/payments/recurring-payments/${encodeURIComponent(recurringPaymentId)}`,
       { method: "GET" }
     );

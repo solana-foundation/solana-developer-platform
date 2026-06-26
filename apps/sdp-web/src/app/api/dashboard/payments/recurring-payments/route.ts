@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isRecurringPaymentsDashboardEnabled } from "@/lib/recurring-payments-feature";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { getRecurringPaymentsProxyClient } from "./proxy-guard";
 
 function disabledResponse(trace: ReturnType<typeof createTimedTrace>) {
   logRouteResult(trace, 404, { recurringPaymentsEnabled: false });
@@ -25,12 +25,14 @@ export async function GET(request: Request) {
   }
 
   try {
-    const apiClient = await createSdpApiClient(
-      trace.childContext("route.dashboard.recurring-payments.api")
-    );
+    const proxyClient = await getRecurringPaymentsProxyClient(trace);
+    if (!proxyClient.ok) {
+      return proxyClient.response;
+    }
+
     const url = new URL(request.url);
     const search = url.searchParams.toString();
-    const response = await apiClient.request(
+    const response = await proxyClient.apiClient.request(
       `/v1/payments/recurring-payments${search ? `?${search}` : ""}`,
       { method: "GET" }
     );
@@ -69,10 +71,12 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.text();
-    const apiClient = await createSdpApiClient(
-      trace.childContext("route.dashboard.recurring-payments.api")
-    );
-    const response = await apiClient.request("/v1/payments/recurring-payments", {
+    const proxyClient = await getRecurringPaymentsProxyClient(trace);
+    if (!proxyClient.ok) {
+      return proxyClient.response;
+    }
+
+    const response = await proxyClient.apiClient.request("/v1/payments/recurring-payments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
