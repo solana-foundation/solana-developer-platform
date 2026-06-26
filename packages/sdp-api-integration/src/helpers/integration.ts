@@ -11,7 +11,10 @@ import {
   getMinimumBalanceForRentExemption,
   getRecentBlockhash,
 } from "@sdp/api/services/solana/rpc";
-import type { CustodyWallet } from "@sdp/api/services/stores/custody-config.store";
+import {
+  CustodyConfigStore,
+  type CustodyWallet,
+} from "@sdp/api/services/stores/custody-config.store";
 import { TEST_ORG, TEST_USER } from "@sdp/api-test/fixtures/organizations";
 import {
   TEST_PROJECT,
@@ -667,6 +670,57 @@ export async function createFundedPrivyWallet(input: {
     label: input.label,
     setDefault: input.setDefault,
   });
+
+  if (input.fundLamports && input.fundLamports > 0) {
+    await fundAddressToLamports(wallet.publicKey, input.fundLamports);
+  } else {
+    await ensureAddressAccountExists(wallet.publicKey);
+  }
+
+  return wallet;
+}
+
+export async function createFundedIntegrationWallet(input: {
+  label: string;
+  fundLamports?: number;
+  setDefault?: boolean;
+}): Promise<CustodyWallet> {
+  if (INTEGRATION_CUSTODY_PROVIDER === "local") {
+    return createFundedLocalWallet(input);
+  }
+
+  return createFundedPrivyWallet(input);
+}
+
+async function createFundedLocalWallet(input: {
+  label: string;
+  fundLamports?: number;
+  setDefault?: boolean;
+}): Promise<CustodyWallet> {
+  const publicKey = await ensureLocalCustodyAddress();
+  const signingService = createSigningService(env);
+  const config = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "local");
+  if (!config) {
+    throw new Error("Integration precondition failed: local signer configuration not found.");
+  }
+
+  const configStore = new CustodyConfigStore(getDb(env), env.CUSTODY_ENCRYPTION_KEY);
+  // Local custody has one signing key; access tests still need distinct wallet IDs.
+  const wallet = await configStore.createWallet(config.id, {
+    walletId: `local_${crypto.randomUUID()}`,
+    publicKey,
+    label: input.label,
+    purpose: "transfer",
+  });
+
+  if (input.setDefault) {
+    await getDb(env)
+      .prepare(
+        "UPDATE custody_configs SET default_wallet_id = ?, updated_at = datetime('now') WHERE id = ?"
+      )
+      .bind(wallet.walletId, config.id)
+      .run();
+  }
 
   if (input.fundLamports && input.fundLamports > 0) {
     await fundAddressToLamports(wallet.publicKey, input.fundLamports);

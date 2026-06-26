@@ -381,11 +381,12 @@ jobs:
             provider: surfpool
             test_files: src/tests/payments-wallet-scope.test.ts src/tests/api-keys-flow.test.ts src/tests/api-keys-rotation.test.ts src/tests/custody-local.test.ts
             rpc_provider: alchemy
-            custody_provider: privy
+            custody_provider: local
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       SOLANA_NETWORK: devnet
+      INTEGRATION_SHARD_NAME: ${{ matrix.name }}
       INTEGRATION_TEST_FILES: ${{ matrix.test_files }}
       SOLANA_RPC_CI_PREFERRED_PROVIDER: ${{ matrix.rpc_provider }}
       SDP_INTEGRATION_CUSTODY_PROVIDER: ${{ matrix.custody_provider }}
@@ -464,8 +465,11 @@ jobs:
           read -r -a test_files <<< "${INTEGRATION_TEST_FILES}"
           if [ "${CI_HAS_DOPPLER_TOKEN}" = "true" ]; then
             scripts/doppler/run-with-config.sh pnpm kora:surfpool:integration -- "${test_files[@]}"
+          elif [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ] && [ "${INTEGRATION_SHARD_NAME}" = "Surfpool / Access" ]; then
+            echo "::notice title=Fork-safe Surfpool Access::Running the Surfpool Access shard without managed RPC or hosted custody secrets."
+            SOLANA_RPC_CI_PREFERRED_PROVIDER=default pnpm kora:surfpool:integration -- "${test_files[@]}"
           elif [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ]; then
-            echo "::notice title=Fork-safe Surfpool integration skip::Forked pull requests cannot access managed Solana RPC secrets, so Surfpool-backed integration shards are skipped."
+            echo "::notice title=Fork-safe Surfpool integration skip::Forked pull requests cannot access managed Solana RPC secrets, so this Surfpool shard is skipped."
           else
             echo "DOPPLER_TOKEN_CI must be configured for Surfpool integration shards." >&2
             exit 1
