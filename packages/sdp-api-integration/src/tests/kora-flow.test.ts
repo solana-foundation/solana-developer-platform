@@ -39,6 +39,7 @@ type ParsedTransactionResponse = {
 
 const TRANSACTION_LOOKUP_TIMEOUT_MS = 30_000;
 const TRANSACTION_LOOKUP_POLL_MS = 1_000;
+const SOLANA_RPC_REQUEST_TIMEOUT_MS = 10_000;
 
 function normalizePubkey(accountKey: ParsedAccountKey): string {
   if (typeof accountKey === "string") {
@@ -53,11 +54,27 @@ async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
     throw new Error("SOLANA_RPC_URL is not configured for integration tests.");
   }
 
-  const response = await fetch(rpcUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SOLANA_RPC_REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new SolanaRpcError(
+        `Request timed out calling ${method} after ${SOLANA_RPC_REQUEST_TIMEOUT_MS}ms`,
+        408
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const responseText = await response.text();
   if (!response.ok) {
@@ -148,6 +165,12 @@ function isRetryableTransactionLookupError(error: unknown): boolean {
     message.includes("timed out") ||
     message.includes("failed to fetch") ||
     message.includes("fetch failed") ||
+    message.includes("aborted") ||
+    message.includes("block not available") ||
+    message.includes("could not find transaction") ||
+    message.includes("not available from this node") ||
+    message.includes("transaction history is not available") ||
+    message.includes("node is behind") ||
     message.includes("service unavailable") ||
     message.includes("try again") ||
     message.includes("too many requests") ||
