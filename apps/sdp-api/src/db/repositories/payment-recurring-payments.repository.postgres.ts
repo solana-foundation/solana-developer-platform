@@ -4,6 +4,7 @@ import type {
   CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
   CreatePaymentRecurringPaymentLifecycleAttemptInput,
+  GetLatestPaymentRecurringPaymentActivationAttemptInput,
   GetLatestPaymentRecurringPaymentLifecycleAttemptInput,
   ListPaymentRecurringPaymentsInput,
   ListPaymentRecurringPaymentsResult,
@@ -512,6 +513,30 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         organizationId: input.organizationId,
         projectId: input.projectId,
       });
+    },
+
+    async getLatestActivationAttempt(
+      input: GetLatestPaymentRecurringPaymentActivationAttemptInput
+    ) {
+      const clauses = ["organization_id = ?", "project_id = ?", "recurring_payment_id = ?"];
+      const values: unknown[] = [input.organizationId, input.projectId, input.recurringPaymentId];
+      if (input.statuses?.length) {
+        clauses.push(`status IN (${buildInClause(input.statuses.length)})`);
+        values.push(...input.statuses);
+      }
+
+      const row = await db
+        .prepare(
+          `SELECT *
+             FROM payment_recurring_payment_activation_attempts
+            WHERE ${clauses.join(" AND ")}
+            ORDER BY created_at DESC, updated_at DESC, id DESC
+            LIMIT 1`
+        )
+        .bind(...values)
+        .first<Record<string, unknown>>();
+
+      return row ? mapActivationAttemptRow(row) : null;
     },
 
     async createLifecycleAttempt(input: CreatePaymentRecurringPaymentLifecycleAttemptInput) {

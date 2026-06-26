@@ -32,6 +32,7 @@ import { SentryUserContext } from "@/components/sentry-user-context";
 import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { isRecurringPaymentsDashboardEnabled } from "@/lib/recurring-payments-feature";
 import { cn } from "@/lib/utils";
 
 type SubNavItem = {
@@ -60,6 +61,15 @@ const PAYMENTS_ACTIONS: readonly SubNavItem[] = [
   { label: "Requests", href: "/dashboard/payments/requests" },
 ];
 
+function getPaymentsActions(): SubNavItem[] {
+  return [
+    ...PAYMENTS_ACTIONS,
+    ...(isRecurringPaymentsDashboardEnabled()
+      ? [{ label: "Recurring", href: "/dashboard/payments/recurring" }]
+      : []),
+  ];
+}
+
 function getNavSections(): NavSection[] {
   return [
     {
@@ -77,7 +87,7 @@ function getNavSections(): NavSection[] {
           label: "Payments",
           href: "/dashboard/payments",
           icon: ArrowLeftRightIcon,
-          children: [...PAYMENTS_ACTIONS],
+          children: getPaymentsActions(),
         },
         { label: "API keys", href: "/dashboard/api-keys", icon: KeyRoundIcon },
       ],
@@ -374,6 +384,12 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
       contentWidthClass: "max-w-none",
     };
   }
+  if (pathname === "/dashboard/payments/recurring") {
+    return {
+      title: "Recurring payments",
+      contentWidthClass: "max-w-none",
+    };
+  }
   if (pathname.startsWith("/dashboard/payments/")) {
     const action = PAYMENTS_ACTIONS.find((item) => pathname.startsWith(item.href));
     const centeredTitle = action
@@ -654,6 +670,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     (pathname.startsWith("/dashboard/payments/counterparty/") &&
       pathname !== "/dashboard/payments/counterparty/create") ||
     pathname === "/dashboard/payments/requests" ||
+    pathname === "/dashboard/payments/recurring" ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;

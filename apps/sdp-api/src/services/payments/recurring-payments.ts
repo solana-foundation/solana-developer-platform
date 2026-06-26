@@ -1297,21 +1297,81 @@ async function createClaimedActivationAttempt(input: {
   organizationId: string;
   projectId: string;
   nowIso: string;
+  recoveringStaleActivation: boolean;
 }): Promise<PaymentRecurringPaymentActivationAttemptRow> {
-  const attempt = await input.recurringRepo.createActivationAttempt({
-    id: `prpa_${crypto.randomUUID()}`,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPaymentId: input.claimed.id,
-    status: "processing",
-    stage: "create_plan",
-    planCreationSignature: input.claimed.plan_creation_signature,
-    authorizationSignature: input.claimed.authorization_signature,
-    error: null,
-    metadata: {},
-    createdAt: input.nowIso,
-    updatedAt: input.nowIso,
-  });
+  if (input.recoveringStaleActivation) {
+    let existing: PaymentRecurringPaymentActivationAttemptRow | null = null;
+    try {
+      existing = await input.recurringRepo.getLatestActivationAttempt({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: input.claimed.id,
+        statuses: ["processing"],
+      });
+    } catch (error) {
+      await resetRecurringPaymentActivationUnlessAlreadyActive({
+        recurringRepo: input.recurringRepo,
+        recurringPaymentId: input.claimed.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        updatedAt: new Date().toISOString(),
+      });
+      throw error;
+    }
+
+    if (existing) {
+      try {
+        const resumed = await input.recurringRepo.updateActivationAttempt({
+          attemptId: existing.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          planCreationSignature:
+            input.claimed.plan_creation_signature ?? existing.plan_creation_signature,
+          authorizationSignature:
+            input.claimed.authorization_signature ?? existing.authorization_signature,
+          error: null,
+          updatedAt: input.nowIso,
+        });
+        return resumed ?? existing;
+      } catch (error) {
+        await resetRecurringPaymentActivationUnlessAlreadyActive({
+          recurringRepo: input.recurringRepo,
+          recurringPaymentId: input.claimed.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          updatedAt: new Date().toISOString(),
+        });
+        throw error;
+      }
+    }
+  }
+
+  let attempt: PaymentRecurringPaymentActivationAttemptRow | null = null;
+  try {
+    attempt = await input.recurringRepo.createActivationAttempt({
+      id: `prpa_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.claimed.id,
+      status: "processing",
+      stage: "create_plan",
+      planCreationSignature: input.claimed.plan_creation_signature,
+      authorizationSignature: input.claimed.authorization_signature,
+      error: null,
+      metadata: {},
+      createdAt: input.nowIso,
+      updatedAt: input.nowIso,
+    });
+  } catch (error) {
+    await resetRecurringPaymentActivationUnlessAlreadyActive({
+      recurringRepo: input.recurringRepo,
+      recurringPaymentId: input.claimed.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      updatedAt: new Date().toISOString(),
+    });
+    throw error;
+  }
 
   if (attempt) {
     return attempt;
@@ -1325,6 +1385,45 @@ async function createClaimedActivationAttempt(input: {
     updatedAt: new Date().toISOString(),
   });
   throw new AppError("INTERNAL_ERROR", "Failed to journal recurring payment activation");
+}
+
+async function settleActiveActivationAttempt(input: {
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  recurringPayment: PaymentRecurringPaymentRow;
+  organizationId: string;
+  projectId: string;
+  nowIso: string;
+}): Promise<void> {
+  try {
+    const attempt = await input.recurringRepo.getLatestActivationAttempt({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      statuses: ["processing"],
+    });
+    if (!attempt) {
+      return;
+    }
+
+    await input.recurringRepo.updateActivationAttempt({
+      attemptId: attempt.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      status: "confirmed",
+      stage: "finalize",
+      planCreationSignature:
+        input.recurringPayment.plan_creation_signature ?? attempt.plan_creation_signature,
+      authorizationSignature:
+        input.recurringPayment.authorization_signature ?? attempt.authorization_signature,
+      error: null,
+      updatedAt: input.nowIso,
+    });
+  } catch (error) {
+    console.error("Failed to settle recurring payment activation attempt on active replay", {
+      error: error instanceof Error ? error.message : String(error),
+      recurringPaymentId: input.recurringPayment.id,
+    });
+  }
 }
 
 async function fetchConfirmedActivationPlan(input: {
@@ -1476,9 +1575,17 @@ export async function activateRecurringPayment(input: {
 
   assertActivationPreconditions({ ...input, nowIso });
   if (input.recurringPayment.status === "active") {
+    await settleActiveActivationAttempt({
+      recurringRepo,
+      recurringPayment: input.recurringPayment,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      nowIso,
+    });
     return input.recurringPayment;
   }
 
+  const recoveringStaleActivation = input.recurringPayment.status === "activating";
   const claimed = await recurringRepo.claimRecurringPaymentActivation({
     recurringPaymentId: input.recurringPayment.id,
     organizationId: input.organizationId,
@@ -1504,11 +1611,14 @@ export async function activateRecurringPayment(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
     nowIso,
+    recoveringStaleActivation,
   });
 
   let currentStage: PaymentRecurringPaymentActivationAttemptStage = "create_plan";
-  let planCreationSignature = claimed.plan_creation_signature as Signature | null;
-  let authorizationSignature = claimed.authorization_signature as Signature | null;
+  let planCreationSignature = (claimed.plan_creation_signature ??
+    attempt.plan_creation_signature) as Signature | null;
+  let authorizationSignature = (claimed.authorization_signature ??
+    attempt.authorization_signature) as Signature | null;
 
   try {
     const owner = assertValidAddress(claimed.source_address, "sourceAddress") as Address;

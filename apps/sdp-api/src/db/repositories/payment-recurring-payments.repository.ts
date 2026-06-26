@@ -206,6 +206,13 @@ export interface GetLatestPaymentRecurringPaymentLifecycleAttemptInput {
   statuses?: PaymentRecurringPaymentLifecycleAttemptStatus[];
 }
 
+export interface GetLatestPaymentRecurringPaymentActivationAttemptInput {
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  statuses?: PaymentRecurringPaymentActivationAttemptStatus[];
+}
+
 export interface ListPaymentRecurringPaymentsInput {
   organizationId: string;
   projectId: string;
@@ -258,6 +265,9 @@ export interface PaymentRecurringPaymentsRepository {
   ): Promise<PaymentRecurringPaymentActivationAttemptRow | null>;
   updateActivationAttempt(
     input: UpdatePaymentRecurringPaymentActivationAttemptInput
+  ): Promise<PaymentRecurringPaymentActivationAttemptRow | null>;
+  getLatestActivationAttempt(
+    input: GetLatestPaymentRecurringPaymentActivationAttemptInput
   ): Promise<PaymentRecurringPaymentActivationAttemptRow | null>;
   createLifecycleAttempt(
     input: CreatePaymentRecurringPaymentLifecycleAttemptInput

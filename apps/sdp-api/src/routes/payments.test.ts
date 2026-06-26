@@ -979,6 +979,41 @@ describe("Payments routes", () => {
       authorizationSignature: activateBody.data.recurringPayment.authorizationSignature,
     });
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
+
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_recurring_payment_activation_attempts
+            SET status = 'processing',
+                stage = 'finalize',
+                updated_at = ?
+          WHERE recurring_payment_id = ?`
+      )
+      .bind(new Date().toISOString(), createBody.data.recurringPayment.id)
+      .run();
+
+    const repairedReplayRes = await app.request(
+      `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
+      {
+        method: "POST",
+        headers,
+      },
+      env
+    );
+
+    expect(repairedReplayRes.status).toBe(200);
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    const repairedAttempt = await getDb(env)
+      .prepare(
+        `SELECT status, stage
+           FROM payment_recurring_payment_activation_attempts
+          WHERE recurring_payment_id = ?`
+      )
+      .bind(createBody.data.recurringPayment.id)
+      .first<{ status: string; stage: string }>();
+    expect(repairedAttempt).toMatchObject({
+      status: "confirmed",
+      stage: "finalize",
+    });
   });
 
   it("creates the source token account during recurring payment activation when it is missing", async () => {
@@ -3262,6 +3297,39 @@ describe("Payments routes", () => {
         createBody.data.recurringPayment.id
       )
       .run();
+    const attemptId = `prpa_${crypto.randomUUID()}`;
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_payment_activation_attempts (
+           id,
+           organization_id,
+           project_id,
+           recurring_payment_id,
+           status,
+           stage,
+           plan_creation_signature,
+           authorization_signature,
+           error,
+           metadata,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+      )
+      .bind(
+        attemptId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        createBody.data.recurringPayment.id,
+        "processing",
+        "create_plan",
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy",
+        null,
+        null,
+        "{}",
+        now,
+        now
+      )
+      .run();
 
     const freshRetryRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
@@ -3293,6 +3361,28 @@ describe("Payments routes", () => {
       authorizationSignature,
     });
     expect(signAndSendMock).toHaveBeenCalledTimes(1);
+    const recoveredAttempts = await getDb(env)
+      .prepare(
+        `SELECT id, status, stage, plan_creation_signature, authorization_signature
+           FROM payment_recurring_payment_activation_attempts
+          WHERE recurring_payment_id = ?
+          ORDER BY created_at DESC`
+      )
+      .bind(createBody.data.recurringPayment.id)
+      .all<{
+        id: string;
+        status: string;
+        stage: string;
+        plan_creation_signature: string | null;
+        authorization_signature: string | null;
+      }>();
+    expect(recoveredAttempts.results).toHaveLength(1);
+    expect(recoveredAttempts.results[0]).toMatchObject({
+      id: attemptId,
+      status: "confirmed",
+      stage: "finalize",
+      authorization_signature: authorizationSignature,
+    });
   });
 
   it("recovers stale authorized recurring payments without re-confirming old signatures", async () => {
