@@ -146,6 +146,8 @@ function isRetryableTransactionLookupError(error: unknown): boolean {
     message.includes("unable to complete request") ||
     message.includes("request timed out") ||
     message.includes("timed out") ||
+    message.includes("failed to fetch") ||
+    message.includes("fetch failed") ||
     message.includes("service unavailable") ||
     message.includes("try again") ||
     message.includes("too many requests") ||
