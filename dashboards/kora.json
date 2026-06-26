@@ -5,7 +5,7 @@
   "tags": ["kora", "sdp"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 4,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
   "templating": {
@@ -30,16 +30,25 @@
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Request rate by method",
-      "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+      "title": "Request rate (by status class)",
+      "description": "Cloud Run request_count (aggregated across instances). App Prometheus counters are per-instance and unreliable on an autoscaling service.",
+      "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
-          "expr": "sum by (method) (rate(kora_http_requests_total{service=\"$service\"}[5m]))",
-          "legendFormat": "{{method}}"
+          "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "solana-developer-platform",
+            "filters": ["metric.type", "=", "run.googleapis.com/request_count", "AND", "resource.label.service_name", "=~", "${service:regex}"],
+            "groupBys": ["metric.label.response_code_class"],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s"
+          },
+          "aliasBy": "{{metric.label.response_code_class}}"
         }
       ]
     },
@@ -47,7 +56,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "5xx rate",
-      "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+      "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
       "fieldConfig": {
         "defaults": { "unit": "reqps", "color": { "mode": "fixed", "fixedColor": "red" } },
@@ -56,31 +65,55 @@
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
-          "expr": "sum (rate(kora_http_requests_total{service=\"$service\",status=~\"5..\"}[5m]))",
-          "legendFormat": "5xx"
+          "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "solana-developer-platform",
+            "filters": ["metric.type", "=", "run.googleapis.com/request_count", "AND", "resource.label.service_name", "=~", "${service:regex}", "AND", "metric.label.response_code_class", "=", "5xx"],
+            "groupBys": ["resource.label.service_name"],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s"
+          },
+          "aliasBy": "5xx"
         }
       ]
     },
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Latency p50 / p95 (s)",
-      "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+      "title": "Latency p50 / p95 (ms)",
+      "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(kora_http_request_duration_seconds_bucket{service=\"$service\"}[5m])))",
-          "legendFormat": "p50"
+          "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "solana-developer-platform",
+            "filters": ["metric.type", "=", "run.googleapis.com/request_latencies", "AND", "resource.label.service_name", "=~", "${service:regex}"],
+            "groupBys": ["resource.label.service_name"],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_PERCENTILE_50",
+            "alignmentPeriod": "300s"
+          },
+          "aliasBy": "p50"
         },
         {
           "refId": "B",
-          "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(kora_http_request_duration_seconds_bucket{service=\"$service\"}[5m])))",
-          "legendFormat": "p95"
+          "datasource": { "type": "stackdriver", "uid": "sdp-gcm" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "solana-developer-platform",
+            "filters": ["metric.type", "=", "run.googleapis.com/request_latencies", "AND", "resource.label.service_name", "=~", "${service:regex}"],
+            "groupBys": ["resource.label.service_name"],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_PERCENTILE_95",
+            "alignmentPeriod": "300s"
+          },
+          "aliasBy": "p95"
         }
       ]
     },
