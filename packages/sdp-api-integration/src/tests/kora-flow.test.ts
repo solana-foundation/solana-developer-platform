@@ -133,7 +133,10 @@ function isRetryableTransactionLookupError(error: unknown): boolean {
       return false;
     }
 
-    if (error.code && (error.code === 429 || (error.code >= 500 && error.code <= 599))) {
+    if (
+      error.code &&
+      (error.code === 408 || error.code === 429 || (error.code >= 500 && error.code <= 599))
+    ) {
       return true;
     }
   }

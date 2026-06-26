@@ -61,7 +61,7 @@
     "kora:surfpool:integration": "scripts/kora-surfpool/integration.sh",
     "kora:surfpool:test": "scripts/kora-surfpool/test.sh",
     "kora:devnet:check": "infra/kora/cloud-run/check.sh",
-    "kora:devnet:test": "DATABASE_URL=${KORA_DEVNET_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp} node scripts/run-workspace-tests.mjs integration -- src/tests/kora.test.ts src/tests/kora-flow.test.ts"
+    "kora:devnet:test": "DATABASE_URL=${KORA_DEVNET_DATABASE_URL:-${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}} node scripts/run-workspace-tests.mjs integration -- src/tests/kora.test.ts src/tests/kora-flow.test.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
