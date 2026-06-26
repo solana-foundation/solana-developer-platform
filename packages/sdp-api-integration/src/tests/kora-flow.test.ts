@@ -56,7 +56,8 @@ async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SOLANA_RPC_REQUEST_TIMEOUT_MS);
-  let response: Response;
+  let response: Response | null = null;
+  let responseText = "";
   try {
     response = await fetch(rpcUrl, {
       method: "POST",
@@ -64,6 +65,7 @@ async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
       signal: controller.signal,
     });
+    responseText = await response.text();
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new SolanaRpcError(
@@ -76,7 +78,10 @@ async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
     clearTimeout(timeout);
   }
 
-  const responseText = await response.text();
+  if (!response) {
+    throw new SolanaRpcError(`No response received calling ${method}`);
+  }
+
   if (!response.ok) {
     throw new SolanaRpcError(
       `HTTP ${response.status} calling ${method}: ${responseText.slice(0, 200)}`,
