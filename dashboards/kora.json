@@ -5,7 +5,7 @@
   "tags": ["kora", "sdp"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
   "templating": {
@@ -14,11 +14,11 @@
         "name": "service",
         "label": "service",
         "type": "custom",
-        "query": "mainnet : kora-mainnet, devnet : kora-sdp",
+        "query": "mainnet : kora-mainnet, devnet : kora-devnet",
         "current": { "text": "mainnet", "value": "kora-mainnet", "selected": true },
         "options": [
           { "text": "mainnet", "value": "kora-mainnet", "selected": true },
-          { "text": "devnet", "value": "kora-sdp", "selected": false }
+          { "text": "devnet", "value": "kora-devnet", "selected": false }
         ],
         "includeAll": false,
         "multi": false
