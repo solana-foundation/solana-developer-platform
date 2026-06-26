@@ -40,6 +40,7 @@ type ParsedTransactionResponse = {
 const TRANSACTION_LOOKUP_TIMEOUT_MS = 30_000;
 const TRANSACTION_LOOKUP_POLL_MS = 1_000;
 const SOLANA_RPC_REQUEST_TIMEOUT_MS = 10_000;
+const RETRYABLE_SOLANA_RPC_CODES = new Set([-32004, -32005]);
 
 function normalizePubkey(accountKey: ParsedAccountKey): string {
   if (typeof accountKey === "string") {
@@ -151,12 +152,16 @@ function isRetryableTransactionLookupError(error: unknown): boolean {
   }
 
   if (error instanceof SolanaRpcError) {
-    if (error.code && [-32600, -32601, -32602].includes(error.code)) {
+    if (error.code !== undefined && [-32600, -32601, -32602].includes(error.code)) {
       return false;
     }
 
+    if (error.code !== undefined && RETRYABLE_SOLANA_RPC_CODES.has(error.code)) {
+      return true;
+    }
+
     if (
-      error.code &&
+      error.code !== undefined &&
       (error.code === 408 || error.code === 429 || (error.code >= 500 && error.code <= 599))
     ) {
       return true;
