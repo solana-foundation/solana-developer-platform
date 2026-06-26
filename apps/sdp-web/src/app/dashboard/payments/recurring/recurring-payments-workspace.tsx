@@ -5,7 +5,8 @@ import {
   type PaymentRecurringPaymentStatus,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
-import { CalendarClockIcon, CopyIcon, RepeatIcon, UserIcon, WalletIcon } from "lucide-react";
+import { CalendarClockIcon, CopyIcon, ExternalLinkIcon, RepeatIcon, UserIcon } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, type ReactNode, useMemo } from "react";
 import { toast } from "sonner";
@@ -20,7 +21,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 
 const STATUS_LABELS = {
@@ -69,8 +69,9 @@ interface RecurringPaymentsWorkspaceProps {
 interface RecurringPaymentDetailWorkspaceProps {
   recurringPayment: PaymentRecurringPayment;
   wallet: RecurringPaymentWalletView | null;
-  counterpartyName: string;
+  counterpartyLabel: string;
   amountLabel: string;
+  currencyLabel: string;
 }
 
 function RecurringPaymentStatusBadge({ status }: { status: PaymentRecurringPaymentStatus }) {
@@ -123,15 +124,35 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
-function CopyableValue({ value, empty = "Not set" }: { value: string | null; empty?: string }) {
+function DetailLabel({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+  return (
+    <div className="mb-3 flex items-center gap-2 text-sm font-medium text-text-medium">
+      <span className="[&_svg]:size-4 [&_svg]:text-text-medium">{icon}</span>
+      <span>{children}</span>
+    </div>
+  );
+}
+
+function CopyableValue({
+  value,
+  label,
+  empty = "Not set",
+}: {
+  value: string | null;
+  label?: string;
+  empty?: string;
+}) {
   if (!value) {
     return <span className="text-text-low">{empty}</span>;
   }
 
   return (
     <span className="inline-flex max-w-full items-center justify-end gap-2">
-      <span className="min-w-0 truncate font-mono text-xs text-text-extra-high" title={value}>
-        {value}
+      <span
+        className="min-w-0 truncate font-mono text-xs text-text-extra-high"
+        title={label ?? value}
+      >
+        {label ?? value}
       </span>
       <Button
         type="button"
@@ -149,16 +170,50 @@ function CopyableValue({ value, empty = "Not set" }: { value: string | null; emp
   );
 }
 
-function SummaryMetric({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
-  return (
-    <div className="min-w-0 rounded-xl border border-border-light bg-white px-4 py-3">
-      <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase text-text-low">
-        <span className="[&_svg]:size-3.5">{icon}</span>
-        <span>{label}</span>
-      </div>
+function SummaryMetric({
+  icon,
+  label,
+  value,
+  href,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  href?: string;
+}) {
+  const content = (
+    <>
+      {href ? (
+        <span
+          aria-hidden="true"
+          className="absolute top-3 right-3 inline-flex h-7 w-7 items-center justify-center rounded-md text-text-low opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+        >
+          <ExternalLinkIcon className="h-4 w-4" />
+        </span>
+      ) : null}
+      <DetailLabel icon={icon}>{label}</DetailLabel>
       <p className="truncate text-sm font-semibold text-text-extra-high">{value}</p>
-    </div>
+    </>
   );
+
+  const className =
+    "group relative min-w-0 rounded-xl border border-border-light bg-white px-4 py-3 transition-[border-color,box-shadow] duration-150 ease-out hover:border-border-medium hover:shadow-sm";
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open ${label.toLowerCase()}`}
+        className={`${className} block focus:outline-none focus-visible:border-border-medium focus-visible:ring-2 focus-visible:ring-black/50`}
+      >
+        {content}
+      </Link>
+    );
+  }
+
+  return <div className={className}>{content}</div>;
 }
 
 export function RecurringPaymentsWorkspace({
@@ -191,7 +246,7 @@ export function RecurringPaymentsWorkspace({
   };
   const getCounterpartyLabel = (recurringPayment: PaymentRecurringPayment) =>
     counterpartyById.get(recurringPayment.counterpartyId)?.displayName ??
-    recurringPayment.counterpartyId;
+    "Counterparty unavailable";
   const getAmountLabel = (recurringPayment: PaymentRecurringPayment) =>
     formatDisplayAmount(
       recurringPayment.amount,
@@ -234,25 +289,22 @@ export function RecurringPaymentsWorkspace({
               <Table className="w-full [&_table]:table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[34%] md:w-[26%] lg:w-[21%] xl:w-[18%] 2xl:w-[15%]">
+                    <TableHead className="w-[34%] md:w-[26%] lg:w-[21%] xl:w-[18%]">
                       Status
                     </TableHead>
-                    <TableHead className="w-[26%] md:w-[22%] lg:w-[20%] xl:w-[18%] 2xl:w-[16%]">
+                    <TableHead className="w-[26%] md:w-[22%] lg:w-[20%] xl:w-[18%]">
                       Amount
                     </TableHead>
-                    <TableHead className="w-[40%] md:w-[34%] lg:w-[31%] xl:w-[24%] 2xl:w-[18%]">
+                    <TableHead className="w-[40%] md:w-[34%] lg:w-[31%] xl:w-[24%]">
                       Counterparty
                     </TableHead>
-                    <TableHead className="hidden lg:table-cell lg:w-[28%] xl:w-[22%] 2xl:w-[17%]">
-                      Source wallet
+                    <TableHead className="hidden lg:table-cell lg:w-[28%] xl:w-[22%]">
+                      Funding wallet
                     </TableHead>
-                    <TableHead className="hidden xl:table-cell xl:w-[18%] 2xl:w-[12%]">
-                      Period
+                    <TableHead className="hidden xl:table-cell xl:w-[18%]">Interval</TableHead>
+                    <TableHead className="hidden md:table-cell md:w-[18%] xl:hidden 2xl:table-cell 2xl:w-[18%]">
+                      Next payment
                     </TableHead>
-                    <TableHead className="hidden md:table-cell md:w-[18%] xl:hidden 2xl:table-cell 2xl:w-[12%]">
-                      Next due
-                    </TableHead>
-                    <TableHead className="hidden 2xl:table-cell 2xl:w-[10%]">Created</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -296,9 +348,6 @@ export function RecurringPaymentsWorkspace({
                       <TableCell className="hidden text-sm text-text-medium md:table-cell xl:hidden 2xl:table-cell">
                         {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt)}
                       </TableCell>
-                      <TableCell className="hidden text-sm text-text-medium 2xl:table-cell">
-                        {formatTimestamp(recurringPayment.createdAt)}
-                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -313,13 +362,12 @@ export function RecurringPaymentsWorkspace({
 
 export function RecurringPaymentDetailWorkspace({
   recurringPayment,
-  wallet,
-  counterpartyName,
+  counterpartyLabel,
   amountLabel,
+  currencyLabel,
 }: RecurringPaymentDetailWorkspaceProps) {
-  const sourceWalletLabel = wallet?.label || (wallet ? shortenAddress(wallet.publicKey) : null);
-  const sourceAddress = wallet?.publicKey ?? recurringPayment.sourceAddress;
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours);
+  const paymentReferenceLabel = shortenAddress(recurringPayment.id);
 
   return (
     <div className="h-full min-h-0 w-full overflow-auto px-3 pt-6 pb-5 md:px-6 md:pb-6">
@@ -329,42 +377,33 @@ export function RecurringPaymentDetailWorkspace({
             <h2 className="text-3xl font-medium tracking-tight text-text-extra-high">
               Recurring payment
             </h2>
-            <p className="truncate text-sm text-text-medium">{recurringPayment.id}</p>
+            <p className="truncate text-sm text-text-medium">
+              {counterpartyLabel} · {amountLabel} · {scheduleLabel}
+            </p>
           </div>
           <RecurringPaymentStatusBadge status={recurringPayment.status} />
         </div>
 
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <SummaryMetric icon={<RepeatIcon />} label="Amount" value={amountLabel} />
-          <SummaryMetric icon={<CalendarClockIcon />} label="Period" value={scheduleLabel} />
           <SummaryMetric
             icon={<CalendarClockIcon />}
-            label="Next due"
+            label="Billing interval"
+            value={scheduleLabel}
+          />
+          <SummaryMetric
+            icon={<CalendarClockIcon />}
+            label="Next payment"
             value={formatOptionalTimestamp(recurringPayment.nextCollectionDueAt)}
           />
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="rounded-xl border border-border-light p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-text-extra-high">
-              <WalletIcon className="h-4 w-4 text-text-low" />
-              Source
-            </div>
-            <p className="truncate text-sm font-medium text-text-extra-high">
-              {sourceWalletLabel ?? recurringPayment.sourceWalletId}
-            </p>
-            <p className="mt-1 truncate font-mono text-xs text-text-medium">{sourceAddress}</p>
-          </div>
-          <div className="rounded-xl border border-border-light p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-text-extra-high">
-              <UserIcon className="h-4 w-4 text-text-low" />
-              Counterparty
-            </div>
-            <p className="truncate text-sm font-medium text-text-extra-high">{counterpartyName}</p>
-            <p className="mt-1 truncate font-mono text-xs text-text-medium">
-              {recurringPayment.destinationAddress}
-            </p>
-          </div>
+          <SummaryMetric
+            icon={<UserIcon />}
+            label="Counterparty"
+            value={counterpartyLabel}
+            href={`/dashboard/payments/counterparty/${encodeURIComponent(
+              recurringPayment.counterpartyId
+            )}`}
+          />
         </div>
 
         <div className="rounded-xl border border-border-light px-4">
@@ -372,27 +411,26 @@ export function RecurringPaymentDetailWorkspace({
             <DetailRow label="Status">
               <RecurringPaymentStatusBadge status={recurringPayment.status} />
             </DetailRow>
-            <DetailRow label="First collection">
+            <DetailRow label="Starts">
               {formatOptionalTimestamp(recurringPayment.firstCollectionAt)}
             </DetailRow>
-            <DetailRow label="Next due">
+            <DetailRow label="Next payment">
               {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt)}
             </DetailRow>
-            <DetailRow label="Destination token account">
-              <CopyableValue value={recurringPayment.destinationTokenAccount} />
+            <DetailRow label="Billing interval">{scheduleLabel}</DetailRow>
+            <DetailRow label="Currency">{currencyLabel}</DetailRow>
+            <DetailRow label="Payment reference">
+              <CopyableValue value={recurringPayment.id} label={paymentReferenceLabel} />
             </DetailRow>
-            <DetailRow label="Token mint">
-              <CopyableValue value={recurringPayment.token} />
-            </DetailRow>
-            <DetailRow label="Metadata URI">
+            <DetailRow label="Metadata">
               {recurringPayment.metadataUri ? (
                 <a
                   href={recurringPayment.metadataUri}
                   target="_blank"
                   rel="noreferrer"
-                  className="break-all underline underline-offset-4"
+                  className="underline underline-offset-4"
                 >
-                  {recurringPayment.metadataUri}
+                  Open metadata
                 </a>
               ) : (
                 <span className="text-text-low">Not set</span>
@@ -404,35 +442,21 @@ export function RecurringPaymentDetailWorkspace({
         </div>
 
         <div>
-          <h3 className="mb-3 text-sm font-medium text-text-extra-high">Subscription lifecycle</h3>
-          <div
-            className={cn(
-              "rounded-xl border border-border-light px-4",
-              "divide-y divide-border-light"
-            )}
-          >
-            <DetailRow label="Plan ID">
+          <h3 className="mb-3 text-sm font-medium text-text-extra-high">Billing setup</h3>
+          <div className="divide-y divide-border-light rounded-xl border border-border-light px-4">
+            <DetailRow label="Plan reference">
               <CopyableValue value={recurringPayment.planId} />
             </DetailRow>
-            <DetailRow label="Plan PDA">
-              <CopyableValue value={recurringPayment.planPda} />
-            </DetailRow>
-            <DetailRow label="Plan created">
+            <DetailRow label="Setup confirmed">
               {formatOptionalTimestamp(recurringPayment.planCreatedAt)}
             </DetailRow>
-            <DetailRow label="Plan signature">
+            <DetailRow label="Setup transaction">
               <CopyableValue value={recurringPayment.planCreationSignature} />
             </DetailRow>
-            <DetailRow label="Subscription ID">
+            <DetailRow label="Subscription reference">
               <CopyableValue value={recurringPayment.subscriptionId} />
             </DetailRow>
-            <DetailRow label="Subscription PDA">
-              <CopyableValue value={recurringPayment.subscriptionPda} />
-            </DetailRow>
-            <DetailRow label="Authority">
-              <CopyableValue value={recurringPayment.subscriptionAuthorityAddress} />
-            </DetailRow>
-            <DetailRow label="Authorization signature">
+            <DetailRow label="Authorization transaction">
               <CopyableValue value={recurringPayment.authorizationSignature} />
             </DetailRow>
           </div>

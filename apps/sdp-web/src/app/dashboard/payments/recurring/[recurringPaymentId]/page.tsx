@@ -60,10 +60,10 @@ export default async function RecurringPaymentDetailRoute({
       }));
       const wallet =
         wallets.find((entry) => entry.walletId === recurringPayment.sourceWalletId) ?? null;
-      const counterpartyName =
+      const counterpartyLabel =
         counterpartiesResult.data.find(
           (counterparty) => counterparty.id === recurringPayment.counterpartyId
-        )?.displayName ?? recurringPayment.counterpartyId;
+        )?.displayName ?? "Counterparty unavailable";
       const knownToken = WELL_KNOWN_TOKEN_BY_MINT.get(recurringPayment.token);
       const tokenLabel =
         knownToken?.symbol ??
@@ -74,8 +74,9 @@ export default async function RecurringPaymentDetailRoute({
         <RecurringPaymentDetailWorkspace
           recurringPayment={recurringPayment}
           wallet={wallet}
-          counterpartyName={counterpartyName}
+          counterpartyLabel={counterpartyLabel}
           amountLabel={formatDisplayAmount(recurringPayment.amount, tokenLabel)}
+          currencyLabel={tokenLabel}
         />
       );
     }

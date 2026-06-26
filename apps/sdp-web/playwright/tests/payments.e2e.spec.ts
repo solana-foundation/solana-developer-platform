@@ -139,10 +139,15 @@ test.describe
         page.locator("main").getByRole("heading", { level: 1, name: "Recurring payment" })
       ).toBeVisible();
       await expect(page.getByRole("link", { name: "Back to recurring payments" })).toBeVisible();
-      await expect(page.getByText(recurringPaymentId)).toBeVisible();
-      await expect(page.getByText("Subscription lifecycle")).toBeVisible();
-      await expect(page.getByText("Plan ID")).toBeVisible();
-      await expect(page.getByText("Authorization signature")).toBeVisible();
+      await expect(page.getByText("Payment reference")).toBeVisible();
+      await expect(page.getByText("Billing setup")).toBeVisible();
+      await expect(page.getByText("Plan reference")).toBeVisible();
+      await expect(page.getByText("Authorization transaction")).toBeVisible();
+      await expect(page.locator("main").getByText("Token mint", { exact: true })).toHaveCount(0);
+      await expect(page.locator("main").getByText("Plan PDA", { exact: true })).toHaveCount(0);
+      await expect(page.locator("main").getByText("Subscription PDA", { exact: true })).toHaveCount(
+        0
+      );
     });
   });
 
