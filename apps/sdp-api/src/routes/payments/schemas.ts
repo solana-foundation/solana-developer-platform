@@ -67,6 +67,115 @@ export const updateWalletPolicySchema = z.object({
     .string()
     .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
     .optional(),
+  defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).optional(),
+  rules: z
+    .array(
+      z.discriminatedUnion("kind", [
+        z.object({
+          id: z.string().min(1).max(120).optional(),
+          name: z.string().min(1).max(120).optional(),
+          description: z.string().max(500).optional(),
+          action: z
+            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+            .optional(),
+          kind: z.literal("operation_family"),
+          family: z
+            .enum([
+              "transfer",
+              "payment",
+              "ramp",
+              "issuance",
+              "raw_sign",
+              "program",
+              "provider_admin",
+            ])
+            .optional(),
+          families: z
+            .array(
+              z.enum([
+                "transfer",
+                "payment",
+                "ramp",
+                "issuance",
+                "raw_sign",
+                "program",
+                "provider_admin",
+              ])
+            )
+            .max(20)
+            .optional(),
+        }),
+        z.object({
+          id: z.string().min(1).max(120).optional(),
+          name: z.string().min(1).max(120).optional(),
+          description: z.string().max(500).optional(),
+          action: z
+            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+            .optional(),
+          kind: z.literal("destination"),
+          allowlist: z.array(solanaAddressSchema("allowlist entry")).max(500).optional(),
+          blocklist: z.array(solanaAddressSchema("blocklist entry")).max(500).optional(),
+          destination: solanaAddressSchema("destination").optional(),
+          destinations: z.array(solanaAddressSchema("destinations entry")).max(500).optional(),
+        }),
+        z.object({
+          id: z.string().min(1).max(120).optional(),
+          name: z.string().min(1).max(120).optional(),
+          description: z.string().max(500).optional(),
+          action: z
+            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+            .optional(),
+          kind: z.literal("amount"),
+          min: z
+            .string()
+            .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
+            .optional(),
+          max: z
+            .string()
+            .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
+            .optional(),
+          asset: z.string().min(1).max(120).optional(),
+          assets: z.array(z.string().min(1).max(120)).max(100).optional(),
+        }),
+        z.object({
+          id: z.string().min(1).max(120).optional(),
+          name: z.string().min(1).max(120).optional(),
+          description: z.string().max(500).optional(),
+          action: z
+            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+            .optional(),
+          kind: z.literal("approval"),
+          families: z
+            .array(
+              z.enum([
+                "transfer",
+                "payment",
+                "ramp",
+                "issuance",
+                "raw_sign",
+                "program",
+                "provider_admin",
+              ])
+            )
+            .max(20)
+            .optional(),
+          operationTypes: z.array(z.string().min(1).max(120)).max(100).optional(),
+          assets: z.array(z.string().min(1).max(120)).max(100).optional(),
+          approvalGroupId: z.string().min(1).max(120).optional(),
+        }),
+        z.object({
+          id: z.string().min(1).max(120).optional(),
+          name: z.string().min(1).max(120).optional(),
+          description: z.string().max(500).optional(),
+          action: z
+            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+            .optional(),
+          kind: z.literal("always"),
+        }),
+      ])
+    )
+    .max(100)
+    .optional(),
 });
 
 export const paymentAmountSchema = z

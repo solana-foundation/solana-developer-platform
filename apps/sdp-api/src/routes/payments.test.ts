@@ -6080,6 +6080,142 @@ describe("Payments routes", () => {
     expect(body.error.message).toContain("BVNK is not configured");
   });
 
+  it("activates immutable wallet control profile revisions from wallet policy updates", async () => {
+    const rules = [
+      {
+        id: "deny-raw-signing",
+        kind: "operation_family",
+        family: "raw_sign",
+        action: "deny",
+      },
+      {
+        id: "approval-for-payments",
+        kind: "approval",
+        families: ["payment"],
+        action: "approval_required",
+      },
+    ];
+
+    const updateRes = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2],
+          maxTransferAmount: "5",
+          defaultAction: "allow",
+          rules,
+        }),
+      },
+      env
+    );
+
+    expect(updateRes.status).toBe(200);
+    const updateBody = (await updateRes.json()) as {
+      data: {
+        policy: {
+          destinationAllowlist: string[];
+          maxTransferAmount?: string;
+          defaultAction?: string;
+          rules?: unknown[];
+          controlProfile?: {
+            id: string;
+            status: string;
+            revisionId: string;
+            revisionNumber: number;
+            providerMappingStatus: string;
+          };
+        };
+      };
+    };
+    expect(updateBody.data.policy.destinationAllowlist).toEqual([TEST_SOLANA_ADDRESSES.wallet2]);
+    expect(updateBody.data.policy.maxTransferAmount).toBe("5");
+    expect(updateBody.data.policy.defaultAction).toBe("allow");
+    expect(updateBody.data.policy.rules).toEqual(rules);
+    expect(updateBody.data.policy.controlProfile).toMatchObject({
+      status: "active",
+      revisionNumber: 1,
+      providerMappingStatus: "not_applicable",
+    });
+
+    const revisionRows = await getDb(env)
+      .prepare(
+        `SELECT revision_number, default_action, rules
+         FROM wallet_control_profile_revisions
+         ORDER BY revision_number ASC`
+      )
+      .all<{
+        revision_number: number;
+        default_action: string;
+        rules: unknown;
+      }>();
+    expect(revisionRows.results).toHaveLength(1);
+    expect(revisionRows.results[0]).toMatchObject({
+      revision_number: 1,
+      default_action: "allow",
+    });
+
+    const secondRes = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationAllowlist: [],
+          defaultAction: "allow",
+          rules: [
+            {
+              id: "deny-programs",
+              kind: "operation_family",
+              family: "program",
+              action: "deny",
+            },
+          ],
+        }),
+      },
+      env
+    );
+
+    expect(secondRes.status).toBe(200);
+    const secondBody = (await secondRes.json()) as typeof updateBody;
+    expect(secondBody.data.policy.controlProfile?.id).toBe(
+      updateBody.data.policy.controlProfile?.id
+    );
+    expect(secondBody.data.policy.controlProfile?.revisionNumber).toBe(2);
+
+    const getRes = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+      {
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(getRes.status).toBe(200);
+    const getBody = (await getRes.json()) as typeof updateBody;
+    expect(getBody.data.policy.controlProfile).toMatchObject({
+      id: updateBody.data.policy.controlProfile?.id,
+      revisionNumber: 2,
+    });
+    expect(getBody.data.policy.rules).toEqual([
+      {
+        id: "deny-programs",
+        kind: "operation_family",
+        family: "program",
+        action: "deny",
+      },
+    ]);
+  });
+
   it("blocks prepare transfer when destination is outside allowlist", async () => {
     await seedWalletPolicy({
       destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2],

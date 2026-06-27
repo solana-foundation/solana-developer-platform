@@ -464,6 +464,8 @@ export async function updateWalletPolicy(
         destinationAllowlist: policy.destinationAllowlist,
         ...(policy.maxTransferAmount ? { maxTransferAmount: policy.maxTransferAmount } : {}),
         ...(policy.maxDailyAmount ? { maxDailyAmount: policy.maxDailyAmount } : {}),
+        ...(policy.defaultAction ? { defaultAction: policy.defaultAction } : {}),
+        ...(policy.rules ? { rules: policy.rules } : {}),
       }),
     }
   );

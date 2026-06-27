@@ -1,6 +1,11 @@
 "use client";
 
-import type { PaymentWalletPolicy } from "@sdp/types";
+import type {
+  PaymentWalletPolicy,
+  PolicyDefaultAction,
+  PolicyRule,
+  WalletOperationFamily,
+} from "@sdp/types";
 import { ArrowLeft, ArrowRight, Check, ChevronDown } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
@@ -11,7 +16,8 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 type FlowStep = "intent" | "details" | "review";
-type RestrictionCategoryId = "destinations" | "limits";
+type RestrictionCategoryId = "operations" | "destinations" | "limits" | "approvals" | "advanced";
+type AdvancedFamily = Extract<WalletOperationFamily, "raw_sign" | "program">;
 
 interface WalletPolicyStartingProfileFlowProps {
   wallet: {
@@ -34,9 +40,12 @@ interface StoredPolicyDraft {
   status: "draft" | "disabled";
   step: FlowStep;
   categories: RestrictionCategoryId[];
+  blockedOperationFamilies: WalletOperationFamily[];
   destinationAllowlist: string[];
   maxTransferAmount: string;
   maxDailyAmount: string;
+  approvalFamilies: WalletOperationFamily[];
+  advancedDeniedFamilies: AdvancedFamily[];
   updatedAt: string;
 }
 
@@ -68,6 +77,11 @@ const FLOW_STEPS = [
 
 const RESTRICTION_CATEGORIES = [
   {
+    id: "operations",
+    title: "Operation access",
+    description: "Block high-risk operation families while keeping normal usage available.",
+  },
+  {
     id: "destinations",
     title: "Allowed destinations",
     description: "Use when this wallet should only pay known addresses.",
@@ -77,9 +91,38 @@ const RESTRICTION_CATEGORIES = [
     title: "Transfer limits",
     description: "Use when this wallet needs spend caps or daily outflow limits.",
   },
+  {
+    id: "approvals",
+    title: "Approval checks",
+    description: "Pause selected operation families for approval before execution.",
+  },
+  {
+    id: "advanced",
+    title: "Advanced signing",
+    description: "Restrict raw signing and direct program interaction paths.",
+  },
 ] as const satisfies readonly RestrictionCategory[];
 
 const RESTRICTION_CATEGORY_IDS = RESTRICTION_CATEGORIES.map((category) => category.id);
+const DEFAULT_POLICY_ACTION = "allow" satisfies PolicyDefaultAction;
+const OPERATION_FAMILY_OPTIONS = [
+  { id: "payment", label: "Payments" },
+  { id: "transfer", label: "Transfers" },
+  { id: "ramp", label: "Ramps" },
+  { id: "issuance", label: "Issuance" },
+  { id: "provider_admin", label: "Provider admin" },
+] as const satisfies readonly { id: WalletOperationFamily; label: string }[];
+const APPROVAL_FAMILY_OPTIONS = [
+  { id: "payment", label: "Payments" },
+  { id: "ramp", label: "Ramps" },
+  { id: "issuance", label: "Issuance" },
+  { id: "raw_sign", label: "Raw signing" },
+  { id: "program", label: "Program interactions" },
+] as const satisfies readonly { id: WalletOperationFamily; label: string }[];
+const ADVANCED_FAMILY_OPTIONS = [
+  { id: "raw_sign", label: "Raw signing" },
+  { id: "program", label: "Program interactions" },
+] as const satisfies readonly { id: AdvancedFamily; label: string }[];
 
 const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const CSV_HEADER_VALUES = new Set([
@@ -99,15 +142,61 @@ function policyHasRestrictions(policy: PaymentWalletPolicy): boolean {
   return (
     policy.destinationAllowlist.length > 0 ||
     Boolean(policy.maxTransferAmount) ||
-    Boolean(policy.maxDailyAmount)
+    Boolean(policy.maxDailyAmount) ||
+    Boolean(policy.rules?.length)
   );
 }
 
 function categoriesFromPolicy(policy: PaymentWalletPolicy): RestrictionCategoryId[] {
   const categories: RestrictionCategoryId[] = [];
+  const blockedFamilies = blockedOperationFamiliesFromRules(policy.rules ?? []);
+  const approvalFamilies = approvalFamiliesFromRules(policy.rules ?? []);
+  const advancedFamilies = advancedDeniedFamiliesFromRules(policy.rules ?? []);
+  if (blockedFamilies.length > 0) categories.push("operations");
   if (policy.destinationAllowlist.length > 0) categories.push("destinations");
   if (policy.maxTransferAmount || policy.maxDailyAmount) categories.push("limits");
+  if (approvalFamilies.length > 0) categories.push("approvals");
+  if (advancedFamilies.length > 0) categories.push("advanced");
   return categories;
+}
+
+function blockedOperationFamiliesFromRules(rules: PolicyRule[]): WalletOperationFamily[] {
+  return uniqueValues(
+    rules
+      .filter(
+        (rule): rule is Extract<PolicyRule, { kind: "operation_family" }> =>
+          rule.kind === "operation_family" && rule.action === "deny"
+      )
+      .flatMap((rule) => rule.families ?? (rule.family ? [rule.family] : []))
+      .filter((family) => family !== "raw_sign" && family !== "program")
+  ) as WalletOperationFamily[];
+}
+
+function advancedDeniedFamiliesFromRules(rules: PolicyRule[]): AdvancedFamily[] {
+  return uniqueValues(
+    rules
+      .filter(
+        (rule): rule is Extract<PolicyRule, { kind: "operation_family" }> =>
+          rule.kind === "operation_family" && rule.action === "deny"
+      )
+      .flatMap(advancedDeniedFamiliesFromOperationRule)
+  ) as AdvancedFamily[];
+}
+
+function advancedDeniedFamiliesFromOperationRule(
+  rule: Extract<PolicyRule, { kind: "operation_family" }>
+): AdvancedFamily[] {
+  return (rule.families ?? (rule.family ? [rule.family] : [])).filter(
+    (family): family is AdvancedFamily => family === "raw_sign" || family === "program"
+  );
+}
+
+function approvalFamiliesFromRules(rules: PolicyRule[]): WalletOperationFamily[] {
+  return uniqueValues(
+    rules
+      .filter((rule): rule is Extract<PolicyRule, { kind: "approval" }> => rule.kind === "approval")
+      .flatMap((rule) => rule.families ?? [])
+  ) as WalletOperationFamily[];
 }
 
 function uniqueValues(values: string[]): string[] {
@@ -207,9 +296,12 @@ function isStoredDraft(value: unknown): value is StoredPolicyDraft {
     (draft.status === "draft" || draft.status === "disabled") &&
     typeof draft.step === "string" &&
     Array.isArray(draft.categories) &&
+    Array.isArray(draft.blockedOperationFamilies) &&
     Array.isArray(draft.destinationAllowlist) &&
     typeof draft.maxTransferAmount === "string" &&
     typeof draft.maxDailyAmount === "string" &&
+    Array.isArray(draft.approvalFamilies) &&
+    Array.isArray(draft.advancedDeniedFamilies) &&
     typeof draft.updatedAt === "string"
   );
 }
@@ -231,6 +323,18 @@ function readStoredDraft(walletId: string): StoredPolicyDraft | null {
     return {
       ...parsed,
       categories: draftCategories,
+      blockedOperationFamilies: filterKnownValues(
+        parsed.blockedOperationFamilies,
+        OPERATION_FAMILY_OPTIONS.map((option) => option.id)
+      ),
+      approvalFamilies: filterKnownValues(
+        parsed.approvalFamilies,
+        APPROVAL_FAMILY_OPTIONS.map((option) => option.id)
+      ),
+      advancedDeniedFamilies: filterKnownValues(
+        parsed.advancedDeniedFamilies,
+        ADVANCED_FAMILY_OPTIONS.map((option) => option.id)
+      ),
     };
   } catch {
     return null;
@@ -245,6 +349,17 @@ function formatCount(count: number, singular: string, plural = `${singular}s`): 
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
+function formatFamilyLabel(family: WalletOperationFamily): string {
+  const match = [...OPERATION_FAMILY_OPTIONS, ...APPROVAL_FAMILY_OPTIONS].find(
+    (option) => option.id === family
+  );
+  return match?.label ?? family.replaceAll("_", " ");
+}
+
+function formatFamilyList(families: readonly WalletOperationFamily[]): string {
+  return families.map(formatFamilyLabel).join(", ");
+}
+
 function getWalletDetailHref(pathname: string, walletId: string): string {
   const section = pathname.startsWith("/dashboard/custody/") ? "custody" : "wallets";
   return `/dashboard/${section}/${encodeURIComponent(walletId)}`;
@@ -253,46 +368,141 @@ function getWalletDetailHref(pathname: string, walletId: string): string {
 function getPolicyFlowValidationState({
   selectedCategories,
   selectedCategorySet,
+  blockedOperationFamilies,
   destinationParse,
   maxTransferAmount,
   maxDailyAmount,
+  approvalFamilies,
+  advancedDeniedFamilies,
   isSubmitting,
   policyError,
 }: {
   selectedCategories: RestrictionCategoryId[];
   selectedCategorySet: ReadonlySet<RestrictionCategoryId>;
+  blockedOperationFamilies: WalletOperationFamily[];
   destinationParse: ReturnType<typeof parseDestinationText>;
   maxTransferAmount: string;
   maxDailyAmount: string;
+  approvalFamilies: WalletOperationFamily[];
+  advancedDeniedFamilies: AdvancedFamily[];
   isSubmitting: boolean;
   policyError: string | null;
 }) {
+  const hasOperationRule = selectedCategorySet.has("operations");
   const hasDestinationRule = selectedCategorySet.has("destinations");
   const hasLimitRule = selectedCategorySet.has("limits");
+  const hasApprovalRule = selectedCategorySet.has("approvals");
+  const hasAdvancedRule = selectedCategorySet.has("advanced");
   const hasLimitAmount = Boolean(maxTransferAmount.trim() || maxDailyAmount.trim());
+  const canActivateOperations = !hasOperationRule || blockedOperationFamilies.length > 0;
   const canActivateDestinations =
     !hasDestinationRule ||
     (destinationParse.addresses.length > 0 && destinationParse.invalid.length === 0);
   const canActivateLimits =
     !hasLimitRule ||
     (hasLimitAmount && isPositiveAmount(maxTransferAmount) && isPositiveAmount(maxDailyAmount));
+  const canActivateApprovals = !hasApprovalRule || approvalFamilies.length > 0;
+  const canActivateAdvanced = !hasAdvancedRule || advancedDeniedFamilies.length > 0;
   const hasActivatableRestriction =
+    (hasOperationRule && blockedOperationFamilies.length > 0) ||
     (hasDestinationRule && destinationParse.addresses.length > 0) ||
-    (hasLimitRule && hasLimitAmount);
+    (hasLimitRule && hasLimitAmount) ||
+    (hasApprovalRule && approvalFamilies.length > 0) ||
+    (hasAdvancedRule && advancedDeniedFamilies.length > 0);
   const canSubmit =
     selectedCategories.length > 0 &&
     hasActivatableRestriction &&
+    canActivateOperations &&
     canActivateDestinations &&
     canActivateLimits &&
+    canActivateApprovals &&
+    canActivateAdvanced &&
     !isSubmitting &&
     !policyError;
 
   return {
+    canActivateOperations,
     canActivateDestinations,
     canActivateLimits,
+    canActivateApprovals,
+    canActivateAdvanced,
     canActivate: canSubmit,
     canSubmitReview: canSubmit,
   };
+}
+
+function buildPolicyRules({
+  selectedCategorySet,
+  blockedOperationFamilies,
+  destinationAllowlist,
+  maxTransferAmount,
+  approvalFamilies,
+  advancedDeniedFamilies,
+}: {
+  selectedCategorySet: ReadonlySet<RestrictionCategoryId>;
+  blockedOperationFamilies: WalletOperationFamily[];
+  destinationAllowlist: string[];
+  maxTransferAmount: string;
+  approvalFamilies: WalletOperationFamily[];
+  advancedDeniedFamilies: AdvancedFamily[];
+}): PolicyRule[] {
+  const rules: PolicyRule[] = [];
+
+  if (selectedCategorySet.has("operations")) {
+    for (const family of blockedOperationFamilies) {
+      rules.push({
+        id: `deny-${family}`,
+        kind: "operation_family",
+        family,
+        action: "deny",
+        name: `Block ${formatFamilyLabel(family)}`,
+      });
+    }
+  }
+
+  if (selectedCategorySet.has("destinations") && destinationAllowlist.length > 0) {
+    rules.push({
+      id: "allowed-destinations",
+      kind: "destination",
+      allowlist: destinationAllowlist,
+      action: "allow",
+      name: "Allowed destinations",
+    });
+  }
+
+  if (selectedCategorySet.has("limits") && maxTransferAmount) {
+    rules.push({
+      id: "per-transfer-limit",
+      kind: "amount",
+      max: maxTransferAmount,
+      action: "allow",
+      name: "Per transfer limit",
+    });
+  }
+
+  if (selectedCategorySet.has("approvals") && approvalFamilies.length > 0) {
+    rules.push({
+      id: "approval-required",
+      kind: "approval",
+      families: approvalFamilies,
+      action: "approval_required",
+      name: "Approval checks",
+    });
+  }
+
+  if (selectedCategorySet.has("advanced")) {
+    for (const family of advancedDeniedFamilies) {
+      rules.push({
+        id: `deny-${family}`,
+        kind: "operation_family",
+        family,
+        action: "deny",
+        name: `Block ${formatFamilyLabel(family)}`,
+      });
+    }
+  }
+
+  return rules;
 }
 
 export function WalletPolicyStartingProfileFlow({
@@ -310,11 +520,20 @@ export function WalletPolicyStartingProfileFlow({
   const [expandedRuleIds, setExpandedRuleIds] = useState<RestrictionCategoryId[]>(
     categoriesFromPolicy(initialPolicy)
   );
+  const [blockedOperationFamilies, setBlockedOperationFamilies] = useState<WalletOperationFamily[]>(
+    blockedOperationFamiliesFromRules(initialPolicy.rules ?? [])
+  );
   const [destinationText, setDestinationText] = useState(
     initialPolicy.destinationAllowlist.join("\n")
   );
   const [maxTransferAmount, setMaxTransferAmount] = useState(initialPolicy.maxTransferAmount ?? "");
   const [maxDailyAmount, setMaxDailyAmount] = useState(initialPolicy.maxDailyAmount ?? "");
+  const [approvalFamilies, setApprovalFamilies] = useState<WalletOperationFamily[]>(
+    approvalFamiliesFromRules(initialPolicy.rules ?? [])
+  );
+  const [advancedDeniedFamilies, setAdvancedDeniedFamilies] = useState<AdvancedFamily[]>(
+    advancedDeniedFamiliesFromRules(initialPolicy.rules ?? [])
+  );
   const [savedDraft, setSavedDraft] = useState<StoredPolicyDraft | null>(null);
   const [localStatus, setLocalStatus] = useState<"draft" | "disabled" | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -327,9 +546,12 @@ export function WalletPolicyStartingProfileFlow({
       setLocalStatus(draft.status);
       setSelectedCategories(draft.categories);
       setExpandedRuleIds(draft.categories);
+      setBlockedOperationFamilies(draft.blockedOperationFamilies);
       setDestinationText(draft.destinationAllowlist.join("\n"));
       setMaxTransferAmount(draft.maxTransferAmount);
       setMaxDailyAmount(draft.maxDailyAmount);
+      setApprovalFamilies(draft.approvalFamilies);
+      setAdvancedDeniedFamilies(draft.advancedDeniedFamilies);
       const draftStepIndex = FLOW_STEPS.findIndex((step) => step.id === draft.step);
       setStepIndex(Math.max(0, draftStepIndex));
     }
@@ -342,16 +564,26 @@ export function WalletPolicyStartingProfileFlow({
   const destinationParse = useMemo(() => parseDestinationText(destinationText), [destinationText]);
   const hasLivePolicy = policyHasRestrictions(currentPolicy);
   const walletDetailHref = getWalletDetailHref(pathname, wallet.walletId);
-  const { canActivateDestinations, canActivateLimits, canActivate, canSubmitReview } =
-    getPolicyFlowValidationState({
-      selectedCategories,
-      selectedCategorySet,
-      destinationParse,
-      maxTransferAmount,
-      maxDailyAmount,
-      isSubmitting,
-      policyError,
-    });
+  const {
+    canActivateOperations,
+    canActivateDestinations,
+    canActivateLimits,
+    canActivateApprovals,
+    canActivateAdvanced,
+    canActivate,
+    canSubmitReview,
+  } = getPolicyFlowValidationState({
+    selectedCategories,
+    selectedCategorySet,
+    blockedOperationFamilies,
+    destinationParse,
+    maxTransferAmount,
+    maxDailyAmount,
+    approvalFamilies,
+    advancedDeniedFamilies,
+    isSubmitting,
+    policyError,
+  });
 
   function persistDraft(options: { notify: boolean } = { notify: false }) {
     if (typeof window === "undefined") return;
@@ -360,9 +592,12 @@ export function WalletPolicyStartingProfileFlow({
       status: "draft",
       step: currentStep.id,
       categories: selectedCategories,
+      blockedOperationFamilies,
       destinationAllowlist: destinationParse.addresses,
       maxTransferAmount: maxTransferAmount.trim(),
       maxDailyAmount: maxDailyAmount.trim(),
+      approvalFamilies,
+      advancedDeniedFamilies,
       updatedAt: new Date().toISOString(),
     };
 
@@ -428,9 +663,30 @@ export function WalletPolicyStartingProfileFlow({
         });
         return;
       }
+      if (!canActivateOperations) {
+        toast.error("Choose operation access controls.", {
+          description: "Select at least one operation family to block.",
+          position: "bottom-right",
+        });
+        return;
+      }
       if (!canActivateLimits) {
         toast.error("Check transfer limits.", {
           description: "Enter a positive number for each configured limit.",
+          position: "bottom-right",
+        });
+        return;
+      }
+      if (!canActivateApprovals) {
+        toast.error("Choose approval checks.", {
+          description: "Select at least one operation family that should require approval.",
+          position: "bottom-right",
+        });
+        return;
+      }
+      if (!canActivateAdvanced) {
+        toast.error("Choose advanced signing controls.", {
+          description: "Select raw signing, program interactions, or both.",
           position: "bottom-right",
         });
         return;
@@ -472,6 +728,15 @@ export function WalletPolicyStartingProfileFlow({
         ...(selectedCategorySet.has("limits") && maxDailyAmount.trim()
           ? { maxDailyAmount: maxDailyAmount.trim() }
           : {}),
+        defaultAction: DEFAULT_POLICY_ACTION,
+        rules: buildPolicyRules({
+          selectedCategorySet,
+          blockedOperationFamilies,
+          destinationAllowlist: destinationParse.addresses,
+          maxTransferAmount: maxTransferAmount.trim(),
+          approvalFamilies,
+          advancedDeniedFamilies,
+        }),
       });
 
       setCurrentPolicy(updated);
@@ -506,23 +771,31 @@ export function WalletPolicyStartingProfileFlow({
       const updated = await updateWalletPolicy(wallet.walletId, {
         walletId: wallet.walletId,
         destinationAllowlist: [],
+        defaultAction: DEFAULT_POLICY_ACTION,
+        rules: [],
       });
 
       const disabledDraft: StoredPolicyDraft = {
         status: "disabled",
         step: "intent",
         categories: [],
+        blockedOperationFamilies: [],
         destinationAllowlist: [],
         maxTransferAmount: "",
         maxDailyAmount: "",
+        approvalFamilies: [],
+        advancedDeniedFamilies: [],
         updatedAt: new Date().toISOString(),
       };
 
       setCurrentPolicy(updated);
       setSelectedCategories([]);
+      setBlockedOperationFamilies([]);
       setDestinationText("");
       setMaxTransferAmount("");
       setMaxDailyAmount("");
+      setApprovalFamilies([]);
+      setAdvancedDeniedFamilies([]);
       setExpandedRuleIds([]);
       setSavedDraft(disabledDraft);
       setLocalStatus("disabled");
@@ -590,15 +863,25 @@ export function WalletPolicyStartingProfileFlow({
             setMaxTransferAmount={setMaxTransferAmount}
             maxDailyAmount={maxDailyAmount}
             setMaxDailyAmount={setMaxDailyAmount}
+            blockedOperationFamilies={blockedOperationFamilies}
+            setBlockedOperationFamilies={setBlockedOperationFamilies}
+            approvalFamilies={approvalFamilies}
+            setApprovalFamilies={setApprovalFamilies}
+            advancedDeniedFamilies={advancedDeniedFamilies}
+            setAdvancedDeniedFamilies={setAdvancedDeniedFamilies}
           />
         ) : null}
         {isLoaded && currentStep.id === "review" ? (
           <ReviewStep
             selectedCategories={selectedCategories}
+            blockedOperationFamilies={blockedOperationFamilies}
             destinationCount={destinationParse.addresses.length}
             invalidDestinationCount={destinationParse.invalid.length}
             maxTransferAmount={maxTransferAmount.trim()}
             maxDailyAmount={maxDailyAmount.trim()}
+            approvalFamilies={approvalFamilies}
+            advancedDeniedFamilies={advancedDeniedFamilies}
+            controlProfile={currentPolicy.controlProfile ?? null}
           />
         ) : null}
       </div>
@@ -726,6 +1009,8 @@ function DetailsStep({
   selectedCategories,
   expandedRuleSet,
   onToggleExpandedRule,
+  blockedOperationFamilies,
+  setBlockedOperationFamilies,
   destinationText,
   setDestinationText,
   destinationCount,
@@ -734,10 +1019,16 @@ function DetailsStep({
   setMaxTransferAmount,
   maxDailyAmount,
   setMaxDailyAmount,
+  approvalFamilies,
+  setApprovalFamilies,
+  advancedDeniedFamilies,
+  setAdvancedDeniedFamilies,
 }: {
   selectedCategories: RestrictionCategoryId[];
   expandedRuleSet: Set<RestrictionCategoryId>;
   onToggleExpandedRule: (category: RestrictionCategoryId) => void;
+  blockedOperationFamilies: WalletOperationFamily[];
+  setBlockedOperationFamilies: (value: WalletOperationFamily[]) => void;
   destinationText: string;
   setDestinationText: (value: string) => void;
   destinationCount: number;
@@ -746,6 +1037,10 @@ function DetailsStep({
   setMaxTransferAmount: (value: string) => void;
   maxDailyAmount: string;
   setMaxDailyAmount: (value: string) => void;
+  approvalFamilies: WalletOperationFamily[];
+  setApprovalFamilies: (value: WalletOperationFamily[]) => void;
+  advancedDeniedFamilies: AdvancedFamily[];
+  setAdvancedDeniedFamilies: (value: AdvancedFamily[]) => void;
 }) {
   const selected = RESTRICTION_CATEGORIES.filter((category) =>
     selectedCategories.includes(category.id)
@@ -763,12 +1058,21 @@ function DetailsStep({
             expanded={expanded}
             summary={getRuleSummary({
               categoryId: category.id,
+              blockedOperationFamilies,
               destinationCount,
               maxTransferAmount,
               maxDailyAmount,
+              approvalFamilies,
+              advancedDeniedFamilies,
             })}
             onToggle={() => onToggleExpandedRule(category.id)}
           >
+            {category.id === "operations" ? (
+              <OperationRuleEditor
+                blockedOperationFamilies={blockedOperationFamilies}
+                setBlockedOperationFamilies={setBlockedOperationFamilies}
+              />
+            ) : null}
             {category.id === "destinations" ? (
               <DestinationRuleEditor
                 destinationText={destinationText}
@@ -782,6 +1086,18 @@ function DetailsStep({
                 setMaxTransferAmount={setMaxTransferAmount}
                 maxDailyAmount={maxDailyAmount}
                 setMaxDailyAmount={setMaxDailyAmount}
+              />
+            ) : null}
+            {category.id === "approvals" ? (
+              <ApprovalRuleEditor
+                approvalFamilies={approvalFamilies}
+                setApprovalFamilies={setApprovalFamilies}
+              />
+            ) : null}
+            {category.id === "advanced" ? (
+              <AdvancedRuleEditor
+                advancedDeniedFamilies={advancedDeniedFamilies}
+                setAdvancedDeniedFamilies={setAdvancedDeniedFamilies}
               />
             ) : null}
           </RuleSection>
@@ -828,6 +1144,63 @@ function RuleSection({
       </button>
       {expanded ? <div className="pb-4 pr-2">{children}</div> : null}
     </section>
+  );
+}
+
+function OptionGrid<TValue extends string>({
+  options,
+  values,
+  onChange,
+}: {
+  options: readonly { id: TValue; label: string }[];
+  values: TValue[];
+  onChange: (value: TValue[]) => void;
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {options.map((option) => {
+        const selected = values.includes(option.id);
+
+        return (
+          <button
+            key={option.id}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(toggleValue(values, option.id))}
+            className={cn(
+              "min-h-11 rounded-md border px-3 py-2 text-left text-sm font-medium transition-colors",
+              selected
+                ? "border-[rgba(28,28,29,0.72)] bg-[rgba(28,28,29,0.04)] text-text-extra-high"
+                : "border-border-light bg-white text-text-medium hover:bg-gray-100"
+            )}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function OperationRuleEditor({
+  blockedOperationFamilies,
+  setBlockedOperationFamilies,
+}: {
+  blockedOperationFamilies: WalletOperationFamily[];
+  setBlockedOperationFamilies: (value: WalletOperationFamily[]) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="text-sm leading-6 text-text-medium">
+        Selected families are denied before signing or execution. Unselected families continue to
+        use default allow unless another rule applies.
+      </p>
+      <OptionGrid
+        options={OPERATION_FAMILY_OPTIONS}
+        values={blockedOperationFamilies}
+        onChange={setBlockedOperationFamilies}
+      />
+    </div>
   );
 }
 
@@ -907,17 +1280,72 @@ function LimitRuleEditor({
   );
 }
 
+function ApprovalRuleEditor({
+  approvalFamilies,
+  setApprovalFamilies,
+}: {
+  approvalFamilies: WalletOperationFamily[];
+  setApprovalFamilies: (value: WalletOperationFamily[]) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="text-sm leading-6 text-text-medium">
+        Selected families pause with an approval-required policy decision. Approval inbox routing is
+        handled by the follow-up approval workflow.
+      </p>
+      <OptionGrid
+        options={APPROVAL_FAMILY_OPTIONS}
+        values={approvalFamilies}
+        onChange={setApprovalFamilies}
+      />
+    </div>
+  );
+}
+
+function AdvancedRuleEditor({
+  advancedDeniedFamilies,
+  setAdvancedDeniedFamilies,
+}: {
+  advancedDeniedFamilies: AdvancedFamily[];
+  setAdvancedDeniedFamilies: (value: AdvancedFamily[]) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="text-sm leading-6 text-text-medium">
+        These controls are intentionally strict because they can bypass high-level payment intent.
+      </p>
+      <OptionGrid
+        options={ADVANCED_FAMILY_OPTIONS}
+        values={advancedDeniedFamilies}
+        onChange={setAdvancedDeniedFamilies}
+      />
+    </div>
+  );
+}
+
 function getRuleSummary({
   categoryId,
+  blockedOperationFamilies,
   destinationCount,
   maxTransferAmount,
   maxDailyAmount,
+  approvalFamilies,
+  advancedDeniedFamilies,
 }: {
   categoryId: RestrictionCategoryId;
+  blockedOperationFamilies: WalletOperationFamily[];
   destinationCount: number;
   maxTransferAmount: string;
   maxDailyAmount: string;
+  approvalFamilies: WalletOperationFamily[];
+  advancedDeniedFamilies: AdvancedFamily[];
 }) {
+  if (categoryId === "operations") {
+    return blockedOperationFamilies.length > 0
+      ? `Block ${formatFamilyList(blockedOperationFamilies)}`
+      : "Choose operation families to block.";
+  }
+
   if (categoryId === "destinations") {
     return destinationCount > 0
       ? formatCount(destinationCount, "address", "addresses")
@@ -932,21 +1360,41 @@ function getRuleSummary({
     return parts.length > 0 ? parts.join(" / ") : "Set a per-transfer cap, daily cap, or both.";
   }
 
+  if (categoryId === "approvals") {
+    return approvalFamilies.length > 0
+      ? `Require approval for ${formatFamilyList(approvalFamilies)}`
+      : "Choose operation families that should pause for approval.";
+  }
+
+  if (categoryId === "advanced") {
+    return advancedDeniedFamilies.length > 0
+      ? `Block ${formatFamilyList(advancedDeniedFamilies)}`
+      : "Block raw signing, program interactions, or both.";
+  }
+
   return "";
 }
 
 function ReviewStep({
   selectedCategories,
+  blockedOperationFamilies,
   destinationCount,
   invalidDestinationCount,
   maxTransferAmount,
   maxDailyAmount,
+  approvalFamilies,
+  advancedDeniedFamilies,
+  controlProfile,
 }: {
   selectedCategories: RestrictionCategoryId[];
+  blockedOperationFamilies: WalletOperationFamily[];
   destinationCount: number;
   invalidDestinationCount: number;
   maxTransferAmount: string;
   maxDailyAmount: string;
+  approvalFamilies: WalletOperationFamily[];
+  advancedDeniedFamilies: AdvancedFamily[];
+  controlProfile: PaymentWalletPolicy["controlProfile"] | null;
 }) {
   const selected = RESTRICTION_CATEGORIES.filter((category) =>
     selectedCategories.includes(category.id)
@@ -954,16 +1402,42 @@ function ReviewStep({
 
   return (
     <div className="space-y-4">
+      <div className="rounded-lg border border-border-light bg-white p-4">
+        <p className="text-sm font-semibold text-text-extra-high">Activation outcome</p>
+        <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
+          <div>
+            <dt className="text-text-extra-low">Default</dt>
+            <dd className="mt-1 font-medium text-text-extra-high">Allow unmatched operations</dd>
+          </div>
+          <div>
+            <dt className="text-text-extra-low">Revision</dt>
+            <dd className="mt-1 font-medium text-text-extra-high">
+              {controlProfile?.revisionNumber ? `#${controlProfile.revisionNumber}` : "New"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-text-extra-low">Provider mapping</dt>
+            <dd className="mt-1 font-medium text-text-extra-high">
+              {controlProfile
+                ? formatProviderMappingStatus(controlProfile.providerMappingStatus)
+                : "SDP enforced"}
+            </dd>
+          </div>
+        </dl>
+      </div>
       <div className="overflow-hidden rounded-lg border border-border-light bg-white">
         {selected.length > 0 ? (
           selected.map((category) => (
             <ReviewCategory
               key={category.id}
               category={category}
+              blockedOperationFamilies={blockedOperationFamilies}
               destinationCount={destinationCount}
               invalidDestinationCount={invalidDestinationCount}
               maxTransferAmount={maxTransferAmount}
               maxDailyAmount={maxDailyAmount}
+              approvalFamilies={approvalFamilies}
+              advancedDeniedFamilies={advancedDeniedFamilies}
             />
           ))
         ) : (
@@ -976,18 +1450,30 @@ function ReviewStep({
 
 function ReviewCategory({
   category,
+  blockedOperationFamilies,
   destinationCount,
   invalidDestinationCount,
   maxTransferAmount,
   maxDailyAmount,
+  approvalFamilies,
+  advancedDeniedFamilies,
 }: {
   category: RestrictionCategory;
+  blockedOperationFamilies: WalletOperationFamily[];
   destinationCount: number;
   invalidDestinationCount: number;
   maxTransferAmount: string;
   maxDailyAmount: string;
+  approvalFamilies: WalletOperationFamily[];
+  advancedDeniedFamilies: AdvancedFamily[];
 }) {
   let value = "";
+  if (category.id === "operations") {
+    value =
+      blockedOperationFamilies.length > 0
+        ? `Deny ${formatFamilyList(blockedOperationFamilies)}`
+        : "No operation families blocked";
+  }
   if (category.id === "destinations") {
     value =
       invalidDestinationCount > 0
@@ -1003,6 +1489,18 @@ function ReviewCategory({
     ].filter(Boolean);
     value = parts.length > 0 ? parts.join(" / ") : "No cap";
   }
+  if (category.id === "approvals") {
+    value =
+      approvalFamilies.length > 0
+        ? `Approval required for ${formatFamilyList(approvalFamilies)}`
+        : "No approval checks";
+  }
+  if (category.id === "advanced") {
+    value =
+      advancedDeniedFamilies.length > 0
+        ? `Deny ${formatFamilyList(advancedDeniedFamilies)}`
+        : "No advanced signing controls";
+  }
 
   return (
     <div className="border-t border-border-light p-4 first:border-t-0">
@@ -1010,4 +1508,20 @@ function ReviewCategory({
       <p className="mt-1 text-sm leading-6 text-text-medium">{value}</p>
     </div>
   );
+}
+
+function formatProviderMappingStatus(
+  status: NonNullable<PaymentWalletPolicy["controlProfile"]>["providerMappingStatus"]
+): string {
+  const labels = {
+    not_applicable: "SDP enforced",
+    pending: "Provider mapping pending",
+    synced: "Provider mapped",
+    partial: "Partially provider mapped",
+    failed: "Provider mapping failed",
+  } satisfies Record<
+    NonNullable<PaymentWalletPolicy["controlProfile"]>["providerMappingStatus"],
+    string
+  >;
+  return labels[status];
 }
