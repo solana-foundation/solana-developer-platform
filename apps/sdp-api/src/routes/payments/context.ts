@@ -5,6 +5,7 @@ import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
+  createPolicyRepository,
 } from "@/db/repositories";
 import type { RampRuntimeContext } from "@/lib/ramps/types";
 import * as feePaymentAdapters from "@/services/adapters/fee-payment";
@@ -42,6 +43,10 @@ export function getPaymentSubscriptionsRepository(c: AppContext) {
 
 export function getPaymentRecurringPaymentsRepository(c: AppContext) {
   return createPaymentRecurringPaymentsRepository(c.env);
+}
+
+export function getPolicyRepository(c: AppContext) {
+  return createPolicyRepository(c.env);
 }
 
 export function getFeePayment(c: AppContext) {

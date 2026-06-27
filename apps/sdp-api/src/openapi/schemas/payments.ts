@@ -56,6 +56,59 @@ export const tokenAmountSchema = z.string().openapi({
   example: "100.00",
 });
 
+const policyRuleSchema = z
+  .object({
+    id: z.string().optional().openapi({ description: "Stable client-side rule identifier." }),
+    name: z.string().optional().openapi({ description: "Human-readable rule name." }),
+    description: z.string().optional().openapi({ description: "Rule description." }),
+    action: z
+      .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+      .optional()
+      .openapi({ description: "Decision to apply when this rule matches." }),
+    kind: z
+      .enum(["operation_family", "destination", "amount", "approval", "always"])
+      .openapi({ description: "Policy rule kind." }),
+  })
+  .passthrough()
+  .openapi({
+    description:
+      "Wallet control profile rule. Supported kinds include operation_family, destination, amount, approval, and always.",
+    example: {
+      id: "deny-raw-signing",
+      kind: "operation_family",
+      family: "raw_sign",
+      action: "deny",
+    },
+  });
+
+const walletControlProfileSummarySchema = z
+  .object({
+    id: z.string().openapi({ description: "Wallet control profile ID." }),
+    status: z
+      .enum(["draft", "active", "disabled", "archived"])
+      .openapi({ description: "Wallet control profile status." }),
+    activeRevisionId: z.string().nullable().openapi({
+      description: "Currently active immutable revision ID.",
+    }),
+    revisionId: z.string().nullable().openapi({ description: "Returned revision ID." }),
+    revisionNumber: z.number().int().nullable().openapi({
+      description: "Returned immutable revision number.",
+    }),
+    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).openapi({
+      description: "Decision used when no rule matches.",
+    }),
+    rules: z.array(policyRuleSchema).openapi({ description: "Active policy rules." }),
+    providerMappingStatus: z
+      .enum(["not_applicable", "pending", "synced", "partial", "failed"])
+      .openapi({ description: "Provider mapping status for this policy profile." }),
+    createdAt: isoDateTimeSchema.openapi({ description: "Profile creation timestamp." }),
+    updatedAt: isoDateTimeSchema.openapi({ description: "Profile update timestamp." }),
+    activatedAt: isoDateTimeSchema.nullable().openapi({
+      description: "Profile activation timestamp.",
+    }),
+  })
+  .openapi({ description: "Wallet control profile summary." });
+
 export const walletPolicySchema = z
   .object({
     walletId: walletIdParamSchema.openapi({
@@ -76,6 +129,16 @@ export const walletPolicySchema = z
     maxDailyAmount: tokenAmountSchema
       .optional()
       .openapi({ description: "Maximum total amount allowed per day." }),
+    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).optional().openapi({
+      description: "Active wallet control profile default action when no rule matches.",
+    }),
+    rules: z
+      .array(policyRuleSchema)
+      .optional()
+      .openapi({ description: "Active wallet control profile rules." }),
+    controlProfile: walletControlProfileSummarySchema.optional().openapi({
+      description: "Active wallet control profile metadata.",
+    }),
     createdAt: isoDateTimeSchema.openapi({
       description: "Timestamp when the policy was created.",
       example: "2025-01-01T00:00:00.000Z",
@@ -122,6 +185,22 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
     maxDailyAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxDailyAmount, {
       description: "Maximum total amount allowed per day.",
       example: "1000.00",
+    }),
+    defaultAction: withOpenApi(updateWalletPolicySchemaBase.shape.defaultAction, {
+      description: "Default action for the activated wallet control profile revision.",
+      example: "allow",
+    }),
+    rules: withOpenApi(updateWalletPolicySchemaBase.shape.rules, {
+      description:
+        "Rules for a new immutable wallet control profile revision. When provided, the revision is activated after validation.",
+      example: [
+        {
+          id: "deny-raw-signing",
+          kind: "operation_family",
+          family: "raw_sign",
+          action: "deny",
+        },
+      ],
     }),
   })
   .openapi({
