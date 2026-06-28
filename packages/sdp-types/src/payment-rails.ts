@@ -14,6 +14,9 @@ export const ONRAMP_CRYPTO_RAILS = SOLANA_CRYPTO_RAILS;
 export const OFFRAMP_CRYPTO_RAILS = SOLANA_CRYPTO_RAILS;
 
 export type CryptoRailId = (typeof SOLANA_CRYPTO_RAILS)[number];
+type CryptoRailNetworkFromRail<TRail extends CryptoRailId> =
+  TRail extends `${string}.${infer Network}` ? Uppercase<Network> : never;
+export type CryptoRailNetwork = CryptoRailNetworkFromRail<CryptoRailId>;
 
 export const CRYPTO_RAIL_ASSET_LABELS = {
   "sol.solana": "SOL",

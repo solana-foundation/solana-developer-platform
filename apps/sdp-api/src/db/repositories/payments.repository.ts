@@ -101,6 +101,8 @@ export interface UpdatePaymentTransferInput {
   fee?: number | null;
   amount?: string | null;
   fiatAmount?: string | null;
+  providerReference?: string | null;
+  deliveryMode?: PaymentTransferDeliveryMode | null;
   providerData?: Record<string, unknown>;
   error?: string | null;
   updatedAt: string;

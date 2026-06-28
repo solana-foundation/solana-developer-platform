@@ -1,4 +1,9 @@
-import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS, RAMP_PROVIDERS } from "@sdp/types";
+import {
+  OFFRAMP_CRYPTO_RAILS,
+  ONRAMP_CRYPTO_RAILS,
+  RAMP_FIAT_CURRENCIES,
+  RAMP_PROVIDERS,
+} from "@sdp/types";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
   createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
@@ -40,6 +45,8 @@ import {
 } from "../../routes/payments/schemas";
 import {
   base64Schema,
+  cryptoAssetSymbolSchema,
+  cryptoRailNetworkSchema,
   isoDateTimeSchema,
   orgIdParamSchema,
   projectIdParamSchema,
@@ -1477,6 +1484,24 @@ const lightsparkRampPaymentInstructionSchema = z.object({
     description: "Provider that produced this instruction.",
     example: "lightspark",
   }),
+  kind: z.literal("crypto_deposit").optional().openapi({
+    description: "Present when the instruction contains normalized crypto-deposit fields.",
+    example: "crypto_deposit",
+  }),
+  destinationAddress: withOpenApi(solanaAddressSchema.optional(), {
+    description: "Normalized Solana address to fund for crypto-deposit manual instructions.",
+  }),
+  cryptoCurrency: withOpenApi(cryptoAssetSymbolSchema.optional(), {
+    description: "Normalized crypto asset to send for crypto-deposit manual instructions.",
+    example: "USDC",
+  }),
+  network: withOpenApi(cryptoRailNetworkSchema.optional(), {
+    description: "Normalized crypto network for crypto-deposit manual instructions.",
+    example: "SOLANA",
+  }),
+  reference: z.string().optional().openapi({
+    description: "Provider-side reference or memo required to match the deposit, when applicable.",
+  }),
   accountOrWalletInfo: z
     .object({
       accountType: z.string().openapi({ example: "USD_ACCOUNT" }),
@@ -1492,7 +1517,7 @@ const lightsparkRampPaymentInstructionSchema = z.object({
         .string()
         .optional()
         .openapi({ example: "ExampleSolanaWalletAddress11111111111111111" }),
-      assetType: z.string().optional().openapi({ example: "USDC" }),
+      assetType: withOpenApi(cryptoAssetSymbolSchema.optional(), { example: "USDC" }),
     })
     .openapi({
       description: "Lightspark bank account or crypto wallet details for funding the ramp.",
@@ -1507,10 +1532,14 @@ const lightsparkRampPaymentInstructionSchema = z.object({
     .openapi({ description: "Whether the payment instruction belongs to a platform account." }),
 });
 
-const bvnkRampPaymentInstructionSchema = z.object({
+const bvnkFiatFundingInstructionSchema = z.object({
   provider: z.literal("bvnk").openapi({
     description: "Provider that produced this instruction.",
     example: "bvnk",
+  }),
+  kind: z.literal("fiat_funding").openapi({
+    description: "Fund BVNK's fiat virtual account to receive crypto.",
+    example: "fiat_funding",
   }),
   onboardingStatus: z
     .enum(["verification_required", "verifying", "verification_failed", "provisioning", "ready"])
@@ -1550,7 +1579,43 @@ const bvnkRampPaymentInstructionSchema = z.object({
     .openapi({ description: "Additional human-readable funding instructions." }),
 });
 
-const rampPaymentInstructionSchema = z.discriminatedUnion("provider", [
+const bvnkCryptoDepositInstructionSchema = z.object({
+  provider: z.literal("bvnk").openapi({
+    description: "Provider that produced this instruction.",
+    example: "bvnk",
+  }),
+  kind: z.literal("crypto_deposit").openapi({
+    description: "Send crypto to BVNK's deposit address; BVNK converts and pays out fiat.",
+    example: "crypto_deposit",
+  }),
+  fiatCurrency: z
+    .enum(RAMP_FIAT_CURRENCIES)
+    .openapi({ description: "Fiat currency BVNK pays out after conversion.", example: "USD" }),
+  destinationAddress: withOpenApi(solanaAddressSchema, {
+    description: "Solana address to send the crypto deposit to.",
+  }),
+  cryptoCurrency: withOpenApi(cryptoAssetSymbolSchema, {
+    description: "Crypto asset to send.",
+    example: "USDC",
+  }),
+  network: withOpenApi(cryptoRailNetworkSchema, {
+    description: "Blockchain network for the destination address.",
+    example: "SOLANA",
+  }),
+  reference: z.string().openapi({
+    description: "BVNK channel reference tied to SDP's transfer id.",
+  }),
+  instructionsNotes: z
+    .string()
+    .openapi({ description: "Additional human-readable funding instructions." }),
+});
+
+const bvnkRampPaymentInstructionSchema = z.discriminatedUnion("kind", [
+  bvnkFiatFundingInstructionSchema,
+  bvnkCryptoDepositInstructionSchema,
+]);
+
+const rampPaymentInstructionSchema = z.union([
   lightsparkRampPaymentInstructionSchema,
   bvnkRampPaymentInstructionSchema,
 ]);

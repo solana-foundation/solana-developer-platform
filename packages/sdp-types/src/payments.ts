@@ -1,6 +1,7 @@
+import type { Address } from "@solana/addresses";
 import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp-support.generated";
-import type { CryptoAssetSymbol, CryptoRailId } from "./payment-rails";
+import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
 import type {
   PolicyDefaultAction,
   PolicyProfileStatus,
@@ -516,7 +517,21 @@ export interface ListPaymentSubscriptionCollectionAttemptsResponse {
 
 export type PaymentRampExecutionStatus = "pending" | "processing" | "completed" | "failed";
 
-export interface LightsparkPaymentRampInstruction {
+export interface CryptoDepositPaymentRampInstruction {
+  provider: RampProviderId;
+  kind: "crypto_deposit";
+  /** Solana address the user should send crypto to. */
+  destinationAddress: Address;
+  /** SDP-supported crypto asset to send. */
+  cryptoCurrency: CryptoAssetSymbol;
+  /** SDP-supported blockchain network for the destination address. */
+  network: CryptoRailNetwork;
+  /** Provider-side reference or memo required to match the deposit, when applicable. */
+  reference?: string;
+  instructionsNotes?: string;
+}
+
+export interface LightsparkProviderPaymentRampInstruction {
   provider: "lightspark";
   accountOrWalletInfo: {
     accountType: string;
@@ -525,12 +540,27 @@ export interface LightsparkPaymentRampInstruction {
     paymentRails?: string[];
     reference?: string;
     bankName?: string;
-    address?: string;
-    assetType?: string;
+    address?: Address;
+    assetType?: CryptoAssetSymbol;
   };
   instructionsNotes?: string;
   isPlatformAccount?: boolean;
 }
+
+export type LightsparkCryptoDepositPaymentRampInstruction =
+  LightsparkProviderPaymentRampInstruction &
+    CryptoDepositPaymentRampInstruction & {
+      provider: "lightspark";
+      accountOrWalletInfo: LightsparkProviderPaymentRampInstruction["accountOrWalletInfo"] & {
+        accountType: "SOLANA_WALLET";
+        address: Address;
+        assetType: CryptoAssetSymbol;
+      };
+    };
+
+export type LightsparkPaymentRampInstruction =
+  | LightsparkProviderPaymentRampInstruction
+  | LightsparkCryptoDepositPaymentRampInstruction;
 
 export type BvnkOnboardingStatus =
   | "verification_required"
@@ -547,8 +577,10 @@ export interface BvnkBankFundingDetails {
   bankName?: string;
 }
 
-export interface BvnkPaymentRampInstruction {
+/** On-ramp: fund a fiat virtual account to receive crypto. */
+export interface BvnkFiatFundingInstruction {
   provider: "bvnk";
+  kind: "fiat_funding";
   onboardingStatus: BvnkOnboardingStatus;
   verificationUrl?: string;
   ruleId?: string;
@@ -560,6 +592,16 @@ export interface BvnkPaymentRampInstruction {
   bankAccount?: BvnkBankFundingDetails;
   instructionsNotes: string;
 }
+
+/** Off-ramp: send crypto to a deposit address; BVNK converts and pays out fiat. */
+export interface BvnkCryptoDepositInstruction extends CryptoDepositPaymentRampInstruction {
+  provider: "bvnk";
+  fiatCurrency: RampFiatCurrency;
+  reference: string;
+  instructionsNotes: string;
+}
+
+export type BvnkPaymentRampInstruction = BvnkFiatFundingInstruction | BvnkCryptoDepositInstruction;
 
 export type PaymentRampInstruction = LightsparkPaymentRampInstruction | BvnkPaymentRampInstruction;
 

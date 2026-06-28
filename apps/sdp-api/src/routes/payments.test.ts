@@ -28,6 +28,11 @@ import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
+import {
+  buildBvnkCustomerExternalReference,
+  buildBvnkOnrampPaymentRuleKey,
+  buildBvnkOnrampWalletName,
+} from "@/lib/ramps/providers/bvnk";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import * as feePaymentAdapters from "@/services/adapters/fee-payment";
 import * as solanaServices from "@/services/solana";
@@ -5535,6 +5540,15 @@ describe("Payments routes", () => {
       },
     });
 
+    const expectedExternalReference = buildBvnkCustomerExternalReference(counterpartyId);
+    const expectedPaymentRuleKey = buildBvnkOnrampPaymentRuleKey(
+      "USD",
+      "USDC",
+      "SOLANA",
+      TEST_SOLANA_ADDRESSES.wallet1
+    );
+    const expectedWalletName = buildBvnkOnrampWalletName(counterpartyId, expectedPaymentRuleKey);
+
     const jsonResponse = (payload: unknown, status = 200) =>
       new Response(JSON.stringify(payload), {
         status,
@@ -5565,7 +5579,7 @@ describe("Payments routes", () => {
           jsonResponse(
             {
               id: "wallet_1",
-              name: "SDP onramp",
+              name: expectedWalletName,
               status: "ACTIVE",
               paymentInstruments: [
                 {
@@ -5652,6 +5666,14 @@ describe("Payments routes", () => {
     expect(calledUrls).toContain(`${TEST_BVNK_API_BASE_URL}/payment/v1/rules`);
     expect(calledUrls).toContain(`${TEST_BVNK_API_BASE_URL}/ledger/v2/wallets`);
 
+    const customerCall = fetchSpy.mock.calls.find((call) =>
+      String(call[0]).endsWith("/platform/v1/customers")
+    );
+    const customerPayload = JSON.parse(String(customerCall?.[1]?.body)) as {
+      externalReference: string;
+    };
+    expect(customerPayload.externalReference).toBe(expectedExternalReference);
+
     const ruleCall = fetchSpy.mock.calls.find((call) =>
       String(call[0]).endsWith("/payment/v1/rules")
     );
@@ -5679,46 +5701,45 @@ describe("Payments routes", () => {
     fetchSpy.mockRestore();
   });
 
-  it("creates and accepts a BVNK off-ramp estimate through the execute endpoint", async () => {
+  it("creates a BVNK off-ramp channel quote with crypto-deposit instructions", async () => {
+    const depositAddress = TEST_SOLANA_ADDRESSES.wallet3;
     const counterpartyId = await seedCounterparty({
       externalId: "customer_456",
-      identity: { address: { countryCode: "US" } },
+      identity: { firstName: "Test", lastName: "User", address: { countryCode: "US" } },
       providerData: {
         bvnk: {
           customer: { customerReference: "customer_456", status: "VERIFIED" },
-          offramp: { wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } } },
+          offramp: {
+            wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } },
+            beneficiaries: {
+              "USD:abc123": {
+                key: "USD:abc123",
+                fiatCurrency: "USD",
+                accountType: "ACH",
+                createdAt: "2026-06-01T00:00:00.000Z",
+              },
+            },
+          },
         },
       },
     });
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            externalId: "estimate_bvnk_123",
-          }),
-          {
-            status: 201,
-            headers: { "Content-Type": "application/json" },
-          }
-        )
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          uuid: "bvnk_channel_uuid_123",
+          reference: "bvnk_channel_reference",
+          status: "OPEN",
+          alternatives: [
+            { network: "ETHEREUM", address: "0xdeadbeef", uri: "ethereum:0xdeadbeef" },
+            { network: "SOLANA", address: depositAddress, uri: `solana:${depositAddress}` },
+          ],
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } }
       )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            uuid: "bvnk_offramp_uuid_123",
-            status: "PROCESSING",
-            reference: "bvnk_offramp_reference",
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        )
-      );
+    );
 
     const res = await app.request(
-      "/v1/payments/ramps/offramp/execute",
+      "/v1/payments/ramps/offramp/quote",
       {
         method: "POST",
         headers: {
@@ -5732,19 +5753,6 @@ describe("Payments routes", () => {
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
-          bvnkCompliance: {
-            partyDetails: [
-              {
-                type: "BENEFICIARY",
-                entityType: "INDIVIDUAL",
-                relationshipType: "THIRD_PARTY",
-                firstName: "Test",
-                lastName: "User",
-                dateOfBirth: "1990-01-01",
-                countryCode: "US",
-              },
-            ],
-          },
         }),
       },
       env
@@ -5752,59 +5760,96 @@ describe("Payments routes", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      data: { ramp: { id: string; provider: string; status: string; reference: string } };
+      data: {
+        quote: {
+          id: string;
+          provider: string;
+          status: string;
+          deliveryMode: string;
+          paymentInstructions: {
+            kind: string;
+            destinationAddress: string;
+            network: string;
+            cryptoCurrency: string;
+            fiatCurrency: string;
+          }[];
+        };
+      };
     };
 
-    expect(body.data.ramp.id.startsWith("ramp_")).toBe(true);
-    expect(body.data.ramp.provider).toBe("bvnk");
-    expect(body.data.ramp.status).toBe("processing");
-    expect(body.data.ramp.reference).toBe("bvnk_offramp_uuid_123");
+    expect(body.data.quote.provider).toBe("bvnk");
+    expect(body.data.quote.deliveryMode).toBe("manual_instructions");
+    expect(body.data.quote.id).toBe("bvnk_channel_uuid_123");
+    expect(body.data.quote.status).toBe("pending");
+    const instruction = body.data.quote.paymentInstructions[0];
+    expect(instruction?.kind).toBe("crypto_deposit");
+    expect(instruction?.destinationAddress).toBe(depositAddress);
+    expect(instruction?.network).toBe("SOLANA");
+    expect(instruction?.cryptoCurrency).toBe("USDC");
+    expect(instruction?.fiatCurrency).toBe("USD");
 
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const channelUrl = String(fetchSpy.mock.calls[0]?.[0]);
+    expect(channelUrl).toBe(`${TEST_BVNK_API_BASE_URL}/api/v2/channel`);
+    const channelHeaders = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(channelHeaders.Authorization).toContain(`Hawk id="${TEST_BVNK_HAWK_AUTH_ID}"`);
 
-    const estimateUrl = String(fetchSpy.mock.calls[0]?.[0]);
-    const acceptUrl = String(fetchSpy.mock.calls[1]?.[0]);
-    expect(estimateUrl).toBe(`${TEST_BVNK_API_BASE_URL}/api/v1/pay/estimate`);
-    expect(acceptUrl).toBe(
-      `${TEST_BVNK_API_BASE_URL}/api/v1/pay/estimate/estimate_bvnk_123/accept`
-    );
-    const estimateHeaders = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
-    const acceptHeaders = fetchSpy.mock.calls[1]?.[1]?.headers as Record<string, string>;
-    expect(estimateHeaders.Authorization).toContain(`Hawk id="${TEST_BVNK_HAWK_AUTH_ID}"`);
-    expect(acceptHeaders.Authorization).toContain(`Hawk id="${TEST_BVNK_HAWK_AUTH_ID}"`);
-
-    const estimatePayload = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body)) as {
+    const channelPayload = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body)) as {
       walletId: string;
-      walletCurrency: string;
-      paidCurrency: string;
-      paidRequiredAmount: number;
-      network: string;
-      complianceDetails: { partyDetails: Record<string, unknown>[] };
-    };
-    expect(estimatePayload.walletId).toBe(TEST_BVNK_OFFRAMP_WALLET_ID);
-    expect(estimatePayload.walletCurrency).toBe("USD");
-    expect(estimatePayload.paidCurrency).toBe("USDC");
-    expect(estimatePayload.paidRequiredAmount).toBe(75.25);
-    expect(estimatePayload.network).toBe("SOLANA");
-    expect(estimatePayload.complianceDetails.partyDetails).toHaveLength(1);
-
-    const acceptPayload = JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body)) as {
+      payCurrency: string;
+      displayCurrency: string;
       customerId: string;
-      payOutDetails: { currency: string; address: string; network: string };
       complianceDetails: { partyDetails: Record<string, unknown>[] };
     };
-    expect(acceptPayload.customerId).toBe("customer_456");
-    expect(acceptPayload.payOutDetails.currency).toBe("USDC");
-    expect(acceptPayload.payOutDetails.address).toBe(TEST_SOLANA_ADDRESSES.wallet1);
-    expect(acceptPayload.payOutDetails.network).toBe("SOLANA");
-    expect(acceptPayload.complianceDetails.partyDetails).toHaveLength(1);
+    expect(channelPayload.walletId).toBe(TEST_BVNK_OFFRAMP_WALLET_ID);
+    expect(channelPayload.payCurrency).toBe("USDC");
+    expect(channelPayload.displayCurrency).toBe("USD");
+    expect(channelPayload.customerId).toBe("customer_456");
+    expect(channelPayload.complianceDetails.partyDetails).toHaveLength(1);
     fetchSpy.mockRestore();
   });
 
-  it("returns bad request when BVNK off-ramp is missing compliance party details", async () => {
+  it("rejects a BVNK off-ramp quote until the payout beneficiary is provisioned", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "customer_456",
-      identity: { address: { countryCode: "US" } },
+      identity: { firstName: "Test", lastName: "User", address: { countryCode: "US" } },
+      providerData: {
+        bvnk: {
+          customer: { customerReference: "customer_456", status: "VERIFIED" },
+          offramp: { wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } } },
+        },
+      },
+    });
+
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "bvnk",
+          counterpartyId,
+          sourceWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          cryptoAmount: "75.25",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("CONFLICT");
+  });
+
+  it("rejects BVNK off-ramp execute (settlement runs from the deposit at quote time)", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "customer_456",
+      identity: { firstName: "Test", lastName: "User", address: { countryCode: "US" } },
       providerData: {
         bvnk: {
           customer: { customerReference: "customer_456", status: "VERIFIED" },
@@ -5819,7 +5864,6 @@ describe("Payments routes", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-forwarded-for": "1.1.1.1",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
@@ -5837,7 +5881,7 @@ describe("Payments routes", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string; message: string } };
     expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.message).toContain("bvnkCompliance.partyDetails is required");
+    expect(body.error.message).toContain("execute is not supported");
   });
 
   async function seedRampTransfer(input: {

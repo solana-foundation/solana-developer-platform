@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { bvnkOnrampStatusFromProviderData, bvnkUnverifiedOnboardingStatus } from "./bvnk";
+import {
+  BvnkRampClient,
+  buildBvnkCustomerExternalReference,
+  buildBvnkOfframpWalletName,
+  buildBvnkOnrampPaymentRuleKey,
+  buildBvnkOnrampWalletName,
+  buildBvnkWalletIdempotencyKey,
+  bvnkOnrampStatusFromProviderData,
+  bvnkUnverifiedOnboardingStatus,
+  parseBvnkCustomerExternalReference,
+  parseBvnkOfframpWalletName,
+  parseBvnkOnrampPaymentRuleKey,
+  parseBvnkOnrampWalletName,
+} from "./bvnk";
 
 const ONRAMP_PARAMS = {
   cryptoToken: "USDC_SOLANA",
@@ -111,5 +124,182 @@ describe("bvnkOnrampStatusFromProviderData", () => {
       ONRAMP_PARAMS
     );
     expect(result.status).toBe("funding_account_provisioning");
+  });
+});
+
+describe("BvnkRampClient.parseBvnkWebhookEvent", () => {
+  it("parses BVNK wallet create webhooks with walletName", () => {
+    const client = new BvnkRampClient();
+
+    expect(
+      client.parseBvnkWebhookEvent({
+        event: "bvnk:ledger:wallet:create",
+        data: {
+          id: "wallet_1",
+          status: "COMPLETED",
+          walletName: buildBvnkOnrampWalletName("counterparty_123", ONRAMP_KEY),
+          customerReference: "customer_1",
+          ledgers: [{ type: "FIAT", accountNumber: "900368997705", code: "101019644" }],
+        },
+      })
+    ).toMatchObject({
+      kind: "bvnk:ledger:wallet:create",
+      customerReference: "customer_1",
+      walletId: "wallet_1",
+      walletName: "sdp:onramp:counterparty_123:USD:USDC_SOLANA:dest",
+      walletStatus: "COMPLETED",
+      bankAccount: { accountNumber: "900368997705" },
+    });
+  });
+
+  it("parses a BVNK fiat pay-in status-change webhook", () => {
+    const client = new BvnkRampClient();
+
+    expect(
+      client.parseBvnkWebhookEvent({
+        event: "bvnk:payment:payin:status-change",
+        data: {
+          status: "COMPLETED",
+          customerReference: "customer_1",
+          beneficiary: { walletId: "a:1:wallet:1" },
+        },
+      })
+    ).toMatchObject({
+      kind: "bvnk:payment:payin:status-change",
+      customerReference: "customer_1",
+      walletId: "a:1:wallet:1",
+      status: "COMPLETED",
+    });
+  });
+
+  it("ignores an unhandled BVNK event instead of throwing", () => {
+    const client = new BvnkRampClient();
+
+    expect(
+      client.parseBvnkWebhookEvent({
+        event: "bvnk:totally:new-event",
+        data: {},
+      })
+    ).toEqual({ kind: "ignore", event: "bvnk:totally:new-event" });
+  });
+});
+
+describe("parseBvnkCustomerExternalReference", () => {
+  it("round-trips an SDP customer externalReference", () => {
+    const counterpartyId = "counterparty_123e4567-e89b-12d3-a456-426614174000";
+    expect(
+      parseBvnkCustomerExternalReference(buildBvnkCustomerExternalReference(counterpartyId))
+    ).toEqual({
+      externalReference: "cp_123e4567e89b12d3a456426614174000",
+      counterpartyId,
+    });
+  });
+
+  it("rejects malformed customer externalReferences", () => {
+    expect(() => buildBvnkCustomerExternalReference("counterparty_123")).toThrow(
+      "Malformed SDP counterparty id for BVNK externalReference"
+    );
+    expect(() =>
+      parseBvnkCustomerExternalReference("counterparty_123e4567-e89b-12d3-a456-426614174000")
+    ).toThrow("Malformed BVNK customer externalReference");
+    expect(() => parseBvnkCustomerExternalReference("sdp:wallet:counterparty_123")).toThrow(
+      "Malformed BVNK customer externalReference"
+    );
+    expect(() => parseBvnkCustomerExternalReference("cp_123")).toThrow(
+      "Malformed BVNK customer externalReference"
+    );
+  });
+});
+
+describe("parseBvnkOfframpWalletName", () => {
+  it("round-trips an SDP off-ramp wallet name", () => {
+    expect(
+      parseBvnkOfframpWalletName(buildBvnkOfframpWalletName("USD", "counterparty_123"))
+    ).toEqual({
+      namespace: "sdp",
+      direction: "offramp",
+      fiatCurrency: "USD",
+      counterpartyId: "counterparty_123",
+    });
+  });
+
+  it("rejects malformed wallet names", () => {
+    expect(() => parseBvnkOfframpWalletName("sdp:onramp:USD:counterparty_123")).toThrow(
+      "Malformed BVNK off-ramp wallet name"
+    );
+    expect(() => parseBvnkOfframpWalletName("sdp:offramp:NOTFIAT:counterparty_123")).toThrow(
+      "Malformed BVNK off-ramp wallet name"
+    );
+    expect(() => parseBvnkOfframpWalletName("sdp:offramp:USD:counterparty_123:extra")).toThrow(
+      "Malformed BVNK off-ramp wallet name"
+    );
+  });
+});
+
+describe("parseBvnkOnrampWalletName", () => {
+  it("round-trips an SDP on-ramp wallet name", () => {
+    const walletName = buildBvnkOnrampWalletName("counterparty_123", ONRAMP_KEY);
+
+    expect(walletName).toBe("sdp:onramp:counterparty_123:USD:USDC_SOLANA:dest");
+    expect(parseBvnkOnrampWalletName(walletName)).toEqual({
+      namespace: "sdp",
+      direction: "onramp",
+      counterpartyId: "counterparty_123",
+      onrampKey: ONRAMP_KEY,
+    });
+  });
+
+  it("rejects wallet names with malformed payment rule keys", () => {
+    expect(() =>
+      parseBvnkOnrampWalletName("sdp:onramp:counterparty_123:USD:USDC_NOPE:dest")
+    ).toThrow("Malformed BVNK on-ramp wallet name");
+  });
+});
+
+describe("buildBvnkWalletIdempotencyKey", () => {
+  it("hashes the BVNK wallet name to a stable 36-character key", async () => {
+    const walletName = buildBvnkOnrampWalletName("counterparty_123", ONRAMP_KEY);
+
+    const key = await buildBvnkWalletIdempotencyKey(walletName);
+
+    expect(key).toMatch(/^[a-f0-9]{36}$/);
+    expect(key).toHaveLength(36);
+    expect(await buildBvnkWalletIdempotencyKey(walletName)).toBe(key);
+    expect(await buildBvnkWalletIdempotencyKey(`${walletName}:changed`)).not.toBe(key);
+  });
+});
+
+describe("BVNK on-ramp payment rule key", () => {
+  it("builds and parses the payment rule key", () => {
+    const key = buildBvnkOnrampPaymentRuleKey("USD", "USDC", "SOLANA", "dest");
+
+    expect(key).toBe(ONRAMP_KEY);
+    expect(parseBvnkOnrampPaymentRuleKey(key)).toEqual({
+      fiatCurrency: "USD",
+      cryptoCurrency: "USDC",
+      cryptoNetwork: "SOLANA",
+      destinationWalletAddress: "dest",
+    });
+  });
+
+  it("parses crypto networks that contain underscores", () => {
+    expect(parseBvnkOnrampPaymentRuleKey("USD:BCH_BITCOIN_CASH:dest")).toEqual({
+      fiatCurrency: "USD",
+      cryptoCurrency: "BCH",
+      cryptoNetwork: "BITCOIN_CASH",
+      destinationWalletAddress: "dest",
+    });
+  });
+
+  it("rejects malformed payment rule keys", () => {
+    expect(() => parseBvnkOnrampPaymentRuleKey("USD:USDC_SOLANA")).toThrow(
+      "Malformed BVNK on-ramp payment rule key"
+    );
+    expect(() => parseBvnkOnrampPaymentRuleKey("USD:USDC_NOT_A_NETWORK:dest")).toThrow(
+      "Malformed BVNK on-ramp payment rule key"
+    );
+    expect(() => buildBvnkOnrampPaymentRuleKey("NOPE", "USDC", "SOLANA", "dest")).toThrow(
+      "Malformed BVNK on-ramp payment rule key input"
+    );
   });
 });

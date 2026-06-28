@@ -4,6 +4,7 @@ import type {
   CounterpartyProviderData,
   CounterpartyStatus,
 } from "@sdp/types";
+import type { BvnkCustomerResolution } from "@/lib/ramps/providers/bvnk";
 import type { RepositoryDbClient } from "./base";
 
 export function generateCounterpartyId(): string {
@@ -13,7 +14,7 @@ export function generateCounterpartyId(): string {
 export interface CounterpartyRow {
   id: string;
   organization_id: string;
-  project_id: string | null;
+  project_id: string;
   external_id: string | null;
   entity_type: CounterpartyEntityType;
   display_name: string;
@@ -69,6 +70,13 @@ export interface ListCounterpartiesResult {
   total: number;
 }
 
+export interface UpsertBvnkCustomerProviderDataInput {
+  counterpartyId: string;
+  organizationId: string;
+  projectId: string;
+  customer: Partial<BvnkCustomerResolution>;
+}
+
 export interface CounterpartiesRepositoryContext {
   db: RepositoryDbClient;
 }
@@ -87,17 +95,10 @@ export interface CounterpartiesRepository {
     organizationId: string;
     projectId: string;
   }): Promise<CounterpartyRow | null>;
-  findCounterpartyByBvnkCustomerReference(
+  findActiveCounterpartyById(counterpartyId: string): Promise<CounterpartyRow | null>;
+  findActiveCounterpartyByBvnkCustomerReference(
     customerReference: string
   ): Promise<CounterpartyRow | null>;
-  patchBvnkCustomerByReference(params: {
-    customerReference: string;
-    customer: Record<string, unknown>;
-  }): Promise<void>;
-  patchBvnkWalletByReference(params: {
-    customerReference: string;
-    walletKey: string;
-    wallet: Record<string, unknown>;
-  }): Promise<void>;
+  upsertBvnkCustomerProviderData(params: UpsertBvnkCustomerProviderDataInput): Promise<void>;
   listCounterparties(params: ListCounterpartiesInput): Promise<ListCounterpartiesResult>;
 }

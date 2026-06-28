@@ -248,6 +248,7 @@ describe("LightsparkRampClient", () => {
                 infoType: "CRYPTO_WALLET_INFO",
                 accountType: "SOLANA_WALLET",
                 address: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+                assetType: "USDC",
               },
             },
           ],
@@ -303,6 +304,12 @@ describe("LightsparkRampClient", () => {
     expect(quote.status).toBe("pending");
     expect(quote.deliveryMode).toBe("manual_instructions");
     expect(quote.paymentInstructions).toHaveLength(1);
+    expect(quote.paymentInstructions?.[0]).toMatchObject({
+      kind: "crypto_deposit",
+      destinationAddress: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+      cryptoCurrency: "USDC",
+      network: "SOLANA",
+    });
     expect(quote.totalReceivingAmount).toBe(2490);
   });
 

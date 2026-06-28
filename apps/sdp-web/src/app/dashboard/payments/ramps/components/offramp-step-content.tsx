@@ -113,6 +113,7 @@ function OfframpManualQuoteStep({
     selectedRampPair,
     fields,
     transferStatus,
+    hasCryptoDepositInstruction,
     canSendOnchain,
     onchainSendLoading,
     onchainSendResult,
@@ -130,6 +131,19 @@ function OfframpManualQuoteStep({
 
   const cryptoToken = toRampCryptoToken(selectedRampPair.assetRail);
   const sendLabel = `Send ${fields.amount.trim()} ${cryptoToken.toUpperCase()}`;
+  const sendAction = hasCryptoDepositInstruction
+    ? {
+        loading: onchainSendLoading,
+        succeeded: onchainSendResult !== null,
+        disabled: !canSendOnchain || quoteExpired,
+        onClick: () => void sendCryptoToDeposit(),
+        icon: <SendIcon />,
+        idleLabel: quoteExpired ? "Quote expired" : sendLabel,
+        busyLabel: "Sending...",
+        doneLabel: "Transfer submitted",
+      }
+    : undefined;
+
   return (
     <div className="space-y-6">
       <ManualInstructionsQuote
@@ -139,20 +153,7 @@ function OfframpManualQuoteStep({
         cryptoToken={cryptoToken}
         instructions={quote.paymentInstructions}
         description={`Send ${fields.amount.trim()} ${cryptoToken.toUpperCase()} to the deposit address below before the quote expires. The provider converts it at the locked rate and pays out to the saved bank account automatically.`}
-        action={
-          quote.provider === "lightspark"
-            ? {
-                loading: onchainSendLoading,
-                succeeded: onchainSendResult !== null,
-                disabled: !canSendOnchain || quoteExpired,
-                onClick: () => void sendCryptoToDeposit(),
-                icon: <SendIcon />,
-                idleLabel: quoteExpired ? "Quote expired" : sendLabel,
-                busyLabel: "Sending...",
-                doneLabel: "Transfer submitted",
-              }
-            : undefined
-        }
+        action={sendAction}
       />
       <div className="border-t border-border-light pt-5">
         <OfframpTransferStatusPanel transfer={transferStatus} />

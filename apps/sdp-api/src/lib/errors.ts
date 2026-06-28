@@ -223,6 +223,18 @@ export function estimateNotAvailable(
   return new AppError("ESTIMATE_NOT_AVAILABLE", message, details);
 }
 
+export function rampExecuteNotSupported(
+  provider: RampProviderId,
+  direction: RampDirection
+): AppError {
+  const label = direction === "offramp" ? "off-ramp" : "on-ramp";
+  return new AppError(
+    "BAD_REQUEST",
+    `${provider} ${label} execute is not supported. Use POST /v1/payments/ramps/${direction}/quote instead.`,
+    { provider, direction }
+  );
+}
+
 export function unsupportedCounterparty(
   provider: RampProviderId,
   direction: RampDirection,

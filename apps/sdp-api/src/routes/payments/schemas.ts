@@ -587,7 +587,12 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: z.record(z.string(), z.string()).optional(),
     }),
-    z.object({ provider: z.literal("bvnk"), direction: z.literal("offramp") }),
+    z.object({
+      provider: z.literal("bvnk"),
+      direction: z.literal("offramp"),
+      fiatCurrency: rampFiatCurrencySchema,
+      collectedData: z.record(z.string(), z.string()).optional(),
+    }),
   ]),
   z.discriminatedUnion("direction", [
     z.object({ provider: z.literal("lightspark"), direction: z.literal("onramp") }),
