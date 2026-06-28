@@ -1,7 +1,7 @@
 import type { RampFiatCurrency, SdpEnvironment } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { createCounterpartiesRepository, createPaymentsRepository } from "@/db/repositories";
+import { createCounterpartiesRepository } from "@/db/repositories";
 import type {
   CounterpartiesRepository,
   CounterpartyRow,
@@ -122,30 +122,38 @@ async function handleProviderOnrampSettlementWebhook(
       `BVNK webhook customer ${event.customerReference} was not found or is not active`
     );
   }
-  const transfer = await getDb(c.env)
+  // Single guarded UPDATE: the status exclusion is on the write itself (not just the
+  // lookup), so a transfer canceled in the race window can't be reopened to completed.
+  await getDb(c.env)
     .prepare(
-      `SELECT id
-       FROM payment_transfers
-       WHERE provider = 'bvnk'
-         AND type = 'onramp'
-         AND counterparty_id = ?
-         AND provider_data->'bvnk'->>'fundingWalletId' = ?
-         AND status NOT IN ('completed', 'failed', 'expired', 'canceled')
-       ORDER BY created_at DESC
-       LIMIT 1`
+      `UPDATE payment_transfers
+       SET status = 'completed',
+           amount = CASE WHEN ?::boolean THEN ? ELSE amount END,
+           fiat_amount = CASE WHEN ?::boolean THEN ? ELSE fiat_amount END,
+           updated_at = ?
+       WHERE id = (
+         SELECT id
+         FROM payment_transfers
+         WHERE provider = 'bvnk'
+           AND type = 'onramp'
+           AND counterparty_id = ?
+           AND provider_data->'bvnk'->>'fundingWalletId' = ?
+           AND status NOT IN ('completed', 'failed', 'expired', 'canceled')
+         ORDER BY created_at DESC
+         LIMIT 1
+       )
+         AND status NOT IN ('completed', 'failed', 'expired', 'canceled')`
     )
-    .bind(counterparty.id, event.walletId)
-    .first<{ id: string }>();
-  if (!transfer) {
-    return;
-  }
-  await createPaymentsRepository(c.env).updateTransfer({
-    transferId: transfer.id,
-    status: "completed",
-    amount: event.amount,
-    fiatAmount: event.amount,
-    updatedAt: new Date().toISOString(),
-  });
+    .bind(
+      event.amount !== undefined,
+      event.amount ?? null,
+      event.amount !== undefined,
+      event.amount ?? null,
+      new Date().toISOString(),
+      counterparty.id,
+      event.walletId
+    )
+    .run();
 }
 
 async function applyBvnkCustomerRequirementWebhook(
