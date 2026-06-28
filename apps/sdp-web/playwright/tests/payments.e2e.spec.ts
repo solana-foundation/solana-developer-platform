@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import type {
+  CreatePaymentRecurringPaymentRequest,
+  PaymentRecurringPaymentResponse,
+} from "@sdp/types";
+import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
+  bootstrapLocalWalletFixtures,
   createExternalSolanaAddress,
   ensureLinkedOrg,
   resolvePlaywrightProjectId,
@@ -19,14 +25,68 @@ const recurringPaymentsEnabled = process.env.NEXT_PUBLIC_PAYMENTS_RECURRING_ENAB
 test.describe
   .serial("dashboard recurring payments feature flag", () => {
     let bootstrapProjectId = "";
+    let recurringPaymentId = "";
+    let recurringCounterpartyName = "";
+    let recurringWalletLabel = "";
 
     test.beforeAll(async ({ browser }) => {
       const session = await getPlaywrightAdminSession(browser);
       await ensureLinkedOrg(session.identity, { tier: "enterprise" });
-      bootstrapProjectId = await resolvePlaywrightProjectId(
-        getBootstrapApiBaseUrl(),
-        session.getBearerToken
-      );
+      if (recurringPaymentsEnabled) {
+        const walletBootstrap = await bootstrapLocalWalletFixtures({
+          identity: session.identity,
+          bearerToken: session.getBearerToken,
+          walletCount: 1,
+          tier: "enterprise",
+          fundSourceWallet: false,
+          walletLabel: "E2E Recurring Treasury",
+        });
+        const sourceWallet = walletBootstrap.wallets[0];
+        if (!sourceWallet) {
+          throw new Error("Recurring payment E2E setup did not create a source wallet");
+        }
+        const projectId = await resolvePlaywrightProjectId(
+          getBootstrapApiBaseUrl(),
+          session.getBearerToken
+        );
+        const api = createLocalApiClient(
+          getBootstrapApiBaseUrl(),
+          session.getBearerToken,
+          projectId
+        );
+        const suffix = randomUUID().slice(0, 8);
+        const seededCounterparty = await seedCounterpartyWithSolanaAccount(api, {
+          displayName: `E2E Recurring ${suffix}`,
+          email: `e2e-recurring-${suffix}@example.com`,
+          accountLabel: `E2E Subscription ${suffix}`,
+          destinationAddress: sourceWallet.publicKey,
+        });
+
+        const input = {
+          sourceWalletId: sourceWallet.walletId,
+          counterpartyId: seededCounterparty.counterpartyId,
+          counterpartyAccountId: seededCounterparty.accountId,
+          token: WELL_KNOWN_TOKENS.USDC.mints.devnet,
+          amount: "7.5",
+          periodHours: 24,
+          firstCollectionAt: new Date(Date.now() + 3_600_000).toISOString(),
+          metadataUri: "https://example.com/metadata/e2e-recurring-payment.json",
+        } satisfies CreatePaymentRecurringPaymentRequest;
+        const response = await api.post<PaymentRecurringPaymentResponse>(
+          "/v1/payments/recurring-payments",
+          input
+        );
+
+        bootstrapProjectId = projectId;
+        recurringPaymentId = response.recurringPayment.id;
+        recurringCounterpartyName = seededCounterparty.displayName;
+        recurringWalletLabel = sourceWallet.label ?? sourceWallet.publicKey;
+      } else {
+        bootstrapProjectId = await resolvePlaywrightProjectId(
+          getBootstrapApiBaseUrl(),
+          session.getBearerToken
+        );
+      }
       await session.page.close();
     });
 
@@ -48,6 +108,11 @@ test.describe
         page.getByRole("heading", { name: "Recurring payments unavailable" })
       ).toBeVisible();
       await expect(page.getByText("No recurring payments yet.")).toHaveCount(0);
+
+      await page.goto("/dashboard/payments/recurring/prp_disabled_flag_test");
+      await expect(
+        page.getByRole("heading", { name: "Recurring payments unavailable" })
+      ).toBeVisible();
     });
 
     test("shows recurring payments when the dashboard feature flag is enabled", async ({
@@ -66,6 +131,28 @@ test.describe
       await expect(
         page.getByText("No recurring payments yet.").or(page.locator("tbody tr").first())
       ).toBeVisible({ timeout: 120_000 });
+
+      await expect(page.getByText(recurringCounterpartyName)).toBeVisible();
+      await expect(page.getByText(recurringWalletLabel)).toBeVisible();
+      await expect(page.getByText("7.50 USDC")).toBeVisible();
+
+      await page.locator("tbody tr").filter({ hasText: recurringCounterpartyName }).first().click();
+      await expect(page).toHaveURL(
+        new RegExp(`/dashboard/payments/recurring/${recurringPaymentId}$`)
+      );
+      await expect(
+        page.locator("main").getByRole("heading", { level: 1, name: "Recurring payment" })
+      ).toBeVisible();
+      await expect(page.getByRole("link", { name: "Back to recurring payments" })).toBeVisible();
+      await expect(page.getByText("Payment reference")).toBeVisible();
+      await expect(page.getByText("Billing setup")).toBeVisible();
+      await expect(page.getByText("Plan reference")).toBeVisible();
+      await expect(page.getByText("Authorization transaction")).toBeVisible();
+      await expect(page.locator("main").getByText("Token mint", { exact: true })).toHaveCount(0);
+      await expect(page.locator("main").getByText("Plan PDA", { exact: true })).toHaveCount(0);
+      await expect(page.locator("main").getByText("Subscription PDA", { exact: true })).toHaveCount(
+        0
+      );
     });
   });
 

@@ -390,6 +390,16 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
       contentWidthClass: "max-w-none",
     };
   }
+  if (pathname.startsWith("/dashboard/payments/recurring/")) {
+    return {
+      title: "Recurring payment",
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/payments/recurring",
+        label: "Back to recurring payments",
+      },
+    };
+  }
   if (pathname.startsWith("/dashboard/payments/")) {
     const action = PAYMENTS_ACTIONS.find((item) => pathname.startsWith(item.href));
     const centeredTitle = action
