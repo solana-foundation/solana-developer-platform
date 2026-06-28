@@ -181,6 +181,9 @@ const BVNK_NETWORKS = [
 
 type BvnkNetwork = (typeof BVNK_NETWORKS)[number];
 
+// Longest-first so suffix matching prefers the most specific network (e.g. BITCOIN_CASH before BITCOIN).
+const BVNK_NETWORKS_BY_LENGTH_DESC = [...BVNK_NETWORKS].sort((a, b) => b.length - a.length);
+
 const BVNK_NETWORK_ALIASES: Record<string, BvnkNetwork> = {
   algo: "ALGORAND",
   algorand: "ALGORAND",
@@ -644,6 +647,7 @@ export type BvnkWebhookEvent =
       customerReference?: string;
       walletId?: string;
       status?: string;
+      amount?: string;
     }
   | {
       kind:
@@ -1011,6 +1015,7 @@ export class BvnkRampClient implements RampProvider {
           customerReference: readString(data.customerReference),
           walletId: readString(readRecord(data.beneficiary)?.walletId),
           status: readString(data.status),
+          amount: readBvnkAmount(readRecord(data.amount)?.value),
         };
       case "bvnk:payment:channel:transaction-detected":
       case "bvnk:payment:channel:transaction-confirmed": {
@@ -1454,7 +1459,6 @@ export interface BvnkCustomerResolution {
 
 const SDP_COUNTERPARTY_ID_PATTERN =
   /^counterparty_([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$/i;
-const BVNK_CUSTOMER_EXTERNAL_REFERENCE_PATTERN = /^cp_([0-9a-f]{32})$/i;
 
 /**
  * Builds the value stored in BVNK's customer `externalReference` field.
@@ -1478,46 +1482,6 @@ export function buildBvnkCustomerExternalReference(counterpartyId: string): stri
     );
   }
   return `cp_${match.slice(1).join("").toLowerCase()}`;
-}
-
-/**
- * Schema for SDP's compact BVNK customer externalReference payload.
- */
-export const BVNKCustomer = z.object({
-  externalReference: z.string().regex(BVNK_CUSTOMER_EXTERNAL_REFERENCE_PATTERN),
-  counterpartyId: z.string().regex(SDP_COUNTERPARTY_ID_PATTERN),
-});
-
-export type BVNKCustomer = z.infer<typeof BVNKCustomer>;
-
-/**
- * Parses BVNK's customer `externalReference` back into the SDP counterparty id.
- *
- * This is deliberately strict because a malformed value means SDP created or
- * received a customer reference that no longer satisfies the webhook lookup
- * contract. Callers should treat parse failure as an internal integration error,
- * not a normal missing-counterparty case.
- *
- * @param externalReference BVNK customer `externalReference` value.
- * @returns Parsed BVNK externalReference and reconstructed SDP counterparty id.
- * @throws AppError with `INTERNAL_ERROR` when the value is not
- * `cp_<uuid_without_hyphens>`.
- */
-export function parseBvnkCustomerExternalReference(externalReference: string): BVNKCustomer {
-  const match = BVNK_CUSTOMER_EXTERNAL_REFERENCE_PATTERN.exec(externalReference);
-  if (!match) {
-    throw internalError(`Malformed BVNK customer externalReference: ${externalReference}`);
-  }
-  const uuid = match[1].toLowerCase();
-  const counterpartyId = `counterparty_${uuid.slice(0, 8)}-${uuid.slice(8, 12)}-${uuid.slice(12, 16)}-${uuid.slice(16, 20)}-${uuid.slice(20)}`;
-  const parsed = BVNKCustomer.safeParse({
-    externalReference: `cp_${uuid}`,
-    counterpartyId,
-  });
-  if (!parsed.success) {
-    throw internalError(`Malformed BVNK customer externalReference: ${externalReference}`);
-  }
-  return parsed.data;
 }
 
 /** Per funding-spec (fiat+token+destination) virtual wallet + rule. */
@@ -1825,9 +1789,9 @@ export function parseBvnkOnrampPaymentRuleKey(key: string): BVNKOnrampPaymentRul
     throw internalError(`Malformed BVNK on-ramp payment rule key: ${key}`);
   }
   const [fiatCurrency, cryptoRail, destinationWalletAddress] = parts;
-  const cryptoNetwork = [...BVNK_NETWORKS]
-    .sort((a, b) => b.length - a.length)
-    .find((network) => cryptoRail.endsWith(`_${network}`));
+  const cryptoNetwork = BVNK_NETWORKS_BY_LENGTH_DESC.find((network) =>
+    cryptoRail.endsWith(`_${network}`)
+  );
   if (!cryptoNetwork) {
     throw internalError(`Malformed BVNK on-ramp payment rule key: ${key}`);
   }

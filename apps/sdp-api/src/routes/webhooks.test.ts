@@ -1030,15 +1030,18 @@ describe("BVNK ramp webhook", () => {
         customerReference: CUSTOMER_REFERENCE,
         beneficiary: { walletId: WALLET_ID },
         status: "COMPLETED",
+        amount: { value: 100, currencyCode: "USD" },
       },
     });
 
     expect(res.status).toBe(200);
     const transfer = await getDb(env)
-      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .prepare("SELECT status, amount, fiat_amount FROM payment_transfers WHERE id = ?")
       .bind(transferId)
-      .first<{ status: string }>();
-    expect(transfer).toEqual({ status: "completed" });
+      .first<{ status: string; amount: string | null; fiat_amount: string | null }>();
+    expect(transfer?.status).toBe("completed");
+    expect(Number(transfer?.amount)).toBe(100);
+    expect(Number(transfer?.fiat_amount)).toBe(100);
   });
 
   it("moves a BVNK off-ramp transfer to settling when a channel transaction is detected", async () => {

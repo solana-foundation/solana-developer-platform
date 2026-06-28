@@ -142,6 +142,8 @@ async function handleProviderOnrampSettlementWebhook(
   await createPaymentsRepository(c.env).updateTransfer({
     transferId: transfer.id,
     status: "completed",
+    amount: event.amount,
+    fiatAmount: event.amount,
     updatedAt: new Date().toISOString(),
   });
 }
@@ -390,7 +392,7 @@ async function handleProviderOfframpSettlementWebhook(
        WHERE id = ?
          AND provider = 'bvnk'
          AND type = 'offramp'
-         AND status NOT IN ('completed', 'failed', 'expired')`
+         AND status NOT IN ('completed', 'failed', 'expired', 'canceled')`
     )
     .bind(
       status,

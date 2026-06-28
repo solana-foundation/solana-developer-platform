@@ -8,7 +8,6 @@ import {
   buildBvnkWalletIdempotencyKey,
   bvnkOnrampStatusFromProviderData,
   bvnkUnverifiedOnboardingStatus,
-  parseBvnkCustomerExternalReference,
   parseBvnkOfframpWalletName,
   parseBvnkOnrampPaymentRuleKey,
   parseBvnkOnrampWalletName,
@@ -161,6 +160,7 @@ describe("BvnkRampClient.parseBvnkWebhookEvent", () => {
         data: {
           status: "COMPLETED",
           customerReference: "customer_1",
+          amount: { value: 100, currencyCode: "USD" },
           beneficiary: { walletId: "a:1:wallet:1" },
         },
       })
@@ -169,6 +169,7 @@ describe("BvnkRampClient.parseBvnkWebhookEvent", () => {
       customerReference: "customer_1",
       walletId: "a:1:wallet:1",
       status: "COMPLETED",
+      amount: "100",
     });
   });
 
@@ -184,29 +185,16 @@ describe("BvnkRampClient.parseBvnkWebhookEvent", () => {
   });
 });
 
-describe("parseBvnkCustomerExternalReference", () => {
-  it("round-trips an SDP customer externalReference", () => {
-    const counterpartyId = "counterparty_123e4567-e89b-12d3-a456-426614174000";
+describe("buildBvnkCustomerExternalReference", () => {
+  it("builds a compact cp_ externalReference from an SDP counterparty id", () => {
     expect(
-      parseBvnkCustomerExternalReference(buildBvnkCustomerExternalReference(counterpartyId))
-    ).toEqual({
-      externalReference: "cp_123e4567e89b12d3a456426614174000",
-      counterpartyId,
-    });
+      buildBvnkCustomerExternalReference("counterparty_123e4567-e89b-12d3-a456-426614174000")
+    ).toBe("cp_123e4567e89b12d3a456426614174000");
   });
 
-  it("rejects malformed customer externalReferences", () => {
+  it("rejects a malformed counterparty id", () => {
     expect(() => buildBvnkCustomerExternalReference("counterparty_123")).toThrow(
       "Malformed SDP counterparty id for BVNK externalReference"
-    );
-    expect(() =>
-      parseBvnkCustomerExternalReference("counterparty_123e4567-e89b-12d3-a456-426614174000")
-    ).toThrow("Malformed BVNK customer externalReference");
-    expect(() => parseBvnkCustomerExternalReference("sdp:wallet:counterparty_123")).toThrow(
-      "Malformed BVNK customer externalReference"
-    );
-    expect(() => parseBvnkCustomerExternalReference("cp_123")).toThrow(
-      "Malformed BVNK customer externalReference"
     );
   });
 });
