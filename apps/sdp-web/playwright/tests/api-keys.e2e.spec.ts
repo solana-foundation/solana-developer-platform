@@ -8,7 +8,7 @@ test.describe
       const session = await getPlaywrightAdminSession(browser);
       await bootstrapLocalWalletFixtures({
         identity: session.identity,
-        bearerToken: session.bearerToken,
+        bearerToken: session.getBearerToken,
         walletCount: 1,
       });
       await session.page.close();

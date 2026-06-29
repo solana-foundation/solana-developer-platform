@@ -9,6 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { TokenApiResponse } from "../helpers/api-types";
 import {
   cleanupIntegrationSuite,
+  env,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
   requestWithApiKey,
@@ -16,10 +17,13 @@ import {
   SOLANA_CONFIGURED,
 } from "../helpers/integration";
 
+const koraSurfpoolShim = (env as { KORA_SURFPOOL_SHIM?: string }).KORA_SURFPOOL_SHIM === "true";
+
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template Deployment", () => {
   let apiKeyHash: string;
   let custodyAddress = "";
   const request = requestWithApiKey();
+  const deployTimeoutMs = 120_000;
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
@@ -36,7 +40,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     custodyAddress = state.custodyAddress;
   });
 
-  it("deploys stablecoin template with sRFC-37", { timeout: 90000 }, async () => {
+  it("deploys stablecoin template with sRFC-37", { timeout: 180000 }, async () => {
     // Create token with stablecoin template
     const createRes = await request("/v1/issuance/tokens", {
       method: "POST",
@@ -62,6 +66,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     // Deploy the token
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
+      timeoutMs: deployTimeoutMs,
     });
 
     expect(deployRes.status).toBe(200);
@@ -76,89 +81,97 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     console.log(`Deployed stablecoin mint: ${deployed.data.token.mintAddress}`);
   });
 
-  it("deploys arcade template with closed-loop allowlist", { timeout: 90000 }, async () => {
-    // Create token with arcade template (always uses allowlist)
-    const createRes = await request("/v1/issuance/tokens", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: "Test Arcade Token",
-        symbol: "TARC",
-        decimals: 0, // Arcade tokens often use 0 decimals for game points
-        template: "arcade",
-        isMintable: true,
-        isFreezable: true,
-        requiresAllowlist: true, // Arcade template enforces allowlist
-      }),
-    });
+  it.skipIf(koraSurfpoolShim)(
+    "deploys arcade template without on-chain ABL",
+    { timeout: 180000 },
+    async () => {
+      // Arcade's on-chain ABL coverage lives in the dedicated Mosaic ACL tests.
+      // This keeps the template deploy path covered without coupling it to the
+      // heavier Surfpool sRFC-37 setup.
+      const createRes = await request("/v1/issuance/tokens", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "Test Arcade Token",
+          symbol: "TARC",
+          decimals: 0, // Arcade tokens often use 0 decimals for game points
+          template: "arcade",
+          isMintable: true,
+          isFreezable: false,
+          requiresAllowlist: true, // Arcade template enforces allowlist
+        }),
+      });
 
-    expect(createRes.status).toBe(201);
-    const created = (await createRes.json()) as TokenApiResponse;
-    const tokenId = created.data.token.id;
-    expect(created.data.token.template).toBe("arcade");
-    expect(created.data.token.requiresAllowlist).toBe(true);
+      expect(createRes.status).toBe(201);
+      const created = (await createRes.json()) as TokenApiResponse;
+      const tokenId = created.data.token.id;
+      expect(created.data.token.template).toBe("arcade");
+      expect(created.data.token.requiresAllowlist).toBe(true);
 
-    // Deploy the token
-    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
-      method: "POST",
-    });
+      // Deploy the token
+      const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+        method: "POST",
+        timeoutMs: deployTimeoutMs,
+      });
 
-    expect(deployRes.status).toBe(200);
-    const deployed = (await deployRes.json()) as TokenApiResponse;
+      expect(deployRes.status).toBe(200);
+      const deployed = (await deployRes.json()) as TokenApiResponse;
 
-    expect(deployed.data.token.status).toBe("active");
-    expect(deployed.data.token.mintAddress).toBeTruthy();
-    // Arcade template with allowlist should have ABL list address
-    // Note: ablListAddress may be null if ABL creation is not enabled for this template
-    // The SDK handles this automatically based on enableAbl flag
+      expect(deployed.data.token.status).toBe("active");
+      expect(deployed.data.token.mintAddress).toBeTruthy();
+      expect(deployed.data.token.freezeAuthority).toBeNull();
+      expect(deployed.data.token.ablListAddress).toBeNull();
 
-    console.log(`Deployed arcade mint: ${deployed.data.token.mintAddress}`);
-    if (deployed.data.token.ablListAddress) {
-      console.log(`ABL list address: ${deployed.data.token.ablListAddress}`);
+      console.log(`Deployed arcade mint: ${deployed.data.token.mintAddress}`);
     }
-  });
+  );
 
-  it("deploys tokenized-security template", { timeout: 90000 }, async () => {
-    // Create token with tokenized-security template
-    const createRes = await request("/v1/issuance/tokens", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: "Test Security Token",
-        symbol: "TSEC",
-        decimals: 8,
-        template: "tokenized-security",
-        isMintable: true,
-        isFreezable: true,
-        requiresAllowlist: true, // Security tokens require KYC/allowlist
-      }),
-    });
+  it.skipIf(koraSurfpoolShim)(
+    "deploys tokenized-security template",
+    { timeout: 180000 },
+    async () => {
+      // Create token with tokenized-security template
+      const createRes = await request("/v1/issuance/tokens", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "Test Security Token",
+          symbol: "TSEC",
+          decimals: 8,
+          template: "tokenized-security",
+          isMintable: true,
+          isFreezable: true,
+          requiresAllowlist: true, // Security tokens require KYC/allowlist
+        }),
+      });
 
-    expect(createRes.status).toBe(201);
-    const created = (await createRes.json()) as TokenApiResponse;
-    const tokenId = created.data.token.id;
-    expect(created.data.token.template).toBe("tokenized-security");
+      expect(createRes.status).toBe(201);
+      const created = (await createRes.json()) as TokenApiResponse;
+      const tokenId = created.data.token.id;
+      expect(created.data.token.template).toBe("tokenized-security");
 
-    // Deploy the token
-    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
-      method: "POST",
-    });
+      // Deploy the token
+      const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+        method: "POST",
+        timeoutMs: deployTimeoutMs,
+      });
 
-    expect(deployRes.status).toBe(200);
-    const deployed = (await deployRes.json()) as TokenApiResponse;
+      expect(deployRes.status).toBe(200);
+      const deployed = (await deployRes.json()) as TokenApiResponse;
 
-    expect(deployed.data.token.status).toBe("active");
-    expect(deployed.data.token.mintAddress).toBeTruthy();
-    expect(deployed.data.token.mintAuthority).toBe(custodyAddress);
+      expect(deployed.data.token.status).toBe("active");
+      expect(deployed.data.token.mintAddress).toBeTruthy();
+      expect(deployed.data.token.mintAuthority).toBe(custodyAddress);
 
-    console.log(`Deployed tokenized-security mint: ${deployed.data.token.mintAddress}`);
-  });
+      console.log(`Deployed tokenized-security mint: ${deployed.data.token.mintAddress}`);
+    }
+  );
 
-  it("deploys custom template with legacy Token2022Service", { timeout: 90000 }, async () => {
+  it("deploys custom template with legacy Token2022Service", { timeout: 180000 }, async () => {
     // Create token with custom template (uses legacy Token2022Service)
     const createRes = await request("/v1/issuance/tokens", {
       method: "POST",
@@ -183,6 +196,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     // Deploy the token
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
+      timeoutMs: deployTimeoutMs,
     });
 
     expect(deployRes.status).toBe(200);

@@ -2,7 +2,7 @@ import { TEST_PROJECT } from "@sdp/api-test/fixtures/tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
-  createFundedPrivyWallet,
+  createFundedIntegrationWallet,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
   requestWithApiKey,
@@ -63,7 +63,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Rotation 
   it("rotates a selected-wallet key, preserves old-key access until revoke, then rejects it", {
     timeout: 240000,
   }, async () => {
-    const wallet = await createFundedPrivyWallet({
+    const wallet = await createFundedIntegrationWallet({
       label: "Rotation Wallet",
       fundLamports: 5_000_000,
     });

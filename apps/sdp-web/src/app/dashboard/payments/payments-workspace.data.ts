@@ -7,6 +7,7 @@ import type {
   CustodyWalletAggregate,
   ListCounterpartiesResponse,
   ListCounterpartyAccountsResponse,
+  MoneygramRampEvent,
   PaymentRampEstimateEnvelope,
   PaymentRampExecution,
   PaymentsWalletAggregateEnvelope,
@@ -26,15 +27,14 @@ import {
   type ComplianceProviderResult,
   screenAddressCompliance,
 } from "@/lib/compliance";
+import {
+  type PaymentApiErrorBody as ApiErrorBody,
+  getPaymentApiError as getApiError,
+} from "./payment-api-errors";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
 export type { PaymentRampExecution, PaymentRampInstruction } from "@sdp/types";
-
-type ApiErrorBody = {
-  error?: {
-    message?: string;
-  };
-};
+export { getPaymentApiError as getApiError } from "./payment-api-errors";
 
 export interface PaymentWalletBalance {
   token: string;
@@ -54,13 +54,6 @@ type RiskTone = "green" | "yellow" | "red" | "neutral";
 
 export function getDevnetExplorerUrl(signature: string): string {
   return `https://explorer.solana.com/tx/${encodeURIComponent(signature)}?cluster=devnet`;
-}
-
-export function getApiError(body: ApiErrorBody, fallback: string): string {
-  if (typeof body.error?.message === "string" && body.error.message) {
-    return body.error.message;
-  }
-  return fallback;
 }
 
 export function toProviderLabel(value: string): string {
@@ -384,6 +377,21 @@ export async function fetchTransferByProviderReference(input: {
   return body.data[0];
 }
 
+export async function cancelRampTransfer(input: {
+  provider: RampProviderId;
+  providerReference: string;
+}): Promise<void> {
+  const response = await fetch("/api/dashboard/payments/ramps/transfers/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json()) as ApiErrorBody;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Transfer cancellation failed (${response.status}).`));
+  }
+}
+
 export async function fetchRampEstimates(input: {
   direction: RampDirection;
   assetRail: CryptoRailId;
@@ -456,6 +464,8 @@ export async function updateWalletPolicy(
         destinationAllowlist: policy.destinationAllowlist,
         ...(policy.maxTransferAmount ? { maxTransferAmount: policy.maxTransferAmount } : {}),
         ...(policy.maxDailyAmount ? { maxDailyAmount: policy.maxDailyAmount } : {}),
+        ...(policy.defaultAction ? { defaultAction: policy.defaultAction } : {}),
+        ...(policy.rules ? { rules: policy.rules } : {}),
       }),
     }
   );
@@ -498,6 +508,26 @@ export async function createTransfer(input: {
 
   if (!body.data?.transfer) {
     throw new Error("Transfer response is missing transfer details.");
+  }
+
+  return body.data.transfer;
+}
+
+export async function postMoneygramRampEvent(event: MoneygramRampEvent): Promise<TransferRecord> {
+  const response = await fetch("/api/dashboard/payments/ramps/moneygram/events", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(event),
+  });
+  const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `MoneyGram event request failed (${response.status}).`));
+  }
+
+  if (!body.data?.transfer) {
+    throw new Error("MoneyGram event response is missing transfer details.");
   }
 
   return body.data.transfer;

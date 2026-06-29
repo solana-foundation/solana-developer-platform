@@ -252,6 +252,8 @@ function isRetryableSignAndSendError(error: unknown): boolean {
   return (
     // Kora's RPC may lag behind on blockhash propagation
     message.includes("blockhash not found") ||
+    message.includes("timeout") ||
+    message.includes("timed out") ||
     // Transient HTTP gateway errors from the underlying RPC (e.g. Helius devnet)
     message.includes("502") ||
     message.includes("503") ||

@@ -1183,7 +1183,7 @@
             "description": "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/wallets.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"destinationAllowlist\": [\n    \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n  ],\n  \"maxTransferAmount\": \"100.00\",\n  \"maxDailyAmount\": \"1000.00\"\n}",
+              "raw": "{\n  \"destinationAllowlist\": [\n    \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n  ],\n  \"maxTransferAmount\": \"100.00\",\n  \"maxDailyAmount\": \"1000.00\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"deny-raw-signing\",\n      \"kind\": \"operation_family\",\n      \"family\": \"raw_sign\",\n      \"action\": \"deny\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1289,6 +1289,42 @@
                 }
               }
             }
+          }
+        },
+        {
+          "name": "Activate recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/activate",
+            "description": "Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures."
+          }
+        },
+        {
+          "name": "Cancel recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/cancel",
+            "description": "Cancels an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction and storing the resulting lifecycle state."
+          }
+        },
+        {
+          "name": "Collect recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/collect",
+            "description": "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time."
+          }
+        },
+        {
+          "name": "Resume recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/resume",
+            "description": "Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status."
           }
         },
         {

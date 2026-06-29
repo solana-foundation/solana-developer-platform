@@ -34,30 +34,35 @@ This applies to the active devnet Kora surfaces:
 - `dev_ci` Kora used by integration tests
 - shared dev/staging Kora used by local and staging environments
 
-The Cloud Run services mount Kora config from Secret Manager, so a checked-in TOML change must also be uploaded to the matching secret and rolled out to the running service. For the shared devnet service:
-
-```bash
-gcloud config set project solana-developer-platform
-
-gcloud secrets versions add kora-sdp-config \
-  --data-file=infra/kora/cloud-run/kora.devnet.toml
-
-gcloud run services update kora-sdp \
-  --region us-central1 \
-  --update-env-vars KORA_CONFIG_VERSION=$(date +%s)
-```
+The `kora-<env>` Cloud Run services (`kora-devnet` / `kora-mainnet`) mount Kora config from Secret
+Manager, and those secrets are **owned by Terraform** (`infra/kora/terraform/secrets.tf`): the
+`kora.<env>.toml` + `signers.<env>.toml` files in this folder are the source of truth. To roll out a
+config change, edit the TOML here, then `terraform apply` for the env (which adds a new secret version)
+and ship a new revision so the running service picks it up. See the repo-root README / PR
+`feat/kora-deploy-via-tag` for the full mainnet cutover steps.
 
 ## Deploy
 
-```bash
-gcloud config set project solana-developer-platform
-gcloud run services update kora-sdp --region us-central1
-```
+Deploys go through `.github/workflows/deploy-kora.yml`, which:
 
-If the service should be publicly reachable, allow unauthenticated invoker:
+1. Reads the pinned Kora image tag from `.github/kora-image-tag` — always an **immutable git SHA**
+   (e.g. `61add05`), never a mutable tag like `:edge`/`:latest`. `deploy.sh` refuses mutable tags.
+2. Mirrors `ghcr.io/solana-foundation/kora:<sha>` into this project's Artifact Registry
+   (`us-central1-docker.pkg.dev/<project>/kora-<env>/kora:<sha>`, resolved to a digest) — Cloud Run
+   cannot pull from ghcr.io.
+3. Runs `gcloud run services update kora-<env> --image <AR>/kora:<sha>` with `KORA_<ENV>_*` env from
+   Doppler. Config + signers are mounted from Secret Manager (Terraform-owned).
+
+**Bumping the deployed image:** find the kora `main` short SHA (`git rev-parse --short=7 origin/main`
+in the kora repo — the edge workflow publishes that `:<sha>` tag), edit `.github/kora-image-tag` to it,
+and open a PR. Merging auto-deploys **devnet then mainnet** (ordered, fail-fast — mainnet only if devnet
+succeeds). **Rollback / manual deploy:** `workflow_dispatch` with `image_sha=<prior sha>` (any SHA still
+in Artifact Registry), `environment` = `devnet`/`mainnet`/`both`. Each env goes through its GitHub Environment.
+
+If a service should be publicly reachable, allow unauthenticated invoker:
 
 ```bash
-gcloud run services add-iam-policy-binding kora-sdp \
+gcloud run services add-iam-policy-binding kora-devnet \
   --region us-central1 \
   --member=allUsers \
   --role=roles/run.invoker

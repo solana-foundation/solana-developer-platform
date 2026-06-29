@@ -615,6 +615,8 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
       case "moonpay":
         await handleMoonpayRampWebhook(c, result.payload);
         break;
+      case "moneygram":
+        throw badRequest("MoneyGram does not deliver webhooks.");
       default:
         throw badRequest(`Unsupported ramp webhook provider: ${result.provider satisfies never}`);
     }

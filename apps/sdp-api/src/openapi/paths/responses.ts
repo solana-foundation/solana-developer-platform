@@ -48,6 +48,7 @@ import {
   onrampQuoteResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
+  paymentRecurringPaymentCollectionResponseSchema,
   paymentRecurringPaymentListResponseSchema,
   paymentRecurringPaymentResponseSchema,
   paymentSubscriptionCollectionAttemptListResponseSchema,
@@ -190,6 +191,9 @@ export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
 export const paymentRecurringPaymentResponse = successResponseSchema(
   paymentRecurringPaymentResponseSchema
+);
+export const paymentRecurringPaymentCollectionResponse = successResponseSchema(
+  paymentRecurringPaymentCollectionResponseSchema
 );
 export const paymentRecurringPaymentListResponse = successResponseSchema(
   paymentRecurringPaymentListResponseSchema

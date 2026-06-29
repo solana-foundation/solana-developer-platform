@@ -1,4 +1,9 @@
-import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS, RAMP_PROVIDERS } from "@sdp/types";
+import {
+  OFFRAMP_CRYPTO_RAILS,
+  ONRAMP_CRYPTO_RAILS,
+  RAMP_FIAT_CURRENCIES,
+  RAMP_PROVIDERS,
+} from "@sdp/types";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
   createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
@@ -40,6 +45,8 @@ import {
 } from "../../routes/payments/schemas";
 import {
   base64Schema,
+  cryptoAssetSymbolSchema,
+  cryptoRailNetworkSchema,
   isoDateTimeSchema,
   orgIdParamSchema,
   projectIdParamSchema,
@@ -55,6 +62,59 @@ export const tokenAmountSchema = z.string().openapi({
   description: "Token amount in UI units (decimal string).",
   example: "100.00",
 });
+
+const policyRuleSchema = z
+  .object({
+    id: z.string().optional().openapi({ description: "Stable client-side rule identifier." }),
+    name: z.string().optional().openapi({ description: "Human-readable rule name." }),
+    description: z.string().optional().openapi({ description: "Rule description." }),
+    action: z
+      .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+      .optional()
+      .openapi({ description: "Decision to apply when this rule matches." }),
+    kind: z
+      .enum(["operation_family", "destination", "amount", "approval", "always"])
+      .openapi({ description: "Policy rule kind." }),
+  })
+  .passthrough()
+  .openapi({
+    description:
+      "Wallet control profile rule. Supported kinds include operation_family, destination, amount, approval, and always.",
+    example: {
+      id: "deny-raw-signing",
+      kind: "operation_family",
+      family: "raw_sign",
+      action: "deny",
+    },
+  });
+
+const walletControlProfileSummarySchema = z
+  .object({
+    id: z.string().openapi({ description: "Wallet control profile ID." }),
+    status: z
+      .enum(["draft", "active", "disabled", "archived"])
+      .openapi({ description: "Wallet control profile status." }),
+    activeRevisionId: z.string().nullable().openapi({
+      description: "Currently active immutable revision ID.",
+    }),
+    revisionId: z.string().nullable().openapi({ description: "Returned revision ID." }),
+    revisionNumber: z.number().int().nullable().openapi({
+      description: "Returned immutable revision number.",
+    }),
+    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).openapi({
+      description: "Decision used when no rule matches.",
+    }),
+    rules: z.array(policyRuleSchema).openapi({ description: "Active policy rules." }),
+    providerMappingStatus: z
+      .enum(["not_applicable", "pending", "synced", "partial", "failed"])
+      .openapi({ description: "Provider mapping status for this policy profile." }),
+    createdAt: isoDateTimeSchema.openapi({ description: "Profile creation timestamp." }),
+    updatedAt: isoDateTimeSchema.openapi({ description: "Profile update timestamp." }),
+    activatedAt: isoDateTimeSchema.nullable().openapi({
+      description: "Profile activation timestamp.",
+    }),
+  })
+  .openapi({ description: "Wallet control profile summary." });
 
 export const walletPolicySchema = z
   .object({
@@ -76,6 +136,16 @@ export const walletPolicySchema = z
     maxDailyAmount: tokenAmountSchema
       .optional()
       .openapi({ description: "Maximum total amount allowed per day." }),
+    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).optional().openapi({
+      description: "Active wallet control profile default action when no rule matches.",
+    }),
+    rules: z
+      .array(policyRuleSchema)
+      .optional()
+      .openapi({ description: "Active wallet control profile rules." }),
+    controlProfile: walletControlProfileSummarySchema.optional().openapi({
+      description: "Active wallet control profile metadata.",
+    }),
     createdAt: isoDateTimeSchema.openapi({
       description: "Timestamp when the policy was created.",
       example: "2025-01-01T00:00:00.000Z",
@@ -122,6 +192,22 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
     maxDailyAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxDailyAmount, {
       description: "Maximum total amount allowed per day.",
       example: "1000.00",
+    }),
+    defaultAction: withOpenApi(updateWalletPolicySchemaBase.shape.defaultAction, {
+      description: "Default action for the activated wallet control profile revision.",
+      example: "allow",
+    }),
+    rules: withOpenApi(updateWalletPolicySchemaBase.shape.rules, {
+      description:
+        "Rules for a new immutable wallet control profile revision. When provided, the revision is activated after validation.",
+      example: [
+        {
+          id: "deny-raw-signing",
+          kind: "operation_family",
+          family: "raw_sign",
+          action: "deny",
+        },
+      ],
     }),
   })
   .openapi({
@@ -383,6 +469,39 @@ export const transferInitiatorSchema = z
   })
   .openapi({ description: "Initiator metadata for the transfer." });
 
+export const moneygramTransferDetailsSchema = z
+  .object({
+    transactionId: z.string().optional().openapi({
+      description: "MoneyGram xRamps transaction identifier.",
+      example: "mgi_tx_example",
+    }),
+    referenceNumber: z.string().optional().openapi({
+      description: "Cash pickup reference number issued by MoneyGram.",
+      example: "12345678",
+    }),
+    payoutAmount: z.number().optional().openapi({
+      description: "Fiat payout amount reported by MoneyGram.",
+      example: 25,
+    }),
+    payoutStatus: z.string().optional().openapi({
+      description: "MoneyGram payout status.",
+      example: "completed",
+    }),
+    cryptoTransferId: z.string().optional().openapi({
+      description: "SDP transfer id for the on-chain USDC leg.",
+      example: "xfr_moneygram_crypto_leg_example",
+    }),
+    solanaTxSignature: z.string().optional().openapi({
+      description: "Solana transaction signature for the USDC transfer.",
+      example: "sig_moneygram_usdc_transfer_example",
+    }),
+    lastWidgetError: z.string().optional().openapi({
+      description: "Last MoneyGram widget error recorded for this transfer.",
+      example: "Transaction cancelled by user",
+    }),
+  })
+  .openapi({ description: "MoneyGram-specific transfer metadata." });
+
 export const transferSchema = z
   .object({
     id: transferIdParamSchema,
@@ -444,10 +563,10 @@ export const transferSchema = z
       description: "Provider quote or transaction reference used for ramp correlation.",
       example: "ramp_quote_example",
     }),
-    deliveryMode: z.enum(["hosted", "manual_instructions"]).optional().openapi({
+    deliveryMode: z.enum(["hosted", "manual_instructions", "session_widget"]).optional().openapi({
       description:
-        "Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions.",
-      example: "hosted",
+        "Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.",
+      example: "session_widget",
     }),
     fiatCurrency: z.string().optional().openapi({
       description: "Fiat currency for the ramp leg.",
@@ -460,6 +579,9 @@ export const transferSchema = z
     risk: transferRiskSchema
       .optional()
       .openapi({ description: "Optional risk evaluation for the transfer." }),
+    moneygram: moneygramTransferDetailsSchema.optional().openapi({
+      description: "MoneyGram-specific details for MoneyGram ramp transfers.",
+    }),
     createdAt: isoDateTimeSchema.openapi({
       description: "Creation timestamp.",
       example: "2025-01-01T00:00:00.000Z",
@@ -690,6 +812,14 @@ export const paymentRecurringPaymentResponseSchema = z
     recurringPayment: paymentRecurringPaymentSchema,
   })
   .openapi({ description: "Recurring payment response payload." });
+
+export const paymentRecurringPaymentCollectionResponseSchema = z
+  .object({
+    recurringPayment: paymentRecurringPaymentSchema,
+    collectionAttempt: z.lazy(() => paymentSubscriptionCollectionAttemptSchema),
+    transfer: z.lazy(() => transferSchema),
+  })
+  .openapi({ description: "Recurring payment collection response payload." });
 
 export const paymentRecurringPaymentListResponseSchema = z
   .object({
@@ -1354,6 +1484,24 @@ const lightsparkRampPaymentInstructionSchema = z.object({
     description: "Provider that produced this instruction.",
     example: "lightspark",
   }),
+  kind: z.literal("crypto_deposit").optional().openapi({
+    description: "Present when the instruction contains normalized crypto-deposit fields.",
+    example: "crypto_deposit",
+  }),
+  destinationAddress: withOpenApi(solanaAddressSchema.optional(), {
+    description: "Normalized Solana address to fund for crypto-deposit manual instructions.",
+  }),
+  cryptoCurrency: withOpenApi(cryptoAssetSymbolSchema.optional(), {
+    description: "Normalized crypto asset to send for crypto-deposit manual instructions.",
+    example: "USDC",
+  }),
+  network: withOpenApi(cryptoRailNetworkSchema.optional(), {
+    description: "Normalized crypto network for crypto-deposit manual instructions.",
+    example: "SOLANA",
+  }),
+  reference: z.string().optional().openapi({
+    description: "Provider-side reference or memo required to match the deposit, when applicable.",
+  }),
   accountOrWalletInfo: z
     .object({
       accountType: z.string().openapi({ example: "USD_ACCOUNT" }),
@@ -1369,7 +1517,7 @@ const lightsparkRampPaymentInstructionSchema = z.object({
         .string()
         .optional()
         .openapi({ example: "ExampleSolanaWalletAddress11111111111111111" }),
-      assetType: z.string().optional().openapi({ example: "USDC" }),
+      assetType: withOpenApi(cryptoAssetSymbolSchema.optional(), { example: "USDC" }),
     })
     .openapi({
       description: "Lightspark bank account or crypto wallet details for funding the ramp.",
@@ -1384,10 +1532,14 @@ const lightsparkRampPaymentInstructionSchema = z.object({
     .openapi({ description: "Whether the payment instruction belongs to a platform account." }),
 });
 
-const bvnkRampPaymentInstructionSchema = z.object({
+const bvnkFiatFundingInstructionSchema = z.object({
   provider: z.literal("bvnk").openapi({
     description: "Provider that produced this instruction.",
     example: "bvnk",
+  }),
+  kind: z.literal("fiat_funding").openapi({
+    description: "Fund BVNK's fiat virtual account to receive crypto.",
+    example: "fiat_funding",
   }),
   onboardingStatus: z
     .enum(["verification_required", "verifying", "verification_failed", "provisioning", "ready"])
@@ -1427,7 +1579,43 @@ const bvnkRampPaymentInstructionSchema = z.object({
     .openapi({ description: "Additional human-readable funding instructions." }),
 });
 
-const rampPaymentInstructionSchema = z.discriminatedUnion("provider", [
+const bvnkCryptoDepositInstructionSchema = z.object({
+  provider: z.literal("bvnk").openapi({
+    description: "Provider that produced this instruction.",
+    example: "bvnk",
+  }),
+  kind: z.literal("crypto_deposit").openapi({
+    description: "Send crypto to BVNK's deposit address; BVNK converts and pays out fiat.",
+    example: "crypto_deposit",
+  }),
+  fiatCurrency: z
+    .enum(RAMP_FIAT_CURRENCIES)
+    .openapi({ description: "Fiat currency BVNK pays out after conversion.", example: "USD" }),
+  destinationAddress: withOpenApi(solanaAddressSchema, {
+    description: "Solana address to send the crypto deposit to.",
+  }),
+  cryptoCurrency: withOpenApi(cryptoAssetSymbolSchema, {
+    description: "Crypto asset to send.",
+    example: "USDC",
+  }),
+  network: withOpenApi(cryptoRailNetworkSchema, {
+    description: "Blockchain network for the destination address.",
+    example: "SOLANA",
+  }),
+  reference: z.string().openapi({
+    description: "BVNK channel reference tied to SDP's transfer id.",
+  }),
+  instructionsNotes: z
+    .string()
+    .openapi({ description: "Additional human-readable funding instructions." }),
+});
+
+const bvnkRampPaymentInstructionSchema = z.discriminatedUnion("kind", [
+  bvnkFiatFundingInstructionSchema,
+  bvnkCryptoDepositInstructionSchema,
+]);
+
+const rampPaymentInstructionSchema = z.union([
   lightsparkRampPaymentInstructionSchema,
   bvnkRampPaymentInstructionSchema,
 ]);

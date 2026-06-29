@@ -129,10 +129,14 @@ export interface RampOfframpQuoteInput {
   fiatCurrency?: RampFiatCurrency;
   cryptoAmount: string;
   sourceWalletAddress: string;
+  /** Handler-generated SDP payment transfer id for provider caller-defined references. */
+  paymentTransferId?: string;
   externalCustomerId: string;
   customerId?: string;
   /** Handler-resolved Grid external payout account id (Lightspark). */
   payoutAccountId?: string;
+  /** Handler-provisioned merchant-owned BVNK off-ramp fiat wallet id. */
+  bvnkOfframpWalletId?: string;
   redirectUrl?: string;
   bvnkCompliance?: BvnkComplianceInput;
 }

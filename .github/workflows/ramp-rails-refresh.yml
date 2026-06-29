@@ -1,0 +1,80 @@
+# Scheduled live ramp-rail discovery; on upstream drift opens a review PR (never auto-merged).
+name: Ramp Rails Refresh
+
+on:
+  schedule:
+    - cron: "0 7 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ramp-rails-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Discover live + open drift PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DOPPLER_CONFIG: dev_ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Doppler token
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+        run: |
+          if [ -z "${DOPPLER_TOKEN}" ]; then
+            echo "DOPPLER_TOKEN_CI must be configured for live ramp rail discovery." >&2
+            exit 1
+          fi
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
+
+      - name: Discover rails live and regenerate matrix
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+        run: pnpm --filter @sdp/api rails:discover -- --strict --emit
+
+      - name: Summarize drift
+        run: pnpm --silent --filter @sdp/api rails:drift | tee "${{ runner.temp }}/ramp-rails-drift.txt"
+
+      - name: Detect matrix/dump changes
+        id: changes
+        run: |
+          if git status --porcelain -- apps/sdp-api/.ramp-rails packages/sdp-types/src/generated/ramp-support.generated.ts | grep -q .; then
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Ramp rails in sync::Live discovery matches the committed matrix; no PR needed."
+          fi
+
+      - name: Open or update drift PR
+        if: steps.changes.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRIFT_SUMMARY: ${{ runner.temp }}/ramp-rails-drift.txt
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: ./scripts/ramp-rails/open-drift-pr.sh

@@ -1,17 +1,22 @@
 import { KoraClient } from "@sdp/api/services/adapters";
 import { env } from "#env-impl";
+import { getIntegrationCustodyProvider } from "./custody-provider";
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
   | { jsonrpc: "2.0"; id: number; error: { code: number; message: string; data?: unknown } };
 
 const PRECHECK_CACHE_KEY = "__sdp_integration_preflight__";
-const REQUIRED_KORA_ALLOWED_PROGRAMS = [
+// biome-ignore lint/security/noSecrets: Public Solana program ID, not a secret.
+const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+const REQUIRED_SURFPOOL_ALLOWED_PROGRAMS = [
   // biome-ignore lint/security/noSecrets: Public Solana program ID, not a secret.
   "TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP",
   // biome-ignore lint/security/noSecrets: Public Solana program ID, not a secret.
   "GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz",
+  MEMO_PROGRAM_ADDRESS,
 ] as const;
+const REQUIRED_LIVE_KORA_ALLOWED_PROGRAMS = [MEMO_PROGRAM_ADDRESS] as const;
 
 type PreflightState = {
   promise: Promise<void>;
@@ -32,11 +37,16 @@ export async function ensureIntegrationPreflight(): Promise<void> {
 }
 
 async function runPreflight(): Promise<void> {
+  const integrationCustodyProvider = getIntegrationCustodyProvider();
   const missing: string[] = [];
   if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
-  if (!env.PRIVY_APP_ID) missing.push("PRIVY_APP_ID");
-  if (!env.PRIVY_APP_SECRET) missing.push("PRIVY_APP_SECRET");
   if (!env.KORA_RPC_URL) missing.push("KORA_RPC_URL");
+  if (integrationCustodyProvider === "local") {
+    if (!env.CUSTODY_PRIVATE_KEY) missing.push("CUSTODY_PRIVATE_KEY");
+  } else {
+    if (!env.PRIVY_APP_ID) missing.push("PRIVY_APP_ID");
+    if (!env.PRIVY_APP_SECRET) missing.push("PRIVY_APP_SECRET");
+  }
 
   if (missing.length > 0) {
     throw new Error(
@@ -65,12 +75,13 @@ async function runPreflight(): Promise<void> {
   if (!config?.validation_config?.allowed_programs) {
     throw new Error("Kora preflight failed: missing validation_config.allowed_programs");
   }
-  const missingAllowedPrograms = REQUIRED_KORA_ALLOWED_PROGRAMS.filter(
+  const requiredAllowedPrograms = getRequiredKoraAllowedPrograms();
+  const missingAllowedPrograms = requiredAllowedPrograms.filter(
     (program) => !config.validation_config.allowed_programs.includes(program)
   );
   if (missingAllowedPrograms.length > 0) {
     throw new Error(
-      `Kora preflight failed: missing required sRFC-37 allowed programs: ${missingAllowedPrograms.join(", ")}. Update Kora validation_config.allowed_programs.`
+      `Kora preflight failed: missing required ${getKoraPreflightScopeLabel()} allowed programs: ${missingAllowedPrograms.join(", ")}. Update Kora validation_config.allowed_programs.`
     );
   }
 
@@ -93,6 +104,26 @@ async function runPreflight(): Promise<void> {
       `Kora preflight failed: fee payer balance too low (${feePayerLamports} lamports, min ${minLamports}).`
     );
   }
+}
+
+function getRequiredKoraAllowedPrograms(): readonly string[] {
+  if (isKoraSurfpoolShim()) {
+    return REQUIRED_SURFPOOL_ALLOWED_PROGRAMS;
+  }
+
+  return REQUIRED_LIVE_KORA_ALLOWED_PROGRAMS;
+}
+
+function getKoraPreflightScopeLabel(): string {
+  if (isKoraSurfpoolShim()) {
+    return "Surfpool-backed SDP";
+  }
+
+  return "live smoke";
+}
+
+function isKoraSurfpoolShim(): boolean {
+  return (env as { KORA_SURFPOOL_SHIM?: string }).KORA_SURFPOOL_SHIM === "true";
 }
 
 function getKoraMinBalanceLamports(): number {

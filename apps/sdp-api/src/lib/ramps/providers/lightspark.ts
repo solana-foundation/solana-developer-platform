@@ -4,6 +4,7 @@ import type {
   LightsparkGridAmount,
   LightsparkPaymentRampExecution,
   LightsparkPaymentRampInstruction,
+  LightsparkProviderPaymentRampInstruction,
   LightsparkRampSettlement,
   PaymentRampEstimate,
   PaymentRampExecution,
@@ -22,7 +23,7 @@ import type { CollectedFieldData, CounterpartyRequirements } from "@sdp/types/ra
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { AppError, badRequest, providerNotConfigured, providerUnavailable } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
-import { isAddress } from "@/lib/solana";
+import { assertValidAddress, isAddress } from "@/lib/solana";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { type ProviderRequestInit, providerFetchJson } from "../fetch";
 import {
@@ -84,18 +85,25 @@ function normalizeLightsparkCurrencyCode(value: string): string {
   return normalized;
 }
 
-function isCryptoAssetSymbol(value: string): value is CryptoAssetSymbol {
-  return value in CRYPTO_ASSET_DECIMALS;
-}
-
 function getLightsparkCurrencyDecimals(currencyCode: string): number {
   const normalized = currencyCode.trim().toUpperCase();
   if (normalized === "BTC") return 8;
-  if (isCryptoAssetSymbol(normalized)) return CRYPTO_ASSET_DECIMALS[normalized];
+  if (isSolanaCryptoAsset(normalized)) return CRYPTO_ASSET_DECIMALS[normalized];
   throw new AppError(
     "BAD_REQUEST",
     `Unsupported lightspark cryptoToken: ${currencyCode}. Supported values: BTC, ${Object.keys(CRYPTO_ASSET_DECIMALS).join(", ")}`
   );
+}
+
+function assertLightsparkInstructionCryptoAsset(value: string | undefined): CryptoAssetSymbol {
+  if (!value?.trim()) {
+    throw providerUnavailable("Lightspark Solana wallet instruction is missing assetType.");
+  }
+  const normalized = normalizeLightsparkCurrencyCode(value);
+  if (!isSolanaCryptoAsset(normalized)) {
+    throw providerUnavailable(`Lightspark returned unsupported crypto asset: ${normalized}.`);
+  }
+  return normalized;
 }
 
 function assertLightsparkAccountId(value: string, fieldName: string): string {
@@ -520,7 +528,16 @@ interface GridCreateQuoteBody {
 }
 
 interface GridPaymentInstruction {
-  accountOrWalletInfo: LightsparkPaymentRampInstruction["accountOrWalletInfo"];
+  accountOrWalletInfo: {
+    accountType: string;
+    accountNumber?: string;
+    routingNumber?: string;
+    paymentRails?: string[];
+    reference?: string;
+    bankName?: string;
+    address?: string;
+    assetType?: string;
+  };
   instructionsNotes?: string;
   isPlatformAccount?: boolean;
 }
@@ -591,6 +608,53 @@ function parseGridExchangeRate(response: GridExchangeRatesResponse): GridExchang
     );
   }
   return entry;
+}
+
+function normalizeLightsparkPaymentInstruction(
+  instruction: GridPaymentInstruction
+): LightsparkPaymentRampInstruction {
+  const info = instruction.accountOrWalletInfo;
+  const baseInstruction: LightsparkProviderPaymentRampInstruction = {
+    provider: "lightspark",
+    accountOrWalletInfo: {
+      accountType: info.accountType,
+      accountNumber: info.accountNumber,
+      routingNumber: info.routingNumber,
+      paymentRails: info.paymentRails,
+      reference: info.reference,
+      bankName: info.bankName,
+    },
+    instructionsNotes: instruction.instructionsNotes,
+    isPlatformAccount: instruction.isPlatformAccount,
+  };
+
+  if (info.accountType.toUpperCase() !== "SOLANA_WALLET") {
+    return baseInstruction;
+  }
+  if (!info.address?.trim()) {
+    throw providerUnavailable("Lightspark Solana wallet instruction is missing address.");
+  }
+
+  const cryptoCurrency = assertLightsparkInstructionCryptoAsset(info.assetType);
+  const destinationAddress = assertValidAddress(
+    info.address,
+    "Lightspark Solana wallet instruction address"
+  );
+
+  return {
+    ...baseInstruction,
+    kind: "crypto_deposit",
+    destinationAddress,
+    cryptoCurrency,
+    network: "SOLANA",
+    reference: info.reference,
+    accountOrWalletInfo: {
+      ...baseInstruction.accountOrWalletInfo,
+      accountType: "SOLANA_WALLET",
+      address: destinationAddress,
+      assetType: cryptoCurrency,
+    },
+  };
 }
 
 export interface CreateLightsparkOnrampQuoteInput {
@@ -1367,10 +1431,7 @@ function parseLightsparkQuote(raw: GridQuoteResponse): LightsparkQuote {
   return {
     id: raw.id,
     quoteStatus: raw.quoteStatus,
-    paymentInstructions: raw.paymentInstructions?.map((instruction) => ({
-      provider: "lightspark" as const,
-      ...instruction,
-    })),
+    paymentInstructions: raw.paymentInstructions?.map(normalizeLightsparkPaymentInstruction),
     exchangeRate: raw.exchangeRate,
     totalSendingAmount: raw.totalSendingAmount,
     sendingCurrency: raw.sendingCurrency,

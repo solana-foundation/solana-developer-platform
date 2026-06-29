@@ -41,6 +41,9 @@ const databaseUrl = getEnv("DATABASE_URL", "postgresql://sdp:sdp@127.0.0.1:5432/
 const koraRpcUrl = getEnv("KORA_RPC_URL");
 const koraApiKey = getEnv("KORA_API_KEY");
 const koraTimeoutMs = getEnv("KORA_TIMEOUT_MS");
+const koraSurfpoolShim = getEnv("KORA_SURFPOOL_SHIM");
+const integrationCustodyProvider = getEnv("SDP_INTEGRATION_CUSTODY_PROVIDER");
+const custodyPrivateKey = getEnv("CUSTODY_PRIVATE_KEY");
 const privyAppId = getEnv("PRIVY_APP_ID");
 const privyAppSecret = getEnv("PRIVY_APP_SECRET");
 const privyApiBaseUrl = getEnv("PRIVY_API_BASE_URL");
@@ -77,6 +80,11 @@ export default defineConfig({
             ...(koraApiKey && { KORA_API_KEY: koraApiKey }),
             ...(koraTimeoutMs && { KORA_TIMEOUT_MS: koraTimeoutMs }),
           }),
+          ...(koraSurfpoolShim && { KORA_SURFPOOL_SHIM: koraSurfpoolShim }),
+          ...(integrationCustodyProvider && {
+            SDP_INTEGRATION_CUSTODY_PROVIDER: integrationCustodyProvider,
+          }),
+          ...(custodyPrivateKey && { CUSTODY_PRIVATE_KEY: custodyPrivateKey }),
           ...(privyAppId && { PRIVY_APP_ID: privyAppId }),
           ...(privyAppSecret && { PRIVY_APP_SECRET: privyAppSecret }),
           ...(privyApiBaseUrl && { PRIVY_API_BASE_URL: privyApiBaseUrl }),

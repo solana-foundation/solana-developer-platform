@@ -6,8 +6,13 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
+  activateRecurringPayment,
+  cancelRampTransfer,
+  cancelRecurringPayment,
+  collectRecurringPayment,
   createOfframpQuote,
   createOnrampQuote,
+  createPaymentRequest,
   createRecurringPayment,
   createSubscription,
   createSubscriptionCollectionAttempt,
@@ -25,6 +30,7 @@ import {
   getWalletPolicy,
   listOfframpCurrencies,
   listOnrampCurrencies,
+  listPaymentRequests,
   listRecurringPayments,
   listSubscriptionCollectionAttempts,
   listSubscriptionPlans,
@@ -36,6 +42,8 @@ import {
   prepareSubscriptionAuthorization,
   prepareSubscriptionCollection,
   prepareTransfer,
+  recordRampProviderEvent,
+  resumeRecurringPayment,
   simulateSandboxTransfer,
   updateSubscription,
   updateSubscriptionPlan,
@@ -92,6 +100,26 @@ payments.post(
   createRecurringPayment
 );
 payments.get("/recurring-payments", requirePermissions("payments:read"), listRecurringPayments);
+payments.post(
+  "/recurring-payments/:id/activate",
+  requirePermissions("payments:write", "wallets:read"),
+  activateRecurringPayment
+);
+payments.post(
+  "/recurring-payments/:id/cancel",
+  requirePermissions("payments:write", "wallets:read"),
+  cancelRecurringPayment
+);
+payments.post(
+  "/recurring-payments/:id/collect",
+  requirePermissions("payments:write", "wallets:read"),
+  collectRecurringPayment
+);
+payments.post(
+  "/recurring-payments/:id/resume",
+  requirePermissions("payments:write", "wallets:read"),
+  resumeRecurringPayment
+);
 payments.get("/recurring-payments/:id", requirePermissions("payments:read"), getRecurringPayment);
 payments.get("/subscription-plans", requirePermissions("payments:read"), listSubscriptionPlans);
 payments.post(
@@ -157,6 +185,12 @@ payments.get(
 );
 payments.post("/transfers", requirePermissions("payments:write", "wallets:read"), createTransfer);
 payments.get("/transfers", requirePermissions("payments:read"), listTransfers);
+payments.get("/requests", requirePermissions("payments:read"), listPaymentRequests);
+payments.post(
+  "/requests",
+  requirePermissions("payments:write", "wallets:read"),
+  createPaymentRequest
+);
 payments.get("/transfers/:transferId", requirePermissions("payments:read"), getTransfer);
 payments.get("/ramps/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
 payments.get("/ramps/offramp/currency", requirePermissions("payments:read"), listOfframpCurrencies);
@@ -182,6 +216,12 @@ payments.post(
   requirePermissions("payments:write", "wallets:read"),
   executeOfframp
 );
+payments.post(
+  "/ramps/:provider/events",
+  requirePermissions("payments:write"),
+  recordRampProviderEvent
+);
+payments.post("/ramps/transfers/cancel", requirePermissions("payments:write"), cancelRampTransfer);
 payments.post(
   "/ramps/sandbox/simulate",
   requirePermissions("payments:write"),

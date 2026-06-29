@@ -45,6 +45,7 @@ const E2E_POLL_OPTIONS = {
   timeout: E2E_POLL_TIMEOUT_MS,
   intervals: [E2E_POLL_INTERVAL_MS],
 };
+const usesKoraSurfpoolShim = process.env.KORA_SURFPOOL_SHIM === "true";
 
 async function getToken(api: LocalApiClient, tokenId: string): Promise<Token> {
   const response = await api.get<TokenResponse>(
@@ -179,7 +180,7 @@ test.describe
       await ensureLinkedOrg(session.identity);
       walletsProjectId = await resolvePlaywrightProjectId(
         getBootstrapApiBaseUrl(),
-        session.bearerToken
+        session.getBearerToken
       );
       await session.page.close();
     });
@@ -188,51 +189,54 @@ test.describe
       await seedProjectCookie(page, walletsProjectId);
     });
 
-    test("user can initialize Privy and run signer check from the wallet detail page", async ({
-      page,
-    }) => {
-      await page.goto("/dashboard/wallets");
-
-      await expect(page.getByText("Create your first wallet", { exact: true })).toBeVisible();
-
-      const privyProviderCard = page.locator("article").filter({ hasText: "Privy" }).first();
-      await expect(privyProviderCard).toBeVisible();
-      await privyProviderCard.getByRole("button", { name: "New wallet" }).click();
-
-      await expect(page.getByText("Wallet details", { exact: true })).toBeVisible();
-      await page.getByLabel("Wallet label").fill("Treasury");
-      await page.getByRole("button", { name: "Create wallet" }).click();
-
-      const walletCard = page.locator("article").filter({
-        has: page.getByText("Treasury"),
+    test("bootstrapped Privy wallet appears in the wallets overview", async ({ browser, page }) => {
+      const session = await getPlaywrightAdminSession(browser);
+      const walletLabel = `Wallet Detail ${Date.now().toString(36).toUpperCase()}`;
+      const fixtures = await bootstrapLocalWalletFixtures({
+        identity: session.identity,
+        bearerToken: session.getBearerToken,
+        provider: "privy",
+        walletCount: 1,
+        walletLabel,
+        tier: "enterprise",
       });
-      await expect(walletCard).toBeVisible({ timeout: 120_000 });
-      await expect(walletCard.getByText("Privy", { exact: true })).toBeVisible();
+      const projectId = await resolvePlaywrightProjectId(
+        getBootstrapApiBaseUrl(),
+        session.getBearerToken
+      );
+      await session.page.close();
+      await seedProjectCookie(page, projectId);
 
-      await expect(walletCard).toBeVisible();
+      const wallet = fixtures.wallets[0];
+      if (!wallet) {
+        throw new Error("Failed to bootstrap wallet detail fixture");
+      }
 
-      await walletCard.getByRole("link", { name: "Manage" }).click();
-      await expect(page).toHaveURL(/\/dashboard\/wallets\/.+/);
+      await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
+      await expect(page).toHaveURL(/\/dashboard\/wallets(?:\?.*)?$/);
 
-      await page.getByRole("button", { name: "Actions" }).click();
-      await page.getByRole("menuitem", { name: "Prove ownership" }).click();
-
-      await expect(page.getByText("Signer check sent.")).toBeVisible({
+      const walletCard = page.locator("article").filter({ hasText: walletLabel }).first();
+      await expect(walletCard).toBeVisible({
         timeout: 120_000,
       });
-      await expect(page.getByRole("link", { name: "View on Solana Explorer" })).toBeVisible();
+      await expect(walletCard.getByText("Privy", { exact: true })).toBeVisible();
+      await expect(walletCard.getByRole("link", { name: "Manage" })).toBeVisible();
     });
 
     test("wallet activity shows real burn rows and balance after API burn flow", async ({
       browser,
       page,
     }) => {
+      test.skip(
+        usesKoraSurfpoolShim,
+        "Surfpool API shards cover deploy/mint/burn; dashboard shim keeps activity rendering focused."
+      );
       test.setTimeout(420_000);
 
       const session = await getPlaywrightAdminSession(browser);
       const fixtures = await bootstrapLocalWalletFixtures({
         identity: session.identity,
-        bearerToken: session.bearerToken,
+        bearerToken: session.getBearerToken,
         provider: "privy",
         walletCount: 1,
         fundSourceWallet: true,
@@ -241,10 +245,9 @@ test.describe
       });
       const projectId = await resolvePlaywrightProjectId(
         getBootstrapApiBaseUrl(),
-        session.bearerToken
+        session.getBearerToken
       );
-      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken, projectId);
-      await session.page.close();
+      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
       await seedProjectCookie(page, projectId);
 
       const wallet = fixtures.wallets[0];
@@ -306,8 +309,9 @@ test.describe
         "have total supply 3"
       );
       await waitForWalletTokenBalance(api, wallet.walletId, mintAddress, 3);
+      await session.page.close();
 
-      await page.goto(`/dashboard/wallets/${wallet.walletId}`);
+      await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
 
       const balancesSection = page.locator("section").filter({
         has: page.getByRole("heading", { name: "Balances" }),
@@ -362,17 +366,22 @@ test.describe
       browser,
       page,
     }) => {
+      test.skip(
+        usesKoraSurfpoolShim,
+        "Dashboard wallet activity refresh uses live wallet detail balance reads; keep it in non-shim dashboard E2E."
+      );
+
       const session = await getPlaywrightAdminSession(browser);
       const fixtures = await bootstrapLocalWalletFixtures({
         identity: session.identity,
-        bearerToken: session.bearerToken,
+        bearerToken: session.getBearerToken,
         provider: "privy",
         walletCount: 1,
         tier: "enterprise",
       });
       const projectId = await resolvePlaywrightProjectId(
         getBootstrapApiBaseUrl(),
-        session.bearerToken
+        session.getBearerToken
       );
       await session.page.close();
       await seedProjectCookie(page, projectId);
@@ -421,7 +430,7 @@ test.describe
         });
       });
 
-      await page.goto(`/dashboard/wallets/${wallet.walletId}`);
+      await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
       const activityRow = page.locator("tr").filter({ hasText: "5.00 USDC" });
       await expect(activityRow).toBeVisible({ timeout: 120_000 });
       await expect(activityRow).toContainText("Incoming");

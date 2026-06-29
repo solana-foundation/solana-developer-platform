@@ -4,6 +4,7 @@ import type {
   PaymentTransferSummary,
 } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
+import { parsePaymentApiErrorText } from "./payment-api-errors";
 
 export interface FetchResult<T> {
   ok: boolean;
@@ -22,18 +23,6 @@ export interface PaymentsIssuedTokenSymbol {
   symbol: string;
 }
 
-function parseErrorMessage(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    return parsed?.error?.message ?? parsed?.message ?? body;
-  } catch {
-    return body;
-  }
-}
-
 export async function fetchPaymentsWallets(
   request: SdpApiClient["request"],
   options: FetchPaymentsWalletsOptions = {}
@@ -50,7 +39,7 @@ export async function fetchPaymentsWallets(
       return {
         ok: false,
         status: response.status,
-        error: parseErrorMessage(body),
+        error: parsePaymentApiErrorText(body),
       };
     }
 
@@ -108,7 +97,7 @@ export async function fetchPaymentsAggregate(
       return {
         ok: false,
         status: response.status,
-        error: parseErrorMessage(body),
+        error: parsePaymentApiErrorText(body),
       };
     }
 
@@ -153,7 +142,7 @@ export async function fetchPaymentTransfers(
       return {
         ok: false,
         status: response.status,
-        error: parseErrorMessage(body),
+        error: parsePaymentApiErrorText(body),
       };
     }
 
@@ -287,7 +276,7 @@ export async function fetchPaymentsIssuedTokenSymbols(
       return {
         ok: false,
         status: response.status,
-        error: parseErrorMessage(body),
+        error: parsePaymentApiErrorText(body),
       };
     }
 

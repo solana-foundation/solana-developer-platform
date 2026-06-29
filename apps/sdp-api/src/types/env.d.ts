@@ -172,6 +172,8 @@ export interface Env {
   KORA_RPC_URL?: string;
   KORA_API_KEY?: string;
   KORA_TIMEOUT_MS?: string;
+  KORA_SURFPOOL_SHIM?: string;
+  KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
 
   // MagicBlock private payments configuration
   MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
@@ -229,6 +231,10 @@ export interface Env {
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;
   BVNK_SANDBOX_WEBHOOK_SECRET?: string;
+
+  // MoneyGram ramps configuration
+  MONEYGRAM_SANDBOX_PUBLIC_KEY?: string;
+  MONEYGRAM_SANDBOX_SECRET_KEY?: string;
 }
 
 // Extend Hono's context with our bindings

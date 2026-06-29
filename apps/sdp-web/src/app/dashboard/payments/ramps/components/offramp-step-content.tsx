@@ -1,5 +1,6 @@
 "use client";
 
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { CheckCircle2Icon, SendIcon, WalletIcon, XCircleIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Combobox } from "@/components/ui/combobox";
@@ -8,6 +9,7 @@ import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import { walletComboboxOptions } from "../wallet-options";
 import { HostedRampFrame } from "./hosted-ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
+import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
 import { RequirementsFields } from "./requirements-fields";
@@ -111,6 +113,7 @@ function OfframpManualQuoteStep({
     selectedRampPair,
     fields,
     transferStatus,
+    hasCryptoDepositInstruction,
     canSendOnchain,
     onchainSendLoading,
     onchainSendResult,
@@ -128,6 +131,19 @@ function OfframpManualQuoteStep({
 
   const cryptoToken = toRampCryptoToken(selectedRampPair.assetRail);
   const sendLabel = `Send ${fields.amount.trim()} ${cryptoToken.toUpperCase()}`;
+  const sendAction = hasCryptoDepositInstruction
+    ? {
+        loading: onchainSendLoading,
+        succeeded: onchainSendResult !== null,
+        disabled: !canSendOnchain || quoteExpired,
+        onClick: () => void sendCryptoToDeposit(),
+        icon: <SendIcon />,
+        idleLabel: quoteExpired ? "Quote expired" : sendLabel,
+        busyLabel: "Sending...",
+        doneLabel: "Transfer submitted",
+      }
+    : undefined;
+
   return (
     <div className="space-y-6">
       <ManualInstructionsQuote
@@ -137,20 +153,7 @@ function OfframpManualQuoteStep({
         cryptoToken={cryptoToken}
         instructions={quote.paymentInstructions}
         description={`Send ${fields.amount.trim()} ${cryptoToken.toUpperCase()} to the deposit address below before the quote expires. The provider converts it at the locked rate and pays out to the saved bank account automatically.`}
-        action={
-          quote.provider === "lightspark"
-            ? {
-                loading: onchainSendLoading,
-                succeeded: onchainSendResult !== null,
-                disabled: !canSendOnchain || quoteExpired,
-                onClick: () => void sendCryptoToDeposit(),
-                icon: <SendIcon />,
-                idleLabel: quoteExpired ? "Quote expired" : sendLabel,
-                busyLabel: "Sending...",
-                doneLabel: "Transfer submitted",
-              }
-            : undefined
-        }
+        action={sendAction}
       />
       <div className="border-t border-border-light pt-5">
         <OfframpTransferStatusPanel transfer={transferStatus} />
@@ -176,9 +179,19 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     collectedData,
     setCollectedField,
     requirementsBlocker,
+    sourceTokenMint,
+    refreshQuote,
+    liveCounterpartiesResult,
   } = wizard;
 
   const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
+  const selectedCounterparty = useMemo(
+    () =>
+      liveCounterpartiesResult?.data.find(
+        (counterparty) => counterparty.id === fields.counterpartyId
+      ) ?? null,
+    [liveCounterpartiesResult, fields.counterpartyId]
+  );
 
   if (currentStepId === "WALLET") {
     return (
@@ -250,6 +263,31 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     return (
       <div className="space-y-6">
         <HostedRampFrame title={`${quote.provider} payout`} src={quote.hostedUrl} />
+        <div className="border-t border-border-light pt-5">
+          <OfframpTransferStatusPanel transfer={transferStatus} />
+        </div>
+      </div>
+    );
+  }
+
+  if (currentStepId === "COMPLETE" && quote?.deliveryMode === "session_widget") {
+    if (!selectedWallet) {
+      return <RampQuoteSkeleton />;
+    }
+    return (
+      <div className="space-y-6">
+        <MoneygramRampWidget
+          quote={quote}
+          counterparty={selectedCounterparty}
+          sourceWalletId={fields.walletId}
+          sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
+          sourceWalletAddress={selectedWallet.publicKey}
+          sourceTokenMint={sourceTokenMint}
+          cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
+          cryptoAmount={fields.amount.trim()}
+          fiatCurrency={selectedRampPair.fiatCurrency}
+          onSessionExpiring={refreshQuote}
+        />
         <div className="border-t border-border-light pt-5">
           <OfframpTransferStatusPanel transfer={transferStatus} />
         </div>

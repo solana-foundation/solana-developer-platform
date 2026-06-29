@@ -1,4 +1,5 @@
 import {
+  type MoneygramRampEvent,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
   type PrivateTransferRequest,
@@ -66,9 +67,118 @@ export const updateWalletPolicySchema = z.object({
     .string()
     .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
     .optional(),
+  defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).optional(),
+  rules: z
+    .array(
+      z.discriminatedUnion("kind", [
+        z.object({
+          id: z.string().min(1).max(120).optional(),
+          name: z.string().min(1).max(120).optional(),
+          description: z.string().max(500).optional(),
+          action: z
+            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+            .optional(),
+          kind: z.literal("operation_family"),
+          family: z
+            .enum([
+              "transfer",
+              "payment",
+              "ramp",
+              "issuance",
+              "raw_sign",
+              "program",
+              "provider_admin",
+            ])
+            .optional(),
+          families: z
+            .array(
+              z.enum([
+                "transfer",
+                "payment",
+                "ramp",
+                "issuance",
+                "raw_sign",
+                "program",
+                "provider_admin",
+              ])
+            )
+            .max(20)
+            .optional(),
+        }),
+        z.object({
+          id: z.string().min(1).max(120).optional(),
+          name: z.string().min(1).max(120).optional(),
+          description: z.string().max(500).optional(),
+          action: z
+            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+            .optional(),
+          kind: z.literal("destination"),
+          allowlist: z.array(solanaAddressSchema("allowlist entry")).max(500).optional(),
+          blocklist: z.array(solanaAddressSchema("blocklist entry")).max(500).optional(),
+          destination: solanaAddressSchema("destination").optional(),
+          destinations: z.array(solanaAddressSchema("destinations entry")).max(500).optional(),
+        }),
+        z.object({
+          id: z.string().min(1).max(120).optional(),
+          name: z.string().min(1).max(120).optional(),
+          description: z.string().max(500).optional(),
+          action: z
+            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+            .optional(),
+          kind: z.literal("amount"),
+          min: z
+            .string()
+            .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
+            .optional(),
+          max: z
+            .string()
+            .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
+            .optional(),
+          asset: z.string().min(1).max(120).optional(),
+          assets: z.array(z.string().min(1).max(120)).max(100).optional(),
+        }),
+        z.object({
+          id: z.string().min(1).max(120).optional(),
+          name: z.string().min(1).max(120).optional(),
+          description: z.string().max(500).optional(),
+          action: z
+            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+            .optional(),
+          kind: z.literal("approval"),
+          families: z
+            .array(
+              z.enum([
+                "transfer",
+                "payment",
+                "ramp",
+                "issuance",
+                "raw_sign",
+                "program",
+                "provider_admin",
+              ])
+            )
+            .max(20)
+            .optional(),
+          operationTypes: z.array(z.string().min(1).max(120)).max(100).optional(),
+          assets: z.array(z.string().min(1).max(120)).max(100).optional(),
+          approvalGroupId: z.string().min(1).max(120).optional(),
+        }),
+        z.object({
+          id: z.string().min(1).max(120).optional(),
+          name: z.string().min(1).max(120).optional(),
+          description: z.string().max(500).optional(),
+          action: z
+            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+            .optional(),
+          kind: z.literal("always"),
+        }),
+      ])
+    )
+    .max(100)
+    .optional(),
 });
 
-const paymentAmountSchema = z
+export const paymentAmountSchema = z
   .string()
   .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
   // Avoid adding a second error when the decimal-format check already failed.
@@ -160,6 +270,11 @@ export const createRecurringPaymentSchema = z.object({
   firstCollectionAt: firstCollectionAtTimestampSchema.optional(),
   metadataUri: z.string().url().max(128).optional(),
 });
+
+export const activateRecurringPaymentSchema = z.object({}).strict();
+export const cancelRecurringPaymentSchema = z.object({}).strict();
+export const collectRecurringPaymentSchema = z.object({}).strict();
+export const resumeRecurringPaymentSchema = z.object({}).strict();
 
 export const listRecurringPaymentsQuerySchema = z.object({
   counterpartyId: z.string().min(1).optional(),
@@ -323,6 +438,11 @@ export const rampFiatCurrencySchema = z.preprocess(
   z.enum(RAMP_FIAT_CURRENCIES)
 );
 
+export const cancelRampTransferSchema = z.object({
+  provider: rampProviderSchema,
+  providerReference: z.string().min(1),
+});
+
 export const listOnrampCurrenciesQuerySchema = z.object({
   source: rampFiatCurrencySchema.optional(),
   dest: onrampCryptoRailSchema.optional(),
@@ -386,6 +506,7 @@ export const transferStatusSchema = z.enum([
   "awaiting_payment",
   "settling",
   "completed",
+  "canceled",
   "expired",
 ]);
 
@@ -456,6 +577,7 @@ export const createOnrampQuoteSchema = z.object({
 
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
+  z.object({ provider: z.literal("moneygram"), direction: rampDirectionSchema }),
   z.discriminatedUnion("direction", [
     z.object({
       provider: z.literal("bvnk"),
@@ -465,7 +587,12 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: z.record(z.string(), z.string()).optional(),
     }),
-    z.object({ provider: z.literal("bvnk"), direction: z.literal("offramp") }),
+    z.object({
+      provider: z.literal("bvnk"),
+      direction: z.literal("offramp"),
+      fiatCurrency: rampFiatCurrencySchema,
+      collectedData: z.record(z.string(), z.string()).optional(),
+    }),
   ]),
   z.discriminatedUnion("direction", [
     z.object({ provider: z.literal("lightspark"), direction: z.literal("onramp") }),
@@ -498,6 +625,34 @@ export const executeOfframpSchema = z.object({
   redirectUrl: z.string().url().optional(),
   bvnkCompliance: bvnkComplianceSchema.optional(),
 });
+
+export const moneygramRampEventSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("signed"),
+    sessionId: z.string().min(1),
+    cryptoTransferId: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal("completed"),
+    sessionId: z.string().min(1),
+    cryptoTransferId: z.string().min(1),
+    transactionId: z.string().min(1),
+    payoutAmount: z.number().positive(),
+    payoutStatus: z.string().min(1),
+    referenceNumber: z.string().min(1).optional(),
+  }),
+  z.object({
+    kind: z.literal("errored"),
+    sessionId: z.string().min(1),
+    reason: z.string().min(1),
+    cryptoTransferId: z.string().min(1).optional(),
+    transactionId: z.string().min(1).optional(),
+  }),
+  z.object({
+    kind: z.literal("closed"),
+    sessionId: z.string().min(1),
+  }),
+]) satisfies z.ZodType<MoneygramRampEvent>;
 
 const simulateLightsparkSandboxTransferPayloadSchema = z.object({
   quoteId: z.string().min(1),

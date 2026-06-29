@@ -16,7 +16,7 @@ export type RampTransferType = (typeof RAMP_TRANSFER_TYPES)[number];
 export function isRampTransferType(type: PaymentTransferType): type is RampTransferType {
   return type === "onramp" || type === "offramp";
 }
-export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions";
+export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
 export type { PaymentTransferStatus };
 export type PaymentWalletPolicyType = string;
 
@@ -60,8 +60,11 @@ export interface PaymentTransferRow {
   updated_at: string;
 }
 
+export function generatePaymentTransferId(): string {
+  return `xfr_${crypto.randomUUID()}`;
+}
+
 export interface CreatePaymentTransferInput {
-  id: string;
   organizationId: string;
   projectId: string | null;
   walletId: string;
@@ -81,13 +84,15 @@ export interface CreatePaymentTransferInput {
   fiatAmount: string | null;
   providerData: Record<string, unknown>;
   serializedTx: string | null;
+  signature: string | null;
+  slot: number | null;
   initiatedByKeyId: string | null;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface UpdatePaymentTransferInput {
   transferId: string;
+  organizationId?: string;
+  projectId?: string | null;
   status?: PaymentTransferStatus;
   signature?: string | null;
   serializedTx?: string | null;
@@ -96,6 +101,8 @@ export interface UpdatePaymentTransferInput {
   fee?: number | null;
   amount?: string | null;
   fiatAmount?: string | null;
+  providerReference?: string | null;
+  deliveryMode?: PaymentTransferDeliveryMode | null;
   providerData?: Record<string, unknown>;
   error?: string | null;
   updatedAt: string;
@@ -163,6 +170,19 @@ export interface PaymentsRepositoryContext {
 export interface PaymentsRepository {
   createTransfer(input: CreatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   updateTransfer(input: UpdatePaymentTransferInput): Promise<PaymentTransferRow | null>;
+  /**
+   * Atomically transitions a transfer's status only if it is currently one of
+   * `fromStatuses`, scoped to org/project. Returns the updated row, or null when
+   * no row matched (wrong owner, missing, or status changed concurrently).
+   */
+  updateTransferStatusGuarded(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    fromStatuses: readonly PaymentTransferStatus[];
+    toStatus: PaymentTransferStatus;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   getTransferById(params: {
     transferId: string;

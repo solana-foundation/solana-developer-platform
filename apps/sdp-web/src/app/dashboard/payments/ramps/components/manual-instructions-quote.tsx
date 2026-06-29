@@ -279,6 +279,32 @@ function LightsparkInstruction({
   );
 }
 
+function BvnkCryptoDepositInstruction({
+  instruction,
+  action,
+}: {
+  instruction: Extract<BvnkInstructionType, { kind: "crypto_deposit" }>;
+  action?: InstructionAction;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <InstructionBadges>
+          <InstructionBadge>{instruction.cryptoCurrency} deposit</InstructionBadge>
+          <InstructionBadge>{instruction.network}</InstructionBadge>
+        </InstructionBadges>
+        {action ? <InstructionActionButton action={action} /> : null}
+      </div>
+      <PaymentInstructionField label="Deposit address" value={instruction.destinationAddress} />
+      <PaymentInstructionField label="Reference" value={instruction.reference} />
+      <div className="rounded-xl bg-border-extra-light px-4 py-3">
+        <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">Notes</p>
+        <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
+      </div>
+    </div>
+  );
+}
+
 function BvnkInstruction({
   instruction,
   action,
@@ -286,6 +312,10 @@ function BvnkInstruction({
   instruction: BvnkInstructionType;
   action?: InstructionAction;
 }) {
+  if (instruction.kind === "crypto_deposit") {
+    return <BvnkCryptoDepositInstruction instruction={instruction} action={action} />;
+  }
+
   const isReady = instruction.onboardingStatus === "ready";
   const needsVerification = instruction.onboardingStatus === "verification_required";
   const isProvisioning = instruction.onboardingStatus === "provisioning";
@@ -397,7 +427,11 @@ export function ManualInstructionsQuote({
   const instructionList = instructions.map((instruction, index) =>
     instruction.provider === "bvnk" ? (
       <BvnkInstruction
-        key={instruction.ruleId ?? instruction.beneficiaryAddress}
+        key={
+          instruction.kind === "crypto_deposit"
+            ? instruction.destinationAddress
+            : (instruction.ruleId ?? instruction.beneficiaryAddress)
+        }
         instruction={instruction}
         action={action}
       />

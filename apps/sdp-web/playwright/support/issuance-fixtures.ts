@@ -31,6 +31,7 @@ export interface IssuanceFixtures {
   tokens: {
     pending: IssuanceFixtureToken;
     allowlisted: IssuanceFixtureToken;
+    authority: IssuanceFixtureToken;
     open: IssuanceFixtureToken;
   };
   addresses: {

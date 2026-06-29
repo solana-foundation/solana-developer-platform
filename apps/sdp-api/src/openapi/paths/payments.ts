@@ -39,6 +39,7 @@ import {
   onrampCurrenciesResponse,
   onrampExecutionResponse,
   onrampQuoteResponse,
+  paymentRecurringPaymentCollectionResponse,
   paymentRecurringPaymentListResponse,
   paymentRecurringPaymentResponse,
   paymentSubscriptionCollectionAttemptListResponse,
@@ -278,6 +279,94 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(paymentRecurringPaymentListResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/recurring-payments/{id}/activate",
+    tags: ["Payments"],
+    summary: "Activate recurring payment",
+    operationId: "activatePaymentRecurringPayment",
+    description:
+      "Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment activated",
+        content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/recurring-payments/{id}/cancel",
+    tags: ["Payments"],
+    summary: "Cancel recurring payment",
+    operationId: "cancelPaymentRecurringPayment",
+    description:
+      "Cancels an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction and storing the resulting lifecycle state.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment canceled",
+        content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/recurring-payments/{id}/collect",
+    tags: ["Payments"],
+    summary: "Collect recurring payment",
+    operationId: "collectPaymentRecurringPayment",
+    description:
+      "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment collected",
+        content: jsonContent(paymentRecurringPaymentCollectionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/recurring-payments/{id}/resume",
+    tags: ["Payments"],
+    summary: "Resume recurring payment",
+    operationId: "resumePaymentRecurringPayment",
+    description:
+      "Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment resumed",
+        content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

@@ -596,7 +596,15 @@ export function getDisplayedAuthorityAddress({
   }
 }
 
-export type SignerAwareAction = "deploy" | "mint" | "burn" | "seize" | "force-burn" | "authority";
+export type SignerAwareAction =
+  | "deploy"
+  | "mint"
+  | "burn"
+  | "seize"
+  | "force-burn"
+  | "authority"
+  | "freeze"
+  | "pause";
 
 export interface SignerSelectionState {
   wallets: PaymentsDashboardWallet[];
@@ -713,6 +721,16 @@ export function getSignerSelectionForAction({
       } is not one of your controlled wallets.`;
       break;
     }
+    case "freeze":
+      requiredAuthority = token.freezeAuthority;
+      missingReason = "No freeze authority is configured.";
+      uncontrolledReason = "Freeze authority is not one of your controlled wallets.";
+      break;
+    case "pause":
+      requiredAuthority = token.extensions?.pausable?.authority ?? token.mintAuthority;
+      missingReason = "No pause authority is configured.";
+      uncontrolledReason = "Pause authority is not one of your controlled wallets.";
+      break;
     default:
       break;
   }

@@ -2,11 +2,12 @@
 
 import type { Counterparty, RampProviderId } from "@sdp/types";
 import Image from "next/image";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/payments/counterparty/counterparty-create-dialog";
 import { Button } from "@/components/ui/button";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { cn } from "@/lib/utils";
+import { CancelTransactionDialog } from "./cancel-transaction-dialog";
 
 export function PoweredByRampProvider({ provider }: { provider: RampProviderId }) {
   const providerLabel = getRampProviderLabel(provider);
@@ -44,6 +45,9 @@ interface RampWizardShellProps {
   header?: ReactNode;
   footerActions?: ReactNode;
   hidePrimary?: boolean;
+  /** Confirm before running the secondary action — used once a transaction is live. */
+  confirmSecondary?: boolean;
+  secondaryDisabled?: boolean;
 }
 
 export function RampWizardShell({
@@ -62,7 +66,10 @@ export function RampWizardShell({
   header,
   footerActions,
   hidePrimary,
+  confirmSecondary,
+  secondaryDisabled,
 }: RampWizardShellProps) {
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   return (
     <div className="mx-auto flex h-[80vh] w-full max-w-5xl flex-col py-6">
       <div className="mx-auto w-full max-w-3xl flex-1 space-y-6 overflow-y-auto px-1.5">
@@ -109,7 +116,8 @@ export function RampWizardShell({
           type="button"
           variant="secondary"
           className="h-14 rounded-full text-base"
-          onClick={onSecondary}
+          disabled={secondaryDisabled}
+          onClick={confirmSecondary ? () => setCancelConfirmOpen(true) : onSecondary}
         >
           {secondaryLabel ?? (stepIndex === 0 ? "Cancel" : "Previous")}
         </Button>
@@ -132,6 +140,15 @@ export function RampWizardShell({
         open={counterpartyDialogOpen}
         onClose={() => setCounterpartyDialogOpen(false)}
         onCreated={onCounterpartyCreated}
+      />
+
+      <CancelTransactionDialog
+        open={cancelConfirmOpen}
+        onKeepGoing={() => setCancelConfirmOpen(false)}
+        onConfirm={() => {
+          setCancelConfirmOpen(false);
+          onSecondary();
+        }}
       />
     </div>
   );

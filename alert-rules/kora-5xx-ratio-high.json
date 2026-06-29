@@ -85,7 +85,6 @@
     }
   ],
   "labels": {
-    "service": "kora",
     "severity": "critical",
     "pagerduty": "true",
     "slack": "true"

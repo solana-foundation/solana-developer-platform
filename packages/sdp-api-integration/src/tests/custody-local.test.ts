@@ -4,6 +4,7 @@ import type { TokenApiResponse } from "../helpers/api-types";
 import {
   cleanupIntegrationSuite,
   env,
+  INTEGRATION_CUSTODY_PROVIDER,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
   request as rawRequest,
@@ -12,7 +13,11 @@ import {
   SOLANA_CONFIGURED,
 } from "../helpers/integration";
 
-describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Privy Signing", () => {
+const describeIfIntegrationConfigured = describe.skipIf(
+  !SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS
+);
+
+describeIfIntegrationConfigured("Custody Access and Default Signing", () => {
   let apiKeyHash: string;
   const request = requestWithApiKey();
 
@@ -29,7 +34,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Privy Sig
     await resetIntegrationState(apiKeyHash);
   });
 
-  it("uses the Privy default signer for deployments", { timeout: 120000 }, async () => {
+  it("uses the configured default signer for deployments", { timeout: 120000 }, async () => {
     const configRes = await request("/v1/wallets/config");
 
     expect(configRes.status).toBe(200);
@@ -38,7 +43,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Privy Sig
     };
 
     const { id: configId, provider, publicKey } = configBody.data.config;
-    expect(provider).toBe("privy");
+    expect(provider).toBe(INTEGRATION_CUSTODY_PROVIDER);
     expect(publicKey).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
 
     const configRow = await getDb(env)
@@ -83,7 +88,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Privy Sig
     const initRes = await rawRequest("/v1/wallets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: "privy" }),
+      body: JSON.stringify({ provider: INTEGRATION_CUSTODY_PROVIDER }),
     });
     expect(initRes.status).toBe(401);
   });
