@@ -1259,19 +1259,13 @@ function buildUpdateDiff(
   return { changedFields, beforeValues, afterValues };
 }
 
-function stableJsonString(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableJsonString).join(",")}]`;
-  }
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableJsonString(record[key])}`)
-      .join(",")}}`;
-  }
+function sameStringSet(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value) => right.includes(value));
+}
 
-  return JSON.stringify(value);
+function sameFlatRecord(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
+  const keys = Object.keys(left);
+  return sameStringSet(keys, Object.keys(right)) && keys.every((key) => left[key] === right[key]);
 }
 
 function updateAttemptMatchesRequest(
@@ -1283,9 +1277,9 @@ function updateAttemptMatchesRequest(
   }
 ): boolean {
   return (
-    stableJsonString(attempt.changed_fields) === stableJsonString(input.changedFields) &&
-    stableJsonString(attempt.before_values) === stableJsonString(input.beforeValues) &&
-    stableJsonString(attempt.after_values) === stableJsonString(input.afterValues)
+    sameStringSet(attempt.changed_fields, input.changedFields) &&
+    sameFlatRecord(attempt.before_values, input.beforeValues) &&
+    sameFlatRecord(attempt.after_values, input.afterValues)
   );
 }
 
