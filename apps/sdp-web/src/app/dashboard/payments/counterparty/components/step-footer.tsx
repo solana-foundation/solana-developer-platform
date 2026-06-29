@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useCounterpartyCreate } from "../counterparty-create-context";
 
 export function StepFooter() {
-  const { step, currentStepId, goNext, goBack, submit, submitting } = useCounterpartyCreate();
+  const { step, currentStepId, goBack, submitting } = useCounterpartyCreate();
 
   const isFirst = step === 0;
   const isReview = currentStepId === "review";
@@ -28,15 +28,14 @@ export function StepFooter() {
 
       {isReview ? (
         <Button
-          type="button"
-          onClick={submit}
+          type="submit"
           disabled={submitting}
           iconLeft={submitting ? <Loader2Icon className="animate-spin" /> : undefined}
         >
           {submitting ? "Creating" : "Create"}
         </Button>
       ) : (
-        <Button type="button" onClick={goNext} iconRight={<ArrowRightIcon />}>
+        <Button type="submit" disabled={submitting} iconRight={<ArrowRightIcon />}>
           Next
         </Button>
       )}

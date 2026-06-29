@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
+import type { FormEvent } from "react";
 import { StepContent } from "./components/step-content";
 import { StepFooter } from "./components/step-footer";
 import { StepIndicator } from "./components/step-indicator";
@@ -38,14 +39,31 @@ const variants = {
 };
 
 export function CounterpartyCreatePage() {
-  const { step, steps, currentStepId, direction, createdCounterparty } = useCounterpartyCreate();
+  const { step, steps, currentStepId, direction, createdCounterparty, goNext, submit, submitting } =
+    useCounterpartyCreate();
 
   if (createdCounterparty) {
     return <CryptoAccountsPhase />;
   }
 
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (submitting) {
+      return;
+    }
+    if (currentStepId === "review") {
+      void submit();
+      return;
+    }
+    goNext();
+  };
+
   return (
-    <div className="mx-auto flex h-[80vh] max-w-xl flex-col py-4">
+    <form
+      className="mx-auto flex h-[80vh] max-w-xl flex-col py-4"
+      noValidate
+      onSubmit={handleSubmit}
+    >
       <StepIndicator steps={steps} step={step} />
 
       <div className="relative mt-6 min-h-0 flex-1 overflow-hidden">
@@ -74,6 +92,6 @@ export function CounterpartyCreatePage() {
       <div className="mt-6">
         <StepFooter />
       </div>
-    </div>
+    </form>
   );
 }

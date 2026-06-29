@@ -5,7 +5,14 @@ import {
   type PaymentRecurringPaymentStatus,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
-import { CalendarClockIcon, CopyIcon, ExternalLinkIcon, RepeatIcon, UserIcon } from "lucide-react";
+import {
+  CalendarClockIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+  PlusIcon,
+  RepeatIcon,
+  UserIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, type ReactNode, useMemo } from "react";
@@ -256,9 +263,17 @@ export function RecurringPaymentsWorkspace({
   return (
     <div className="h-full min-h-0 w-full px-3 pt-6 pb-5 md:px-6 md:pb-6">
       <Card className="flex h-full min-h-0 flex-col">
-        <CardHeader>
-          <CardTitle>Recurring payments</CardTitle>
-          <CardDescription>{countLabel}</CardDescription>
+        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1.5">
+            <CardTitle>Recurring payments</CardTitle>
+            <CardDescription>{countLabel}</CardDescription>
+          </div>
+          <Button asChild size="sm">
+            <Link href="/dashboard/payments/recurring/create">
+              <PlusIcon className="size-4" />
+              Create recurring payment
+            </Link>
+          </Button>
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col">
           {initialError ? (
@@ -280,6 +295,12 @@ export function RecurringPaymentsWorkspace({
                   Created recurring payment records will appear here.
                 </p>
               </div>
+              <Button asChild size="sm">
+                <Link href="/dashboard/payments/recurring/create">
+                  <PlusIcon className="size-4" />
+                  Create recurring payment
+                </Link>
+              </Button>
             </div>
           ) : (
             <div className="min-h-0 flex-1 overflow-hidden">
