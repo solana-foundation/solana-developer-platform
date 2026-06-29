@@ -5,7 +5,7 @@ import { ONRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ra
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { HostedRampFrame } from "./hosted-ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
-import { simulateActionLabels } from "./providers";
+import { hasOnboardingLifecycle, simulateActionLabels } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
@@ -84,7 +84,12 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
-  if (currentStepId === "PROVIDER" && onboarding && !quote) {
+  if (
+    currentStepId === "PROVIDER" &&
+    onboarding &&
+    !quote &&
+    hasOnboardingLifecycle(onboarding.provider)
+  ) {
     return (
       <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />
     );

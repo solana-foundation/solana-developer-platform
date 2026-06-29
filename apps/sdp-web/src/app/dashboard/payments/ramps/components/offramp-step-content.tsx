@@ -10,6 +10,7 @@ import { walletComboboxOptions } from "../wallet-options";
 import { HostedRampFrame } from "./hosted-ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
+import { hasOnboardingLifecycle } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
@@ -177,7 +178,12 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     );
   }
 
-  if (currentStepId === "COMPLETE" && onboarding && !quote) {
+  if (
+    currentStepId === "COMPLETE" &&
+    onboarding &&
+    !quote &&
+    hasOnboardingLifecycle(onboarding.provider)
+  ) {
     return (
       <RampOnboardingPanel direction="offramp" onboarding={onboarding} onRetry={retryOnboarding} />
     );

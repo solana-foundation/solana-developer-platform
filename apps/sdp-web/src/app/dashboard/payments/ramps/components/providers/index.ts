@@ -26,6 +26,15 @@ export interface SimulateActionLabels {
   done: string;
 }
 
+/**
+ * Providers with a counterparty onboarding/provisioning lifecycle (and thus panel copy).
+ * Widget providers (moonpay, moneygram) report `ready` and go straight to a quote — they
+ * never render the onboarding panel, so callers must gate on this before rendering it.
+ */
+export function hasOnboardingLifecycle(provider: RampProviderId): boolean {
+  return provider === "bvnk" || provider === "lightspark";
+}
+
 export function onboardingCopy(
   provider: RampProviderId,
   status: OnboardingPanelStatus
@@ -41,7 +50,16 @@ export function onboardingCopy(
 }
 
 export function simulateActionLabels(provider: "bvnk" | "lightspark"): SimulateActionLabels {
-  return provider === "bvnk" ? BVNK_SIMULATE_LABELS : LIGHTSPARK_SIMULATE_LABELS;
+  switch (provider) {
+    case "bvnk":
+      return BVNK_SIMULATE_LABELS;
+    case "lightspark":
+      return LIGHTSPARK_SIMULATE_LABELS;
+    default: {
+      const exhaustive: never = provider;
+      throw new Error(`No simulate labels for ramp provider: ${exhaustive}`);
+    }
+  }
 }
 
 /** One-line "what we're setting up under the hood" — varies by provider and direction. */
