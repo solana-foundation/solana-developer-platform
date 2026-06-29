@@ -7,6 +7,10 @@ export interface ApiKeyWalletBinding {
   permissions: Permission[];
 }
 
+export interface ApiKeyWalletBindingForKey extends ApiKeyWalletBinding {
+  apiKeyId: string;
+}
+
 export const DEFAULT_API_KEY_WALLET_PERMISSIONS: Permission[] = ["*"];
 
 export function normalizeApiKeyWalletPermissions(permissions?: Permission[] | null): Permission[] {
@@ -37,6 +41,31 @@ export async function listApiKeyWalletBindings(
     .all<{ wallet_id: string; permissions: string }>();
 
   return (result.results ?? []).map((row) => ({
+    walletId: row.wallet_id,
+    permissions: normalizeApiKeyWalletPermissions(safeParsePermissions(row.permissions)),
+  }));
+}
+
+export async function listApiKeyWalletBindingsForApiKeys(
+  db: DatabaseClient,
+  apiKeyIds: string[]
+): Promise<ApiKeyWalletBindingForKey[]> {
+  if (apiKeyIds.length === 0) {
+    return [];
+  }
+
+  const result = await db
+    .prepare(
+      `SELECT api_key_id, wallet_id, permissions
+       FROM api_key_wallet_permissions
+       WHERE api_key_id = ANY(?::text[])
+       ORDER BY api_key_id ASC, created_at ASC`
+    )
+    .bind(apiKeyIds)
+    .all<{ api_key_id: string; wallet_id: string; permissions: unknown }>();
+
+  return (result.results ?? []).map((row) => ({
+    apiKeyId: row.api_key_id,
     walletId: row.wallet_id,
     permissions: normalizeApiKeyWalletPermissions(safeParsePermissions(row.permissions)),
   }));
@@ -113,7 +142,7 @@ export async function cloneApiKeyWalletBindings(
     .run();
 }
 
-function safeParsePermissions(raw: string): Permission[] | null {
+function safeParsePermissions(raw: unknown): Permission[] | null {
   const parsed = parsePostgresJsonOr<unknown>(raw, null);
   if (!Array.isArray(parsed)) {
     return null;

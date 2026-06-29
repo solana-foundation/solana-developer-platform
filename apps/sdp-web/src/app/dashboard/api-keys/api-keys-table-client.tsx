@@ -1,6 +1,14 @@
 "use client";
 
-import type { PaymentsDashboardWallet, Permission } from "@sdp/types";
+import type {
+  ApiKeyEnvironment,
+  ApiKeyRole,
+  ApiKeyStatus,
+  ApiKeyWalletBinding,
+  ApiKeyWalletPolicyBindingSummary,
+  ApiKeyWalletScope,
+  PaymentsDashboardWallet,
+} from "@sdp/types";
 import { useEffect, useMemo, useState } from "react";
 import {
   Table,
@@ -12,34 +20,11 @@ import {
 } from "@/components/ui/table";
 import { ApiKeyActionsMenu } from "./api-key-actions-menu";
 
-type ApiKeyRole = "api_admin" | "api_developer" | "api_readonly";
-type ApiKeyEnvironment = "sandbox" | "production";
-type ApiKeyStatus = "active" | "revoked" | "expired" | "deactivated";
-type ApiKeyWalletScope = "all" | "selected";
-
 const PREFIX_COLUMN_CLASS = "hidden @4xl/api-keys-table:table-cell";
 const STATUS_COLUMN_CLASS = "hidden @5xl/api-keys-table:table-cell";
 const LAST_USED_COLUMN_CLASS = "hidden @6xl/api-keys-table:table-cell";
 const EXPIRES_COLUMN_CLASS = "hidden @7xl/api-keys-table:table-cell";
 const CREATED_COLUMN_CLASS = "hidden @7xl/api-keys-table:table-cell";
-
-interface ApiKeyWalletBinding {
-  walletId: string;
-  permissions: Permission[];
-}
-
-interface ApiKeyWalletPolicyBindingSummary {
-  id: string;
-  bindingScope: ApiKeyWalletScope;
-  walletId: string | null;
-  custodyWalletId: string | null;
-  walletControlProfileId: string | null;
-  walletControlProfileRevisionId: string | null;
-  apiKeyControlProfileId: string | null;
-  apiKeyControlProfileRevisionId: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
 
 export interface ApiKeyRecord {
   id: string;

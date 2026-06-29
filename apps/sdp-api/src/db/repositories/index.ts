@@ -108,6 +108,7 @@ export {
 export { createPostgresPaymentsRepository } from "./payments.repository.postgres";
 export type {
   ActiveApiKeyControlProfileResult,
+  ActivePolicyProfileRevisionRefRow,
   ActiveWalletControlProfileResult,
   ApiKeyControlProfileRevisionRow,
   ApiKeyControlProfileRow,

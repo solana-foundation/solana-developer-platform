@@ -1,13 +1,16 @@
-import type { ApiKeyWalletPolicyBinding, ApiKeyWalletPolicyBindingSummary } from "@sdp/types";
-import { createPolicyRepository, type PolicyRepository } from "@/db/repositories";
+import type { ApiKeyWalletPolicyBindingSummary } from "@sdp/types";
+import {
+  type ActivePolicyProfileRevisionRefRow,
+  type ApiKeyWalletPolicyBindingRow,
+  createPolicyRepository,
+} from "@/db/repositories";
 import {
   type ApiKeyWalletBinding,
-  listApiKeyWalletBindings,
+  listApiKeyWalletBindingsForApiKeys,
 } from "@/services/api-key-wallets.service";
-import { PolicyFoundationService } from "@/services/policy-foundation.service";
 import type { Env } from "@/types/env";
 
-type ApiKeyWalletBindingsDb = Parameters<typeof listApiKeyWalletBindings>[0];
+type ApiKeyWalletBindingsDb = Parameters<typeof listApiKeyWalletBindingsForApiKeys>[0];
 
 export interface ApiKeyAccessSummary {
   keyId: string;
@@ -15,40 +18,37 @@ export interface ApiKeyAccessSummary {
   policyBindings: ApiKeyWalletPolicyBindingSummary[];
 }
 
-async function mapPolicyBindingSummary(
-  binding: ApiKeyWalletPolicyBinding,
-  policyRepository: PolicyRepository
-): Promise<ApiKeyWalletPolicyBindingSummary> {
-  const [walletProfile, apiKeyProfile] = await Promise.all([
-    binding.walletControlProfileId
-      ? policyRepository.getActiveWalletControlProfileByProfileId(binding.walletControlProfileId)
-      : Promise.resolve(null),
-    binding.apiKeyControlProfileId
-      ? policyRepository.getActiveApiKeyControlProfileByProfileId(binding.apiKeyControlProfileId)
-      : Promise.resolve(null),
-  ]);
-
-  return {
-    id: binding.id,
-    bindingScope: binding.bindingScope,
-    walletId: binding.walletId,
-    custodyWalletId: binding.custodyWalletId,
-    walletControlProfileId: binding.walletControlProfileId,
-    walletControlProfileRevisionId: walletProfile?.revision?.id ?? null,
-    apiKeyControlProfileId: binding.apiKeyControlProfileId,
-    apiKeyControlProfileRevisionId: apiKeyProfile?.revision?.id ?? null,
-    createdAt: binding.createdAt,
-    updatedAt: binding.updatedAt,
-  };
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
 }
 
-async function mapPolicyBindingSummaries(
-  bindings: ApiKeyWalletPolicyBinding[],
-  policyRepository: PolicyRepository
-): Promise<ApiKeyWalletPolicyBindingSummary[]> {
-  return await Promise.all(
-    bindings.map((binding) => mapPolicyBindingSummary(binding, policyRepository))
-  );
+function revisionIdByProfileId(
+  rows: ActivePolicyProfileRevisionRefRow[]
+): Map<string, string | null> {
+  return new Map(rows.map((row) => [row.profile_id, row.active_revision_id]));
+}
+
+function mapPolicyBindingSummary(
+  binding: ApiKeyWalletPolicyBindingRow,
+  walletRevisionIdByProfileId: Map<string, string | null>,
+  apiKeyRevisionIdByProfileId: Map<string, string | null>
+): ApiKeyWalletPolicyBindingSummary {
+  return {
+    id: binding.id,
+    bindingScope: binding.binding_scope,
+    walletId: binding.wallet_id,
+    custodyWalletId: binding.custody_wallet_id,
+    walletControlProfileId: binding.wallet_control_profile_id,
+    walletControlProfileRevisionId: binding.wallet_control_profile_id
+      ? (walletRevisionIdByProfileId.get(binding.wallet_control_profile_id) ?? null)
+      : null,
+    apiKeyControlProfileId: binding.api_key_control_profile_id,
+    apiKeyControlProfileRevisionId: binding.api_key_control_profile_id
+      ? (apiKeyRevisionIdByProfileId.get(binding.api_key_control_profile_id) ?? null)
+      : null,
+    createdAt: binding.created_at,
+    updatedAt: binding.updated_at,
+  };
 }
 
 export async function buildApiKeyAccessSummaries(
@@ -56,24 +56,57 @@ export async function buildApiKeyAccessSummaries(
   db: ApiKeyWalletBindingsDb,
   apiKeyIds: string[]
 ): Promise<Map<string, ApiKeyAccessSummary>> {
+  const uniqueApiKeyIds = uniqueStrings(apiKeyIds);
+  if (uniqueApiKeyIds.length === 0) {
+    return new Map();
+  }
+
   const policyRepository = createPolicyRepository(env);
-  const policyService = new PolicyFoundationService(policyRepository);
-  const summaries = await Promise.all(
-    apiKeyIds.map(async (keyId) => {
-      const [walletBindings, policyBindings] = await Promise.all([
-        listApiKeyWalletBindings(db, keyId),
-        policyService
-          .listApiKeyWalletPolicyBindings(keyId)
-          .then((bindings) => mapPolicyBindingSummaries(bindings, policyRepository)),
-      ]);
 
-      return {
+  const [walletBindings, policyBindings] = await Promise.all([
+    listApiKeyWalletBindingsForApiKeys(db, uniqueApiKeyIds),
+    policyRepository.listApiKeyWalletPolicyBindingsForApiKeys(uniqueApiKeyIds),
+  ]);
+
+  const [walletRevisionRefs, apiKeyRevisionRefs] = await Promise.all([
+    policyRepository.listActiveWalletControlProfileRevisionRefs(
+      uniqueStrings(policyBindings.map((binding) => binding.wallet_control_profile_id))
+    ),
+    policyRepository.listActiveApiKeyControlProfileRevisionRefs(
+      uniqueStrings(policyBindings.map((binding) => binding.api_key_control_profile_id))
+    ),
+  ]);
+
+  const walletRevisionIdByProfileId = revisionIdByProfileId(walletRevisionRefs);
+  const apiKeyRevisionIdByProfileId = revisionIdByProfileId(apiKeyRevisionRefs);
+  const walletBindingsByKeyId = new Map<string, ApiKeyWalletBinding[]>();
+  const policyBindingsByKeyId = new Map<string, ApiKeyWalletPolicyBindingSummary[]>();
+
+  for (const binding of walletBindings) {
+    const bindingsForKey = walletBindingsByKeyId.get(binding.apiKeyId) ?? [];
+    bindingsForKey.push({
+      walletId: binding.walletId,
+      permissions: binding.permissions,
+    });
+    walletBindingsByKeyId.set(binding.apiKeyId, bindingsForKey);
+  }
+
+  for (const binding of policyBindings) {
+    const bindingsForKey = policyBindingsByKeyId.get(binding.api_key_id) ?? [];
+    bindingsForKey.push(
+      mapPolicyBindingSummary(binding, walletRevisionIdByProfileId, apiKeyRevisionIdByProfileId)
+    );
+    policyBindingsByKeyId.set(binding.api_key_id, bindingsForKey);
+  }
+
+  return new Map(
+    uniqueApiKeyIds.map((keyId) => [
+      keyId,
+      {
         keyId,
-        walletBindings,
-        policyBindings,
-      };
-    })
+        walletBindings: walletBindingsByKeyId.get(keyId) ?? [],
+        policyBindings: policyBindingsByKeyId.get(keyId) ?? [],
+      },
+    ])
   );
-
-  return new Map(summaries.map((summary) => [summary.keyId, summary]));
 }
