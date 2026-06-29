@@ -10,17 +10,32 @@ import type { ComboboxOption } from "@/components/ui/combobox";
 type WalletBalance = NonNullable<PaymentsDashboardWallet["balances"]>[number];
 type IssuedTokenSymbolsByMint = Record<string, string>;
 
+interface ResolveWalletAssetOptionsConfig {
+  includeDefaultUsdc?: boolean;
+  hideUnresolvedMints?: boolean;
+}
+
+const DISPLAYABLE_TOKEN_SYMBOL_PATTERN = /^[A-Z0-9][A-Z0-9._-]{0,11}$/;
+
+function isDisplayableTokenSymbol(value: string): boolean {
+  return DISPLAYABLE_TOKEN_SYMBOL_PATTERN.test(value.trim().toUpperCase());
+}
+
 export function resolveWalletAssetOptions(
   wallet: PaymentsDashboardWallet | null,
-  issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint
+  issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint,
+  options: ResolveWalletAssetOptionsConfig = {}
 ): string[] {
-  const assetSet = new Set<string>(["USDC"]);
+  const assetSet = new Set<string>(options.includeDefaultUsdc === false ? [] : ["USDC"]);
   for (const balance of wallet?.balances ?? []) {
     if (isSolBalance(balance)) {
       continue;
     }
 
     const token = resolveAggregateBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
+    if (options.hideUnresolvedMints && !isDisplayableTokenSymbol(token)) {
+      continue;
+    }
     if (token) {
       assetSet.add(token);
     }
@@ -49,7 +64,7 @@ export function findWalletBalanceForDisplayToken(
     wallet?.balances?.find((balance) => {
       const displayToken = resolveAggregateBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
       return (
-        displayToken === normalizedToken ||
+        displayToken.trim().toUpperCase() === normalizedToken ||
         balance.token.trim().toUpperCase() === normalizedToken ||
         balance.mint.trim() === token.trim()
       );

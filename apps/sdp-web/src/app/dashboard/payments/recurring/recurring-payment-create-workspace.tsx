@@ -1,17 +1,12 @@
 "use client";
 
-import {
-  type Counterparty,
-  type CounterpartyAccount,
-  type PaymentsDashboardWallet,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+import type { Counterparty, CounterpartyAccount, PaymentsDashboardWallet } from "@sdp/types";
 import { CreditCardIcon, PlusIcon, RepeatIcon, WalletIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
-import { Combobox } from "@/components/ui/combobox";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
@@ -24,7 +19,10 @@ import {
 } from "../payments-workspace.data";
 import { CounterpartyPicker } from "../ramps/components/counterparty-picker";
 import { RampWizardShell } from "../ramps/components/ramp-wizard-shell";
-import { findWalletBalanceForDisplayToken } from "../ramps/wallet-options";
+import {
+  findWalletBalanceForDisplayToken,
+  resolveWalletAssetOptions,
+} from "../ramps/wallet-options";
 import { createRecurringPayment } from "./recurring-payments.data";
 
 interface RecurringPaymentCreateWorkspaceProps {
@@ -50,12 +48,6 @@ interface RecurringPaymentCreateFields {
   metadataUri: string;
 }
 
-interface AssetOption {
-  value: string;
-  label: string;
-  description?: string;
-}
-
 type WalletBalance = NonNullable<PaymentsDashboardWallet["balances"]>[number];
 
 const CREATE_STEPS = [
@@ -67,7 +59,6 @@ const CREATE_STEPS = [
 
 const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
-const DISPLAYABLE_TOKEN_SYMBOL_PATTERN = /^[A-Z0-9][A-Z0-9._-]{0,11}$/;
 
 const SCHEDULE_PRESETS = [
   { value: "24", label: "Every day", description: "Collect once per day." },
@@ -137,57 +128,6 @@ function firstCollectionAtIsValid(value: string): boolean {
   }
   const timestamp = new Date(value).getTime();
   return Number.isFinite(timestamp) && timestamp > Date.now();
-}
-
-function resolveDisplayableTokenSymbol(value: string): string | null {
-  const symbol = value.trim().toUpperCase();
-  return DISPLAYABLE_TOKEN_SYMBOL_PATTERN.test(symbol) ? symbol : null;
-}
-
-function resolveRecurringAssetDisplayToken(
-  balance: Pick<WalletBalance, "token" | "mint">,
-  issuedTokenSymbolsByMint: Record<string, string>
-): string | null {
-  const normalizedMint = balance.mint.trim();
-  const issuedTokenSymbol = issuedTokenSymbolsByMint[normalizedMint]?.trim();
-  if (issuedTokenSymbol) {
-    return issuedTokenSymbol;
-  }
-
-  const wellKnownTokenSymbol = WELL_KNOWN_TOKEN_BY_MINT.get(normalizedMint)?.symbol;
-  if (wellKnownTokenSymbol) {
-    return wellKnownTokenSymbol;
-  }
-
-  return resolveDisplayableTokenSymbol(balance.token);
-}
-
-function resolveRecurringAssetOptions(
-  wallet: PaymentsDashboardWallet | null,
-  issuedTokenSymbolsByMint: Record<string, string>
-): AssetOption[] {
-  const seen = new Set<string>();
-  const options: AssetOption[] = [];
-
-  for (const balance of wallet?.balances ?? []) {
-    if (isSolBalance(balance)) {
-      continue;
-    }
-
-    const displayToken = resolveRecurringAssetDisplayToken(balance, issuedTokenSymbolsByMint);
-    if (!displayToken || seen.has(displayToken)) {
-      continue;
-    }
-
-    seen.add(displayToken);
-    options.push({
-      value: displayToken,
-      label: displayToken,
-      description: `${balance.uiAmount} available`,
-    });
-  }
-
-  return options;
 }
 
 function ReviewSummaryCard({ rows }: { rows: Array<{ label: string; value: ReactNode }> }) {
@@ -314,8 +254,19 @@ export function RecurringPaymentCreateWorkspace({
   const selectedWallet =
     availableWallets.find((wallet) => wallet.walletId === fields.walletId) ?? null;
 
-  const assetOptions = useMemo<AssetOption[]>(
-    () => resolveRecurringAssetOptions(selectedWallet, issuedTokenSymbolsByMint),
+  const assetOptions = useMemo<ComboboxOption[]>(
+    () =>
+      resolveWalletAssetOptions(selectedWallet, issuedTokenSymbolsByMint, {
+        hideUnresolvedMints: true,
+        includeDefaultUsdc: false,
+      }).map((token) => ({
+        value: token,
+        label: token,
+        description: `${
+          findWalletBalanceForDisplayToken(selectedWallet, token, issuedTokenSymbolsByMint)
+            ?.uiAmount ?? "0"
+        } available`,
+      })),
     [issuedTokenSymbolsByMint, selectedWallet]
   );
   const nonSolBalanceCount =
@@ -373,13 +324,14 @@ export function RecurringPaymentCreateWorkspace({
 
   const selectWallet = (walletId: string) => {
     const wallet = availableWallets.find((entry) => entry.walletId === walletId) ?? null;
-    const nextAssets = resolveRecurringAssetOptions(wallet, issuedTokenSymbolsByMint);
+    const nextAssets = resolveWalletAssetOptions(wallet, issuedTokenSymbolsByMint, {
+      hideUnresolvedMints: true,
+      includeDefaultUsdc: false,
+    });
     setFields((current) => ({
       ...current,
       walletId,
-      token: nextAssets.some((asset) => asset.value === current.token)
-        ? current.token
-        : (nextAssets[0]?.value ?? ""),
+      token: nextAssets.includes(current.token) ? current.token : (nextAssets[0] ?? ""),
     }));
     setFormError(null);
   };
@@ -502,11 +454,6 @@ export function RecurringPaymentCreateWorkspace({
     setStepIndex((current) => current + 1);
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    void handlePrimary();
-  };
-
   const handleSecondary = () => {
     if (submitting) {
       return;
@@ -527,7 +474,6 @@ export function RecurringPaymentCreateWorkspace({
       secondaryLabel={stepIndex === 0 ? "Cancel" : "Previous"}
       walletsError={liveWalletsError}
       onPrimary={handlePrimary}
-      onSubmit={handleSubmit}
       onSecondary={handleSecondary}
       counterpartyDialogOpen={counterpartyDialogOpen}
       setCounterpartyDialogOpen={setCounterpartyDialogOpen}
@@ -677,7 +623,7 @@ export function RecurringPaymentCreateWorkspace({
               label="Billing interval"
               value={fields.schedulePreset}
               onChange={(value) => setField("schedulePreset", value as SchedulePreset)}
-              options={SCHEDULE_PRESETS.map((preset) => ({ ...preset }))}
+              options={SCHEDULE_PRESETS}
               searchable={false}
               icon={<RepeatIcon />}
               size="lg"

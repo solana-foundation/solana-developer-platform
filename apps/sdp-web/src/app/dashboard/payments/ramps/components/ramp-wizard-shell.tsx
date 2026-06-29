@@ -2,7 +2,7 @@
 
 import type { Counterparty, RampProviderId } from "@sdp/types";
 import Image from "next/image";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/payments/counterparty/counterparty-create-dialog";
 import { Button } from "@/components/ui/button";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
@@ -37,7 +37,6 @@ interface RampWizardShellProps {
   walletsError: string | null;
   onPrimary: () => void;
   onSecondary: () => void;
-  onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
   counterpartyDialogOpen: boolean;
   setCounterpartyDialogOpen: (open: boolean) => void;
   onCounterpartyCreated: (created: Counterparty) => void;
@@ -60,7 +59,6 @@ export function RampWizardShell({
   walletsError,
   onPrimary,
   onSecondary,
-  onSubmit,
   counterpartyDialogOpen,
   setCounterpartyDialogOpen,
   onCounterpartyCreated,
@@ -72,8 +70,8 @@ export function RampWizardShell({
   secondaryDisabled,
 }: RampWizardShellProps) {
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
-  const content = (
-    <>
+  return (
+    <div className="mx-auto flex h-[80vh] w-full max-w-5xl flex-col py-6">
       <div className="mx-auto w-full max-w-3xl flex-1 space-y-6 overflow-y-auto px-1.5">
         <div className="space-y-4">
           <div className="flex items-center gap-3">
@@ -127,10 +125,10 @@ export function RampWizardShell({
           {footerActions}
           {hidePrimary ? null : (
             <Button
-              type={onSubmit ? "submit" : "button"}
+              type="button"
               className="h-14 rounded-full text-base"
               disabled={primaryDisabled}
-              onClick={onSubmit ? undefined : onPrimary}
+              onClick={onPrimary}
             >
               {primaryLabel}
             </Button>
@@ -152,20 +150,6 @@ export function RampWizardShell({
           onSecondary();
         }}
       />
-    </>
+    </div>
   );
-
-  if (onSubmit) {
-    return (
-      <form
-        className="mx-auto flex h-[80vh] w-full max-w-5xl flex-col py-6"
-        noValidate
-        onSubmit={onSubmit}
-      >
-        {content}
-      </form>
-    );
-  }
-
-  return <div className="mx-auto flex h-[80vh] w-full max-w-5xl flex-col py-6">{content}</div>;
 }
