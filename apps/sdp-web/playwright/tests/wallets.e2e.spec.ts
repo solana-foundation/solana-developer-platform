@@ -45,7 +45,6 @@ const E2E_POLL_OPTIONS = {
   timeout: E2E_POLL_TIMEOUT_MS,
   intervals: [E2E_POLL_INTERVAL_MS],
 };
-const usesKoraSurfpoolShim = process.env.KORA_SURFPOOL_SHIM === "true";
 
 async function getToken(api: LocalApiClient, tokenId: string): Promise<Token> {
   const response = await api.get<TokenResponse>(
@@ -227,10 +226,6 @@ test.describe
       browser,
       page,
     }) => {
-      test.skip(
-        usesKoraSurfpoolShim,
-        "Surfpool API shards cover deploy/mint/burn; dashboard shim keeps activity rendering focused."
-      );
       test.setTimeout(420_000);
 
       const session = await getPlaywrightAdminSession(browser);
@@ -366,11 +361,6 @@ test.describe
       browser,
       page,
     }) => {
-      test.skip(
-        usesKoraSurfpoolShim,
-        "Dashboard wallet activity refresh uses live wallet detail balance reads; keep it in non-shim dashboard E2E."
-      );
-
       const session = await getPlaywrightAdminSession(browser);
       const fixtures = await bootstrapLocalWalletFixtures({
         identity: session.identity,
