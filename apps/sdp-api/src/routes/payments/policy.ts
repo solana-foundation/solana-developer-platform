@@ -24,6 +24,7 @@ export async function assertWalletPolicyAllowsTransfer(
     wallet: CustodyWallet;
     destinationAddress?: string | null;
     enforceDestinationAllowlist?: boolean;
+    enforceDailyLimit?: boolean;
     token: string;
     amount: string;
   }
