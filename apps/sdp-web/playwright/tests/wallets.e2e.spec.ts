@@ -348,6 +348,8 @@ test.describe
         bearerToken: session.getBearerToken,
         provider: "privy",
         walletCount: 1,
+        fundSourceWallet: true,
+        fundSourceAmountSol: 0.01,
         tier: "enterprise",
       });
       const projectId = await resolvePlaywrightProjectId(
