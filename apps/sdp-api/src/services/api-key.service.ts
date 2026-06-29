@@ -20,6 +20,7 @@ export interface ApiKeyListItem {
   role: ApiKeyRole;
   environment: ApiKeyEnvironment;
   status: ApiKeyStatus;
+  signingWalletId: string | null;
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
@@ -102,6 +103,7 @@ interface ApiKeyListRow {
   role: ApiKeyRole;
   environment: ApiKeyEnvironment;
   status: ApiKeyStatus;
+  signing_wallet_id: string | null;
   last_used_at: string | null;
   expires_at: string | null;
   created_at: string;
@@ -131,7 +133,7 @@ export class ApiKeyService {
     const result = await this.db
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
-                ak.last_used_at, ak.expires_at, ak.created_at
+                ak.signing_wallet_id, ak.last_used_at, ak.expires_at, ak.created_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.project_id = ? AND ak.status NOT IN ('revoked', 'deactivated')
@@ -458,6 +460,7 @@ export class ApiKeyService {
       role: row.role,
       environment: row.environment,
       status: row.status,
+      signingWalletId: row.signing_wallet_id,
       lastUsedAt: row.last_used_at,
       expiresAt: row.expires_at,
       createdAt: row.created_at,

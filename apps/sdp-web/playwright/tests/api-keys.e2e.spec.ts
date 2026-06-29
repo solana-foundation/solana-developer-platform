@@ -26,6 +26,13 @@ test.describe
       await page.getByLabel("Selected wallets").check();
       await page.getByRole("checkbox").first().check();
       await page.getByRole("button", { name: "Continue" }).click();
+
+      await expect(page.getByText("Endpoint permissions")).toBeVisible();
+      await expect(page.getByText("Wallet access")).toBeVisible();
+      await expect(page.getByText("Policy").first()).toBeVisible();
+      await expect(page.getByText("Security note")).toBeVisible();
+      await expect(page.getByText("No API-key policy").first()).toBeVisible();
+
       await page.getByRole("button", { name: "Create key" }).click();
 
       await expect(page.getByText("API key generated")).toBeVisible({ timeout: 120_000 });
@@ -36,6 +43,10 @@ test.describe
 
       await expect(page.locator("#generated-key")).toHaveCount(0);
       await expect(page.getByText("Your full key (shown once)")).toHaveCount(0);
-      await expect(page.getByText(keyName)).toBeVisible();
+      const keyRow = page.getByRole("row", { name: new RegExp(keyName) });
+      await expect(keyRow).toBeVisible();
+      await expect(keyRow).toContainText("Developer access");
+      await expect(keyRow).toContainText("1 selected");
+      await expect(keyRow).toContainText("No API-key policy");
     });
   });
