@@ -1612,10 +1612,14 @@ function replacementNextCollectionDueAt(input: {
   requested: string | null | undefined;
   periodStartAt: string;
   periodHours: number;
+  clampToMinimum?: boolean;
 }): string {
   const minimumDueAt = nextCollectionDueAt(input.periodStartAt, input.periodHours);
   const requested = input.requested ?? minimumDueAt;
   if (new Date(requested).getTime() < new Date(minimumDueAt).getTime()) {
+    if (input.clampToMinimum) {
+      return minimumDueAt;
+    }
     throw badRequest(
       "nextCollectionDueAt cannot be earlier than the replacement subscription period"
     );
@@ -1685,6 +1689,11 @@ async function finalizeMetadataScheduleUpdate(input: {
       error: null,
       updatedAt: finalizedAt,
     });
+    const auditAfterValues =
+      input.nextCollectionDueAt !== undefined &&
+      input.resolved.changedFields.includes("nextCollectionDueAt")
+        ? { ...input.resolved.afterValues, nextCollectionDueAt: input.nextCollectionDueAt }
+        : input.resolved.afterValues;
     await recordRecurringPaymentUpdateEvent({
       recurringRepo,
       organizationId: input.organizationId,
@@ -1693,7 +1702,7 @@ async function finalizeMetadataScheduleUpdate(input: {
       attemptId: input.attempt.id,
       changedFields: input.resolved.changedFields.map(String),
       beforeValues: input.resolved.beforeValues,
-      afterValues: input.resolved.afterValues,
+      afterValues: auditAfterValues,
       createdBy: input.createdBy,
       createdAt: finalizedAt,
     });
@@ -1718,6 +1727,23 @@ async function runMetadataScheduleUpdate(input: {
   const rpc = solanaRpc.createRpc(input.env);
   let attempt = input.attempt;
   let planUpdateSignature = attempt.plan_update_signature as Signature | null;
+
+  let onChainSubscription: Awaited<
+    ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>
+  > | null = null;
+  if (input.request.nextCollectionDueAt !== undefined && input.claimed.subscription_pda) {
+    onChainSubscription = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
+      rpc,
+      assertValidAddress(input.claimed.subscription_pda, "subscriptionPda") as Address,
+      { commitment: "confirmed" }
+    );
+  }
+  const nextDueAt = activeNextCollectionDueAt({
+    requested: input.request.nextCollectionDueAt,
+    recurringPayment: input.claimed,
+    subscription: input.subscription,
+    onChainSubscription,
+  });
 
   if (input.resolved.metadataUri !== input.claimed.metadata_uri) {
     if (!input.claimed.plan_pda) {
@@ -1781,23 +1807,6 @@ async function runMetadataScheduleUpdate(input: {
       "Recurring payment update failed on-chain"
     );
   }
-
-  let onChainSubscription: Awaited<
-    ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>
-  > | null = null;
-  if (input.request.nextCollectionDueAt !== undefined && input.claimed.subscription_pda) {
-    onChainSubscription = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
-      rpc,
-      assertValidAddress(input.claimed.subscription_pda, "subscriptionPda") as Address,
-      { commitment: "confirmed" }
-    );
-  }
-  const nextDueAt = activeNextCollectionDueAt({
-    requested: input.request.nextCollectionDueAt,
-    recurringPayment: input.claimed,
-    subscription: input.subscription,
-    onChainSubscription,
-  });
 
   return finalizeMetadataScheduleUpdate({
     env: input.env,
@@ -2093,6 +2102,9 @@ async function finalizeReplacementUpdate(input: {
       error: null,
       updatedAt: finalizedAt,
     });
+    const auditAfterValues = input.resolved.changedFields.includes("nextCollectionDueAt")
+      ? { ...input.resolved.afterValues, nextCollectionDueAt: input.nextCollectionDueAt }
+      : input.resolved.afterValues;
     await recordRecurringPaymentUpdateEvent({
       recurringRepo,
       organizationId: input.organizationId,
@@ -2101,7 +2113,7 @@ async function finalizeReplacementUpdate(input: {
       attemptId: input.attempt.id,
       changedFields: input.resolved.changedFields.map(String),
       beforeValues: input.resolved.beforeValues,
-      afterValues: input.resolved.afterValues,
+      afterValues: auditAfterValues,
       createdBy: input.createdBy,
       createdAt: finalizedAt,
     });
@@ -2152,6 +2164,7 @@ async function runReplacementUpdate(input: {
     requested: input.request.nextCollectionDueAt,
     periodStartAt: replacementPeriodStartAt,
     periodHours: input.resolved.periodHours,
+    clampToMinimum: Boolean(planCreationSignature || authorizationSignature || oldCancelSignature),
   });
 
   const sourceSigner = await solanaServices.createOrgSigner(
@@ -2408,6 +2421,14 @@ async function runReplacementUpdate(input: {
     "Recurring payment old subscription cancellation failed on-chain"
   );
 
+  const finalizedAt = new Date().toISOString();
+  const safeNextDue = replacementNextCollectionDueAt({
+    requested: requestedNextDue,
+    periodStartAt: finalizedAt,
+    periodHours: input.resolved.periodHours,
+    clampToMinimum: true,
+  });
+
   return finalizeReplacementUpdate({
     env: input.env,
     organizationId: input.organizationId,
@@ -2425,8 +2446,8 @@ async function runReplacementUpdate(input: {
     subscriptionAuthorityAddress,
     authorizationSignature,
     oldCancelSignature,
-    currentPeriodStartAt: replacementPeriodStartAt,
-    nextCollectionDueAt: requestedNextDue,
+    currentPeriodStartAt: finalizedAt,
+    nextCollectionDueAt: safeNextDue,
     createdBy: input.createdBy,
   });
 }

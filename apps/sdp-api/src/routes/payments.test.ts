@@ -1144,13 +1144,21 @@ describe("Payments routes", () => {
       "Content-Type": "application/json",
     };
     const activated = await activateRecurringPaymentForTest(headers);
+    const laterPeriodStartAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET current_period_start_at = ? WHERE id = ?")
+      .bind(laterPeriodStartAt, activated.subscriptionId)
+      .run();
 
     const updateRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}`,
       {
         method: "PATCH",
         headers,
-        body: JSON.stringify({ metadataUri: "https://example.com/recurring/active.json" }),
+        body: JSON.stringify({
+          metadataUri: "https://example.com/recurring/active.json",
+          nextCollectionDueAt: null,
+        }),
       },
       env
     );
@@ -1163,6 +1171,7 @@ describe("Payments routes", () => {
           planId: string;
           subscriptionId: string;
           metadataUri: string | null;
+          nextCollectionDueAt: string;
         };
       };
     };
@@ -1172,6 +1181,7 @@ describe("Payments routes", () => {
       subscriptionId: activated.subscriptionId,
       metadataUri: "https://example.com/recurring/active.json",
     });
+    expect(updateBody.data.recurringPayment.nextCollectionDueAt).not.toBeNull();
     expect(signAndSendMock).toHaveBeenCalledTimes(3);
 
     const attempt = await getDb(env)
@@ -1193,6 +1203,17 @@ describe("Payments routes", () => {
       stage: "finalize",
       plan_update_signature: updatePlanSignature,
     });
+    const event = await getDb(env)
+      .prepare(
+        `SELECT after_values
+           FROM payment_recurring_payment_update_events
+          WHERE recurring_payment_id = ?`
+      )
+      .bind(activated.id)
+      .first<{ after_values: Record<string, unknown> }>();
+    expect(event?.after_values.nextCollectionDueAt).toBe(
+      updateBody.data.recurringPayment.nextCollectionDueAt
+    );
   });
 
   it("replaces active recurring payment records for term changes and cancels the old subscription", async () => {
@@ -1235,7 +1256,7 @@ describe("Payments routes", () => {
       {
         method: "PATCH",
         headers,
-        body: JSON.stringify({ amount: "35.00", periodHours: 48 }),
+        body: JSON.stringify({ amount: "35.00", periodHours: 48, nextCollectionDueAt: null }),
       },
       env
     );
@@ -1250,6 +1271,7 @@ describe("Payments routes", () => {
           planId: string;
           subscriptionId: string;
           authorizationSignature: string;
+          nextCollectionDueAt: string;
         };
       };
     };
@@ -1259,6 +1281,7 @@ describe("Payments routes", () => {
       periodHours: 48,
       authorizationSignature: replacementAuthSignature,
     });
+    expect(updateBody.data.recurringPayment.nextCollectionDueAt).not.toBeNull();
     expect(updateBody.data.recurringPayment.planId).not.toBe(activated.planId);
     expect(updateBody.data.recurringPayment.subscriptionId).not.toBe(activated.subscriptionId);
     expect(signAndSendMock).toHaveBeenCalledTimes(5);
@@ -1296,6 +1319,17 @@ describe("Payments routes", () => {
       authorization_signature: replacementAuthSignature,
       old_cancel_signature: oldCancelSignature,
     });
+    const event = await getDb(env)
+      .prepare(
+        `SELECT after_values
+           FROM payment_recurring_payment_update_events
+          WHERE recurring_payment_id = ?`
+      )
+      .bind(activated.id)
+      .first<{ after_values: Record<string, unknown> }>();
+    expect(event?.after_values.nextCollectionDueAt).toBe(
+      updateBody.data.recurringPayment.nextCollectionDueAt
+    );
   });
 
   it("rejects active replacement next due dates before replacement transactions are submitted", async () => {
