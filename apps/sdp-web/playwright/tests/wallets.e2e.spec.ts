@@ -222,7 +222,7 @@ test.describe
       await expect(walletCard.getByRole("link", { name: "Manage" })).toBeVisible();
     });
 
-    test("wallet activity shows a real burn row and balance after API burn flow", async ({
+    test("wallet activity shows a real burn row and keeps rows visible when refresh fails", async ({
       browser,
       page,
     }) => {
@@ -336,37 +336,10 @@ test.describe
       for (const { locator } of activityRows) {
         await expect(locator).toBeVisible();
       }
-    });
 
-    test("wallet activity keeps existing rows visible when refresh fails", async ({
-      browser,
-      page,
-    }) => {
-      const session = await getPlaywrightAdminSession(browser);
-      const fixtures = await bootstrapLocalWalletFixtures({
-        identity: session.identity,
-        bearerToken: session.getBearerToken,
-        provider: "privy",
-        walletCount: 1,
-        fundSourceWallet: true,
-        fundSourceAmountSol: 0.01,
-        tier: "enterprise",
-      });
-      const projectId = await resolvePlaywrightProjectId(
-        getBootstrapApiBaseUrl(),
-        session.getBearerToken
-      );
-      await session.page.close();
-      await seedProjectCookie(page, projectId);
-
-      const wallet = fixtures.wallets[0];
-      if (!wallet) {
-        throw new Error("Failed to bootstrap wallet activity fixture");
-      }
-
-      let failNextActivityRequest = false;
-      await page.route(/\/api\/dashboard\/wallets\/[^/]+\/activity$/, async (route) => {
-        if (failNextActivityRequest) {
+      await page.route(
+        /\/api\/dashboard\/wallets\/[^/]+\/activity$/,
+        async (route) => {
           await route.fulfill({
             status: 503,
             contentType: "application/json",
@@ -374,45 +347,24 @@ test.describe
               error: { message: "Activity refresh failed" },
             }),
           });
-          return;
-        }
+        },
+        { times: 1 }
+      );
+      const failedActivityResponsePromise = page.waitForResponse(
+        (response) =>
+          response.status() === 503 &&
+          response
+            .url()
+            .includes(`/api/dashboard/wallets/${encodeURIComponent(wallet.walletId)}/activity`)
+      );
 
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            data: {
-              activityRows: [
-                {
-                  id: "payment-e2e-refresh",
-                  sourceKind: "payments",
-                  operationLabel: "Incoming",
-                  status: "confirmed",
-                  signature: "payment_signature_e2e_111111111111111111111111111111111",
-                  token: "USDC",
-                  amount: "5",
-                  address: wallet.publicKey,
-                  createdAt: "2024-01-02T00:00:00.000Z",
-                  updatedAt: "2024-01-02T00:00:00.000Z",
-                },
-              ],
-              activityError: null,
-              activityNotice: null,
-            },
-          }),
-        });
-      });
-
-      await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
-      const activityRow = page.locator("tr").filter({ hasText: "5.00 USDC" });
-      await expect(activityRow).toBeVisible({ timeout: 120_000 });
-      await expect(activityRow).toContainText("Incoming");
-      await expect(activityRow.getByRole("link")).toHaveCount(1);
-
-      failNextActivityRequest = true;
-      await page.getByRole("button", { name: "Refresh" }).click();
+      await expect(refreshButton).toBeEnabled();
+      await refreshButton.click();
+      await failedActivityResponsePromise;
 
       await expect(page.getByText("Activity refresh failed")).toBeVisible();
-      await expect(activityRow).toBeVisible();
+      for (const { locator } of activityRows) {
+        await expect(locator).toBeVisible();
+      }
     });
   });
