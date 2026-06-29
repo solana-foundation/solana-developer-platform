@@ -11,7 +11,6 @@ type WalletBalance = NonNullable<PaymentsDashboardWallet["balances"]>[number];
 type IssuedTokenSymbolsByMint = Record<string, string>;
 
 interface ResolveWalletAssetOptionsConfig {
-  includeDefaultUsdc?: boolean;
   hideUnresolvedMints?: boolean;
 }
 
@@ -27,58 +26,11 @@ function shouldHideUnresolvedMintLabel(
   return displayToken.trim().toUpperCase() === mint.toUpperCase();
 }
 
-export function resolveWalletAssetOptions(
-  wallet: PaymentsDashboardWallet | null,
-  issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint,
-  options: ResolveWalletAssetOptionsConfig = {}
-): string[] {
-  const assetSet = new Set<string>(options.includeDefaultUsdc === false ? [] : ["USDC"]);
-  for (const balance of wallet?.balances ?? []) {
-    if (isSolBalance(balance)) {
-      continue;
-    }
-
-    const token = resolveAggregateBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
-    if (
-      options.hideUnresolvedMints &&
-      shouldHideUnresolvedMintLabel(balance, token, issuedTokenSymbolsByMint)
-    ) {
-      continue;
-    }
-    if (token) {
-      assetSet.add(token);
-    }
-  }
-  return [...assetSet];
-}
-
 export function findWalletBalanceForToken(
   wallet: PaymentsDashboardWallet | null,
   token: string
 ): WalletBalance | null {
   return wallet?.balances?.find((balance) => balance.token === token) ?? null;
-}
-
-export function findWalletBalanceForDisplayToken(
-  wallet: PaymentsDashboardWallet | null,
-  token: string,
-  issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint
-): WalletBalance | null {
-  const normalizedToken = token.trim().toUpperCase();
-  if (!normalizedToken) {
-    return null;
-  }
-
-  return (
-    wallet?.balances?.find((balance) => {
-      const displayToken = resolveAggregateBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
-      return (
-        displayToken.trim().toUpperCase() === normalizedToken ||
-        balance.token.trim().toUpperCase() === normalizedToken ||
-        balance.mint.trim() === token.trim()
-      );
-    }) ?? null
-  );
 }
 
 export function walletBalanceAssetOptions(
