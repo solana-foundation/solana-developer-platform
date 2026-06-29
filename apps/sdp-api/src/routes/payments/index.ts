@@ -18,14 +18,17 @@ import {
   createSubscriptionCollectionAttempt,
   createSubscriptionPlan,
   createTransfer,
+  createTransferBatch,
   estimateOfframp,
   estimateOnramp,
+  estimateTransferBatch,
   executeOfframp,
   executeOnramp,
   getRecurringPayment,
   getSubscription,
   getSubscriptionPlan,
   getTransfer,
+  getTransferBatch,
   getWalletBalances,
   getWalletPolicy,
   listOfframpCurrencies,
@@ -35,6 +38,7 @@ import {
   listSubscriptionCollectionAttempts,
   listSubscriptionPlans,
   listSubscriptions,
+  listTransferBatches,
   listTransfers,
   prepareCancelSubscription,
   prepareCreateSubscriptionPlan,
@@ -185,6 +189,18 @@ payments.get(
 );
 payments.post("/transfers", requirePermissions("payments:write", "wallets:read"), createTransfer);
 payments.get("/transfers", requirePermissions("payments:read"), listTransfers);
+payments.post(
+  "/transfer-batches/estimate",
+  requirePermissions("payments:read", "wallets:read", "counterparties:read"),
+  estimateTransferBatch
+);
+payments.post(
+  "/transfer-batches",
+  requirePermissions("payments:write", "wallets:read", "counterparties:read"),
+  createTransferBatch
+);
+payments.get("/transfer-batches", requirePermissions("payments:read"), listTransferBatches);
+payments.get("/transfer-batches/:batchId", requirePermissions("payments:read"), getTransferBatch);
 payments.get("/requests", requirePermissions("payments:read"), listPaymentRequests);
 payments.post(
   "/requests",
