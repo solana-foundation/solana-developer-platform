@@ -1,7 +1,9 @@
+import type { ComplianceProviderId } from "@sdp/types";
+
 export type ComplianceIntent = "transfer_destination" | "wallet_address_addition" | "unknown";
 
 export type ComplianceProviderResult = {
-  provider: string;
+  provider: ComplianceProviderId;
   status: "ok" | "unavailable" | "error";
   riskScore: number | null;
   riskLevel?: string;
