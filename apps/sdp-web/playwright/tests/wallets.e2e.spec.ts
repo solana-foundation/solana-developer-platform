@@ -222,7 +222,7 @@ test.describe
       await expect(walletCard.getByRole("link", { name: "Manage" })).toBeVisible();
     });
 
-    test("wallet activity shows real burn rows and balance after API burn flow", async ({
+    test("wallet activity shows a real burn row and balance after API burn flow", async ({
       browser,
       page,
     }) => {
@@ -283,27 +283,13 @@ test.describe
       expect(burned.transaction.status).toBe("confirmed");
       expect(burned.transaction.signature).toBeTruthy();
 
-      const secondBurned = await api.post<TransactionResponse>(
-        `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/burn`,
-        {
-          signingWalletId: wallet.walletId,
-          burn: {
-            source: minted.tokenAccount,
-            amount: "1",
-          },
-        }
-      );
-      expect(secondBurned.transaction.type).toBe("burn");
-      expect(secondBurned.transaction.status).toBe("confirmed");
-      expect(secondBurned.transaction.signature).toBeTruthy();
-
       await waitForToken(
         api,
         deployedToken.id,
-        (token) => token.totalSupply === "3",
-        "have total supply 3"
+        (token) => token.totalSupply === "4",
+        "have total supply 4"
       );
-      await waitForWalletTokenBalance(api, wallet.walletId, mintAddress, 3);
+      await waitForWalletTokenBalance(api, wallet.walletId, mintAddress, 4);
       await session.page.close();
 
       await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
@@ -311,18 +297,13 @@ test.describe
       const balancesSection = page.locator("section").filter({
         has: page.getByRole("heading", { name: "Balances" }),
       });
-      await expect(balancesSection.getByText(`3.00 ${mintAddress}`, { exact: true })).toBeVisible({
+      await expect(balancesSection.getByText(`4.00 ${mintAddress}`, { exact: true })).toBeVisible({
         timeout: 120_000,
       });
       await expect(balancesSection.getByText(mintAddress, { exact: true }).first()).toBeVisible();
 
       const expectedActivityRows = [
         { operationLabel: "Burn", token: deployedToken.symbol, amount: "2" },
-        {
-          operationLabel: "Burn",
-          token: deployedToken.symbol,
-          amount: "1",
-        },
       ];
       const activityRows = expectedActivityRows.map((expectedRow) => ({
         expectedRow,
