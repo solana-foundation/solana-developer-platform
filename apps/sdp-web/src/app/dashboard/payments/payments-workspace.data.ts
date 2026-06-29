@@ -50,7 +50,7 @@ export interface PaymentWalletBalancesSnapshot {
   balances: PaymentWalletBalance[];
 }
 
-type RiskTone = "green" | "yellow" | "red" | "neutral";
+export type RiskTone = "green" | "yellow" | "red" | "neutral";
 
 export function getDevnetExplorerUrl(signature: string): string {
   return `https://explorer.solana.com/tx/${encodeURIComponent(signature)}?cluster=devnet`;
@@ -100,7 +100,7 @@ export function formatRiskScore(result: ComplianceProviderResult): string {
   return "N/A";
 }
 
-function resolveRiskTone(result: ComplianceProviderResult): RiskTone {
+export function resolveRiskTone(result: ComplianceProviderResult): RiskTone {
   if (result.status !== "ok") {
     return "neutral";
   }

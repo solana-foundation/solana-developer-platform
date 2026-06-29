@@ -879,13 +879,13 @@ export function CounterpartyDetailWorkspace({
                   return (
                     <div
                       key={account.id}
-                      className="flex items-center justify-between gap-4 border-b border-border-light px-4 py-3 last:border-b-0"
+                      className="flex items-center justify-between gap-4 border-b border-border-light px-4 py-2.5 last:border-b-0"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-text-extra-high">
                           {account.label ?? "Crypto wallet"}
                         </p>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex h-5 items-center gap-1">
                           <p className="truncate font-mono text-xs text-text-medium">
                             {details.address}
                           </p>
@@ -894,6 +894,7 @@ export function CounterpartyDetailWorkspace({
                               type="button"
                               variant="ghost"
                               size="icon-xs"
+                              className="size-5"
                               aria-label="Copy address"
                               onClick={() => {
                                 if (!details.address) return;
@@ -911,7 +912,16 @@ export function CounterpartyDetailWorkspace({
                           )}
                         </div>
                       </div>
-                      <span className="shrink-0 text-xs text-text-medium">{details.network}</span>
+                      <span className="flex shrink-0 items-center gap-1.5 text-xs text-text-medium">
+                        <Image
+                          src="/landing/solana-logo.svg"
+                          alt=""
+                          width={16}
+                          height={14}
+                          className="h-3.5 w-auto"
+                        />
+                        Solana
+                      </span>
                     </div>
                   );
                 })}
