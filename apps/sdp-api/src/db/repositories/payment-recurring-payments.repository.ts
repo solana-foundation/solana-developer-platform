@@ -163,6 +163,7 @@ export interface UpdatePaymentRecurringPaymentInput {
   status?: PaymentRecurringPaymentStatus;
   metadataUri?: string | null;
   expectedStatus?: PaymentRecurringPaymentStatus;
+  expectedUpdatedAt?: string;
   updatedAt: string;
 }
 

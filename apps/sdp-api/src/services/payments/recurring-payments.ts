@@ -1466,11 +1466,15 @@ async function updatePendingRecurringPayment(input: {
     firstCollectionAt: input.resolved.firstCollectionAt,
     metadataUri: input.resolved.metadataUri,
     expectedStatus: "pending_activation",
+    expectedUpdatedAt: input.recurringPayment.updated_at,
     updatedAt,
   });
 
   if (!updated) {
-    throw new AppError("CONFLICT", "Recurring payment update is already processing");
+    throw new AppError(
+      "CONFLICT",
+      "Recurring payment changed while updating; retry with the latest payment"
+    );
   }
 
   await recordRecurringPaymentUpdateEvent({
