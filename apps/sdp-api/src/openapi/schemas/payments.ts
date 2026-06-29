@@ -10,7 +10,9 @@ import {
   createSubscriptionCollectionAttemptSchema as createSubscriptionCollectionAttemptSchemaBase,
   createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
   createSubscriptionSchema as createSubscriptionSchemaBase,
+  createTransferBatchSchema as createTransferBatchSchemaBase,
   createTransferSchema as createTransferSchemaBase,
+  estimateTransferBatchSchema as estimateTransferBatchSchemaBase,
   executeOfframpSchema as executeOfframpSchemaBase,
   executeOnrampSchema as executeOnrampSchemaBase,
   listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase,
@@ -19,6 +21,7 @@ import {
   listSubscriptionCollectionAttemptsQuerySchema as listSubscriptionCollectionAttemptsQuerySchemaBase,
   listSubscriptionPlansQuerySchema as listSubscriptionPlansQuerySchemaBase,
   listSubscriptionsQuerySchema as listSubscriptionsQuerySchemaBase,
+  listTransferBatchesQuerySchema as listTransferBatchesQuerySchemaBase,
   listTransfersQuerySchema as listTransfersQuerySchemaBase,
   paymentRecurringPaymentStatusSchema as paymentRecurringPaymentStatusSchemaBase,
   paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
@@ -35,6 +38,9 @@ import {
   simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase,
   subscriptionIdParamsSchema as subscriptionIdParamsSchemaBase,
   subscriptionPlanIdParamsSchema as subscriptionPlanIdParamsSchemaBase,
+  transferBatchIdParamsSchema as transferBatchIdParamsSchemaBase,
+  transferBatchRecipientStatusSchema as transferBatchRecipientStatusSchemaBase,
+  transferBatchStatusSchema as transferBatchStatusSchemaBase,
   transferDirectionSchema as transferDirectionSchemaBase,
   transferIdParamsSchema as transferIdParamsSchemaBase,
   transferStatusSchema as transferStatusSchemaBase,
@@ -177,6 +183,15 @@ export const paymentTransferIdParamsSchema = transferIdParamsSchemaBase
     }),
   })
   .openapi({ description: "Payment transfer path parameters." });
+
+export const paymentTransferBatchIdParamsSchema = transferBatchIdParamsSchemaBase
+  .extend({
+    batchId: withOpenApi(transferBatchIdParamsSchemaBase.shape.batchId, {
+      description: "Transfer batch identifier.",
+      example: "xbatch_example",
+    }),
+  })
+  .openapi({ description: "Payment transfer batch path parameters." });
 
 export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
   .extend({
@@ -427,7 +442,7 @@ export const prepareTransferRequestSchema = prepareTransferSchemaBase
   });
 
 export const transferTypeSchema = z
-  .enum(["transfer", "transfer_confidential", "onramp", "offramp"])
+  .enum(["transfer", "transfer_confidential", "transfer_batch", "onramp", "offramp"])
   .openapi({ description: "Transfer type.", example: "transfer" });
 
 export const transferDirectionSchema = withOpenApi(transferDirectionSchemaBase, {
@@ -637,6 +652,200 @@ export const prepareTransferResponseSchema = z
       .openapi({ description: "Optional transaction simulation result." }),
   })
   .openapi({ description: "Prepare transfer response payload." });
+
+export const paymentTransferBatchStatusSchema = withOpenApi(transferBatchStatusSchemaBase, {
+  description: "Transfer batch status.",
+  example: "processing",
+});
+
+export const paymentTransferBatchRecipientStatusSchema = withOpenApi(
+  transferBatchRecipientStatusSchemaBase,
+  {
+    description: "Transfer batch recipient status.",
+    example: "pending",
+  }
+);
+
+export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
+  .extend({
+    projectId: withOpenApi(createTransferBatchSchemaBase.shape.projectId, {
+      description: "Project identifier for the transfer batch context.",
+      example: "prj_example",
+    }),
+    externalId: withOpenApi(createTransferBatchSchemaBase.shape.externalId, {
+      description: "Caller-provided batch correlation ID. Not used as an idempotency key.",
+      example: "payroll_2026_06_30",
+    }),
+    source: withOpenApi(createTransferBatchSchemaBase.shape.source, {
+      description: "Source custody wallet ID from /v1/wallets.",
+      example: "wal_example",
+    }),
+    token: withOpenApi(createTransferBatchSchemaBase.shape.token, {
+      description:
+        "Token mint address. For the native token, pass `SOL` (recommended) or the canonical SOL mint `So11111111111111111111111111111111111111112` — the server normalizes both to `SOL`. SPL tokens must be specified by their on-chain mint.",
+      example: "SOL",
+    }),
+    recipients: withOpenApi(createTransferBatchSchemaBase.shape.recipients, {
+      description: "Counterparty-account recipients to pay in this batch.",
+      example: [
+        {
+          externalId: "payroll_row_001",
+          counterpartyId: "cp_example",
+          counterpartyAccountId: "cpa_example",
+          amount: "25.00",
+        },
+      ],
+    }),
+    options: withOpenApi(createTransferBatchSchemaBase.shape.options, {
+      description:
+        "Execution options for transaction chunking, priority fees, and preflight validation.",
+      example: {
+        maxRecipientsPerTransaction: 20,
+        priorityFee: "auto",
+        preflight: true,
+      },
+    }),
+  })
+  .openapi({
+    description:
+      "Create a custody-executed outbound transfer batch. Initial scaffold only; execution is not implemented yet.",
+  });
+
+export const estimateTransferBatchRequestSchema = estimateTransferBatchSchemaBase
+  .extend(createTransferBatchRequestSchema.shape)
+  .openapi({
+    description:
+      "Estimate transaction chunking and fees for a transfer batch. Initial scaffold only; estimation is not implemented yet.",
+  });
+
+export const paymentListTransferBatchesQuerySchema = listTransferBatchesQuerySchemaBase
+  .extend({
+    wallet: withOpenApi(listTransferBatchesQuerySchemaBase.shape.wallet, {
+      description: "Filter by source custody wallet ID.",
+      example: "wal_example",
+    }),
+    token: withOpenApi(listTransferBatchesQuerySchemaBase.shape.token, {
+      description: "Filter by token symbol or mint.",
+      example: "SOL",
+    }),
+    status: withOpenApi(listTransferBatchesQuerySchemaBase.shape.status, {
+      description: "Filter by transfer batch status.",
+      example: "processing",
+    }),
+    externalId: withOpenApi(listTransferBatchesQuerySchemaBase.shape.externalId, {
+      description: "Filter by caller-provided batch correlation ID.",
+      example: "payroll_2026_06_30",
+    }),
+    page: withOpenApi(listTransferBatchesQuerySchemaBase.shape.page, {
+      description: "Page number (1-based).",
+      example: 1,
+    }),
+    pageSize: withOpenApi(listTransferBatchesQuerySchemaBase.shape.pageSize, {
+      description: "Number of batches per page.",
+      example: 20,
+    }),
+  })
+  .openapi({ description: "Transfer batch list query parameters." });
+
+export const transferBatchRecipientSchema = z
+  .object({
+    id: z.string().openapi({ description: "Transfer batch recipient identifier." }),
+    batchId: z.string().openapi({ description: "Parent transfer batch identifier." }),
+    transferId: transferIdParamSchema.nullable().openapi({
+      description: "Payment transfer chunk that settled this recipient, once assigned.",
+    }),
+    externalId: z.string().nullable().openapi({
+      description: "Caller-provided recipient correlation ID.",
+      example: "payroll_row_001",
+    }),
+    counterpartyId: z.string().openapi({
+      description: "Counterparty identifier for the recipient.",
+      example: "cp_example",
+    }),
+    counterpartyAccountId: z.string().openapi({
+      description: "Counterparty account identifier for the recipient.",
+      example: "cpa_example",
+    }),
+    destination: solanaAddressSchema.openapi({
+      description: "Resolved Solana destination address.",
+    }),
+    amount: tokenAmountSchema,
+    status: paymentTransferBatchRecipientStatusSchema,
+    error: z.string().nullable().openapi({
+      description: "Recipient-level failure reason, when available.",
+    }),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .openapi({ description: "Recipient-level line within a transfer batch." });
+
+export const transferBatchSchema = z
+  .object({
+    id: z
+      .string()
+      .openapi({ description: "Transfer batch identifier.", example: "xbatch_example" }),
+    organizationId: orgIdParamSchema,
+    projectId: projectIdParamSchema.openapi({
+      description: "Project identifier for the transfer batch.",
+    }),
+    externalId: z.string().nullable().openapi({
+      description: "Caller-provided batch correlation ID.",
+      example: "payroll_2026_06_30",
+    }),
+    sourceWalletId: walletIdParamSchema.openapi({
+      description: "Source custody wallet ID.",
+      example: "wal_example",
+    }),
+    sourceAddress: solanaAddressSchema.openapi({
+      description: "Source custody wallet address.",
+    }),
+    token: z.string().openapi({ description: "Token symbol or mint address.", example: "SOL" }),
+    status: paymentTransferBatchStatusSchema,
+    totalAmount: tokenAmountSchema.nullable().openapi({
+      description: "Total requested batch amount in UI units, when computed.",
+      example: "1000.00",
+    }),
+    recipientCount: z.number().int().openapi({
+      description: "Number of recipient rows in the batch.",
+      example: 20,
+    }),
+    transactionCount: z.number().int().openapi({
+      description: "Number of Solana transaction chunks for the batch.",
+      example: 1,
+    }),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .openapi({ description: "Transfer batch summary." });
+
+export const transferBatchEstimateSchema = z
+  .object({
+    recipientCount: z.number().int().openapi({ description: "Requested recipient count." }),
+    transactionCount: z.number().int().openapi({
+      description: "Estimated number of Solana transaction chunks.",
+    }),
+    estimatedFees: z
+      .object({
+        networkFeeLamports: z.string().openapi({
+          description: "Estimated base network fee in lamports.",
+          example: "5000",
+        }),
+        priorityFeeLamports: z.string().openapi({
+          description: "Estimated priority fee in lamports.",
+          example: "0",
+        }),
+        tokenAccountRentLamports: z.string().openapi({
+          description: "Estimated rent needed for newly-created recipient token accounts.",
+          example: "0",
+        }),
+        sponsored: z.boolean().openapi({
+          description: "Whether SDP sponsors transaction fees for this batch.",
+          example: true,
+        }),
+      })
+      .openapi({ description: "Estimated fee components." }),
+  })
+  .openapi({ description: "Transfer batch estimate." });
 
 export const paymentSubscriptionPlanStatusSchema = withOpenApi(
   paymentSubscriptionPlanStatusSchemaBase,
@@ -1825,6 +2034,24 @@ export const transferResponseSchema = z
       .openapi({ description: "Provider metadata returned for private-transfer execution." }),
   })
   .openapi({ description: "Transfer response payload." });
+
+export const transferBatchResponseSchema = z
+  .object({
+    batch: transferBatchSchema.openapi({ description: "Transfer batch details." }),
+    recipients: z.array(transferBatchRecipientSchema).optional().openapi({
+      description: "Recipient rows for the batch, included on detail responses.",
+    }),
+    transfers: z.array(transferSchema).optional().openapi({
+      description: "Payment transfer chunk records associated with this batch.",
+    }),
+  })
+  .openapi({ description: "Transfer batch response payload." });
+
+export const transferBatchEstimateResponseSchema = z
+  .object({
+    estimate: transferBatchEstimateSchema.openapi({ description: "Transfer batch estimate." }),
+  })
+  .openapi({ description: "Transfer batch estimate response payload." });
 
 export const onrampExecutionResponseSchema = z
   .object({

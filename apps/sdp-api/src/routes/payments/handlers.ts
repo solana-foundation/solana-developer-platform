@@ -39,4 +39,10 @@ export {
   updateSubscription,
   updateSubscriptionPlan,
 } from "./handlers/subscriptions";
+export {
+  createTransferBatch,
+  estimateTransferBatch,
+  getTransferBatch,
+  listTransferBatches,
+} from "./handlers/transfer-batches";
 export { createTransfer, getTransfer, listTransfers, prepareTransfer } from "./handlers/transfers";

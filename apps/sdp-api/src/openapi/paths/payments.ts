@@ -6,20 +6,24 @@ import {
   createSubscriptionCollectionAttemptRequestSchema,
   createSubscriptionPlanRequestSchema,
   createSubscriptionRequestSchema,
+  createTransferBatchRequestSchema,
   createTransferRequestSchema,
   errorResponseSchema,
+  estimateTransferBatchRequestSchema,
   executeOfframpRequestSchema,
   executeOnrampRequestSchema,
   paymentListRecurringPaymentsQuerySchema,
   paymentListSubscriptionCollectionAttemptsQuerySchema,
   paymentListSubscriptionPlansQuerySchema,
   paymentListSubscriptionsQuerySchema,
+  paymentListTransferBatchesQuerySchema,
   paymentListTransfersQuerySchema,
   paymentOfframpCurrenciesQuerySchema,
   paymentOnrampCurrenciesQuerySchema,
   paymentRecurringPaymentIdParamsSchema,
   paymentSubscriptionIdParamsSchema,
   paymentSubscriptionPlanIdParamsSchema,
+  paymentTransferBatchIdParamsSchema,
   paymentTransferIdParamsSchema,
   paymentWalletIdParamsSchema,
   prepareSubscriptionAuthorizationRequestSchema,
@@ -54,6 +58,9 @@ import {
   preparePaymentSubscriptionPlanResponse,
   prepareTransferResponse,
   sandboxTransferSimulationResponse,
+  transferBatchEstimateResponse,
+  transferBatchListResponse,
+  transferBatchResponse,
   transferListResponse,
   transferResponse,
   walletBalancesResponse,
@@ -226,6 +233,98 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       200: {
         description: "Transfer details",
         content: jsonContent(transferResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/transfer-batches/estimate",
+    tags: ["Payments"],
+    summary: "Estimate transfer batch",
+    operationId: "estimatePaymentTransferBatch",
+    description:
+      "Validates a transfer batch request and estimates transaction chunking and fees. This route is scaffolded; estimation is not implemented yet.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(estimateTransferBatchRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Transfer batch estimate",
+        content: jsonContent(transferBatchEstimateResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/transfer-batches",
+    tags: ["Payments"],
+    summary: "Create transfer batch",
+    operationId: "createPaymentTransferBatch",
+    description:
+      "Creates a custody-executed outbound transfer batch to counterparty crypto-wallet accounts. This route is scaffolded; execution is not implemented yet.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(createTransferBatchRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Transfer batch created",
+        content: jsonContent(transferBatchResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/transfer-batches",
+    tags: ["Payments"],
+    summary: "List transfer batches",
+    operationId: "listPaymentTransferBatches",
+    description: "Lists transfer batches for the authenticated organization or project scope.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentListTransferBatchesQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Transfer batch list",
+        content: jsonContent(transferBatchListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/transfer-batches/{batchId}",
+    tags: ["Payments"],
+    summary: "Get transfer batch",
+    operationId: "getPaymentTransferBatch",
+    description: "Retrieves a transfer batch with recipient rows and chunk transfer summaries.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentTransferBatchIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Transfer batch details",
+        content: jsonContent(transferBatchResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },

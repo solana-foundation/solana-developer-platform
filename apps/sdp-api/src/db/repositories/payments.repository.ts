@@ -3,10 +3,16 @@ import type { RampProviderId } from "@sdp/types/provider-access";
 import type { RepositoryDbClient } from "./base";
 
 export type PaymentTransferDirection = "inbound" | "outbound";
-export type PaymentTransferType = "transfer" | "transfer_confidential" | "onramp" | "offramp";
+export type PaymentTransferType =
+  | "transfer"
+  | "transfer_confidential"
+  | "transfer_batch"
+  | "onramp"
+  | "offramp";
 export const WALLET_TRANSFER_TYPES = [
   "transfer",
   "transfer_confidential",
+  "transfer_batch",
 ] as const satisfies readonly PaymentTransferType[];
 export const RAMP_TRANSFER_TYPES = [
   "onramp",

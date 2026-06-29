@@ -86,6 +86,9 @@ import {
   tokenTemplateResponseSchema,
   tokenTransactionListItemSchema,
   tokenTransactionSchema,
+  transferBatchEstimateResponseSchema,
+  transferBatchResponseSchema,
+  transferBatchSchema,
   transferResponseSchema,
   transferSchema,
   walletBalancesResponseSchema,
@@ -189,6 +192,11 @@ export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSc
 export const prepareTransferResponse = successResponseSchema(prepareTransferResponseSchema);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
+export const transferBatchResponse = successResponseSchema(transferBatchResponseSchema);
+export const transferBatchListResponse = paginatedResponseSchema(transferBatchSchema);
+export const transferBatchEstimateResponse = successResponseSchema(
+  transferBatchEstimateResponseSchema
+);
 export const paymentRecurringPaymentResponse = successResponseSchema(
   paymentRecurringPaymentResponseSchema
 );

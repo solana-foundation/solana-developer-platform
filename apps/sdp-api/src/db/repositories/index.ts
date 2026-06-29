@@ -75,6 +75,30 @@ export type {
 } from "./payment-subscriptions.repository";
 export { createPostgresPaymentSubscriptionsRepository } from "./payment-subscriptions.repository.postgres";
 export type {
+  CreatePaymentTransferBatchInput,
+  CreatePaymentTransferRecipientInput,
+  DeletePaymentTransferBatchInput,
+  DeletePaymentTransferRecipientInput,
+  GetPaymentTransferBatchInput,
+  GetPaymentTransferRecipientInput,
+  ListPaymentTransferBatchesInput,
+  ListPaymentTransferBatchesResult,
+  ListPaymentTransferRecipientsInput,
+  ListPaymentTransferRecipientsResult,
+  PaymentTransferBatchesRepository,
+  PaymentTransferBatchRow,
+  PaymentTransferRecipientRow,
+  UpdatePaymentTransferBatchInput,
+  UpdatePaymentTransferRecipientInput,
+  UpsertPaymentTransferBatchInput,
+  UpsertPaymentTransferRecipientInput,
+} from "./payment-transfer-batches.repository";
+export {
+  generatePaymentTransferBatchId,
+  generatePaymentTransferRecipientId,
+} from "./payment-transfer-batches.repository";
+export { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
+export type {
   CreatePaymentTransferInput,
   PaymentsRepository,
   PaymentsRepositoryContext,
@@ -124,6 +148,7 @@ export {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
+  createPaymentTransferBatchesRepository,
   createPolicyRepository,
   createTokenRepository,
 } from "./repository-factory";

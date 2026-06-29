@@ -222,6 +222,107 @@ export interface PaymentTransferPrepareEnvelope {
   };
 }
 
+export type PaymentTransferBatchStatus =
+  | "pending"
+  | "processing"
+  | "confirmed"
+  | "failed"
+  | "partially_failed"
+  | "archived";
+
+export type PaymentTransferBatchRecipientStatus =
+  | "pending"
+  | "processing"
+  | "confirmed"
+  | "failed"
+  | "archived";
+
+export interface PaymentTransferBatchRecipientRequest {
+  externalId?: string;
+  counterpartyId: string;
+  counterpartyAccountId: string;
+  amount: string;
+}
+
+export interface PaymentTransferBatchOptions {
+  maxRecipientsPerTransaction?: number;
+  priorityFee?: "none" | "low" | "medium" | "high" | "auto";
+  preflight?: boolean;
+}
+
+export interface PaymentTransferBatchRequest {
+  projectId?: string;
+  externalId?: string;
+  source: string;
+  token: string;
+  recipients: PaymentTransferBatchRecipientRequest[];
+  options?: PaymentTransferBatchOptions;
+}
+
+export type PaymentTransferBatchEstimateRequest = PaymentTransferBatchRequest;
+
+export interface PaymentTransferBatch {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  externalId: string | null;
+  sourceWalletId: string;
+  sourceAddress: string;
+  token: string;
+  status: PaymentTransferBatchStatus;
+  totalAmount: string | null;
+  recipientCount: number;
+  transactionCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaymentTransferRecipient {
+  id: string;
+  batchId: string;
+  transferId: string | null;
+  externalId: string | null;
+  counterpartyId: string;
+  counterpartyAccountId: string;
+  destination: string;
+  amount: string;
+  status: PaymentTransferBatchRecipientStatus;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaymentTransferBatchEstimate {
+  recipientCount: number;
+  transactionCount: number;
+  estimatedFees: {
+    networkFeeLamports: string;
+    priorityFeeLamports: string;
+    tokenAccountRentLamports: string;
+    sponsored: boolean;
+  };
+}
+
+export interface PaymentTransferBatchEnvelope {
+  data?: {
+    batch?: PaymentTransferBatch;
+    recipients?: PaymentTransferRecipient[];
+    transfers?: PaymentTransferSummary[];
+  };
+  error?: {
+    message?: string;
+  };
+}
+
+export interface PaymentTransferBatchEstimateEnvelope {
+  data?: {
+    estimate?: PaymentTransferBatchEstimate;
+  };
+  error?: {
+    message?: string;
+  };
+}
+
 export type PaymentSubscriptionPlanStatus = "draft" | "active" | "archived";
 export type PaymentSubscriptionStatus =
   | "pending_authorization"

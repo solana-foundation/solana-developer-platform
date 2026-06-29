@@ -5,6 +5,7 @@ import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
+  createPaymentTransferBatchesRepository,
   createPolicyRepository,
 } from "@/db/repositories";
 import type { RampRuntimeContext } from "@/lib/ramps/types";
@@ -43,6 +44,10 @@ export function getPaymentSubscriptionsRepository(c: AppContext) {
 
 export function getPaymentRecurringPaymentsRepository(c: AppContext) {
   return createPaymentRecurringPaymentsRepository(c.env);
+}
+
+export function getPaymentTransferBatchesRepository(c: AppContext) {
+  return createPaymentTransferBatchesRepository(c.env);
 }
 
 export function getPolicyRepository(c: AppContext) {
