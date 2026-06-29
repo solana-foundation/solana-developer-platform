@@ -81,7 +81,7 @@ export const listProjectApiKeys = async (c: AppContext) => {
         role: key.role as ApiKeyRole,
         environment: key.environment as "sandbox" | "production",
         status: key.status,
-        walletScope: walletBindings.length > 0 ? "selected" : "all",
+        walletScope: key.walletScope,
         signingWalletId: key.signingWalletId,
         signingWalletIds: walletBindings.map((binding) => binding.walletId),
         walletBindings,
