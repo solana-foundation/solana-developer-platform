@@ -40,7 +40,16 @@ import type {
 } from "@/db/repositories/payments.repository";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
+import {
+  badRequest,
+  badRequestParams,
+  badRequestQuery,
+  estimateNotAvailable,
+  forbidden,
+  internalError,
+  notFound,
+  transactionFailed,
+} from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import {
@@ -475,7 +484,7 @@ async function estimateNetworkFeeLamports(rpc: Rpc, chunks: TransactionChunk[]):
       const message = Buffer.from(messageBytes).toString("base64") as TransactionMessageBytesBase64;
       const { value } = await rpc.getFeeForMessage(message, { commitment: "confirmed" }).send();
       if (value === null) {
-        throw new AppError("ESTIMATE_NOT_AVAILABLE", "Unable to estimate Solana transaction fees");
+        throw estimateNotAvailable("Unable to estimate Solana transaction fees");
       }
       return value;
     })
@@ -602,7 +611,7 @@ async function updateTransferRecord(
   });
 
   if (!updated) {
-    throw new AppError("INTERNAL_ERROR", "Payment transfer record not found for update");
+    throw internalError("Payment transfer record not found for update");
   }
 
   return updated;
@@ -623,7 +632,7 @@ async function updateRecipientRows(
   const targets = params.recipientIndexes.map((index) => {
     const existing = params.recipientsByIndex.get(index);
     if (!existing) {
-      throw new AppError("INTERNAL_ERROR", "Transfer batch recipient row is missing");
+      throw internalError("Transfer batch recipient row is missing");
     }
     return { index, id: existing.id };
   });
@@ -641,7 +650,7 @@ async function updateRecipientRows(
   for (const target of targets) {
     const updated = updatedById.get(target.id);
     if (!updated) {
-      throw new AppError("INTERNAL_ERROR", "Transfer batch recipient row not found for update");
+      throw internalError("Transfer batch recipient row not found for update");
     }
     params.recipientsByIndex.set(target.index, updated);
   }
@@ -658,12 +667,17 @@ async function executeChunk(params: {
   preflight: boolean;
 }): Promise<PaymentTransferRow> {
   const { c, resolved, chunk } = params;
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(chunk.message);
+  const lifetime = await solanaRpc.getRecentBlockhash(resolved.rpc, "confirmed");
+  const message = setTransactionMessageLifetimeUsingBlockhash(
+    { blockhash: lifetime.blockhash, lastValidBlockHeight: lifetime.lastValidBlockHeight },
+    chunk.message
+  );
+  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const serializedTx = getBase64EncodedWireTransaction(partiallySigned);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
   const recipientRows = chunk.recipientIndexes.map((index) => params.recipientsByIndex.get(index));
   if (recipientRows.some((row) => !row)) {
-    throw new AppError("INTERNAL_ERROR", "Transfer batch recipient row is missing");
+    throw internalError("Transfer batch recipient row is missing");
   }
 
   const firstRecipient = recipientRows[0] as PaymentTransferRecipientRow;
@@ -696,7 +710,7 @@ async function executeChunk(params: {
   });
 
   if (!transfer) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create payment transfer record");
+    throw internalError("Failed to create payment transfer record");
   }
 
   await updateRecipientRows(c, {
@@ -709,71 +723,94 @@ async function executeChunk(params: {
     error: null,
   });
 
+  const settle = async (params2: {
+    status: PaymentTransferStatus;
+    recipientStatus: PaymentTransferRecipientRow["status"];
+    signature?: string | null;
+    slot?: number | null;
+    error: string | null;
+  }): Promise<PaymentTransferRow> => {
+    await updateRecipientRows(c, {
+      recipientsByIndex: params.recipientsByIndex,
+      recipientIndexes: chunk.recipientIndexes,
+      organizationId: resolved.scope.auth.organizationId,
+      projectId: resolved.projectId,
+      transferId: transfer.id,
+      status: params2.recipientStatus,
+      error: params2.error,
+    });
+    return updateTransferRecord(c, {
+      transferId: transfer.id,
+      organizationId: resolved.scope.auth.organizationId,
+      projectId: resolved.projectId,
+      status: params2.status,
+      signature: params2.signature,
+      serializedTx,
+      slot: params2.slot,
+      blockTime: null,
+      error: params2.error,
+    });
+  };
+
+  // Build/sign/submit: any failure here means nothing reached the chain → failed.
+  let signature: Awaited<ReturnType<typeof params.feePayment.signAndSend>>;
   try {
     if (params.preflight) {
       const simulated = await solanaRpc.simulateTransaction(resolved.rpc, txBytes);
       if (!simulated.success) {
-        throw new AppError(
-          "TRANSACTION_FAILED",
+        throw transactionFailed(
           `Batch transfer preflight failed: ${simulated.error ?? "unknown simulation error"}`,
           { logs: simulated.logs }
         );
       }
     }
-
-    const signature = await params.feePayment.signAndSend(txBytes);
-    const confirmation = await solanaRpc.confirmTransaction(resolved.rpc, signature, {
-      commitment: "confirmed",
-    });
-
-    if (confirmation.err) {
-      throw new AppError("TRANSACTION_FAILED", "Batch transfer failed on-chain");
-    }
-
-    await updateRecipientRows(c, {
-      recipientsByIndex: params.recipientsByIndex,
-      recipientIndexes: chunk.recipientIndexes,
-      organizationId: resolved.scope.auth.organizationId,
-      projectId: resolved.projectId,
-      transferId: transfer.id,
-      status: "confirmed",
-      error: null,
-    });
-
-    return updateTransferRecord(c, {
-      transferId: transfer.id,
-      organizationId: resolved.scope.auth.organizationId,
-      projectId: resolved.projectId,
-      status: "confirmed",
-      signature,
-      serializedTx,
-      slot: Number(confirmation.slot),
-      blockTime: null,
-      error: null,
-    });
+    signature = await params.feePayment.signAndSend(txBytes);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await updateRecipientRows(c, {
-      recipientsByIndex: params.recipientsByIndex,
-      recipientIndexes: chunk.recipientIndexes,
-      organizationId: resolved.scope.auth.organizationId,
-      projectId: resolved.projectId,
-      transferId: transfer.id,
+    return settle({
       status: "failed",
-      error: message,
-    });
-    return updateTransferRecord(c, {
-      transferId: transfer.id,
-      organizationId: resolved.scope.auth.organizationId,
-      projectId: resolved.projectId,
-      status: "failed",
-      serializedTx,
-      error: message,
+      recipientStatus: "failed",
+      error: error instanceof Error ? error.message : String(error),
     });
   }
+
+  // Submitted: a confirmation timeout is inconclusive (the tx may still land), so keep the
+  // signature and leave it processing for reconciliation — only a definitive on-chain error fails.
+  let confirmation: Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>;
+  try {
+    confirmation = await solanaRpc.confirmTransaction(resolved.rpc, signature, {
+      commitment: "confirmed",
+    });
+  } catch (error) {
+    return settle({
+      status: "processing",
+      recipientStatus: "processing",
+      signature,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  if (confirmation.err) {
+    return settle({
+      status: "failed",
+      recipientStatus: "failed",
+      signature,
+      error: "Batch transfer failed on-chain",
+    });
+  }
+
+  return settle({
+    status: "confirmed",
+    recipientStatus: "confirmed",
+    signature,
+    slot: Number(confirmation.slot),
+    error: null,
+  });
 }
 
 function finalBatchStatus(transfers: PaymentTransferRow[]): PaymentTransferBatchRow["status"] {
+  if (transfers.some((transfer) => transfer.status === "processing")) {
+    return "processing";
+  }
   const confirmed = transfers.filter((transfer) => transfer.status === "confirmed").length;
   if (confirmed === transfers.length) {
     return "confirmed";
@@ -929,9 +966,9 @@ export async function createTransferBatch(c: AppContext) {
       projectId: resolved.projectId,
       status,
       error:
-        status === "confirmed"
-          ? null
-          : "One or more transfer batch transactions failed during execution",
+        status === "failed" || status === "partially_failed"
+          ? "One or more transfer batch transactions failed during execution"
+          : null,
     })) ?? batch;
 
   return success(c, {
@@ -1003,7 +1040,7 @@ export async function getTransferBatch(c: AppContext) {
 
   const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
   if (allowedWalletIds && !allowedWalletIds.includes(batch.source_wallet_id)) {
-    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+    throw forbidden("API key is not authorized for the requested wallet");
   }
 
   const recipients = await batchRepository.listTransferRecipientsByBatch({

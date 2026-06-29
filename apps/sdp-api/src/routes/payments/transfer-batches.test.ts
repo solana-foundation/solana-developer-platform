@@ -630,4 +630,118 @@ describe("payment transfer batches", () => {
     ]);
     expect(signAndSendMock).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps a chunk processing when confirmation times out (tx may still land)", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+
+    const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValueOnce({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    confirmTransactionMock.mockRejectedValueOnce(
+      new Error(`Transaction ${FIRST_SIGNATURE} confirmation timed out`)
+    );
+
+    const counterpartyId = await seedCounterparty("batch_timeout_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        batch: { status: string };
+        recipients: Array<{ status: string }>;
+        transfers: Array<{ status: string; signature: string | null }>;
+      };
+    };
+    expect(body.data.batch.status).toBe("processing");
+    expect(body.data.recipients).toMatchObject([{ status: "processing" }]);
+    expect(body.data.transfers).toMatchObject([
+      { status: "processing", signature: FIRST_SIGNATURE },
+    ]);
+    expect(signAndSendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks a chunk failed on a definitive on-chain error", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+
+    const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValueOnce({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    confirmTransactionMock.mockResolvedValueOnce({
+      signature: FIRST_SIGNATURE as Awaited<
+        ReturnType<typeof solanaRpc.confirmTransaction>
+      >["signature"],
+      slot: 100n,
+      confirmationStatus: "confirmed",
+      err: { InstructionError: [0, { Custom: 1 }] },
+    } as Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>);
+
+    const counterpartyId = await seedCounterparty("batch_onchain_error_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        batch: { status: string };
+        recipients: Array<{ status: string }>;
+        transfers: Array<{ status: string }>;
+      };
+    };
+    expect(body.data.batch.status).toBe("failed");
+    expect(body.data.recipients).toMatchObject([{ status: "failed" }]);
+    expect(body.data.transfers).toMatchObject([{ status: "failed" }]);
+  });
 });
