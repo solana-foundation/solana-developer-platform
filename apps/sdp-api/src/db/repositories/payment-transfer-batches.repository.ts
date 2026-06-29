@@ -11,7 +11,7 @@ export function generatePaymentTransferRecipientId(): string {
 export interface PaymentTransferBatchRow {
   id: string;
   organization_id: string;
-  project_id: string | null;
+  project_id: string;
   external_id: string | null;
   source_wallet_id: string;
   source_address: string;
@@ -31,7 +31,7 @@ export interface PaymentTransferRecipientRow {
   id: string;
   batch_id: string;
   organization_id: string;
-  project_id: string | null;
+  project_id: string;
   transfer_id: string | null;
   external_id: string | null;
   counterparty_id: string;
@@ -46,7 +46,7 @@ export interface PaymentTransferRecipientRow {
 
 export interface CreatePaymentTransferBatchInput {
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   externalId?: string | null;
   sourceWalletId: string;
   sourceAddress: string;
@@ -67,7 +67,7 @@ export interface UpsertPaymentTransferBatchInput extends CreatePaymentTransferBa
 export interface UpdatePaymentTransferBatchInput {
   batchId: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   externalId?: string | null;
   sourceWalletId?: string;
   sourceAddress?: string;
@@ -84,14 +84,14 @@ export interface UpdatePaymentTransferBatchInput {
 export interface GetPaymentTransferBatchInput {
   batchId: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
 }
 
 export type DeletePaymentTransferBatchInput = GetPaymentTransferBatchInput;
 
 export interface ListPaymentTransferBatchesInput {
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   walletId?: string;
   token?: string;
   status?: PaymentTransferBatchStatus;
@@ -110,7 +110,7 @@ export interface ListPaymentTransferBatchesResult {
 export interface CreatePaymentTransferRecipientInput {
   batchId: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   transferId?: string | null;
   externalId?: string | null;
   counterpartyId: string;
@@ -128,7 +128,7 @@ export interface UpsertPaymentTransferRecipientInput extends CreatePaymentTransf
 export interface UpdatePaymentTransferRecipientInput {
   recipientId: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   batchId?: string;
   transferId?: string | null;
   externalId?: string | null;
@@ -143,7 +143,7 @@ export interface UpdatePaymentTransferRecipientInput {
 export interface GetPaymentTransferRecipientInput {
   recipientId: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
 }
 
 export type DeletePaymentTransferRecipientInput = GetPaymentTransferRecipientInput;
@@ -151,7 +151,7 @@ export type DeletePaymentTransferRecipientInput = GetPaymentTransferRecipientInp
 export interface ListPaymentTransferRecipientsInput {
   batchId: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   transferId?: string;
   status?: PaymentTransferBatchRecipientStatus;
   limit: number;

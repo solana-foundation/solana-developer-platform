@@ -785,7 +785,7 @@ export const transferBatchSchema = z
       .string()
       .openapi({ description: "Transfer batch identifier.", example: "xbatch_example" }),
     organizationId: orgIdParamSchema,
-    projectId: projectIdParamSchema.nullable().openapi({
+    projectId: projectIdParamSchema.openapi({
       description: "Project identifier for the transfer batch.",
     }),
     externalId: z.string().nullable().openapi({

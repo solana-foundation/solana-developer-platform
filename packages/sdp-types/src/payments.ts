@@ -264,7 +264,7 @@ export type PaymentTransferBatchEstimateRequest = PaymentTransferBatchRequest;
 export interface PaymentTransferBatch {
   id: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   externalId: string | null;
   sourceWalletId: string;
   sourceAddress: string;

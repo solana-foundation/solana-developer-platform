@@ -28,7 +28,7 @@ function mapPaymentTransferBatchRow(row: Record<string, unknown>): PaymentTransf
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
-    project_id: (row.project_id as string | null | undefined) ?? null,
+    project_id: row.project_id as string,
     external_id: (row.external_id as string | null | undefined) ?? null,
     source_wallet_id: row.source_wallet_id as string,
     source_address: row.source_address as string,
@@ -50,7 +50,7 @@ function mapPaymentTransferRecipientRow(row: Record<string, unknown>): PaymentTr
     id: row.id as string,
     batch_id: row.batch_id as string,
     organization_id: row.organization_id as string,
-    project_id: (row.project_id as string | null | undefined) ?? null,
+    project_id: row.project_id as string,
     transfer_id: (row.transfer_id as string | null | undefined) ?? null,
     external_id: (row.external_id as string | null | undefined) ?? null,
     counterparty_id: row.counterparty_id as string,
@@ -70,17 +70,12 @@ function jsonParam(value: Record<string, unknown> | undefined): string | null {
 
 function buildScopeWhere(params: {
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   extraClauses?: string[];
   extraValues?: unknown[];
 }) {
-  const clauses = ["organization_id = ?"];
-  const values: unknown[] = [params.organizationId];
-
-  if (params.projectId) {
-    clauses.push("project_id = ?");
-    values.push(params.projectId);
-  }
+  const clauses = ["organization_id = ?", "project_id = ?"];
+  const values: unknown[] = [params.organizationId, params.projectId];
 
   if (params.extraClauses?.length) {
     clauses.push(...params.extraClauses);
@@ -218,10 +213,7 @@ export function createPostgresPaymentTransferBatchesRepository(
              initiated_by_key_id = EXCLUDED.initiated_by_key_id,
              updated_at = sdp_iso_now()
            WHERE payment_transfer_batches.organization_id = EXCLUDED.organization_id
-             AND (
-               payment_transfer_batches.project_id = EXCLUDED.project_id
-               OR (payment_transfer_batches.project_id IS NULL AND EXCLUDED.project_id IS NULL)
-             )
+             AND payment_transfer_batches.project_id = EXCLUDED.project_id
            RETURNING *`
         )
         .bind(
@@ -463,10 +455,7 @@ export function createPostgresPaymentTransferBatchesRepository(
              error = EXCLUDED.error,
              updated_at = sdp_iso_now()
            WHERE payment_transfer_recipients.organization_id = EXCLUDED.organization_id
-             AND (
-               payment_transfer_recipients.project_id = EXCLUDED.project_id
-               OR (payment_transfer_recipients.project_id IS NULL AND EXCLUDED.project_id IS NULL)
-             )
+             AND payment_transfer_recipients.project_id = EXCLUDED.project_id
            RETURNING *`
         )
         .bind(

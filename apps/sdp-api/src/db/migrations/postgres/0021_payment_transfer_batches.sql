@@ -3,10 +3,34 @@
 -- execution/signature table: implementation should create one transfer row per
 -- Solana transaction chunk, while recipient-level status lives here.
 
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM   pg_constraint
+        WHERE  conname = 'counterparty_accounts_id_counterparty_org_project_key'
+    ) THEN
+        ALTER TABLE counterparty_accounts ADD CONSTRAINT counterparty_accounts_id_counterparty_org_project_key
+            UNIQUE (id, counterparty_id, organization_id, project_id);
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM   pg_constraint
+        WHERE  conname = 'payment_transfers_id_org_project_key'
+    ) THEN
+        ALTER TABLE payment_transfers ADD CONSTRAINT payment_transfers_id_org_project_key
+            UNIQUE (id, organization_id, project_id);
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS payment_transfer_batches (
     id TEXT PRIMARY KEY,
     organization_id TEXT NOT NULL,
-    project_id TEXT,
+    project_id TEXT NOT NULL,
     external_id TEXT,
     source_wallet_id TEXT NOT NULL,
     source_address TEXT NOT NULL,
@@ -28,7 +52,8 @@ CREATE TABLE IF NOT EXISTS payment_transfer_batches (
     ),
     CONSTRAINT payment_transfer_batches_counts_nonnegative CHECK (
         recipient_count >= 0 AND transaction_count >= 0
-    )
+    ),
+    CONSTRAINT payment_transfer_batches_id_org_project_key UNIQUE (id, organization_id, project_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_payment_transfer_batches_org_created
@@ -37,7 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_payment_transfer_batches_org_created
 
 CREATE INDEX IF NOT EXISTS idx_payment_transfer_batches_project_created
     ON payment_transfer_batches(project_id, created_at DESC)
-    WHERE project_id IS NOT NULL AND status <> 'archived';
+    WHERE status <> 'archived';
 
 CREATE INDEX IF NOT EXISTS idx_payment_transfer_batches_wallet_created
     ON payment_transfer_batches(source_wallet_id, created_at DESC)
@@ -55,7 +80,7 @@ CREATE TABLE IF NOT EXISTS payment_transfer_recipients (
     id TEXT PRIMARY KEY,
     batch_id TEXT NOT NULL,
     organization_id TEXT NOT NULL,
-    project_id TEXT,
+    project_id TEXT NOT NULL,
     transfer_id TEXT,
     external_id TEXT,
     counterparty_id TEXT NOT NULL,
@@ -66,12 +91,19 @@ CREATE TABLE IF NOT EXISTS payment_transfer_recipients (
     error TEXT,
     created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
-    FOREIGN KEY (batch_id) REFERENCES payment_transfer_batches(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY (transfer_id) REFERENCES payment_transfers(id) ON DELETE SET NULL,
-    FOREIGN KEY (counterparty_id) REFERENCES counterparties(id),
-    FOREIGN KEY (counterparty_account_id) REFERENCES counterparty_accounts(id),
+    FOREIGN KEY (batch_id, organization_id, project_id)
+        REFERENCES payment_transfer_batches(id, organization_id, project_id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (transfer_id, organization_id, project_id)
+        REFERENCES payment_transfers(id, organization_id, project_id),
+    FOREIGN KEY (counterparty_id, organization_id, project_id)
+        REFERENCES counterparties(id, organization_id, project_id)
+        ON DELETE RESTRICT,
+    FOREIGN KEY (counterparty_account_id, counterparty_id, organization_id, project_id)
+        REFERENCES counterparty_accounts(id, counterparty_id, organization_id, project_id)
+        ON DELETE RESTRICT,
     CONSTRAINT payment_transfer_recipients_status_check CHECK (
         status IN ('pending', 'processing', 'confirmed', 'failed', 'archived')
     )
