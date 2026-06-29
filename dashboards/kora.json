@@ -5,7 +5,7 @@
   "tags": ["kora", "sdp"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 4,
+  "version": 5,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
   "templating": {
@@ -95,8 +95,8 @@
             "projectName": "solana-developer-platform",
             "filters": ["metric.type", "=", "run.googleapis.com/request_latencies", "AND", "resource.label.service_name", "=~", "${service:regex}"],
             "groupBys": ["resource.label.service_name"],
-            "crossSeriesReducer": "REDUCE_MEAN",
-            "perSeriesAligner": "ALIGN_PERCENTILE_50",
+            "crossSeriesReducer": "REDUCE_PERCENTILE_50",
+            "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "300s"
           },
           "aliasBy": "p50"
@@ -109,8 +109,8 @@
             "projectName": "solana-developer-platform",
             "filters": ["metric.type", "=", "run.googleapis.com/request_latencies", "AND", "resource.label.service_name", "=~", "${service:regex}"],
             "groupBys": ["resource.label.service_name"],
-            "crossSeriesReducer": "REDUCE_MEAN",
-            "perSeriesAligner": "ALIGN_PERCENTILE_95",
+            "crossSeriesReducer": "REDUCE_PERCENTILE_95",
+            "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "300s"
           },
           "aliasBy": "p95"

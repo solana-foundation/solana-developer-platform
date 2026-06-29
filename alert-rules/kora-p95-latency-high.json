@@ -22,8 +22,8 @@
           "projectName": "solana-developer-platform",
           "filters": ["metric.type", "=", "run.googleapis.com/request_latencies", "AND", "resource.label.service_name", "=~", "kora-mainnet|kora-devnet"],
           "groupBys": ["resource.label.service_name"],
-          "crossSeriesReducer": "REDUCE_MEAN",
-          "perSeriesAligner": "ALIGN_PERCENTILE_95",
+          "crossSeriesReducer": "REDUCE_PERCENTILE_95",
+          "perSeriesAligner": "ALIGN_DELTA",
           "alignmentPeriod": "300s"
         },
         "aliasBy": "{{resource.label.service_name}}"
