@@ -283,19 +283,19 @@ test.describe
       expect(burned.transaction.status).toBe("confirmed");
       expect(burned.transaction.signature).toBeTruthy();
 
-      const forceBurned = await api.post<TransactionResponse>(
-        `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/force-burn`,
+      const secondBurned = await api.post<TransactionResponse>(
+        `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/burn`,
         {
           signingWalletId: wallet.walletId,
-          forceBurn: {
+          burn: {
             source: minted.tokenAccount,
             amount: "1",
           },
         }
       );
-      expect(forceBurned.transaction.type).toBe("force_burn");
-      expect(forceBurned.transaction.status).toBe("confirmed");
-      expect(forceBurned.transaction.signature).toBeTruthy();
+      expect(secondBurned.transaction.type).toBe("burn");
+      expect(secondBurned.transaction.status).toBe("confirmed");
+      expect(secondBurned.transaction.signature).toBeTruthy();
 
       await waitForToken(
         api,
@@ -319,7 +319,7 @@ test.describe
       const expectedActivityRows = [
         { operationLabel: "Burn", token: deployedToken.symbol, amount: "2" },
         {
-          operationLabel: "Force Burn",
+          operationLabel: "Burn",
           token: deployedToken.symbol,
           amount: "1",
         },
