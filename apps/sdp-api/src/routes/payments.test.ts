@@ -1298,6 +1298,80 @@ describe("Payments routes", () => {
     });
   });
 
+  it("rejects active replacement next due dates before replacement transactions are submitted", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const tooEarlyNextDue = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          amount: "35.00",
+          periodHours: 48,
+          nextCollectionDueAt: tooEarlyNextDue,
+        }),
+      },
+      env
+    );
+
+    expect(updateRes.status).toBe(400);
+    const body = (await updateRes.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("replacement subscription period");
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+
+    const recurringPayment = await getDb(env)
+      .prepare("SELECT status FROM payment_recurring_payments WHERE id = ?")
+      .bind(activated.id)
+      .first<{ status: string }>();
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT status, error, plan_creation_signature, authorization_signature, old_cancel_signature
+           FROM payment_recurring_payment_update_attempts
+          WHERE recurring_payment_id = ?`
+      )
+      .bind(activated.id)
+      .first<{
+        status: string;
+        error: string | null;
+        plan_creation_signature: string | null;
+        authorization_signature: string | null;
+        old_cancel_signature: string | null;
+      }>();
+    expect(recurringPayment?.status).toBe("active");
+    expect(attempt).toMatchObject({
+      status: "failed",
+      plan_creation_signature: null,
+      authorization_signature: null,
+      old_cancel_signature: null,
+    });
+    expect(attempt?.error).toContain("replacement subscription period");
+  });
+
   it("rejects fresh in-flight recurring payment updates", async () => {
     env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {

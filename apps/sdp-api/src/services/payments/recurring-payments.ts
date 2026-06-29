@@ -1608,6 +1608,22 @@ function activeNextCollectionDueAt(input: {
   return requested;
 }
 
+function replacementNextCollectionDueAt(input: {
+  requested: string | null | undefined;
+  periodStartAt: string;
+  periodHours: number;
+}): string {
+  const minimumDueAt = nextCollectionDueAt(input.periodStartAt, input.periodHours);
+  const requested = input.requested ?? minimumDueAt;
+  if (new Date(requested).getTime() < new Date(minimumDueAt).getTime()) {
+    throw badRequest(
+      "nextCollectionDueAt cannot be earlier than the replacement subscription period"
+    );
+  }
+
+  return requested;
+}
+
 async function finalizeMetadataScheduleUpdate(input: {
   env: Env;
   organizationId: string;
@@ -1987,6 +2003,7 @@ async function finalizeReplacementUpdate(input: {
   subscriptionAuthorityAddress: Address;
   authorizationSignature: Signature;
   oldCancelSignature: Signature;
+  currentPeriodStartAt: string;
   nextCollectionDueAt: string;
   createdBy: string | null;
 }): Promise<PaymentRecurringPaymentRow> {
@@ -2029,7 +2046,7 @@ async function finalizeReplacementUpdate(input: {
       subscriptionAuthorityAddress: input.subscriptionAuthorityAddress,
       authorizationSignature: input.authorizationSignature,
       status: "active",
-      currentPeriodStartAt: finalizedAt,
+      currentPeriodStartAt: input.currentPeriodStartAt,
       nextCollectionDueAt: input.nextCollectionDueAt,
       updatedAt: finalizedAt,
     });
@@ -2130,6 +2147,12 @@ async function runReplacementUpdate(input: {
   let planCreationSignature = attempt.plan_creation_signature as Signature | null;
   let authorizationSignature = attempt.authorization_signature as Signature | null;
   let oldCancelSignature = attempt.old_cancel_signature as Signature | null;
+  const replacementPeriodStartAt = attempt.created_at;
+  const requestedNextDue = replacementNextCollectionDueAt({
+    requested: input.request.nextCollectionDueAt,
+    periodStartAt: replacementPeriodStartAt,
+    periodHours: input.resolved.periodHours,
+  });
 
   const sourceSigner = await solanaServices.createOrgSigner(
     input.env,
@@ -2159,7 +2182,7 @@ async function runReplacementUpdate(input: {
     resolved: input.resolved,
     createdBy: input.createdBy,
   });
-  if (!attempt.new_plan_id) {
+  if (attempt.new_plan_id !== plan.id) {
     attempt = await recurringRepo.updateUpdateAttempt({
       attemptId: attempt.id,
       organizationId: input.organizationId,
@@ -2239,7 +2262,7 @@ async function runReplacementUpdate(input: {
     resolved: input.resolved,
     createdBy: input.createdBy,
   });
-  if (!attempt.new_subscription_id) {
+  if (attempt.new_subscription_id !== subscription.id) {
     attempt = await recurringRepo.updateUpdateAttempt({
       attemptId: attempt.id,
       organizationId: input.organizationId,
@@ -2385,15 +2408,6 @@ async function runReplacementUpdate(input: {
     "Recurring payment old subscription cancellation failed on-chain"
   );
 
-  const finalizedAt = new Date().toISOString();
-  const minimumNextDue = nextCollectionDueAt(finalizedAt, input.resolved.periodHours);
-  const requestedNextDue = input.request.nextCollectionDueAt ?? minimumNextDue;
-  if (new Date(requestedNextDue).getTime() < new Date(minimumNextDue).getTime()) {
-    throw badRequest(
-      "nextCollectionDueAt cannot be earlier than the replacement subscription period"
-    );
-  }
-
   return finalizeReplacementUpdate({
     env: input.env,
     organizationId: input.organizationId,
@@ -2411,6 +2425,7 @@ async function runReplacementUpdate(input: {
     subscriptionAuthorityAddress,
     authorizationSignature,
     oldCancelSignature,
+    currentPeriodStartAt: replacementPeriodStartAt,
     nextCollectionDueAt: requestedNextDue,
     createdBy: input.createdBy,
   });
