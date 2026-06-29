@@ -16,6 +16,7 @@
     "reference/api/projects",
     "reference/api/issuance",
     "reference/api/payments",
-    "reference/api/compliance"
+    "reference/api/compliance",
+    "reference/api/asset-profiles"
   ]
 }

@@ -681,6 +681,15 @@
           }
         },
         {
+          "name": "Get public token metadata JSON",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/metadata.json",
+            "description": "Public, unauthenticated endpoint serving the SDP-hosted Token-2022 / Metaplex fungible-compatible metadata JSON for a deployed token. This is the URL burned into the on-chain MetadataPointer when the issuer doesn't supply their own URI. Only deployed (on-chain) tokens are served; pending drafts return 404."
+          }
+        },
+        {
           "name": "Refresh cached token supply",
           "request": {
             "method": "POST",
@@ -714,6 +723,39 @@
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare",
             "description": "Builds an unsigned deploy transaction for client-side signing."
+          }
+        },
+        {
+          "name": "Confirm non-custodial deploy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/confirm",
+            "description": "Records the mint after the client signs and submits a prepared (non-custodial) deploy transaction. Verifies the transaction landed on-chain, then marks the token deployed.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signature\": \"5x...signature\",\n  \"mint\": \"So11111111111111111111111111111111111111112\",\n  \"listAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"wal_example\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare metadata-URI follow-up transaction",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare-metadata",
+            "description": "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Returns a null transaction when the on-chain URI already matches."
           }
         },
         {
@@ -1684,6 +1726,95 @@
                 }
               }
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Asset Profiles",
+      "item": [
+        {
+          "name": "Get asset profile field options",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/asset-profiles/metadata",
+            "description": "Returns the supported asset categories and the asset types available within each, for building an asset profile form."
+          }
+        },
+        {
+          "name": "List asset profiles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/asset-profiles",
+            "description": "Lists asset profiles for the authenticated organization and project."
+          }
+        },
+        {
+          "name": "Create asset profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/asset-profiles",
+            "description": "Creates an asset profile for an issued token. The token must belong to the caller's project and must not already have an active profile. Public metadata is derived from the supplied issuance metadata via the asset type's projection rules.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tokenId\": \"tok_example\",\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get asset profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/asset-profiles/{{profileId}}",
+            "description": "Gets an asset profile by id."
+          }
+        },
+        {
+          "name": "Update asset profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/asset-profiles/{{profileId}}",
+            "description": "Updates an asset profile. At least one field must be provided. The resulting category/type pair must be supported. Public metadata is recomputed when metadata or the asset type changes.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Archive asset profile",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/v1/asset-profiles/{{profileId}}",
+            "description": "Archives an asset profile. Archived profiles are hidden from default lists."
           }
         }
       ]

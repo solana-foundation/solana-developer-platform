@@ -1022,7 +1022,7 @@ POST /v1/issuance/tokens/{tokenId}/burn
 POST /v1/issuance/tokens/{tokenId}/force-burn
 ```
 
-The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`. This is not the raw smallest-unit integer from wallet balance responses.
+The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`.
 
 </Tab>
 </Tabs>
@@ -4988,6 +4988,7 @@ Source: https://platform.solana.com/docs/reference/api
 - [Issuance](/docs/reference/api/issuance)
 - [Payments](/docs/reference/api/payments)
 - [Compliance](/docs/reference/api/compliance)
+- [Asset Profiles](/docs/reference/api/asset-profiles)
 
 ---
 
@@ -5085,11 +5086,14 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Execute burn |
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn/prepare` | Prepare burn transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | Deploy token |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/confirm` | Confirm non-custodial deploy |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare` | Prepare token deploy transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata` | Prepare metadata-URI follow-up transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/force-burn` | Execute force burn |
 | `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/prepare` | Prepare force burn transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze account |
 | `GET` | `/v1/issuance/tokens/{tokenId}/frozen` | List frozen accounts |
+| `GET` | `/v1/issuance/tokens/{tokenId}/metadata.json` | Get public token metadata JSON |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint` | Execute mint |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint/prepare` | Prepare mint transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/pause` | Pause token transfers |
@@ -5152,6 +5156,22 @@ Source: https://platform.solana.com/docs/reference/api/compliance
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `POST` | `/v1/compliance/address-screenings` | Screen an address across configured compliance providers |
+
+---
+
+### Asset Profiles
+Source: https://platform.solana.com/docs/reference/api/asset-profiles
+
+> Issued-asset identity and metadata profiles, plus the public token metadata URI.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/asset-profiles` | List asset profiles |
+| `POST` | `/v1/asset-profiles` | Create asset profile |
+| `DELETE` | `/v1/asset-profiles/{profileId}` | Archive asset profile |
+| `GET` | `/v1/asset-profiles/{profileId}` | Get asset profile |
+| `PATCH` | `/v1/asset-profiles/{profileId}` | Update asset profile |
+| `GET` | `/v1/asset-profiles/metadata` | Get asset profile field options |
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.

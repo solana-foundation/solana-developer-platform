@@ -188,17 +188,16 @@ export function createPostgresAssetProfilesRepository(db: AppDb): AssetProfilesR
       return row ? mapAssetProfileRow(row) : null;
     },
 
-    async getPublicMetadataByMintAddress(mintAddress: string) {
+    async getPublicMetadataByTokenId(tokenId: string) {
       const row = await db
         .prepare(
-          `SELECT ap.public_metadata
-             FROM asset_profiles ap
-             JOIN issued_tokens t ON t.id = ap.token_id
-            WHERE t.mint_address = ?
-              AND ap.status = 'active'
+          `SELECT public_metadata
+             FROM asset_profiles
+            WHERE token_id = ?
+              AND status = 'active'
             LIMIT 1`
         )
-        .bind(mintAddress)
+        .bind(tokenId)
         .first<{ public_metadata: PublicTokenMetadata }>();
       return row ? row.public_metadata : null;
     },

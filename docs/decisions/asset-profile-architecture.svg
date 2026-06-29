@@ -38,8 +38,9 @@
   <text x="235" y="258" text-anchor="middle" font-size="12" fill="#334155">routes · tokens:read / tokens:write</text>
 
   <rect x="720" y="210" width="250" height="66" rx="8" fill="#dcfce7" stroke="#16a34a"/>
-  <text x="845" y="238" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">GET /token-metadata/:mint</text>
-  <text x="845" y="258" text-anchor="middle" font-size="12" fill="#334155">public · no auth</text>
+  <text x="845" y="230" text-anchor="middle" font-size="12" font-weight="700" fill="#0f172a">GET /v1/issuance/tokens/</text>
+  <text x="845" y="246" text-anchor="middle" font-size="12" font-weight="700" fill="#0f172a">:tokenId/metadata.json</text>
+  <text x="845" y="265" text-anchor="middle" font-size="10.5" fill="#334155">public · canonical URI · folds projection</text>
 
   <!-- Handlers -->
   <rect x="110" y="320" width="400" height="84" rx="8" fill="#eef2ff" stroke="#6366f1"/>
@@ -62,7 +63,7 @@
   <!-- Repository -->
   <rect x="110" y="540" width="850" height="64" rx="8" fill="#f1f5f9" stroke="#475569"/>
   <text x="535" y="566" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">asset-profile.repository  (Postgres adapter)</text>
-  <text x="535" y="586" text-anchor="middle" font-size="12" fill="#334155">CRUD · getPublicMetadataByMintAddress()</text>
+  <text x="535" y="586" text-anchor="middle" font-size="12" fill="#334155">CRUD · getPublicMetadataByTokenId()</text>
 
   <!-- Postgres -->
   <rect x="300" y="648" width="470" height="160" rx="10" fill="#f8fafc" stroke="#334155"/>
@@ -109,5 +110,6 @@
   <text x="605" y="722" text-anchor="middle" font-size="10" fill="#475569">FK</text>
 
   <!-- Footnote -->
-  <text x="520" y="828" text-anchor="middle" font-size="12" fill="#64748b">The public URI serves only the cached public_metadata — compliance &amp; custom fields never cross into it.</text>
+  <text x="520" y="822" text-anchor="middle" font-size="12" fill="#64748b">The canonical token metadata.json folds in only the cached public_metadata — compliance &amp; custom fields never cross into it.</text>
+  <text x="520" y="838" text-anchor="middle" font-size="11" fill="#94a3b8">Whole feature gated by ASSET_PROFILES_ENABLED (off by default).</text>
 </svg>

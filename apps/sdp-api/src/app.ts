@@ -38,7 +38,6 @@ import organizations from "@/routes/organizations";
 import payments from "@/routes/payments";
 import places from "@/routes/places";
 import projects from "@/routes/projects";
-import publicTokenMetadata from "@/routes/public-token-metadata";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
 import { isSentryEnabled, type Observability } from "@/runtime/observability";
@@ -215,8 +214,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/docs", docs);
   app.route("/llms.txt", llms);
   app.route("/webhooks", webhooks);
-  // Public token metadata URI host (no auth) — serves the safe public subset.
-  app.route("/token-metadata", publicTokenMetadata);
 
   // API v1
   const v1 = new Hono<{ Bindings: Env }>();

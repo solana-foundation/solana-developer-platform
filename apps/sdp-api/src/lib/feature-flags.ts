@@ -8,3 +8,7 @@ function isTruthyFlag(value: string | undefined): boolean {
 export function isRecurringPaymentsEnabled(env: Pick<Env, "PAYMENTS_RECURRING_ENABLED">): boolean {
   return isTruthyFlag(env.PAYMENTS_RECURRING_ENABLED);
 }
+
+export function isAssetProfilesEnabled(env: Pick<Env, "ASSET_PROFILES_ENABLED">): boolean {
+  return isTruthyFlag(env.ASSET_PROFILES_ENABLED);
+}

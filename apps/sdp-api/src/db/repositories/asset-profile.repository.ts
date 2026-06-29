@@ -88,8 +88,9 @@ export interface AssetProfilesRepository {
     organizationId: string;
     projectId: string;
   }): Promise<AssetProfileRow | null>;
-  // Used by the public, unauthenticated token metadata URI endpoint. Resolves by
-  // mint address alone (public surface) and returns only the cached public_metadata.
-  getPublicMetadataByMintAddress(mintAddress: string): Promise<PublicTokenMetadata | null>;
+  // Used by the public, unauthenticated canonical token metadata URI
+  // (/v1/issuance/tokens/:tokenId/metadata.json). Keyed by tokenId to match that
+  // route, and returns only the active profile's cached public_metadata.
+  getPublicMetadataByTokenId(tokenId: string): Promise<PublicTokenMetadata | null>;
   listAssetProfiles(params: ListAssetProfilesInput): Promise<ListAssetProfilesResult>;
 }

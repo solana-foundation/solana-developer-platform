@@ -6,8 +6,6 @@ import {
   createAssetProfileRequestSchema,
   errorResponseSchema,
   listAssetProfilesQuerySchema,
-  publicTokenMetadataSchema,
-  solanaAddressSchema,
   updateAssetProfileRequestSchema,
 } from "../schemas";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
@@ -155,28 +153,6 @@ export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
         description: "Asset profile archived",
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/token-metadata/{mintAddress}",
-    tags: ["Asset Profiles"],
-    summary: "Get public token metadata",
-    operationId: "getPublicTokenMetadata",
-    description:
-      "Public, unauthenticated token metadata URI hosted by SDP. Returns only the safe public metadata subset for a deployed token's mint address. Never exposes private compliance or custom fields.",
-    responses: {
-      200: {
-        description: "Public token metadata document",
-        content: jsonContent(publicTokenMetadataSchema),
-      },
-      ...errorResponses(errorResponseSchema, [400, 404]),
-    },
-    request: {
-      params: z.object({
-        mintAddress: solanaAddressSchema,
-      }),
     },
   });
 }
