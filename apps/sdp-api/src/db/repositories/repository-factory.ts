@@ -10,6 +10,8 @@ import type { PaymentRequestsRepository } from "./payment-requests.repository";
 import { createPostgresPaymentRequestsRepository } from "./payment-requests.repository.postgres";
 import type { PaymentSubscriptionsRepository } from "./payment-subscriptions.repository";
 import { createPostgresPaymentSubscriptionsRepository } from "./payment-subscriptions.repository.postgres";
+import type { PaymentTransferBatchesRepository } from "./payment-transfer-batches.repository";
+import { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
 import type { PaymentsRepository } from "./payments.repository";
 import { createPostgresPaymentsRepository } from "./payments.repository.postgres";
 import type { PolicyRepository } from "./policy.repository";
@@ -33,6 +35,10 @@ export function createPaymentRecurringPaymentsRepository(
 
 export function createPaymentRequestsRepository(env: Env): PaymentRequestsRepository {
   return createPostgresPaymentRequestsRepository(getDb(env));
+}
+
+export function createPaymentTransferBatchesRepository(env: Env): PaymentTransferBatchesRepository {
+  return createPostgresPaymentTransferBatchesRepository(getDb(env));
 }
 
 export function createCounterpartiesRepository(env: Env): CounterpartiesRepository {
