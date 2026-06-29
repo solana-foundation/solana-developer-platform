@@ -2,6 +2,8 @@ import type { SdpEnvironment } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import type { Context } from "hono";
 import {
+  createCounterpartiesRepository,
+  createCounterpartyAccountsRepository,
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
@@ -36,6 +38,14 @@ export function rampRuntime(c: AppContext): RampRuntimeContext {
 
 export function getPaymentsRepository(c: AppContext) {
   return createPaymentsRepository(c.env);
+}
+
+export function getCounterpartiesRepository(c: AppContext) {
+  return createCounterpartiesRepository(c.env);
+}
+
+export function getCounterpartyAccountsRepository(c: AppContext) {
+  return createCounterpartyAccountsRepository(c.env);
 }
 
 export function getPaymentSubscriptionsRepository(c: AppContext) {

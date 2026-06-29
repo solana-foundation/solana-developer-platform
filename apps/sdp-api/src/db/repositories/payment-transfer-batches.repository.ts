@@ -93,6 +93,7 @@ export interface ListPaymentTransferBatchesInput {
   organizationId: string;
   projectId: string;
   walletId?: string;
+  walletIds?: string[];
   token?: string;
   status?: PaymentTransferBatchStatus;
   externalId?: string;
@@ -163,6 +164,15 @@ export interface ListPaymentTransferRecipientsResult {
   total: number;
 }
 
+export interface UpdatePaymentTransferRecipientsStatusInput {
+  recipientIds: string[];
+  organizationId: string;
+  projectId: string;
+  transferId: string | null;
+  status: PaymentTransferBatchRecipientStatus;
+  error: string | null;
+}
+
 export interface PaymentTransferBatchesRepository {
   createTransferBatch(input: CreatePaymentTransferBatchInput): Promise<PaymentTransferBatchRow>;
   upsertTransferBatch(input: UpsertPaymentTransferBatchInput): Promise<PaymentTransferBatchRow>;
@@ -182,12 +192,18 @@ export interface PaymentTransferBatchesRepository {
   createTransferRecipient(
     input: CreatePaymentTransferRecipientInput
   ): Promise<PaymentTransferRecipientRow>;
+  createTransferRecipients(
+    inputs: CreatePaymentTransferRecipientInput[]
+  ): Promise<PaymentTransferRecipientRow[]>;
   upsertTransferRecipient(
     input: UpsertPaymentTransferRecipientInput
   ): Promise<PaymentTransferRecipientRow>;
   updateTransferRecipient(
     input: UpdatePaymentTransferRecipientInput
   ): Promise<PaymentTransferRecipientRow | null>;
+  updateTransferRecipientsStatus(
+    input: UpdatePaymentTransferRecipientsStatusInput
+  ): Promise<PaymentTransferRecipientRow[]>;
   deleteTransferRecipient(
     input: DeletePaymentTransferRecipientInput
   ): Promise<PaymentTransferRecipientRow | null>;

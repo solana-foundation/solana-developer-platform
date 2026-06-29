@@ -208,6 +208,10 @@ export function internalError(message?: string): AppError {
   return new AppError("INTERNAL_ERROR", message);
 }
 
+export function transactionFailed(message?: string, details?: Record<string, unknown>): AppError {
+  return new AppError("TRANSACTION_FAILED", message, details);
+}
+
 export function providerNotConfigured(message?: string): AppError {
   return new AppError("PROVIDER_NOT_CONFIGURED", message);
 }

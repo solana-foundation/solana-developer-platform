@@ -16,6 +16,7 @@ import type {
   PaymentTransferRecipientRow,
   UpdatePaymentTransferBatchInput,
   UpdatePaymentTransferRecipientInput,
+  UpdatePaymentTransferRecipientsStatusInput,
   UpsertPaymentTransferBatchInput,
   UpsertPaymentTransferRecipientInput,
 } from "./payment-transfer-batches.repository";
@@ -325,6 +326,12 @@ export function createPostgresPaymentTransferBatchesRepository(
       if (input.walletId) {
         extraClauses.push("source_wallet_id = ?");
         extraValues.push(input.walletId);
+      } else if (input.walletIds) {
+        if (input.walletIds.length === 0) {
+          return { rows: [], total: 0 };
+        }
+        extraClauses.push(`source_wallet_id IN (${input.walletIds.map(() => "?").join(", ")})`);
+        extraValues.push(...input.walletIds);
       }
       if (input.token) {
         extraClauses.push("token = ?");
@@ -425,6 +432,54 @@ export function createPostgresPaymentTransferBatchesRepository(
       return mapPaymentTransferRecipientRow(row);
     },
 
+    async createTransferRecipients(inputs: CreatePaymentTransferRecipientInput[]) {
+      if (inputs.length === 0) {
+        return [];
+      }
+
+      const rowPlaceholder = `(${Array(12).fill("?").join(", ")})`;
+      const values = inputs.flatMap((input) => [
+        generatePaymentTransferRecipientId(),
+        input.batchId,
+        input.organizationId,
+        input.projectId,
+        input.transferId ?? null,
+        input.externalId ?? null,
+        input.counterpartyId,
+        input.counterpartyAccountId,
+        input.destinationAddress,
+        input.amount,
+        input.status ?? "pending",
+        input.error ?? null,
+      ]);
+
+      const result = await db
+        .prepare(
+          `INSERT INTO payment_transfer_recipients (
+             id,
+             batch_id,
+             organization_id,
+             project_id,
+             transfer_id,
+             external_id,
+             counterparty_id,
+             counterparty_account_id,
+             destination_address,
+             amount,
+             status,
+             error
+           ) VALUES ${inputs.map(() => rowPlaceholder).join(", ")}
+           RETURNING *`
+        )
+        .bind(...values)
+        .all<Record<string, unknown>>();
+
+      if (result.results.length !== inputs.length) {
+        throw internalError("payment_transfer_recipients bulk INSERT returned an unexpected count");
+      }
+      return result.results.map(mapPaymentTransferRecipientRow);
+    },
+
     async upsertTransferRecipient(input: UpsertPaymentTransferRecipientInput) {
       const recipientId = input.recipientId ?? generatePaymentTransferRecipientId();
       const row = await db
@@ -522,6 +577,37 @@ export function createPostgresPaymentTransferBatchesRepository(
         .first<Record<string, unknown>>();
 
       return row ? mapPaymentTransferRecipientRow(row) : null;
+    },
+
+    async updateTransferRecipientsStatus(input: UpdatePaymentTransferRecipientsStatusInput) {
+      if (input.recipientIds.length === 0) {
+        return [];
+      }
+
+      const scope = buildScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        extraClauses: [
+          `id IN (${input.recipientIds.map(() => "?").join(", ")})`,
+          "status <> 'archived'",
+        ],
+        extraValues: input.recipientIds,
+      });
+
+      const result = await db
+        .prepare(
+          `UPDATE payment_transfer_recipients
+             SET transfer_id = ?,
+                 status = ?,
+                 error = ?,
+                 updated_at = sdp_iso_now()
+           WHERE ${scope.where}
+           RETURNING *`
+        )
+        .bind(input.transferId, input.status, input.error, ...scope.values)
+        .all<Record<string, unknown>>();
+
+      return result.results.map(mapPaymentTransferRecipientRow);
     },
 
     async deleteTransferRecipient(input: DeletePaymentTransferRecipientInput) {
