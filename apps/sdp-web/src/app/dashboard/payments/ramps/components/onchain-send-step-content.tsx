@@ -68,6 +68,10 @@ export function OnchainSendStepContent({
   } = wizard;
 
   const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
+  const assetSelectOptions = useMemo(
+    () => assetOptions.map((asset) => ({ value: asset.value, label: asset.label })),
+    [assetOptions]
+  );
 
   if (currentStepId === "DESTINATION") {
     return (
@@ -156,10 +160,10 @@ export function OnchainSendStepContent({
             label="Asset"
             value={fields.asset || null}
             onChange={(value) => setField("asset", value)}
-            options={assetOptions}
+            options={assetSelectOptions}
             placeholder="Select an asset"
             searchable={false}
-            disabled={!fields.walletId || assetOptions.length === 0}
+            disabled={!fields.walletId || assetSelectOptions.length === 0}
           />
         </div>
         <div className="flex flex-col gap-2">
