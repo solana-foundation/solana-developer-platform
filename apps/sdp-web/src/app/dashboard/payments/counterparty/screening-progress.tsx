@@ -1,6 +1,5 @@
 "use client";
 
-import type { ComplianceProviderId } from "@sdp/types";
 import {
   Loader2Icon,
   type LucideIcon,
@@ -12,7 +11,8 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import type { ComplianceProviderResult } from "@/lib/compliance";
+import { HeightReveal } from "@/components/ui/height-reveal";
+import { COMPLIANCE_PROVIDER_LOGOS, type ComplianceProviderResult } from "@/lib/compliance";
 import {
   formatRiskScore,
   type RiskTone,
@@ -23,13 +23,6 @@ import {
 const ROW_HOLD_MS = 650;
 const ROW_STAGGER_MS = 420;
 const COMPLETE_DELAY_MS = 500;
-
-const PROVIDER_LOGOS = {
-  range: "/provider-logos/range-compliance.svg",
-  elliptic: "/provider-logos/elliptic-compliance.svg",
-  trm: "/provider-logos/trm-compliance.svg",
-  chainalysis: "/provider-logos/chainalysis-compliance.svg",
-} as const satisfies Record<ComplianceProviderId, string>;
 
 const TONE_ICON = {
   green: { Icon: ShieldCheckIcon, className: "text-[#115e3d]" },
@@ -66,13 +59,7 @@ export function ScreeningProgress({ results, onComplete }: ScreeningProgressProp
   }, [resolvedCount, results.length, onComplete]);
 
   return (
-    <motion.div
-      initial={{ height: 0, opacity: 0 }}
-      animate={{ height: "auto", opacity: 1 }}
-      exit={{ height: 0, opacity: 0 }}
-      transition={{ duration: 0.3, ease: "easeOut" }}
-      style={{ overflow: "hidden" }}
-    >
+    <HeightReveal>
       <div className="space-y-2">
         <div className="text-sm font-medium text-text-medium">Compliance screening</div>
         <ul className="space-y-1.5">
@@ -86,7 +73,7 @@ export function ScreeningProgress({ results, onComplete }: ScreeningProgressProp
           ))}
         </ul>
       </div>
-    </motion.div>
+    </HeightReveal>
   );
 }
 
@@ -98,6 +85,7 @@ interface ScreeningRowProps {
 
 function ScreeningRow({ result, index, resolved }: ScreeningRowProps) {
   const { Icon, className } = TONE_ICON[resolveRiskTone(result)];
+  const logo = COMPLIANCE_PROVIDER_LOGOS[result.provider];
 
   return (
     <motion.li
@@ -107,13 +95,15 @@ function ScreeningRow({ result, index, resolved }: ScreeningRowProps) {
       className="flex items-center justify-between gap-3 rounded-xl bg-[rgba(255,255,255,0.6)] px-3 py-2 text-sm"
     >
       <span className="flex items-center gap-2 font-medium text-text-high">
-        <Image
-          src={PROVIDER_LOGOS[result.provider]}
-          alt=""
-          width={16}
-          height={16}
-          className="size-4 shrink-0 opacity-70 grayscale"
-        />
+        {logo ? (
+          <Image
+            src={logo}
+            alt=""
+            width={16}
+            height={16}
+            className="size-4 shrink-0 opacity-70 grayscale"
+          />
+        ) : null}
         {toProviderLabel(result.provider)}
       </span>
       <div className="flex items-center gap-2">

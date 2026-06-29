@@ -2,11 +2,12 @@
 
 import type { CounterpartyAccount, CounterpartyAccountResponse } from "@sdp/types";
 import { CheckIcon, Loader2Icon, PlusIcon, ShieldAlertIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { AnimatePresence } from "motion/react";
+import { type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
+import { HeightReveal } from "@/components/ui/height-reveal";
 import { HoldButton } from "@/components/ui/hold-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,6 +42,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
   const [phase, setPhase] = useState<AddPhase>("idle");
   const [snapshot, setSnapshot] = useState<ComplianceSnapshot | null>(null);
   const [screenUnavailable, setScreenUnavailable] = useState(false);
+  const submittingRef = useRef(false);
 
   const trimmedAddress = address.trim();
   const busy = phase === "screening" || phase === "revealing" || phase === "submitting";
@@ -53,41 +55,34 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
     : [];
   const hasRisk = problems.length > 0 || screenUnavailable;
 
-  const buttonLabel = ((): string => {
+  const buttonState = ((): { label: string; icon: ReactNode } => {
     switch (phase) {
       case "submitting":
-        return "Adding";
+        return { label: "Adding", icon: <Loader2Icon className="animate-spin" /> };
       case "screening":
       case "revealing":
-        return "Screening";
+        return { label: "Screening", icon: <Loader2Icon className="animate-spin" /> };
       case "ready":
-        return "Add account";
+        return { label: "Add account", icon: <CheckIcon /> };
       case "idle":
-        return "Add account";
+        return { label: "Add account", icon: <PlusIcon /> };
     }
   })();
 
-  const buttonIcon = (() => {
-    switch (phase) {
-      case "idle":
-        return <PlusIcon />;
-      case "ready":
-        return <CheckIcon />;
-      case "screening":
-      case "revealing":
-      case "submitting":
-        return <Loader2Icon className="animate-spin" />;
-    }
-  })();
-
-  function clearScreening() {
-    if (phase === "idle" || phase === "submitting") return;
+  function resetScreening() {
     setSnapshot(null);
     setScreenUnavailable(false);
     setPhase("idle");
   }
 
+  function clearScreening() {
+    if (phase === "idle" || phase === "submitting") return;
+    resetScreening();
+  }
+
   async function createAccount() {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setPhase("submitting");
     setError(null);
 
@@ -103,10 +98,10 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
       }
     );
 
+    submittingRef.current = false;
+
     if (!result.ok) {
-      setSnapshot(null);
-      setScreenUnavailable(false);
-      setPhase("idle");
+      resetScreening();
       setError(result.error);
       toast.error(result.error, { position: "bottom-right" });
       return;
@@ -117,20 +112,23 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
     toast.success("Crypto account attached", { position: "bottom-right" });
     setLabel("");
     setAddress("");
-    setSnapshot(null);
-    setScreenUnavailable(false);
-    setPhase("idle");
+    resetScreening();
   }
 
   async function handleAdd() {
     if (!trimmedAddress) return;
     setError(null);
-    setSnapshot(null);
     setScreenUnavailable(false);
+    setSnapshot(null);
     setPhase("screening");
 
     try {
       const result = await runComplianceCheck(trimmedAddress, "wallet_address_addition");
+      if (result.providers.length === 0) {
+        setScreenUnavailable(true);
+        setPhase("ready");
+        return;
+      }
       setSnapshot(result);
       setPhase("revealing");
     } catch {
@@ -200,20 +198,13 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
 
       <AnimatePresence>
         {phase === "ready" && hasRisk && (
-          <motion.div
-            key="risk-warning"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: "easeOut" }}
-            style={{ overflow: "hidden" }}
-          >
+          <HeightReveal key="risk-warning" durationSeconds={0.25}>
             <p className="text-sm text-status-error-text">
               {screenUnavailable
                 ? "We couldn't screen this address — compliance screening is unavailable. Add it anyway?"
                 : "One or more checks flagged this wallet or couldn't be completed. Add it anyway?"}
             </p>
-          </motion.div>
+          </HeightReveal>
         )}
       </AnimatePresence>
 
@@ -230,9 +221,9 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
             type="button"
             onClick={() => (phase === "ready" ? void createAccount() : void handleAdd())}
             disabled={(phase !== "idle" && phase !== "ready") || !trimmedAddress}
-            iconLeft={buttonIcon}
+            iconLeft={buttonState.icon}
           >
-            {buttonLabel}
+            {buttonState.label}
           </Button>
         )}
       </div>
