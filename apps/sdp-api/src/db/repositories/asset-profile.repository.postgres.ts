@@ -189,12 +189,17 @@ export function createPostgresAssetProfilesRepository(db: AppDb): AssetProfilesR
     },
 
     async getPublicMetadataByTokenId(tokenId: string) {
+      // token_id is the PK of issued_tokens (globally unique) and the partial
+      // unique index guarantees at most one active profile per token, so this
+      // returns exactly that token's profile. ORDER BY is a deterministic
+      // tiebreak should that invariant ever change.
       const row = await db
         .prepare(
           `SELECT public_metadata
              FROM asset_profiles
             WHERE token_id = ?
               AND status = 'active'
+            ORDER BY created_at DESC, id DESC
             LIMIT 1`
         )
         .bind(tokenId)

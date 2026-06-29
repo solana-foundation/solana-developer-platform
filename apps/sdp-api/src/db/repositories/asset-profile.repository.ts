@@ -89,8 +89,8 @@ export interface AssetProfilesRepository {
     projectId: string;
   }): Promise<AssetProfileRow | null>;
   // Used by the public, unauthenticated canonical token metadata URI
-  // (/v1/issuance/tokens/:tokenId/metadata.json). Keyed by tokenId to match that
-  // route, and returns only the active profile's cached public_metadata.
+  // (/v1/issuance/tokens/:tokenId/metadata.json). Keyed by tokenId alone:
+  // token_id is the PK of issued_tokens (globally unique). Returns the cached public_metadata.
   getPublicMetadataByTokenId(tokenId: string): Promise<PublicTokenMetadata | null>;
   listAssetProfiles(params: ListAssetProfilesInput): Promise<ListAssetProfilesResult>;
 }

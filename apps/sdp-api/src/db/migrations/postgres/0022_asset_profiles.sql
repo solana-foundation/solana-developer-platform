@@ -66,7 +66,10 @@ CREATE TABLE IF NOT EXISTS asset_profiles (
 );
 
 -- One active profile per token ("an issued token has one Asset Profile").
--- Partial unique index lets an archived profile coexist with a new active one.
+-- Keyed by token_id alone: it is an FK to issued_tokens.id (a PRIMARY KEY), so
+-- token_id is globally unique and a token can never appear under two org/project
+-- scopes. Partial index lets an archived profile coexist with a
+-- new active one.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_profiles_token_active
     ON asset_profiles(token_id)
     WHERE status = 'active';
