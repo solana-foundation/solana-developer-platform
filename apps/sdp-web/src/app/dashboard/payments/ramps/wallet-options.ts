@@ -15,10 +15,16 @@ interface ResolveWalletAssetOptionsConfig {
   hideUnresolvedMints?: boolean;
 }
 
-const DISPLAYABLE_TOKEN_SYMBOL_PATTERN = /^[A-Z0-9][A-Z0-9._-]{0,11}$/;
-
-function isDisplayableTokenSymbol(value: string): boolean {
-  return DISPLAYABLE_TOKEN_SYMBOL_PATTERN.test(value.trim().toUpperCase());
+function shouldHideUnresolvedMintLabel(
+  balance: Pick<WalletBalance, "token" | "mint">,
+  displayToken: string,
+  issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint
+): boolean {
+  const mint = balance.mint.trim();
+  if (issuedTokenSymbolsByMint[mint]?.trim()) {
+    return false;
+  }
+  return displayToken.trim().toUpperCase() === mint.toUpperCase();
 }
 
 export function resolveWalletAssetOptions(
@@ -33,7 +39,10 @@ export function resolveWalletAssetOptions(
     }
 
     const token = resolveAggregateBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
-    if (options.hideUnresolvedMints && !isDisplayableTokenSymbol(token)) {
+    if (
+      options.hideUnresolvedMints &&
+      shouldHideUnresolvedMintLabel(balance, token, issuedTokenSymbolsByMint)
+    ) {
       continue;
     }
     if (token) {
@@ -70,6 +79,41 @@ export function findWalletBalanceForDisplayToken(
       );
     }) ?? null
   );
+}
+
+export function walletBalanceAssetOptions(
+  wallet: PaymentsDashboardWallet | null,
+  issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint,
+  options: Pick<ResolveWalletAssetOptionsConfig, "hideUnresolvedMints"> = {}
+): ComboboxOption[] {
+  const seen = new Set<string>();
+  const assetOptions: ComboboxOption[] = [];
+
+  for (const balance of wallet?.balances ?? []) {
+    if (isSolBalance(balance)) {
+      continue;
+    }
+
+    const mint = balance.mint.trim();
+    const label = resolveAggregateBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
+    if (
+      !mint ||
+      seen.has(mint) ||
+      (options.hideUnresolvedMints &&
+        shouldHideUnresolvedMintLabel(balance, label, issuedTokenSymbolsByMint))
+    ) {
+      continue;
+    }
+
+    seen.add(mint);
+    assetOptions.push({
+      value: mint,
+      label,
+      description: `${balance.uiAmount} available`,
+    });
+  }
+
+  return assetOptions;
 }
 
 export function walletComboboxOptions(wallets: PaymentsDashboardWallet[]): ComboboxOption[] {

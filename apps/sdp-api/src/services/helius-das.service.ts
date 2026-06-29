@@ -384,7 +384,7 @@ async function fetchTokenSymbolsByMint(
 function needsTokenSymbol(balance: Pick<CustodyWalletTokenBalance, "token" | "mint">): boolean {
   const token = balance.token.trim();
   const mint = balance.mint.trim();
-  return token.length === 0 || token === mint || token.length > 12;
+  return token.length === 0 || token === mint;
 }
 
 function enrichBalancesWithTokenSymbols(

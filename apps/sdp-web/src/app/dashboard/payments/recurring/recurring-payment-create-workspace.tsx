@@ -19,10 +19,7 @@ import {
 } from "../payments-workspace.data";
 import { CounterpartyPicker } from "../ramps/components/counterparty-picker";
 import { RampWizardShell } from "../ramps/components/ramp-wizard-shell";
-import {
-  findWalletBalanceForDisplayToken,
-  resolveWalletAssetOptions,
-} from "../ramps/wallet-options";
+import { walletBalanceAssetOptions } from "../ramps/wallet-options";
 import { createRecurringPayment } from "./recurring-payments.data";
 
 interface RecurringPaymentCreateWorkspaceProps {
@@ -256,17 +253,9 @@ export function RecurringPaymentCreateWorkspace({
 
   const assetOptions = useMemo<ComboboxOption[]>(
     () =>
-      resolveWalletAssetOptions(selectedWallet, issuedTokenSymbolsByMint, {
+      walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint, {
         hideUnresolvedMints: true,
-        includeDefaultUsdc: false,
-      }).map((token) => ({
-        value: token,
-        label: token,
-        description: `${
-          findWalletBalanceForDisplayToken(selectedWallet, token, issuedTokenSymbolsByMint)
-            ?.uiAmount ?? "0"
-        } available`,
-      })),
+      }),
     [issuedTokenSymbolsByMint, selectedWallet]
   );
   const nonSolBalanceCount =
@@ -276,9 +265,9 @@ export function RecurringPaymentCreateWorkspace({
   const selectedAssetBalance = useMemo<WalletBalance | null>(
     () =>
       selectedAsset
-        ? findWalletBalanceForDisplayToken(selectedWallet, fields.token, issuedTokenSymbolsByMint)
+        ? (selectedWallet?.balances?.find((balance) => balance.mint === fields.token) ?? null)
         : null,
-    [fields.token, issuedTokenSymbolsByMint, selectedAsset, selectedWallet]
+    [fields.token, selectedAsset, selectedWallet]
   );
   const periodHours = resolvePeriodHours(fields);
   const currentStep = CREATE_STEPS[stepIndex];
@@ -324,14 +313,15 @@ export function RecurringPaymentCreateWorkspace({
 
   const selectWallet = (walletId: string) => {
     const wallet = availableWallets.find((entry) => entry.walletId === walletId) ?? null;
-    const nextAssets = resolveWalletAssetOptions(wallet, issuedTokenSymbolsByMint, {
+    const nextAssets = walletBalanceAssetOptions(wallet, issuedTokenSymbolsByMint, {
       hideUnresolvedMints: true,
-      includeDefaultUsdc: false,
     });
     setFields((current) => ({
       ...current,
       walletId,
-      token: nextAssets.includes(current.token) ? current.token : (nextAssets[0] ?? ""),
+      token: nextAssets.some((asset) => asset.value === current.token)
+        ? current.token
+        : (nextAssets[0]?.value ?? ""),
     }));
     setFormError(null);
   };

@@ -165,4 +165,25 @@ describe("helius-das service", () => {
       decimals: 6,
     });
   });
+
+  it("keeps configured token labels even when they are long", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const mint = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
+
+    const balances = await attachTokenSymbolsToBalances(env, [
+      {
+        token: "INSTITUTIONALUSD",
+        mint,
+        amount: "20000000",
+        uiAmount: "20",
+        decimals: 6,
+      },
+    ]);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(balances[0]).toMatchObject({
+      token: "INSTITUTIONALUSD",
+      mint,
+    });
+  });
 });
