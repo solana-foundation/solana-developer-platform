@@ -49,16 +49,15 @@ export function onboardingCopy(
   }
 }
 
-export function simulateActionLabels(provider: "bvnk" | "lightspark"): SimulateActionLabels {
+/** Sandbox simulate-action labels for providers that support the simulate flow; null otherwise (caller hides the action). */
+export function simulateActionLabels(provider: RampProviderId): SimulateActionLabels | null {
   switch (provider) {
     case "bvnk":
       return BVNK_SIMULATE_LABELS;
     case "lightspark":
       return LIGHTSPARK_SIMULATE_LABELS;
-    default: {
-      const exhaustive: never = provider;
-      throw new Error(`No simulate labels for ramp provider: ${exhaustive}`);
-    }
+    default:
+      return null;
   }
 }
 

@@ -120,6 +120,17 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     }
 
     const labels = simulateActionLabels(quote.provider);
+    const simulateAction = labels
+      ? {
+          loading: quoteSimulationLoading,
+          succeeded: quoteSimulationSucceeded,
+          onClick: () => void simulateCurrentQuote(),
+          icon: <DollarSignIcon />,
+          idleLabel: labels.idle,
+          busyLabel: labels.busy,
+          doneLabel: labels.done,
+        }
+      : undefined;
     return (
       <div className="space-y-6">
         <ManualInstructionsQuote
@@ -128,15 +139,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           fiatCurrency={selectedRampPair.fiatCurrency}
           cryptoToken={toRampCryptoToken(selectedRampPair.assetRail)}
           instructions={quote.paymentInstructions}
-          action={{
-            loading: quoteSimulationLoading,
-            succeeded: quoteSimulationSucceeded,
-            onClick: () => void simulateCurrentQuote(),
-            icon: <DollarSignIcon />,
-            idleLabel: labels.idle,
-            busyLabel: labels.busy,
-            doneLabel: labels.done,
-          }}
+          action={simulateAction}
         />
         <div className="border-t border-border-light pt-5">
           <RampStatusPanel direction="onramp" transfer={transferStatus} />
