@@ -1,13 +1,22 @@
+import type { ComplianceProviderId } from "@sdp/types";
+
 export type ComplianceIntent = "transfer_destination" | "wallet_address_addition" | "unknown";
 
 export type ComplianceProviderResult = {
-  provider: string;
+  provider: ComplianceProviderId;
   status: "ok" | "unavailable" | "error";
   riskScore: number | null;
   riskLevel?: string;
   message?: string;
   evaluatedAt: string;
 };
+
+export const COMPLIANCE_PROVIDER_LOGOS = {
+  range: "/provider-logos/range-compliance.svg",
+  elliptic: "/provider-logos/elliptic-compliance.svg",
+  trm: "/provider-logos/trm-compliance.svg",
+  chainalysis: "/provider-logos/chainalysis-compliance.svg",
+} as const satisfies Record<ComplianceProviderId, string>;
 
 export type AddressScreeningResult = {
   checkedAt: string;
