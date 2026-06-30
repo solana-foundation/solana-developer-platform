@@ -71,7 +71,6 @@ import * as solanaRpc from "@/services/solana/rpc";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import {
   type AppContext,
-  getCounterpartiesRepository,
   getCounterpartyAccountsRepository,
   getFeePayment,
   getPaymentsRepository,
@@ -241,61 +240,35 @@ async function resolveRecipients(params: {
   recipients: TransferBatchRecipientInput[];
   decimals: number;
 }): Promise<ResolvedRecipient[]> {
-  const counterpartiesRepository = getCounterpartiesRepository(params.c);
   const accountsRepository = getCounterpartyAccountsRepository(params.c);
 
-  return Promise.all(
-    params.recipients.map(async (recipient, index) => {
-      let counterpartyId: string;
-      let account: CounterpartyAccountRow | null;
-      if (recipient.counterpartyId) {
-        const [counterparty, scopedAccount] = await Promise.all([
-          counterpartiesRepository.getCounterpartyById({
-            counterpartyId: recipient.counterpartyId,
-            organizationId: params.organizationId,
-            projectId: params.projectId,
-          }),
-          accountsRepository.getCounterpartyAccountById({
-            counterpartyAccountId: recipient.counterpartyAccountId,
-            counterpartyId: recipient.counterpartyId,
-            organizationId: params.organizationId,
-            projectId: params.projectId,
-          }),
-        ]);
-        if (!counterparty) {
-          throw notFound(`Counterparty ${recipient.counterpartyId}`);
-        }
-        counterpartyId = recipient.counterpartyId;
-        account = scopedAccount;
-      } else {
-        account = await accountsRepository.getCounterpartyAccountByIdInProject({
-          counterpartyAccountId: recipient.counterpartyAccountId,
-          organizationId: params.organizationId,
-          projectId: params.projectId,
-        });
-        if (account) {
-          counterpartyId = account.counterparty_id;
-        } else {
-          throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
-        }
-      }
+  const accounts = await accountsRepository.listCounterpartyAccountsByIdsInProject({
+    counterpartyAccountIds: [...new Set(params.recipients.map((r) => r.counterpartyAccountId))],
+    organizationId: params.organizationId,
+    projectId: params.projectId,
+  });
+  const accountById = new Map(accounts.map((account) => [account.id, account]));
 
-      if (!account) {
-        throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
-      }
+  return params.recipients.map((recipient, index) => {
+    const account = accountById.get(recipient.counterpartyAccountId);
+    if (!account) {
+      throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
+    }
+    if (recipient.counterpartyId && account.counterparty_id !== recipient.counterpartyId) {
+      throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
+    }
 
-      const amountBaseUnits = parseRecipientAmount(recipient.amount, params.decimals);
-      return {
-        index,
-        externalId: recipient.externalId ?? null,
-        counterpartyId,
-        counterpartyAccountId: recipient.counterpartyAccountId,
-        destinationAddress: readCryptoWalletAddress(account, index),
-        amount: formatDecimalAmount(amountBaseUnits, params.decimals),
-        amountBaseUnits,
-      };
-    })
-  );
+    const amountBaseUnits = parseRecipientAmount(recipient.amount, params.decimals);
+    return {
+      index,
+      externalId: recipient.externalId ?? null,
+      counterpartyId: account.counterparty_id,
+      counterpartyAccountId: recipient.counterpartyAccountId,
+      destinationAddress: readCryptoWalletAddress(account, index),
+      amount: formatDecimalAmount(amountBaseUnits, params.decimals),
+      amountBaseUnits,
+    };
+  });
 }
 
 async function resolveBatchRequest(

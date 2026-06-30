@@ -5,10 +5,10 @@ import type {
   CounterpartyAccount,
   CryptoRailId,
   CustodyWalletAggregate,
-  ListBatchRecipientsEnvelope,
-  ListBatchRecipientsResponse,
   ListCounterpartiesResponse,
   ListCounterpartyAccountsResponse,
+  ListProjectCounterpartyAccountsEnvelope,
+  ListProjectCounterpartyAccountsResponse,
   MoneygramRampEvent,
   PaymentRampEstimateEnvelope,
   PaymentRampExecution,
@@ -527,22 +527,19 @@ export async function fetchBatchRecipients(input: {
   search?: string;
   ids?: string[];
   signal?: AbortSignal;
-}): Promise<ListBatchRecipientsResponse> {
+}): Promise<ListProjectCounterpartyAccountsResponse> {
   const query = new URLSearchParams({
     page: String(input.page),
     pageSize: String(input.pageSize),
     ...(input.search ? { search: input.search } : {}),
     ...(input.ids && input.ids.length > 0 ? { ids: input.ids.join(",") } : {}),
   });
-  const response = await fetch(
-    `/api/dashboard/counterparty/crypto-recipients?${query.toString()}`,
-    {
-      method: "GET",
-      cache: "no-store",
-      signal: input.signal,
-    }
-  );
-  const body = (await response.json().catch(() => ({}))) as ListBatchRecipientsEnvelope;
+  const response = await fetch(`/api/dashboard/counterparty/accounts?${query.toString()}`, {
+    method: "GET",
+    cache: "no-store",
+    signal: input.signal,
+  });
+  const body = (await response.json().catch(() => ({}))) as ListProjectCounterpartyAccountsEnvelope;
   if (!response.ok) {
     throw new Error(getApiError(body, `Recipient list request failed (${response.status}).`));
   }

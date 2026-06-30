@@ -25,6 +25,14 @@ const RECIPIENT_STATUS_TONE = {
   archived: "text-text-low",
 } as const satisfies Record<PaymentTransferBatchRecipientStatus, string>;
 
+const RECIPIENT_STATUS_LABEL = {
+  pending: "Pending",
+  processing: "Processing",
+  confirmed: "Complete",
+  failed: "Failed",
+  archived: "Archived",
+} as const satisfies Record<PaymentTransferBatchRecipientStatus, string>;
+
 function batchResultTitle(status: PaymentTransferBatchStatus): string {
   switch (status) {
     case "confirmed":
@@ -276,7 +284,7 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
                 <span
                   className={cn("text-sm font-medium", RECIPIENT_STATUS_TONE[recipient.status])}
                 >
-                  {recipient.status}
+                  {RECIPIENT_STATUS_LABEL[recipient.status]}
                 </span>
                 {signature ? (
                   <button

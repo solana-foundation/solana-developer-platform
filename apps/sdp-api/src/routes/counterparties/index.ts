@@ -10,7 +10,7 @@ import {
   getCounterpartyFieldOptions,
   getCounterpartyRequirements,
   listCounterparties,
-  listCryptoRecipients,
+  listProjectCounterpartyAccounts,
   submitCounterpartyRequirements,
   updateCounterparty,
 } from "./handlers";
@@ -26,9 +26,9 @@ counterparties.get(
   getCounterpartyFieldOptions
 );
 counterparties.get(
-  "/crypto-recipients",
+  "/accounts",
   requirePermissions("counterparties:read"),
-  listCryptoRecipients
+  listProjectCounterpartyAccounts
 );
 counterparties.get("/", requirePermissions("counterparties:read"), listCounterparties);
 counterparties.post("/", requirePermissions("counterparties:write"), createCounterparty);

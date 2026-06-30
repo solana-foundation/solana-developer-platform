@@ -53,6 +53,10 @@ export function BatchSendRail({
       stepIndex={wizard.stepIndex}
       primaryDisabled={wizard.submitting || !wizard.canProceed}
       primaryLabel={batchPrimaryLabel(wizard)}
+      secondaryLabel="Cancel"
+      confirmSecondary={wizard.isLastStep && !wizard.batchResult}
+      secondaryDisabled={wizard.submitting}
+      hideSecondary={Boolean(wizard.batchResult)}
       walletsError={wizard.liveWalletsError}
       onPrimary={() => void wizard.handlePrimary()}
       onSecondary={wizard.handleSecondary}

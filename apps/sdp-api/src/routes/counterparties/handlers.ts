@@ -11,8 +11,8 @@ import {
   type Counterparty,
   type CounterpartyFieldOptionsResponse,
   type CounterpartyResponse,
-  type ListBatchRecipientsResponse,
   type ListCounterpartiesResponse,
+  type ListProjectCounterpartyAccountsResponse,
   US_STATES,
 } from "@sdp/types";
 import { z } from "zod";
@@ -47,8 +47,8 @@ import {
   counterpartyIdParamsSchema,
   counterpartyRequirementsQuerySchema,
   createCounterpartySchema,
-  listBatchRecipientsQuerySchema,
   listCounterpartiesQuerySchema,
+  listCounterpartyAccountsQuerySchema,
   updateCounterpartySchema,
 } from "./schemas";
 
@@ -119,10 +119,17 @@ export const listCounterparties = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const listCryptoRecipients = async (c: AppContext) => {
+/**
+ * Lists a project's counterparty accounts of the requested `type`.
+ *
+ * Only `crypto_account` is supported today (active Solana wallets); the `type`
+ * enum will widen as other account kinds gain pickers, at which point the
+ * response becomes a discriminated union by `type`.
+ */
+export const listProjectCounterpartyAccounts = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const parsed = listBatchRecipientsQuerySchema.safeParse(c.req.query());
+  const parsed = listCounterpartyAccountsQuerySchema.safeParse(c.req.query());
 
   if (!parsed.success) {
     throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
@@ -147,8 +154,8 @@ export const listCryptoRecipients = async (c: AppContext) => {
     offset: resolvingIds ? 0 : (page - 1) * pageSize,
   });
 
-  const response: ListBatchRecipientsResponse = {
-    recipients: rows.map((row) => ({
+  const response: ListProjectCounterpartyAccountsResponse = {
+    accounts: rows.map((row) => ({
       counterpartyId: row.counterparty_id,
       counterpartyAccountId: row.account_id,
       name: row.counterparty_display_name,

@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  type BatchRecipientAccount,
+  type CounterpartyAccountSummary,
   type PaymentsDashboardWallet,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
@@ -29,7 +29,7 @@ export const BATCH_SEND_STEPS = [
 
 export type BatchSendStepId = (typeof BATCH_SEND_STEPS)[number]["id"];
 
-export type BatchEligibleRecipient = BatchRecipientAccount;
+export type BatchEligibleRecipient = CounterpartyAccountSummary;
 
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 const RECIPIENTS_PAGE_SIZE = 8;
@@ -101,7 +101,7 @@ export function useBatchSendWizard({
       }),
     { revalidateOnFocus: false, keepPreviousData: true }
   );
-  const pageRecipients = recipientPage ? recipientPage.recipients : [];
+  const pageRecipients = recipientPage ? recipientPage.accounts : [];
   const recipientTotal = recipientPage ? recipientPage.total : 0;
   const pageCount = Math.max(1, Math.ceil(recipientTotal / RECIPIENTS_PAGE_SIZE));
 
@@ -184,7 +184,7 @@ export function useBatchSendWizard({
     const ids = [...new Set(rows.map((row) => row.accountId))];
     const resolved = await fetchBatchRecipients({ page: 1, pageSize: 1, ids });
     const byId = new Map(
-      resolved.recipients.map((recipient) => [recipient.counterpartyAccountId, recipient])
+      resolved.accounts.map((recipient) => [recipient.counterpartyAccountId, recipient])
     );
     const additions: Record<string, BatchRecipientEntry> = {};
     const unresolved: string[] = [];
@@ -314,11 +314,7 @@ export function useBatchSendWizard({
     if (submitting || batchResult) {
       return;
     }
-    if (stepIndex === 0) {
-      onExit();
-      return;
-    }
-    setStepIndex((current) => Math.max(0, current - 1));
+    onExit();
   };
 
   return {

@@ -6,7 +6,7 @@ export async function GET(request: Request) {
     const apiClient = await createSdpApiClient();
     const search = new URL(request.url).searchParams.toString();
     const response = await apiClient.request(
-      `/v1/counterparties/crypto-recipients${search ? `?${search}` : ""}`,
+      `/v1/counterparties/accounts${search ? `?${search}` : ""}`,
       { method: "GET" }
     );
 

@@ -642,5 +642,47 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       expect(page2.rows).toHaveLength(1);
       expect(page2.rows[0].counterparty_display_name).toBe("Ccc");
     });
+
+    it("restricts results to the given accountIds and combines with search", async () => {
+      const acme = await seedNamed("Acme Corp", "ext_acme");
+      const beta = await seedNamed("Beta LLC", "ext_beta");
+      const acmeAccount = await seedSolanaAccount(acme.id, "7xKqAcme", null);
+      const betaAccount = await seedSolanaAccount(beta.id, "3mPoBeta", null);
+      if (!acmeAccount || !betaAccount) {
+        throw new Error("failed to seed accounts");
+      }
+
+      const onlyAcme = await repo.listBatchRecipients({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        accountIds: [acmeAccount.id],
+        limit: 50,
+        offset: 0,
+      });
+      expect(onlyAcme.total).toBe(1);
+      expect(onlyAcme.rows[0].account_id).toBe(acmeAccount.id);
+
+      // Bind order must keep search and accountIds independent.
+      const acmeFilteredBySearch = await repo.listBatchRecipients({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        accountIds: [acmeAccount.id, betaAccount.id],
+        search: "beta",
+        limit: 50,
+        offset: 0,
+      });
+      expect(acmeFilteredBySearch.total).toBe(1);
+      expect(acmeFilteredBySearch.rows[0].account_id).toBe(betaAccount.id);
+
+      // An accountId outside the project resolves to nothing.
+      const foreign = await repo.listBatchRecipients({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        accountIds: ["cpa_does_not_exist"],
+        limit: 50,
+        offset: 0,
+      });
+      expect(foreign.total).toBe(0);
+    });
   });
 });

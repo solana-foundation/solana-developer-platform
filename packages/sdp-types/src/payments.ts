@@ -292,7 +292,11 @@ export interface PaymentTransferRecipient {
   updatedAt: string;
 }
 
-export interface BatchRecipientAccount {
+export const COUNTERPARTY_ACCOUNT_SUMMARY_TYPES = ["crypto_account"] as const;
+
+export type CounterpartyAccountSummaryType = (typeof COUNTERPARTY_ACCOUNT_SUMMARY_TYPES)[number];
+
+export interface CounterpartyAccountSummary {
   counterpartyId: string;
   counterpartyAccountId: string;
   name: string;
@@ -300,15 +304,15 @@ export interface BatchRecipientAccount {
   label: string | null;
 }
 
-export interface ListBatchRecipientsResponse {
-  recipients: BatchRecipientAccount[];
+export interface ListProjectCounterpartyAccountsResponse {
+  accounts: CounterpartyAccountSummary[];
   total: number;
   page: number;
   pageSize: number;
 }
 
-export interface ListBatchRecipientsEnvelope {
-  data?: ListBatchRecipientsResponse;
+export interface ListProjectCounterpartyAccountsEnvelope {
+  data?: ListProjectCounterpartyAccountsResponse;
   error?: {
     message?: string;
   };
