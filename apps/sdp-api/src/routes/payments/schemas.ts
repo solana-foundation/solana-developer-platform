@@ -555,7 +555,7 @@ export const transferBatchRecipientStatusSchema = z.enum([
 
 export const transferBatchRecipientSchema = z.object({
   externalId: z.string().min(1).max(256).optional(),
-  counterpartyId: z.string().min(1),
+  counterpartyId: z.string().min(1).optional(),
   counterpartyAccountId: z.string().min(1),
   amount: paymentAmountSchema,
 });

@@ -246,23 +246,40 @@ async function resolveRecipients(params: {
 
   return Promise.all(
     params.recipients.map(async (recipient, index) => {
-      const [counterparty, account] = await Promise.all([
-        counterpartiesRepository.getCounterpartyById({
-          counterpartyId: recipient.counterpartyId,
-          organizationId: params.organizationId,
-          projectId: params.projectId,
-        }),
-        accountsRepository.getCounterpartyAccountById({
+      let counterpartyId: string;
+      let account: CounterpartyAccountRow | null;
+      if (recipient.counterpartyId) {
+        const [counterparty, scopedAccount] = await Promise.all([
+          counterpartiesRepository.getCounterpartyById({
+            counterpartyId: recipient.counterpartyId,
+            organizationId: params.organizationId,
+            projectId: params.projectId,
+          }),
+          accountsRepository.getCounterpartyAccountById({
+            counterpartyAccountId: recipient.counterpartyAccountId,
+            counterpartyId: recipient.counterpartyId,
+            organizationId: params.organizationId,
+            projectId: params.projectId,
+          }),
+        ]);
+        if (!counterparty) {
+          throw notFound(`Counterparty ${recipient.counterpartyId}`);
+        }
+        counterpartyId = recipient.counterpartyId;
+        account = scopedAccount;
+      } else {
+        account = await accountsRepository.getCounterpartyAccountByIdInProject({
           counterpartyAccountId: recipient.counterpartyAccountId,
-          counterpartyId: recipient.counterpartyId,
           organizationId: params.organizationId,
           projectId: params.projectId,
-        }),
-      ]);
-
-      if (!counterparty) {
-        throw notFound(`Counterparty ${recipient.counterpartyId}`);
+        });
+        if (account) {
+          counterpartyId = account.counterparty_id;
+        } else {
+          throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
+        }
       }
+
       if (!account) {
         throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
       }
@@ -271,7 +288,7 @@ async function resolveRecipients(params: {
       return {
         index,
         externalId: recipient.externalId ?? null,
-        counterpartyId: recipient.counterpartyId,
+        counterpartyId,
         counterpartyAccountId: recipient.counterpartyAccountId,
         destinationAddress: readCryptoWalletAddress(account, index),
         amount: formatDecimalAmount(amountBaseUnits, params.decimals),
