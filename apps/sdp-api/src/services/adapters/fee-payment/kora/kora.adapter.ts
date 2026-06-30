@@ -21,6 +21,14 @@ export type KoraAdapterConfig = KoraClientOptions & {
    * Note: The Kora SDK does not currently support timeouts directly.
    */
   timeoutMs?: number;
+
+  /**
+   * Stable per-end-user identifier forwarded to Kora as `user_id` on sign calls.
+   * Kora requires this when pricing is `free` + usage tracking is enabled (mainnet);
+   * configs without usage tracking (e.g. devnet) ignore it. Source: the SDP user id
+   * (session/clerk `usr_…`), falling back to the API key id for programmatic callers.
+   */
+  userId?: string;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -31,12 +39,14 @@ export class KoraAdapter implements FeePaymentPort {
   readonly providerId = "kora";
 
   private client: KoraClient;
+  private readonly userId?: string;
   private cachedFeePayer: Address | null = null;
   private cachedFeeToken: string | null = null;
 
   constructor(config: KoraAdapterConfig) {
-    const { rpcUrl, apiKey, hmacSecret } = config;
+    const { rpcUrl, apiKey, hmacSecret, userId } = config;
     this.client = new KoraClient({ rpcUrl, apiKey, hmacSecret });
+    this.userId = userId;
   }
 
   /**
@@ -85,9 +95,9 @@ export class KoraAdapter implements FeePaymentPort {
     try {
       const base64Tx = encodeBase64(transaction);
 
-      const { signed_transaction } = await this.client.signTransaction({
-        transaction: base64Tx,
-      });
+      const { signed_transaction } = await this.client.signTransaction(
+        this.buildSignRequest(base64Tx) as Parameters<typeof this.client.signTransaction>[0]
+      );
 
       return decodeBase64(signed_transaction);
     } catch (error) {
@@ -110,9 +120,11 @@ export class KoraAdapter implements FeePaymentPort {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const { signature: submittedSignature, signed_transaction } =
-          await this.client.signAndSendTransaction({
-            transaction: base64Tx,
-          });
+          await this.client.signAndSendTransaction(
+            this.buildSignRequest(base64Tx) as Parameters<
+              typeof this.client.signAndSendTransaction
+            >[0]
+          );
 
         if (submittedSignature) {
           return submittedSignature as Signature;
@@ -178,6 +190,24 @@ export class KoraAdapter implements FeePaymentPort {
   // ═══════════════════════════════════════════════════════════════════════════
   // Private Methods
   // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Build a sign request, attaching `user_id` when configured.
+   *
+   * The installed @solana/kora (0.2.1) request types don't declare `user_id`, but the
+   * SDK forwards every request field to the JSON-RPC `params`, so it reaches the server
+   * (Kora requires `user_id` under free-pricing + usage-tracking — mainnet; devnet
+   * ignores it). The caller casts to the SDK's param type to bridge the type gap. Drop
+   * the cast once @solana/kora 0.3.0 *stable* ships `user_id` typing — 0.3.0-beta.0's
+   * packaging (empty `exports`, unbundleable peer kit-plugins) breaks the esbuild bundle.
+   */
+  private buildSignRequest(transaction: string): { transaction: string; user_id?: string } {
+    const request: { transaction: string; user_id?: string } = { transaction };
+    if (this.userId) {
+      request.user_id = this.userId;
+    }
+    return request;
+  }
 
   private async resolveFeeToken(): Promise<string> {
     if (this.cachedFeeToken) {

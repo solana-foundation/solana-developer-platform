@@ -39,23 +39,27 @@ const DEFAULT_KORA_URLS: Record<string, string> = {
  * Create a fee payment adapter from environment variables.
  * Uses Kora if configured, falls back to native adapter.
  */
-export function createFeePaymentAdapter(env: Env): FeePaymentPort {
+export function createFeePaymentAdapter(env: Env, userId?: string): FeePaymentPort {
   const provider = (env.FEE_PAYMENT_PROVIDER ?? "kora") as FeePaymentProviderType;
 
   switch (provider) {
     case "kora":
-      return createKoraAdapter(env);
+      return createKoraAdapter(env, userId);
     case "native":
       return new NativeAdapter(env);
     default:
-      return createKoraAdapter(env);
+      return createKoraAdapter(env, userId);
   }
 }
 
 /**
  * Create a Kora adapter from environment configuration.
+ *
+ * @param userId Stable per-end-user id forwarded to Kora as `user_id` on sign calls
+ *   (required by Kora's free+usage-tracking mainnet config). Resolve it from the
+ *   request via `resolveKoraUserId(c)`; omit for non-request/background callers.
  */
-export function createKoraAdapter(env: Env): KoraAdapter {
+export function createKoraAdapter(env: Env, userId?: string): KoraAdapter {
   // Get RPC URL from env or use default based on network
   const rpcUrl = env.KORA_RPC_URL ?? getDefaultKoraUrl(env);
 
@@ -70,6 +74,7 @@ export function createKoraAdapter(env: Env): KoraAdapter {
     rpcUrl,
     apiKey: env.KORA_API_KEY,
     timeoutMs: env.KORA_TIMEOUT_MS ? Number.parseInt(env.KORA_TIMEOUT_MS, 10) : undefined,
+    userId,
   };
 
   return new KoraAdapter(config);
