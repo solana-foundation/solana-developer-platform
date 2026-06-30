@@ -292,6 +292,28 @@ export interface PaymentTransferRecipient {
   updatedAt: string;
 }
 
+export interface BatchRecipientAccount {
+  counterpartyId: string;
+  counterpartyAccountId: string;
+  name: string;
+  address: string;
+  label: string | null;
+}
+
+export interface ListBatchRecipientsResponse {
+  recipients: BatchRecipientAccount[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ListBatchRecipientsEnvelope {
+  data?: ListBatchRecipientsResponse;
+  error?: {
+    message?: string;
+  };
+}
+
 export interface PaymentTransferBatchEstimate {
   recipientCount: number;
   transactionCount: number;
