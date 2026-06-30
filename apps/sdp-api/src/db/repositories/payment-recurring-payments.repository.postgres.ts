@@ -43,7 +43,7 @@ function mapStringArray(value: unknown): string[] {
     return value
       .replace(/^\{|\}$/g, "")
       .split(",")
-      .map((item) => item.trim())
+      .map((item) => item.trim().replace(/^"|"$/g, ""))
       .filter(Boolean);
   }
   return [];

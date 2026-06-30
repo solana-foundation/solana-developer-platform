@@ -1250,6 +1250,11 @@ describe("Payments routes", () => {
       "Content-Type": "application/json",
     };
     const activated = await activateRecurringPaymentForTest(headers);
+    const firstCollectionAt = "2026-07-02T00:00:00.000Z";
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET first_collection_at = ? WHERE id = ?")
+      .bind(firstCollectionAt, activated.id)
+      .run();
 
     const updateRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}`,
@@ -1321,12 +1326,20 @@ describe("Payments routes", () => {
     });
     const event = await getDb(env)
       .prepare(
-        `SELECT after_values
+        `SELECT changed_fields, before_values, after_values
            FROM payment_recurring_payment_update_events
           WHERE recurring_payment_id = ?`
       )
       .bind(activated.id)
-      .first<{ after_values: Record<string, unknown> }>();
+      .first<{
+        changed_fields: string[];
+        before_values: Record<string, unknown>;
+        after_values: Record<string, unknown>;
+      }>();
+    expect(event?.changed_fields).toContain("firstCollectionAt");
+    expect(event?.changed_fields).toContain("nextCollectionDueAt");
+    expect(event?.before_values.firstCollectionAt).toBe(firstCollectionAt);
+    expect(event?.after_values.firstCollectionAt).toBeNull();
     expect(event?.after_values.nextCollectionDueAt).toBe(
       updateBody.data.recurringPayment.nextCollectionDueAt
     );

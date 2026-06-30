@@ -2111,17 +2111,35 @@ async function finalizeReplacementUpdate(input: {
       error: null,
       updatedAt: finalizedAt,
     });
-    const auditAfterValues = input.resolved.changedFields.includes("nextCollectionDueAt")
-      ? { ...input.resolved.afterValues, nextCollectionDueAt: input.nextCollectionDueAt }
-      : input.resolved.afterValues;
+    const auditChangedFields = input.resolved.changedFields.map(String);
+    const auditBeforeValues = { ...input.resolved.beforeValues };
+    const auditAfterValues = { ...input.resolved.afterValues };
+    if (
+      input.claimed.first_collection_at !== null &&
+      !auditChangedFields.includes("firstCollectionAt")
+    ) {
+      auditChangedFields.push("firstCollectionAt");
+      auditBeforeValues.firstCollectionAt = input.claimed.first_collection_at;
+      auditAfterValues.firstCollectionAt = null;
+    }
+    if (
+      input.claimed.next_collection_due_at !== input.nextCollectionDueAt &&
+      !auditChangedFields.includes("nextCollectionDueAt")
+    ) {
+      auditChangedFields.push("nextCollectionDueAt");
+      auditBeforeValues.nextCollectionDueAt = input.claimed.next_collection_due_at;
+    }
+    if (auditChangedFields.includes("nextCollectionDueAt")) {
+      auditAfterValues.nextCollectionDueAt = input.nextCollectionDueAt;
+    }
     await recordRecurringPaymentUpdateEvent({
       recurringRepo,
       organizationId: input.organizationId,
       projectId: input.projectId,
       recurringPaymentId: input.claimed.id,
       attemptId: input.attempt.id,
-      changedFields: input.resolved.changedFields.map(String),
-      beforeValues: input.resolved.beforeValues,
+      changedFields: auditChangedFields,
+      beforeValues: auditBeforeValues,
       afterValues: auditAfterValues,
       createdBy: input.createdBy,
       createdAt: finalizedAt,
