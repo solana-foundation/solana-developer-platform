@@ -66,6 +66,28 @@ export interface ListCounterpartyAccountsResult {
   total: number;
 }
 
+export interface BatchRecipientRow {
+  counterparty_id: string;
+  counterparty_display_name: string;
+  account_id: string;
+  account_label: string | null;
+  address: string;
+}
+
+export interface ListBatchRecipientsInput {
+  organizationId: string;
+  projectId: string;
+  search?: string;
+  accountIds?: string[];
+  limit: number;
+  offset: number;
+}
+
+export interface ListBatchRecipientsResult {
+  rows: BatchRecipientRow[];
+  total: number;
+}
+
 export interface CounterpartyAccountsRepositoryContext {
   db: RepositoryDbClient;
 }
@@ -86,7 +108,18 @@ export interface CounterpartyAccountsRepository {
     organizationId: string;
     projectId: string;
   }): Promise<CounterpartyAccountRow | null>;
+  getCounterpartyAccountByIdInProject(params: {
+    counterpartyAccountId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<CounterpartyAccountRow | null>;
+  listCounterpartyAccountsByIdsInProject(params: {
+    counterpartyAccountIds: string[];
+    organizationId: string;
+    projectId: string;
+  }): Promise<CounterpartyAccountRow[]>;
   listCounterpartyAccountsByCounterparty(
     params: ListCounterpartyAccountsByCounterpartyInput
   ): Promise<ListCounterpartyAccountsResult>;
+  listBatchRecipients(params: ListBatchRecipientsInput): Promise<ListBatchRecipientsResult>;
 }

@@ -11,6 +11,7 @@ import {
   type Counterparty,
   type CounterpartyFieldOptionsResponse,
   type CounterpartyResponse,
+  type ListBatchRecipientsResponse,
   type ListCounterpartiesResponse,
   US_STATES,
 } from "@sdp/types";
@@ -37,11 +38,16 @@ import {
 import { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
 import { AuditService } from "@/services/audit.service";
-import { type AppContext, getCounterpartiesRepository } from "./context";
+import {
+  type AppContext,
+  getCounterpartiesRepository,
+  getCounterpartyAccountsRepository,
+} from "./context";
 import {
   counterpartyIdParamsSchema,
   counterpartyRequirementsQuerySchema,
   createCounterpartySchema,
+  listBatchRecipientsQuerySchema,
   listCounterpartiesQuerySchema,
   updateCounterpartySchema,
 } from "./schemas";
@@ -105,6 +111,50 @@ export const listCounterparties = async (c: AppContext) => {
 
   const response: ListCounterpartiesResponse = {
     counterparties: rows.map(mapToCounterparty),
+    total,
+    page,
+    pageSize,
+  };
+
+  return success(c, response);
+};
+
+export const listCryptoRecipients = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const parsed = listBatchRecipientsQuerySchema.safeParse(c.req.query());
+
+  if (!parsed.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
+  }
+
+  const { page, pageSize, search } = parsed.data;
+  const accountIds = parsed.data.ids
+    ? parsed.data.ids
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0)
+    : undefined;
+  const resolvingIds = accountIds !== undefined && accountIds.length > 0;
+
+  const repo = getCounterpartyAccountsRepository(c);
+  const { rows, total } = await repo.listBatchRecipients({
+    organizationId: auth.organizationId,
+    projectId,
+    search,
+    accountIds,
+    limit: resolvingIds ? accountIds.length : pageSize,
+    offset: resolvingIds ? 0 : (page - 1) * pageSize,
+  });
+
+  const response: ListBatchRecipientsResponse = {
+    recipients: rows.map((row) => ({
+      counterpartyId: row.counterparty_id,
+      counterpartyAccountId: row.account_id,
+      name: row.counterparty_display_name,
+      address: row.address,
+      label: row.account_label,
+    })),
     total,
     page,
     pageSize,

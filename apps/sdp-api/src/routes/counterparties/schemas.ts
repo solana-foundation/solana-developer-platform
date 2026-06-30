@@ -143,3 +143,10 @@ export const listCounterpartiesQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   includeArchived: z.coerce.boolean().default(false),
 });
+
+export const listBatchRecipientsQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().trim().min(1).max(256).optional(),
+  ids: z.string().trim().min(1).max(20000).optional(),
+});
