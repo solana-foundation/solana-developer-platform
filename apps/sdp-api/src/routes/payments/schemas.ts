@@ -249,6 +249,7 @@ export const paymentRecurringPaymentStatusSchema = z.enum([
   "pending_activation",
   "activating",
   "active",
+  "updating",
   "canceling",
   "resuming",
   "paused",
@@ -270,6 +271,31 @@ export const createRecurringPaymentSchema = z.object({
   firstCollectionAt: firstCollectionAtTimestampSchema.optional(),
   metadataUri: z.string().url().max(128).optional(),
 });
+
+export const updateRecurringPaymentSchema = z
+  .object({
+    sourceWalletId: z.string().min(1).optional(),
+    counterpartyId: z.string().min(1).optional(),
+    counterpartyAccountId: z.string().min(1).optional(),
+    token: paymentTokenSchema.optional(),
+    amount: paymentAmountSchema.optional(),
+    periodHours: z
+      .number()
+      .int()
+      .positive()
+      .max(24 * 365)
+      .optional(),
+    firstCollectionAt: firstCollectionAtTimestampSchema.nullable().optional(),
+    nextCollectionDueAt: recurringTimestampSchema.nullable().optional(),
+    metadataUri: z.string().url().max(128).nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided",
+  })
+  .refine((value) => !value.counterpartyId || value.counterpartyAccountId, {
+    message: "counterpartyAccountId is required when counterpartyId changes",
+    path: ["counterpartyAccountId"],
+  });
 
 export const activateRecurringPaymentSchema = z.object({}).strict();
 export const cancelRecurringPaymentSchema = z.object({}).strict();

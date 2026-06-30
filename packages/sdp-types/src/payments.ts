@@ -342,6 +342,7 @@ export type PaymentRecurringPaymentStatus =
   | "pending_activation"
   | "activating"
   | "active"
+  | "updating"
   | "canceling"
   | "resuming"
   | "paused"
@@ -540,6 +541,18 @@ export interface CreatePaymentRecurringPaymentRequest {
   periodHours: number;
   firstCollectionAt?: string;
   metadataUri?: string;
+}
+
+export interface UpdatePaymentRecurringPaymentRequest {
+  sourceWalletId?: string;
+  counterpartyId?: string;
+  counterpartyAccountId?: string;
+  token?: string;
+  amount?: string;
+  periodHours?: number;
+  firstCollectionAt?: string | null;
+  nextCollectionDueAt?: string | null;
+  metadataUri?: string | null;
 }
 
 export interface PaymentRecurringPaymentResponse {

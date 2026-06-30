@@ -10,22 +10,20 @@ import type { ComboboxOption } from "@/components/ui/combobox";
 type WalletBalance = NonNullable<PaymentsDashboardWallet["balances"]>[number];
 type IssuedTokenSymbolsByMint = Record<string, string>;
 
-export function resolveWalletAssetOptions(
-  wallet: PaymentsDashboardWallet | null,
-  issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint
-): string[] {
-  const assetSet = new Set<string>(["USDC"]);
-  for (const balance of wallet?.balances ?? []) {
-    if (isSolBalance(balance)) {
-      continue;
-    }
+interface ResolveWalletAssetOptionsConfig {
+  hideUnresolvedMints?: boolean;
+}
 
-    const token = resolveAggregateBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
-    if (token) {
-      assetSet.add(token);
-    }
+function shouldHideUnresolvedMintLabel(
+  balance: Pick<WalletBalance, "token" | "mint">,
+  displayToken: string,
+  issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint
+): boolean {
+  const mint = balance.mint.trim();
+  if (issuedTokenSymbolsByMint[mint]?.trim()) {
+    return false;
   }
-  return [...assetSet];
+  return displayToken.trim().toUpperCase() === mint.toUpperCase();
 }
 
 export function findWalletBalanceForToken(
@@ -35,26 +33,39 @@ export function findWalletBalanceForToken(
   return wallet?.balances?.find((balance) => balance.token === token) ?? null;
 }
 
-export function findWalletBalanceForDisplayToken(
+export function walletBalanceAssetOptions(
   wallet: PaymentsDashboardWallet | null,
-  token: string,
-  issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint
-): WalletBalance | null {
-  const normalizedToken = token.trim().toUpperCase();
-  if (!normalizedToken) {
-    return null;
+  issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint,
+  options: Pick<ResolveWalletAssetOptionsConfig, "hideUnresolvedMints"> = {}
+): ComboboxOption[] {
+  const seen = new Set<string>();
+  const assetOptions: ComboboxOption[] = [];
+
+  for (const balance of wallet?.balances ?? []) {
+    if (isSolBalance(balance)) {
+      continue;
+    }
+
+    const mint = balance.mint.trim();
+    const label = resolveAggregateBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
+    if (
+      !mint ||
+      seen.has(mint) ||
+      (options.hideUnresolvedMints &&
+        shouldHideUnresolvedMintLabel(balance, label, issuedTokenSymbolsByMint))
+    ) {
+      continue;
+    }
+
+    seen.add(mint);
+    assetOptions.push({
+      value: mint,
+      label,
+      description: `${balance.uiAmount} available`,
+    });
   }
 
-  return (
-    wallet?.balances?.find((balance) => {
-      const displayToken = resolveAggregateBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
-      return (
-        displayToken === normalizedToken ||
-        balance.token.trim().toUpperCase() === normalizedToken ||
-        balance.mint.trim() === token.trim()
-      );
-    }) ?? null
-  );
+  return assetOptions;
 }
 
 export function walletComboboxOptions(wallets: PaymentsDashboardWallet[]): ComboboxOption[] {

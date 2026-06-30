@@ -22,6 +22,7 @@ import {
   collectRecurringPayment as collectRecurringPaymentRecord,
   createRecurringPayment as createRecurringPaymentRecord,
   resumeRecurringPayment as resumeRecurringPaymentRecord,
+  updateRecurringPayment as updateRecurringPaymentRecord,
 } from "@/services/payments/recurring-payments";
 import { type AppContext, getPaymentRecurringPaymentsRepository } from "../context";
 import { mapTransferRow } from "../mappers";
@@ -33,6 +34,7 @@ import {
   listRecurringPaymentsQuerySchema,
   recurringPaymentIdParamsSchema,
   resumeRecurringPaymentSchema,
+  updateRecurringPaymentSchema,
 } from "../schemas";
 import { resolveScope, resolveWallet } from "../wallets";
 
@@ -136,6 +138,61 @@ async function readOptionalJsonBody(c: AppContext): Promise<unknown> {
     throw badRequest("Invalid request body");
   }
 }
+
+export const updateRecurringPayment = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
+
+  if (!params.success) {
+    throw badRequestParams();
+  }
+
+  const body = await readOptionalJsonBody(c);
+  const parsed = updateRecurringPaymentSchema.safeParse(body);
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
+  }
+
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:write"]);
+  const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
+    recurringPaymentId: params.data.id,
+    organizationId: auth.organizationId,
+    projectId,
+    sourceWalletIds: allowedWalletIds ?? undefined,
+  });
+
+  if (!recurringPayment) {
+    throw new AppError("NOT_FOUND", "Recurring payment not found");
+  }
+
+  const scope = await resolveScope(c);
+  const sourceWallet = resolveWallet(scope.wallets, recurringPayment.source_wallet_id);
+  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
+  const nextSourceWallet =
+    parsed.data.sourceWalletId && parsed.data.sourceWalletId !== sourceWallet.walletId
+      ? resolveWallet(scope.wallets, parsed.data.sourceWalletId)
+      : undefined;
+  if (nextSourceWallet) {
+    assertApiKeyWalletAccess(scope.auth, nextSourceWallet.walletId, ["payments:write"]);
+  }
+
+  const updated = await updateRecurringPaymentRecord({
+    env: c.env,
+    organizationId: auth.organizationId,
+    projectId,
+    sourceWallet,
+    nextSourceWallet,
+    recurringPayment,
+    request: parsed.data,
+    createdBy: await resolveCreatorUserId(c),
+  });
+  const response: PaymentRecurringPaymentResponse = {
+    recurringPayment: mapRecurringPayment(updated),
+  };
+
+  return success(c, response);
+};
 
 export const activateRecurringPayment = async (c: AppContext) => {
   const auth = getAuth(c);

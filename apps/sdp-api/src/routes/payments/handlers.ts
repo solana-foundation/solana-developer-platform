@@ -21,6 +21,7 @@ export {
   getRecurringPayment,
   listRecurringPayments,
   resumeRecurringPayment,
+  updateRecurringPayment,
 } from "./handlers/recurring-payments";
 export {
   createSubscription,
