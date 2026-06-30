@@ -96,7 +96,7 @@ export class KoraAdapter implements FeePaymentPort {
       const base64Tx = encodeBase64(transaction);
 
       const { signed_transaction } = await this.client.signTransaction(
-        this.buildSignRequest(base64Tx) as Parameters<typeof this.client.signTransaction>[0]
+        this.buildSignRequest(base64Tx)
       );
 
       return decodeBase64(signed_transaction);
@@ -120,11 +120,7 @@ export class KoraAdapter implements FeePaymentPort {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const { signature: submittedSignature, signed_transaction } =
-          await this.client.signAndSendTransaction(
-            this.buildSignRequest(base64Tx) as Parameters<
-              typeof this.client.signAndSendTransaction
-            >[0]
-          );
+          await this.client.signAndSendTransaction(this.buildSignRequest(base64Tx));
 
         if (submittedSignature) {
           return submittedSignature as Signature;
@@ -192,14 +188,9 @@ export class KoraAdapter implements FeePaymentPort {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Build a sign request, attaching `user_id` when configured.
-   *
-   * The installed @solana/kora (0.2.1) request types don't declare `user_id`, but the
-   * SDK forwards every request field to the JSON-RPC `params`, so it reaches the server
-   * (Kora requires `user_id` under free-pricing + usage-tracking — mainnet; devnet
-   * ignores it). The caller casts to the SDK's param type to bridge the type gap. Drop
-   * the cast once @solana/kora 0.3.0 *stable* ships `user_id` typing — 0.3.0-beta.0's
-   * packaging (empty `exports`, unbundleable peer kit-plugins) breaks the esbuild bundle.
+   * Build a sign request, attaching `user_id` when configured. Kora requires `user_id`
+   * under free-pricing + usage-tracking (mainnet); configs without usage tracking
+   * (e.g. devnet) ignore it.
    */
   private buildSignRequest(transaction: string): { transaction: string; user_id?: string } {
     const request: { transaction: string; user_id?: string } = { transaction };
