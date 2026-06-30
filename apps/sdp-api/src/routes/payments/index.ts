@@ -49,6 +49,7 @@ import {
   recordRampProviderEvent,
   resumeRecurringPayment,
   simulateSandboxTransfer,
+  updateRecurringPayment,
   updateSubscription,
   updateSubscriptionPlan,
   updateWalletPolicy,
@@ -104,6 +105,11 @@ payments.post(
   createRecurringPayment
 );
 payments.get("/recurring-payments", requirePermissions("payments:read"), listRecurringPayments);
+payments.patch(
+  "/recurring-payments/:id",
+  requirePermissions("payments:write", "wallets:read", "counterparties:read"),
+  updateRecurringPayment
+);
 payments.post(
   "/recurring-payments/:id/activate",
   requirePermissions("payments:write", "wallets:read"),

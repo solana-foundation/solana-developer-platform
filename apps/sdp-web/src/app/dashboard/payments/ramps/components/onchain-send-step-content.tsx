@@ -54,6 +54,7 @@ export function OnchainSendStepContent({
     destinationAddress,
     assetOptions,
     availableAmount,
+    selectedAsset,
     selectedAssetBalance,
     exceedsBalance,
     counterpartyId,
@@ -67,6 +68,10 @@ export function OnchainSendStepContent({
   } = wizard;
 
   const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
+  const assetSelectOptions = useMemo(
+    () => assetOptions.map((asset) => ({ value: asset.value, label: asset.label })),
+    [assetOptions]
+  );
 
   if (currentStepId === "DESTINATION") {
     return (
@@ -139,7 +144,7 @@ export function OnchainSendStepContent({
                 availableAmount !== null ? (
                   <AmountBalanceReadout
                     available={selectedAssetBalance ? selectedAssetBalance.uiAmount : "0"}
-                    assetLabel={fields.asset}
+                    assetLabel={selectedAsset?.label ?? fields.asset}
                     exceeds={exceedsBalance}
                     onMax={
                       selectedAssetBalance && availableAmount > 0
@@ -155,9 +160,10 @@ export function OnchainSendStepContent({
             label="Asset"
             value={fields.asset || null}
             onChange={(value) => setField("asset", value)}
-            options={assetOptions.map((value) => ({ value, label: value }))}
+            options={assetSelectOptions}
             placeholder="Select an asset"
             searchable={false}
+            disabled={!fields.walletId || assetSelectOptions.length === 0}
           />
         </div>
         <div className="flex flex-col gap-2">
@@ -207,7 +213,7 @@ export function OnchainSendStepContent({
   const amountHero = (
     <div className="flex flex-col items-center gap-0.5 border-b border-border-light pb-4">
       <p className="text-3xl font-semibold tracking-tight text-text-extra-high">
-        {fields.amount || "0"} {fields.asset}
+        {fields.amount || "0"} {selectedAsset?.label ?? fields.asset}
       </p>
       <p className="text-sm text-text-low">to {counterpartyName || "counterparty"}</p>
     </div>

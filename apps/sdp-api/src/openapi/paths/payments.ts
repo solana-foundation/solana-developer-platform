@@ -32,6 +32,7 @@ import {
   prepareSubscriptionPlanCreateRequestSchema,
   prepareTransferRequestSchema,
   simulateSandboxTransferRequestSchema,
+  updateRecurringPaymentRequestSchema,
   updateSubscriptionPlanRequestSchema,
   updateSubscriptionRequestSchema,
   updateWalletPolicyRequestSchema,
@@ -378,6 +379,32 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(paymentRecurringPaymentListResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "patch",
+    path: "/v1/payments/recurring-payments/{id}",
+    tags: ["Payments"],
+    summary: "Update recurring payment",
+    operationId: "updatePaymentRecurringPayment",
+    description:
+      "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+      body: {
+        required: true,
+        content: jsonContent(updateRecurringPaymentRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Recurring payment updated",
+        content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

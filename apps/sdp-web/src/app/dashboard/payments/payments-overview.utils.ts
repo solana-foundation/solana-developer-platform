@@ -320,7 +320,12 @@ export function resolveAggregateBalanceDisplayToken(
   const issuedTokenSymbol = issuedTokenSymbolsByMint[normalizedMint]?.trim();
 
   if (issuedTokenSymbol) {
-    return issuedTokenSymbol.toUpperCase();
+    return issuedTokenSymbol;
+  }
+
+  const wellKnownTokenSymbol = WELL_KNOWN_TOKEN_BY_MINT.get(normalizedMint)?.symbol;
+  if (wellKnownTokenSymbol) {
+    return wellKnownTokenSymbol;
   }
 
   const normalizedToken = balance.token.trim().toUpperCase();
