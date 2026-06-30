@@ -1585,6 +1585,7 @@ function activeNextCollectionDueAt(input: {
   onChainSubscription?: Awaited<
     ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>
   > | null;
+  clampToMinimum?: boolean;
 }): string | null | undefined {
   if (input.requested === undefined) {
     return undefined;
@@ -1606,6 +1607,9 @@ function activeNextCollectionDueAt(input: {
   const minimumDueAt = nextCollectionDueAt(currentPeriodStartAt, periodHours);
   const requested = input.requested ?? minimumDueAt;
   if (new Date(requested).getTime() < new Date(minimumDueAt).getTime()) {
+    if (input.clampToMinimum) {
+      return minimumDueAt;
+    }
     throw badRequest("nextCollectionDueAt cannot be earlier than the next eligible collection");
   }
 
@@ -1747,6 +1751,7 @@ async function runMetadataScheduleUpdate(input: {
     recurringPayment: input.claimed,
     subscription: input.subscription,
     onChainSubscription,
+    clampToMinimum: planUpdateSignature !== null,
   });
 
   if (input.resolved.metadataUri !== input.claimed.metadata_uri) {

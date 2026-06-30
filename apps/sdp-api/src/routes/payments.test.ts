@@ -1518,6 +1518,129 @@ describe("Payments routes", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
+  it("clamps stale metadata update retries after the subscription period advances", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const planCreationSignature =
+      "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature;
+    const authorizationSignature =
+      "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature;
+    const updatePlanSignature =
+      "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c" as Signature;
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(planCreationSignature)
+      .mockResolvedValueOnce(authorizationSignature);
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const requestedNextDueAt = new Date(
+      new Date(activated.nextCollectionDueAt).getTime() + 60 * 60 * 1000
+    ).toISOString();
+    const advancedPeriodStartAt = requestedNextDueAt;
+    const expectedClampedDueAt = new Date(
+      new Date(advancedPeriodStartAt).getTime() + 24 * 60 * 60 * 1000
+    ).toISOString();
+    const metadataUri = "https://example.com/recurring/recovered.json";
+    const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_recurring_payments SET status = 'updating', updated_at = ? WHERE id = ?"
+      )
+      .bind(staleAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET current_period_start_at = ? WHERE id = ?")
+      .bind(advancedPeriodStartAt, activated.subscriptionId)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_payment_update_attempts (
+           id,
+           organization_id,
+           project_id,
+           recurring_payment_id,
+           mode,
+           status,
+           stage,
+           old_plan_id,
+           old_subscription_id,
+           plan_update_signature,
+           changed_fields,
+           before_values,
+           after_values,
+           created_at,
+           updated_at
+         ) VALUES (
+           'prpu_stale_metadata_schedule_recovery',
+           ?, ?, ?, 'metadata_schedule', 'processing', 'update_plan', ?, ?, ?,
+           ARRAY['nextCollectionDueAt', 'metadataUri']::text[], ?::jsonb, ?::jsonb, ?, ?
+         )`
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        activated.id,
+        activated.planId,
+        activated.subscriptionId,
+        updatePlanSignature,
+        JSON.stringify({ nextCollectionDueAt: activated.nextCollectionDueAt, metadataUri: null }),
+        JSON.stringify({ nextCollectionDueAt: requestedNextDueAt, metadataUri }),
+        staleAt,
+        staleAt
+      )
+      .run();
+
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ metadataUri, nextCollectionDueAt: requestedNextDueAt }),
+      },
+      env
+    );
+
+    expect(updateRes.status).toBe(200);
+    const updateBody = (await updateRes.json()) as {
+      data: {
+        recurringPayment: {
+          status: string;
+          metadataUri: string;
+          nextCollectionDueAt: string;
+        };
+      };
+    };
+    expect(updateBody.data.recurringPayment).toMatchObject({
+      status: "active",
+      metadataUri,
+      nextCollectionDueAt: expectedClampedDueAt,
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+
+    const event = await getDb(env)
+      .prepare(
+        `SELECT after_values
+           FROM payment_recurring_payment_update_events
+          WHERE recurring_payment_id = ?`
+      )
+      .bind(activated.id)
+      .first<{ after_values: Record<string, unknown> }>();
+    expect(event?.after_values.nextCollectionDueAt).toBe(expectedClampedDueAt);
+  });
+
   it("creates the source token account during recurring payment activation when it is missing", async () => {
     env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
