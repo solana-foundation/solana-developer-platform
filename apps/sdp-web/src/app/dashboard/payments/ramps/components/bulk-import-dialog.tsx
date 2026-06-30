@@ -153,8 +153,9 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
 
         {errors.length > 0 ? (
           <div className="space-y-1 rounded-xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text">
-            {errors.map((message) => (
-              <p key={message}>{message}</p>
+            {errors.map((message, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: error list is positional; messages may repeat
+              <p key={index}>{message}</p>
             ))}
           </div>
         ) : null}

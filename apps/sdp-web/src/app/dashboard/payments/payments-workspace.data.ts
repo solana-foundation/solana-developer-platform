@@ -522,15 +522,15 @@ export async function createTransfer(input: {
 }
 
 export async function fetchBatchRecipients(input: {
-  page: number;
-  pageSize: number;
+  page?: number;
+  pageSize?: number;
   search?: string;
   ids?: string[];
   signal?: AbortSignal;
 }): Promise<ListProjectCounterpartyAccountsResponse> {
   const query = new URLSearchParams({
-    page: String(input.page),
-    pageSize: String(input.pageSize),
+    ...(input.page ? { page: String(input.page) } : {}),
+    ...(input.pageSize ? { pageSize: String(input.pageSize) } : {}),
     ...(input.search ? { search: input.search } : {}),
     ...(input.ids && input.ids.length > 0 ? { ids: input.ids.join(",") } : {}),
   });

@@ -18,7 +18,7 @@ import {
   fetchWallets,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { BulkImportRow } from "../bulk-import";
-import { batchSendSchema } from "../schema";
+import { batchSendSchema, MAX_BATCH_RECIPIENTS } from "../schema";
 import { findWalletBalanceForDisplayToken, resolveWalletAssetOptions } from "../wallet-options";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
@@ -182,7 +182,7 @@ export function useBatchSendWizard({
 
   const bulkImport = async (rows: BulkImportRow[]): Promise<{ unresolved: string[] }> => {
     const ids = [...new Set(rows.map((row) => row.accountId))];
-    const resolved = await fetchBatchRecipients({ page: 1, pageSize: 1, ids });
+    const resolved = await fetchBatchRecipients({ ids });
     const byId = new Map(
       resolved.accounts.map((recipient) => [recipient.counterpartyAccountId, recipient])
     );
@@ -195,6 +195,12 @@ export function useBatchSendWizard({
       } else {
         unresolved.push(row.accountId);
       }
+    }
+    const projected = new Set([...Object.keys(entries), ...Object.keys(additions)]);
+    if (projected.size > MAX_BATCH_RECIPIENTS) {
+      throw new Error(
+        `A batch can have at most ${MAX_BATCH_RECIPIENTS} recipients. This import would bring the total to ${projected.size}.`
+      );
     }
     if (Object.keys(additions).length > 0) {
       setAsset(rows[0].currency);

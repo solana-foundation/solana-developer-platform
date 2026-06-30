@@ -109,10 +109,15 @@ export const batchRecipientSchema = z.object({
   amount: onchainAmount,
 });
 
+export const MAX_BATCH_RECIPIENTS = 500;
+
 export const batchSendSchema = z.object({
   walletId: z.string().min(1, "Select a source wallet."),
   asset: z.string().min(1, "Select an asset."),
-  recipients: z.array(batchRecipientSchema).min(1, "Add at least one recipient.").max(500),
+  recipients: z
+    .array(batchRecipientSchema)
+    .min(1, "Add at least one recipient.")
+    .max(MAX_BATCH_RECIPIENTS),
 });
 
 export function applyRequirementMask(mask: string, raw: string): string {
