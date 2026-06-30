@@ -5,12 +5,20 @@ import type {
   CounterpartyAccount,
   CryptoRailId,
   CustodyWalletAggregate,
+  ListBatchRecipientsEnvelope,
+  ListBatchRecipientsResponse,
   ListCounterpartiesResponse,
   ListCounterpartyAccountsResponse,
   MoneygramRampEvent,
   PaymentRampEstimateEnvelope,
   PaymentRampExecution,
   PaymentsWalletAggregateEnvelope,
+  PaymentTransferBatch,
+  PaymentTransferBatchEnvelope,
+  PaymentTransferBatchEstimate,
+  PaymentTransferBatchEstimateEnvelope,
+  PaymentTransferBatchRequest,
+  PaymentTransferRecipient,
   RampDirection,
   RampFiatCurrency,
   RampProviderEstimateResult,
@@ -511,6 +519,83 @@ export async function createTransfer(input: {
   }
 
   return body.data.transfer;
+}
+
+export async function fetchBatchRecipients(input: {
+  page: number;
+  pageSize: number;
+  search?: string;
+  ids?: string[];
+  signal?: AbortSignal;
+}): Promise<ListBatchRecipientsResponse> {
+  const query = new URLSearchParams({
+    page: String(input.page),
+    pageSize: String(input.pageSize),
+    ...(input.search ? { search: input.search } : {}),
+    ...(input.ids && input.ids.length > 0 ? { ids: input.ids.join(",") } : {}),
+  });
+  const response = await fetch(
+    `/api/dashboard/counterparty/crypto-recipients?${query.toString()}`,
+    {
+      method: "GET",
+      cache: "no-store",
+      signal: input.signal,
+    }
+  );
+  const body = (await response.json().catch(() => ({}))) as ListBatchRecipientsEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Recipient list request failed (${response.status}).`));
+  }
+  if (!body.data) {
+    throw new Error("Recipient list response is missing recipients.");
+  }
+  return body.data;
+}
+
+export async function estimateTransferBatch(
+  input: PaymentTransferBatchRequest
+): Promise<PaymentTransferBatchEstimate> {
+  const response = await fetch("/api/dashboard/payments/transfers/batch/estimate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEstimateEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Batch estimate request failed (${response.status}).`));
+  }
+  if (!body.data?.estimate) {
+    throw new Error("Batch estimate response is missing estimate details.");
+  }
+  return body.data.estimate;
+}
+
+export interface CreateTransferBatchResult {
+  batch: PaymentTransferBatch;
+  recipients: PaymentTransferRecipient[];
+  transfers: TransferRecord[];
+}
+
+export async function createTransferBatch(
+  input: PaymentTransferBatchRequest
+): Promise<CreateTransferBatchResult> {
+  const response = await fetch("/api/dashboard/payments/transfers/batch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Batch transfer request failed (${response.status}).`));
+  }
+  if (!body.data?.batch || !body.data.recipients || !body.data.transfers) {
+    throw new Error("Batch transfer response is missing batch details.");
+  }
+  return {
+    batch: body.data.batch,
+    recipients: body.data.recipients,
+    transfers: body.data.transfers,
+  };
 }
 
 export async function postMoneygramRampEvent(event: MoneygramRampEvent): Promise<TransferRecord> {

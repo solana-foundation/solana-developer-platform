@@ -40,6 +40,7 @@ interface ComboboxProps {
   searchable?: boolean;
   searchPlaceholder?: string;
   icon?: ReactNode;
+  trailing?: ReactNode;
   size?: ComboboxSize;
   isLoading?: boolean;
   disabled?: boolean;
@@ -56,6 +57,7 @@ export function Combobox({
   searchable = true,
   searchPlaceholder = "Search…",
   icon,
+  trailing,
   size = "xl",
   isLoading,
   disabled,
@@ -119,6 +121,7 @@ export function Combobox({
                 <span className="text-text-low">{placeholder}</span>
               )}
             </span>
+            {trailing ? <span className="shrink-0">{trailing}</span> : null}
             <ChevronDownIcon
               className={cn(
                 "size-5 shrink-0 text-text-low transition-transform",
