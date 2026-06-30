@@ -130,7 +130,7 @@ export function Combobox({
 
   useEffect(() => {
     setActiveIndex(filtered.length === 1 ? 0 : -1);
-  }, [filtered.length]);
+  }, [filtered]);
 
   return (
     <div className="flex flex-col gap-2">

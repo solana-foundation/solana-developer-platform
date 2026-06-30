@@ -5,6 +5,7 @@ import { notFound, redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { isRecurringPaymentsDashboardEnabled } from "@/lib/recurring-payments-feature";
+import type { SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparty } from "../../counterparty/counterparty-page.data";
 import { formatDisplayAmount, shortenAddress } from "../../payments-overview.utils";
 import { fetchPaymentsWallets } from "../../payments-page.data";
@@ -12,6 +13,42 @@ import { fetchRecurringPaymentById } from "../recurring-payments.data";
 import { RecurringPaymentDetailWorkspace } from "../recurring-payments-workspace";
 
 export const dynamic = "force-dynamic";
+
+const COUNTERPARTY_ACCOUNTS_PAGE_SIZE = 100;
+
+async function fetchAllCounterpartyWalletAccounts(
+  request: SdpApiClient["request"],
+  counterpartyId: string
+): Promise<CounterpartyAccount[]> {
+  const encodedCounterpartyId = encodeURIComponent(counterpartyId);
+  const accounts: CounterpartyAccount[] = [];
+  let page = 1;
+  let total = Number.POSITIVE_INFINITY;
+
+  while (accounts.length < total) {
+    const response = await request(
+      `/v1/counterparties/${encodedCounterpartyId}/accounts?page=${page}&pageSize=${COUNTERPARTY_ACCOUNTS_PAGE_SIZE}&accountKind=crypto_wallet`
+    );
+    if (!response.ok) {
+      return [];
+    }
+
+    const json = (await response.json()) as { data?: ListCounterpartyAccountsResponse };
+    const data = json.data;
+    if (!data) {
+      return accounts;
+    }
+
+    accounts.push(...data.accounts);
+    total = data.total;
+    if (data.accounts.length < data.pageSize) {
+      break;
+    }
+    page += 1;
+  }
+
+  return accounts;
+}
 
 export default async function RecurringPaymentDetailRoute({
   params,
@@ -61,17 +98,10 @@ export default async function RecurringPaymentDetailRoute({
         fetchCounterparty(apiClient.request, recurringPayment.counterpartyId)
       );
       const counterpartyLabel = counterparty?.displayName ?? "Counterparty unavailable";
-      const accountsResponse = await trace.step(
+      const counterpartyAccounts = await trace.step(
         "fetch_recurring_payment_counterparty_accounts",
-        () =>
-          apiClient.request(
-            `/v1/counterparties/${encodeURIComponent(recurringPayment.counterpartyId)}/accounts?pageSize=100`
-          )
+        () => fetchAllCounterpartyWalletAccounts(apiClient.request, recurringPayment.counterpartyId)
       );
-      const counterpartyAccounts: CounterpartyAccount[] = accountsResponse.ok
-        ? (((await accountsResponse.json()) as { data?: ListCounterpartyAccountsResponse }).data
-            ?.accounts ?? [])
-        : [];
       const knownToken = WELL_KNOWN_TOKEN_BY_MINT.get(recurringPayment.token);
       const tokenLabel =
         knownToken?.symbol ??

@@ -470,7 +470,7 @@ function RecurringPaymentLifecycleBand({
   return null;
 }
 
-function canEditSourceWallet(status: PaymentRecurringPaymentStatus): boolean {
+function canEditRecurringPayment(status: PaymentRecurringPaymentStatus): boolean {
   return status === "pending_activation" || status === "active";
 }
 
@@ -690,7 +690,7 @@ export function RecurringPaymentDetailWorkspace({
   const receivingAccountAddress = accountAddress(receivingAccount);
   const dueNow =
     recurringPayment.status === "active" && isDueNow(recurringPayment.nextCollectionDueAt);
-  const sourceWalletEditable = canEditSourceWallet(recurringPayment.status);
+  const isEditable = canEditRecurringPayment(recurringPayment.status);
   const controlsDisabled =
     Boolean(pendingAction) ||
     savingWallet ||
@@ -962,7 +962,7 @@ export function RecurringPaymentDetailWorkspace({
               <span className="shrink-0 text-sm text-text-medium">Amount</span>
               <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-text-extra-high">
                 <span>{amountLabel}</span>
-                {sourceWalletEditable ? (
+                {isEditable ? (
                   <Button
                     type="button"
                     size="sm"
@@ -999,7 +999,7 @@ export function RecurringPaymentDetailWorkspace({
                     label={shortenAddress(wallet.publicKey)}
                   />
                 ) : null}
-                {sourceWalletEditable ? (
+                {isEditable ? (
                   <Button
                     type="button"
                     size="sm"
@@ -1027,7 +1027,7 @@ export function RecurringPaymentDetailWorkspace({
                     label={shortenAddress(receivingAccountAddress)}
                   />
                 ) : null}
-                {sourceWalletEditable ? (
+                {isEditable ? (
                   <Button
                     type="button"
                     size="sm"
@@ -1055,7 +1055,7 @@ export function RecurringPaymentDetailWorkspace({
               <span className="shrink-0 text-sm text-text-medium">Billing interval</span>
               <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-text-extra-high">
                 <span>{scheduleLabel}</span>
-                {sourceWalletEditable ? (
+                {isEditable ? (
                   <Button
                     type="button"
                     size="sm"
@@ -1080,7 +1080,7 @@ export function RecurringPaymentDetailWorkspace({
               <span className="shrink-0 text-sm text-text-medium">Currency</span>
               <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-text-extra-high">
                 <span>{currencyLabel}</span>
-                {sourceWalletEditable ? (
+                {isEditable ? (
                   <Button
                     type="button"
                     size="sm"
