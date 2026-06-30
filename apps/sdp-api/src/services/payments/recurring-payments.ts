@@ -2627,21 +2627,32 @@ export async function updateRecurringPayment(input: {
       createdBy: input.createdBy,
     });
   } catch (error) {
-    const latest = await recurringRepo.getLatestUpdateAttempt({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      recurringPaymentId: claimed.id,
-      statuses: ["processing"],
-    });
-    const currentAttempt = latest ?? attempt;
-    const hasReplacementAuthorization =
-      currentAttempt.mode === "replacement" && Boolean(currentAttempt.authorization_signature);
-    const hasSubmittedMetadataUpdate =
-      currentAttempt.mode === "metadata_schedule" && Boolean(currentAttempt.plan_update_signature);
-    const transactionFailed = error instanceof AppError && error.code === "TRANSACTION_FAILED";
-    const resetToActive =
-      !hasReplacementAuthorization && (!hasSubmittedMetadataUpdate || transactionFailed);
     try {
+      let currentAttempt = attempt;
+      let resetToActive = false;
+      try {
+        const latest = await recurringRepo.getLatestUpdateAttempt({
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recurringPaymentId: claimed.id,
+          statuses: ["processing"],
+        });
+        currentAttempt = latest ?? attempt;
+        const hasReplacementAuthorization =
+          currentAttempt.mode === "replacement" && Boolean(currentAttempt.authorization_signature);
+        const hasSubmittedMetadataUpdate =
+          currentAttempt.mode === "metadata_schedule" &&
+          Boolean(currentAttempt.plan_update_signature);
+        const transactionFailed = error instanceof AppError && error.code === "TRANSACTION_FAILED";
+        resetToActive =
+          !hasReplacementAuthorization && (!hasSubmittedMetadataUpdate || transactionFailed);
+      } catch (latestAttemptError) {
+        console.error("Failed to fetch latest recurring payment update attempt after failure", {
+          error: activationErrorMessage(latestAttemptError),
+          recurringPaymentId: claimed.id,
+        });
+      }
+
       await recordRecurringPaymentUpdateFailure({
         recurringRepo,
         attempt: currentAttempt,
