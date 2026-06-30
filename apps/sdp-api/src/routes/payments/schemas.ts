@@ -286,9 +286,7 @@ export const updateRecurringPaymentSchema = z
       .max(24 * 365)
       .optional(),
     firstCollectionAt: firstCollectionAtTimestampSchema.nullable().optional(),
-    nextCollectionDueAt: futureRecurringTimestampSchema("nextCollectionDueAt")
-      .nullable()
-      .optional(),
+    nextCollectionDueAt: recurringTimestampSchema.nullable().optional(),
     metadataUri: z.string().url().max(128).nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {

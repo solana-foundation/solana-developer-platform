@@ -1558,15 +1558,13 @@ describe("Payments routes", () => {
       "Content-Type": "application/json",
     };
     const activated = await activateRecurringPaymentForTest(headers);
-    const requestedNextDueAt = new Date(
-      new Date(activated.nextCollectionDueAt).getTime() + 60 * 60 * 1000
-    ).toISOString();
-    const advancedPeriodStartAt = requestedNextDueAt;
+    const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    const requestedNextDueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    const advancedPeriodStartAt = new Date().toISOString();
     const expectedClampedDueAt = new Date(
       new Date(advancedPeriodStartAt).getTime() + 24 * 60 * 60 * 1000
     ).toISOString();
     const metadataUri = "https://example.com/recurring/recovered.json";
-    const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
 
     await getDb(env)
       .prepare(
