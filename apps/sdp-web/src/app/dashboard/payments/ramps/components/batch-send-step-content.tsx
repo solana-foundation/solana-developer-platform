@@ -5,6 +5,7 @@ import { ExternalLink, PlusIcon, SearchIcon, WalletIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 import {
+  formatLamportsAsSol,
   formatTokenAmount,
   shortenAddress,
 } from "@/app/dashboard/payments/payments-overview.utils";
@@ -284,26 +285,73 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
 function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
   const { recipients, displayAsset, totalAmount, estimate, estimateError } = wizard;
   const rootLabel = rootLabelOf(wizard);
+  const fees = estimate?.estimatedFees;
+  const totalFeeLamports = fees
+    ? BigInt(fees.networkFeeLamports) +
+      BigInt(fees.priorityFeeLamports) +
+      BigInt(fees.tokenAccountRentLamports)
+    : null;
 
   return (
     <div className="space-y-5">
-      <section className="space-y-1 rounded-2xl bg-border-extra-light p-5 text-center">
-        <p className="text-3xl font-semibold tracking-tight text-text-extra-high">
-          {formatTokenAmount(totalAmount)} {displayAsset}
-        </p>
-        <p className="text-sm text-text-low">
-          to {pluralRecipients(recipients.length)} from {rootLabel}
-        </p>
-        {estimateError ? (
-          <p className="pt-1 text-sm text-status-error-text">{estimateError}</p>
-        ) : estimate ? (
-          <p className="pt-1 text-sm text-text-low">
-            Sent as {estimate.transactionCount} transaction
-            {estimate.transactionCount === 1 ? "" : "s"} ·{" "}
-            {estimate.estimatedFees.sponsored ? "Network fee sponsored" : "Network fee applies"}
+      <section className="space-y-4 rounded-2xl bg-border-extra-light p-5">
+        <div className="space-y-0.5 text-center">
+          <p className="text-3xl font-semibold tracking-tight text-text-extra-high">
+            {formatTokenAmount(totalAmount)} {displayAsset} → {pluralRecipients(recipients.length)}
           </p>
+          {estimate ? (
+            <p className="text-sm text-text-low">
+              {estimate.transactionCount} transaction
+              {estimate.transactionCount === 1 ? "" : "s"}
+            </p>
+          ) : null}
+        </div>
+        {estimateError ? (
+          <p className="text-center text-sm text-status-error-text">{estimateError}</p>
+        ) : fees && totalFeeLamports !== null ? (
+          <dl className="space-y-2 text-sm">
+            <div className="flex items-center justify-between">
+              <dt className="text-text-low">Source</dt>
+              <dd className="text-text-high">{rootLabel}</dd>
+            </div>
+            <div className="flex items-center justify-between">
+              <dt className="text-text-low">Transaction fees</dt>
+              <dd className="text-text-high">
+                {formatLamportsAsSol(
+                  BigInt(fees.networkFeeLamports) + BigInt(fees.priorityFeeLamports)
+                )}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between">
+              <dt className="text-text-low">Rent fees</dt>
+              <dd className="text-text-high">
+                {formatLamportsAsSol(BigInt(fees.tokenAccountRentLamports))}
+              </dd>
+            </div>
+            <div className="h-px bg-border-light" />
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-text-extra-high">Total</span>
+              <span className="flex items-center gap-2">
+                {fees.sponsored ? (
+                  <>
+                    <span className="text-text-low line-through">
+                      {formatLamportsAsSol(totalFeeLamports)}
+                    </span>
+                    <span className="font-medium text-text-extra-high">0 SOL</span>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-text-medium">
+                      Sponsored by SDP via Kora
+                    </span>
+                  </>
+                ) : (
+                  <span className="font-medium text-text-extra-high">
+                    {formatLamportsAsSol(totalFeeLamports)}
+                  </span>
+                )}
+              </span>
+            </div>
+          </dl>
         ) : (
-          <p className="pt-1 text-sm text-text-low">Estimating…</p>
+          <p className="text-center text-sm text-text-low">Estimating…</p>
         )}
       </section>
       <div className="flex flex-col gap-0.5">

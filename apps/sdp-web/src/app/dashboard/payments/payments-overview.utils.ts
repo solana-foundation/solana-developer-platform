@@ -85,6 +85,10 @@ export function formatTokenAmount(value: number | string): string {
     : String(value);
 }
 
+export function formatLamportsAsSol(lamports: bigint): string {
+  return `${formatTokenAmount(Number(lamports) / 1_000_000_000)} SOL`;
+}
+
 export function formatDisplayAmount(value?: string, token?: string): string {
   if (!value) {
     return token ? `- ${token}` : "-";
