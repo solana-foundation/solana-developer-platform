@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
+import type { CounterpartyAccount, ListCounterpartyAccountsResponse } from "@sdp/types";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -53,28 +54,36 @@ export default async function RecurringPaymentDetailRoute({
       }
       const recurringPayment = recurringPaymentResult.data;
 
-      const wallets = (walletsResult.data ?? []).map((wallet) => ({
-        walletId: wallet.walletId,
-        label: wallet.label,
-        publicKey: wallet.publicKey,
-        balances: wallet.balances ?? [],
-      }));
+      const wallets = walletsResult.data ?? [];
       const wallet =
         wallets.find((entry) => entry.walletId === recurringPayment.sourceWalletId) ?? null;
       const counterparty = await trace.step("fetch_recurring_payment_counterparty", () =>
         fetchCounterparty(apiClient.request, recurringPayment.counterpartyId)
       );
       const counterpartyLabel = counterparty?.displayName ?? "Counterparty unavailable";
+      const accountsResponse = await trace.step("fetch_recurring_payment_counterparty_accounts", () =>
+        apiClient.request(
+          `/v1/counterparties/${encodeURIComponent(recurringPayment.counterpartyId)}/accounts?pageSize=100`
+        )
+      );
+      const counterpartyAccounts: CounterpartyAccount[] = accountsResponse.ok
+        ? (((await accountsResponse.json()) as { data?: ListCounterpartyAccountsResponse }).data
+            ?.accounts ?? [])
+        : [];
       const knownToken = WELL_KNOWN_TOKEN_BY_MINT.get(recurringPayment.token);
       const tokenLabel =
         knownToken?.symbol ??
-        wallet?.balances.find((entry) => entry.mint === recurringPayment.token)?.token ??
+        wallet?.balances?.find((entry) => entry.mint === recurringPayment.token)?.token ??
         shortenAddress(recurringPayment.token);
 
       return (
         <RecurringPaymentDetailWorkspace
           recurringPayment={recurringPayment}
           wallet={wallet}
+          wallets={wallets}
+          counterpartyAccounts={counterpartyAccounts.filter(
+            (account) => account.accountKind === "crypto_wallet" && account.status === "active"
+          )}
           counterpartyLabel={counterpartyLabel}
           amountLabel={formatDisplayAmount(recurringPayment.amount, tokenLabel)}
           currencyLabel={tokenLabel}

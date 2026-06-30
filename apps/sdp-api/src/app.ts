@@ -41,7 +41,7 @@ import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
 import { isSentryEnabled, type Observability } from "@/runtime/observability";
-import { SigningError } from "@/services/ports";
+import { FeePaymentError, SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 
 export interface SdpPlugin {
@@ -93,6 +93,54 @@ function mapSigningError(err: SigningError): {
       return { status: 502, code: err.code, message: err.message };
     default:
       return { status: 400, code: err.code, message: err.message };
+  }
+}
+
+function mapFeePaymentError(err: FeePaymentError): {
+  status: 400 | 429 | 502 | 503;
+  code: string;
+  message: string;
+} {
+  const programError = /custom program error: (0x[0-9a-f]+)/i.exec(err.message)?.[1].toLowerCase();
+  if (programError === "0x1") {
+    return {
+      status: 400,
+      code: "TRANSACTION_FAILED",
+      message:
+        "The wallet used for this payment does not have enough funds. Add funds and try again.",
+    };
+  }
+  if (programError) {
+    return {
+      status: 400,
+      code: "TRANSACTION_FAILED",
+      message: "The transaction was rejected on Solana. Check the payment wallet and try again.",
+    };
+  }
+
+  switch (err.code) {
+    case "INSUFFICIENT_BALANCE":
+      return {
+        status: 400,
+        code: "TRANSACTION_FAILED",
+        message:
+          "The wallet used for this payment does not have enough funds. Add funds and try again.",
+      };
+    case "RATE_LIMITED":
+      return { status: 429, code: err.code, message: "The signing provider is busy. Try again." };
+    case "PROVIDER_NOT_AVAILABLE":
+    case "NETWORK_ERROR":
+      return {
+        status: 503,
+        code: "PROVIDER_UNAVAILABLE",
+        message: "The signing provider is temporarily unavailable. Try again.",
+      };
+    default:
+      return {
+        status: 502,
+        code: "TRANSACTION_FAILED",
+        message: "The transaction could not be signed or submitted. Try again.",
+      };
   }
 }
 
@@ -275,6 +323,21 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
     if (err instanceof SigningError) {
       const mapped = mapSigningError(err);
+      c.header("X-SDP-Trace-ID", traceId);
+      return c.json(
+        {
+          error: {
+            code: mapped.code,
+            message: mapped.message,
+          },
+          meta: { requestId },
+        },
+        mapped.status
+      );
+    }
+
+    if (err instanceof FeePaymentError) {
+      const mapped = mapFeePaymentError(err);
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
         {
