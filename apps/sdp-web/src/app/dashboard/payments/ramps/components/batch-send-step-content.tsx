@@ -1,7 +1,7 @@
 "use client";
 
 import type { PaymentTransferBatchRecipientStatus, PaymentTransferBatchStatus } from "@sdp/types";
-import { ExternalLink, WalletIcon } from "lucide-react";
+import { ExternalLink, PlusIcon, SearchIcon, WalletIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 import {
@@ -9,12 +9,14 @@ import {
   shortenAddress,
 } from "@/app/dashboard/payments/payments-overview.utils";
 import { getDevnetExplorerUrl } from "@/app/dashboard/payments/payments-workspace.data";
+import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Combobox } from "@/components/ui/combobox";
+import { Input } from "@/components/ui/input";
+import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { cn } from "@/lib/utils";
 import type { BatchSendWizard } from "../hooks/use-batch-send-wizard";
 import { walletComboboxOptions } from "../wallet-options";
 import { AmountBalanceReadout } from "./amount-balance-readout";
-import { BatchRecipientTable } from "./batch-recipient-table";
 import { BulkImportDialog } from "./bulk-import-dialog";
 
 const RECIPIENT_STATUS_TONE = {
@@ -85,7 +87,6 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
     recipients,
     entries,
     toggleRecipient,
-    setManySelected,
     setRecipientAmount,
     bulkImport,
   } = wizard;
@@ -144,29 +145,124 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
         </button>
       </div>
 
-      <BatchRecipientTable
-        pageRecipients={pageRecipients}
-        entries={entries}
-        asset={asset}
-        displayAsset={displayAsset}
-        isLoading={recipientsLoading}
-        page={page}
-        pageCount={pageCount}
-        total={recipientTotal}
-        onPageChange={setPage}
-        search={search}
-        onSearchChange={setSearchQuery}
-        onToggle={toggleRecipient}
-        onToggleMany={setManySelected}
-        onAmountChange={setRecipientAmount}
-      />
+      <div className="space-y-2">
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-3.5 size-5 -translate-y-1/2 text-text-low" />
+            <Input
+              value={search}
+              onChange={(event) => setSearchQuery(event.currentTarget.value)}
+              placeholder="Search counterparty"
+              size="xl"
+              className="h-[var(--input-height-xl)] pl-11 [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:bg-[var(--input-bg-idle)]"
+            />
+          </div>
+          <ArrowPagination
+            page={page}
+            pageCount={pageCount}
+            onPageChange={setPage}
+            summary={`${page} / ${pageCount}`}
+            className="shrink-0 gap-2"
+          />
+        </div>
+
+        <motion.div
+          key={page}
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.15 }}
+          className="divide-y divide-border-light"
+        >
+          {recipientsLoading ? (
+            Array.from({ length: 6 }, (_, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
+              <div key={i} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+                  <SkeletonBlock className="h-4 w-32" />
+                  <SkeletonBlock className="h-3 w-44" />
+                </div>
+                <SkeletonBlock className="size-4 shrink-0 rounded" />
+              </div>
+            ))
+          ) : pageRecipients.length === 0 ? (
+            <p className="py-6 text-center text-sm text-text-low">
+              {recipientTotal === 0 ? "No counterparties with a Solana address." : "No matches."}
+            </p>
+          ) : (
+            pageRecipients.map((account) => {
+              const entry = entries[account.counterpartyAccountId];
+              const isSelected = Boolean(entry);
+              const hasLabel = account.label !== null && account.label.trim().length > 0;
+              return (
+                <div
+                  key={account.counterpartyAccountId}
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2.5 transition-colors",
+                    isSelected ? "bg-border-extra-light" : "hover:bg-border-extra-light"
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleRecipient(account)}
+                    className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
+                  >
+                    <span className="truncate text-sm font-medium text-text-extra-high">
+                      {account.name}
+                    </span>
+                    <span className="truncate text-xs text-text-low">
+                      {hasLabel ? `${account.label} · ` : ""}
+                      <span className="font-mono">{shortenAddress(account.address)}</span>
+                    </span>
+                  </button>
+                  {isSelected ? (
+                    <motion.div
+                      initial={{ opacity: 0, x: 8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.15 }}
+                      className="flex shrink-0 items-center gap-1.5"
+                    >
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="any"
+                        value={entry.amount}
+                        onChange={(event) => setRecipientAmount(account, event.currentTarget.value)}
+                        onBlur={() => {
+                          if (entry.amount.trim() === "" || Number(entry.amount) === 0) {
+                            toggleRecipient(account);
+                          }
+                        }}
+                        placeholder="0.0"
+                        className="w-24 border-0 border-b border-border-medium bg-transparent pb-0.5 text-right text-sm text-text-extra-high [appearance:textfield] focus:border-[var(--input-border-focus)] focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                      />
+                      <span className="text-sm text-text-low">{displayAsset}</span>
+                    </motion.div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => toggleRecipient(account)}
+                      aria-label={`Add ${account.name}`}
+                      className="shrink-0 text-text-low transition-colors hover:text-text-extra-high"
+                    >
+                      <PlusIcon className="size-4" />
+                    </button>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </motion.div>
+      </div>
 
       <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onImport={bulkImport} />
 
       {recipients.length > 0 ? (
         <div className="flex items-center justify-between px-1 text-sm">
           <span className={exceedsBalance ? "font-medium text-status-error-text" : "text-text-low"}>
-            {exceedsBalance ? "Insufficient balance" : pluralRecipients(recipients.length)}
+            {exceedsBalance
+              ? "Insufficient balance"
+              : `${recipients.length} wallet${recipients.length === 1 ? "" : "s"} selected`}
           </span>
           <span
             className={cn(

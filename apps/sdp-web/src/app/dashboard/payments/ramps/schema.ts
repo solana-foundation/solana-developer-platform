@@ -109,7 +109,7 @@ export const batchRecipientSchema = z.object({
   amount: onchainAmount,
 });
 
-export const MAX_BATCH_RECIPIENTS = 500;
+export const MAX_BATCH_RECIPIENTS = 6;
 
 export const batchSendSchema = z.object({
   walletId: z.string().min(1, "Select a source wallet."),

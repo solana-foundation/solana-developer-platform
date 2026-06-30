@@ -32,7 +32,7 @@ export type BatchSendStepId = (typeof BATCH_SEND_STEPS)[number]["id"];
 export type BatchEligibleRecipient = CounterpartyAccountSummary;
 
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
-const RECIPIENTS_PAGE_SIZE = 8;
+const RECIPIENTS_PAGE_SIZE = 6;
 
 export interface BatchRecipientDraft {
   counterpartyId: string;
