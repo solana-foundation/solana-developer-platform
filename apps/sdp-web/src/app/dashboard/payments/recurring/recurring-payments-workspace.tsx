@@ -138,7 +138,10 @@ function schedulePresetForPeriodHours(periodHours: number): SchedulePreset {
     : "custom";
 }
 
-function parsePeriodHours(schedulePreset: SchedulePreset, customPeriodHours: string): number | null {
+function parsePeriodHours(
+  schedulePreset: SchedulePreset,
+  customPeriodHours: string
+): number | null {
   const rawValue = schedulePreset === "custom" ? customPeriodHours : schedulePreset;
   if (!/^\d+$/.test(rawValue.trim())) {
     return null;
@@ -629,6 +632,7 @@ export function RecurringPaymentsWorkspace({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: detail editing intentionally centralizes lifecycle and modal state in one workspace.
 export function RecurringPaymentDetailWorkspace({
   recurringPayment,
   wallet,
@@ -767,7 +771,9 @@ export function RecurringPaymentDetailWorkspace({
       return;
     }
     if (accountId === recurringPayment.counterpartyAccountId) {
-      setReceivingAccountValidationError(`${receivingAccountLabel} is already the receiving wallet.`);
+      setReceivingAccountValidationError(
+        `${receivingAccountLabel} is already the receiving wallet.`
+      );
       return;
     }
 
@@ -988,7 +994,10 @@ export function RecurringPaymentDetailWorkspace({
                   <span className="min-w-0 truncate">{sourceWalletLabel}</span>
                 )}
                 {wallet ? (
-                  <CopyableValue value={wallet.publicKey} label={shortenAddress(wallet.publicKey)} />
+                  <CopyableValue
+                    value={wallet.publicKey}
+                    label={shortenAddress(wallet.publicKey)}
+                  />
                 ) : null}
                 {sourceWalletEditable ? (
                   <Button
@@ -1370,9 +1379,7 @@ export function RecurringPaymentDetailWorkspace({
                   placeholder="24"
                 />
                 {billingIntervalValidationError ? (
-                  <p className="text-sm text-status-error-text">
-                    {billingIntervalValidationError}
-                  </p>
+                  <p className="text-sm text-status-error-text">{billingIntervalValidationError}</p>
                 ) : null}
               </div>
             ) : billingIntervalValidationError ? (
@@ -1433,7 +1440,9 @@ export function RecurringPaymentDetailWorkspace({
                 setCurrencyValidationError(null);
               }}
               options={assetOptions}
-              placeholder={assetOptions.length === 0 ? "No supported token balances" : "Select a currency"}
+              placeholder={
+                assetOptions.length === 0 ? "No supported token balances" : "Select a currency"
+              }
               searchPlaceholder="Search currencies"
               icon={<CreditCardIcon />}
               disabled={savingCurrency || assetOptions.length === 0}

@@ -61,10 +61,12 @@ export default async function RecurringPaymentDetailRoute({
         fetchCounterparty(apiClient.request, recurringPayment.counterpartyId)
       );
       const counterpartyLabel = counterparty?.displayName ?? "Counterparty unavailable";
-      const accountsResponse = await trace.step("fetch_recurring_payment_counterparty_accounts", () =>
-        apiClient.request(
-          `/v1/counterparties/${encodeURIComponent(recurringPayment.counterpartyId)}/accounts?pageSize=100`
-        )
+      const accountsResponse = await trace.step(
+        "fetch_recurring_payment_counterparty_accounts",
+        () =>
+          apiClient.request(
+            `/v1/counterparties/${encodeURIComponent(recurringPayment.counterpartyId)}/accounts?pageSize=100`
+          )
       );
       const counterpartyAccounts: CounterpartyAccount[] = accountsResponse.ok
         ? (((await accountsResponse.json()) as { data?: ListCounterpartyAccountsResponse }).data
