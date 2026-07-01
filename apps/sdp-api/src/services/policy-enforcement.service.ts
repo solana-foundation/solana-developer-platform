@@ -3,16 +3,19 @@ import type {
   PolicyEvaluation,
   WalletOperationActor,
   WalletOperationEnvelope,
+  WalletOperationPolicyEvaluation,
   WalletOperationStatus,
 } from "@sdp/types";
 import { getDb } from "@/db";
 import {
+  type ApprovalRequestRow,
+  type CreateApprovalRequestInput,
   type CreateWalletOperationInput,
   createPolicyRepository,
   type PolicyRepository,
 } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError, internalError } from "@/lib/errors";
+import { AppError, conflict, internalError } from "@/lib/errors";
 import {
   CustodyConfigStore,
   type CustodyWalletLookup,
@@ -39,13 +42,32 @@ export class WalletPolicyEnforcementService {
       status: input.status ?? "created",
     });
 
+    let approvalRequestId: string | null = null;
+
     const { result, evaluation, updatedOperation } = await (async () => {
       try {
         const result = await this.foundation.evaluateWalletOperationPolicies(operation);
-        const evaluation = await this.foundation.recordPolicyEvaluation(
-          createPolicyEvaluationInput(result)
-        );
         const status = walletOperationStatusForDecision(result.decision);
+        if (status === "pending_approval") {
+          const approvalRequest = await this.repository.createApprovalRequest(
+            createApprovalRequestInput(operation, result)
+          );
+
+          if (!approvalRequest) {
+            throw internalError("Failed to create wallet operation approval request");
+          }
+
+          if (approvalRequest.status !== "pending") {
+            throw internalError("Wallet operation approval request is no longer pending");
+          }
+
+          approvalRequestId = approvalRequest.id;
+        }
+
+        const evaluation = await this.foundation.recordPolicyEvaluation({
+          ...createPolicyEvaluationInput(result),
+          approvalRequestId,
+        });
         const updated = await this.repository.updateWalletOperationStatus(operation.id, status);
 
         if (!updated) {
@@ -62,7 +84,19 @@ export class WalletPolicyEnforcementService {
           },
         };
       } catch (error) {
-        await markWalletOperationFailed(this.repository, operation.id);
+        if (approvalRequestId) {
+          try {
+            await markApprovalRequestAndWalletOperationFailed(
+              this.repository,
+              operation.organizationId,
+              approvalRequestId
+            );
+          } catch (cleanupError) {
+            throw combineEnforcementAndCleanupErrors(error, cleanupError);
+          }
+        } else {
+          await markWalletOperationFailed(this.repository, operation.id);
+        }
         throw error;
       }
     })();
@@ -75,6 +109,38 @@ export class WalletPolicyEnforcementService {
     }
 
     throw walletOperationPolicyDecisionError(updatedOperation, evaluation);
+  }
+
+  async approveApprovalRequest(
+    organizationId: string,
+    approvalRequestId: string,
+    resolvedBy?: string | null
+  ) {
+    const approvalRequest = await this.repository.updateApprovalRequestStatus({
+      organizationId,
+      approvalRequestId,
+      status: "approved",
+      operationStatus: "executing",
+      resolvedBy,
+    });
+
+    return requireApprovalRequestStatus(approvalRequest, "approved");
+  }
+
+  async cancelApprovalRequest(
+    organizationId: string,
+    approvalRequestId: string,
+    resolvedBy?: string | null
+  ) {
+    const approvalRequest = await this.repository.updateApprovalRequestStatus({
+      organizationId,
+      approvalRequestId,
+      status: "canceled",
+      operationStatus: "canceled",
+      resolvedBy,
+    });
+
+    return requireApprovalRequestStatus(approvalRequest, "canceled");
   }
 }
 
@@ -125,6 +191,41 @@ async function markWalletOperationFailed(
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+async function markApprovalRequestAndWalletOperationFailed(
+  repository: PolicyRepository,
+  organizationId: string,
+  approvalRequestId: string
+): Promise<void> {
+  await repository.updateApprovalRequestStatus({
+    organizationId,
+    approvalRequestId,
+    status: "failed",
+    operationStatus: "failed",
+  });
+}
+
+function requireApprovalRequestStatus<TStatus extends ApprovalRequestRow["status"]>(
+  approvalRequest: ApprovalRequestRow | null,
+  status: TStatus
+): (ApprovalRequestRow & { status: TStatus }) | null {
+  if (approvalRequest && approvalRequest.status !== status) {
+    throw conflict(`Approval request is already ${approvalRequest.status}`);
+  }
+
+  return approvalRequest as (ApprovalRequestRow & { status: TStatus }) | null;
+}
+
+function combineEnforcementAndCleanupErrors(error: unknown, cleanupError: unknown): AggregateError {
+  return new AggregateError(
+    [error, cleanupError],
+    `Wallet operation policy enforcement failed (${errorMessage(error)}) and approval cleanup failed (${errorMessage(cleanupError)})`
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export async function enforceWalletOperationPolicy(
@@ -196,6 +297,7 @@ function walletOperationPolicyDecisionError(
     reasonCode: evaluation.reasonCode,
     reason: evaluation.reason,
     requiresApproval: evaluation.requiresApproval,
+    approvalRequestId: evaluation.approvalRequestId,
   };
 
   if (evaluation.decision === "deny" || evaluation.decision === "not_evaluated") {
@@ -207,4 +309,37 @@ function walletOperationPolicyDecisionError(
   }
 
   return new AppError("SIGNING_PENDING", "Wallet operation requires policy approval", details);
+}
+
+function createApprovalRequestInput(
+  operation: WalletOperationEnvelope,
+  evaluation: WalletOperationPolicyEvaluation
+): CreateApprovalRequestInput {
+  return {
+    organizationId: operation.organizationId,
+    projectId: operation.projectId,
+    walletOperationId: operation.id,
+    approvalGroupId: getApprovalGroupId(evaluation),
+    provider: stringValue(operation.providerExtensions.provider),
+    providerReference:
+      stringValue(operation.providerExtensions.providerReference) ??
+      stringValue(operation.providerExtensions.approvalId) ??
+      stringValue(operation.providerExtensions.approvalRequestId),
+    providerPayload: operation.providerExtensions,
+    requestedBy: typeof operation.actor?.id === "string" ? operation.actor.id : null,
+  };
+}
+
+function getApprovalGroupId(evaluation: WalletOperationPolicyEvaluation): string | null {
+  for (const matchedRule of evaluation.matchedRules) {
+    const approvalGroupId = stringValue(matchedRule.rule.approvalGroupId);
+    if (approvalGroupId) {
+      return approvalGroupId;
+    }
+  }
+  return null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
