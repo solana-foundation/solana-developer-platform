@@ -94,6 +94,7 @@ function createRepository(options: {
   walletPolicy?: ActiveWalletControlProfileResult | null;
   apiKeyPolicy?: ActiveApiKeyControlProfileResult | null;
   evaluationError?: Error;
+  policyEvaluationError?: Error;
   statusUpdateFailures?: number;
   statusUpdateError?: Error;
 }) {
@@ -144,20 +145,26 @@ function createRepository(options: {
       operation.updated_at = "2026-06-18T00:01:00.000Z";
       return operation;
     }),
-    createPolicyEvaluation: vi.fn(async (input: CreatePolicyEvaluationInput) => ({
-      id: "peval_1",
-      wallet_operation_id: input.walletOperationId,
-      wallet_policy_revision_id: input.walletPolicyRevisionId ?? null,
-      api_key_policy_revision_id: input.apiKeyPolicyRevisionId ?? null,
-      decision: input.decision,
-      reason_code: input.reasonCode,
-      reason: input.reason ?? null,
-      matched_rules: input.matchedRules ?? [],
-      evaluation_context: input.evaluationContext,
-      requires_approval: input.requiresApproval ?? false,
-      approval_request_id: input.approvalRequestId ?? null,
-      created_at: "2026-06-18T00:00:00.000Z",
-    })),
+    createPolicyEvaluation: vi.fn(async (input: CreatePolicyEvaluationInput) => {
+      if (options.policyEvaluationError) {
+        throw options.policyEvaluationError;
+      }
+
+      return {
+        id: "peval_1",
+        wallet_operation_id: input.walletOperationId,
+        wallet_policy_revision_id: input.walletPolicyRevisionId ?? null,
+        api_key_policy_revision_id: input.apiKeyPolicyRevisionId ?? null,
+        decision: input.decision,
+        reason_code: input.reasonCode,
+        reason: input.reason ?? null,
+        matched_rules: input.matchedRules ?? [],
+        evaluation_context: input.evaluationContext,
+        requires_approval: input.requiresApproval ?? false,
+        approval_request_id: input.approvalRequestId ?? null,
+        created_at: "2026-06-18T00:00:00.000Z",
+      };
+    }),
     createApprovalRequest: vi.fn(async (input) => {
       const existing = approvalRequests.find(
         (request) => request.wallet_operation_id === input.walletOperationId
@@ -196,7 +203,12 @@ function createRepository(options: {
       request.updated_at = resolvedAt;
 
       const operation = operations.find((row) => row.id === request.wallet_operation_id);
-      if (operation && input.operationStatus && operation.status === "pending_approval") {
+      if (
+        operation &&
+        input.operationStatus &&
+        (operation.status === "pending_approval" ||
+          (input.operationStatus === "failed" && operation.status === "created"))
+      ) {
         operation.status = input.operationStatus;
         operation.updated_at = request.updated_at;
       }
@@ -397,6 +409,25 @@ describe("WalletPolicyEnforcementService", () => {
       status: "canceled",
       resolved_by: "usr_approver",
     });
+  });
+
+  it("fails approval requests and wallet operations together when recording the evaluation fails", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile([
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]),
+      policyEvaluationError: new Error("evaluation write unavailable"),
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(service.enforce(baseOperation)).rejects.toThrow("evaluation write unavailable");
+
+    expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith({
+      approvalRequestId: "appr_1",
+      status: "failed",
+      operationStatus: "failed",
+    });
+    expect(repository.updateWalletOperationStatus).not.toHaveBeenCalledWith("wop_1", "failed");
   });
 
   it("lets an API key policy narrow an otherwise allowed wallet operation", async () => {

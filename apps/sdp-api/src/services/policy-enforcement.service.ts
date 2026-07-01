@@ -79,9 +79,10 @@ export class WalletPolicyEnforcementService {
         };
       } catch (error) {
         if (approvalRequestId) {
-          await markApprovalRequestFailed(this.repository, approvalRequestId);
+          await markApprovalRequestAndWalletOperationFailed(this.repository, approvalRequestId);
+        } else {
+          await markWalletOperationFailed(this.repository, operation.id);
         }
-        await markWalletOperationFailed(this.repository, operation.id);
         throw error;
       }
     })();
@@ -164,7 +165,7 @@ async function markWalletOperationFailed(
   }
 }
 
-async function markApprovalRequestFailed(
+async function markApprovalRequestAndWalletOperationFailed(
   repository: PolicyRepository,
   approvalRequestId: string
 ): Promise<void> {
@@ -172,9 +173,10 @@ async function markApprovalRequestFailed(
     await repository.updateApprovalRequestStatus({
       approvalRequestId,
       status: "failed",
+      operationStatus: "failed",
     });
   } catch (error) {
-    console.error("Failed to mark approval request failed", {
+    console.error("Failed to mark approval request and wallet operation failed", {
       approvalRequestId,
       error: error instanceof Error ? error.message : String(error),
     });

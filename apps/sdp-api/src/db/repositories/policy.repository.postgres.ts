@@ -1099,13 +1099,18 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
           .first<Record<string, unknown>>();
 
         if (input.operationStatus) {
+          const currentOperationStatus =
+            input.operationStatus === "failed"
+              ? "status IN ('created', 'pending_approval')"
+              : "status = 'pending_approval'";
+
           await tx
             .prepare(
               `UPDATE wallet_operations
                SET status = ?,
                    updated_at = ?
                WHERE id = ?
-                 AND status = 'pending_approval'`
+                 AND ${currentOperationStatus}`
             )
             .bind(input.operationStatus, resolvedAt, current.wallet_operation_id)
             .run();
