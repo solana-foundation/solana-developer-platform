@@ -1,3 +1,5 @@
+import type { SdpEnvironment } from "./api-keys";
+
 export type SolanaCluster = "devnet" | "mainnet-beta";
 
 export const SOLANA_CLUSTER_LABELS = {
@@ -82,3 +84,20 @@ export const WELL_KNOWN_TOKEN_BY_MINT: ReadonlyMap<string, WellKnownToken> = new
     [...new Set(Object.values(token.mints))].map((mint): [string, WellKnownToken] => [mint, token])
   )
 );
+
+export const CLUSTER_BY_SDP_ENVIRONMENT = {
+  sandbox: "devnet",
+  production: "mainnet-beta",
+} as const satisfies Record<SdpEnvironment, SolanaCluster>;
+
+export function isWellKnownTokenSymbol(value: string): value is WellKnownTokenSymbol {
+  return Object.hasOwn(WELL_KNOWN_TOKENS, value);
+}
+
+export function wellKnownMint(
+  symbol: WellKnownTokenSymbol,
+  cluster: SolanaCluster
+): string | undefined {
+  const token: WellKnownToken = WELL_KNOWN_TOKENS[symbol];
+  return token.mints[cluster];
+}

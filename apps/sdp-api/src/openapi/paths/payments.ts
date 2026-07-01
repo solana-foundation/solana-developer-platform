@@ -10,8 +10,6 @@ import {
   createTransferRequestSchema,
   errorResponseSchema,
   estimateTransferBatchRequestSchema,
-  executeOfframpRequestSchema,
-  executeOnrampRequestSchema,
   paymentListRecurringPaymentsQuerySchema,
   paymentListSubscriptionCollectionAttemptsQuerySchema,
   paymentListSubscriptionPlansQuerySchema,
@@ -40,9 +38,7 @@ import {
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
   offrampCurrenciesResponse,
-  offrampExecutionResponse,
   onrampCurrenciesResponse,
-  onrampExecutionResponse,
   onrampQuoteResponse,
   paymentRecurringPaymentCollectionResponse,
   paymentRecurringPaymentListResponse,
@@ -948,54 +944,6 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(onrampQuoteResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/payments/ramps/onramp/execute",
-    tags: ["Payments"],
-    summary: "Execute on-ramp",
-    operationId: "executePaymentOnramp",
-    description: "Creates a fiat-to-crypto on-ramp session through the selected provider.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(executeOnrampRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "On-ramp execution initiated",
-        content: jsonContent(onrampExecutionResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/payments/ramps/offramp/execute",
-    tags: ["Payments"],
-    summary: "Execute off-ramp",
-    operationId: "executePaymentOfframp",
-    description: "Creates a crypto-to-fiat off-ramp session through the selected provider.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(executeOfframpRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Off-ramp execution initiated",
-        content: jsonContent(offrampExecutionResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
     },
   });
 

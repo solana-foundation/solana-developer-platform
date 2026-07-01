@@ -1,6 +1,7 @@
 "use client";
 
 import type { Counterparty, RampProviderId } from "@sdp/types";
+import { motion } from "motion/react";
 import Image from "next/image";
 import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/payments/counterparty/counterparty-create-dialog";
@@ -48,6 +49,7 @@ interface RampWizardShellProps {
   /** Confirm before running the secondary action — used once a transaction is live. */
   confirmSecondary?: boolean;
   secondaryDisabled?: boolean;
+  hideSecondary?: boolean;
 }
 
 export function RampWizardShell({
@@ -68,6 +70,7 @@ export function RampWizardShell({
   hidePrimary,
   confirmSecondary,
   secondaryDisabled,
+  hideSecondary,
 }: RampWizardShellProps) {
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   return (
@@ -108,19 +111,31 @@ export function RampWizardShell({
           </div>
         ) : null}
 
-        {children}
+        <motion.div
+          key={stepIndex}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2, ease: "easeOut" }}
+          className="space-y-6"
+        >
+          {children}
+        </motion.div>
       </div>
 
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 pt-4 pb-1 sm:flex-row sm:justify-between">
-        <Button
-          type="button"
-          variant="secondary"
-          className="h-14 rounded-full text-base"
-          disabled={secondaryDisabled}
-          onClick={confirmSecondary ? () => setCancelConfirmOpen(true) : onSecondary}
-        >
-          {secondaryLabel ?? (stepIndex === 0 ? "Cancel" : "Previous")}
-        </Button>
+        {hideSecondary ? (
+          <div />
+        ) : (
+          <Button
+            type="button"
+            variant="secondary"
+            className="h-14 rounded-full text-base"
+            disabled={secondaryDisabled}
+            onClick={confirmSecondary ? () => setCancelConfirmOpen(true) : onSecondary}
+          >
+            {secondaryLabel ?? (stepIndex === 0 ? "Cancel" : "Previous")}
+          </Button>
+        )}
         <div className="flex flex-col gap-3 sm:flex-row">
           {footerActions}
           {hidePrimary ? null : (
@@ -145,7 +160,7 @@ export function RampWizardShell({
       <CancelTransactionDialog
         open={cancelConfirmOpen}
         onKeepGoing={() => setCancelConfirmOpen(false)}
-        onConfirm={() => {
+        onCancel={() => {
           setCancelConfirmOpen(false);
           onSecondary();
         }}

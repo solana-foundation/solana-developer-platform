@@ -6,13 +6,13 @@ import { Modal } from "@/components/ui/modal";
 interface CancelTransactionDialogProps {
   open: boolean;
   onKeepGoing: () => void;
-  onConfirm: () => void;
+  onCancel: () => void;
 }
 
 export function CancelTransactionDialog({
   open,
   onKeepGoing,
-  onConfirm,
+  onCancel,
 }: CancelTransactionDialogProps) {
   return (
     <Modal isOpen={open} onClose={onKeepGoing} ariaLabel="Cancel transaction" size="sm">
@@ -29,7 +29,7 @@ export function CancelTransactionDialog({
           <Button type="button" variant="secondary" onClick={onKeepGoing}>
             Keep going
           </Button>
-          <Button type="button" variant="destructive" onClick={onConfirm}>
+          <Button type="button" variant="destructive" onClick={onCancel}>
             Cancel transaction
           </Button>
         </div>
