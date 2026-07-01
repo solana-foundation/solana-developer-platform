@@ -1,0 +1,1256 @@
+{
+  "status": 200,
+  "body": [
+    {
+      "id": 2009,
+      "code": "2GIVE",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/b48ca4ef-c72a-4f55-87c8-997bffee25f3.png",
+      "name": "2GIVE",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2103,
+      "code": "ADA",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/8e710fe5-7409-447d-962e-c07158424d95.png",
+      "name": "Cardano",
+      "withdrawalParameters": [],
+      "options": {
+        "transaction": "https://cardanoscan.io/transaction/{{hash}}",
+        "explorer": "https://cardanoscan.io/",
+        "confirmations": 12,
+        "address": "https://cardanoscan.io/address/{{address}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 8,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "ADA",
+          "network": "Cardano",
+          "networkCode": "CARDANO"
+        }
+      ]
+    },
+    {
+      "id": 2122,
+      "code": "ALGO",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/c9765a4b-e8e7-40e8-b03f-ce5f7a0b0976.png",
+      "name": "Algorand",
+      "withdrawalParameters": [
+        {
+          "id": 3,
+          "code": "note",
+          "name": "Note",
+          "required": false,
+          "example": "XYZABC"
+        }
+      ],
+      "options": {},
+      "withdrawalFee": 2,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 6,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2054,
+      "code": "ARK",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/a61d586e-b23d-4094-a6de-e41eff658bb2.png",
+      "name": "Ark",
+      "withdrawalParameters": [],
+      "options": {
+        "explorer": "https://explorer.ark.io/",
+        "confirmations": 12,
+        "transaction": "https://explorer.ark.io/transaction/{{hash}}",
+        "address": "https://explorer.ark.io/wallets/{{address}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2099,
+      "code": "BCH",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/1a773ba0-6ded-4018-a20f-461e4a947ecc.png",
+      "name": "Bitcoin Cash",
+      "withdrawalParameters": [],
+      "options": {
+        "explorer": "https://explorer.bitcoin.com/bch",
+        "address": "https://explorer.bitcoin.com/bch/address/{{address}}",
+        "transaction": "https://explorer.bitcoin.com/bch/tx/{{hash}}",
+        "confirmations": 12
+      },
+      "withdrawalFee": 0.001,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 8,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2115,
+      "code": "BNB",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/ac6d2d23-c31a-4ab1-8539-c6bce82b9f72.png",
+      "name": "Binance Coin",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 4,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "BNB",
+          "network": "Binance Smart Chain",
+          "networkCode": "BINANCE"
+        }
+      ]
+    },
+    {
+      "id": 1691,
+      "code": "BTC",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/7b74200a-b16b-4548-b288-fb385a67d7ff.png",
+      "name": "Bitcoin",
+      "withdrawalParameters": [],
+      "options": {
+        "address": "https://www.blockchain.com/btc/address/{{address}}",
+        "transaction": "https://www.blockchain.com/btc/tx/{{hash}}",
+        "explorer": "https://www.blockchain.com/explorer?view=btc",
+        "confirmations": 4
+      },
+      "withdrawalFee": 0.000005,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 8,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "BTC",
+          "network": "Bitcoin",
+          "networkCode": "BITCOIN"
+        }
+      ]
+    },
+    {
+      "id": 1882,
+      "code": "BTCD",
+      "fiat": false,
+      "icon": "s3://dev-coindirect-filestore/com.coindirect.core.finance.Currency/d944437d-b762-4303-ab0b-7ecbf90d245c.png",
+      "name": "BitcoinDark",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2104,
+      "code": "BTG",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/6339176c-f282-46f3-b68c-83240404ad78.png",
+      "name": "Bitcoin Gold",
+      "withdrawalParameters": [],
+      "options": {
+        "address": "https://btgexplorer.com/address/{{address}}",
+        "explorer": "https://btgexplorer.com/",
+        "transaction": "https://btgexplorer.com/tx/{{hash}}",
+        "confirmations": 12
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 1899,
+      "code": "BTS",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/7cd60660-b2d9-4164-b9bf-d3d5a4d93c50.png",
+      "name": "BitShares",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2096,
+      "code": "CVC",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/22330515-f03e-44ff-a1c7-9843c0bc5f97.png",
+      "name": "Civic",
+      "withdrawalParameters": [],
+      "options": {
+        "explorer": "https://etherscan.io/token/0x41e5560054824ea6b0732e656e3ad64e20e94e45",
+        "address": "https://etherscan.io/token/0x41e5560054824ea6b0732e656e3ad64e20e94e45?a={{address}}",
+        "confirmations": 12,
+        "transaction": "https://etherscan.io/tx/{{hash}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2101,
+      "code": "DAI",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/95b556ea-9fdb-47c0-908f-fb21a39523b1.png",
+      "name": "DAI",
+      "withdrawalParameters": [],
+      "options": {
+        "confirmations": 12,
+        "transaction": "https://etherscan.io/tx/{{hash}}",
+        "explorer": "https://etherscan.io/token/0x6b175474e89094c44da98b954eedeac495271d0f",
+        "address": "https://etherscan.io/token/0x6b175474e89094c44da98b954eedeac495271d0f?a={{address}}"
+      },
+      "withdrawalFee": 0.4,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 8,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "ERC20",
+          "network": "Ethereum",
+          "networkCode": "ETHEREUM"
+        }
+      ]
+    },
+    {
+      "id": 1897,
+      "code": "DGB",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/3eb0c0ac-0064-488a-8f2c-94e886da1598.png",
+      "name": "Digibyte",
+      "withdrawalParameters": [],
+      "options": {
+        "confirmations": 12,
+        "transaction": "https://digiexplorer.info/tx/{{hash}}",
+        "explorer": "https://digiexplorer.info/",
+        "address": "https://digiexplorer.info/address/{{address}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 1833,
+      "code": "DOGE",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/00954b34-ac4e-4142-9e9f-05e2e2ce8b06.png",
+      "name": "Dogecoin",
+      "withdrawalParameters": [],
+      "options": {
+        "confirmations": 12,
+        "explorer": "https://dogechain.info/",
+        "address": "https://dogechain.info/address/{{address}}",
+        "transaction": "https://dogechain.info/tx/{{hash}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 8,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "DOGE",
+          "network": "Dogecoin",
+          "networkCode": "DOGECOIN"
+        }
+      ]
+    },
+    {
+      "id": 2113,
+      "code": "DOT",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/7bca4da4-c6e5-4873-963b-ce8ee9d0ca6d.png",
+      "name": "Polkadot",
+      "withdrawalParameters": [],
+      "options": {
+        "address": "https://polkascan.io/polkadot/account/{{address}}",
+        "confirmations": 12,
+        "explorer": "https://polkascan.io/polkadot",
+        "transaction": "https://polkascan.io/polkadot/transaction/{{hash}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2105,
+      "code": "EOS",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/0aa338cb-8216-4c60-8e76-7ff6c803ab9f.png",
+      "name": "EOS",
+      "withdrawalParameters": [],
+      "options": {
+        "explorer": "https://eosflare.io/",
+        "confirmations": 12,
+        "transaction": "https://eosflare.io/tx/{{hash}}",
+        "address": "https://eosflare.io/account/{{address}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2142,
+      "code": "es-PY",
+      "fiat": false,
+      "icon": null,
+      "name": "begi-test",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 8,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2021,
+      "code": "ETC",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/4c8b6634-f1c7-40fa-8401-6acfb2b1d378.png",
+      "name": "Ethereum Classic",
+      "withdrawalParameters": [],
+      "options": {
+        "transaction": "https://etcblockexplorer.com/tx/{{hash}}",
+        "address": "https://etherscan.io/address/{{address}}",
+        "explorer": "https://etcblockexplorer.com/",
+        "confirmations": 12
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 1969,
+      "code": "ETH",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/61a40a06-1e8c-4968-a01a-539587debb3d.png",
+      "name": "Ethereum",
+      "withdrawalParameters": [],
+      "options": {
+        "address": "https://etherscan.io/address/{{address}}",
+        "transaction": "https://etherscan.io/tx/{{hash}}",
+        "explorer": "https://etherscan.io/",
+        "confirmations": 12
+      },
+      "withdrawalFee": 0.001,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 8,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "ETH",
+          "network": "Ethereum",
+          "networkCode": "ETHEREUM"
+        }
+      ]
+    },
+    {
+      "id": 2138,
+      "code": "EURC",
+      "fiat": false,
+      "icon": null,
+      "name": "EURC",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 6,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "ERC20",
+          "network": "Ethereum",
+          "networkCode": "ETHEREUM"
+        }
+      ]
+    },
+    {
+      "id": 2136,
+      "code": "FDUSD",
+      "fiat": false,
+      "icon": null,
+      "name": "FDUSD",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "BEP20",
+          "network": "Binance Smart Chain",
+          "networkCode": "BINANCE"
+        },
+        {
+          "code": "ERC20",
+          "network": "Ethereum",
+          "networkCode": "ETHEREUM"
+        }
+      ]
+    },
+    {
+      "id": 2059,
+      "code": "GNT",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/2dbbe06d-09a8-4126-9cc6-0497ce98c37c.png",
+      "name": "Golem",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 5,
+      "protocols": []
+    },
+    {
+      "id": 2106,
+      "code": "ICX",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/471b655c-87b4-4b3b-921a-5c8341255026.png",
+      "name": "ICON",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2107,
+      "code": "IOT",
+      "fiat": false,
+      "icon": "https://dev-coindirect-filestore.s3.amazonaws.com/com.coindirect.core.finance.Currency/956d7924-35c9-42dd-8a3d-5481a47120eb.png",
+      "name": "IOTA",
+      "withdrawalParameters": [],
+      "options": {
+        "confirmations": 12,
+        "explorer": "https://etherscan.io/token/0x5e6b6d9abad9093fdc861ea1600eba1b355cd940",
+        "transaction": "https://etherscan.io/tx/{{hash}}",
+        "address": "https://etherscan.io/token/0x5e6b6d9abad9093fdc861ea1600eba1b355cd940?a={{address}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2112,
+      "code": "LINK",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/2f8944be-e317-450e-b26a-e9f2dc6eb042.png",
+      "name": "Chainlink",
+      "withdrawalParameters": [],
+      "options": {
+        "confirmations": 12,
+        "explorer": "https://etherscan.io/token/0x514910771af9ca656af840dff83e8264ecf986ca",
+        "transaction": "https://etherscan.io/tx/{{hash}}",
+        "address": "https://etherscan.io/token/0x514910771af9ca656af840dff83e8264ecf986ca?a={{address}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2010,
+      "code": "LSK",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/122602d7-9b04-4462-89cd-882e08fd2dab.png",
+      "name": "Lisk",
+      "withdrawalParameters": [],
+      "options": {
+        "transaction": "https://explorer.lisk.com/tx/{{hash}}",
+        "explorer": "https://explorer.lisk.com/",
+        "address": "https://explorer.lisk.com/address/{{address}}",
+        "confirmations": 12
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 1832,
+      "code": "LTC",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/385f38db-be60-43bd-9f0f-388bbf36e4af.png",
+      "name": "Litecoin",
+      "withdrawalParameters": [],
+      "options": {
+        "transaction": "https://litecoinblockexplorer.net/tx/{{hash}}",
+        "confirmations": 12,
+        "explorer": "https://litecoinblockexplorer.net/",
+        "address": "https://litecoinblockexplorer.net/address/{{address}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 8,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "LTC",
+          "network": "Litecoin",
+          "networkCode": "LITECOIN"
+        }
+      ]
+    },
+    {
+      "id": 2118,
+      "code": "LUNA",
+      "fiat": false,
+      "icon": "s3://dev-coindirect-filestore/com.coindirect.core.finance.Currency/74c6a203-ec94-46a2-a520-2c3a7c40c9e6.png",
+      "name": "Terra",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 1879,
+      "code": "NAV",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/817bb6a1-2b56-437c-89b7-242a27bbc530.png",
+      "name": "NAVCoin",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2108,
+      "code": "NEO",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/0d9c6ce9-04e9-4a0e-b10c-0f6f95ad0a2c.png",
+      "name": "NEO",
+      "withdrawalParameters": [],
+      "options": {
+        "confirmations": 12,
+        "explorer": "https://neotracker.io/",
+        "transaction": "https://neotracker.io/tx/{{hash}}",
+        "address": "https://neotracker.io/address/{{address}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 1838,
+      "code": "NXT",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/0b510777-a8d8-42b1-9b7c-93ecb7584e83.png",
+      "name": "NXT",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2095,
+      "code": "OMG",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/65fe60ba-b525-48f7-b6f7-fc6e7ff078dc.png",
+      "name": "OmiseGO",
+      "withdrawalParameters": [],
+      "options": {
+        "confirmations": 12,
+        "address": "https://blockexplorer.mainnet.v1.omg.network/address/{{address}}",
+        "explorer": "https://blockexplorer.mainnet.v1.omg.network/",
+        "transaction": "https://blockexplorer.mainnet.v1.omg.network/transaction/{{hash}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2123,
+      "code": "POL",
+      "fiat": false,
+      "icon": null,
+      "name": "Polygon",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 6,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "POLYGON",
+          "network": "Polygon",
+          "networkCode": "POLYGON"
+        }
+      ]
+    },
+    {
+      "id": 2124,
+      "code": "PYUSD",
+      "fiat": false,
+      "icon": null,
+      "name": "PayPal USD",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 6,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "ERC20",
+          "network": "Ethereum",
+          "networkCode": "ETHEREUM"
+        }
+      ]
+    },
+    {
+      "id": 2098,
+      "code": "QTUM",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/e2fc7f57-4a9d-452f-8b83-1dd2c301e9a5.png",
+      "name": "Qtum",
+      "withdrawalParameters": [],
+      "options": {
+        "transaction": "https://qtum.info/tx/{{hash}}",
+        "address": "https://etherscan.io/token/0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359?a={{address}}",
+        "confirmations": 12,
+        "explorer": "https://qtum.info/"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2109,
+      "code": "SALT",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/30ea88a6-3565-4845-b9ba-aebb3b5deedb.png",
+      "name": "SALT",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2074,
+      "code": "SC",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/1de5f722-e834-4ee8-b434-f4af6f76699c.png",
+      "name": "Siacoin",
+      "withdrawalParameters": [],
+      "options": {
+        "address": "https://siastats.info/navigator?search={{address}}",
+        "explorer": "https://siastats.info/index",
+        "confirmations": 12,
+        "transaction": "https://siastats.info/navigator?search={{hash}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2117,
+      "code": "SHIB",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/3365985e-ec97-4dd3-ab50-81b3e62cd20d.png",
+      "name": "Shiba Inu",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2116,
+      "code": "SOL",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/83791e23-fc0a-47ad-9258-b4e84fe003e0.png",
+      "name": "Solana",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "SOL",
+          "network": "Solana",
+          "networkCode": "SOLANA"
+        }
+      ]
+    },
+    {
+      "id": 2008,
+      "code": "STEEM",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/58d65742-ceae-4719-b495-9e73a8388d0a.png",
+      "name": "STEEM",
+      "withdrawalParameters": [],
+      "options": {
+        "confirmations": 12,
+        "explorer": "https://steemscan.com/",
+        "transaction": "https://steemscan.com/transaction/{{hash}}",
+        "address": "https://steemscan.com/account/{{address}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2093,
+      "code": "STORJ",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/5186fb4a-ff41-47aa-ad3a-9391ba918960.png",
+      "name": "STORJ",
+      "withdrawalParameters": [],
+      "options": {
+        "explorer": "https://etherscan.io/token/0xb64ef51c888972c908cfacf59b47c1afbc0ab8ac",
+        "confirmations": 12,
+        "address": "https://chainz.cryptoid.info/strax/address.dws?{{address}}",
+        "transaction": "https://chainz.cryptoid.info/strax/tx.dws?{{hash}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2023,
+      "code": "STRAT",
+      "fiat": false,
+      "icon": "https://coindirect-dev-filestore.s3.amazonaws.com/com.coindirect.core.finance.Currency/6cdedf8b-e92a-4925-b690-a9303d57d2c1.png",
+      "name": "Stratis",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 5,
+      "protocols": []
+    },
+    {
+      "id": 2144,
+      "code": "test - ivo 2",
+      "fiat": false,
+      "icon": null,
+      "name": "btc",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 8,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2102,
+      "code": "TRX",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/7b0454c4-e5e0-4564-a354-0fcb04546443.png",
+      "name": "Tronix",
+      "withdrawalParameters": [],
+      "options": {
+        "transaction": "https://trx.tokenview.com/en/tx/{{hash}}",
+        "address": "https://trx.tokenview.com/en/address/{address}}",
+        "confirmations": 12,
+        "explorer": "https://trx.tokenview.com/"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 6,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "TRX",
+          "network": "Tron",
+          "networkCode": "TRON"
+        }
+      ]
+    },
+    {
+      "id": 2119,
+      "code": "UNI",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/fe80ff40-3317-4906-9221-1d240b5c2e25.png",
+      "name": "Uniswap",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2114,
+      "code": "USDC",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/07772c0e-f88d-4812-a513-61a7e5531f13.png",
+      "name": "USDC",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 6,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "ARBITRUM",
+          "network": "Arbitrum",
+          "networkCode": "ARBITRUM"
+        },
+        {
+          "code": "BASE",
+          "network": "Base",
+          "networkCode": "BASE"
+        },
+        {
+          "code": "BEP20",
+          "network": "Binance Smart Chain",
+          "networkCode": "BINANCE"
+        },
+        {
+          "code": "POLYGON",
+          "network": "Polygon",
+          "networkCode": "POLYGON"
+        },
+        {
+          "code": "ARC",
+          "network": "Arc",
+          "networkCode": "ARC"
+        },
+        {
+          "code": "ERC20",
+          "network": "Ethereum",
+          "networkCode": "ETHEREUM"
+        },
+        {
+          "code": "SOL",
+          "network": "Solana",
+          "networkCode": "SOLANA"
+        }
+      ]
+    },
+    {
+      "id": 2137,
+      "code": "USDG",
+      "fiat": false,
+      "icon": null,
+      "name": "Global Dollar",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 6,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "SOL",
+          "network": "Solana",
+          "networkCode": "SOLANA"
+        }
+      ]
+    },
+    {
+      "id": 1979,
+      "code": "USDT",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/5b9dd253-ef95-4570-8375-0bf56c583463.png",
+      "name": "Tether",
+      "withdrawalParameters": [],
+      "options": {
+        "explorer": "https://usdt.tokenview.io/",
+        "address": "https://usdt.tokenview.io/en/address/{{address}}",
+        "transaction": "https://usdt.tokenview.io/en/tx/{{hash}}",
+        "confirmations": 12
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 6,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "BEP20",
+          "network": "Binance Smart Chain",
+          "networkCode": "BINANCE"
+        },
+        {
+          "code": "POLYGON",
+          "network": "Polygon",
+          "networkCode": "POLYGON"
+        },
+        {
+          "code": "SOL",
+          "network": "Solana",
+          "networkCode": "SOLANA"
+        },
+        {
+          "code": "TRC20",
+          "network": "Tron",
+          "networkCode": "TRON"
+        },
+        {
+          "code": "ERC20",
+          "network": "Ethereum",
+          "networkCode": "ETHEREUM"
+        }
+      ]
+    },
+    {
+      "id": 2110,
+      "code": "VET",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/d7c27120-4a9a-4f06-9bf1-d8c14804d6f7.png",
+      "name": "VeChainThor",
+      "withdrawalParameters": [],
+      "options": {
+        "explorer": "https://vechainthorscan.com/",
+        "transaction": "https://vechainthorscan.com/transaction/{{hash}}",
+        "address": "https://vechainthorscan.com/account/{{address}}",
+        "confirmations": 12
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2015,
+      "code": "WAVES",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/b560c001-e327-44f0-b6ab-c0aaf58ed2cf.png",
+      "name": "Waves",
+      "withdrawalParameters": [],
+      "options": {
+        "confirmations": 12,
+        "explorer": "https://wavesexplorer.com/",
+        "transaction": "https://wavesexplorer.com/tx/{{hash}}",
+        "address": "https://wavesexplorer.com/address/{{address}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2111,
+      "code": "WTC",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/5accd081-2809-4fd8-9429-06a48608fcd4.png",
+      "name": "WaltonChain",
+      "withdrawalParameters": [],
+      "options": {
+        "transaction": "https://waltonchain.pro/#/transactions?hash={{hash}}",
+        "explorer": "https://waltonchain.pro/#/home",
+        "confirmations": 12,
+        "address": "https://waltonchain.pro/#/address?address={{address}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 1948,
+      "code": "XEM",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/d4e92ea4-3ddd-4f17-b8f8-f762e9b73955.png",
+      "name": "NewEconomyMovement",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 1982,
+      "code": "XLM",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/02797f25-2a32-4691-aa2b-40e2e81c0240.png",
+      "name": "Lumen",
+      "withdrawalParameters": [],
+      "options": {
+        "explorer": "https://stellarchain.io/",
+        "confirmations": 12,
+        "transaction": "https://stellarchain.io/tx/{{hash}}",
+        "address": "https://stellarchain.io/address/{{address}}"
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 1927,
+      "code": "XRP",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/718ae0ae-03cd-4235-94cd-8b0e41ef2084.png",
+      "name": "Ripple",
+      "withdrawalParameters": [
+        {
+          "id": 1,
+          "code": "destinationTag",
+          "name": "Destination Tag",
+          "required": false,
+          "example": "12345"
+        }
+      ],
+      "options": {
+        "explorer": "https://xrpscan.com/",
+        "transaction": "https://xrpscan.com/tx/{{hash}}",
+        "address": "https://xrpscan.com/account/{{address}}",
+        "confirmations": 12
+      },
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": true,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 8,
+      "pricePrecision": 8,
+      "protocols": [
+        {
+          "code": "XRP",
+          "network": "Ripple",
+          "networkCode": "RIPPLE"
+        }
+      ]
+    },
+    {
+      "id": 1880,
+      "code": "XST",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/050e4493-a323-493a-a618-7fdcd627bafa.png",
+      "name": "StealthCoin",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2037,
+      "code": "ZCL",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/27afbe05-bb1f-485d-8fcc-30cc541c816b.png",
+      "name": "Zclassic",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2036,
+      "code": "ZEC",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/4be1b1d3-e632-4eca-b041-58a69f6e2ea8.png",
+      "name": "ZCash",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    },
+    {
+      "id": 2073,
+      "code": "ZEN",
+      "fiat": false,
+      "icon": "https://media.dev.node.limited/6fcdf762-7159-4cb0-98fc-871e2d111f77.png",
+      "name": "ZenCash",
+      "withdrawalParameters": [],
+      "options": {},
+      "withdrawalFee": 0,
+      "depositFee": 0,
+      "supportsDeposits": false,
+      "supportsWithdrawals": true,
+      "quantityPrecision": 5,
+      "pricePrecision": 8,
+      "protocols": []
+    }
+  ]
+}

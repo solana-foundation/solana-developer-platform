@@ -1,0 +1,1391 @@
+{
+  "status": 200,
+  "body": [
+    {
+      "code": "ADP",
+      "name": "Andorran Peseta",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "AED",
+      "name": "UAE Dirham",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "AFA",
+      "name": "Afghani",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "AFN",
+      "name": "Afghan Afghani",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "ALL",
+      "name": "Lek",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "AMD",
+      "name": "Armenian Dram",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "ANG",
+      "name": "Netherlands Antillan Guilder",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "AOA",
+      "name": "Kwanza",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "ARS",
+      "name": "Argentine Peso",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "ATS",
+      "name": "Austrian Schilling",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "AUD",
+      "name": "Australian Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "AWG",
+      "name": "Aruban Guilder",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "AZM",
+      "name": "Azerbaijanian Manat",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BAM",
+      "name": "Convertible Marks",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BBD",
+      "name": "Barbados Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BDT",
+      "name": "Taka",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BEF",
+      "name": "Belgian Franc",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "BGL",
+      "name": "Lev",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BGN",
+      "name": "Bulgarian Lev",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BHD",
+      "name": "Bahraini Dinar",
+      "type": "fiat",
+      "precision": 3,
+      "symbol": null
+    },
+    {
+      "code": "BIF",
+      "name": "Burundi Franc",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BMD",
+      "name": "Bermudian Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BND",
+      "name": "Brunei Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BOB",
+      "name": "Boliviano",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BOV",
+      "name": "Mvdol",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BRL",
+      "name": "Brazilian Real",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BSD",
+      "name": "Bahamian Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BTN",
+      "name": "Ngultrum",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BWP",
+      "name": "Pula",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "BYR",
+      "name": "Belarussian Ruble",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "BZD",
+      "name": "Belize Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "CAD",
+      "name": "Canadian Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "CDF",
+      "name": "Franc Congolais",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "CHF",
+      "name": "Swiss Franc",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "CLF",
+      "name": "Unidades de fomento",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "CLP",
+      "name": "Chilean Peso",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "CNY",
+      "name": "Yuan Renminbi",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "COP",
+      "name": "Colombian Peso",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "CRC",
+      "name": "Costa Rican Colon",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "CUC",
+      "name": "Peso Convertible",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "CUP",
+      "name": "Cuban Peso",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "CVE",
+      "name": "Cape Verde Escudo",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "CYP",
+      "name": "Cyprus Pound",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "CZK",
+      "name": "Czech Koruna",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "DEM",
+      "name": "German Mark",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "DJF",
+      "name": "Djibouti Franc",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "DKK",
+      "name": "Danish Krone",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "DOP",
+      "name": "Dominican Peso",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "DZD",
+      "name": "Algerian Dinar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "EEK",
+      "name": "Kroon",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "EGP",
+      "name": "Egyptian Pound",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "ERN",
+      "name": "Nakfa",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "ESP",
+      "name": "Spanish Peseta",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "ETB",
+      "name": "Ethiopian Birr",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "EUR",
+      "name": "Euro",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "FIM",
+      "name": "Finnish Markka",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "FJD",
+      "name": "Fiji Dollar",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "FKP",
+      "name": "Falkland Islands Pound",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "FRF",
+      "name": "French Franc",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "GBP",
+      "name": "Pound Sterling",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "GEL",
+      "name": "Lari",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "GHC",
+      "name": "Cedi",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "GHS",
+      "name": "Ghana Cedi",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "GIP",
+      "name": "Gibraltar Pound",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "GMD",
+      "name": "Dalasi",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "GNF",
+      "name": "Guinea Franc",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "GRD",
+      "name": "Drachma",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "GTQ",
+      "name": "Quetzal",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "GWP",
+      "name": "Guinea-Bissau Peso",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "GYD",
+      "name": "Guyana Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "HKD",
+      "name": "Hong Kong Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "HNL",
+      "name": "Lempira",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "HRK",
+      "name": "Croatian kuna",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "HTG",
+      "name": "Gourde",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "HUF",
+      "name": "Forint",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "IDR",
+      "name": "Rupiah",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "IEP",
+      "name": "Irish Pound",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "ILS",
+      "name": "New Israeli Sheqel",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "INR",
+      "name": "Indian Rupee",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "IQD",
+      "name": "Iraqi Dinar",
+      "type": "fiat",
+      "precision": 3,
+      "symbol": null
+    },
+    {
+      "code": "IRR",
+      "name": "Iranian Rial",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "ISK",
+      "name": "Iceland Krona",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "ITL",
+      "name": "Italian Lira",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "JMD",
+      "name": "Jamaican Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "JOD",
+      "name": "Jordanian Dinar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "JPY",
+      "name": "Yen",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "KES",
+      "name": "Kenyan Shilling",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "KGS",
+      "name": "Som",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "KHR",
+      "name": "Riel",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "KMF",
+      "name": "Comoro Franc",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "KPW",
+      "name": "North Korean Won",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "KRW",
+      "name": "Won",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "KWD",
+      "name": "Kuwaiti Dinar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "KYD",
+      "name": "Cayman Islands Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "KZT",
+      "name": "Tenge",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "LAK",
+      "name": "Kip",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "LBP",
+      "name": "Lebanese Pound",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "LKR",
+      "name": "Sri Lanka Rupee",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "LRD",
+      "name": "Liberian Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "LSL",
+      "name": "Loti",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "LTL",
+      "name": "Lithuanian Litus",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "LUF",
+      "name": "Luxembourg Franc",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "LVL",
+      "name": "Latvian Lats",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "LYD",
+      "name": "Lybian Dinar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MAD",
+      "name": "Moroccan Dirham",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MDL",
+      "name": "Moldovan Leu",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MGA",
+      "name": "Malagascy Ariary",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MGF",
+      "name": "Malagasy Franc",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "MKD",
+      "name": "Denar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MMK",
+      "name": "Kyat",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MNT",
+      "name": "Tugrik",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MOP",
+      "name": "Pataca",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MRO",
+      "name": "Ouguiya",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MRU",
+      "name": "Ouguiya",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MTL",
+      "name": "Maltese Lira",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MUR",
+      "name": "Mauritius Rupee",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MVR",
+      "name": "Rufiyaa",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MWK",
+      "name": "Kwacha",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MXN",
+      "name": "Mexican Peso",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "MXV",
+      "name": "Mexican Unidad de Inversion (UDI)",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MYR",
+      "name": "Malaysian Ringgit",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MZM",
+      "name": "Metical",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "MZN",
+      "name": "Mozambican Metical",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "NAD",
+      "name": "Namibia Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "NGN",
+      "name": "Naira",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "NIO",
+      "name": "Cordoba Oro",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "NLG",
+      "name": "Dutch Guilder",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "NOK",
+      "name": "Norwegian Krone",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "NPR",
+      "name": "Nepalese Rupee",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "NZD",
+      "name": "New Zealand Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "OMR",
+      "name": "Rial Omani",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "PAB",
+      "name": "Balboa",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "PEN",
+      "name": "Peruvian Nuevo Sol",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "PGK",
+      "name": "Kina",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "PHP",
+      "name": "Philippine Peso",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "PKR",
+      "name": "Pakistan Rupee",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "PLN",
+      "name": "Zloty",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "PTE",
+      "name": "Portuguese Escudo",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "PYG",
+      "name": "Guarani",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "QAR",
+      "name": "Qatari Rial",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "ROL",
+      "name": "Leu",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "RON",
+      "name": "Romanian New Leu",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "RSD",
+      "name": "Serbian Dinar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "RUB",
+      "name": "Russian Ruble",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "RUR",
+      "name": "Russian Ruble",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "RWF",
+      "name": "Rwanda Franc",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SAR",
+      "name": "Saudi Riyal",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SBD",
+      "name": "Solomon Islands Dollar",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "SCR",
+      "name": "Seychelles Rupee",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SDD",
+      "name": "Sudanese Dinar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SDG",
+      "name": "Sudanese Pound",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SEK",
+      "name": "Swedish Krona",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SGD",
+      "name": "Singapore Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SHP",
+      "name": "Saint Helena Pound",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SIT",
+      "name": "Tolar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SKK",
+      "name": "Slovak Koruna",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SLE",
+      "name": "Leone",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SLL",
+      "name": "Leone",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SOS",
+      "name": "Somali Shilling",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SRD",
+      "name": "Surinam Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SRG",
+      "name": "Suriname Guilder",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SSP",
+      "name": "South Sudanese Pound",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "STD",
+      "name": "Dobra",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "STN",
+      "name": "Dobra",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SVC",
+      "name": "El Salvador Colon",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "SYP",
+      "name": "Syrian Pound",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "SZL",
+      "name": "Lilangeni",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "THB",
+      "name": "Baht",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "TJS",
+      "name": "Somoni",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "TMM",
+      "name": "Manat",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "TND",
+      "name": "Tunisian Dinar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "TOP",
+      "name": "Paanga",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "TPE",
+      "name": "Timor Escudo",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "TRL",
+      "name": "Turkish Lira",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "TRY",
+      "name": "Turkish Lira",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "TTD",
+      "name": "Trinidad and Tobago Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "TWD",
+      "name": "New Taiwan Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "TZS",
+      "name": "Tanzanian Shilling",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "UAH",
+      "name": "Hryvnia",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "UGX",
+      "name": "Uganda Shilling",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "USD",
+      "name": "US Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "UYU",
+      "name": "Peso Uruguayo",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "UZS",
+      "name": "Uzbekistan Sum",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "VEB",
+      "name": "Bolivar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "VEF",
+      "name": "Venezuelan Bolivar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "VND",
+      "name": "Dong",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "VUV",
+      "name": "Vatu",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "WST",
+      "name": "Tala",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "XAF",
+      "name": "CFAFRANC BEAC",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "XCD",
+      "name": "East Caribbean Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "XOF",
+      "name": "CFAFRANC BCEAO",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "XPF",
+      "name": "CFP Franc",
+      "type": "fiat",
+      "precision": 0,
+      "symbol": null
+    },
+    {
+      "code": "YER",
+      "name": "Yemeni Rial",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "YUM",
+      "name": "Yugoslavian Dinar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "ZAR",
+      "name": "Rand",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "ZMK",
+      "name": "Kwacha",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "ZMW",
+      "name": "Kwacha",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    },
+    {
+      "code": "ZWD",
+      "name": "Zimbabwe Dollar",
+      "type": "fiat",
+      "precision": 2,
+      "symbol": null
+    }
+  ]
+}

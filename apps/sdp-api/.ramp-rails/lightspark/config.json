@@ -1,0 +1,74 @@
+{
+  "status": 200,
+  "body": {
+    "createdAt": "2026-05-06T02:56:04.660701Z",
+    "embeddedWalletConfig": {
+      "appName": "sdp-staging"
+    },
+    "id": "Platform:019dfb36-c834-b4db-0000-e6bf1d01c374",
+    "isRegulatedFinancialInstitution": true,
+    "proxyUmaSubdomain": "solanasandboxca9386",
+    "supportedCurrencies": [
+      {
+        "currencyCode": "USD",
+        "enabledTransactionTypes": [
+          "OUTGOING",
+          "INCOMING"
+        ],
+        "maxAmount": 1000000,
+        "minAmount": 100,
+        "providerRequiredCounterpartyCustomerFields": [
+          "FULL_NAME",
+          "FI_LEGAL_ENTITY_NAME"
+        ],
+        "requiredCounterpartyFields": [
+          {
+            "mandatory": false,
+            "name": "FULL_NAME"
+          }
+        ]
+      },
+      {
+        "currencyCode": "USDB",
+        "enabledTransactionTypes": [
+          "OUTGOING",
+          "INCOMING"
+        ],
+        "maxAmount": 1000000,
+        "minAmount": 100,
+        "providerRequiredCounterpartyCustomerFields": [
+          "FULL_NAME",
+          "FI_LEGAL_ENTITY_NAME"
+        ],
+        "requiredCounterpartyFields": [
+          {
+            "mandatory": true,
+            "name": "FULL_NAME"
+          }
+        ]
+      },
+      {
+        "currencyCode": "USDC",
+        "enabledTransactionTypes": [
+          "OUTGOING",
+          "INCOMING"
+        ],
+        "maxAmount": 1000000,
+        "minAmount": 100,
+        "providerRequiredCounterpartyCustomerFields": [
+          "FULL_NAME",
+          "FI_LEGAL_ENTITY_NAME"
+        ],
+        "requiredCounterpartyFields": [
+          {
+            "mandatory": true,
+            "name": "FULL_NAME"
+          }
+        ]
+      }
+    ],
+    "umaDomain": "solanasandboxca9386.umaaas.uma.money",
+    "updatedAt": "2026-06-22T08:26:06.461106Z",
+    "webhookEndpoint": "https://sequence-fiddling-unwanted.ngrok-free.dev/webhooks/payments/ramps/sandbox/lightspark"
+  }
+}

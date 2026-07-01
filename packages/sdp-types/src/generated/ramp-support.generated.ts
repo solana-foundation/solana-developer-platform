@@ -1,20 +1,20 @@
 // AUTO-GENERATED - do not edit by hand.
 // Refresh dumps + regenerate:   pnpm --filter @sdp/api rails:discover --emit
 // Regenerate from existing dumps: pnpm --filter @sdp/api rails:generate
-// Source dumps live in apps/sdp-api/.ramp-rails/ (gitignored).
+// Source dumps live in apps/sdp-api/.ramp-rails/ (committed).
 
 import type { OfframpPairSupport, OnrampPairSupport } from "../payment-rails";
 import type { RampProviderId } from "../provider-access";
 
 export const RAMP_SUPPORT_HASH =
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  "24728fa701d8da266e9f7f5e92edbcaac098f9f6f8aafed238d3547c59c685f1" as const;
+  "22950eaf39219cfeda7638b879f6b43d6fe8a9706f0243f86e56556761b93615" as const;
 
 export const RAMP_PROVIDER_SUPPORT_HASHES = {
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   moonpay: "ccd9380220ab0d8c56057ecbb127a1b24e39fa2dc5ac0ad6083554d472ed53b3",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  lightspark: "1bd8c4ca2955522e88d1beafac20bc926a174a2dcdb664fdfb48a01bf18fc5e7",
+  lightspark: "69fb601e945f389208f9d9a2199e099ad6b1a8632b6d444a4484e56bbcf19069",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   bvnk: "e2d1af10de70f562d5fcc6c8f7f28180d106760f835fbf71aed2d07157689754",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
@@ -23,7 +23,7 @@ export const RAMP_PROVIDER_SUPPORT_HASHES = {
 
 export const RAMP_PROVIDER_SUPPORT_COUNTS = {
   moonpay: { onramp: 33, offramp: 25 },
-  lightspark: { onramp: 1, offramp: 1 },
+  lightspark: { onramp: 0, offramp: 0 },
   bvnk: { onramp: 8, offramp: 412 },
   moneygram: { onramp: 0, offramp: 198 },
 } as const satisfies Record<RampProviderId, { onramp: number; offramp: number }>;
@@ -510,7 +510,7 @@ export const ONRAMP_SUPPORT = [
   { source: "TRY", dest: "sol.solana", providers: ["moonpay"] },
   { source: "TWD", dest: "sol.solana", providers: ["moonpay"] },
   { source: "USD", dest: "sol.solana", providers: ["moonpay", "bvnk"] },
-  { source: "USD", dest: "usdc.solana", providers: ["lightspark", "bvnk"] },
+  { source: "USD", dest: "usdc.solana", providers: ["bvnk"] },
   { source: "USD", dest: "usdt.solana", providers: ["bvnk"] },
   { source: "USD", dest: "usdg.solana", providers: ["bvnk"] },
   { source: "VND", dest: "sol.solana", providers: ["moonpay"] },
@@ -808,7 +808,7 @@ export const OFFRAMP_SUPPORT = [
   { source: "usdc.solana", dest: "TZS", providers: ["bvnk", "moneygram"] },
   { source: "usdc.solana", dest: "UAH", providers: ["moneygram"] },
   { source: "usdc.solana", dest: "UGX", providers: ["bvnk", "moneygram"] },
-  { source: "usdc.solana", dest: "USD", providers: ["lightspark", "bvnk", "moneygram"] },
+  { source: "usdc.solana", dest: "USD", providers: ["bvnk", "moneygram"] },
   { source: "usdc.solana", dest: "UYU", providers: ["moneygram"] },
   { source: "usdc.solana", dest: "UZS", providers: ["bvnk", "moneygram"] },
   { source: "usdc.solana", dest: "VEB", providers: ["moneygram"] },
