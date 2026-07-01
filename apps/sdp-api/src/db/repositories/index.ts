@@ -22,12 +22,36 @@ export type {
 } from "./counterparty-account.repository";
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
+  CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
+  CreatePaymentRecurringPaymentLifecycleAttemptInput,
+  CreatePaymentRecurringPaymentUpdateAttemptInput,
+  CreatePaymentRecurringPaymentUpdateEventInput,
+  GetLatestPaymentRecurringPaymentActivationAttemptInput,
+  GetLatestPaymentRecurringPaymentLifecycleAttemptInput,
+  GetLatestPaymentRecurringPaymentUpdateAttemptInput,
   ListPaymentRecurringPaymentsInput,
   ListPaymentRecurringPaymentsResult,
+  PaymentRecurringPaymentActivationAttemptRow,
+  PaymentRecurringPaymentActivationAttemptStage,
+  PaymentRecurringPaymentActivationAttemptStatus,
+  PaymentRecurringPaymentLifecycleAttemptRow,
+  PaymentRecurringPaymentLifecycleAttemptStage,
+  PaymentRecurringPaymentLifecycleAttemptStatus,
+  PaymentRecurringPaymentLifecycleOperation,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
+  PaymentRecurringPaymentUpdateAttemptMode,
+  PaymentRecurringPaymentUpdateAttemptRow,
+  PaymentRecurringPaymentUpdateAttemptStage,
+  PaymentRecurringPaymentUpdateAttemptStatus,
+  PaymentRecurringPaymentUpdateEventRow,
+  UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
+  UpdatePaymentRecurringPaymentInput,
+  UpdatePaymentRecurringPaymentLifecycleAttemptInput,
+  UpdatePaymentRecurringPaymentLifecycleInput,
+  UpdatePaymentRecurringPaymentUpdateAttemptInput,
 } from "./payment-recurring-payments.repository";
 export { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 export type {
@@ -50,6 +74,30 @@ export type {
 } from "./payment-subscriptions.repository";
 export { createPostgresPaymentSubscriptionsRepository } from "./payment-subscriptions.repository.postgres";
 export type {
+  CreatePaymentTransferBatchInput,
+  CreatePaymentTransferRecipientInput,
+  DeletePaymentTransferBatchInput,
+  DeletePaymentTransferRecipientInput,
+  GetPaymentTransferBatchInput,
+  GetPaymentTransferRecipientInput,
+  ListPaymentTransferBatchesInput,
+  ListPaymentTransferBatchesResult,
+  ListPaymentTransferRecipientsInput,
+  ListPaymentTransferRecipientsResult,
+  PaymentTransferBatchesRepository,
+  PaymentTransferBatchRow,
+  PaymentTransferRecipientRow,
+  UpdatePaymentTransferBatchInput,
+  UpdatePaymentTransferRecipientInput,
+  UpsertPaymentTransferBatchInput,
+  UpsertPaymentTransferRecipientInput,
+} from "./payment-transfer-batches.repository";
+export {
+  generatePaymentTransferBatchId,
+  generatePaymentTransferRecipientId,
+} from "./payment-transfer-batches.repository";
+export { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
+export type {
   CreatePaymentTransferInput,
   PaymentsRepository,
   PaymentsRepositoryContext,
@@ -70,6 +118,7 @@ export {
 export { createPostgresPaymentsRepository } from "./payments.repository.postgres";
 export type {
   ActiveApiKeyControlProfileResult,
+  ActivePolicyProfileRevisionRefRow,
   ActiveWalletControlProfileResult,
   ApiKeyControlProfileRevisionRow,
   ApiKeyControlProfileRow,
@@ -98,6 +147,7 @@ export {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
+  createPaymentTransferBatchesRepository,
   createPolicyRepository,
   createTokenRepository,
 } from "./repository-factory";

@@ -1,4 +1,5 @@
 export { getWalletBalances, getWalletPolicy, updateWalletPolicy } from "./handlers/balances";
+export { createPaymentRequest, listPaymentRequests } from "./handlers/payment-requests";
 export {
   cancelRampTransfer,
   createOfframpQuote,
@@ -14,9 +15,13 @@ export {
 export { recordRampProviderEvent } from "./handlers/ramps/moneygram";
 export {
   activateRecurringPayment,
+  cancelRecurringPayment,
+  collectRecurringPayment,
   createRecurringPayment,
   getRecurringPayment,
   listRecurringPayments,
+  resumeRecurringPayment,
+  updateRecurringPayment,
 } from "./handlers/recurring-payments";
 export {
   createSubscription,
@@ -35,4 +40,10 @@ export {
   updateSubscription,
   updateSubscriptionPlan,
 } from "./handlers/subscriptions";
+export {
+  createTransferBatch,
+  estimateTransferBatch,
+  getTransferBatch,
+  listTransferBatches,
+} from "./handlers/transfer-batches";
 export { createTransfer, getTransfer, listTransfers, prepareTransfer } from "./handlers/transfers";

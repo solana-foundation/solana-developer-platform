@@ -46,6 +46,7 @@ interface TokenActionAdminFormsProps {
   controlListEmptyState: string;
   freezeHint: string | null;
   signerWallets: PaymentsDashboardWallet[];
+  defaultSignerWalletId?: string;
   walletOptions: PaymentsDashboardWallet[];
   signerUnavailableReason: string | null;
   seizeValidationErrors: SeizeValidationErrors;
@@ -86,6 +87,7 @@ export function TokenActionAdminForms({
   controlListEmptyState,
   freezeHint,
   signerWallets,
+  defaultSignerWalletId = "",
   walletOptions,
   signerUnavailableReason,
   seizeValidationErrors,
@@ -348,30 +350,42 @@ export function TokenActionAdminForms({
 
       {activeAction === "pause" ? (
         <TokenActionCard title="Pause Controls" description="Pause or resume token-wide transfers.">
-          <div className="flex flex-wrap gap-2">
-            <TokenDisabledActionTooltip
-              reason={tokenStatus === "paused" ? "Token is already paused." : null}
-            >
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onPause(true)}
-                disabled={isPending || tokenStatus === "paused"}
+          <div className="space-y-4">
+            <TokenSignerSelect
+              signerWallets={signerWallets}
+              signerWalletId={defaultSignerWalletId} // Always single locked wallet
+              signerUnavailableReason={signerUnavailableReason}
+              onSignerWalletIdChange={onSignerWalletIdChange}
+            />
+            <div className="flex flex-wrap gap-2">
+              <TokenDisabledActionTooltip
+                reason={tokenStatus === "paused" ? "Token is already paused." : null}
               >
-                Pause token
-              </Button>
-            </TokenDisabledActionTooltip>
-            <TokenDisabledActionTooltip
-              reason={tokenStatus === "active" ? "Token is not paused." : null}
-            >
-              <Button
-                type="button"
-                onClick={() => onPause(false)}
-                disabled={isPending || tokenStatus === "active"}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => onPause(true)}
+                  disabled={
+                    isPending || tokenStatus === "paused" || Boolean(signerUnavailableReason)
+                  }
+                >
+                  Pause token
+                </Button>
+              </TokenDisabledActionTooltip>
+              <TokenDisabledActionTooltip
+                reason={tokenStatus === "active" ? "Token is not paused." : null}
               >
-                Unpause token
-              </Button>
-            </TokenDisabledActionTooltip>
+                <Button
+                  type="button"
+                  onClick={() => onPause(false)}
+                  disabled={
+                    isPending || tokenStatus === "active" || Boolean(signerUnavailableReason)
+                  }
+                >
+                  Unpause token
+                </Button>
+              </TokenDisabledActionTooltip>
+            </div>
           </div>
         </TokenActionCard>
       ) : null}
@@ -390,6 +404,12 @@ export function TokenActionAdminForms({
               onFreeze(action === "unfreeze");
             }}
           >
+            <TokenSignerSelect
+              signerWallets={signerWallets}
+              signerWalletId={defaultSignerWalletId} // Always single locked wallet
+              signerUnavailableReason={signerUnavailableReason}
+              onSignerWalletIdChange={onSignerWalletIdChange}
+            />
             <ActionField
               label="Wallet Address"
               value={freezeForm.accountAddress}
@@ -427,10 +447,19 @@ export function TokenActionAdminForms({
                 submitAlignment === "end" ? "justify-end" : "",
               ].join(" ")}
             >
-              <Button type="submit" variant="outline" value="freeze" disabled={isPending}>
+              <Button
+                type="submit"
+                variant="outline"
+                value="freeze"
+                disabled={isPending || Boolean(signerUnavailableReason)}
+              >
                 Freeze account
               </Button>
-              <Button type="submit" value="unfreeze" disabled={isPending}>
+              <Button
+                type="submit"
+                value="unfreeze"
+                disabled={isPending || Boolean(signerUnavailableReason)}
+              >
                 Unfreeze account
               </Button>
             </div>

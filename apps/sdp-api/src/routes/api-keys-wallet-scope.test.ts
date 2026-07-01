@@ -243,6 +243,161 @@ describe("API key wallet scope routes", () => {
     expect(bindings.results?.map((row) => row.wallet_id)).toEqual(["wal_scope_a", "wal_scope_b"]);
   });
 
+  it("lists wallet access and policy binding metadata for selected-wallet keys", async () => {
+    const res = await app.request(
+      "/v1/api-keys",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          name: "Scoped key with policy",
+          projectId: TEST_PROJECT.id,
+          walletScope: "selected",
+          signingWalletId: "wal_scope_b",
+          signingWalletIds: ["wal_scope_a", "wal_scope_b"],
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      data: {
+        apiKey: {
+          id: string;
+        };
+      };
+    };
+    const createdKeyId = body.data.apiKey.id;
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_key_control_profiles
+             (id, organization_id, project_id, api_key_id, name, status)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "akcp_scope_a",
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          createdKeyId,
+          "Scoped policy",
+          "active"
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_key_control_profile_revisions
+             (id, profile_id, revision_number, rules, default_action, created_by, activated_at)
+           VALUES (?, ?, ?, ?::jsonb, ?, ?, ?)`
+        )
+        .bind(
+          "akcpr_scope_a_1",
+          "akcp_scope_a",
+          1,
+          JSON.stringify([{ id: "allow_payments", kind: "always", action: "allow" }]),
+          "allow",
+          TEST_USER.id,
+          "2026-06-29T00:00:00.000Z"
+        ),
+      getDb(env)
+        .prepare(
+          `UPDATE api_key_control_profiles
+           SET active_revision_id = ?, activated_at = ?
+           WHERE id = ?`
+        )
+        .bind("akcpr_scope_a_1", "2026-06-29T00:00:00.000Z", "akcp_scope_a"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_key_wallet_policy_bindings
+             (id, api_key_id, binding_scope, wallet_id, custody_wallet_id, api_key_control_profile_id)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "akwpol_scope_a",
+          createdKeyId,
+          "selected",
+          "wal_scope_a",
+          "cwlt_scope_a",
+          "akcp_scope_a"
+        ),
+    ]);
+
+    const listRes = await app.request(
+      "/v1/api-keys",
+      {
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as {
+      data: {
+        apiKeys: Array<{
+          id: string;
+          walletScope: string;
+          signingWalletId: string | null;
+          signingWalletIds: string[];
+          walletBindings: Array<{ walletId: string }>;
+          policyBindings: Array<{
+            bindingScope: string;
+            walletId: string | null;
+            apiKeyControlProfileId: string | null;
+            apiKeyControlProfileRevisionId: string | null;
+          }>;
+        }>;
+      };
+    };
+    const listedKey = listBody.data.apiKeys.find((key) => key.id === createdKeyId);
+    expect(listedKey).toMatchObject({
+      walletScope: "selected",
+      signingWalletId: "wal_scope_b",
+      signingWalletIds: ["wal_scope_a", "wal_scope_b"],
+    });
+    expect(listedKey?.walletBindings.map((binding) => binding.walletId)).toEqual([
+      "wal_scope_a",
+      "wal_scope_b",
+    ]);
+    expect(listedKey?.policyBindings).toEqual([
+      expect.objectContaining({
+        bindingScope: "selected",
+        walletId: "wal_scope_a",
+        apiKeyControlProfileId: "akcp_scope_a",
+        apiKeyControlProfileRevisionId: "akcpr_scope_a_1",
+      }),
+    ]);
+
+    const detailRes = await app.request(
+      `/v1/api-keys/${createdKeyId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(detailRes.status).toBe(200);
+    const detailBody = (await detailRes.json()) as {
+      data: {
+        policyBindings: Array<{
+          apiKeyControlProfileId: string | null;
+          apiKeyControlProfileRevisionId: string | null;
+        }>;
+      };
+    };
+    expect(detailBody.data.policyBindings[0]).toMatchObject({
+      apiKeyControlProfileId: "akcp_scope_a",
+      apiKeyControlProfileRevisionId: "akcpr_scope_a_1",
+    });
+  });
+
   it("requires walletScope when updating wallet bindings", async () => {
     const res = await app.request(
       `/v1/api-keys/${TEST_API_KEY.id}`,

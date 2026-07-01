@@ -681,6 +681,15 @@
           }
         },
         {
+          "name": "Get public token metadata JSON",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/metadata.json",
+            "description": "Public, unauthenticated endpoint serving the SDP-hosted Token-2022 / Metaplex fungible-compatible metadata JSON for a deployed token. This is the URL burned into the on-chain MetadataPointer when the issuer doesn't supply their own URI. Only deployed (on-chain) tokens are served; pending drafts return 404."
+          }
+        },
+        {
           "name": "Refresh cached token supply",
           "request": {
             "method": "POST",
@@ -714,6 +723,39 @@
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare",
             "description": "Builds an unsigned deploy transaction for client-side signing."
+          }
+        },
+        {
+          "name": "Confirm non-custodial deploy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/confirm",
+            "description": "Records the mint after the client signs and submits a prepared (non-custodial) deploy transaction. Verifies the transaction landed on-chain, then marks the token deployed.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signature\": \"5x...signature\",\n  \"mint\": \"So11111111111111111111111111111111111111112\",\n  \"listAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"wal_example\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare metadata-URI follow-up transaction",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare-metadata",
+            "description": "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Returns a null transaction when the on-chain URI already matches."
           }
         },
         {
@@ -1141,7 +1183,7 @@
             "description": "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/wallets.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"destinationAllowlist\": [\n    \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n  ],\n  \"maxTransferAmount\": \"100.00\",\n  \"maxDailyAmount\": \"1000.00\"\n}",
+              "raw": "{\n  \"destinationAllowlist\": [\n    \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n  ],\n  \"maxTransferAmount\": \"100.00\",\n  \"maxDailyAmount\": \"1000.00\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"deny-raw-signing\",\n      \"kind\": \"operation_family\",\n      \"family\": \"raw_sign\",\n      \"action\": \"deny\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1217,6 +1259,72 @@
           }
         },
         {
+          "name": "Estimate transfer batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches/estimate",
+            "description": "Validates a transfer batch request and estimates transaction chunking and fees. This route is scaffolded; estimation is not implemented yet.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"wal_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List transfer batches",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches",
+            "description": "Lists transfer batches for the authenticated organization or project scope."
+          }
+        },
+        {
+          "name": "Create transfer batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches",
+            "description": "Creates a custody-executed outbound transfer batch to counterparty crypto-wallet accounts. This route is scaffolded; execution is not implemented yet.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"wal_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get transfer batch",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches/{{batchId}}",
+            "description": "Retrieves a transfer batch with recipient rows and chunk transfer summaries."
+          }
+        },
+        {
           "name": "List recurring payments",
           "request": {
             "method": "GET",
@@ -1256,6 +1364,66 @@
             "header": [],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}",
             "description": "Retrieves an SDP-custody outbound recurring payment record."
+          }
+        },
+        {
+          "name": "Update recurring payment",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}",
+            "description": "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceWalletId\": \"wal_source\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Activate recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/activate",
+            "description": "Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures."
+          }
+        },
+        {
+          "name": "Cancel recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/cancel",
+            "description": "Cancels an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction and storing the resulting lifecycle state."
+          }
+        },
+        {
+          "name": "Collect recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/collect",
+            "description": "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time."
+          }
+        },
+        {
+          "name": "Resume recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/resume",
+            "description": "Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status."
           }
         },
         {

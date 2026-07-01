@@ -35,6 +35,7 @@ import {
   assertRampProviderAvailable,
 } from "@/routes/payments/handlers/ramps";
 import { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
+import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
 import { AuditService } from "@/services/audit.service";
 import { type AppContext, getCounterpartiesRepository } from "./context";
 import {
@@ -176,12 +177,18 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     if (gate.status === "collect" || gate.status === "unsupported") {
       return success(c, gate);
     }
+    const scope = await resolveScope(c);
+    const destinationWalletAddress = resolveWalletAddress(
+      scope.wallets,
+      query.data.destinationWallet,
+      "destinationWallet"
+    );
     return success(
       c,
       bvnkOnrampStatusFromProviderData(counterparty.provider_data, {
         cryptoToken: query.data.cryptoToken,
         fiatCurrency: query.data.fiatCurrency,
-        destinationWalletAddress: query.data.destinationWallet,
+        destinationWalletAddress,
       })
     );
   }

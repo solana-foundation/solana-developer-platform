@@ -16,8 +16,15 @@ import type {
 } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { AppError, badRequest, unsupportedCounterparty } from "@/lib/errors";
-import { readBvnkCustomer } from "../providers/bvnk";
+import { AppError, badRequest, internalError, unsupportedCounterparty } from "@/lib/errors";
+import {
+  bvnkUnverifiedOnboardingStatus,
+  isBvnkCustomerVerified,
+  isBvnkWalletActive,
+  latestBvnkOfframpBeneficiary,
+  readBvnkCustomer,
+  readBvnkOfframpWallet,
+} from "../providers/bvnk";
 import {
   buildRequirementSchema,
   enumOptions,
@@ -159,11 +166,86 @@ export function bvnkOnrampFields(identity: CounterpartyIdentity): BvnkOnrampFiel
     : BVNK_ONRAMP_BASE_FIELDS;
 }
 
+interface BvnkOfframpSpec {
+  accountType: string;
+  fields: readonly RequirementField[];
+}
+
+// Add corridors here as BVNK payout support is verified; each fiat maps to a bank-detail field set.
+const BVNK_OFFRAMP_SPECS = {
+  USD: {
+    accountType: "ACH",
+    fields: [
+      textField({
+        key: "accountNumber",
+        label: "Account number",
+        required: true,
+        pattern: "^[0-9]{4,17}$",
+      }),
+      textField({
+        key: "routingNumber",
+        label: "Routing number",
+        required: true,
+        pattern: "^[0-9]{9}$",
+        placeholder: "021000021",
+      }),
+    ],
+  },
+  EUR: {
+    accountType: "SEPA_CT",
+    fields: [
+      textField({
+        key: "iban",
+        label: "IBAN",
+        required: true,
+        pattern: "^[A-Z]{2}[0-9A-Z]{13,32}$",
+        placeholder: "DE89370400440532013000",
+      }),
+    ],
+  },
+} as const satisfies Record<string, BvnkOfframpSpec>;
+
+export type BvnkOfframpCurrency = keyof typeof BVNK_OFFRAMP_SPECS;
+
+export function isBvnkOfframpCurrency(value: string): value is BvnkOfframpCurrency {
+  return Object.hasOwn(BVNK_OFFRAMP_SPECS, value);
+}
+
+export function bvnkOfframpAccountType(fiatCurrency: BvnkOfframpCurrency): string {
+  return BVNK_OFFRAMP_SPECS[fiatCurrency].accountType;
+}
+
+export function bvnkOfframpFields(fiatCurrency: BvnkOfframpCurrency): RequirementField[] {
+  return [...BVNK_OFFRAMP_SPECS[fiatCurrency].fields];
+}
+
 export function bvnkCounterpartyRequirements(
   counterparty: Counterparty,
-  { direction, providerData }: ValidateCounterpartyOptions
+  { direction, providerData, fiatCurrency }: ValidateCounterpartyOptions
 ): CounterpartyRequirements {
   if (direction === "offramp") {
+    if (!fiatCurrency) {
+      throw badRequest("fiatCurrency is required for BVNK off-ramp requirements.");
+    }
+    if (!isBvnkOfframpCurrency(fiatCurrency)) {
+      return unsupportedCounterparty(
+        "bvnk",
+        direction,
+        `BVNK off-ramp does not support payouts in ${fiatCurrency}.`
+      );
+    }
+    if (!latestBvnkOfframpBeneficiary(providerData, fiatCurrency)) {
+      return {
+        provider: "bvnk",
+        direction,
+        status: "collect",
+        fields: bvnkOfframpFields(fiatCurrency),
+      };
+    }
+    const wallet = readBvnkOfframpWallet(providerData, fiatCurrency);
+    if (!wallet || !isBvnkWalletActive(wallet.status)) {
+      return { provider: "bvnk", direction, status: "funding_account_provisioning" };
+    }
     return readyCounterparty("bvnk", direction);
   }
   if (counterparty.entityType === "business") {
@@ -184,8 +266,32 @@ export function bvnkCounterpartyRequirements(
     );
   }
 
-  if (readBvnkCustomer(providerData).customerReference) {
-    return readyCounterparty("bvnk", direction);
+  const customer = readBvnkCustomer(providerData);
+  if (customer.customerReference) {
+    if (!isBvnkCustomerVerified(customer.status)) {
+      const phase = bvnkUnverifiedOnboardingStatus(customer.status);
+      switch (phase) {
+        case "verifying":
+          return { provider: "bvnk", direction, status: "customer_verifying" };
+        case "verification_failed":
+          return { provider: "bvnk", direction, status: "customer_verification_failed" };
+        case "verification_required":
+          if (!customer.verificationUrl) {
+            throw internalError('BVNK reported "verification_required" without a verificationUrl.');
+          }
+          return {
+            provider: "bvnk",
+            direction,
+            status: "customer_verification_required",
+            verificationUrl: customer.verificationUrl,
+          };
+        default: {
+          const exhaustive: never = phase;
+          throw internalError(`Unhandled BVNK verification phase: ${String(exhaustive)}`);
+        }
+      }
+    }
+    return { provider: "bvnk", direction, status: "funding_account_provisioning" };
   }
 
   const missingIdentity = [
@@ -207,7 +313,7 @@ export function bvnkCounterpartyRequirements(
     .filter((field) => field.read(identity) === undefined)
     .map((field) => field.descriptor);
   if (missing.length === 0) {
-    return readyCounterparty("bvnk", direction);
+    return { provider: "bvnk", direction, status: "onboarding_not_started" };
   }
   return { provider: "bvnk", direction, status: "collect", fields: missing };
 }

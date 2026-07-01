@@ -34,7 +34,7 @@ export interface ComboboxOption {
 interface ComboboxProps {
   value: string | null;
   onChange: (value: string) => void;
-  options: ComboboxOption[];
+  options: readonly ComboboxOption[];
   label: string;
   placeholder?: string;
   searchable?: boolean;

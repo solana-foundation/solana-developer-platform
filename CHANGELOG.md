@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.33.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.32.0...v0.33.0) (2026-06-24)
+
+### Features
+
+* **api:** add recurring payment manual collection ([#511](https://github.com/solana-foundation/solana-developer-platform/pull/511)) ([b24ce27](https://github.com/solana-foundation/solana-developer-platform/commit/b24ce2726b45bc883df65da3b1bf0faf9612ae9d))
+* add wallet policy starting profile flow ([#510](https://github.com/solana-foundation/solana-developer-platform/pull/510)) ([3ec18b9](https://github.com/solana-foundation/solana-developer-platform/commit/3ec18b913365332e0b21ab28590010c30417ca09))
+* **payments:** add Solana Pay primitives + signed request links ([#513](https://github.com/solana-foundation/solana-developer-platform/pull/513)) ([c0ef0ac](https://github.com/solana-foundation/solana-developer-platform/commit/c0ef0ac0f011d24dd47cbc5c4c3f889309080566))
+* **api:** enforce wallet and API key policies server-side ([#485](https://github.com/solana-foundation/solana-developer-platform/pull/485)) ([d92d027](https://github.com/solana-foundation/solana-developer-platform/commit/d92d027f0186c72c3d50103afbca171b1c349d36))
+* **payments:** recover recurring activation ([#499](https://github.com/solana-foundation/solana-developer-platform/pull/499)) ([0b2fd0b](https://github.com/solana-foundation/solana-developer-platform/commit/0b2fd0b10a0e798da92e2b2aa4b6fe3822204115))
+
+### Bug Fixes
+
+* **kora:** deploy.sh uses crane, not gcrane ([#508](https://github.com/solana-foundation/solana-developer-platform/pull/508)) ([9c65c88](https://github.com/solana-foundation/solana-developer-platform/commit/9c65c88158e57cfca538be51d400e30b8a63df4b))
+
+### Maintenance
+
+* add Kora Surfpool local harness ([#512](https://github.com/solana-foundation/solana-developer-platform/pull/512)) ([9df3ac6](https://github.com/solana-foundation/solana-developer-platform/commit/9df3ac6aa955ac58422acf3b3c342d4784992464))
+* **kora:** pin deploy image to 8249b4a (glibc fix) ([#514](https://github.com/solana-foundation/solana-developer-platform/pull/514)) ([4b4784b](https://github.com/solana-foundation/solana-developer-platform/commit/4b4784b2bc31a57ae7e0f09bfa897ffc99b7f530))
+* **kora:** STARTED + SUCCESS/FAILED Slack messages on deploy ([#509](https://github.com/solana-foundation/solana-developer-platform/pull/509)) ([b535501](https://github.com/solana-foundation/solana-developer-platform/commit/b535501bc246d96cdfa74aedc21b57f8430d8211))
+* **payments:** remove v1 and paymentsV2 feature flag ([#504](https://github.com/solana-foundation/solana-developer-platform/pull/504)) ([089519a](https://github.com/solana-foundation/solana-developer-platform/commit/089519a689045b5bf73292f3a58d0cfab4e1a540))
+* **kora:** pin deploy to immutable :<git-sha> (not :edge) ([#501](https://github.com/solana-foundation/solana-developer-platform/pull/501)) ([ec193ee](https://github.com/solana-foundation/solana-developer-platform/commit/ec193ee2f30a2c04b4bd52a3fb872a4fa1ef1360))
+
 ## [0.32.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.31.0...v0.32.0) (2026-06-23)
 
 ### Features

@@ -8,6 +8,7 @@ import { badRequest } from "@/lib/errors";
 import type {
   ActivateApiKeyControlProfileRevisionInput,
   ActivateWalletControlProfileRevisionInput,
+  ActivePolicyProfileRevisionRefRow,
   ApiKeyControlProfileRevisionRow,
   ApiKeyControlProfileRow,
   ApiKeyPolicySubjectRow,
@@ -754,6 +755,60 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
       return rows.results.map(mapApiKeyWalletPolicyBindingRow);
     },
 
+    async listApiKeyWalletPolicyBindingsForApiKeys(apiKeyIds: string[]) {
+      if (apiKeyIds.length === 0) {
+        return [];
+      }
+
+      const rows = await db
+        .prepare(
+          `SELECT *
+           FROM api_key_wallet_policy_bindings
+           WHERE api_key_id = ANY(?::text[])
+           ORDER BY api_key_id ASC, created_at ASC`
+        )
+        .bind(apiKeyIds)
+        .all<Record<string, unknown>>();
+
+      return rows.results.map(mapApiKeyWalletPolicyBindingRow);
+    },
+
+    async listActiveWalletControlProfileRevisionRefs(profileIds: string[]) {
+      if (profileIds.length === 0) {
+        return [];
+      }
+
+      const rows = await db
+        .prepare(
+          `SELECT id AS profile_id, active_revision_id
+           FROM wallet_control_profiles
+           WHERE id = ANY(?::text[])
+             AND status = 'active'`
+        )
+        .bind(profileIds)
+        .all<ActivePolicyProfileRevisionRefRow>();
+
+      return rows.results;
+    },
+
+    async listActiveApiKeyControlProfileRevisionRefs(profileIds: string[]) {
+      if (profileIds.length === 0) {
+        return [];
+      }
+
+      const rows = await db
+        .prepare(
+          `SELECT id AS profile_id, active_revision_id
+           FROM api_key_control_profiles
+           WHERE id = ANY(?::text[])
+             AND status = 'active'`
+        )
+        .bind(profileIds)
+        .all<ActivePolicyProfileRevisionRefRow>();
+
+      return rows.results;
+    },
+
     async getApiKeyWalletPolicyBindingResolution(apiKeyId: string, walletId: string) {
       const row = await db
         .prepare(
@@ -886,6 +941,24 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
 
     async getWalletOperationById(walletOperationId: string) {
       return getWalletOperationByIdInternal(db, walletOperationId);
+    },
+
+    async updateWalletOperationStatus(
+      walletOperationId: string,
+      status: WalletOperationRow["status"]
+    ) {
+      const row = await db
+        .prepare(
+          `UPDATE wallet_operations
+           SET status = ?,
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+           RETURNING *`
+        )
+        .bind(status, walletOperationId)
+        .first<Record<string, unknown>>();
+
+      return row ? mapWalletOperationRow(row) : null;
     },
 
     async createPolicyEvaluation(input: CreatePolicyEvaluationInput) {

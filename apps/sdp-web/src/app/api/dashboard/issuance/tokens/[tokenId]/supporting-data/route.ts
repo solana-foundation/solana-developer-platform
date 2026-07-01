@@ -78,7 +78,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
 
     const [walletsResult, transactionsResult, allowlistResult, frozenResult] = await Promise.all([
       trace.step("fetch_authority_wallets", () =>
-        fetchPaymentsWallets(apiClient.request, { view: "summary", includeBalances: true })
+        fetchPaymentsWallets(apiClient.request, { view: "summary", includeBalances: false })
       ),
       trace.step("fetch_transactions", () =>
         fetchList<TokenTransaction>(

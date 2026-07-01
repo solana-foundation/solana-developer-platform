@@ -1,13 +1,12 @@
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import {
+  type CustodyWalletTokenBalance,
+  WELL_KNOWN_TOKEN_BY_MINT,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types";
 import { getDb } from "@/db";
 import { formatDecimalAmount } from "@/lib/amount";
 import { withHeliusApiKey } from "@/services/rpc-relay.service";
 import type { Env } from "@/types/env";
-
-// biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
-const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-// biome-ignore lint/security/noSecrets: Mainnet USDC mint address constant, not a secret.
-const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 interface TrackedAssetDefinition {
   decimals: number;
@@ -56,6 +55,11 @@ interface HeliusSearchAssetsResponse {
 
 interface HeliusGetAssetBatchItem {
   id?: string;
+  content?: {
+    metadata?: {
+      symbol?: string | null;
+    };
+  };
   token_info?: HeliusTokenInfo | null;
 }
 
@@ -66,10 +70,15 @@ interface HeliusGetAssetBatchResponse {
 
 async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetDefinition>> {
   const network = env.SOLANA_NETWORK ?? "devnet";
-  const trackedAssets: TrackedAssetDefinition[] =
-    network === "mainnet-beta"
-      ? [{ token: "USDC", mint: MAINNET_USDC_MINT, decimals: 6, isUsdStable: true }]
-      : [{ token: "USDC", mint: DEVNET_USDC_MINT, decimals: 6, isUsdStable: true }];
+  const usdc = WELL_KNOWN_TOKENS.USDC;
+  const trackedAssets: TrackedAssetDefinition[] = [
+    {
+      token: usdc.symbol,
+      mint: usdc.mints[network],
+      decimals: usdc.decimals,
+      isUsdStable: usdc.isUsdStable,
+    },
+  ];
 
   const trackedAssetsByMint = new Map(trackedAssets.map((asset) => [asset.mint, asset]));
 
@@ -123,17 +132,17 @@ function resolveKnownUsdPrice(
   balance: Pick<CustodyWalletTokenBalance, "mint" | "token">,
   trackedAssets: Map<string, TrackedAssetDefinition>
 ): number | null {
-  const trackedAsset = trackedAssets.get(balance.mint.trim());
+  const normalizedMint = balance.mint.trim();
+  const trackedAsset = trackedAssets.get(normalizedMint);
   if (trackedAsset?.isUsdStable) {
     return 1;
   }
 
   const normalizedToken = balance.token.trim().toUpperCase();
-  if (
-    normalizedToken === "USDC" ||
-    balance.mint === DEVNET_USDC_MINT ||
-    balance.mint === MAINNET_USDC_MINT
-  ) {
+  const wellKnown =
+    WELL_KNOWN_TOKEN_BY_MINT.get(normalizedMint) ??
+    Object.values(WELL_KNOWN_TOKENS).find((token) => token.symbol === normalizedToken);
+  if (wellKnown?.isUsdStable) {
     return 1;
   }
 
@@ -276,12 +285,13 @@ async function fetchTrackedBalancesForOwner(
     .filter((balance): balance is CustodyWalletTokenBalance => Boolean(balance));
 }
 
-async function fetchUsdPricesByMint(
+async function fetchFungibleAssetsByMint(
   heliusDasUrl: string,
-  mints: string[]
-): Promise<Map<string, number>> {
+  mints: string[],
+  requestId: string
+): Promise<HeliusGetAssetBatchItem[]> {
   if (mints.length === 0) {
-    return new Map();
+    return [];
   }
 
   const response = await fetch(heliusDasUrl, {
@@ -291,7 +301,7 @@ async function fetchUsdPricesByMint(
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
-      id: `wallet-prices-${mints.length}`,
+      id: requestId,
       method: "getAssetBatch",
       params: {
         ids: mints,
@@ -311,9 +321,21 @@ async function fetchUsdPricesByMint(
     throw new Error(payload.error.message);
   }
 
+  return payload.result ?? [];
+}
+
+async function fetchUsdPricesByMint(
+  heliusDasUrl: string,
+  mints: string[]
+): Promise<Map<string, number>> {
+  const assets = await fetchFungibleAssetsByMint(
+    heliusDasUrl,
+    mints,
+    `wallet-prices-${mints.length}`
+  );
   const pricesByMint = new Map<string, number>();
 
-  for (const asset of payload.result ?? []) {
+  for (const asset of assets) {
     const mint = asset.id?.trim();
     const pricePerToken = asset.token_info?.price_info?.price_per_token;
     const currency = asset.token_info?.price_info?.currency?.trim().toUpperCase() ?? "USD";
@@ -330,6 +352,94 @@ async function fetchUsdPricesByMint(
   }
 
   return pricesByMint;
+}
+
+function resolveAssetSymbol(asset: HeliusGetAssetBatchItem): string | null {
+  const symbol = asset.token_info?.symbol?.trim() || asset.content?.metadata?.symbol?.trim() || "";
+  return symbol.length > 0 ? symbol : null;
+}
+
+async function fetchTokenSymbolsByMint(
+  heliusDasUrl: string,
+  mints: string[]
+): Promise<Map<string, string>> {
+  const assets = await fetchFungibleAssetsByMint(
+    heliusDasUrl,
+    mints,
+    `wallet-symbols-${mints.length}`
+  );
+  const symbolsByMint = new Map<string, string>();
+
+  for (const asset of assets) {
+    const mint = asset.id?.trim();
+    const symbol = resolveAssetSymbol(asset);
+    if (mint && symbol) {
+      symbolsByMint.set(mint, symbol);
+    }
+  }
+
+  return symbolsByMint;
+}
+
+function needsTokenSymbol(balance: Pick<CustodyWalletTokenBalance, "token" | "mint">): boolean {
+  const token = balance.token.trim();
+  const mint = balance.mint.trim();
+  return token.length === 0 || token === mint;
+}
+
+function enrichBalancesWithTokenSymbols(
+  balances: CustodyWalletTokenBalance[],
+  symbolsByMint: Map<string, string>
+): CustodyWalletTokenBalance[] {
+  return balances.map((balance) => {
+    if (!needsTokenSymbol(balance)) {
+      return balance;
+    }
+
+    const symbol = symbolsByMint.get(balance.mint.trim());
+    return symbol ? { ...balance, token: symbol } : balance;
+  });
+}
+
+export async function attachTokenSymbolsToBalances(
+  env: Env,
+  balances: CustodyWalletTokenBalance[]
+): Promise<CustodyWalletTokenBalance[]> {
+  const heliusDasUrl = resolveHeliusDasUrl(env);
+  const unresolvedMints = [
+    ...new Set(
+      balances.filter((balance) => needsTokenSymbol(balance)).map((balance) => balance.mint)
+    ),
+  ];
+
+  if (!heliusDasUrl || unresolvedMints.length === 0) {
+    return balances;
+  }
+
+  try {
+    const symbolsByMint = await fetchTokenSymbolsByMint(heliusDasUrl, unresolvedMints);
+    return enrichBalancesWithTokenSymbols(balances, symbolsByMint);
+  } catch {
+    return balances;
+  }
+}
+
+export async function attachTokenSymbolsToBalanceMap(
+  env: Env,
+  balancesByWalletId: Map<string, CustodyWalletTokenBalance[]>
+): Promise<Map<string, CustodyWalletTokenBalance[]>> {
+  const allBalances = [...balancesByWalletId.values()].flat();
+  const enrichedBalances = await attachTokenSymbolsToBalances(env, allBalances);
+  let cursor = 0;
+
+  return new Map(
+    [...balancesByWalletId.entries()].map(([walletId, balances]) => {
+      const nextCursor = cursor + balances.length;
+      const walletBalances = enrichedBalances.slice(cursor, nextCursor);
+      cursor = nextCursor;
+      return [walletId, walletBalances] as const;
+    })
+  );
 }
 
 async function resolveUsdPricesForBalances(

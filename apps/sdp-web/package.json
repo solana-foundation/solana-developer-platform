@@ -19,6 +19,7 @@
     "@sdp/types": "workspace:*",
     "@sentry/nextjs": "^10.57.0",
     "@solana/design-system": "1.0.1",
+    "@solana/qr-code-styling": "1.6.0",
     "clsx": "2.1.1",
     "lucide-react": "1.17.0",
     "motion": "^12.40.0",

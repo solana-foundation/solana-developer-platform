@@ -48,6 +48,50 @@ export const apiKeyWalletBindingSchema = z
   })
   .openapi({ description: "Wallet-level permission binding for an API key." });
 
+export const apiKeyWalletPolicyBindingSchema = z
+  .object({
+    id: z.string().openapi({
+      description: "API-key wallet policy binding ID.",
+      example: "akwpol_123",
+    }),
+    bindingScope: apiKeyWalletScopeSchema.openapi({
+      description: "Whether this policy binding applies to every wallet or one selected wallet.",
+    }),
+    walletId: z.string().nullable().openapi({
+      description: "Selected wallet ID when this binding is wallet-specific.",
+      example: "privy_wallet_123",
+    }),
+    custodyWalletId: z.string().nullable().openapi({
+      description: "Internal custody wallet row ID when this binding is wallet-specific.",
+      example: "cwlt_123",
+    }),
+    walletControlProfileId: z.string().nullable().openapi({
+      description: "Wallet control profile applied by this binding, if any.",
+      example: "wcp_123",
+    }),
+    walletControlProfileRevisionId: z.string().nullable().openapi({
+      description: "Active wallet control profile revision applied by this binding, if any.",
+      example: "wcpr_123",
+    }),
+    apiKeyControlProfileId: z.string().nullable().openapi({
+      description: "API-key control profile applied by this binding, if any.",
+      example: "akcp_123",
+    }),
+    apiKeyControlProfileRevisionId: z.string().nullable().openapi({
+      description: "Active API-key control profile revision applied by this binding, if any.",
+      example: "akcpr_123",
+    }),
+    createdAt: isoDateTimeSchema.openapi({
+      description: "Policy binding creation timestamp.",
+      example: "2025-01-01T00:00:00.000Z",
+    }),
+    updatedAt: isoDateTimeSchema.openapi({
+      description: "Policy binding update timestamp.",
+      example: "2025-01-02T00:00:00.000Z",
+    }),
+  })
+  .openapi({ description: "Read-only policy binding summary for an API key wallet scope." });
+
 export const apiKeyListItemSchema = z
   .object({
     id: apiKeyIdParamSchema,
@@ -56,6 +100,21 @@ export const apiKeyListItemSchema = z
     role: apiKeyRoleSchema,
     environment: apiKeyEnvironmentSchema,
     status: apiKeyStatusSchema,
+    walletScope: apiKeyWalletScopeSchema,
+    signingWalletId: z.string().nullable().openapi({
+      description: "Default custody wallet bound to this API key for signing.",
+      example: "privy_wallet_123",
+    }),
+    signingWalletIds: z.array(z.string()).openapi({
+      description: "All custody wallet IDs bound to this API key.",
+      example: ["privy_wallet_123", "dfns_wallet_456"],
+    }),
+    walletBindings: z.array(apiKeyWalletBindingSchema).openapi({
+      description: "Wallet bindings and wallet-level permission sets for this API key.",
+    }),
+    policyBindings: z.array(apiKeyWalletPolicyBindingSchema).openapi({
+      description: "Policy binding summaries currently associated with this API key.",
+    }),
     lastUsedAt: isoDateTimeSchema.nullable().openapi({
       description: "Timestamp of the last key usage.",
       example: "2025-01-10T12:00:00.000Z",
@@ -111,6 +170,9 @@ export const apiKeyDetailSchema = z
     }),
     walletBindings: z.array(apiKeyWalletBindingSchema).openapi({
       description: "Wallet bindings and wallet-level permission sets for this API key.",
+    }),
+    policyBindings: z.array(apiKeyWalletPolicyBindingSchema).openapi({
+      description: "Policy binding summaries currently associated with this API key.",
     }),
     lastUsedAt: isoDateTimeSchema.nullable().openapi({
       description: "Timestamp of the last key usage.",

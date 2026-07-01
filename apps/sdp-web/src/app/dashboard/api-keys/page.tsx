@@ -91,10 +91,13 @@ export default async function ApiKeysPage() {
               the API for custom grace values (0-168h). New key secrets are shown once.
             </p>
           </div>
-          <ApiKeysTableClient
-            initialApiKeys={apiKeys}
-            canManageApiKeys={dashboardAccess.capabilities.canManageApiKeys}
-          />
+          <div className="@container/api-keys-table">
+            <ApiKeysTableClient
+              initialApiKeys={apiKeys}
+              canManageApiKeys={dashboardAccess.capabilities.canManageApiKeys}
+              wallets={wallets}
+            />
+          </div>
         </CardContent>
       </Card>
     </div>

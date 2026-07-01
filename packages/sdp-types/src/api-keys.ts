@@ -3,6 +3,7 @@
  */
 
 import type { ApiKeyRole, Permission } from "./permissions";
+import type { ApiKeyWalletPolicyBindingScope } from "./policy";
 
 export type SdpEnvironment = "sandbox" | "production";
 
@@ -17,6 +18,19 @@ export type ApiKeyWalletScope = "all" | "selected";
 export interface ApiKeyWalletBinding {
   walletId: string;
   permissions: Permission[];
+}
+
+export interface ApiKeyWalletPolicyBindingSummary {
+  id: string;
+  bindingScope: ApiKeyWalletPolicyBindingScope;
+  walletId: string | null;
+  custodyWalletId: string | null;
+  walletControlProfileId: string | null;
+  walletControlProfileRevisionId: string | null;
+  apiKeyControlProfileId: string | null;
+  apiKeyControlProfileRevisionId: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ApiKey {
@@ -39,8 +53,10 @@ export interface ApiKey {
   rotatedFrom: string | null; // Previous key ID if this was created via rotation
   rotationDeadline: string | null; // Grace period end for the rotated-from key
   signingWalletId: string | null; // Custody wallet binding (e.g. privy_xxx)
+  walletScope?: ApiKeyWalletScope;
   signingWalletIds?: string[]; // Optional multi-wallet bindings (wallet IDs)
   walletBindings?: ApiKeyWalletBinding[]; // Optional wallet-level permission bindings
+  policyBindings?: ApiKeyWalletPolicyBindingSummary[];
   status: ApiKeyStatus;
   createdAt: string;
 }
@@ -58,8 +74,10 @@ export interface CachedApiKey {
   rateLimitTier: RateLimitTier;
   allowedIps: string[] | null;
   signingWalletId: string | null;
+  walletScope?: ApiKeyWalletScope;
   signingWalletIds?: string[];
   walletBindings?: ApiKeyWalletBinding[];
+  policyBindings?: ApiKeyWalletPolicyBindingSummary[];
   status: ApiKeyStatus;
   expiresAt: string | null;
 }
@@ -141,6 +159,11 @@ export interface ListApiKeysResponse {
     role: ApiKeyRole;
     environment: ApiKeyEnvironment;
     status: ApiKeyStatus;
+    walletScope: ApiKeyWalletScope;
+    signingWalletId: string | null;
+    signingWalletIds: string[];
+    walletBindings: ApiKeyWalletBinding[];
+    policyBindings: ApiKeyWalletPolicyBindingSummary[];
     lastUsedAt: string | null;
     expiresAt: string | null;
     createdAt: string;

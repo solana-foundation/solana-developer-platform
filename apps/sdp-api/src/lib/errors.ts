@@ -208,6 +208,10 @@ export function internalError(message?: string): AppError {
   return new AppError("INTERNAL_ERROR", message);
 }
 
+export function transactionFailed(message?: string, details?: Record<string, unknown>): AppError {
+  return new AppError("TRANSACTION_FAILED", message, details);
+}
+
 export function providerNotConfigured(message?: string): AppError {
   return new AppError("PROVIDER_NOT_CONFIGURED", message);
 }
@@ -221,6 +225,18 @@ export function estimateNotAvailable(
   details?: Record<string, unknown>
 ): AppError {
   return new AppError("ESTIMATE_NOT_AVAILABLE", message, details);
+}
+
+export function rampExecuteNotSupported(
+  provider: RampProviderId,
+  direction: RampDirection
+): AppError {
+  const label = direction === "offramp" ? "off-ramp" : "on-ramp";
+  return new AppError(
+    "BAD_REQUEST",
+    `${provider} ${label} execute is not supported. Use POST /v1/payments/ramps/${direction}/quote instead.`,
+    { provider, direction }
+  );
 }
 
 export function unsupportedCounterparty(

@@ -105,6 +105,11 @@ export interface ApiKeyWalletPolicyBindingRow {
   updated_at: string;
 }
 
+export interface ActivePolicyProfileRevisionRefRow {
+  profile_id: string;
+  active_revision_id: string | null;
+}
+
 export interface WalletOperationRow {
   id: string;
   organization_id: string;
@@ -311,6 +316,15 @@ export interface PolicyRepository {
     input: UpsertApiKeyWalletPolicyBindingInput
   ): Promise<ApiKeyWalletPolicyBindingRow | null>;
   listApiKeyWalletPolicyBindings(apiKeyId: string): Promise<ApiKeyWalletPolicyBindingRow[]>;
+  listApiKeyWalletPolicyBindingsForApiKeys(
+    apiKeyIds: string[]
+  ): Promise<ApiKeyWalletPolicyBindingRow[]>;
+  listActiveWalletControlProfileRevisionRefs(
+    profileIds: string[]
+  ): Promise<ActivePolicyProfileRevisionRefRow[]>;
+  listActiveApiKeyControlProfileRevisionRefs(
+    profileIds: string[]
+  ): Promise<ActivePolicyProfileRevisionRefRow[]>;
   getApiKeyWalletPolicyBindingResolution(
     apiKeyId: string,
     walletId: string
@@ -322,6 +336,10 @@ export interface PolicyRepository {
 
   createWalletOperation(input: CreateWalletOperationInput): Promise<WalletOperationRow | null>;
   getWalletOperationById(walletOperationId: string): Promise<WalletOperationRow | null>;
+  updateWalletOperationStatus(
+    walletOperationId: string,
+    status: WalletOperationStatus
+  ): Promise<WalletOperationRow | null>;
   createPolicyEvaluation(input: CreatePolicyEvaluationInput): Promise<PolicyEvaluationRow | null>;
   listPolicyEvaluationsForOperation(walletOperationId: string): Promise<PolicyEvaluationRow[]>;
 }

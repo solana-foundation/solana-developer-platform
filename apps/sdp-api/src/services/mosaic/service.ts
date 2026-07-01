@@ -15,6 +15,7 @@
 import {
   type Address,
   appendTransactionMessageInstructions,
+  type Commitment,
   compileTransaction,
   createNoopSigner,
   createTransactionMessage,
@@ -92,6 +93,7 @@ import { safeStringify } from "./utils";
 // ═══════════════════════════════════════════════════════════════════════════
 
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
+type ConfirmationOptions = Parameters<typeof confirmTransaction>[2];
 
 /**
  * Solana's maximum raw (unencoded) transaction size. A Token-2022 create tx
@@ -167,6 +169,17 @@ export class MosaicService {
     }
 
     throw lastError instanceof Error ? lastError : new Error("RPC operation failed");
+  }
+
+  private getTransactionConfirmationOptions(): ConfirmationOptions {
+    if (this.env.KORA_SURFPOOL_SHIM === "true") {
+      return {
+        commitment: "processed" satisfies Commitment,
+        timeoutMs: 30_000,
+      };
+    }
+
+    return undefined;
   }
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -1145,7 +1158,11 @@ export class MosaicService {
       const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
 
       const signature = await this.feePayment.signAndSend(txBytes);
-      const confirmation = await confirmTransaction(this.rpc, signature);
+      const confirmation = await confirmTransaction(
+        this.rpc,
+        signature,
+        this.getTransactionConfirmationOptions()
+      );
 
       if (confirmation.err) {
         throw new Error(`Transaction failed: ${safeStringify(confirmation.err)}`);
@@ -1168,7 +1185,11 @@ export class MosaicService {
       })
       .send();
 
-    const confirmation = await confirmTransaction(this.rpc, signature);
+    const confirmation = await confirmTransaction(
+      this.rpc,
+      signature,
+      this.getTransactionConfirmationOptions()
+    );
 
     if (confirmation.err) {
       throw new Error(`Transaction failed: ${safeStringify(confirmation.err)}`);

@@ -1,6 +1,13 @@
+import type { Address } from "@solana/addresses";
 import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp-support.generated";
-import type { CryptoAssetSymbol, CryptoRailId } from "./payment-rails";
+import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
+import type {
+  PolicyDefaultAction,
+  PolicyProfileStatus,
+  PolicyProviderSyncStatus,
+  PolicyRule,
+} from "./policy";
 import type { PrivateTransferRequest } from "./private-transfers";
 import type { RampProviderId } from "./provider-access";
 
@@ -35,6 +42,23 @@ export interface PaymentWalletPolicy {
   destinationAllowlist: string[];
   maxTransferAmount?: string;
   maxDailyAmount?: string;
+  defaultAction?: PolicyDefaultAction;
+  rules?: PolicyRule[];
+  controlProfile?: PaymentWalletControlProfileSummary;
+}
+
+export interface PaymentWalletControlProfileSummary {
+  id: string;
+  status: PolicyProfileStatus;
+  activeRevisionId: string | null;
+  revisionId: string | null;
+  revisionNumber: number | null;
+  defaultAction: PolicyDefaultAction;
+  rules: PolicyRule[];
+  providerMappingStatus: PolicyProviderSyncStatus;
+  createdAt: string;
+  updatedAt: string;
+  activatedAt: string | null;
 }
 
 export interface PaymentWalletPolicyEnvelope {
@@ -198,6 +222,107 @@ export interface PaymentTransferPrepareEnvelope {
   };
 }
 
+export type PaymentTransferBatchStatus =
+  | "pending"
+  | "processing"
+  | "confirmed"
+  | "failed"
+  | "partially_failed"
+  | "archived";
+
+export type PaymentTransferBatchRecipientStatus =
+  | "pending"
+  | "processing"
+  | "confirmed"
+  | "failed"
+  | "archived";
+
+export interface PaymentTransferBatchRecipientRequest {
+  externalId?: string;
+  counterpartyId: string;
+  counterpartyAccountId: string;
+  amount: string;
+}
+
+export interface PaymentTransferBatchOptions {
+  maxRecipientsPerTransaction?: number;
+  priorityFee?: "none" | "low" | "medium" | "high" | "auto";
+  preflight?: boolean;
+}
+
+export interface PaymentTransferBatchRequest {
+  projectId?: string;
+  externalId?: string;
+  source: string;
+  token: string;
+  recipients: PaymentTransferBatchRecipientRequest[];
+  options?: PaymentTransferBatchOptions;
+}
+
+export type PaymentTransferBatchEstimateRequest = PaymentTransferBatchRequest;
+
+export interface PaymentTransferBatch {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  externalId: string | null;
+  sourceWalletId: string;
+  sourceAddress: string;
+  token: string;
+  status: PaymentTransferBatchStatus;
+  totalAmount: string | null;
+  recipientCount: number;
+  transactionCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaymentTransferRecipient {
+  id: string;
+  batchId: string;
+  transferId: string | null;
+  externalId: string | null;
+  counterpartyId: string;
+  counterpartyAccountId: string;
+  destination: string;
+  amount: string;
+  status: PaymentTransferBatchRecipientStatus;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaymentTransferBatchEstimate {
+  recipientCount: number;
+  transactionCount: number;
+  estimatedFees: {
+    networkFeeLamports: string;
+    priorityFeeLamports: string;
+    tokenAccountRentLamports: string;
+    sponsored: boolean;
+  };
+}
+
+export interface PaymentTransferBatchEnvelope {
+  data?: {
+    batch?: PaymentTransferBatch;
+    recipients?: PaymentTransferRecipient[];
+    transfers?: PaymentTransferSummary[];
+  };
+  error?: {
+    message?: string;
+  };
+}
+
+export interface PaymentTransferBatchEstimateEnvelope {
+  data?: {
+    estimate?: PaymentTransferBatchEstimate;
+  };
+  error?: {
+    message?: string;
+  };
+}
+
 export type PaymentSubscriptionPlanStatus = "draft" | "active" | "archived";
 export type PaymentSubscriptionStatus =
   | "pending_authorization"
@@ -217,6 +342,7 @@ export type PaymentRecurringPaymentStatus =
   | "pending_activation"
   | "activating"
   | "active"
+  | "updating"
   | "canceling"
   | "resuming"
   | "paused"
@@ -322,6 +448,7 @@ export interface PaymentRequestLifecycleEvent {
 
 export interface PaymentRequest {
   id: string;
+  publicToken: string;
   organizationId: string;
   projectId: string | null;
   counterpartyId: string | null;
@@ -338,6 +465,13 @@ export interface PaymentRequest {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ListPaymentRequestsResponse {
+  paymentRequests: PaymentRequest[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface CreatePaymentSubscriptionPlanRequest {
@@ -409,8 +543,26 @@ export interface CreatePaymentRecurringPaymentRequest {
   metadataUri?: string;
 }
 
+export interface UpdatePaymentRecurringPaymentRequest {
+  sourceWalletId?: string;
+  counterpartyId?: string;
+  counterpartyAccountId?: string;
+  token?: string;
+  amount?: string;
+  periodHours?: number;
+  firstCollectionAt?: string | null;
+  nextCollectionDueAt?: string | null;
+  metadataUri?: string | null;
+}
+
 export interface PaymentRecurringPaymentResponse {
   recurringPayment: PaymentRecurringPayment;
+}
+
+export interface PaymentRecurringPaymentCollectionResponse {
+  recurringPayment: PaymentRecurringPayment;
+  collectionAttempt: PaymentSubscriptionCollectionAttempt;
+  transfer: PaymentTransferSummary;
 }
 
 export interface ListPaymentRecurringPaymentsResponse {
@@ -479,7 +631,21 @@ export interface ListPaymentSubscriptionCollectionAttemptsResponse {
 
 export type PaymentRampExecutionStatus = "pending" | "processing" | "completed" | "failed";
 
-export interface LightsparkPaymentRampInstruction {
+export interface CryptoDepositPaymentRampInstruction {
+  provider: RampProviderId;
+  kind: "crypto_deposit";
+  /** Solana address the user should send crypto to. */
+  destinationAddress: Address;
+  /** SDP-supported crypto asset to send. */
+  cryptoCurrency: CryptoAssetSymbol;
+  /** SDP-supported blockchain network for the destination address. */
+  network: CryptoRailNetwork;
+  /** Provider-side reference or memo required to match the deposit, when applicable. */
+  reference?: string;
+  instructionsNotes?: string;
+}
+
+export interface LightsparkProviderPaymentRampInstruction {
   provider: "lightspark";
   accountOrWalletInfo: {
     accountType: string;
@@ -488,12 +654,27 @@ export interface LightsparkPaymentRampInstruction {
     paymentRails?: string[];
     reference?: string;
     bankName?: string;
-    address?: string;
-    assetType?: string;
+    address?: Address;
+    assetType?: CryptoAssetSymbol;
   };
   instructionsNotes?: string;
   isPlatformAccount?: boolean;
 }
+
+export type LightsparkCryptoDepositPaymentRampInstruction =
+  LightsparkProviderPaymentRampInstruction &
+    CryptoDepositPaymentRampInstruction & {
+      provider: "lightspark";
+      accountOrWalletInfo: LightsparkProviderPaymentRampInstruction["accountOrWalletInfo"] & {
+        accountType: "SOLANA_WALLET";
+        address: Address;
+        assetType: CryptoAssetSymbol;
+      };
+    };
+
+export type LightsparkPaymentRampInstruction =
+  | LightsparkProviderPaymentRampInstruction
+  | LightsparkCryptoDepositPaymentRampInstruction;
 
 export type BvnkOnboardingStatus =
   | "verification_required"
@@ -510,8 +691,10 @@ export interface BvnkBankFundingDetails {
   bankName?: string;
 }
 
-export interface BvnkPaymentRampInstruction {
+/** On-ramp: fund a fiat virtual account to receive crypto. */
+export interface BvnkFiatFundingInstruction {
   provider: "bvnk";
+  kind: "fiat_funding";
   onboardingStatus: BvnkOnboardingStatus;
   verificationUrl?: string;
   ruleId?: string;
@@ -523,6 +706,16 @@ export interface BvnkPaymentRampInstruction {
   bankAccount?: BvnkBankFundingDetails;
   instructionsNotes: string;
 }
+
+/** Off-ramp: send crypto to a deposit address; BVNK converts and pays out fiat. */
+export interface BvnkCryptoDepositInstruction extends CryptoDepositPaymentRampInstruction {
+  provider: "bvnk";
+  fiatCurrency: RampFiatCurrency;
+  reference: string;
+  instructionsNotes: string;
+}
+
+export type BvnkPaymentRampInstruction = BvnkFiatFundingInstruction | BvnkCryptoDepositInstruction;
 
 export type PaymentRampInstruction = LightsparkPaymentRampInstruction | BvnkPaymentRampInstruction;
 

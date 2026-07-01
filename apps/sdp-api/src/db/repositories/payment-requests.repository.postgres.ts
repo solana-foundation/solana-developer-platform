@@ -9,11 +9,16 @@ import type {
   PaymentRequestRow,
   PaymentRequestsRepository,
 } from "./payment-requests.repository";
-import { generatePaymentRequestId } from "./payment-requests.repository";
+import {
+  generatePaymentRequestId,
+  generatePaymentRequestPublicToken,
+  generatePaymentRequestReference,
+} from "./payment-requests.repository";
 
 function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
   return {
     id: row.id as string,
+    public_token: row.public_token as string,
     organization_id: row.organization_id as string,
     project_id: row.project_id as string | null,
     counterparty_id: row.counterparty_id as string | null,
@@ -33,15 +38,44 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
   };
 }
 
+// "expired" is computed from expires_at and never written to the status column,
+// so it (and awaiting_payment) filter the awaiting_payment rows partitioned by
+// expiry. Text comparison is exact: expires_at and sdp_iso_now() share the same
+// ISO-8601 UTC format, and the partial index on (expires_at) covers the predicate.
+function paymentRequestStatusFilter(status: PaymentRequestStatus | undefined): {
+  sql: string;
+  binds: string[];
+} {
+  switch (status) {
+    case undefined:
+      return { sql: "TRUE", binds: [] };
+    case "awaiting_payment":
+      return {
+        sql: "status = 'awaiting_payment' AND (expires_at IS NULL OR expires_at > sdp_iso_now())",
+        binds: [],
+      };
+    case "expired":
+      return {
+        sql: "status = 'awaiting_payment' AND expires_at IS NOT NULL AND expires_at <= sdp_iso_now()",
+        binds: [],
+      };
+    default:
+      return { sql: "status = ?", binds: [status] };
+  }
+}
+
 export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentRequestsRepository {
   return {
     async createPaymentRequest(input: CreatePaymentRequestInput) {
       const id = generatePaymentRequestId();
+      const publicToken = generatePaymentRequestPublicToken();
+      const reference = await generatePaymentRequestReference();
 
       const row = await db
         .prepare(
           `INSERT INTO payment_requests (
              id,
+             public_token,
              organization_id,
              project_id,
              counterparty_id,
@@ -54,13 +88,14 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              created_by,
              lifecycle
            ) VALUES (
-             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
              jsonb_build_array(jsonb_build_object('status', 'awaiting_payment', 'at', sdp_iso_now()))
            )
            RETURNING *`
         )
         .bind(
           id,
+          publicToken,
           input.organizationId,
           input.projectId,
           input.counterpartyId,
@@ -68,7 +103,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           input.destinationAddress,
           input.token,
           input.amount,
-          input.reference,
+          reference,
           input.expiresAt,
           input.createdBy
         )
@@ -124,43 +159,31 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       return row ? mapPaymentRequestRow(row) : null;
     },
 
+    async getPaymentRequestByPublicToken(publicToken) {
+      const row = await db
+        .prepare(`SELECT * FROM payment_requests WHERE public_token = ?`)
+        .bind(publicToken)
+        .first<Record<string, unknown>>();
+      return row ? mapPaymentRequestRow(row) : null;
+    },
+
     async listPaymentRequests(
       params: ListPaymentRequestsInput
     ): Promise<ListPaymentRequestsResult> {
+      const filter = paymentRequestStatusFilter(params.status);
+      const where = `WHERE organization_id = ? AND project_id = ? AND ${filter.sql}`;
+      const scopeBinds = [params.organizationId, params.projectId, ...filter.binds];
+
       const [rowsResult, countRow] = await Promise.all([
         db
           .prepare(
-            `SELECT *
-               FROM payment_requests
-              WHERE organization_id = ?
-                AND project_id = ?
-                AND (?::text IS NULL OR status = ?::text)
-              ORDER BY created_at DESC
-              LIMIT ? OFFSET ?`
+            `SELECT * FROM payment_requests ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`
           )
-          .bind(
-            params.organizationId,
-            params.projectId,
-            params.status ?? null,
-            params.status ?? null,
-            params.limit,
-            params.offset
-          )
+          .bind(...scopeBinds, params.limit, params.offset)
           .all<Record<string, unknown>>(),
         db
-          .prepare(
-            `SELECT COUNT(*)::int AS total
-               FROM payment_requests
-              WHERE organization_id = ?
-                AND project_id = ?
-                AND (?::text IS NULL OR status = ?::text)`
-          )
-          .bind(
-            params.organizationId,
-            params.projectId,
-            params.status ?? null,
-            params.status ?? null
-          )
+          .prepare(`SELECT COUNT(*)::int AS total FROM payment_requests ${where}`)
+          .bind(...scopeBinds)
           .first<{ total: number }>(),
       ]);
 

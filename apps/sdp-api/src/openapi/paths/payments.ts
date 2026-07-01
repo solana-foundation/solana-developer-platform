@@ -6,20 +6,24 @@ import {
   createSubscriptionCollectionAttemptRequestSchema,
   createSubscriptionPlanRequestSchema,
   createSubscriptionRequestSchema,
+  createTransferBatchRequestSchema,
   createTransferRequestSchema,
   errorResponseSchema,
+  estimateTransferBatchRequestSchema,
   executeOfframpRequestSchema,
   executeOnrampRequestSchema,
   paymentListRecurringPaymentsQuerySchema,
   paymentListSubscriptionCollectionAttemptsQuerySchema,
   paymentListSubscriptionPlansQuerySchema,
   paymentListSubscriptionsQuerySchema,
+  paymentListTransferBatchesQuerySchema,
   paymentListTransfersQuerySchema,
   paymentOfframpCurrenciesQuerySchema,
   paymentOnrampCurrenciesQuerySchema,
   paymentRecurringPaymentIdParamsSchema,
   paymentSubscriptionIdParamsSchema,
   paymentSubscriptionPlanIdParamsSchema,
+  paymentTransferBatchIdParamsSchema,
   paymentTransferIdParamsSchema,
   paymentWalletIdParamsSchema,
   prepareSubscriptionAuthorizationRequestSchema,
@@ -28,6 +32,7 @@ import {
   prepareSubscriptionPlanCreateRequestSchema,
   prepareTransferRequestSchema,
   simulateSandboxTransferRequestSchema,
+  updateRecurringPaymentRequestSchema,
   updateSubscriptionPlanRequestSchema,
   updateSubscriptionRequestSchema,
   updateWalletPolicyRequestSchema,
@@ -39,6 +44,7 @@ import {
   onrampCurrenciesResponse,
   onrampExecutionResponse,
   onrampQuoteResponse,
+  paymentRecurringPaymentCollectionResponse,
   paymentRecurringPaymentListResponse,
   paymentRecurringPaymentResponse,
   paymentSubscriptionCollectionAttemptListResponse,
@@ -53,6 +59,9 @@ import {
   preparePaymentSubscriptionPlanResponse,
   prepareTransferResponse,
   sandboxTransferSimulationResponse,
+  transferBatchEstimateResponse,
+  transferBatchListResponse,
+  transferBatchResponse,
   transferListResponse,
   transferResponse,
   walletBalancesResponse,
@@ -230,6 +239,98 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     },
   });
 
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/transfer-batches/estimate",
+    tags: ["Payments"],
+    summary: "Estimate transfer batch",
+    operationId: "estimatePaymentTransferBatch",
+    description:
+      "Validates a transfer batch request and estimates transaction chunking and fees. This route is scaffolded; estimation is not implemented yet.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(estimateTransferBatchRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Transfer batch estimate",
+        content: jsonContent(transferBatchEstimateResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/transfer-batches",
+    tags: ["Payments"],
+    summary: "Create transfer batch",
+    operationId: "createPaymentTransferBatch",
+    description:
+      "Creates a custody-executed outbound transfer batch to counterparty crypto-wallet accounts. This route is scaffolded; execution is not implemented yet.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(createTransferBatchRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Transfer batch created",
+        content: jsonContent(transferBatchResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/transfer-batches",
+    tags: ["Payments"],
+    summary: "List transfer batches",
+    operationId: "listPaymentTransferBatches",
+    description: "Lists transfer batches for the authenticated organization or project scope.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentListTransferBatchesQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Transfer batch list",
+        content: jsonContent(transferBatchListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/transfer-batches/{batchId}",
+    tags: ["Payments"],
+    summary: "Get transfer batch",
+    operationId: "getPaymentTransferBatch",
+    description: "Retrieves a transfer batch with recipient rows and chunk transfer summaries.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentTransferBatchIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Transfer batch details",
+        content: jsonContent(transferBatchResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Recurring Payments (feature-flagged)
   // ═══════════════════════════════════════════════════════════════════════════
@@ -282,6 +383,32 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
+    method: "patch",
+    path: "/v1/payments/recurring-payments/{id}",
+    tags: ["Payments"],
+    summary: "Update recurring payment",
+    operationId: "updatePaymentRecurringPayment",
+    description:
+      "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+      body: {
+        required: true,
+        content: jsonContent(updateRecurringPaymentRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Recurring payment updated",
+        content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
     method: "post",
     path: "/v1/payments/recurring-payments/{id}/activate",
     tags: ["Payments"],
@@ -297,6 +424,72 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     responses: {
       200: {
         description: "Recurring payment activated",
+        content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/recurring-payments/{id}/cancel",
+    tags: ["Payments"],
+    summary: "Cancel recurring payment",
+    operationId: "cancelPaymentRecurringPayment",
+    description:
+      "Cancels an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction and storing the resulting lifecycle state.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment canceled",
+        content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/recurring-payments/{id}/collect",
+    tags: ["Payments"],
+    summary: "Collect recurring payment",
+    operationId: "collectPaymentRecurringPayment",
+    description:
+      "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment collected",
+        content: jsonContent(paymentRecurringPaymentCollectionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/recurring-payments/{id}/resume",
+    tags: ["Payments"],
+    summary: "Resume recurring payment",
+    operationId: "resumePaymentRecurringPayment",
+    description:
+      "Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment resumed",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),

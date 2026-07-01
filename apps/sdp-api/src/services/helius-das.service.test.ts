@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
+  attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
   getTrackedWalletBalancesByOwner,
 } from "@/services/helius-das.service";
@@ -127,5 +128,62 @@ describe("helius-das service", () => {
         decimals: 6,
       },
     ]);
+  });
+
+  it("attaches DAS symbols to unlabeled token balances", async () => {
+    const mint = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        result: [
+          {
+            id: mint,
+            content: { metadata: { symbol: "EURC" } },
+            token_info: {
+              symbol: "EURC",
+            },
+          },
+        ],
+      }),
+    } as Response);
+
+    const balances = await attachTokenSymbolsToBalances(env, [
+      {
+        token: mint,
+        mint,
+        amount: "20000000",
+        uiAmount: "20",
+        decimals: 6,
+      },
+    ]);
+
+    expect(balances[0]).toMatchObject({
+      token: "EURC",
+      mint,
+      amount: "20000000",
+      uiAmount: "20",
+      decimals: 6,
+    });
+  });
+
+  it("keeps configured token labels even when they are long", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const mint = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
+
+    const balances = await attachTokenSymbolsToBalances(env, [
+      {
+        token: "INSTITUTIONALUSD",
+        mint,
+        amount: "20000000",
+        uiAmount: "20",
+        decimals: 6,
+      },
+    ]);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(balances[0]).toMatchObject({
+      token: "INSTITUTIONALUSD",
+      mint,
+    });
   });
 });

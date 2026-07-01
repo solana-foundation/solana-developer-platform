@@ -124,6 +124,9 @@ export function getE2EEnv(): E2EEnv {
       CLERK_JWT_TEMPLATE: clerkJwtTemplate,
       SDP_API_BASE_URL: sdpApiBaseUrl,
       NEXT_PUBLIC_SDP_API_BASE_URL: publicApiBaseUrl,
+      NEXT_PUBLIC_DISABLE_SENTRY: "1",
+      NEXT_PUBLIC_SENTRY_DSN: "",
+      PLAYWRIGHT_DISABLE_SENTRY: "1",
       NEXT_PUBLIC_CLERK_SIGN_IN_URL:
         process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ??
         fallback.NEXT_PUBLIC_CLERK_SIGN_IN_URL ??

@@ -1,3 +1,4 @@
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {
@@ -5,11 +6,11 @@ import {
   createTransferSchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
   prepareTransferSchema,
+  updateRecurringPaymentSchema,
   updateWalletPolicySchema,
 } from "./schemas";
 
-const SOL_MINT = "So11111111111111111111111111111111111111112";
-const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"];
 const VALID_DESTINATION = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
 
 const tokenSchema = createTransferSchema.shape.token;
@@ -169,6 +170,35 @@ describe("recurring payment schema", () => {
 
   it("still parses native SOL at the request schema layer for service-level rejection", () => {
     expect(recurringPaymentTokenSchema.parse("SOL")).toBe("SOL");
+  });
+
+  it("rejects an empty recurring payment update body", () => {
+    const result = updateRecurringPaymentSchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts nullable pending and active timing fields on recurring payment updates", () => {
+    const result = updateRecurringPaymentSchema.safeParse({
+      firstCollectionAt: null,
+      nextCollectionDueAt: null,
+      metadataUri: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("requires counterpartyAccountId when counterpartyId changes", () => {
+    const result = updateRecurringPaymentSchema.safeParse({
+      counterpartyId: "cp_next",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects invalid recurring payment update amount, period, and metadata URL", () => {
+    expect(updateRecurringPaymentSchema.safeParse({ amount: "0" }).success).toBe(false);
+    expect(updateRecurringPaymentSchema.safeParse({ periodHours: 0 }).success).toBe(false);
+    expect(updateRecurringPaymentSchema.safeParse({ metadataUri: "not-a-url" }).success).toBe(
+      false
+    );
   });
 });
 

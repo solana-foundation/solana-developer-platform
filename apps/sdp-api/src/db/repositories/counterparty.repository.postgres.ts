@@ -13,6 +13,7 @@ import type {
   ListCounterpartiesInput,
   ListCounterpartiesResult,
   UpdateCounterpartyInput,
+  UpsertBvnkCustomerProviderDataInput,
 } from "./counterparty.repository";
 import { generateCounterpartyId } from "./counterparty.repository";
 
@@ -20,7 +21,7 @@ function mapCounterpartyRow(row: Record<string, unknown>): CounterpartyRow {
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
-    project_id: row.project_id as string | null,
+    project_id: row.project_id as string,
     external_id: row.external_id as string | null,
     entity_type: row.entity_type as CounterpartyEntityType,
     display_name: row.display_name as string,
@@ -186,12 +187,25 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       return row ? mapCounterpartyRow(row) : null;
     },
 
-    async findCounterpartyByBvnkCustomerReference(customerReference: string) {
+    async findActiveCounterpartyById(counterpartyId: string) {
       const row = await db
         .prepare(
           `SELECT * FROM counterparties
-             WHERE provider_data->'bvnk'->'customer'->>'customerReference' = ?
+             WHERE id = ?
                AND status = 'active'
+             LIMIT 1`
+        )
+        .bind(counterpartyId)
+        .first<Record<string, unknown>>();
+      return row ? mapCounterpartyRow(row) : null;
+    },
+
+    async findActiveCounterpartyByBvnkCustomerReference(customerReference: string) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM counterparties
+             WHERE status = 'active'
+               AND provider_data->'bvnk'->'customer'->>'customerReference' = ?
              LIMIT 1`
         )
         .bind(customerReference)
@@ -199,7 +213,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       return row ? mapCounterpartyRow(row) : null;
     },
 
-    async patchBvnkCustomerByReference(params) {
+    async upsertBvnkCustomerProviderData(params: UpsertBvnkCustomerProviderDataInput) {
       await db
         .prepare(
           `UPDATE counterparties
@@ -209,31 +223,16 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
                    coalesce(provider_data->'bvnk'->'customer', '{}'::jsonb) || ?::jsonb,
                    true),
                  updated_at = sdp_iso_now()
-           WHERE provider_data->'bvnk'->'customer'->>'customerReference' = ?
-             AND status = 'active'`
-        )
-        .bind(JSON.stringify(params.customer), params.customerReference)
-        .run();
-    },
-
-    async patchBvnkWalletByReference(params) {
-      await db
-        .prepare(
-          `UPDATE counterparties
-             SET provider_data = jsonb_set(
-                   provider_data,
-                   array['bvnk', 'wallets', ?::text],
-                   coalesce(provider_data->'bvnk'->'wallets'->?, '{}'::jsonb) || ?::jsonb,
-                   true),
-                 updated_at = sdp_iso_now()
-           WHERE provider_data->'bvnk'->'customer'->>'customerReference' = ?
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
              AND status = 'active'`
         )
         .bind(
-          params.walletKey,
-          params.walletKey,
-          JSON.stringify(params.wallet),
-          params.customerReference
+          JSON.stringify(params.customer),
+          params.counterpartyId,
+          params.organizationId,
+          params.projectId
         )
         .run();
     },

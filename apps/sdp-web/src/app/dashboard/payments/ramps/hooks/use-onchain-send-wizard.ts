@@ -16,7 +16,7 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { useZodForm } from "@/lib/use-zod-form";
 import { onchainDestinationSchema, onchainDetailsSchema, onchainSendSchema } from "../schema";
-import { findWalletBalanceForDisplayToken, resolveWalletAssetOptions } from "../wallet-options";
+import { walletBalanceAssetOptions } from "../wallet-options";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
 export const ONCHAIN_SEND_STEPS = [
@@ -57,7 +57,7 @@ export function useOnchainSendWizard({
   const { values: fields, setField } = useZodForm(onchainSendSchema, {
     accountId: "",
     walletId: "",
-    asset: "USDC",
+    asset: "",
     amount: "",
     memo: "",
   });
@@ -115,22 +115,26 @@ export function useOnchainSendWizard({
   const destinationAddress = resolveAccountAddress(selectedAccount);
 
   const assetOptions = useMemo(
-    () => resolveWalletAssetOptions(selectedWallet, issuedTokenSymbolsByMint),
+    () => walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint),
     [issuedTokenSymbolsByMint, selectedWallet]
+  );
+  const selectedAsset = useMemo(
+    () => assetOptions.find((asset) => asset.value === fields.asset) ?? null,
+    [assetOptions, fields.asset]
   );
 
   const selectWallet = (walletId: string) => {
     setField("walletId", walletId);
     const nextWallet = liveWallets.find((wallet) => wallet.walletId === walletId) ?? null;
-    const nextAssets = resolveWalletAssetOptions(nextWallet, issuedTokenSymbolsByMint);
-    if (!nextAssets.includes(fields.asset)) {
-      setField("asset", nextAssets[0] ?? "");
+    const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint);
+    if (!nextAssets.some((asset) => asset.value === fields.asset)) {
+      setField("asset", nextAssets[0]?.value ?? "");
     }
   };
 
   const selectedAssetBalance = useMemo(
-    () => findWalletBalanceForDisplayToken(selectedWallet, fields.asset, issuedTokenSymbolsByMint),
-    [issuedTokenSymbolsByMint, selectedWallet, fields.asset]
+    () => selectedWallet?.balances?.find((balance) => balance.mint === fields.asset) ?? null,
+    [selectedWallet, fields.asset]
   );
 
   let availableAmount: number | null = null;
@@ -169,7 +173,7 @@ export function useOnchainSendWizard({
   };
 
   const submitTransfer = async () => {
-    if (!fields.walletId || !destinationAddress) {
+    if (!fields.walletId || !destinationAddress || !selectedAssetBalance) {
       return;
     }
     setSubmitting(true);
@@ -178,7 +182,7 @@ export function useOnchainSendWizard({
       const transfer = await createTransfer({
         source: fields.walletId,
         destination: destinationAddress,
-        token: selectedAssetBalance?.mint ?? (fields.asset === "SOL" ? "SOL" : fields.asset),
+        token: selectedAssetBalance.mint,
         amount: fields.amount,
         ...(fields.memo.trim() ? { memo: fields.memo.trim() } : {}),
       });
@@ -242,6 +246,7 @@ export function useOnchainSendWizard({
     selectedAccount,
     destinationAddress,
     assetOptions,
+    selectedAsset,
     selectedAssetBalance,
     availableAmount,
     exceedsBalance,

@@ -4,6 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
+import {
+  buildBvnkCustomerExternalReference,
+  buildBvnkOfframpReference,
+  buildBvnkOnrampPaymentRuleKey,
+  buildBvnkOnrampWalletName,
+} from "@/lib/ramps/providers/bvnk";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 
@@ -526,10 +532,13 @@ describe("BVNK ramp webhook", () => {
   const BVNK_WEBHOOK_SECRET = "bvnk_webhook_secret_test";
   const ORG_ID = "org_bvnk_webhook";
   const PROJECT_ID = "prj_bvnk_webhook";
-  const COUNTERPARTY_ID = "counterparty_bvnk_webhook";
-  const CUSTOMER_REFERENCE = "cust_webhook_1";
+  const COUNTERPARTY_ID = "counterparty_123e4567-e89b-12d3-a456-426614174000";
+  const CUSTOMER_REFERENCE = "965a5ef5-77f3-482e-917f-194c30143810";
   const USER_ID = "usr_bvnk_webhook";
   const WALLET_ID = "a:1:wallet:1";
+  const CUSTOMER_EXTERNAL_REFERENCE = buildBvnkCustomerExternalReference(COUNTERPARTY_ID);
+  const ONRAMP_PAYMENT_RULE_KEY = buildBvnkOnrampPaymentRuleKey("USD", "USDC", "SOLANA", "dest");
+  const ONRAMP_WALLET_NAME = buildBvnkOnrampWalletName(COUNTERPARTY_ID, ONRAMP_PAYMENT_RULE_KEY);
 
   async function seedVerifiableCounterparty() {
     await getDb(env)
@@ -565,8 +574,12 @@ describe("BVNK ramp webhook", () => {
         {},
         {
           bvnk: {
-            customer: { customerReference: CUSTOMER_REFERENCE, status: "PENDING" },
-            wallets: { "USD:USDC_SOLANA:dest": { walletId: WALLET_ID } },
+            customer: {
+              customerReference: CUSTOMER_REFERENCE,
+              externalReference: CUSTOMER_EXTERNAL_REFERENCE,
+              status: "PENDING",
+            },
+            wallets: { [ONRAMP_PAYMENT_RULE_KEY]: { walletId: WALLET_ID } },
           },
         },
         null
@@ -624,7 +637,11 @@ describe("BVNK ramp webhook", () => {
             customer?: { status?: string; verificationUrl?: string };
             wallets?: Record<
               string,
-              { walletId?: string; bankAccount?: { accountNumber?: string; bankName?: string } }
+              {
+                walletId?: string;
+                ruleId?: string;
+                bankAccount?: { accountNumber?: string; bankName?: string };
+              }
             >;
           };
         };
@@ -635,11 +652,83 @@ describe("BVNK ramp webhook", () => {
   it("flips the cached customer status to VERIFIED on a customers:status-change webhook", async () => {
     const res = await sendBvnkWebhook({
       event: "bvnk:customers:status-change",
-      data: { customerId: CUSTOMER_REFERENCE, status: "VERIFIED", customerType: "INDIVIDUAL" },
+      data: {
+        customerId: CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+        customerType: "INDIVIDUAL",
+      },
     });
 
     expect(res.status).toBe(200);
     expect((await readBvnk())?.customer?.status).toBe("VERIFIED");
+  });
+
+  it("provisions the funding wallet and payment rule after customer verification succeeds", async () => {
+    await getDb(env)
+      .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
+      .bind(
+        {
+          bvnk: {
+            customer: {
+              customerReference: CUSTOMER_REFERENCE,
+              externalReference: CUSTOMER_EXTERNAL_REFERENCE,
+              status: "PENDING",
+            },
+            wallets: {
+              [ONRAMP_PAYMENT_RULE_KEY]: {
+                request: {
+                  fiatCurrency: "USD",
+                  currency: "USDC",
+                  network: "SOLANA",
+                  destinationWalletAddress: "dest",
+                },
+              },
+            },
+          },
+        },
+        COUNTERPARTY_ID
+      )
+      .run();
+
+    const getProfile = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getFiatWalletProfile")
+      .mockResolvedValue("profile_webhook_1");
+    const createWallet = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createFiatWallet")
+      .mockResolvedValue({
+        id: WALLET_ID,
+        name: ONRAMP_WALLET_NAME,
+        status: "ACTIVE",
+        bankAccount: {
+          accountNumber: "900473221558",
+          bankName: "LEAD BANK",
+        },
+      });
+    const createRule = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule")
+      .mockResolvedValue({ id: "rule_webhook_verified_1", status: "ACTIVE" });
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:customers:status-change",
+      data: {
+        customerId: CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+        customerType: "INDIVIDUAL",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(getProfile).toHaveBeenCalledTimes(1);
+    expect(createWallet).toHaveBeenCalledTimes(1);
+    expect(createRule).toHaveBeenCalledTimes(1);
+
+    const entry = (await readBvnk())?.wallets?.[ONRAMP_PAYMENT_RULE_KEY];
+    expect(entry?.walletId).toBe(WALLET_ID);
+    expect(entry?.ruleId).toBe("rule_webhook_verified_1");
+
+    getProfile.mockRestore();
+    createWallet.mockRestore();
+    createRule.mockRestore();
   });
 
   it("fetches and caches the verification URL when a status-change reports an unverified status", async () => {
@@ -674,6 +763,7 @@ describe("BVNK ramp webhook", () => {
       event: "ledger:v2:wallet:status-change",
       data: {
         id: WALLET_ID,
+        name: ONRAMP_WALLET_NAME,
         status: "ACTIVE",
         customer: { id: CUSTOMER_REFERENCE, name: "Zach Khong" },
         paymentInstruments: [
@@ -687,7 +777,7 @@ describe("BVNK ramp webhook", () => {
     });
 
     expect(res.status).toBe(200);
-    const entry = (await readBvnk())?.wallets?.["USD:USDC_SOLANA:dest"];
+    const entry = (await readBvnk())?.wallets?.[ONRAMP_PAYMENT_RULE_KEY];
     expect(entry?.bankAccount?.accountNumber).toBe("900473221558");
     expect(entry?.bankAccount?.bankName).toBe("LEAD BANK");
   });
@@ -700,11 +790,11 @@ describe("BVNK ramp webhook", () => {
           bvnk: {
             customer: {
               customerReference: CUSTOMER_REFERENCE,
-              externalReference: "sdp_bvnkwebhook",
+              externalReference: CUSTOMER_EXTERNAL_REFERENCE,
               status: "VERIFIED",
             },
             wallets: {
-              "USD:USDC_SOLANA:dest": {
+              [ONRAMP_PAYMENT_RULE_KEY]: {
                 walletId: WALLET_ID,
                 walletStatus: "PENDING",
                 request: {
@@ -729,6 +819,7 @@ describe("BVNK ramp webhook", () => {
       event: "ledger:v2:wallet:status-change",
       data: {
         id: WALLET_ID,
+        name: ONRAMP_WALLET_NAME,
         status: "ACTIVE",
         customer: { id: CUSTOMER_REFERENCE, name: "Webhook Buyer" },
         paymentInstruments: [
@@ -754,11 +845,56 @@ describe("BVNK ramp webhook", () => {
           };
         };
       }>();
-    const entry = row?.provider_data.bvnk?.wallets?.["USD:USDC_SOLANA:dest"];
+    const entry = row?.provider_data.bvnk?.wallets?.[ONRAMP_PAYMENT_RULE_KEY];
     expect(entry?.ruleId).toBe("rule_webhook_1");
     expect(entry?.bankAccount?.accountNumber).toBe("900473221558");
 
     createRule.mockRestore();
+  });
+
+  it("activates the off-ramp wallet on a wallet status-change webhook with no customer", async () => {
+    const OFFRAMP_WALLET_ID = "a:offramp:wallet:1";
+    await getDb(env)
+      .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
+      .bind(
+        {
+          bvnk: {
+            offramp: {
+              wallets: { USD: { id: OFFRAMP_WALLET_ID, status: "PENDING" } },
+              beneficiaries: {
+                "USD:abc123": {
+                  key: "USD:abc123",
+                  fiatCurrency: "USD",
+                  accountType: "ACH",
+                  createdAt: "2026-06-01T00:00:00.000Z",
+                },
+              },
+            },
+          },
+        },
+        COUNTERPARTY_ID
+      )
+      .run();
+
+    const res = await sendBvnkWebhook({
+      event: "ledger:v2:wallet:status-change",
+      data: {
+        id: OFFRAMP_WALLET_ID,
+        status: "ACTIVE",
+        name: `sdp:offramp:USD:${COUNTERPARTY_ID}`,
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const row = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(COUNTERPARTY_ID)
+      .first<{
+        provider_data: {
+          bvnk?: { offramp?: { wallets?: Record<string, { id?: string; status?: string }> } };
+        };
+      }>();
+    expect(row?.provider_data.bvnk?.offramp?.wallets?.USD?.status).toBe("ACTIVE");
   });
 
   it("clears a stale provisioningError when a retry makes forward progress", async () => {
@@ -769,11 +905,11 @@ describe("BVNK ramp webhook", () => {
           bvnk: {
             customer: {
               customerReference: CUSTOMER_REFERENCE,
-              externalReference: "sdp_bvnkwebhook",
+              externalReference: CUSTOMER_EXTERNAL_REFERENCE,
               status: "VERIFIED",
             },
             wallets: {
-              "USD:USDC_SOLANA:dest": {
+              [ONRAMP_PAYMENT_RULE_KEY]: {
                 walletId: WALLET_ID,
                 walletStatus: "PENDING",
                 provisioningError: "BVNK rule creation failed",
@@ -797,7 +933,11 @@ describe("BVNK ramp webhook", () => {
 
     const res = await sendBvnkWebhook({
       event: "bvnk:customers:status-change",
-      data: { customerId: CUSTOMER_REFERENCE, status: "VERIFIED", customerType: "INDIVIDUAL" },
+      data: {
+        customerId: CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+        customerType: "INDIVIDUAL",
+      },
     });
 
     expect(res.status).toBe(200);
@@ -809,11 +949,244 @@ describe("BVNK ramp webhook", () => {
           bvnk?: { wallets?: Record<string, { provisioningError?: string; ruleId?: string }> };
         };
       }>();
-    const entry = row?.provider_data.bvnk?.wallets?.["USD:USDC_SOLANA:dest"];
+    const entry = row?.provider_data.bvnk?.wallets?.[ONRAMP_PAYMENT_RULE_KEY];
     expect(entry?.provisioningError).toBeUndefined();
     expect(entry?.ruleId).toBeUndefined();
 
     getWallet.mockRestore();
+  });
+
+  it("completes an on-ramp transfer from a payment webhook using the SDP customer reference", async () => {
+    const ruleId = "rule_webhook_payment_1";
+    const transferId = "pt_bvnk_webhook_payment";
+    const providerReference = "bvnk_onramp_quote_webhook_1";
+    await getDb(env)
+      .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
+      .bind(
+        {
+          bvnk: {
+            customer: {
+              customerReference: CUSTOMER_REFERENCE,
+              externalReference: CUSTOMER_EXTERNAL_REFERENCE,
+              status: "VERIFIED",
+            },
+            wallets: {
+              [ONRAMP_PAYMENT_RULE_KEY]: {
+                walletId: WALLET_ID,
+                ruleId,
+                request: {
+                  fiatCurrency: "USD",
+                  currency: "USDC",
+                  network: "SOLANA",
+                  destinationWalletAddress: "dest",
+                },
+              },
+            },
+          },
+        },
+        COUNTERPARTY_ID
+      )
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, counterparty_id, source_address, destination_address,
+           token, amount, memo, type, direction, status, provider, provider_reference,
+           delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
+           initiated_by_key_id, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        transferId,
+        ORG_ID,
+        PROJECT_ID,
+        "wallet_bvnk_webhook",
+        COUNTERPARTY_ID,
+        null,
+        "dest",
+        "USDC",
+        null,
+        null,
+        "onramp",
+        "inbound",
+        "awaiting_payment",
+        "bvnk",
+        providerReference,
+        "manual_instructions",
+        "USD",
+        "100.00",
+        JSON.stringify({ bvnk: { ruleId, fundingWalletId: WALLET_ID } }),
+        null,
+        null,
+        null,
+        "2026-06-05T00:00:00.000Z",
+        "2026-06-05T00:00:00.000Z"
+      )
+      .run();
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:payment:payin:status-change",
+      data: {
+        customerReference: CUSTOMER_REFERENCE,
+        beneficiary: { walletId: WALLET_ID },
+        status: "COMPLETED",
+        amount: { value: 100, currencyCode: "USD" },
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const transfer = await getDb(env)
+      .prepare("SELECT status, amount, fiat_amount FROM payment_transfers WHERE id = ?")
+      .bind(transferId)
+      .first<{ status: string; amount: string | null; fiat_amount: string | null }>();
+    expect(transfer?.status).toBe("completed");
+    expect(Number(transfer?.amount)).toBe(100);
+    expect(Number(transfer?.fiat_amount)).toBe(100);
+  });
+
+  it("moves a BVNK off-ramp transfer to settling when a channel transaction is detected", async () => {
+    const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bd7";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, source_address, destination_address,
+           token, amount, memo, type, direction, status, provider, provider_reference,
+           delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
+           initiated_by_key_id, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        transferId,
+        ORG_ID,
+        PROJECT_ID,
+        "wallet_bvnk_webhook",
+        "source_address",
+        null,
+        "USDC",
+        "5",
+        null,
+        "offramp",
+        "outbound",
+        "awaiting_payment",
+        "bvnk",
+        "019f0ce4-98ab-7424-a968-fc323266b8ed",
+        "manual_instructions",
+        "USD",
+        null,
+        {},
+        null,
+        null,
+        null,
+        "2026-06-28T06:22:15.239Z",
+        "2026-06-28T06:22:17.258Z"
+      )
+      .run();
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:payment:channel:transaction-detected",
+      eventId: "019f0ce4-c81e-7000-8000-000000000000",
+      data: {
+        channelId: "019f0ce4-98ab-7424-a968-fc323266b8ed",
+        merchantDisplayName: `sdp:offramp:USD:${COUNTERPARTY_ID}`,
+        reference: buildBvnkOfframpReference(transferId),
+        dateCreated: 1782627747852,
+        lastUpdated: 1782627747852,
+        status: "DETECTED",
+        uuid: "019f0ce4-c7c2-7a12-ac86-9f1820ff48e1",
+        hash: "3B9neiFe2HG3P8ovttfH1XrppubeFtMcKWZDhw9rzLUqUSQrfLYdzpC3v3ctsbtQBt1rwUPkBaa4SWG2SZzqtXD2",
+        address: "H8j6ZdeUt1D3GexMhUs6mSrncK7r4KkspKuLVhpsA7V6",
+        paidCurrency: "USDC",
+        displayCurrency: "USD",
+        walletCurrency: "USD",
+        feeCurrency: "USD",
+        paidAmount: 0,
+        displayAmount: 0,
+        walletAmount: 0,
+        feeAmount: 0,
+        sources: null,
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const transfer = await getDb(env)
+      .prepare("SELECT status, fiat_amount FROM payment_transfers WHERE id = ?")
+      .bind(transferId)
+      .first<{ status: string; fiat_amount: string | null }>();
+    expect(transfer).toEqual({ status: "settling", fiat_amount: null });
+  });
+
+  it("completes a BVNK off-ramp transfer from a confirmed channel transaction", async () => {
+    const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bd7";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, source_address, destination_address,
+           token, amount, memo, type, direction, status, provider, provider_reference,
+           delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
+           initiated_by_key_id, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        transferId,
+        ORG_ID,
+        PROJECT_ID,
+        "wallet_bvnk_webhook",
+        "source_address",
+        null,
+        "USDC",
+        "5",
+        null,
+        "offramp",
+        "outbound",
+        "awaiting_payment",
+        "bvnk",
+        "019f0ce4-98ab-7424-a968-fc323266b8ed",
+        "manual_instructions",
+        "USD",
+        null,
+        {},
+        null,
+        null,
+        null,
+        "2026-06-28T06:22:15.239Z",
+        "2026-06-28T06:22:17.258Z"
+      )
+      .run();
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:payment:channel:transaction-confirmed",
+      eventId: "019f0ce5-28a6-7000-8000-000000000000",
+      data: {
+        channelId: "019f0ce4-98ab-7424-a968-fc323266b8ed",
+        merchantDisplayName: `sdp:offramp:USD:${COUNTERPARTY_ID}`,
+        reference: buildBvnkOfframpReference(transferId),
+        dateCreated: 1782627748000,
+        lastUpdated: 1782627771174,
+        status: "COMPLETE",
+        uuid: "019f0ce4-c7c2-7a12-ac86-9f1820ff48e1",
+        hash: "3B9neiFe2HG3P8ovttfH1XrppubeFtMcKWZDhw9rzLUqUSQrfLYdzpC3v3ctsbtQBt1rwUPkBaa4SWG2SZzqtXD2",
+        address: "H8j6ZdeUt1D3GexMhUs6mSrncK7r4KkspKuLVhpsA7V6",
+        paidCurrency: "USDC",
+        displayCurrency: "USD",
+        walletCurrency: "USD",
+        feeCurrency: "USD",
+        paidAmount: 5,
+        displayAmount: 4.95,
+        walletAmount: 4.95,
+        feeAmount: 0.04,
+        sources: [
+          "GSDYH3kHc4iAVHSCrTxxhXLsoQfMLo6eYLPbA3HLgvzg",
+          "6zZcSMwGfY7iPkNvBtZksmNr9JCgg9Q1CGDRjtV4f2U9",
+        ],
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const transfer = await getDb(env)
+      .prepare("SELECT status, fiat_amount FROM payment_transfers WHERE id = ?")
+      .bind(transferId)
+      .first<{ status: string; fiat_amount: string | null }>();
+    expect(transfer).toEqual({ status: "completed", fiat_amount: "4.95" });
   });
 
   it("rejects a webhook with an invalid signature", async () => {
@@ -827,7 +1200,11 @@ describe("BVNK ramp webhook", () => {
   it("rejects a bvnk webhook that omits the envelope timestamp", async () => {
     const body = JSON.stringify({
       event: "bvnk:customers:status-change",
-      data: { customerId: CUSTOMER_REFERENCE, status: "VERIFIED", customerType: "INDIVIDUAL" },
+      data: {
+        customerId: CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+        customerType: "INDIVIDUAL",
+      },
     });
     const sig = createHmac("sha256", BVNK_WEBHOOK_SECRET).update(body).digest("base64");
     const res = await app.request(

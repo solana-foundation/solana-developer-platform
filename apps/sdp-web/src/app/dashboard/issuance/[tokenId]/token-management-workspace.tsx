@@ -469,6 +469,22 @@ export function TokenManagementWorkspace({
       metadataAuthority,
     })
   );
+  const freezeSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "freeze",
+      token,
+      authorityWallets,
+      metadataAuthority,
+    })
+  );
+  const pauseSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "pause",
+      token,
+      authorityWallets,
+      metadataAuthority,
+    })
+  );
   const permissionRows = getPermissionRows(token, metadataAuthority).map((row) => {
     const displayedAuthorityAddress = getDisplayedAuthorityAddress({
       token,
@@ -520,6 +536,10 @@ export function TokenManagementWorkspace({
     seizeDisabledReason ?? seizeSignerSelection.unavailableReason;
   const effectiveForceBurnDisabledReason =
     forceBurnDisabledReason ?? forceBurnSignerSelection.unavailableReason;
+  const effectiveFreezeDisabledReason =
+    freezeDisabledReason ?? freezeSignerSelection.unavailableReason;
+  const effectivePauseDisabledReason =
+    pauseDisabledReason ?? pauseSignerSelection.unavailableReason;
   const selectedBurnSignerWallet =
     findWalletByWalletId(
       burnSignerSelection.wallets,
@@ -589,8 +609,8 @@ export function TokenManagementWorkspace({
   const complianceActionDisabledReasons: Partial<Record<AdminAction, string | null>> = {
     seize: effectiveSeizeDisabledReason ?? seizeValidationReason,
     "force-burn": effectiveForceBurnDisabledReason ?? forceBurnValidationReason,
-    freeze: freezeDisabledReason,
-    pause: pauseDisabledReason,
+    freeze: effectiveFreezeDisabledReason,
+    pause: effectivePauseDisabledReason,
   };
   const fundManagementRows = canDeployToken
     ? [
@@ -938,8 +958,8 @@ export function TokenManagementWorkspace({
   };
 
   const handlePause = (pause: boolean) => {
-    if (pauseDisabledReason) {
-      toast.error(pauseDisabledReason);
+    if (effectivePauseDisabledReason) {
+      toast.error(effectivePauseDisabledReason);
       return;
     }
 
@@ -966,8 +986,8 @@ export function TokenManagementWorkspace({
   };
 
   const handleFreeze = (unfreeze: boolean) => {
-    if (freezeDisabledReason) {
-      toast.error(freezeDisabledReason);
+    if (effectiveFreezeDisabledReason) {
+      toast.error(effectiveFreezeDisabledReason);
       return;
     }
 
@@ -1039,11 +1059,40 @@ export function TokenManagementWorkspace({
   };
 
   const handleRemoveAllowlist = (entryId: string) => {
-    runAction({
-      label: controlListCopy?.removeActionLabel ?? "Remove allowlist entry",
-      method: "DELETE",
-      path: `${tokenBasePath}/allowlist/${entryId}`,
-    });
+    runAction(
+      {
+        label: controlListCopy?.removeActionLabel ?? "Remove allowlist entry",
+        method: "DELETE",
+        path: `${tokenBasePath}/allowlist/${entryId}`,
+      },
+      {
+        onSuccess: async () => {
+          await mutateSupportingData(
+            (current) => {
+              if (!current) {
+                return current;
+              }
+
+              const allowlistEntries = current.allowlistEntries.filter(
+                (entry) => entry.id !== entryId
+              );
+              const removedCount = current.allowlistEntries.length - allowlistEntries.length;
+              const allowlistTotal =
+                current.allowlistTotal === null
+                  ? null
+                  : Math.max(0, current.allowlistTotal - removedCount);
+
+              return {
+                ...current,
+                allowlistEntries,
+                allowlistTotal,
+              };
+            },
+            { revalidate: false }
+          );
+        },
+      }
+    );
   };
 
   const handleAuthorityModalOpen = (row: PermissionRow) => {
@@ -1199,6 +1248,22 @@ export function TokenManagementWorkspace({
           onSignerWalletIdChange: (value: string) =>
             setForceBurnForm((previous) => ({ ...previous, signingWalletId: value })),
         };
+      case "freeze":
+        return {
+          signerWallets: freezeSignerSelection.wallets,
+          defaultSignerWalletId: freezeSignerSelection.defaultWalletId,
+          signerUnavailableReason: freezeSignerSelection.unavailableReason,
+          // Freeze authority is always single
+          onSignerWalletIdChange: (_value: string) => {},
+        };
+      case "pause":
+        return {
+          signerWallets: pauseSignerSelection.wallets,
+          defaultSignerWalletId: pauseSignerSelection.defaultWalletId,
+          signerUnavailableReason: pauseSignerSelection.unavailableReason,
+          // Pause authority is always single
+          onSignerWalletIdChange: (_value: string) => {},
+        };
       default:
         return {
           signerWallets: [],
@@ -1256,6 +1321,7 @@ export function TokenManagementWorkspace({
         controlListEmptyState={controlListCopy?.emptyState ?? "No allowlist entries yet."}
         freezeHint={controlListCopy?.freezeHint ?? null}
         signerWallets={visibleActionSignerProps.signerWallets}
+        defaultSignerWalletId={visibleActionSignerProps.defaultSignerWalletId}
         walletOptions={authorityWallets}
         signerUnavailableReason={visibleActionSignerProps.signerUnavailableReason}
         mintValidationErrors={mintValidationErrors}
@@ -1347,12 +1413,12 @@ export function TokenManagementWorkspace({
             </p>
           </div>
           {canManageTokenAdmin ? (
-            <TokenDisabledActionTooltip reason={isPending ? null : pauseDisabledReason}>
+            <TokenDisabledActionTooltip reason={isPending ? null : effectivePauseDisabledReason}>
               <Button
                 type="button"
                 size="sm"
                 onClick={() => handlePause(false)}
-                disabled={isPending || Boolean(pauseDisabledReason)}
+                disabled={isPending || Boolean(effectivePauseDisabledReason)}
               >
                 Unpause token
               </Button>
@@ -1374,7 +1440,7 @@ export function TokenManagementWorkspace({
       ) : null}
 
       {activeTab === "permissions" ? (
-        supportingDataLoading ? (
+        authorityWalletsLoading ? (
           <LoadingSection message="Loading authority wallet access…" />
         ) : (
           <div className="space-y-4">
@@ -1544,6 +1610,7 @@ export function TokenManagementWorkspace({
             controlListEmptyState={controlListCopy?.emptyState ?? "No allowlist entries yet."}
             freezeHint={controlListCopy?.freezeHint ?? null}
             signerWallets={fundManagementActionSignerProps.signerWallets}
+            defaultSignerWalletId={fundManagementActionSignerProps.defaultSignerWalletId}
             walletOptions={authorityWallets}
             signerUnavailableReason={fundManagementActionSignerProps.signerUnavailableReason}
             mintValidationErrors={mintValidationErrors}

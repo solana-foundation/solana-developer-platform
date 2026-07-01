@@ -1,13 +1,11 @@
 import type {
   BvnkBankFundingDetails,
   BvnkOnboardingStatus,
-  BvnkPaymentRampExecution,
   BvnkPaymentRampInstruction,
   Counterparty,
   CounterpartyEntityType,
   PaymentRampEstimate,
   PaymentRampEstimateFees,
-  PaymentRampExecution,
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
@@ -26,7 +24,8 @@ import {
   providerUnavailable,
 } from "@/lib/errors";
 import { hashString, hmacSha256Base64 } from "@/lib/hash";
-import { readString } from "@/lib/json";
+import { readRecord, readString } from "@/lib/json";
+import { assertValidAddress } from "@/lib/solana";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { type ProviderRequestInit, providerFetch } from "../fetch";
 import { readyCounterparty } from "../requirements";
@@ -165,19 +164,25 @@ function readBvnkConfig(env: Record<string, string | undefined>, mode: SdpEnviro
   return { auth: { authId, secretKey }, walletId, apiBaseUrl, signingHost, proxyAuthSecret };
 }
 
-type BvnkNetwork =
-  | "ALGORAND"
-  | "CARDANO"
-  | "BITCOIN_CASH"
-  | "BINANCE"
-  | "BITCOIN"
-  | "DOGECOIN"
-  | "ETHEREUM"
-  | "LITECOIN"
-  | "POLYGON"
-  | "SOLANA"
-  | "TRON"
-  | "RIPPLE";
+const BVNK_NETWORKS = [
+  "ALGORAND",
+  "CARDANO",
+  "BITCOIN_CASH",
+  "BINANCE",
+  "BITCOIN",
+  "DOGECOIN",
+  "ETHEREUM",
+  "LITECOIN",
+  "POLYGON",
+  "SOLANA",
+  "TRON",
+  "RIPPLE",
+] as const;
+
+type BvnkNetwork = (typeof BVNK_NETWORKS)[number];
+
+// Longest-first so suffix matching prefers the most specific network (e.g. BITCOIN_CASH before BITCOIN).
+const BVNK_NETWORKS_BY_LENGTH_DESC = [...BVNK_NETWORKS].sort((a, b) => b.length - a.length);
 
 const BVNK_NETWORK_ALIASES: Record<string, BvnkNetwork> = {
   algo: "ALGORAND",
@@ -237,28 +242,6 @@ export function normalizeBvnkCurrencyAndNetwork(value: string): BvnkCurrencyNetw
   throw badRequest(
     `Unsupported BVNK cryptoToken '${value}'. Provide token with network (for example: BTC, ETH, SOL, USDC_SOLANA).`
   );
-}
-
-function mapBvnkPaymentStatus(status: string | undefined): PaymentRampExecution["status"] {
-  if (!status) return "pending";
-  const normalized = status.trim().toUpperCase();
-  if (
-    normalized.includes("COMPLETE") ||
-    normalized.includes("PAID") ||
-    normalized.includes("SUCCESS")
-  ) {
-    return "completed";
-  }
-  if (normalized.includes("PROCESS")) return "processing";
-  if (
-    normalized.includes("FAIL") ||
-    normalized.includes("EXPIRE") ||
-    normalized.includes("CANCEL") ||
-    normalized.includes("REJECT")
-  ) {
-    return "failed";
-  }
-  return "pending";
 }
 
 function buildBvnkComplianceDetails(
@@ -355,15 +338,35 @@ function mapBvnkErrorStatus(
   return badRequest(message);
 }
 
-interface BvnkEstimateResponse {
-  externalId?: string;
+interface BvnkChannelAddress {
+  network?: string;
+  address?: string;
+  uri?: string;
 }
 
-interface BvnkPaymentSummary {
+interface BvnkChannelResponse {
   uuid?: string;
-  status?: string;
-  redirectUrl?: string;
   reference?: string;
+  status?: string;
+  address?: string;
+  network?: string;
+  redirectUrl?: string;
+  alternatives?: BvnkChannelAddress[];
+}
+
+/** Picks the deposit address for the requested network from the channel's primary slot or alternatives. */
+function parseBvnkChannelAddress(channel: BvnkChannelResponse, network: BvnkNetwork): string {
+  const candidates: BvnkChannelAddress[] = [{ network: channel.network, address: channel.address }];
+  if (channel.alternatives) {
+    candidates.push(...channel.alternatives);
+  }
+  const match = candidates.find(
+    (candidate) => candidate.network?.toUpperCase() === network && candidate.address
+  );
+  if (!match?.address) {
+    throw badRequest(`BVNK channel did not return a ${network} deposit address.`);
+  }
+  return match.address;
 }
 
 interface BvnkPayoutEstimateResponse {
@@ -536,6 +539,7 @@ export interface BvnkCustomerState {
 
 export interface BvnkFiatWallet {
   id: string;
+  name?: string;
   status?: string;
   bankAccount?: BvnkBankFundingDetails;
 }
@@ -547,6 +551,13 @@ export interface CreateBvnkAgreementSessionInput {
 }
 
 export interface CreateBvnkCustomerInput {
+  /**
+   * BVNK API field for the caller's stable customer identifier.
+   * SDP sets this to a compact `cp_<uuid_without_hyphens>` alias via
+   * `buildBvnkCustomerExternalReference`, because BVNK caps this field at 36
+   * characters. Webhooks reverse it back to the canonical SDP counterparty id
+   * without scanning provider_data.
+   */
   externalReference: string;
   signedAgreementSessionReference: string;
   individual: Record<string, unknown>;
@@ -561,6 +572,21 @@ export interface CreateBvnkFiatWalletInput {
   idempotencyKey: string;
 }
 
+/**
+ * Builds BVNK's `Idempotency-Key` header for fiat wallet creation.
+ *
+ * SDP's BVNK wallet `name` is the canonical wallet identity. BVNK caps
+ * idempotency keys at 36 characters, so SDP hashes the full wallet name and
+ * trims the digest to the provider limit instead of sending the long readable
+ * name as the key.
+ *
+ * @param walletName BVNK wallet `name` generated by SDP.
+ * @returns A stable 36-character idempotency key for the wallet name.
+ */
+export async function buildBvnkWalletIdempotencyKey(walletName: string): Promise<string> {
+  return (await hashString(walletName)).slice(0, 36);
+}
+
 interface BvnkWalletProfile {
   id: string;
   currencies: string[];
@@ -568,10 +594,10 @@ interface BvnkWalletProfile {
 }
 
 function parseBvnkWalletProfileId(payload: unknown, currency: string): string | undefined {
-  const content = asRecord(payload).content;
+  const content = readRecord(payload)?.content;
   if (!Array.isArray(content)) return undefined;
   const profiles = content.map((entry): BvnkWalletProfile => {
-    const profile = asRecord(entry);
+    const profile = readRecord(entry) ?? {};
     return {
       id: readString(profile.id) ?? "",
       currencies: Array.isArray(profile.currencies)
@@ -591,26 +617,55 @@ function parseBvnkWalletProfileId(payload: unknown, currency: string): string | 
 
 export type BvnkWebhookEvent =
   | {
-      kind: "wallet";
-      event: string;
+      kind: "ledger:v2:wallet:status-change";
       customerReference?: string;
       walletId?: string;
+      walletName?: string;
       walletStatus?: string;
       bankAccount?: BvnkBankFundingDetails;
     }
   | {
-      kind: "customer";
-      event: string;
+      kind: "bvnk:ledger:wallet:create";
+      customerReference?: string;
+      walletId?: string;
+      walletName?: string;
+      walletStatus?: string;
+      bankAccount?: BvnkBankFundingDetails;
+    }
+  | {
+      kind: "bvnk:customers:status-change";
       customerReference?: string;
       customerStatus?: string;
+    }
+  | {
+      kind: "bvnk:platform:customer:update";
+      customerReference?: string;
       verificationUrl?: string;
     }
   | {
-      kind: "payment";
-      event: string;
-      customerId?: string;
+      kind: "bvnk:payment:payin:status-change";
+      customerReference?: string;
       walletId?: string;
       status?: string;
+      amount?: string;
+    }
+  | {
+      kind:
+        | "bvnk:payment:channel:transaction-detected"
+        | "bvnk:payment:channel:transaction-confirmed";
+      transferId?: string;
+      channelId?: string;
+      transactionId?: string;
+      transactionHash?: string;
+      status?: string;
+      paidCurrency?: string;
+      paidAmount?: string;
+      displayCurrency?: string;
+      displayAmount?: string;
+      walletCurrency?: string;
+      walletAmount?: string;
+      feeCurrency?: string;
+      feeAmount?: string;
     }
   | { kind: "ignore"; event: string };
 
@@ -623,19 +678,15 @@ export interface CreateBvnkOnrampRuleInput {
   entity: BvnkRuleEntity;
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
-}
-
 function parseBvnkAgreementSession(payload: unknown): BvnkAgreementSession {
-  const data = asRecord(payload);
+  const data = readRecord(payload) ?? {};
   const reference = readString(data.reference);
   if (!reference) {
     throw badRequest("BVNK agreement session response is missing a reference");
   }
   const agreements = Array.isArray(data.agreements)
     ? data.agreements.map((entry): BvnkAgreement => {
-        const a = asRecord(entry);
+        const a = readRecord(entry) ?? {};
         return {
           name: readString(a.name),
           displayName: readString(a.displayName),
@@ -702,7 +753,7 @@ export function bvnkUnverifiedOnboardingStatus(
 }
 
 function parseBvnkCustomerState(payload: unknown): BvnkCustomerState {
-  const data = asRecord(payload);
+  const data = readRecord(payload) ?? {};
   const reference = readString(data.reference);
   if (!reference) {
     throw badRequest("BVNK customer response is missing a reference");
@@ -711,7 +762,7 @@ function parseBvnkCustomerState(payload: unknown): BvnkCustomerState {
   if (!status) {
     throw badRequest("BVNK customer response is missing a status");
   }
-  const verification = asRecord(data.verification);
+  const verification = readRecord(data.verification) ?? {};
   return {
     reference,
     status,
@@ -725,7 +776,7 @@ function parseBvnkLedgersBankAccount(
 ): BvnkBankFundingDetails | undefined {
   const ledgers = Array.isArray(data.ledgers) ? data.ledgers : [];
   for (const entry of ledgers) {
-    const ledger = asRecord(entry);
+    const ledger = readRecord(entry) ?? {};
     const accountNumber = readString(ledger.accountNumber);
     if (accountNumber) {
       return {
@@ -739,19 +790,21 @@ function parseBvnkLedgersBankAccount(
 }
 
 function parseBvnkFiatWallet(payload: unknown): BvnkFiatWallet {
-  const data = asRecord(payload);
+  const data = readRecord(payload) ?? {};
   const id = readString(data.id);
   if (!id) {
     throw badRequest("BVNK wallet response is missing an id");
   }
+  const name = readString(data.name);
   const status = readString(data.status);
   const instruments = Array.isArray(data.paymentInstruments) ? data.paymentInstruments : [];
   for (const entry of instruments) {
-    const inst = asRecord(entry);
+    const inst = readRecord(entry) ?? {};
     if (readString(inst.type) !== "FIAT") continue;
-    const bank = asRecord(inst.bankDetails);
+    const bank = readRecord(inst.bankDetails) ?? {};
     return {
       id,
+      name,
       status,
       bankAccount: {
         accountNumber: readString(inst.accountNumber),
@@ -761,7 +814,14 @@ function parseBvnkFiatWallet(payload: unknown): BvnkFiatWallet {
       },
     };
   }
-  return { id, status };
+  return { id, name, status };
+}
+
+function readBvnkAmount(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return readString(value);
 }
 
 export class BvnkRampClient implements RampProvider {
@@ -900,59 +960,83 @@ export class BvnkRampClient implements RampProvider {
   }
 
   /**
-   * Maps a BVNK webhook to a typed event by its `event` discriminator. Each
-   * event carries the customer in a different field and a different `status`
-   * (customer KYC vs wallet lifecycle), so they're mapped explicitly rather than
-   * scraped generically. Unrecognised events return an `ignore` kind.
+   * Maps a BVNK webhook to a typed event by its upstream `event` discriminator.
+   * Each event carries the customer in a different field and a different
+   * `status` (customer KYC vs wallet lifecycle), so they're mapped explicitly
+   * rather than scraped generically.
    */
   parseBvnkWebhookEvent(payload: unknown): BvnkWebhookEvent {
-    const root = asRecord(payload);
-    const event = readString(root.event) ?? "";
-    const data = asRecord(root.data);
+    const root = readRecord(payload);
+    const event = readString(root?.event);
+    if (!event) {
+      throw internalError("BVNK webhook is missing an event");
+    }
+    const data = readRecord(root?.data);
+    if (!data) {
+      throw internalError(`BVNK webhook "${event}" is missing a data object`);
+    }
 
     switch (event) {
       case "bvnk:customers:status-change":
         return {
-          kind: "customer",
-          event,
+          kind: event,
           customerReference: readString(data.customerId),
           customerStatus: readString(data.status),
         };
       case "bvnk:platform:customer:update":
         return {
-          kind: "customer",
-          event,
+          kind: event,
           customerReference: readString(data.reference),
-          verificationUrl: readString(asRecord(data.verification).url),
+          verificationUrl: readString(readRecord(data.verification)?.url),
         };
       case "ledger:v2:wallet:status-change": {
         const wallet = parseBvnkFiatWallet(data);
         return {
-          kind: "wallet",
-          event,
-          customerReference: readString(asRecord(data.customer).id),
+          kind: event,
+          customerReference: readString(readRecord(data.customer)?.id),
           walletId: wallet.id,
+          walletName: wallet.name,
           walletStatus: readString(data.status),
           bankAccount: wallet.bankAccount,
         };
       }
       case "bvnk:ledger:wallet:create":
         return {
-          kind: "wallet",
-          event,
+          kind: event,
           customerReference: readString(data.customerReference),
           walletId: readString(data.id),
+          walletName: readString(data.walletName),
           walletStatus: readString(data.status),
           bankAccount: parseBvnkLedgersBankAccount(data),
         };
-      case "bvnk:payment:crypto:status-change":
+      case "bvnk:payment:payin:status-change":
         return {
-          kind: "payment",
-          event,
-          customerId: readString(data.customerId),
-          walletId: readString(data.walletId),
+          kind: event,
+          customerReference: readString(data.customerReference),
+          walletId: readString(readRecord(data.beneficiary)?.walletId),
           status: readString(data.status),
+          amount: readBvnkAmount(readRecord(data.amount)?.value),
         };
+      case "bvnk:payment:channel:transaction-detected":
+      case "bvnk:payment:channel:transaction-confirmed": {
+        const reference = readString(data.reference);
+        return {
+          kind: event,
+          transferId: reference ? parseBvnkOfframpReference(reference) : undefined,
+          channelId: readString(data.channelId),
+          transactionId: readString(data.uuid),
+          transactionHash: readString(data.hash),
+          status: readString(data.status),
+          paidCurrency: readString(data.paidCurrency),
+          paidAmount: readBvnkAmount(data.paidAmount),
+          displayCurrency: readString(data.displayCurrency),
+          displayAmount: readBvnkAmount(data.displayAmount),
+          walletCurrency: readString(data.walletCurrency),
+          walletAmount: readBvnkAmount(data.walletAmount),
+          feeCurrency: readString(data.feeCurrency),
+          feeAmount: readBvnkAmount(data.feeAmount),
+        };
+      }
       default:
         return { kind: "ignore", event };
     }
@@ -1262,148 +1346,142 @@ export class BvnkRampClient implements RampProvider {
     }
     const config = readBvnkConfig(env, mode);
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+    if (network !== "SOLANA") {
+      throw internalError(`BVNK off-ramp returned unsupported SDP crypto network: ${network}`);
+    }
+    if (!isSolanaCryptoAsset(currency)) {
+      throw internalError(`BVNK off-ramp returned unsupported SDP crypto asset: ${currency}`);
+    }
     const fiatCurrency = input.fiatCurrency;
-    const paidRequiredAmount = toPositiveAmount(input.cryptoAmount, "cryptoAmount");
-    const reference = rampId("sdp_offramp");
+    if (!input.paymentTransferId) {
+      throw internalError("BVNK off-ramp requires an SDP payment transfer id.");
+    }
+    const reference = buildBvnkOfframpReference(input.paymentTransferId);
     const complianceDetails = buildBvnkComplianceDetails(input.bvnkCompliance, {
       requirePartyDetails: true,
     });
 
-    const estimate = await this.request<BvnkEstimateResponse>(config, "/api/v1/pay/estimate", {
+    const channel = await this.request<BvnkChannelResponse>(config, "/api/v2/channel", {
       method: "POST",
       body: {
         walletId: input.bvnkOfframpWalletId,
-        walletCurrency: fiatCurrency,
-        paidCurrency: currency,
-        paidRequiredAmount,
+        payCurrency: currency,
+        displayCurrency: fiatCurrency,
         reference,
-        network,
+        customerId: input.externalCustomerId,
         complianceDetails,
       },
     });
-    if (!estimate.externalId) {
-      throw badRequest("BVNK estimate response is missing externalId");
+    if (!channel.uuid) {
+      throw badRequest("BVNK channel response is missing uuid");
     }
-
-    const summary = await this.request<BvnkPaymentSummary>(
-      config,
-      `/api/v1/pay/estimate/${encodeURIComponent(estimate.externalId)}/accept`,
-      {
-        method: "POST",
-        body: {
-          customerId: input.externalCustomerId,
-          payOutDetails: { currency, address: input.sourceWalletAddress, network },
-          complianceDetails,
-        },
-      }
+    const destinationAddress = assertValidAddress(
+      parseBvnkChannelAddress(channel, network),
+      "BVNK channel deposit address"
     );
-    if (!summary.uuid) {
-      throw badRequest("BVNK off-ramp did not return a payment uuid");
-    }
-    if (!summary.redirectUrl) {
-      throw badRequest("BVNK off-ramp did not return a redirect URL");
-    }
-    return {
-      provider: "bvnk",
-      id: summary.uuid,
-      status: mapBvnkPaymentStatus(summary.status),
-      deliveryMode: "hosted",
-      hostedUrl: summary.redirectUrl,
-    };
-  }
 
-  async executeOnramp(
-    { mode }: RampRuntimeContext,
-    input: BvnkExecuteOnrampInput
-  ): Promise<BvnkPaymentRampExecution> {
-    const resolution = input.bvnkPaymentRule;
-    const { network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
-    const fiatCurrency = input.fiatCurrency;
-    const instruction = buildBvnkOnrampInstruction(resolution, {
-      network,
-      destinationWalletAddress: input.destinationWalletAddress,
-      fiatCurrency,
-      mode,
-    });
-    const reference =
-      resolution.onboardingStatus === "ready"
-        ? resolution.entry.ruleId
-        : resolution.customer.customerReference;
-    if (!reference)
-      throw internalError(
-        `BVNK on-ramp missing reference at status "${resolution.onboardingStatus}".`
-      );
     return {
-      id: reference,
       provider: "bvnk",
+      id: channel.uuid,
       status: "pending",
-      reference,
-      paymentInstructions: [instruction],
-    };
-  }
-
-  async executeOfframp(
-    { env, mode }: RampRuntimeContext,
-    input: BvnkExecuteOfframpInput
-  ): Promise<BvnkPaymentRampExecution> {
-    const config = readBvnkConfig(env, mode);
-    const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
-    const fiatCurrency = input.fiatCurrency;
-    const paidRequiredAmount = toPositiveAmount(input.cryptoAmount, "cryptoAmount");
-    const externalReference = rampId("sdp_offramp");
-    const complianceDetails = buildBvnkComplianceDetails(input.bvnkCompliance, {
-      requirePartyDetails: true,
-    });
-
-    const estimate = await this.request<BvnkEstimateResponse>(config, "/api/v1/pay/estimate", {
-      method: "POST",
-      body: {
-        walletId: input.walletId,
-        walletCurrency: fiatCurrency,
-        paidCurrency: currency,
-        paidRequiredAmount,
-        reference: externalReference,
-        network,
-        complianceDetails,
-      },
-    });
-    if (!estimate.externalId) {
-      throw badRequest("BVNK estimate response is missing externalId");
-    }
-
-    const summary = await this.request<BvnkPaymentSummary>(
-      config,
-      `/api/v1/pay/estimate/${encodeURIComponent(estimate.externalId)}/accept`,
-      {
-        method: "POST",
-        body: {
-          customerId: input.externalCustomerId,
-          payOutDetails: { currency, address: input.sourceWalletAddress, network },
-          complianceDetails,
+      deliveryMode: "manual_instructions",
+      paymentInstructions: [
+        {
+          provider: "bvnk",
+          kind: "crypto_deposit",
+          fiatCurrency,
+          cryptoCurrency: currency,
+          destinationAddress,
+          network,
+          reference,
+          instructionsNotes: `Send ${currency} on ${network} to the deposit address. BVNK converts it to ${fiatCurrency} and pays out to the registered bank account.`,
         },
-      }
-    );
-    if (!summary.uuid) {
-      throw badRequest("BVNK off-ramp did not return a payment uuid");
-    }
-
-    return {
-      id: rampId("ramp"),
-      provider: "bvnk",
-      status: mapBvnkPaymentStatus(summary.status),
-      redirectUrl: summary.redirectUrl,
-      reference: summary.uuid,
+      ],
     };
   }
 }
 
+/**
+ * Builds the caller-defined BVNK off-ramp channel reference.
+ *
+ * The route pre-generates the SDP payment transfer id before creating the BVNK
+ * channel, then persists the transfer with that same id after BVNK returns the
+ * channel uuid. This keeps BVNK's human/provider-side reference tied to SDP's
+ * transaction id.
+ *
+ * BVNK rejects `reference` values containing colons or other special
+ * characters; allowed characters are alphanumeric characters, dashes,
+ * underscores, and periods. This deliberately uses underscores instead of the
+ * wallet-name convention (`sdp:offramp:...`) so the reference is accepted by
+ * BVNK while still carrying SDP's transfer id.
+ *
+ * @param paymentTransferId SDP payment transfer id, for example `xfr_<uuid>`.
+ * @returns BVNK off-ramp reference in `sdp_offramp_<transfer_id>` format.
+ */
+export function buildBvnkOfframpReference(paymentTransferId: string): string {
+  if (!paymentTransferId.trim()) {
+    throw internalError("BVNK off-ramp reference requires a payment transfer id.");
+  }
+  return `sdp_offramp_${paymentTransferId}`;
+}
+
+/**
+ * Parses BVNK's channel transaction `data.reference` back into the SDP transfer id.
+ *
+ * @param reference BVNK off-ramp reference in `sdp_offramp_<transfer_id>` format.
+ * @returns SDP payment transfer id, for example `xfr_<uuid>`.
+ */
+export function parseBvnkOfframpReference(reference: string): string {
+  const prefix = "sdp_offramp_";
+  if (!reference.startsWith(prefix)) {
+    throw internalError(`Malformed BVNK off-ramp reference: ${reference}`);
+  }
+  const transferId = reference.slice(prefix.length);
+  if (!/^xfr_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(transferId)) {
+    throw internalError(`Malformed BVNK off-ramp reference: ${reference}`);
+  }
+  return transferId;
+}
+
 /** Shared, one-per-counterparty BVNK customer (KYC) state. */
 export interface BvnkCustomerResolution {
+  /**
+   * BVNK customer `externalReference` value. For SDP-created customers this is
+   * a reversible `cp_<uuid_without_hyphens>` alias for the SDP counterparty id,
+   * sized to fit BVNK's 36-character limit.
+   */
   externalReference?: string;
   customerReference?: string;
   status?: string;
   verificationStatus?: BvnkVerificationStatus;
   verificationUrl?: string;
+}
+
+const SDP_COUNTERPARTY_ID_PATTERN =
+  /^counterparty_([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$/i;
+
+/**
+ * Builds the value stored in BVNK's customer `externalReference` field.
+ *
+ * BVNK limits `externalReference` to 36 characters, while SDP counterparty ids
+ * are `counterparty_<uuid>` and therefore too long. This function creates a
+ * reversible BVNK-facing id in `cp_<uuid_without_hyphens>` format. BVNK returns
+ * this caller-provided value in customer/payment webhooks, letting handlers
+ * reconstruct the SDP counterparty id and load by primary key.
+ *
+ * @param counterpartyId SDP counterparty primary key in `counterparty_<uuid>` format.
+ * @returns BVNK customer `externalReference` in `cp_<32_hex_uuid>` format.
+ * @throws AppError with `INTERNAL_ERROR` when the counterparty id cannot be
+ * represented in BVNK's compact externalReference format.
+ */
+export function buildBvnkCustomerExternalReference(counterpartyId: string): string {
+  const match = SDP_COUNTERPARTY_ID_PATTERN.exec(counterpartyId);
+  if (!match) {
+    throw internalError(
+      `Malformed SDP counterparty id for BVNK externalReference: ${counterpartyId}`
+    );
+  }
+  return `cp_${match.slice(1).join("").toLowerCase()}`;
 }
 
 /** Per funding-spec (fiat+token+destination) virtual wallet + rule. */
@@ -1414,8 +1492,9 @@ export interface BvnkOnrampRequestSpec {
   fiatCurrency: string;
 }
 
-export interface BvnkOnrampEntry {
+export interface BvnkOnrampPaymentRuleState {
   walletId?: string;
+  walletName?: string;
   walletStatus?: string;
   ruleId?: string;
   ruleStatus?: string;
@@ -1432,25 +1511,8 @@ export function isBvnkWalletActive(status: string | undefined): boolean {
 
 export interface BvnkPaymentRuleResolution {
   customer: BvnkCustomerResolution;
-  entry: BvnkOnrampEntry;
+  entry: BvnkOnrampPaymentRuleState;
   onboardingStatus: BvnkOnboardingStatus;
-}
-
-export interface BvnkExecuteOnrampInput {
-  destinationWalletAddress: string;
-  cryptoToken: string;
-  fiatCurrency: RampFiatCurrency;
-  bvnkPaymentRule: BvnkPaymentRuleResolution;
-}
-
-export interface BvnkExecuteOfframpInput {
-  sourceWalletAddress: string;
-  cryptoToken: string;
-  fiatCurrency: RampFiatCurrency;
-  cryptoAmount: string;
-  externalCustomerId: string;
-  walletId: string;
-  bvnkCompliance?: BvnkComplianceInput;
 }
 
 export function readBvnkData(
@@ -1469,9 +1531,11 @@ export function readBvnkCustomer(
 
 export function readBvnkWallets(
   providerData: CounterpartyRow["provider_data"]
-): Record<string, BvnkOnrampEntry> {
+): Record<string, BvnkOnrampPaymentRuleState> {
   const wallets = readBvnkData(providerData).wallets;
-  return wallets && typeof wallets === "object" ? (wallets as Record<string, BvnkOnrampEntry>) : {};
+  return wallets && typeof wallets === "object"
+    ? (wallets as Record<string, BvnkOnrampPaymentRuleState>)
+    : {};
 }
 
 /** Merchant-owned BVNK off-ramp wallet, one per fiat currency. */
@@ -1480,10 +1544,120 @@ export interface BvnkOfframpWallet {
   status?: string;
 }
 
+export function buildBvnkOfframpWalletName(
+  fiatCurrency: RampFiatCurrency,
+  counterpartyId: string
+): string {
+  return `sdp:offramp:${fiatCurrency}:${counterpartyId}`;
+}
+
+/**
+ * Builds the BVNK wallet name for customer-owned on-ramp funding wallets.
+ *
+ * The name carries the SDP counterparty id and the deterministic on-ramp
+ * payment rule fields so wallet lifecycle webhooks can update
+ * `provider_data.bvnk.wallets[onrampPaymentRuleKey]` directly.
+ *
+ * @param counterpartyId SDP counterparty primary key.
+ * @param onrampPaymentRuleKey Deterministic key from `buildBvnkOnrampPaymentRuleKey`.
+ * @returns BVNK wallet name in
+ * `sdp:onramp:<counterparty_id>:<fiat>:<crypto>_<network>:<destination>` format.
+ */
+export function buildBvnkOnrampWalletName(
+  counterpartyId: string,
+  onrampPaymentRuleKey: string
+): string {
+  const key = parseBvnkOnrampPaymentRuleKey(onrampPaymentRuleKey);
+  return `sdp:onramp:${counterpartyId}:${key.fiatCurrency}:${key.cryptoCurrency}_${key.cryptoNetwork}:${key.destinationWalletAddress}`;
+}
+
+const BVNKOfframpWalletName = z.object({
+  namespace: z.literal("sdp"),
+  direction: z.literal("offramp"),
+  fiatCurrency: z.enum(RAMP_FIAT_CURRENCIES),
+  counterpartyId: z.string().min(1),
+});
+
+const BVNKOnrampWalletName = z.object({
+  namespace: z.literal("sdp"),
+  direction: z.literal("onramp"),
+  counterpartyId: z.string().min(1),
+  onrampKey: z.string().min(1),
+});
+
+export const BVNKWallet = z.discriminatedUnion("direction", [
+  BVNKOfframpWalletName,
+  BVNKOnrampWalletName,
+]);
+
+export type BVNKWallet = z.infer<typeof BVNKWallet>;
+
+export function parseBvnkOfframpWalletName(
+  walletName: string
+): Extract<BVNKWallet, { direction: "offramp" }> {
+  const parts = walletName.split(":");
+  if (parts.length !== 4) {
+    throw internalError(`Malformed BVNK off-ramp wallet name: ${walletName}`);
+  }
+  const [namespace, direction, fiatCurrency, counterpartyId] = parts;
+  const parsed = BVNKOfframpWalletName.safeParse({
+    namespace,
+    direction,
+    fiatCurrency,
+    counterpartyId,
+  });
+  if (!parsed.success) {
+    throw internalError(`Malformed BVNK off-ramp wallet name: ${walletName}`);
+  }
+  return parsed.data;
+}
+
+/**
+ * Parses a customer-owned BVNK funding wallet name back into its SDP owner and
+ * on-ramp entry key.
+ *
+ * @param walletName BVNK wallet `name` value.
+ * @returns Parsed SDP counterparty id and `buildBvnkOnrampPaymentRuleKey` value.
+ * @throws AppError with `INTERNAL_ERROR` when the name does not match the SDP
+ * on-ramp wallet naming contract.
+ */
+export function parseBvnkOnrampWalletName(
+  walletName: string
+): Extract<BVNKWallet, { direction: "onramp" }> {
+  const parts = walletName.split(":");
+  if (parts.length !== 6) {
+    throw internalError(`Malformed BVNK on-ramp wallet name: ${walletName}`);
+  }
+  const [namespace, direction, counterpartyId, fiatCurrency, cryptoRail, destinationWalletAddress] =
+    parts;
+  let onrampKey = `${fiatCurrency}:${cryptoRail}:${destinationWalletAddress}`;
+  try {
+    const key = parseBvnkOnrampPaymentRuleKey(onrampKey);
+    onrampKey = buildBvnkOnrampPaymentRuleKey(
+      key.fiatCurrency,
+      key.cryptoCurrency,
+      key.cryptoNetwork,
+      key.destinationWalletAddress
+    );
+  } catch {
+    throw internalError(`Malformed BVNK on-ramp wallet name: ${walletName}`);
+  }
+  const parsed = BVNKOnrampWalletName.safeParse({
+    namespace,
+    direction,
+    counterpartyId,
+    onrampKey,
+  });
+  if (!parsed.success) {
+    throw internalError(`Malformed BVNK on-ramp wallet name: ${walletName}`);
+  }
+  return parsed.data;
+}
+
 export function readBvnkOfframpWallets(
   providerData: CounterpartyRow["provider_data"]
 ): Record<string, BvnkOfframpWallet> {
-  const offramp = asRecord(readBvnkData(providerData).offramp).wallets;
+  const offramp = readRecord(readBvnkData(providerData).offramp)?.wallets;
   return offramp && typeof offramp === "object"
     ? (offramp as Record<string, BvnkOfframpWallet>)
     : {};
@@ -1496,40 +1670,150 @@ export function readBvnkOfframpWallet(
   return readBvnkOfframpWallets(providerData)[fiatCurrency];
 }
 
-export function bvnkOnrampKey(
-  fiatCurrency: string,
-  currency: string,
-  network: string,
-  destinationWalletAddress: string
-): string {
-  return `${fiatCurrency}:${currency}_${network}:${destinationWalletAddress}`;
+/** A registered off-ramp payout beneficiary. PII-light: raw account details are not stored. */
+export interface BvnkOfframpBeneficiary {
+  /** `${fiatCurrency}:${hash(collectedData)}` — content-addressed so distinct bank details never collide. */
+  key: string;
+  fiatCurrency: string;
+  accountType: string;
+  createdAt: string;
 }
 
-export function readBvnkOnrampEntry(
+export function readBvnkOfframpBeneficiaries(
+  providerData: CounterpartyRow["provider_data"]
+): Record<string, unknown> {
+  const beneficiaries = readRecord(readBvnkData(providerData).offramp)?.beneficiaries;
+  return beneficiaries && typeof beneficiaries === "object"
+    ? (beneficiaries as Record<string, unknown>)
+    : {};
+}
+
+function parseBvnkOfframpBeneficiary(key: string, value: unknown): BvnkOfframpBeneficiary {
+  const { fiatCurrency, accountType, createdAt } = value as {
+    fiatCurrency?: unknown;
+    accountType?: unknown;
+    createdAt?: unknown;
+  };
+  if (
+    typeof fiatCurrency !== "string" ||
+    typeof accountType !== "string" ||
+    typeof createdAt !== "string"
+  ) {
+    throw internalError(`Malformed BVNK off-ramp beneficiary "${key}" in provider_data`);
+  }
+  return { key, fiatCurrency, accountType, createdAt };
+}
+
+export function readBvnkOfframpBeneficiaryByKey(
   providerData: CounterpartyRow["provider_data"],
   key: string
-): BvnkOnrampEntry {
-  const entry = readBvnkWallets(providerData)[key];
-  return entry && typeof entry === "object" ? entry : {};
+): BvnkOfframpBeneficiary | null {
+  const value = readBvnkOfframpBeneficiaries(providerData)[key];
+  return value === undefined ? null : parseBvnkOfframpBeneficiary(key, value);
 }
 
-export function findBvnkWalletEntryKey(
+export function latestBvnkOfframpBeneficiary(
   providerData: CounterpartyRow["provider_data"],
-  walletId: string
-): string | undefined {
-  for (const [key, entry] of Object.entries(readBvnkWallets(providerData))) {
-    if (entry && typeof entry === "object" && entry.walletId === walletId) return key;
-  }
-  return undefined;
+  fiatCurrency: string
+): BvnkOfframpBeneficiary | null {
+  const entries = Object.entries(readBvnkOfframpBeneficiaries(providerData))
+    .filter(([key]) => key.startsWith(`${fiatCurrency}:`))
+    .map(([key, value]) => parseBvnkOfframpBeneficiary(key, value))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return entries[0] ?? null;
 }
 
 /**
- * Deterministic BVNK customer externalReference for a counterparty so BVNK
- * dedupes (one customer per counterparty) even if our cached reference is lost.
- * BVNK caps externalReference at 36 chars; `sdp_` + 32 alphanumerics fits.
+ * Schema for the logical components encoded into
+ * `provider_data.bvnk.wallets[onrampPaymentRuleKey]`.
  */
-export function bvnkCustomerExternalReference(counterpartyId: string): string {
-  return `sdp_${counterpartyId.replace(/[^a-zA-Z0-9]/g, "").slice(-32)}`;
+export const BVNKOnrampPaymentRuleKey = z.object({
+  fiatCurrency: z.enum(RAMP_FIAT_CURRENCIES),
+  cryptoCurrency: z
+    .string()
+    .trim()
+    .min(1)
+    .regex(/^[A-Z0-9]+$/),
+  cryptoNetwork: z.enum(BVNK_NETWORKS),
+  destinationWalletAddress: z
+    .string()
+    .min(1)
+    .refine((value) => !value.includes(":")),
+});
+
+export type BVNKOnrampPaymentRuleKey = z.infer<typeof BVNKOnrampPaymentRuleKey>;
+
+/**
+ * Builds the deterministic key for a BVNK on-ramp payment rule.
+ *
+ * This key identifies the exact funding rule SDP needs for one fiat funding
+ * currency, one crypto asset/network destination, and one destination wallet.
+ * It is stored under `provider_data.bvnk.wallets` and embedded into the BVNK
+ * wallet name so webhook handlers can reverse it without scanning by wallet id.
+ *
+ * @param fiatCurrency Fiat currency the counterparty sends into the BVNK funding account.
+ * @param cryptoCurrency Crypto asset BVNK delivers for the on-ramp, such as `USDC`.
+ * @param cryptoNetwork Blockchain network BVNK delivers on, such as `SOLANA`.
+ * @param destinationWalletAddress Destination wallet address that receives the on-ramped crypto.
+ * @returns Serialized on-ramp payment rule key in `<fiat>:<crypto>_<network>:<destination>` format.
+ * @throws AppError with `INTERNAL_ERROR` when inputs do not satisfy the SDP key contract.
+ */
+export function buildBvnkOnrampPaymentRuleKey(
+  fiatCurrency: string,
+  cryptoCurrency: string,
+  cryptoNetwork: string,
+  destinationWalletAddress: string
+): string {
+  const parsed = BVNKOnrampPaymentRuleKey.safeParse({
+    fiatCurrency: fiatCurrency.trim().toUpperCase(),
+    cryptoCurrency: cryptoCurrency.trim().toUpperCase(),
+    cryptoNetwork: cryptoNetwork.trim().toUpperCase(),
+    destinationWalletAddress,
+  });
+  if (!parsed.success) {
+    throw internalError("Malformed BVNK on-ramp payment rule key input");
+  }
+  return `${parsed.data.fiatCurrency}:${parsed.data.cryptoCurrency}_${parsed.data.cryptoNetwork}:${parsed.data.destinationWalletAddress}`;
+}
+
+/**
+ * Parses a stored BVNK on-ramp payment rule key back to its logical components.
+ *
+ * @param key Serialized key from `buildBvnkOnrampPaymentRuleKey`.
+ * @returns Parsed fiat funding currency, on-ramped crypto asset/network, and destination wallet.
+ * @throws AppError with `INTERNAL_ERROR` when the key no longer matches SDP's BVNK key contract.
+ */
+export function parseBvnkOnrampPaymentRuleKey(key: string): BVNKOnrampPaymentRuleKey {
+  const parts = key.split(":");
+  if (parts.length !== 3) {
+    throw internalError(`Malformed BVNK on-ramp payment rule key: ${key}`);
+  }
+  const [fiatCurrency, cryptoRail, destinationWalletAddress] = parts;
+  const cryptoNetwork = BVNK_NETWORKS_BY_LENGTH_DESC.find((network) =>
+    cryptoRail.endsWith(`_${network}`)
+  );
+  if (!cryptoNetwork) {
+    throw internalError(`Malformed BVNK on-ramp payment rule key: ${key}`);
+  }
+  const cryptoCurrency = cryptoRail.slice(0, -(cryptoNetwork.length + 1));
+  const parsed = BVNKOnrampPaymentRuleKey.safeParse({
+    fiatCurrency,
+    cryptoCurrency,
+    cryptoNetwork,
+    destinationWalletAddress,
+  });
+  if (!parsed.success) {
+    throw internalError(`Malformed BVNK on-ramp payment rule key: ${key}`);
+  }
+  return parsed.data;
+}
+
+export function readBvnkOnrampPaymentRuleState(
+  providerData: CounterpartyRow["provider_data"],
+  key: string
+): BvnkOnrampPaymentRuleState {
+  const entry = readBvnkWallets(providerData)[key];
+  return entry && typeof entry === "object" ? entry : {};
 }
 
 export async function bvnkRuleReference(
@@ -1614,6 +1898,7 @@ export function buildBvnkOnrampInstruction(
   const notes = notesByStatus[onboardingStatus];
   return {
     provider: "bvnk",
+    kind: "fiat_funding",
     onboardingStatus,
     verificationUrl: customer.verificationUrl,
     ruleId: entry.ruleId,
@@ -1693,13 +1978,13 @@ export function bvnkOnrampStatusFromProviderData(
     }
   }
   const { currency, network } = normalizeBvnkCurrencyAndNetwork(params.cryptoToken);
-  const key = bvnkOnrampKey(
+  const key = buildBvnkOnrampPaymentRuleKey(
     params.fiatCurrency,
     currency,
     network,
     params.destinationWalletAddress
   );
-  const entry = readBvnkOnrampEntry(providerData, key);
+  const entry = readBvnkOnrampPaymentRuleState(providerData, key);
   if (entry.ruleId && entry.bankAccount?.accountNumber) {
     return { provider: "bvnk", direction, status: "ready" };
   }

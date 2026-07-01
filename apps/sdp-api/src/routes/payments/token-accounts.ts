@@ -1,29 +1,25 @@
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
+import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { formatDecimalAmount } from "@/lib/amount";
 import { badRequest } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
-import { SOL_MINT } from "@/services/payment-operation.service";
 import { type createRpc, getAccountInfo } from "@/services/solana/rpc";
 
 export { SOL_MINT } from "@/services/payment-operation.service";
 
-// biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
-const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-// biome-ignore lint/security/noSecrets: Mainnet USDC mint address constant, not a secret.
-const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-// biome-ignore lint/security/noSecrets: Solana SPL Token program ID, not a secret.
-const SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" as Address;
-// biome-ignore lint/security/noSecrets: Solana Token-2022 program ID, not a secret.
-const SPL_TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" as Address;
+const SPL_TOKEN_PROGRAM_ID = SPL_TOKEN_PROGRAMS["spl-token"] as Address;
+const SPL_TOKEN_2022_PROGRAM_ID = SPL_TOKEN_PROGRAMS["token-2022"] as Address;
 const SPL_TOKEN_PROGRAM_IDS = [SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID] as const;
-const KNOWN_TOKEN_LABELS_BY_MINT = new Map<string, string>([
-  [SOL_MINT, "SOL"],
-  [DEVNET_USDC_MINT, "USDC"],
-  [MAINNET_USDC_MINT, "USDC"],
-]);
 
-function resolveTokenLabel(mint: string): string {
-  return KNOWN_TOKEN_LABELS_BY_MINT.get(mint) ?? mint;
+export type TokenLabelsByMint = ReadonlyMap<string, string>;
+
+interface GetSplTokenBalancesOptions {
+  tokenLabelsByMint?: TokenLabelsByMint;
+}
+
+export function resolveTokenLabel(mint: string, tokenLabelsByMint?: TokenLabelsByMint): string {
+  return tokenLabelsByMint?.get(mint)?.trim() || WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol || mint;
 }
 
 type JsonParsedTokenAccountEntry = {
@@ -141,7 +137,8 @@ function parseTokenAmountInfo(
 
 export async function getSplTokenBalances(
   rpc: ReturnType<typeof createRpc>,
-  owner: Address
+  owner: Address,
+  options: GetSplTokenBalancesOptions = {}
 ): Promise<
   Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
 > {
@@ -173,7 +170,7 @@ export async function getSplTokenBalances(
   return Array.from(balancesByMint.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([mint, balance]) => ({
-      token: resolveTokenLabel(mint),
+      token: resolveTokenLabel(mint, options.tokenLabelsByMint),
       mint,
       amount: balance.amount.toString(),
       uiAmount: balance.uiAmount ?? formatDecimalAmount(balance.amount, balance.decimals),
@@ -232,6 +229,53 @@ export async function resolveSourceTokenAccount(
   mint: Address,
   tokenProgram: Address
 ): Promise<{ tokenAccount: Address; decimals: number }> {
+  const selected = await findSourceTokenAccount(rpc, owner, mint, tokenProgram);
+
+  if (!selected) {
+    throw badRequest("Source wallet has no token account for this mint");
+  }
+
+  return {
+    tokenAccount: selected.tokenAccount,
+    decimals: selected.decimals,
+  };
+}
+
+export async function resolveSourceTokenAccountOrAta(
+  rpc: ReturnType<typeof createRpc>,
+  owner: Address,
+  mint: Address,
+  tokenProgram: Address
+): Promise<{ tokenAccount: Address; decimals: number; exists: boolean }> {
+  const selected = await findSourceTokenAccount(rpc, owner, mint, tokenProgram);
+
+  if (selected) {
+    return {
+      ...selected,
+      exists: true,
+    };
+  }
+
+  const [tokenAccount] = await findAssociatedTokenPda({
+    owner,
+    tokenProgram,
+    mint,
+  });
+  const decimals = await resolveMintDecimals(rpc, mint);
+
+  return {
+    tokenAccount,
+    decimals,
+    exists: false,
+  };
+}
+
+async function findSourceTokenAccount(
+  rpc: ReturnType<typeof createRpc>,
+  owner: Address,
+  mint: Address,
+  tokenProgram: Address
+): Promise<{ tokenAccount: Address; decimals: number; amount: bigint } | null> {
   const response = await getTokenAccountsByOwnerJsonParsed(rpc, owner, tokenProgram);
   let selected: { tokenAccount: Address; decimals: number; amount: bigint } | null = null;
 
@@ -255,12 +299,5 @@ export async function resolveSourceTokenAccount(
     }
   }
 
-  if (!selected) {
-    throw badRequest("Source wallet has no token account for this mint");
-  }
-
-  return {
-    tokenAccount: selected.tokenAccount,
-    decimals: selected.decimals,
-  };
+  return selected;
 }

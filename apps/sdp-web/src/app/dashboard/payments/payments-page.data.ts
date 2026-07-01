@@ -4,6 +4,7 @@ import type {
   PaymentTransferSummary,
 } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
+import { parsePaymentApiErrorText } from "./payment-api-errors";
 
 export interface FetchResult<T> {
   ok: boolean;
@@ -22,18 +23,6 @@ export interface PaymentsIssuedTokenSymbol {
   symbol: string;
 }
 
-function parseErrorMessage(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    return parsed?.error?.message ?? parsed?.message ?? body;
-  } catch {
-    return body;
-  }
-}
-
 export async function fetchPaymentsWallets(
   request: SdpApiClient["request"],
   options: FetchPaymentsWalletsOptions = {}
@@ -50,7 +39,7 @@ export async function fetchPaymentsWallets(
       return {
         ok: false,
         status: response.status,
-        error: parseErrorMessage(body),
+        error: parsePaymentApiErrorText(body),
       };
     }
 
@@ -108,7 +97,7 @@ export async function fetchPaymentsAggregate(
       return {
         ok: false,
         status: response.status,
-        error: parseErrorMessage(body),
+        error: parsePaymentApiErrorText(body),
       };
     }
 
@@ -153,7 +142,7 @@ export async function fetchPaymentTransfers(
       return {
         ok: false,
         status: response.status,
-        error: parseErrorMessage(body),
+        error: parsePaymentApiErrorText(body),
       };
     }
 
@@ -276,41 +265,63 @@ export async function fetchPaymentsIssuedTokenSymbols(
   pageSize = 100
 ): Promise<FetchResult<PaymentsIssuedTokenSymbol[]>> {
   try {
-    const response = await request(
-      `/v1/issuance/tokens?${new URLSearchParams({
-        page: "1",
-        pageSize: String(pageSize),
-      }).toString()}`
-    );
-    if (!response.ok) {
-      const body = await response.text();
-      return {
-        ok: false,
-        status: response.status,
-        error: parseErrorMessage(body),
+    const tokens: PaymentsIssuedTokenSymbol[] = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      const response = await request(
+        `/v1/issuance/tokens?${new URLSearchParams({
+          page: String(page),
+          pageSize: String(pageSize),
+        }).toString()}`
+      );
+      if (!response.ok) {
+        const body = await response.text();
+        return {
+          ok: false,
+          status: response.status,
+          error: parsePaymentApiErrorText(body),
+        };
+      }
+
+      const json = (await response.json()) as {
+        data?:
+          | Array<{
+              mintAddress?: string | null;
+              symbol?: string;
+            }>
+          | {
+              tokens?: Array<{
+                mintAddress?: string | null;
+                symbol?: string;
+              }>;
+            };
+        meta?: {
+          hasMore?: boolean;
+        };
       };
+
+      const pageTokens = Array.isArray(json.data) ? json.data : (json.data?.tokens ?? []);
+      tokens.push(
+        ...pageTokens
+          .filter(
+            (
+              token
+            ): token is {
+              mintAddress: string;
+              symbol?: string;
+            } => typeof token?.mintAddress === "string" && token.mintAddress.length > 0
+          )
+          .map((token) => ({
+            mintAddress: token.mintAddress,
+            symbol: token.symbol?.trim() || token.mintAddress,
+          }))
+      );
+
+      hasMore = json.meta?.hasMore === true;
+      page += 1;
     }
-
-    const json = (await response.json()) as {
-      data?: Array<{
-        mintAddress?: string | null;
-        symbol?: string;
-      }>;
-    };
-
-    const tokens = (json?.data ?? [])
-      .filter(
-        (
-          token
-        ): token is {
-          mintAddress: string;
-          symbol?: string;
-        } => typeof token?.mintAddress === "string" && token.mintAddress.length > 0
-      )
-      .map((token) => ({
-        mintAddress: token.mintAddress,
-        symbol: token.symbol?.trim() || token.mintAddress,
-      }));
 
     return { ok: true, data: tokens };
   } catch (error) {

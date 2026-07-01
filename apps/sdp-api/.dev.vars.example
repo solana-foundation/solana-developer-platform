@@ -25,8 +25,8 @@
 # CUSTODY_PRIVATE_KEY=<base58-encoded keypair>
 # CUSTODY_ENCRYPTION_KEY=<base64-encoded 256-bit key>  # required for any custody provider — encrypts stored wallet secrets
 #
-# Fee payment: native (do NOT default to "kora" — that points at the
-# Solana Foundation's public Kora endpoint and adds an external dependency)
+# Fee payment: native (Use it if you don't want to use Kora — that points at the Solana Foundation's
+# public endpoint and adds an external dependency. Defaults to "kora" when unset.)
 # FEE_PAYMENT_PROVIDER=native
 # FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
 #

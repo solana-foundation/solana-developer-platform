@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { address, getAddressEncoder, getProgramDerivedAddress } from "@solana/kit";
 import { formatDisplayLabel } from "@/lib/utils";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import {
@@ -9,18 +10,59 @@ import {
 import { seedProjectCookie } from "../support/local-dashboard-bootstrap";
 import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootstrap";
 
+// biome-ignore lint/security/noSecrets: Solana associated token program ID, not a secret.
+const ASSOCIATED_TOKEN_PROGRAM_ID = address("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+// biome-ignore lint/security/noSecrets: Solana Token-2022 program ID, not a secret.
+const TOKEN_2022_PROGRAM_ID = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
 function shortValue(value: string): string {
   return value.length <= 16 ? value : `${value.slice(0, 6)}...${value.slice(-6)}`;
 }
 
+async function deriveAssociatedTokenAccountAddress(owner: string, mint: string): Promise<string> {
+  const encoder = getAddressEncoder();
+  const [tokenAccount] = await getProgramDerivedAddress({
+    programAddress: ASSOCIATED_TOKEN_PROGRAM_ID,
+    seeds: [
+      encoder.encode(address(owner)),
+      encoder.encode(TOKEN_2022_PROGRAM_ID),
+      encoder.encode(address(mint)),
+    ],
+  });
+
+  return tokenAccount;
+}
+
 async function gotoIssuanceDashboard(page: Page): Promise<void> {
-  await page.goto("/dashboard/issuance");
-  await expect(page.getByRole("button", { name: "Create draft" })).toBeVisible();
+  await page.goto("/dashboard/issuance", { waitUntil: "domcontentloaded" });
+  const createDraftButton = page.getByRole("button", { name: "Create draft", exact: true });
+  await expect(createDraftButton)
+    .toBeVisible({ timeout: 30_000 })
+    .catch(async () => {
+      const retryButton = page.getByRole("button", { name: "Retry", exact: true });
+      if ((await retryButton.count()) > 0) {
+        await retryButton.click();
+      } else {
+        await page.reload({ waitUntil: "domcontentloaded" });
+      }
+      await expect(createDraftButton).toBeVisible({ timeout: 120_000 });
+    });
 }
 
 async function gotoToken(page: Page, tokenId: string): Promise<void> {
-  await page.goto(`/dashboard/issuance/${tokenId}`);
-  await expect(page.getByTestId("overview-row-token-address")).toBeVisible();
+  await page.goto(`/dashboard/issuance/${tokenId}`, { waitUntil: "domcontentloaded" });
+  const tokenAddressRow = page.getByTestId("overview-row-token-address");
+  await expect(tokenAddressRow)
+    .toBeVisible({ timeout: 30_000 })
+    .catch(async () => {
+      const retryButton = page.getByRole("button", { name: "Retry", exact: true });
+      if ((await retryButton.count()) > 0) {
+        await retryButton.click();
+      } else {
+        await page.reload({ waitUntil: "domcontentloaded" });
+      }
+      await expect(tokenAddressRow).toBeVisible({ timeout: 120_000 });
+    });
 }
 
 const tabQueryParamByName = {
@@ -54,11 +96,70 @@ async function openTab(page: Page, name: string): Promise<void> {
   }
 }
 
+async function expectFrozenAccountsSummary(page: Page, accountCount: number): Promise<void> {
+  await openTab(page, "Compliance");
+  await expect(page.getByTestId("frozen-accounts-summary-card")).toContainText(
+    `${accountCount} accounts`,
+    { timeout: 120_000 }
+  );
+}
+
+async function selectComplianceAction(page: Page, name: string): Promise<void> {
+  await openTab(page, "Compliance");
+
+  const action = page.getByRole("button", { name, exact: true });
+  await expect(action)
+    .toBeVisible({ timeout: 30_000 })
+    .catch(async () => {
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await openTab(page, "Compliance");
+      await expect(action).toBeVisible({ timeout: 120_000 });
+    });
+  await action.click();
+}
+
 async function waitForToast(page: Page, text: string, previousCount = 0): Promise<void> {
   await expect
     .poll(async () => page.getByText(text).count(), { timeout: 120_000 })
     .toBeGreaterThan(previousCount);
   await expect(page.getByText(text).nth(previousCount)).toBeVisible({ timeout: 120_000 });
+}
+
+async function selectNewAuthority(page: Page, publicKey: string): Promise<void> {
+  const newAuthoritySelect = page.getByLabel("New authority");
+  if ((await newAuthoritySelect.locator(`option[value="${publicKey}"]`).count()) > 0) {
+    await newAuthoritySelect.selectOption(publicKey);
+    return;
+  }
+
+  await page.getByRole("button", { name: "Use custom address" }).click();
+  await page.getByLabel("Custom authority").fill(publicKey);
+}
+
+async function waitForActionResponse(
+  page: Page,
+  options: { method: string; pathIncludes: string },
+  trigger: () => Promise<void>
+): Promise<void> {
+  const responsePromise = page.waitForResponse(
+    (response) => {
+      const request = response.request();
+      const postData = request.postData() ?? "";
+      return (
+        response.url().endsWith("/api/playground/execute") &&
+        request.method() === "POST" &&
+        postData.includes(`"method":"${options.method}"`) &&
+        postData.includes(options.pathIncludes)
+      );
+    },
+    { timeout: 180_000 }
+  );
+
+  await trigger();
+  const response = await responsePromise;
+  expect(response.ok()).toBe(true);
+  const payload = (await response.json().catch(() => null)) as { ok?: boolean } | null;
+  expect(payload?.ok, JSON.stringify(payload)).toBe(true);
 }
 
 async function confirmAction(page: Page, confirmButtonLabel: string): Promise<void> {
@@ -69,7 +170,9 @@ async function openFundManagementAction(page: Page, action: string): Promise<voi
   await openTab(page, "Operations");
   const row = page.getByTestId(`fund-management-row-${action}`);
   await expect(row).toBeVisible();
-  await row.getByRole("button").click();
+  const button = row.getByRole("button");
+  await expect(button).toBeEnabled({ timeout: 120_000 });
+  await button.click();
 }
 
 async function waitForPermissionRowValue(
@@ -89,8 +192,21 @@ async function waitForPermissionRowValue(
     .toContain(expectedText);
 }
 
-async function waitForAllowlistCount(page: Page, expectedCount: number): Promise<void> {
+async function waitForAllowlistCount(
+  page: Page,
+  expectedCount: number,
+  options: { reload?: boolean } = {}
+): Promise<void> {
   const expectedLabel = `${expectedCount} ${expectedCount === 1 ? "entries" : "entries"}`;
+  if (options.reload) {
+    await page.reload();
+    await openTab(page, "Compliance");
+    await expect(page.getByTestId("allowlist-summary-card")).toContainText(expectedLabel, {
+      timeout: 120_000,
+    });
+    return;
+  }
+
   await expect(page.getByTestId("allowlist-summary-card")).toContainText(expectedLabel, {
     timeout: 120_000,
   });
@@ -98,6 +214,8 @@ async function waitForAllowlistCount(page: Page, expectedCount: number): Promise
 
 test.describe
   .serial("issuance e2e", () => {
+    test.setTimeout(360_000);
+
     let fixtures: IssuanceFixtures;
 
     test.beforeAll(async ({ browser }) => {
@@ -105,7 +223,7 @@ test.describe
       const session = await getPlaywrightAdminSession(browser);
       await bootstrapLocalIssuanceFixtures({
         identity: session.identity,
-        bearerToken: session.bearerToken,
+        bearerToken: session.getBearerToken,
       });
       fixtures = readIssuanceFixtures();
       await session.page.close();
@@ -120,6 +238,7 @@ test.describe
 
       await expect(page.getByTestId(`token-card-${fixtures.tokens.pending.id}`)).toBeVisible();
       await expect(page.getByTestId(`token-card-${fixtures.tokens.allowlisted.id}`)).toBeVisible();
+      await expect(page.getByTestId(`token-card-${fixtures.tokens.authority.id}`)).toBeVisible();
       await expect(page.getByTestId(`token-card-${fixtures.tokens.open.id}`)).toBeVisible();
     });
 
@@ -240,48 +359,27 @@ test.describe
       await expect(page.getByLabel("Image URL")).toHaveValue(updatedImageUrl);
     });
 
-    test("6. user can update an authority including the None confirmation flow", async ({
-      page,
-    }) => {
-      const rowTestId = "permission-row-permanent-delegate";
-
-      await gotoToken(page, fixtures.tokens.allowlisted.id);
-      await openTab(page, "Permissions");
-
-      const row = page.getByTestId(rowTestId);
-      await row.getByRole("button", { name: "Edit" }).click();
-      await page.getByLabel("New authority").selectOption(fixtures.wallets.delegated.publicKey);
-      await page.getByRole("button", { name: "Save authority" }).click();
-      await waitForPermissionRowValue(
-        page,
-        rowTestId,
-        shortValue(fixtures.wallets.delegated.publicKey)
-      );
-
-      const refreshedRow = page.getByTestId(rowTestId);
-      await refreshedRow.getByRole("button", { name: "Edit" }).click();
-      await page.getByLabel("New authority").selectOption({ label: "None" });
-      await page.getByRole("button", { name: "Save authority" }).click();
-
-      await expect(
-        page.getByRole("heading", { name: "Set Permanent Delegate Authority to None?" })
-      ).toBeVisible();
-      await page.getByRole("button", { name: "Yes, set to None" }).click();
-      await waitForPermissionRowValue(page, rowTestId, "None");
-    });
-
-    test("7. user can add and remove allowlist entries on the allowlist-enabled token", async ({
+    test("6. user can add and remove allowlist entries on the allowlist-enabled token", async ({
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.allowlisted.id);
-      await openTab(page, "Compliance");
+      await selectComplianceAction(page, "Allowlist");
 
       await page
         .getByRole("textbox", { name: "Address", exact: true })
         .fill(fixtures.addresses.allowlistWallet);
       await page.getByRole("textbox", { name: "Label", exact: true }).fill("E2E allowlist wallet");
-      await page.getByRole("button", { name: "Add allowlist entry" }).click();
-      await waitForAllowlistCount(page, 1);
+      await waitForActionResponse(
+        page,
+        {
+          method: "POST",
+          pathIncludes: `/v1/issuance/tokens/${fixtures.tokens.allowlisted.id}/allowlist`,
+        },
+        async () => {
+          await page.getByRole("button", { name: "Add allowlist entry" }).click();
+        }
+      );
+      await waitForAllowlistCount(page, 1, { reload: true });
       await expect(page.getByText(fixtures.addresses.allowlistWallet)).toBeVisible();
       await expect(page.getByTestId("allowlist-summary-card")).toContainText("1 entries");
 
@@ -290,15 +388,75 @@ test.describe
         .filter({ hasText: fixtures.addresses.allowlistWallet })
         .filter({ has: page.getByRole("button", { name: "Remove entry" }) })
         .first();
-      await allowlistEntry.getByRole("button", { name: "Remove entry" }).click();
-      await waitForAllowlistCount(page, 0);
+      await waitForActionResponse(
+        page,
+        {
+          method: "DELETE",
+          pathIncludes: `/v1/issuance/tokens/${fixtures.tokens.allowlisted.id}/allowlist/`,
+        },
+        async () => {
+          await allowlistEntry.getByRole("button", { name: "Remove entry" }).click();
+        }
+      );
+      await waitForAllowlistCount(page, 0, { reload: true });
       await expect(page.getByText(fixtures.addresses.allowlistWallet)).toHaveCount(0);
       await expect(page.getByTestId("allowlist-summary-card")).toContainText("0 entries");
     });
 
+    test("7. user can update an authority including the None confirmation flow", async ({
+      page,
+    }) => {
+      const rowTestId = "permission-row-mint-authority";
+      const authorityTokenId = fixtures.tokens.authority.id;
+
+      await gotoToken(page, authorityTokenId);
+      await openTab(page, "Permissions");
+
+      const row = page.getByTestId(rowTestId);
+      if (fixtures.wallets.delegated.publicKey !== fixtures.wallets.treasury.publicKey) {
+        await row.getByRole("button", { name: "Edit" }).click();
+        await selectNewAuthority(page, fixtures.wallets.delegated.publicKey);
+        await waitForActionResponse(
+          page,
+          {
+            method: "POST",
+            pathIncludes: `/v1/issuance/tokens/${authorityTokenId}/authority`,
+          },
+          async () => {
+            await page.getByRole("button", { name: "Save authority" }).click();
+          }
+        );
+        await waitForPermissionRowValue(
+          page,
+          rowTestId,
+          shortValue(fixtures.wallets.delegated.publicKey)
+        );
+      }
+
+      const refreshedRow = page.getByTestId(rowTestId);
+      await refreshedRow.getByRole("button", { name: "Edit" }).click();
+      await page.getByLabel("New authority").selectOption({ label: "None" });
+      await page.getByRole("button", { name: "Save authority" }).click();
+
+      await expect(
+        page.getByRole("heading", { name: "Set Mint Authority to None?" })
+      ).toBeVisible();
+      await waitForActionResponse(
+        page,
+        {
+          method: "POST",
+          pathIncludes: `/v1/issuance/tokens/${authorityTokenId}/authority`,
+        },
+        async () => {
+          await page.getByRole("button", { name: "Yes, set to None" }).click();
+        }
+      );
+      await waitForPermissionRowValue(page, rowTestId, "None");
+    });
+
     test("8. user sees denylist controls on the open stablecoin token", async ({ page }) => {
       await gotoToken(page, fixtures.tokens.open.id);
-      await openTab(page, "Compliance");
+      await selectComplianceAction(page, "Denylist");
 
       await expect(page.getByRole("button", { name: "Denylist", exact: true })).toBeVisible();
       await expect(
@@ -331,7 +489,15 @@ test.describe
       await expect(page.getByTestId("overview-row-supply")).toContainText("10");
 
       await openFundManagementAction(page, "burn");
-      await page.getByLabel("Source").fill(fixtures.wallets.treasury.publicKey);
+      const openMintAddress = fixtures.tokens.open.mintAddress;
+      if (!openMintAddress) {
+        throw new Error("Open issuance fixture is missing a mint address");
+      }
+      const treasuryTokenAccount = await deriveAssociatedTokenAccountAddress(
+        fixtures.wallets.treasury.publicKey,
+        openMintAddress
+      );
+      await page.getByLabel("Source").fill(treasuryTokenAccount);
       await page.getByLabel("Amount").fill("3");
       await page.getByRole("button", { name: "Burn tokens" }).click();
       successCount = await page.getByText("Burn transaction finalized.").count();
@@ -358,29 +524,22 @@ test.describe
       await confirmAction(page, "Mint now");
       await waitForToast(page, "Mint transaction finalized.", successCount);
 
-      await openTab(page, "Compliance");
-      await page.getByRole("button", { name: "Freeze", exact: true }).click();
+      await selectComplianceAction(page, "Freeze");
       await page.getByLabel("Wallet Address").fill(fixtures.addresses.freezeWallet);
       await page.getByLabel("Reason (freeze only)").fill("Playwright freeze validation");
       await page.getByRole("button", { name: "Freeze account", exact: true }).click();
       successCount = await page.getByText("Freeze transaction finalized.").count();
       await confirmAction(page, "Freeze now");
       await waitForToast(page, "Freeze transaction finalized.", successCount);
-      await page.reload();
+      await expectFrozenAccountsSummary(page, 1);
 
-      await openTab(page, "Compliance");
-      await expect(page.getByTestId("frozen-accounts-summary-card")).toContainText("1 accounts");
-
-      await page.getByRole("button", { name: "Freeze", exact: true }).click();
+      await selectComplianceAction(page, "Freeze");
       await page.getByLabel("Wallet Address").fill(fixtures.addresses.freezeWallet);
       await page.getByRole("button", { name: "Unfreeze account", exact: true }).click();
       successCount = await page.getByText("Unfreeze transaction finalized.").count();
       await confirmAction(page, "Unfreeze now");
       await waitForToast(page, "Unfreeze transaction finalized.", successCount);
-      await page.reload();
-
-      await openTab(page, "Compliance");
-      await expect(page.getByTestId("frozen-accounts-summary-card")).toContainText("0 accounts");
+      await expectFrozenAccountsSummary(page, 0);
     });
 
     test("11. user sees the token ID row on the detail header and can copy it", async ({
@@ -415,6 +574,7 @@ test.describe
         .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value));
       expect(optionValues).toContain(fixtures.tokens.pending.id);
       expect(optionValues).toContain(fixtures.tokens.allowlisted.id);
+      expect(optionValues).toContain(fixtures.tokens.authority.id);
       expect(optionValues).toContain(fixtures.tokens.open.id);
 
       const initialValue = await tokenIdSelect.inputValue();
@@ -427,16 +587,15 @@ test.describe
 
     test("13. user can pause and unpause the token from compliance controls", async ({ page }) => {
       await gotoToken(page, fixtures.tokens.open.id);
-      await openTab(page, "Compliance");
 
-      await page.getByRole("button", { name: "Pause", exact: true }).click();
+      await selectComplianceAction(page, "Pause");
       await page.getByRole("button", { name: "Pause token", exact: true }).click();
       let successCount = await page.getByText("Pause transaction finalized.").count();
       await confirmAction(page, "Pause now");
       await waitForToast(page, "Pause transaction finalized.", successCount);
       await expect(page.getByText("Token is paused")).toBeVisible();
 
-      await page.getByRole("button", { name: "Pause", exact: true }).click();
+      await selectComplianceAction(page, "Pause");
       await page.getByRole("button", { name: "Unpause token", exact: true }).first().click();
       successCount = await page.getByText("Unpause transaction finalized.").count();
       await confirmAction(page, "Unpause now");

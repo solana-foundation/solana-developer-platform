@@ -17,15 +17,13 @@ import {
   resolveCreateWalletScope,
   resolveUpdateWalletScope,
 } from "@/services/api-key-scope.service";
-import {
-  listApiKeyWalletBindings,
-  replaceApiKeyWalletBindings,
-} from "@/services/api-key-wallets.service";
+import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import { SigningError } from "@/services/ports";
 import type { WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
+import { buildApiKeyAccessSummaries } from "./access-response";
 import { apiKeyCreateSchema, apiKeyRotateSchema, apiKeyUpdateSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -73,21 +71,37 @@ export const listApiKeys = async (c: AppContext) => {
   resolveActor(c);
   const projectId = requireProjectId(c);
 
-  const apiKeyService = new ApiKeyService(getDb(c.env));
+  const db = getDb(c.env);
+  const apiKeyService = new ApiKeyService(db);
   const apiKeys = await apiKeyService.listForProject(projectId);
+  const accessSummaryByKeyId = await buildApiKeyAccessSummaries(
+    c.env,
+    db,
+    apiKeys.map((key) => key.id)
+  );
 
   const response: ListApiKeysResponse = {
-    apiKeys: apiKeys.map((key) => ({
-      id: key.id,
-      name: key.name,
-      keyPrefix: key.keyPrefix,
-      role: key.role as ApiKeyRole,
-      environment: key.environment as "sandbox" | "production",
-      status: key.status,
-      lastUsedAt: key.lastUsedAt,
-      expiresAt: key.expiresAt,
-      createdAt: key.createdAt,
-    })),
+    apiKeys: apiKeys.map((key) => {
+      const accessSummary = accessSummaryByKeyId.get(key.id);
+      const walletBindings = accessSummary?.walletBindings ?? [];
+
+      return {
+        id: key.id,
+        name: key.name,
+        keyPrefix: key.keyPrefix,
+        role: key.role as ApiKeyRole,
+        environment: key.environment as "sandbox" | "production",
+        status: key.status,
+        walletScope: key.walletScope,
+        signingWalletId: key.signingWalletId,
+        signingWalletIds: walletBindings.map((binding) => binding.walletId),
+        walletBindings,
+        policyBindings: accessSummary?.policyBindings ?? [],
+        lastUsedAt: key.lastUsedAt,
+        expiresAt: key.expiresAt,
+        createdAt: key.createdAt,
+      };
+    }),
   };
 
   return success(c, response);
@@ -269,7 +283,9 @@ export const getApiKey = async (c: AppContext) => {
     throw notFound("API key");
   }
 
-  const walletBindings = await listApiKeyWalletBindings(getDb(c.env), key.id);
+  const accessSummaryByKeyId = await buildApiKeyAccessSummaries(c.env, getDb(c.env), [key.id]);
+  const accessSummary = accessSummaryByKeyId.get(key.id);
+  const walletBindings = accessSummary?.walletBindings ?? [];
 
   return success(c, {
     id: key.id,
@@ -282,10 +298,11 @@ export const getApiKey = async (c: AppContext) => {
     status: key.status,
     projectId: key.projectId,
     allowedIps: key.allowedIps,
-    walletScope: walletBindings.length > 0 ? "selected" : "all",
+    walletScope: key.walletScope,
     signingWalletId: key.signingWalletId,
     signingWalletIds: walletBindings.map((binding) => binding.walletId),
     walletBindings,
+    policyBindings: accessSummary?.policyBindings ?? [],
     lastUsedAt: key.lastUsedAt,
     expiresAt: key.expiresAt,
     rotatedFrom: key.rotatedFrom,

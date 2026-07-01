@@ -27,15 +27,14 @@ import {
   type ComplianceProviderResult,
   screenAddressCompliance,
 } from "@/lib/compliance";
+import {
+  type PaymentApiErrorBody as ApiErrorBody,
+  getPaymentApiError as getApiError,
+} from "./payment-api-errors";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
 export type { PaymentRampExecution, PaymentRampInstruction } from "@sdp/types";
-
-type ApiErrorBody = {
-  error?: {
-    message?: string;
-  };
-};
+export { getPaymentApiError as getApiError } from "./payment-api-errors";
 
 export interface PaymentWalletBalance {
   token: string;
@@ -51,17 +50,10 @@ export interface PaymentWalletBalancesSnapshot {
   balances: PaymentWalletBalance[];
 }
 
-type RiskTone = "green" | "yellow" | "red" | "neutral";
+export type RiskTone = "green" | "yellow" | "red" | "neutral";
 
 export function getDevnetExplorerUrl(signature: string): string {
   return `https://explorer.solana.com/tx/${encodeURIComponent(signature)}?cluster=devnet`;
-}
-
-export function getApiError(body: ApiErrorBody, fallback: string): string {
-  if (typeof body.error?.message === "string" && body.error.message) {
-    return body.error.message;
-  }
-  return fallback;
 }
 
 export function toProviderLabel(value: string): string {
@@ -108,7 +100,7 @@ export function formatRiskScore(result: ComplianceProviderResult): string {
   return "N/A";
 }
 
-function resolveRiskTone(result: ComplianceProviderResult): RiskTone {
+export function resolveRiskTone(result: ComplianceProviderResult): RiskTone {
   if (result.status !== "ok") {
     return "neutral";
   }
@@ -472,6 +464,8 @@ export async function updateWalletPolicy(
         destinationAllowlist: policy.destinationAllowlist,
         ...(policy.maxTransferAmount ? { maxTransferAmount: policy.maxTransferAmount } : {}),
         ...(policy.maxDailyAmount ? { maxDailyAmount: policy.maxDailyAmount } : {}),
+        ...(policy.defaultAction ? { defaultAction: policy.defaultAction } : {}),
+        ...(policy.rules ? { rules: policy.rules } : {}),
       }),
     }
   );

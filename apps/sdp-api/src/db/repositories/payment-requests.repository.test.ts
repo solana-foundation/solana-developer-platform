@@ -10,12 +10,6 @@ import { createPostgresPaymentRequestsRepository } from "./payment-requests.repo
 const TEST_PROJECT_ID = "prj_preq_repo_test";
 const OTHER_PROJECT_ID = "prj_preq_repo_test_other";
 
-let referenceCounter = 0;
-function nextReference(): string {
-  referenceCounter += 1;
-  return `ref_${referenceCounter}`;
-}
-
 describe("PaymentRequestsRepository (postgres)", () => {
   let repo: PaymentRequestsRepository;
 
@@ -103,7 +97,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       destinationAddress: "OurWallet",
       token: "USDC",
       amount: "25.00",
-      reference: nextReference(),
       expiresAt: "2026-07-01T00:00:00.000Z",
       createdBy: TEST_USER.id,
       ...overrides,
@@ -136,6 +129,29 @@ describe("PaymentRequestsRepository (postgres)", () => {
     it("supports an open link (null counterparty)", async () => {
       const row = await repo.createPaymentRequest(createInput({ counterpartyId: null }));
       expect(row?.counterparty_id).toBeNull();
+    });
+
+    it("generates a public_token distinct from the id", async () => {
+      const first = await repo.createPaymentRequest(createInput());
+      const second = await repo.createPaymentRequest(createInput());
+
+      expect(first?.public_token).toMatch(/^[A-Za-z0-9_-]{16}$/);
+      expect(first?.public_token).not.toBe(first?.id);
+      expect(first?.public_token).not.toBe(second?.public_token);
+    });
+  });
+
+  describe("getPaymentRequestByPublicToken", () => {
+    it("resolves a row by its public token, unscoped by org/project", async () => {
+      const created = await repo.createPaymentRequest(createInput());
+
+      const row = await repo.getPaymentRequestByPublicToken(created?.public_token ?? "");
+      expect(row?.id).toBe(created?.id);
+    });
+
+    it("returns null for an unknown token", async () => {
+      const row = await repo.getPaymentRequestByPublicToken("does_not_exist0");
+      expect(row).toBeNull();
     });
   });
 

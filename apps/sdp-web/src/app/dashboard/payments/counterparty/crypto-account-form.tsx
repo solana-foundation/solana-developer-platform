@@ -1,18 +1,23 @@
 "use client";
 
 import type { CounterpartyAccount, CounterpartyAccountResponse } from "@sdp/types";
-import { Loader2Icon, PlusIcon } from "lucide-react";
-import { useState } from "react";
+import { CheckIcon, Loader2Icon, PlusIcon, ShieldAlertIcon } from "lucide-react";
+import { AnimatePresence } from "motion/react";
+import { type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
+import { HeightReveal } from "@/components/ui/height-reveal";
+import { HoldButton } from "@/components/ui/hold-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { ComplianceProviderResult } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getHighRiskProviders, runComplianceCheck } from "../payments-workspace.data";
-import { ConfirmRiskyAccountDialog } from "./confirm-risky-account-dialog";
+import type { ComplianceSnapshot } from "../payments-workspace.types";
 import { CRYPTO_ACCOUNT_NETWORKS, type CryptoAccountNetwork } from "./counterparty-create-schemas";
+import { ScreeningProgress } from "./screening-progress";
+
+type AddPhase = "idle" | "screening" | "revealing" | "ready" | "submitting";
 
 const NETWORK_LABELS: Record<CryptoAccountNetwork, string> = {
   solana: "Solana",
@@ -33,19 +38,52 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
   const [network, setNetwork] = useState<CryptoAccountNetwork>("solana");
   const [address, setAddress] = useState("");
 
-  const [screening, setScreening] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<{
-    providers: ComplianceProviderResult[];
-    screened: boolean;
-  } | null>(null);
+  const [phase, setPhase] = useState<AddPhase>("idle");
+  const [snapshot, setSnapshot] = useState<ComplianceSnapshot | null>(null);
+  const [screenUnavailable, setScreenUnavailable] = useState(false);
+  const submittingRef = useRef(false);
 
   const trimmedAddress = address.trim();
-  const busy = screening || submitting;
+  const busy = phase === "screening" || phase === "revealing" || phase === "submitting";
+
+  const problems = snapshot
+    ? [
+        ...getHighRiskProviders(snapshot),
+        ...snapshot.providers.filter((provider) => provider.status !== "ok"),
+      ]
+    : [];
+  const hasRisk = problems.length > 0 || screenUnavailable;
+
+  const buttonState = ((): { label: string; icon: ReactNode } => {
+    switch (phase) {
+      case "submitting":
+        return { label: "Adding", icon: <Loader2Icon className="animate-spin" /> };
+      case "screening":
+      case "revealing":
+        return { label: "Screening", icon: <Loader2Icon className="animate-spin" /> };
+      case "ready":
+        return { label: "Add account", icon: <CheckIcon /> };
+      case "idle":
+        return { label: "Add account", icon: <PlusIcon /> };
+    }
+  })();
+
+  function resetScreening() {
+    setSnapshot(null);
+    setScreenUnavailable(false);
+    setPhase("idle");
+  }
+
+  function clearScreening() {
+    if (phase === "idle" || phase === "submitting") return;
+    resetScreening();
+  }
 
   async function createAccount() {
-    setSubmitting(true);
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setPhase("submitting");
     setError(null);
 
     const result = await dashboardFetch<{ data: CounterpartyAccountResponse }>(
@@ -60,10 +98,10 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
       }
     );
 
-    setSubmitting(false);
+    submittingRef.current = false;
 
     if (!result.ok) {
-      setConfirm(null);
+      resetScreening();
       setError(result.error);
       toast.error(result.error, { position: "bottom-right" });
       return;
@@ -74,30 +112,29 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
     toast.success("Crypto account attached", { position: "bottom-right" });
     setLabel("");
     setAddress("");
-    setConfirm(null);
+    resetScreening();
   }
 
   async function handleAdd() {
     if (!trimmedAddress) return;
     setError(null);
-    setScreening(true);
+    setScreenUnavailable(false);
+    setSnapshot(null);
+    setPhase("screening");
 
-    let flagged: ComplianceProviderResult[] = [];
-    let screened = true;
     try {
-      const snapshot = await runComplianceCheck(trimmedAddress, "wallet_address_addition");
-      flagged = getHighRiskProviders(snapshot);
+      const result = await runComplianceCheck(trimmedAddress, "wallet_address_addition");
+      if (result.providers.length === 0) {
+        setScreenUnavailable(true);
+        setPhase("ready");
+        return;
+      }
+      setSnapshot(result);
+      setPhase("revealing");
     } catch {
-      screened = false;
-    } finally {
-      setScreening(false);
+      setScreenUnavailable(true);
+      setPhase("ready");
     }
-
-    if (!screened || flagged.length > 0) {
-      setConfirm({ providers: flagged, screened });
-      return;
-    }
-    await createAccount();
   }
 
   return (
@@ -111,6 +148,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
           size="xl"
           placeholder="e.g. Alice's Solana wallet"
           value={label}
+          disabled={busy}
           onChange={(e) => setLabel(e.target.value)}
         />
       </div>
@@ -121,10 +159,12 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
         onChange={(next) => {
           const match = CRYPTO_ACCOUNT_NETWORKS.find((n) => n === next);
           if (match) setNetwork(match);
+          clearScreening();
         }}
         options={NETWORK_OPTIONS}
         placeholder="Select network"
         searchable={false}
+        disabled={busy}
       />
 
       <div className="flex flex-col gap-2">
@@ -136,35 +176,57 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
           size="xl"
           placeholder="Destination wallet address"
           value={address}
-          onChange={(e) => setAddress(e.target.value)}
+          disabled={busy}
+          onChange={(e) => {
+            setAddress(e.target.value);
+            clearScreening();
+          }}
         />
       </div>
 
       {error && <p className="text-sm text-status-error-text">{error}</p>}
 
-      {screening ? (
-        <div className="flex items-center gap-2 text-sm text-text-medium">
-          <Loader2Icon className="size-4 animate-spin" />
-          Screening address for risk…
-        </div>
-      ) : (
-        <Button
-          type="button"
-          onClick={() => void handleAdd()}
-          disabled={busy || !trimmedAddress}
-          iconLeft={submitting ? <Loader2Icon className="animate-spin" /> : <PlusIcon />}
-        >
-          {submitting ? "Adding" : "Add account"}
-        </Button>
-      )}
+      <AnimatePresence>
+        {snapshot && (
+          <ScreeningProgress
+            key="screening"
+            results={snapshot.providers}
+            onComplete={() => setPhase("ready")}
+          />
+        )}
+      </AnimatePresence>
 
-      <ConfirmRiskyAccountDialog
-        isOpen={confirm !== null}
-        providers={confirm?.providers ?? []}
-        screened={confirm?.screened ?? true}
-        onConfirm={createAccount}
-        onClose={() => setConfirm(null)}
-      />
+      <AnimatePresence>
+        {phase === "ready" && hasRisk && (
+          <HeightReveal key="risk-warning" durationSeconds={0.25}>
+            <p className="text-sm text-status-error-text">
+              {screenUnavailable
+                ? "We couldn't screen this address — compliance screening is unavailable. Add it anyway?"
+                : "One or more checks flagged this wallet or couldn't be completed. Add it anyway?"}
+            </p>
+          </HeightReveal>
+        )}
+      </AnimatePresence>
+
+      <div className="flex justify-end">
+        {phase === "ready" && hasRisk ? (
+          <HoldButton
+            iconLeft={<ShieldAlertIcon className="size-3.5" />}
+            onHoldComplete={() => void createAccount()}
+          >
+            Hold to add anyway
+          </HoldButton>
+        ) : (
+          <Button
+            type="button"
+            onClick={() => (phase === "ready" ? void createAccount() : void handleAdd())}
+            disabled={(phase !== "idle" && phase !== "ready") || !trimmedAddress}
+            iconLeft={buttonState.icon}
+          >
+            {buttonState.label}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

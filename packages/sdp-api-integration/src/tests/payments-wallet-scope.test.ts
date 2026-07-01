@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
-  createFundedPrivyWallet,
+  createFundedIntegrationWallet,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
   requestWithApiKey,
@@ -52,11 +52,11 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
   it("limits transfer list/get access to the API key wallet bindings", {
     timeout: 240000,
   }, async () => {
-    const walletA = await createFundedPrivyWallet({
+    const walletA = await createFundedIntegrationWallet({
       label: "Wallet A",
       fundLamports: 12_000_000,
     });
-    const walletB = await createFundedPrivyWallet({
+    const walletB = await createFundedIntegrationWallet({
       label: "Wallet B",
       fundLamports: 12_000_000,
     });
@@ -89,7 +89,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
         source: walletA.walletId,
         destination: DESTINATION_A,
         token: "SOL",
-        amount: "0.01",
+        amount: "0.001",
       }),
     });
     expect(transferARes.status).toBe(200);
@@ -104,7 +104,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
         source: walletB.walletId,
         destination: DESTINATION_B,
         token: "SOL",
-        amount: "0.01",
+        amount: "0.001",
       }),
     });
     expect(transferBRes.status).toBe(200);

@@ -1,4 +1,10 @@
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
+import {
+  CRYPTO_RAIL_ASSET_LABELS,
+  type CryptoAssetSymbol,
+  type CryptoRailNetwork,
+  SOLANA_CRYPTO_RAILS,
+} from "@sdp/types";
 import { z } from "zod";
 
 extendZodWithOpenApi(z);
@@ -56,6 +62,20 @@ export const solanaAddressSchema = z.string().min(32).max(44).openapi({
   description: "Base58-encoded Solana address.",
   example: "So11111111111111111111111111111111111111112",
 });
+
+export const cryptoAssetSymbolSchema = z.enum(
+  Object.values(CRYPTO_RAIL_ASSET_LABELS) as [CryptoAssetSymbol, ...CryptoAssetSymbol[]]
+);
+
+export const cryptoRailNetworkSchema = z.enum(
+  Array.from(
+    new Set(
+      SOLANA_CRYPTO_RAILS.map((rail) => rail.split(".")[1]?.toUpperCase()).filter(
+        (network): network is CryptoRailNetwork => Boolean(network)
+      )
+    )
+  ) as [CryptoRailNetwork, ...CryptoRailNetwork[]]
+);
 
 const idSchema = (label: string, example: string) =>
   z.string().min(1).openapi({ description: label, example });
