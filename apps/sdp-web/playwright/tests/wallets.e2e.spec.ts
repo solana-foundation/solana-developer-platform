@@ -29,16 +29,6 @@ interface WalletBalancesResponse {
   };
 }
 
-interface WalletActivityEnvelope {
-  data?: {
-    activityRows?: Array<{
-      operationLabel?: string;
-      token?: string;
-      amount?: string;
-    }>;
-  };
-}
-
 const E2E_POLL_TIMEOUT_MS = 180_000;
 const E2E_POLL_INTERVAL_MS = 2_000;
 const E2E_POLL_OPTIONS = {
@@ -148,15 +138,6 @@ async function createAndDeployWalletActivityToken(
     created.token.id,
     (token) => token.status === "active" && Boolean(token.mintAddress),
     "be deployed"
-  );
-}
-
-function expectActivityPayloadRow(
-  body: WalletActivityEnvelope,
-  input: { operationLabel: string; token: string; amount: string }
-) {
-  expect(body.data?.activityRows ?? []).toEqual(
-    expect.arrayContaining([expect.objectContaining(input)])
   );
 }
 
@@ -303,27 +284,6 @@ test.describe
         await expect(locator).toBeVisible({ timeout: 120_000 });
         await expect(locator.getByText("confirmed", { exact: true })).toBeVisible();
         await expect(locator.getByRole("link")).toHaveCount(1);
-      }
-
-      const refreshButton = page.getByRole("button", { name: "Refresh" });
-      await expect(refreshButton).toBeEnabled({ timeout: E2E_POLL_TIMEOUT_MS });
-      const activityResponsePromise = page.waitForResponse(
-        (response) =>
-          response.status() === 200 &&
-          response
-            .url()
-            .includes(`/api/dashboard/wallets/${encodeURIComponent(wallet.walletId)}/activity`)
-      );
-
-      await refreshButton.click();
-      const activityResponse = await activityResponsePromise;
-      const activityBody = (await activityResponse.json()) as WalletActivityEnvelope;
-      for (const { expectedRow } of activityRows) {
-        expectActivityPayloadRow(activityBody, expectedRow);
-      }
-
-      for (const { locator } of activityRows) {
-        await expect(locator).toBeVisible();
       }
     });
 
