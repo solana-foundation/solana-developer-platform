@@ -1,6 +1,7 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type PaymentsDashboardWallet } from "@sdp/types";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { BatchSendStepContent } from "./components/batch-send-step-content";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type SendMode, SendModeToggle } from "./components/send-mode-toggle";
@@ -40,10 +41,12 @@ export function BatchSendRail({
   sendMode,
   onSendModeChange,
 }: BatchSendRailProps) {
+  const { sdpEnvironment } = useDashboardWorkspace();
   const wizard = useBatchSendWizard({
     wallets,
     walletsError,
     issuedTokenSymbolsByMint,
+    cluster: CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment],
     onExit,
   });
 

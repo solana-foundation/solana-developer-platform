@@ -1,4 +1,4 @@
-import { WELL_KNOWN_TOKENS } from "@sdp/types";
+import { isWellKnownTokenSymbol } from "@sdp/types";
 
 export interface BulkImportRow {
   accountId: string;
@@ -29,7 +29,7 @@ export function splitPastedRows(text: string): BulkImportRow[] {
       const upper = parts[1].toUpperCase();
       return {
         accountId: parts[0],
-        currency: Object.hasOwn(WELL_KNOWN_TOKENS, upper) ? upper : parts[1],
+        currency: isWellKnownTokenSymbol(upper) ? upper : parts[1],
         amount: parts[2],
       };
     });

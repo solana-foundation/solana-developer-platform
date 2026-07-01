@@ -2,14 +2,15 @@
 
 import {
   type CounterpartyAccountSummary,
+  isWellKnownTokenSymbol,
   type PaymentsDashboardWallet,
-  WELL_KNOWN_TOKEN_BY_MINT,
+  type SolanaCluster,
+  wellKnownMint,
 } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
 import {
   type CreateTransferBatchResult,
   createTransferBatch,
@@ -19,7 +20,7 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { BulkImportRow } from "../bulk-import";
 import { batchSendSchema, MAX_BATCH_RECIPIENTS } from "../schema";
-import { findWalletBalanceForDisplayToken, resolveWalletAssetOptions } from "../wallet-options";
+import { walletBalanceAssetOptions } from "../wallet-options";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
 export const BATCH_SEND_STEPS = [
@@ -52,6 +53,7 @@ export interface UseBatchSendWizardProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
+  cluster: SolanaCluster;
   onExit: () => void;
 }
 
@@ -59,12 +61,13 @@ export function useBatchSendWizard({
   wallets,
   walletsError,
   issuedTokenSymbolsByMint,
+  cluster,
   onExit,
 }: UseBatchSendWizardProps) {
   const router = useRouter();
   const [stepIndex, setStepIndex] = useState(0);
   const [walletId, setWalletId] = useState("");
-  const [asset, setAsset] = useState("USDC");
+  const [asset, setAsset] = useState("");
   const [entries, setEntries] = useState<Record<string, BatchRecipientEntry>>({});
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -115,32 +118,22 @@ export function useBatchSendWizard({
     [liveWallets, walletId]
   );
   const assetOptions = useMemo(
-    () => resolveWalletAssetOptions(selectedWallet, issuedTokenSymbolsByMint),
+    () => walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint),
     [issuedTokenSymbolsByMint, selectedWallet]
   );
   const selectedAssetBalance = useMemo(
-    () => findWalletBalanceForDisplayToken(selectedWallet, asset, issuedTokenSymbolsByMint),
-    [issuedTokenSymbolsByMint, selectedWallet, asset]
+    () => selectedWallet?.balances?.find((balance) => balance.mint === asset) ?? null,
+    [selectedWallet, asset]
   );
-  const selectedAssetMint = selectedAssetBalance?.mint.trim() ?? "";
-  const displayAsset = useMemo(() => {
-    const trimmedAsset = asset.trim();
-    const tokenLookup = selectedAssetMint || trimmedAsset;
-    const issuedTokenSymbol = issuedTokenSymbolsByMint[tokenLookup]?.trim();
-    return (
-      (issuedTokenSymbol ? issuedTokenSymbol.toUpperCase() : null) ??
-      WELL_KNOWN_TOKEN_BY_MINT.get(tokenLookup)?.symbol ??
-      shortenAddress(trimmedAsset)
-    );
-  }, [asset, issuedTokenSymbolsByMint, selectedAssetMint]);
-  const token = selectedAssetBalance?.mint ?? (asset === "SOL" ? "SOL" : asset);
+  const displayAsset = assetOptions.find((option) => option.value === asset)?.label ?? "";
 
   const selectWallet = (nextWalletId: string) => {
     setWalletId(nextWalletId);
     const nextWallet = liveWallets.find((wallet) => wallet.walletId === nextWalletId) ?? null;
-    const nextAssets = resolveWalletAssetOptions(nextWallet, issuedTokenSymbolsByMint);
-    if (!nextAssets.includes(asset)) {
-      setAsset(nextAssets[0] ?? "");
+    const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint);
+    if (!nextAssets.some((option) => option.value === asset)) {
+      const preferred = nextAssets.find((option) => option.label === "USDC") ?? nextAssets[0];
+      setAsset(preferred?.value ?? "");
     }
   };
 
@@ -203,7 +196,11 @@ export function useBatchSendWizard({
       );
     }
     if (Object.keys(additions).length > 0) {
-      setAsset(rows[0].currency);
+      const { currency } = rows[0];
+      const mint = isWellKnownTokenSymbol(currency) ? wellKnownMint(currency, cluster) : currency;
+      if (mint) {
+        setAsset(mint);
+      }
       setEntries((prev) => ({ ...prev, ...additions }));
     }
     return { unresolved };
@@ -242,14 +239,14 @@ export function useBatchSendWizard({
   const request = useMemo(
     () => ({
       source: walletId,
-      token,
+      token: asset,
       recipients: recipients.map((r) => ({
         counterpartyId: r.counterpartyId,
         counterpartyAccountId: r.counterpartyAccountId,
         amount: r.amount,
       })),
     }),
-    [walletId, token, recipients]
+    [walletId, asset, recipients]
   );
   const recipientsValid = batchSendSchema.safeParse({ walletId, asset, recipients }).success;
 

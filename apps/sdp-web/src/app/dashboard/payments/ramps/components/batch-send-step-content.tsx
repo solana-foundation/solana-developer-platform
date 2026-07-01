@@ -127,7 +127,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
           label="Asset"
           value={asset || null}
           onChange={setAsset}
-          options={assetOptions.map((value) => ({ value, label: value }))}
+          options={assetOptions}
           placeholder="Select an asset"
           searchable={false}
         />
