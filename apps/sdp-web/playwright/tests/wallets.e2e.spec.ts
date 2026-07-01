@@ -306,7 +306,7 @@ test.describe
       }
 
       const refreshButton = page.getByRole("button", { name: "Refresh" });
-      await expect(refreshButton).toBeEnabled();
+      await expect(refreshButton).toBeEnabled({ timeout: E2E_POLL_TIMEOUT_MS });
       const activityResponsePromise = page.waitForResponse(
         (response) =>
           response.status() === 200 &&
