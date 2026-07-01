@@ -1070,8 +1070,10 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
 
       const row = await db.transaction(async (tx) => {
         const current = await tx
-          .prepare("SELECT * FROM approval_requests WHERE id = ? FOR UPDATE")
-          .bind(input.approvalRequestId)
+          .prepare(
+            "SELECT * FROM approval_requests WHERE id = ? AND organization_id = ? FOR UPDATE"
+          )
+          .bind(input.approvalRequestId, input.organizationId)
           .first<Record<string, unknown>>();
 
         if (!current) {
@@ -1089,6 +1091,7 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
                  resolved_at = ?,
                  updated_at = ?
              WHERE id = ?
+               AND organization_id = ?
              RETURNING *`
           )
           .bind(
@@ -1096,9 +1099,14 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
             input.resolvedBy ?? null,
             resolvedAt,
             resolvedAt,
-            input.approvalRequestId
+            input.approvalRequestId,
+            input.organizationId
           )
           .first<Record<string, unknown>>();
+
+        if (!updated) {
+          return null;
+        }
 
         if (input.operationStatus) {
           const currentOperationStatus =

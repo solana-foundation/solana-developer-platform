@@ -84,7 +84,11 @@ export class WalletPolicyEnforcementService {
         };
       } catch (error) {
         if (approvalRequestId) {
-          await markApprovalRequestAndWalletOperationFailed(this.repository, approvalRequestId);
+          await markApprovalRequestAndWalletOperationFailed(
+            this.repository,
+            operation.organizationId,
+            approvalRequestId
+          );
         } else {
           await markWalletOperationFailed(this.repository, operation.id);
         }
@@ -102,8 +106,13 @@ export class WalletPolicyEnforcementService {
     throw walletOperationPolicyDecisionError(updatedOperation, evaluation);
   }
 
-  async approveApprovalRequest(approvalRequestId: string, resolvedBy?: string | null) {
+  async approveApprovalRequest(
+    organizationId: string,
+    approvalRequestId: string,
+    resolvedBy?: string | null
+  ) {
     return this.repository.updateApprovalRequestStatus({
+      organizationId,
       approvalRequestId,
       status: "approved",
       operationStatus: "executing",
@@ -111,8 +120,13 @@ export class WalletPolicyEnforcementService {
     });
   }
 
-  async cancelApprovalRequest(approvalRequestId: string, resolvedBy?: string | null) {
+  async cancelApprovalRequest(
+    organizationId: string,
+    approvalRequestId: string,
+    resolvedBy?: string | null
+  ) {
     return this.repository.updateApprovalRequestStatus({
+      organizationId,
       approvalRequestId,
       status: "canceled",
       operationStatus: "canceled",
@@ -172,10 +186,12 @@ async function markWalletOperationFailed(
 
 async function markApprovalRequestAndWalletOperationFailed(
   repository: PolicyRepository,
+  organizationId: string,
   approvalRequestId: string
 ): Promise<void> {
   try {
     await repository.updateApprovalRequestStatus({
+      organizationId,
       approvalRequestId,
       status: "failed",
       operationStatus: "failed",

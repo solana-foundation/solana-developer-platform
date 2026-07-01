@@ -215,7 +215,9 @@ function createRepository(options: {
       return row;
     }),
     updateApprovalRequestStatus: vi.fn(async (input) => {
-      const request = approvalRequests.find((row) => row.id === input.approvalRequestId);
+      const request = approvalRequests.find(
+        (row) => row.id === input.approvalRequestId && row.organization_id === input.organizationId
+      );
       if (!request) return null;
       if (request.status !== "pending") return request;
 
@@ -423,11 +425,15 @@ describe("WalletPolicyEnforcementService", () => {
       code: "SIGNING_PENDING",
     });
 
-    await expect(service.approveApprovalRequest("appr_1", "usr_approver")).resolves.toMatchObject({
+    await expect(
+      service.approveApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).resolves.toMatchObject({
       status: "approved",
       resolved_by: "usr_approver",
     });
-    await expect(service.approveApprovalRequest("appr_1", "usr_approver")).resolves.toMatchObject({
+    await expect(
+      service.approveApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).resolves.toMatchObject({
       status: "approved",
       resolved_by: "usr_approver",
     });
@@ -443,13 +449,13 @@ describe("WalletPolicyEnforcementService", () => {
       code: "SIGNING_PENDING",
     });
     await expect(
-      secondService.cancelApprovalRequest("appr_1", "usr_approver")
+      secondService.cancelApprovalRequest("org_1", "appr_1", "usr_approver")
     ).resolves.toMatchObject({
       status: "canceled",
       resolved_by: "usr_approver",
     });
     await expect(
-      secondService.cancelApprovalRequest("appr_1", "usr_approver")
+      secondService.cancelApprovalRequest("org_1", "appr_1", "usr_approver")
     ).resolves.toMatchObject({
       status: "canceled",
       resolved_by: "usr_approver",
@@ -468,6 +474,7 @@ describe("WalletPolicyEnforcementService", () => {
     await expect(service.enforce(baseOperation)).rejects.toThrow("evaluation write unavailable");
 
     expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith({
+      organizationId: "org_1",
       approvalRequestId: "appr_1",
       status: "failed",
       operationStatus: "failed",

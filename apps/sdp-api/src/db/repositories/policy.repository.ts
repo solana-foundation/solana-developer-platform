@@ -310,6 +310,7 @@ export interface CreateApprovalRequestInput {
 }
 
 export interface UpdateApprovalRequestStatusInput {
+  organizationId: string;
   approvalRequestId: string;
   status: ApprovalRequestStatus;
   operationStatus?: WalletOperationStatus;
