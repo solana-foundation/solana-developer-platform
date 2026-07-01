@@ -15,10 +15,12 @@ import {
   fetchCounterpartyAccounts,
   fetchWallets,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import { BatchSendRail } from "./batch-send-rail";
 import { CounterpartyPicker } from "./components/counterparty-picker";
 import { CounterpartyRecentTransfers } from "./components/counterparty-recent-transfers";
 import { type PaymentMethod, PaymentMethodStep } from "./components/payment-method-step";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
+import { type SendMode, SendModeToggle } from "./components/send-mode-toggle";
 import { OfframpRail } from "./offramp-rail";
 import { OnchainReceiveRail } from "./onchain-receive-rail";
 import { OnchainSendRail } from "./onchain-send-rail";
@@ -59,6 +61,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   const router = useRouter();
 
   const [phase, setPhase] = useState<RampsPhase>("counterparty");
+  const [sendMode, setSendMode] = useState<SendMode>("single");
   const [counterpartyId, setCounterpartyId] = useState("");
   const [method, setMethod] = useState<PaymentMethod | null>(null);
   const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
@@ -113,6 +116,19 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   };
 
   const railOnExit = () => setPhase(showMethodStep ? "method" : "counterparty");
+
+  if (mode === "send" && sendMode === "batch") {
+    return (
+      <BatchSendRail
+        wallets={props.wallets}
+        walletsError={props.walletsError}
+        issuedTokenSymbolsByMint={props.issuedTokenSymbolsByMint}
+        onExit={() => router.push("/dashboard/payments")}
+        sendMode={sendMode}
+        onSendModeChange={setSendMode}
+      />
+    );
+  }
 
   if (phase === "rail") {
     const railProps: RailProps = {
@@ -179,6 +195,11 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
       counterpartyDialogOpen={counterpartyDialogOpen}
       setCounterpartyDialogOpen={setCounterpartyDialogOpen}
       onCounterpartyCreated={handleCounterpartyCreated}
+      header={
+        mode === "send" && phase === "counterparty" ? (
+          <SendModeToggle value={sendMode} onChange={setSendMode} />
+        ) : undefined
+      }
     >
       {phase === "counterparty" ? (
         <>

@@ -168,6 +168,38 @@ export function createPostgresCounterpartyAccountsRepository(
       return row ? mapCounterpartyAccountRow(row) : null;
     },
 
+    async getCounterpartyAccountByIdInProject(params) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM counterparty_accounts
+             WHERE id = ?
+               AND organization_id = ?
+               AND project_id = ?
+               AND status = 'active'`
+        )
+        .bind(params.counterpartyAccountId, params.organizationId, params.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapCounterpartyAccountRow(row) : null;
+    },
+
+    async listCounterpartyAccountsByIdsInProject(params) {
+      if (params.counterpartyAccountIds.length === 0) {
+        return [];
+      }
+      const placeholders = params.counterpartyAccountIds.map(() => "?").join(", ");
+      const result = await db
+        .prepare(
+          `SELECT * FROM counterparty_accounts
+             WHERE id IN (${placeholders})
+               AND organization_id = ?
+               AND project_id = ?
+               AND status = 'active'`
+        )
+        .bind(...params.counterpartyAccountIds, params.organizationId, params.projectId)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapCounterpartyAccountRow);
+    },
+
     async listCounterpartyAccountsByCounterparty(
       params: ListCounterpartyAccountsByCounterpartyInput
     ): Promise<ListCounterpartyAccountsResult> {
@@ -218,6 +250,72 @@ export function createPostgresCounterpartyAccountsRepository(
 
       return {
         rows: rowsResult.results.map(mapCounterpartyAccountRow),
+        total: countRow?.total ?? 0,
+      };
+    },
+
+    async listBatchRecipients(params) {
+      const searchLike = params.search ? `%${params.search}%` : null;
+      const idValues = params.accountIds && params.accountIds.length > 0 ? params.accountIds : [];
+      const idClause =
+        idValues.length > 0 ? `AND a.id IN (${idValues.map(() => "?").join(", ")})` : "";
+      const filter = `FROM counterparty_accounts a
+             JOIN counterparties c
+               ON c.id = a.counterparty_id
+              AND c.organization_id = a.organization_id
+              AND c.project_id = a.project_id
+            WHERE a.organization_id = ?
+              AND a.project_id = ?
+              AND a.status = 'active'
+              AND a.account_kind = 'crypto_wallet'
+              AND c.status = 'active'
+              AND a.details->>'network' = 'solana'
+              AND a.details->>'address' IS NOT NULL
+              AND (?::text IS NULL OR c.display_name ILIKE ?)
+              ${idClause}`;
+
+      const [rowsResult, countRow] = await Promise.all([
+        db
+          .prepare(
+            `SELECT a.counterparty_id,
+                    c.display_name AS counterparty_display_name,
+                    a.id AS account_id,
+                    a.label AS account_label,
+                    a.details->>'address' AS address
+               ${filter}
+            ORDER BY c.display_name ASC, a.created_at DESC
+              LIMIT ? OFFSET ?`
+          )
+          .bind(
+            params.organizationId,
+            params.projectId,
+            params.search ?? null,
+            searchLike,
+            ...idValues,
+            params.limit,
+            params.offset
+          )
+          .all<Record<string, unknown>>(),
+        db
+          .prepare(`SELECT COUNT(*)::int AS total ${filter}`)
+          .bind(
+            params.organizationId,
+            params.projectId,
+            params.search ?? null,
+            searchLike,
+            ...idValues
+          )
+          .first<{ total: number }>(),
+      ]);
+
+      return {
+        rows: rowsResult.results.map((row) => ({
+          counterparty_id: row.counterparty_id as string,
+          counterparty_display_name: row.counterparty_display_name as string,
+          account_id: row.account_id as string,
+          account_label: (row.account_label as string | null) ?? null,
+          address: row.address as string,
+        })),
         total: countRow?.total ?? 0,
       };
     },

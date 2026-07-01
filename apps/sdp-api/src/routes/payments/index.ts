@@ -22,8 +22,6 @@ import {
   estimateOfframp,
   estimateOnramp,
   estimateTransferBatch,
-  executeOfframp,
-  executeOnramp,
   getRecurringPayment,
   getSubscription,
   getSubscriptionPlan,
@@ -224,19 +222,9 @@ payments.post(
   createOnrampQuote
 );
 payments.post(
-  "/ramps/onramp/execute",
-  requirePermissions("payments:write", "wallets:read"),
-  executeOnramp
-);
-payments.post(
   "/ramps/offramp/quote",
   requirePermissions("payments:write", "wallets:read"),
   createOfframpQuote
-);
-payments.post(
-  "/ramps/offramp/execute",
-  requirePermissions("payments:write", "wallets:read"),
-  executeOfframp
 );
 payments.post(
   "/ramps/:provider/events",
