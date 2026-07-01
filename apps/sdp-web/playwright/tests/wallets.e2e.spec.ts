@@ -107,6 +107,31 @@ async function waitForWalletTokenBalance(
   return matchingBalance;
 }
 
+async function postWithSigningProviderRetry<T>(
+  api: LocalApiClient,
+  path: string,
+  body: unknown
+): Promise<T> {
+  const maxAttempts = 4;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await api.post<T>(path, body);
+    } catch (error) {
+      const isRetryable =
+        error instanceof Error &&
+        error.message.includes("signing provider is temporarily unavailable");
+      if (!isRetryable || attempt === maxAttempts) {
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+    }
+  }
+
+  throw new Error(`Signing provider request did not complete for ${path}`);
+}
+
 async function createAndDeployWalletActivityToken(
   api: LocalApiClient,
   signingWalletId: string
@@ -126,7 +151,8 @@ async function createAndDeployWalletActivityToken(
     isFreezable: true,
   });
 
-  await api.post<TokenResponse>(
+  await postWithSigningProviderRetry<TokenResponse>(
+    api,
     `/v1/issuance/tokens/${encodeURIComponent(created.token.id)}/deploy`,
     {
       signingWalletId,
@@ -234,7 +260,8 @@ test.describe
         throw new Error("Failed to deploy wallet activity token with a mint address");
       }
 
-      const minted = await api.post<MintResponse>(
+      const minted = await postWithSigningProviderRetry<MintResponse>(
+        api,
         `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/mint`,
         {
           signingWalletId: wallet.walletId,
@@ -247,7 +274,8 @@ test.describe
       expect(minted.transaction.status).toBe("confirmed");
       expect(minted.tokenAccount).toBeTruthy();
 
-      const burned = await api.post<TransactionResponse>(
+      const burned = await postWithSigningProviderRetry<TransactionResponse>(
+        api,
         `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/burn`,
         {
           signingWalletId: wallet.walletId,
