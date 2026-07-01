@@ -12,6 +12,7 @@ import {
   type CounterpartyFieldOptionsResponse,
   type CounterpartyResponse,
   type ListCounterpartiesResponse,
+  type ListProjectCounterpartyAccountsResponse,
   US_STATES,
 } from "@sdp/types";
 import { z } from "zod";
@@ -37,12 +38,17 @@ import {
 import { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
 import { AuditService } from "@/services/audit.service";
-import { type AppContext, getCounterpartiesRepository } from "./context";
+import {
+  type AppContext,
+  getCounterpartiesRepository,
+  getCounterpartyAccountsRepository,
+} from "./context";
 import {
   counterpartyIdParamsSchema,
   counterpartyRequirementsQuerySchema,
   createCounterpartySchema,
   listCounterpartiesQuerySchema,
+  listCounterpartyAccountsQuerySchema,
   updateCounterpartySchema,
 } from "./schemas";
 
@@ -105,6 +111,57 @@ export const listCounterparties = async (c: AppContext) => {
 
   const response: ListCounterpartiesResponse = {
     counterparties: rows.map(mapToCounterparty),
+    total,
+    page,
+    pageSize,
+  };
+
+  return success(c, response);
+};
+
+/**
+ * Lists a project's counterparty accounts of the requested `type`.
+ *
+ * Only `crypto_account` is supported today (active Solana wallets); the `type`
+ * enum will widen as other account kinds gain pickers, at which point the
+ * response becomes a discriminated union by `type`.
+ */
+export const listProjectCounterpartyAccounts = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const parsed = listCounterpartyAccountsQuerySchema.safeParse(c.req.query());
+
+  if (!parsed.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
+  }
+
+  const { page, pageSize, search } = parsed.data;
+  const accountIds = parsed.data.ids
+    ? parsed.data.ids
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0)
+    : undefined;
+  const resolvingIds = accountIds !== undefined && accountIds.length > 0;
+
+  const repo = getCounterpartyAccountsRepository(c);
+  const { rows, total } = await repo.listBatchRecipients({
+    organizationId: auth.organizationId,
+    projectId,
+    search,
+    accountIds,
+    limit: resolvingIds ? accountIds.length : pageSize,
+    offset: resolvingIds ? 0 : (page - 1) * pageSize,
+  });
+
+  const response: ListProjectCounterpartyAccountsResponse = {
+    accounts: rows.map((row) => ({
+      counterpartyId: row.counterparty_id,
+      counterpartyAccountId: row.account_id,
+      name: row.counterparty_display_name,
+      address: row.address,
+      label: row.account_label,
+    })),
     total,
     page,
     pageSize,

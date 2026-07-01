@@ -1,3 +1,8 @@
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import {
+  formatTokenAmount,
+  shortenAddress,
+} from "@/app/dashboard/payments/payments-overview.utils";
 import { cn } from "@/lib/utils";
 
 export function AmountBalanceReadout({
@@ -11,12 +16,20 @@ export function AmountBalanceReadout({
   exceeds: boolean;
   onMax?: () => void;
 }) {
+  const trimmedAssetLabel = assetLabel.trim();
+  const displayAssetLabel =
+    WELL_KNOWN_TOKEN_BY_MINT.get(trimmedAssetLabel)?.symbol ?? shortenAddress(trimmedAssetLabel);
+  const displayAvailable = formatTokenAmount(available);
+  const fullReadout = `${available} ${assetLabel}`;
+  const displayReadout = `${displayAvailable} ${displayAssetLabel}`;
+
   return (
     <div className="flex items-center gap-2.5 text-sm">
       <span
         className={cn("whitespace-nowrap", exceeds ? "text-status-error-text" : "text-text-low")}
+        title={displayReadout === fullReadout ? undefined : fullReadout}
       >
-        {available} {assetLabel}
+        {displayReadout}
       </span>
       {onMax ? (
         <>

@@ -281,10 +281,10 @@ export function buildPaymentsPlaygroundEndpointConfigs({
       },
     },
     {
-      id: "execute-onramp",
-      title: "Execute Onramp",
+      id: "create-onramp-quote",
+      title: "Create Onramp Quote",
       method: "POST",
-      path: "/v1/payments/ramps/onramp/execute",
+      path: "/v1/payments/ramps/onramp/quote",
       pathFields: [],
       bodyFields: [
         {
@@ -333,17 +333,21 @@ export function buildPaymentsPlaygroundEndpointConfigs({
       ],
       expectedResponse: {
         data: {
-          provider: "moonpay",
-          redirectUrl: "https://buy.moonpay.com/session_123",
-          destinationWallet: exampleWalletId,
+          quote: {
+            id: "ramp_quote_example",
+            provider: "moonpay",
+            status: "pending",
+            deliveryMode: "hosted",
+            hostedUrl: "https://buy.moonpay.com/session_123",
+          },
         },
       },
     },
     {
-      id: "execute-offramp",
-      title: "Execute Offramp",
+      id: "create-offramp-quote",
+      title: "Create Offramp Quote",
       method: "POST",
-      path: "/v1/payments/ramps/offramp/execute",
+      path: "/v1/payments/ramps/offramp/quote",
       pathFields: [],
       bodyFields: [
         {
@@ -392,9 +396,13 @@ export function buildPaymentsPlaygroundEndpointConfigs({
       ],
       expectedResponse: {
         data: {
-          provider: "moonpay",
-          redirectUrl: "https://sell.moonpay.com/session_123",
-          sourceWallet: exampleWalletId,
+          quote: {
+            id: "ramp_quote_example",
+            provider: "moonpay",
+            status: "pending",
+            deliveryMode: "hosted",
+            hostedUrl: "https://sell.moonpay.com/session_123",
+          },
         },
       },
     },

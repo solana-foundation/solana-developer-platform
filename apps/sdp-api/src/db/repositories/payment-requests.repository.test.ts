@@ -97,7 +97,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
       destinationAddress: "OurWallet",
       token: "USDC",
       amount: "25.00",
-      expiresAt: "2026-07-01T00:00:00.000Z",
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       createdBy: TEST_USER.id,
       ...overrides,
     };
