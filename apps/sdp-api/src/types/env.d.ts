@@ -232,6 +232,13 @@ export interface Env {
   // MoneyGram ramps configuration
   MONEYGRAM_SANDBOX_PUBLIC_KEY?: string;
   MONEYGRAM_SANDBOX_SECRET_KEY?: string;
+
+  // Coinbase Onramp (headless v2) configuration
+  // Sandbox mode uses the same keys — test transactions are identified by a
+  // "sandbox-" prefix on the partnerUserRef parameter, not separate credentials.
+  CDP_API_KEY?: string;
+  CDP_API_SECRET?: string;
+  CDP_WEBHOOK_SECRET?: string;
 }
 
 // Extend Hono's context with our bindings

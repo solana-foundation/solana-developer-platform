@@ -683,6 +683,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       collectedData: z.record(z.string(), z.string()).optional(),
     }),
   ]),
+  z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),
 ]);
 
 export const createOfframpQuoteSchema = z.object({

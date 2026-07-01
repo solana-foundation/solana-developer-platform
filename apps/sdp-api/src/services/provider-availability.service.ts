@@ -202,6 +202,10 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
         return sandbox;
       },
     },
+    coinbase: {
+      label: "Coinbase Onramp",
+      isConfigured: (env) => hasAllEnv(env, ["CDP_API_KEY", "CDP_API_SECRET"]),
+    },
   },
 } as const satisfies ProviderAvailabilityDefinitions;
 

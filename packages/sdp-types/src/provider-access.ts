@@ -9,7 +9,7 @@ import {
 export const COMPLIANCE_PROVIDERS = ["range", "elliptic", "trm", "chainalysis"] as const;
 export type ComplianceProviderId = (typeof COMPLIANCE_PROVIDERS)[number];
 
-export const RAMP_PROVIDERS = ["moonpay", "lightspark", "bvnk", "moneygram"] as const;
+export const RAMP_PROVIDERS = ["moonpay", "lightspark", "bvnk", "moneygram", "coinbase"] as const;
 export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
 
 export const ORGANIZATION_PROVIDER_FAMILIES = ["custody", "rpc", "compliance", "ramps"] as const;
@@ -111,7 +111,13 @@ const ENTERPRISE_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
     "trm",
     "chainalysis",
   ]),
-  ramps: createBooleanRecord(RAMP_PROVIDERS, ["moonpay", "lightspark", "bvnk", "moneygram"]),
+  ramps: createBooleanRecord(RAMP_PROVIDERS, [
+    "moonpay",
+    "lightspark",
+    "bvnk",
+    "moneygram",
+    "coinbase",
+  ]),
 };
 
 export function resolveOrganizationProviderEntitlements(input: {
