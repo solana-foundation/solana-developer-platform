@@ -45,6 +45,11 @@ CREATE TABLE IF NOT EXISTS provider_credentials (
         CHECK (credential_version > 0),
     CONSTRAINT provider_credentials_display_metadata_object
         CHECK (jsonb_typeof(display_metadata) = 'object'),
+    CONSTRAINT provider_credentials_deactivated_at_status_check
+        CHECK (
+            (status = 'deactivated' AND deactivated_at IS NOT NULL)
+            OR (status <> 'deactivated' AND deactivated_at IS NULL)
+        ),
     CONSTRAINT provider_credentials_secret_location_check
         CHECK (
             (
@@ -106,7 +111,7 @@ CREATE TABLE IF NOT EXISTS custody_connections (
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (provider_credential_id, organization_id, provider)
-        REFERENCES provider_credentials(id, organization_id, provider),
+        REFERENCES provider_credentials(id, organization_id, provider) ON DELETE CASCADE,
     FOREIGN KEY (default_custody_wallet_id) REFERENCES custody_wallets(id) ON DELETE SET NULL,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT custody_connections_scope_check
@@ -124,9 +129,26 @@ CREATE TABLE IF NOT EXISTS custody_connections (
     CONSTRAINT custody_connections_setup_metadata_object
         CHECK (jsonb_typeof(setup_metadata) = 'object'),
     CONSTRAINT custody_connections_display_metadata_object
-        CHECK (jsonb_typeof(display_metadata) = 'object')
+        CHECK (jsonb_typeof(display_metadata) = 'object'),
+    CONSTRAINT custody_connections_activated_at_status_check
+        CHECK (
+            (status = 'active' AND activated_at IS NOT NULL)
+            OR (status <> 'active')
+        ),
+    CONSTRAINT custody_connections_deactivated_at_status_check
+        CHECK (
+            (status = 'deactivated' AND deactivated_at IS NOT NULL)
+            OR (status <> 'deactivated' AND deactivated_at IS NULL)
+        ),
+    CONSTRAINT custody_connections_activated_at_lifecycle_check
+        CHECK (
+            activated_at IS NULL
+            OR status IN ('active', 'deactivated')
+        )
 );
 
+-- Multiple active connections per provider/scope are intentional for rotation overlap
+-- and explicit project selection.
 CREATE INDEX IF NOT EXISTS idx_custody_connections_org_provider_status
     ON custody_connections(organization_id, provider, status, updated_at);
 
