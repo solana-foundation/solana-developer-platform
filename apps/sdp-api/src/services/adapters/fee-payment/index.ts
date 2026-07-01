@@ -54,10 +54,7 @@ export function createFeePaymentAdapter(env: Env, userId?: string): FeePaymentPo
 
 /**
  * Create a Kora adapter from environment configuration.
- *
- * @param userId Stable per-end-user id forwarded to Kora as `user_id` on sign calls
- *   (required by Kora's free+usage-tracking mainnet config). Resolve it from the
- *   request via `resolveKoraUserId(c)`; omit for non-request/background callers.
+ * Pass `userId` (via `resolveKoraUserId(c)`) to forward it to Kora as `user_id`.
  */
 export function createKoraAdapter(env: Env, userId?: string): KoraAdapter {
   // Get RPC URL from env or use default based on network

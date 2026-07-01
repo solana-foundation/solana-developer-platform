@@ -1,13 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Capture the args passed to the underlying Kora SDK client.
 const mocks = vi.hoisted(() => ({
   signTransaction: vi.fn(),
   signAndSendTransaction: vi.fn(),
 }));
 
-// Class (not a function) so the adapter's `new KoraClient(...)` works and biome's
-// useArrowFunction rule can't rewrite it into a non-constructable arrow.
+// Class, not an arrow, so `new KoraClient(...)` is constructable.
 vi.mock("@solana/kora", () => {
   class MockKoraClient {
     signTransaction = mocks.signTransaction;

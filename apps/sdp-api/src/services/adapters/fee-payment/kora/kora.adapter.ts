@@ -22,12 +22,7 @@ export type KoraAdapterConfig = KoraClientOptions & {
    */
   timeoutMs?: number;
 
-  /**
-   * Stable per-end-user identifier forwarded to Kora as `user_id` on sign calls.
-   * Kora requires this when pricing is `free` + usage tracking is enabled (mainnet);
-   * configs without usage tracking (e.g. devnet) ignore it. Source: the SDP user id
-   * (session/clerk `usr_…`), falling back to the API key id for programmatic callers.
-   */
+  /** Per-user id forwarded to Kora as `user_id` (required by mainnet's free+usage-tracking config). */
   userId?: string;
 };
 
@@ -187,11 +182,7 @@ export class KoraAdapter implements FeePaymentPort {
   // Private Methods
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Build a sign request, attaching `user_id` when configured. Kora requires `user_id`
-   * under free-pricing + usage-tracking (mainnet); configs without usage tracking
-   * (e.g. devnet) ignore it.
-   */
+  /** Attach `user_id` to the sign request when configured. */
   private buildSignRequest(transaction: string): { transaction: string; user_id?: string } {
     const request: { transaction: string; user_id?: string } = { transaction };
     if (this.userId) {
