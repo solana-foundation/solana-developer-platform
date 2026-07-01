@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS provider_credentials (
     provider TEXT NOT NULL,
     label TEXT NOT NULL,
     scope TEXT NOT NULL,
+    scope_key TEXT GENERATED ALWAYS AS (COALESCE(project_id, '__organization__')) STORED,
     source TEXT NOT NULL,
     storage_backend TEXT NOT NULL,
     secret_ref TEXT,
@@ -29,12 +30,14 @@ CREATE TABLE IF NOT EXISTS provider_credentials (
     FOREIGN KEY (rotated_from_provider_credential_id)
         REFERENCES provider_credentials(id) ON DELETE SET NULL,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
-    UNIQUE (id, organization_id, provider),
+    UNIQUE (id, organization_id, provider, scope_key),
     CONSTRAINT provider_credentials_scope_check
         CHECK (
             (scope = 'organization' AND project_id IS NULL)
             OR (scope = 'project' AND project_id IS NOT NULL)
         ),
+    CONSTRAINT provider_credentials_project_scope_key_check
+        CHECK (project_id IS NULL OR project_id <> '__organization__'),
     CONSTRAINT provider_credentials_source_check
         CHECK (source IN ('stored', 'runtime')),
     CONSTRAINT provider_credentials_storage_backend_check
@@ -96,6 +99,7 @@ CREATE TABLE IF NOT EXISTS custody_connections (
     provider TEXT NOT NULL,
     scope TEXT NOT NULL,
     provider_credential_id TEXT NOT NULL,
+    provider_credential_scope_key TEXT NOT NULL,
     default_custody_wallet_id TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
     setup_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -110,14 +114,31 @@ CREATE TABLE IF NOT EXISTS custody_connections (
     updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY (provider_credential_id, organization_id, provider)
-        REFERENCES provider_credentials(id, organization_id, provider) ON DELETE CASCADE,
+    FOREIGN KEY (
+        provider_credential_id,
+        organization_id,
+        provider,
+        provider_credential_scope_key
+    )
+        REFERENCES provider_credentials(id, organization_id, provider, scope_key)
+        ON DELETE CASCADE,
     FOREIGN KEY (default_custody_wallet_id) REFERENCES custody_wallets(id) ON DELETE SET NULL,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT custody_connections_scope_check
         CHECK (
             (scope = 'organization' AND project_id IS NULL)
             OR (scope = 'project' AND project_id IS NOT NULL)
+        ),
+    CONSTRAINT custody_connections_credential_scope_check
+        CHECK (
+            (
+                scope = 'organization'
+                AND provider_credential_scope_key = '__organization__'
+            )
+            OR (
+                scope = 'project'
+                AND provider_credential_scope_key IN ('__organization__', project_id)
+            )
         ),
     CONSTRAINT custody_connections_status_check
         CHECK (status IN ('pending', 'checking', 'active', 'failed', 'deactivated')),
