@@ -495,6 +495,46 @@ describe("WalletPolicyEnforcementService", () => {
     });
   });
 
+  it("rejects conflicting approval request terminal transitions", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile([
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]),
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
+      code: "SIGNING_PENDING",
+    });
+    await service.cancelApprovalRequest("org_1", "appr_1", "usr_approver");
+
+    await expect(
+      service.approveApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "Approval request is already canceled",
+    });
+
+    const secondRepository = createRepository({
+      walletPolicy: walletProfile([
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]),
+    });
+    const secondService = new WalletPolicyEnforcementService(secondRepository);
+
+    await expect(secondService.enforce(baseOperation)).rejects.toMatchObject({
+      code: "SIGNING_PENDING",
+    });
+    await secondService.approveApprovalRequest("org_1", "appr_1", "usr_approver");
+
+    await expect(
+      secondService.cancelApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "Approval request is already approved",
+    });
+  });
+
   it("fails approval requests and wallet operations together when recording the evaluation fails", async () => {
     const repository = createRepository({
       walletPolicy: walletProfile([

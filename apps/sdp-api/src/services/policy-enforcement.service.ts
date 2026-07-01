@@ -8,13 +8,14 @@ import type {
 } from "@sdp/types";
 import { getDb } from "@/db";
 import {
+  type ApprovalRequestRow,
   type CreateApprovalRequestInput,
   type CreateWalletOperationInput,
   createPolicyRepository,
   type PolicyRepository,
 } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError, internalError } from "@/lib/errors";
+import { AppError, conflict, internalError } from "@/lib/errors";
 import {
   CustodyConfigStore,
   type CustodyWalletLookup,
@@ -115,13 +116,15 @@ export class WalletPolicyEnforcementService {
     approvalRequestId: string,
     resolvedBy?: string | null
   ) {
-    return this.repository.updateApprovalRequestStatus({
+    const approvalRequest = await this.repository.updateApprovalRequestStatus({
       organizationId,
       approvalRequestId,
       status: "approved",
       operationStatus: "executing",
       resolvedBy,
     });
+
+    return requireApprovalRequestStatus(approvalRequest, "approved");
   }
 
   async cancelApprovalRequest(
@@ -129,13 +132,15 @@ export class WalletPolicyEnforcementService {
     approvalRequestId: string,
     resolvedBy?: string | null
   ) {
-    return this.repository.updateApprovalRequestStatus({
+    const approvalRequest = await this.repository.updateApprovalRequestStatus({
       organizationId,
       approvalRequestId,
       status: "canceled",
       operationStatus: "canceled",
       resolvedBy,
     });
+
+    return requireApprovalRequestStatus(approvalRequest, "canceled");
   }
 }
 
@@ -199,6 +204,17 @@ async function markApprovalRequestAndWalletOperationFailed(
     status: "failed",
     operationStatus: "failed",
   });
+}
+
+function requireApprovalRequestStatus<TStatus extends ApprovalRequestRow["status"]>(
+  approvalRequest: ApprovalRequestRow | null,
+  status: TStatus
+): (ApprovalRequestRow & { status: TStatus }) | null {
+  if (approvalRequest && approvalRequest.status !== status) {
+    throw conflict(`Approval request is already ${approvalRequest.status}`);
+  }
+
+  return approvalRequest as (ApprovalRequestRow & { status: TStatus }) | null;
 }
 
 function combineEnforcementAndCleanupErrors(error: unknown, cleanupError: unknown): AggregateError {
