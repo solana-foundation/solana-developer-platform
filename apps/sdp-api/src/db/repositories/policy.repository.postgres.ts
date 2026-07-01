@@ -1120,9 +1120,15 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
                SET status = ?,
                    updated_at = ?
                WHERE id = ?
+                 AND organization_id = ?
                  AND ${currentOperationStatus}`
             )
-            .bind(input.operationStatus, resolvedAt, current.wallet_operation_id)
+            .bind(
+              input.operationStatus,
+              resolvedAt,
+              current.wallet_operation_id,
+              input.organizationId
+            )
             .run();
         }
 

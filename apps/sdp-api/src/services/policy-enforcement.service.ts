@@ -84,11 +84,15 @@ export class WalletPolicyEnforcementService {
         };
       } catch (error) {
         if (approvalRequestId) {
-          await markApprovalRequestAndWalletOperationFailed(
-            this.repository,
-            operation.organizationId,
-            approvalRequestId
-          );
+          try {
+            await markApprovalRequestAndWalletOperationFailed(
+              this.repository,
+              operation.organizationId,
+              approvalRequestId
+            );
+          } catch (cleanupError) {
+            throw combineEnforcementAndCleanupErrors(error, cleanupError);
+          }
         } else {
           await markWalletOperationFailed(this.repository, operation.id);
         }
@@ -195,6 +199,17 @@ async function markApprovalRequestAndWalletOperationFailed(
     status: "failed",
     operationStatus: "failed",
   });
+}
+
+function combineEnforcementAndCleanupErrors(error: unknown, cleanupError: unknown): AggregateError {
+  return new AggregateError(
+    [error, cleanupError],
+    `Wallet operation policy enforcement failed (${errorMessage(error)}) and approval cleanup failed (${errorMessage(cleanupError)})`
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export async function enforceWalletOperationPolicy(

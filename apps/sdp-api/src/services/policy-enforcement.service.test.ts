@@ -515,7 +515,7 @@ describe("WalletPolicyEnforcementService", () => {
     expect(repository.updateWalletOperationStatus).not.toHaveBeenCalledWith("wop_1", "failed");
   });
 
-  it("surfaces approval cleanup failures after creating an approval request", async () => {
+  it("surfaces approval cleanup failures without hiding the original error", async () => {
     const repository = createRepository({
       walletPolicy: walletProfile([
         { id: "large-payment-approval", kind: "approval", families: ["payment"] },
@@ -525,7 +525,9 @@ describe("WalletPolicyEnforcementService", () => {
     });
     const service = new WalletPolicyEnforcementService(repository);
 
-    await expect(service.enforce(baseOperation)).rejects.toThrow("approval cleanup unavailable");
+    await expect(service.enforce(baseOperation)).rejects.toThrow(
+      "Wallet operation policy enforcement failed (evaluation write unavailable) and approval cleanup failed (approval cleanup unavailable)"
+    );
 
     expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith({
       organizationId: "org_1",
