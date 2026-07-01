@@ -15,14 +15,17 @@ import type {
   ApiKeyWalletPolicyBindingResolutionRow,
   ApiKeyWalletPolicyBindingRow,
   ApiKeyWalletPolicyTargetRow,
+  ApprovalRequestRow,
   CreateApiKeyControlProfileInput,
   CreateApiKeyControlProfileRevisionInput,
+  CreateApprovalRequestInput,
   CreatePolicyEvaluationInput,
   CreateWalletControlProfileInput,
   CreateWalletControlProfileRevisionInput,
   CreateWalletOperationInput,
   PolicyEvaluationRow,
   PolicyRepository,
+  UpdateApprovalRequestStatusInput,
   UpsertApiKeyWalletPolicyBindingInput,
   WalletControlProfileRevisionRow,
   WalletControlProfileRow,
@@ -32,6 +35,7 @@ import {
   generateApiKeyControlProfileId,
   generateApiKeyControlProfileRevisionId,
   generateApiKeyWalletPolicyBindingId,
+  generateApprovalRequestId,
   generatePolicyEvaluationId,
   generateWalletControlProfileId,
   generateWalletControlProfileRevisionId,
@@ -194,6 +198,26 @@ function mapPolicyEvaluationRow(row: Record<string, unknown>): PolicyEvaluationR
     requires_approval: row.requires_approval as boolean,
     approval_request_id: (row.approval_request_id as string | null | undefined) ?? null,
     created_at: row.created_at as string,
+  };
+}
+
+function mapApprovalRequestRow(row: Record<string, unknown>): ApprovalRequestRow {
+  return {
+    id: row.id as string,
+    organization_id: row.organization_id as string,
+    project_id: (row.project_id as string | null | undefined) ?? null,
+    wallet_operation_id: row.wallet_operation_id as string,
+    approval_group_id: (row.approval_group_id as string | null | undefined) ?? null,
+    status: row.status as ApprovalRequestRow["status"],
+    provider: (row.provider as string | null | undefined) ?? null,
+    provider_reference: (row.provider_reference as string | null | undefined) ?? null,
+    provider_payload: asPostgresJsonObject(row.provider_payload),
+    requested_by: (row.requested_by as string | null | undefined) ?? null,
+    resolved_by: (row.resolved_by as string | null | undefined) ?? null,
+    expires_at: (row.expires_at as string | null | undefined) ?? null,
+    resolved_at: (row.resolved_at as string | null | undefined) ?? null,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
   };
 }
 
@@ -1000,6 +1024,118 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
 
     async listPolicyEvaluationsForOperation(walletOperationId: string) {
       return listPolicyEvaluationsForOperationInternal(db, walletOperationId);
+    },
+
+    async createApprovalRequest(input: CreateApprovalRequestInput) {
+      const id = generateApprovalRequestId();
+      const row = await db
+        .prepare(
+          `INSERT INTO approval_requests (
+             id,
+             organization_id,
+             project_id,
+             wallet_operation_id,
+             approval_group_id,
+             provider,
+             provider_reference,
+             provider_payload,
+             requested_by,
+             expires_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
+           ON CONFLICT (wallet_operation_id)
+           -- Self-assignment forces RETURNING * to emit the existing row.
+           -- ON CONFLICT DO NOTHING RETURNING * returns zero rows on conflict.
+           DO UPDATE SET updated_at = approval_requests.updated_at
+           RETURNING *`
+        )
+        .bind(
+          id,
+          input.organizationId,
+          input.projectId,
+          input.walletOperationId,
+          input.approvalGroupId ?? null,
+          input.provider ?? null,
+          input.providerReference ?? null,
+          JSON.stringify(input.providerPayload ?? {}),
+          input.requestedBy ?? null,
+          input.expiresAt ?? null
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapApprovalRequestRow(row) : null;
+    },
+
+    async updateApprovalRequestStatus(input: UpdateApprovalRequestStatusInput) {
+      const resolvedAt = input.resolvedAt ?? new Date().toISOString();
+
+      const row = await db.transaction(async (tx) => {
+        const current = await tx
+          .prepare(
+            "SELECT * FROM approval_requests WHERE id = ? AND organization_id = ? FOR UPDATE"
+          )
+          .bind(input.approvalRequestId, input.organizationId)
+          .first<Record<string, unknown>>();
+
+        if (!current) {
+          return null;
+        }
+        if (current.status !== "pending") {
+          return current;
+        }
+
+        const updated = await tx
+          .prepare(
+            `UPDATE approval_requests
+             SET status = ?,
+                 resolved_by = ?,
+                 resolved_at = ?,
+                 updated_at = ?
+             WHERE id = ?
+               AND organization_id = ?
+             RETURNING *`
+          )
+          .bind(
+            input.status,
+            input.resolvedBy ?? null,
+            resolvedAt,
+            resolvedAt,
+            input.approvalRequestId,
+            input.organizationId
+          )
+          .first<Record<string, unknown>>();
+
+        if (!updated) {
+          return null;
+        }
+
+        if (input.operationStatus) {
+          const currentOperationStatus =
+            input.operationStatus === "failed"
+              ? "status IN ('created', 'pending_approval')"
+              : "status = 'pending_approval'";
+
+          await tx
+            .prepare(
+              `UPDATE wallet_operations
+               SET status = ?,
+                   updated_at = ?
+               WHERE id = ?
+                 AND organization_id = ?
+                 AND ${currentOperationStatus}`
+            )
+            .bind(
+              input.operationStatus,
+              resolvedAt,
+              current.wallet_operation_id,
+              input.organizationId
+            )
+            .run();
+        }
+
+        return updated;
+      });
+
+      return row ? mapApprovalRequestRow(row) : null;
     },
   };
 }
