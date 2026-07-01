@@ -217,7 +217,7 @@ function createRepository(options: {
     updateApprovalRequestStatus: vi.fn(async (input) => {
       const request = approvalRequests.find((row) => row.id === input.approvalRequestId);
       if (!request) return null;
-      if (request.status !== "pending" || request.status === input.status) return request;
+      if (request.status !== "pending") return request;
 
       request.status = input.status;
       request.resolved_by = input.resolvedBy ?? null;

@@ -1077,7 +1077,7 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
         if (!current) {
           return null;
         }
-        if (current.status !== "pending" || current.status === input.status) {
+        if (current.status !== "pending") {
           return current;
         }
 
