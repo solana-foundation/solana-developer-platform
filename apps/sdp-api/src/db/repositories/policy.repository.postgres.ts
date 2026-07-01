@@ -1043,6 +1043,8 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
              expires_at
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
            ON CONFLICT (wallet_operation_id)
+           -- Self-assignment forces RETURNING * to emit the existing row.
+           -- ON CONFLICT DO NOTHING RETURNING * returns zero rows on conflict.
            DO UPDATE SET updated_at = approval_requests.updated_at
            RETURNING *`
         )
