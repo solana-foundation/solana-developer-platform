@@ -188,7 +188,10 @@ test.describe
     });
 
     // ponytail: quarantined until Surfpool signing stops intermittently hanging in CI.
-    test.skip("wallet activity shows a real burn row after API burn flow", async ({ browser, page }) => {
+    test.skip("wallet activity shows a real burn row after API burn flow", async ({
+      browser,
+      page,
+    }) => {
       test.setTimeout(420_000);
 
       const session = await getPlaywrightAdminSession(browser);
