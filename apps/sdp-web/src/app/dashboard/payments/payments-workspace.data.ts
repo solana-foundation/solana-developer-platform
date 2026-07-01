@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  CoinbaseRampEvent,
   Counterparty,
   CounterpartyAccount,
   CryptoRailId,
@@ -12,6 +13,7 @@ import type {
   PaymentRampExecution,
   PaymentsWalletAggregateEnvelope,
   RampDirection,
+  RampEventProvider,
   RampFiatCurrency,
   RampProviderEstimateResult,
   RampProviderId,
@@ -513,8 +515,11 @@ export async function createTransfer(input: {
   return body.data.transfer;
 }
 
-export async function postMoneygramRampEvent(event: MoneygramRampEvent): Promise<TransferRecord> {
-  const response = await fetch("/api/dashboard/payments/ramps/moneygram/events", {
+async function postRampEvent(
+  provider: RampEventProvider,
+  event: MoneygramRampEvent | CoinbaseRampEvent
+): Promise<TransferRecord> {
+  const response = await fetch(`/api/dashboard/payments/ramps/${provider}/events`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -523,14 +528,22 @@ export async function postMoneygramRampEvent(event: MoneygramRampEvent): Promise
   });
   const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `MoneyGram event request failed (${response.status}).`));
+    throw new Error(getApiError(body, `${provider} event request failed (${response.status}).`));
   }
 
   if (!body.data?.transfer) {
-    throw new Error("MoneyGram event response is missing transfer details.");
+    throw new Error(`${provider} event response is missing transfer details.`);
   }
 
   return body.data.transfer;
+}
+
+export function postMoneygramRampEvent(event: MoneygramRampEvent): Promise<TransferRecord> {
+  return postRampEvent("moneygram", event);
+}
+
+export function postCoinbaseRampEvent(event: CoinbaseRampEvent): Promise<TransferRecord> {
+  return postRampEvent("coinbase", event);
 }
 
 export async function fetchCounterpartyAccounts(

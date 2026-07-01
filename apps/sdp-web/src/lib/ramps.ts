@@ -37,6 +37,7 @@ export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
   { id: "lightspark", title: "Lightspark" },
   { id: "bvnk", title: "BVNK" },
   { id: "moneygram", title: "MoneyGram" },
+  { id: "coinbase", title: "Coinbase" },
 ];
 
 export const ONRAMP_PAIRS: RampPair[] = ONRAMP_SUPPORT.map(({ source, dest, providers }) => ({

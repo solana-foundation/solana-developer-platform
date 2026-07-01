@@ -204,7 +204,9 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     },
     coinbase: {
       label: "Coinbase Onramp",
-      isConfigured: (env) => hasAllEnv(env, ["CDP_API_KEY", "CDP_API_SECRET"]),
+      // Onramp uses the account-wide CDP Secret API Key (same key across environments).
+      isConfigured: (env) =>
+        hasAllEnv(env, ["COINBASE_CDP_API_KEY_ID", "COINBASE_CDP_API_KEY_SECRET"]),
     },
   },
 } as const satisfies ProviderAvailabilityDefinitions;

@@ -1,9 +1,12 @@
 "use client";
 
+import type { CoinbaseRampEvent } from "@sdp/types";
 import { DollarSignIcon } from "lucide-react";
+import { toast } from "sonner";
+import { postCoinbaseRampEvent } from "@/app/dashboard/payments/payments-workspace.data";
 import { ONRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
-import { HostedRampFrame } from "./hosted-ramp-frame";
+import { HostedRampFrame, type HostedRampFrameEvent } from "./hosted-ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { hasOnboardingLifecycle, simulateActionLabels } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
@@ -12,6 +15,37 @@ import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
 import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
+
+// Coinbase headless iframe postMessage names → SDP ramp event kinds. Unmapped names (load_*, cancel) are ignored.
+const COINBASE_EVENT_KIND = {
+  "onramp_api.commit_success": "committed",
+  "onramp_api.polling_success": "completed",
+  "onramp_api.commit_error": "errored",
+  "onramp_api.polling_error": "errored",
+} as const satisfies Record<string, CoinbaseRampEvent["kind"]>;
+
+function reportCoinbaseFrameEvent(orderId: string, frameEvent: HostedRampFrameEvent): void {
+  const kind = COINBASE_EVENT_KIND[frameEvent.eventName as keyof typeof COINBASE_EVENT_KIND];
+  if (!kind) {
+    return;
+  }
+  const event: CoinbaseRampEvent =
+    kind === "errored"
+      ? {
+          kind,
+          orderId,
+          reason: frameEvent.data?.errorMessage
+            ? frameEvent.data.errorMessage
+            : frameEvent.eventName,
+        }
+      : { kind, orderId };
+  postCoinbaseRampEvent(event).catch((error) => {
+    toast.error("Failed to record Coinbase event.", {
+      description: error instanceof Error ? error.message : "Event request failed.",
+      position: "bottom-right",
+    });
+  });
+}
 
 export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   const {
@@ -102,7 +136,19 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "hosted") {
     return (
       <div className="space-y-6">
-        <HostedRampFrame title={`${quote.provider} deposit`} src={quote.hostedUrl} />
+        <HostedRampFrame
+          title={`${quote.provider} deposit`}
+          src={quote.hostedUrl}
+          {...(quote.provider === "coinbase"
+            ? {
+                onProviderEvent: (frameEvent: HostedRampFrameEvent) =>
+                  reportCoinbaseFrameEvent(quote.id, frameEvent),
+                // Required by Coinbase to render the Apple Pay payment link in an iframe.
+                sandbox: "allow-scripts allow-same-origin",
+                referrerPolicy: "no-referrer" as const,
+              }
+            : {})}
+        />
         <div className="border-t border-border-light pt-5">
           <RampStatusPanel direction="onramp" transfer={transferStatus} />
         </div>

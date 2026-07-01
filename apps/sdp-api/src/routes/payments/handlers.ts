@@ -12,7 +12,7 @@ export {
   listOnrampCurrencies,
   simulateSandboxTransfer,
 } from "./handlers/ramps";
-export { recordRampProviderEvent } from "./handlers/ramps/moneygram";
+export { recordRampProviderEvent } from "./handlers/ramps/events";
 export {
   activateRecurringPayment,
   cancelRecurringPayment,

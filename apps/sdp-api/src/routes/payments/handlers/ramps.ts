@@ -471,12 +471,9 @@ async function executeOnrampWithProvider(
     case "moneygram":
       throw badRequest("MoneyGram on-ramp is not available.");
     case "coinbase":
-      return await RAMP_PROVIDER_CLIENTS.coinbase.executeOnramp(ctx, {
-        destinationWalletAddress,
-        cryptoToken: input.cryptoToken,
-        fiatCurrency: input.fiatCurrency,
-        fiatAmount: input.fiatAmount,
-      });
+      throw badRequest(
+        "Coinbase on-ramp completes in the hosted payment widget from the quote; execute is not supported."
+      );
     default: {
       const _exhaustive: never = input.provider;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
@@ -847,6 +844,9 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
         externalCustomerId: counterparty.external_id ?? counterparty.id,
+        email: counterparty.email,
+        phone: counterparty.identity.phone,
+        domain: input.domain,
       });
       break;
     }

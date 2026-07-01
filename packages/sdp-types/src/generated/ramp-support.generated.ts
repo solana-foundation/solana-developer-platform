@@ -19,7 +19,8 @@ export const RAMP_PROVIDER_SUPPORT_HASHES = {
   bvnk: "e2d1af10de70f562d5fcc6c8f7f28180d106760f835fbf71aed2d07157689754",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   moneygram: "d13d7ca60131cce86bc8e7b5405e007fc15661bfb440795fe4156f8523f6436e",
-  coinbase: "",
+  // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
+  coinbase: "ebeabe75a50c763b1358572e3af8afd0335a979125d2affbed7e971f40a77cba",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_SUPPORT_COUNTS = {

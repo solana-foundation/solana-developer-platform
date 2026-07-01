@@ -22,8 +22,14 @@ export function classifyProviderStatus(status: number): ErrorCode {
 
 export function extractProviderErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") return fallback;
-  const record = payload as { error?: { message?: unknown }; message?: unknown; reason?: unknown };
-  const message = record.error?.message ?? record.message ?? record.reason;
+  const record = payload as {
+    error?: { message?: unknown };
+    message?: unknown;
+    reason?: unknown;
+    // Coinbase/CDP shape: { errorMessage, errorType }.
+    errorMessage?: unknown;
+  };
+  const message = record.error?.message ?? record.message ?? record.reason ?? record.errorMessage;
   return typeof message === "string" && message.trim() ? message : fallback;
 }
 
