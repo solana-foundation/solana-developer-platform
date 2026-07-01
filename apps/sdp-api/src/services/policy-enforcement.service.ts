@@ -54,6 +54,11 @@ export class WalletPolicyEnforcementService {
           if (!approvalRequest) {
             throw internalError("Failed to create wallet operation approval request");
           }
+
+          if (approvalRequest.status !== "pending") {
+            throw internalError("Wallet operation approval request is no longer pending");
+          }
+
           approvalRequestId = approvalRequest.id;
         }
 

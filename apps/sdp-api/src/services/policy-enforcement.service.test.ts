@@ -95,6 +95,7 @@ function createRepository(options: {
   apiKeyPolicy?: ActiveApiKeyControlProfileResult | null;
   evaluationError?: Error;
   policyEvaluationError?: Error;
+  existingApprovalRequestStatus?: ApprovalRequestRow["status"];
   statusUpdateFailures?: number;
   statusUpdateError?: Error;
 }) {
@@ -170,6 +171,28 @@ function createRepository(options: {
         (request) => request.wallet_operation_id === input.walletOperationId
       );
       if (existing) return existing;
+
+      if (options.existingApprovalRequestStatus) {
+        const row: ApprovalRequestRow = {
+          id: "appr_existing",
+          organization_id: input.organizationId,
+          project_id: input.projectId,
+          wallet_operation_id: input.walletOperationId,
+          approval_group_id: input.approvalGroupId ?? null,
+          status: options.existingApprovalRequestStatus,
+          provider: input.provider ?? null,
+          provider_reference: input.providerReference ?? null,
+          provider_payload: input.providerPayload ?? {},
+          requested_by: input.requestedBy ?? null,
+          resolved_by: "usr_previous",
+          expires_at: input.expiresAt ?? null,
+          resolved_at: "2026-06-18T00:02:00.000Z",
+          created_at: "2026-06-18T00:00:00.000Z",
+          updated_at: "2026-06-18T00:02:00.000Z",
+        };
+        approvalRequests.push(row);
+        return row;
+      }
 
       const row: ApprovalRequestRow = {
         id: `appr_${approvalRequests.length + 1}`,
@@ -318,6 +341,28 @@ describe("WalletPolicyEnforcementService", () => {
       expect.objectContaining({
         approvalRequestId: "appr_1",
       })
+    );
+  });
+
+  it("does not reuse terminal approval requests for a new pending decision", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile([
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]),
+      existingApprovalRequestStatus: "failed",
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(service.enforce(baseOperation)).rejects.toThrow(
+      "Wallet operation approval request is no longer pending"
+    );
+
+    expect(repository.createPolicyEvaluation).not.toHaveBeenCalled();
+    expect(repository.updateApprovalRequestStatus).not.toHaveBeenCalled();
+    expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "failed");
+    expect(repository.updateWalletOperationStatus).not.toHaveBeenCalledWith(
+      "wop_1",
+      "pending_approval"
     );
   });
 
