@@ -11,6 +11,7 @@ import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
+import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
@@ -21,6 +22,7 @@ import { CUSTODY_PROVIDERS, type CustodyProvider } from "@/services/custody/prov
 import * as signingServiceModule from "@/services/domain/signing.service";
 import {
   aggregateTrackedWalletBalances,
+  attachTokenSymbolsToBalanceMap,
   attachUsdValuesToBalanceMap,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
@@ -96,6 +98,11 @@ function writeCache<T>(cache: Map<string, CacheEntry<T>>, key: string, value: T,
   });
 
   return value;
+}
+
+function buildWalletBalanceCacheKey(c: AppContext, publicKey: string): string {
+  const auth = getAuth(c);
+  return `${auth.organizationId}:${auth.projectId ?? "org"}:${publicKey}`;
 }
 
 function logWalletStep(
@@ -378,16 +385,18 @@ async function getBalancesByWalletId(
   options: { includeUsdValues?: boolean } = {}
 ) {
   const rpc = solanaRpc.createRpc(c.env);
+  const tokenLabelsByMint = await resolveIssuedTokenLabelsByMint(c);
   const balancesByWalletId = await Promise.all(
     walletPublicKeys.map(async (wallet) => {
-      const cachedBalances = readCache(walletBalanceCache, wallet.publicKey);
+      const cacheKey = buildWalletBalanceCacheKey(c, wallet.publicKey);
+      const cachedBalances = readCache(walletBalanceCache, cacheKey);
       if (cachedBalances) {
         return [wallet.walletId, cachedBalances] as const;
       }
 
       const [solBalanceResult, splBalancesResult] = await Promise.allSettled([
         solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address),
-        tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address),
+        tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address, { tokenLabelsByMint }),
       ]);
       const lamports =
         solBalanceResult.status === "fulfilled" ? (solBalanceResult.value?.lamports ?? 0n) : 0n;
@@ -419,7 +428,7 @@ async function getBalancesByWalletId(
 
       const walletBalances = writeCache(
         walletBalanceCache,
-        wallet.publicKey,
+        cacheKey,
         [
           {
             token: "SOL",
@@ -437,7 +446,7 @@ async function getBalancesByWalletId(
     })
   );
 
-  const balancesMap = new Map(balancesByWalletId);
+  const balancesMap = await attachTokenSymbolsToBalanceMap(c.env, new Map(balancesByWalletId));
 
   if (options.includeUsdValues === false) {
     return balancesMap;

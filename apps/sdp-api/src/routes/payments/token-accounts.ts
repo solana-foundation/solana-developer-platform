@@ -12,8 +12,14 @@ const SPL_TOKEN_PROGRAM_ID = SPL_TOKEN_PROGRAMS["spl-token"] as Address;
 const SPL_TOKEN_2022_PROGRAM_ID = SPL_TOKEN_PROGRAMS["token-2022"] as Address;
 const SPL_TOKEN_PROGRAM_IDS = [SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID] as const;
 
-export function resolveTokenLabel(mint: string): string {
-  return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? mint;
+export type TokenLabelsByMint = ReadonlyMap<string, string>;
+
+interface GetSplTokenBalancesOptions {
+  tokenLabelsByMint?: TokenLabelsByMint;
+}
+
+export function resolveTokenLabel(mint: string, tokenLabelsByMint?: TokenLabelsByMint): string {
+  return tokenLabelsByMint?.get(mint)?.trim() || WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol || mint;
 }
 
 type JsonParsedTokenAccountEntry = {
@@ -131,7 +137,8 @@ function parseTokenAmountInfo(
 
 export async function getSplTokenBalances(
   rpc: ReturnType<typeof createRpc>,
-  owner: Address
+  owner: Address,
+  options: GetSplTokenBalancesOptions = {}
 ): Promise<
   Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
 > {
@@ -163,7 +170,7 @@ export async function getSplTokenBalances(
   return Array.from(balancesByMint.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([mint, balance]) => ({
-      token: resolveTokenLabel(mint),
+      token: resolveTokenLabel(mint, options.tokenLabelsByMint),
       mint,
       amount: balance.amount.toString(),
       uiAmount: balance.uiAmount ?? formatDecimalAmount(balance.amount, balance.decimals),

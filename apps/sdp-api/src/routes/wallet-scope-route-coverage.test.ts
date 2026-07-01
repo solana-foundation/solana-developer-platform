@@ -74,6 +74,7 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /transfers/:transferId",
       "GET /wallets/:walletId/balances",
       "GET /wallets/:walletId/policies",
+      "PATCH /recurring-payments/:id",
       "PATCH /subscription-plans/:planId",
       "POST /ramps/offramp/execute",
       "POST /ramps/offramp/quote",

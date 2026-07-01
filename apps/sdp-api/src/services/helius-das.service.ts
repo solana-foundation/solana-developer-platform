@@ -55,6 +55,11 @@ interface HeliusSearchAssetsResponse {
 
 interface HeliusGetAssetBatchItem {
   id?: string;
+  content?: {
+    metadata?: {
+      symbol?: string | null;
+    };
+  };
   token_info?: HeliusTokenInfo | null;
 }
 
@@ -280,12 +285,13 @@ async function fetchTrackedBalancesForOwner(
     .filter((balance): balance is CustodyWalletTokenBalance => Boolean(balance));
 }
 
-async function fetchUsdPricesByMint(
+async function fetchFungibleAssetsByMint(
   heliusDasUrl: string,
-  mints: string[]
-): Promise<Map<string, number>> {
+  mints: string[],
+  requestId: string
+): Promise<HeliusGetAssetBatchItem[]> {
   if (mints.length === 0) {
-    return new Map();
+    return [];
   }
 
   const response = await fetch(heliusDasUrl, {
@@ -295,7 +301,7 @@ async function fetchUsdPricesByMint(
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
-      id: `wallet-prices-${mints.length}`,
+      id: requestId,
       method: "getAssetBatch",
       params: {
         ids: mints,
@@ -315,9 +321,21 @@ async function fetchUsdPricesByMint(
     throw new Error(payload.error.message);
   }
 
+  return payload.result ?? [];
+}
+
+async function fetchUsdPricesByMint(
+  heliusDasUrl: string,
+  mints: string[]
+): Promise<Map<string, number>> {
+  const assets = await fetchFungibleAssetsByMint(
+    heliusDasUrl,
+    mints,
+    `wallet-prices-${mints.length}`
+  );
   const pricesByMint = new Map<string, number>();
 
-  for (const asset of payload.result ?? []) {
+  for (const asset of assets) {
     const mint = asset.id?.trim();
     const pricePerToken = asset.token_info?.price_info?.price_per_token;
     const currency = asset.token_info?.price_info?.currency?.trim().toUpperCase() ?? "USD";
@@ -334,6 +352,94 @@ async function fetchUsdPricesByMint(
   }
 
   return pricesByMint;
+}
+
+function resolveAssetSymbol(asset: HeliusGetAssetBatchItem): string | null {
+  const symbol = asset.token_info?.symbol?.trim() || asset.content?.metadata?.symbol?.trim() || "";
+  return symbol.length > 0 ? symbol : null;
+}
+
+async function fetchTokenSymbolsByMint(
+  heliusDasUrl: string,
+  mints: string[]
+): Promise<Map<string, string>> {
+  const assets = await fetchFungibleAssetsByMint(
+    heliusDasUrl,
+    mints,
+    `wallet-symbols-${mints.length}`
+  );
+  const symbolsByMint = new Map<string, string>();
+
+  for (const asset of assets) {
+    const mint = asset.id?.trim();
+    const symbol = resolveAssetSymbol(asset);
+    if (mint && symbol) {
+      symbolsByMint.set(mint, symbol);
+    }
+  }
+
+  return symbolsByMint;
+}
+
+function needsTokenSymbol(balance: Pick<CustodyWalletTokenBalance, "token" | "mint">): boolean {
+  const token = balance.token.trim();
+  const mint = balance.mint.trim();
+  return token.length === 0 || token === mint;
+}
+
+function enrichBalancesWithTokenSymbols(
+  balances: CustodyWalletTokenBalance[],
+  symbolsByMint: Map<string, string>
+): CustodyWalletTokenBalance[] {
+  return balances.map((balance) => {
+    if (!needsTokenSymbol(balance)) {
+      return balance;
+    }
+
+    const symbol = symbolsByMint.get(balance.mint.trim());
+    return symbol ? { ...balance, token: symbol } : balance;
+  });
+}
+
+export async function attachTokenSymbolsToBalances(
+  env: Env,
+  balances: CustodyWalletTokenBalance[]
+): Promise<CustodyWalletTokenBalance[]> {
+  const heliusDasUrl = resolveHeliusDasUrl(env);
+  const unresolvedMints = [
+    ...new Set(
+      balances.filter((balance) => needsTokenSymbol(balance)).map((balance) => balance.mint)
+    ),
+  ];
+
+  if (!heliusDasUrl || unresolvedMints.length === 0) {
+    return balances;
+  }
+
+  try {
+    const symbolsByMint = await fetchTokenSymbolsByMint(heliusDasUrl, unresolvedMints);
+    return enrichBalancesWithTokenSymbols(balances, symbolsByMint);
+  } catch {
+    return balances;
+  }
+}
+
+export async function attachTokenSymbolsToBalanceMap(
+  env: Env,
+  balancesByWalletId: Map<string, CustodyWalletTokenBalance[]>
+): Promise<Map<string, CustodyWalletTokenBalance[]>> {
+  const allBalances = [...balancesByWalletId.values()].flat();
+  const enrichedBalances = await attachTokenSymbolsToBalances(env, allBalances);
+  let cursor = 0;
+
+  return new Map(
+    [...balancesByWalletId.entries()].map(([walletId, balances]) => {
+      const nextCursor = cursor + balances.length;
+      const walletBalances = enrichedBalances.slice(cursor, nextCursor);
+      cursor = nextCursor;
+      return [walletId, walletBalances] as const;
+    })
+  );
 }
 
 async function resolveUsdPricesForBalances(

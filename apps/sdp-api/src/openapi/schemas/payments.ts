@@ -44,6 +44,7 @@ import {
   transferDirectionSchema as transferDirectionSchemaBase,
   transferIdParamsSchema as transferIdParamsSchemaBase,
   transferStatusSchema as transferStatusSchemaBase,
+  updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
   updateSubscriptionPlanSchema as updateSubscriptionPlanSchemaBase,
   updateSubscriptionSchema as updateSubscriptionSchemaBase,
   updateWalletPolicySchema as updateWalletPolicySchemaBase,
@@ -945,6 +946,61 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
   .openapi({
     description:
       "Creates an SDP-custody outbound recurring payment intent. Activation and collection are added by follow-up endpoints.",
+  });
+
+export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaBase
+  .safeExtend({
+    sourceWalletId: withOpenApi(updateRecurringPaymentSchemaBase.shape.sourceWalletId, {
+      description:
+        "Optional replacement SDP custody wallet. Active replacements require write access to both the old and new source wallets.",
+      example: "wal_source",
+    }),
+    counterpartyId: withOpenApi(updateRecurringPaymentSchemaBase.shape.counterpartyId, {
+      description:
+        "Optional replacement counterparty. When provided, counterpartyAccountId is also required.",
+      example: "cp_example",
+    }),
+    counterpartyAccountId: withOpenApi(
+      updateRecurringPaymentSchemaBase.shape.counterpartyAccountId,
+      {
+        description:
+          "Optional replacement counterparty account. Without counterpartyId, this changes the account for the current counterparty.",
+        example: "cpa_example",
+      }
+    ),
+    token: withOpenApi(updateRecurringPaymentSchemaBase.shape.token, {
+      description:
+        "Optional replacement SPL token mint address. Native SOL is not supported for recurring payments.",
+      example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    }),
+    amount: withOpenApi(updateRecurringPaymentSchemaBase.shape.amount, {
+      description: "Optional replacement amount in UI units.",
+      example: "25.00",
+    }),
+    periodHours: withOpenApi(updateRecurringPaymentSchemaBase.shape.periodHours, {
+      description:
+        "Optional replacement billing period length in hours. Active term changes create a replacement on-chain subscription.",
+      example: 720,
+    }),
+    firstCollectionAt: withOpenApi(updateRecurringPaymentSchemaBase.shape.firstCollectionAt, {
+      description:
+        "Pending-only first collection timestamp. Use null to clear the pending first collection override.",
+      example: "2099-01-01T00:00:00.000Z",
+    }),
+    nextCollectionDueAt: withOpenApi(updateRecurringPaymentSchemaBase.shape.nextCollectionDueAt, {
+      description:
+        "Active-only next due timestamp. Use null to reset to the earliest eligible collection time.",
+      example: "2099-02-01T00:00:00.000Z",
+    }),
+    metadataUri: withOpenApi(updateRecurringPaymentSchemaBase.shape.metadataUri, {
+      description:
+        "Optional plan metadata URI. Use null to clear it. Active metadata-only edits update the existing on-chain plan in place.",
+      example: "https://example.com/subscriptions/monthly-usdc.json",
+    }),
+  })
+  .openapi({
+    description:
+      "Updates a recurring payment. Pending payments are edited directly. Active metadata or due-date updates are applied in place, while active term/source/destination/token updates create and authorize a replacement subscription before canceling the old one.",
   });
 
 export const paymentListRecurringPaymentsQuerySchema = listRecurringPaymentsQuerySchemaBase

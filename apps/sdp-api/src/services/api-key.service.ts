@@ -4,7 +4,13 @@
  * Shared data access for API key operations.
  */
 
-import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyStatus, Permission } from "@sdp/types";
+import type {
+  ApiKeyEnvironment,
+  ApiKeyRole,
+  ApiKeyStatus,
+  ApiKeyWalletScope,
+  Permission,
+} from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
@@ -20,6 +26,8 @@ export interface ApiKeyListItem {
   role: ApiKeyRole;
   environment: ApiKeyEnvironment;
   status: ApiKeyStatus;
+  walletScope: ApiKeyWalletScope;
+  signingWalletId: string | null;
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
@@ -102,6 +110,8 @@ interface ApiKeyListRow {
   role: ApiKeyRole;
   environment: ApiKeyEnvironment;
   status: ApiKeyStatus;
+  wallet_scope: ApiKeyWalletScope;
+  signing_wallet_id: string | null;
   last_used_at: string | null;
   expires_at: string | null;
   created_at: string;
@@ -131,7 +141,16 @@ export class ApiKeyService {
     const result = await this.db
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
-                ak.last_used_at, ak.expires_at, ak.created_at
+                CASE
+                  WHEN EXISTS (
+                    SELECT 1
+                    FROM api_key_wallet_permissions akw
+                    WHERE akw.api_key_id = ak.id
+                  )
+                  THEN 'selected'
+                  ELSE 'all'
+                END AS wallet_scope,
+                ak.signing_wallet_id, ak.last_used_at, ak.expires_at, ak.created_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.project_id = ? AND ak.status NOT IN ('revoked', 'deactivated')
@@ -152,6 +171,15 @@ export class ApiKeyService {
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
                 ak.project_id, ak.allowed_ips, ak.permissions, ak.signing_wallet_id,
+                CASE
+                  WHEN EXISTS (
+                    SELECT 1
+                    FROM api_key_wallet_permissions akw
+                    WHERE akw.api_key_id = ak.id
+                  )
+                  THEN 'selected'
+                  ELSE 'all'
+                END AS wallet_scope,
                 ak.last_used_at, ak.expires_at, ak.rotated_from, ak.rotation_deadline, ak.created_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
@@ -458,6 +486,8 @@ export class ApiKeyService {
       role: row.role,
       environment: row.environment,
       status: row.status,
+      walletScope: row.wallet_scope,
+      signingWalletId: row.signing_wallet_id,
       lastUsedAt: row.last_used_at,
       expiresAt: row.expires_at,
       createdAt: row.created_at,
