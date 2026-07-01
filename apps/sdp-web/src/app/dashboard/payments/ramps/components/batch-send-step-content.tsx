@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { cn } from "@/lib/utils";
 import type { BatchSendWizard } from "../hooks/use-batch-send-wizard";
+import { MAX_BATCH_RECIPIENTS } from "../schema";
 import { walletComboboxOptions } from "../wallet-options";
 import { AmountBalanceReadout } from "./amount-balance-readout";
 import { BulkImportDialog } from "./bulk-import-dialog";
@@ -63,6 +64,20 @@ function rootLabelOf(wizard: BatchSendWizard): string {
   return wizard.selectedWallet?.label ?? wizard.selectedWallet?.walletId ?? "your wallet";
 }
 
+function recipientsStatusLabel(
+  count: number,
+  exceedsBalance: boolean,
+  exceedsMax: boolean
+): string {
+  if (exceedsMax) {
+    return `A batch can have at most ${MAX_BATCH_RECIPIENTS} recipients.`;
+  }
+  if (exceedsBalance) {
+    return "Insufficient balance";
+  }
+  return `${count} wallet${count === 1 ? "" : "s"} selected`;
+}
+
 function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
   const {
     liveWallets,
@@ -77,6 +92,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
     availableAmount,
     totalAmount,
     exceedsBalance,
+    exceedsMaxRecipients,
     pageRecipients,
     recipientsLoading,
     recipientTotal,
@@ -260,10 +276,14 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
 
       {recipients.length > 0 ? (
         <div className="flex items-center justify-between px-1 text-sm">
-          <span className={exceedsBalance ? "font-medium text-status-error-text" : "text-text-low"}>
-            {exceedsBalance
-              ? "Insufficient balance"
-              : `${recipients.length} wallet${recipients.length === 1 ? "" : "s"} selected`}
+          <span
+            className={
+              exceedsBalance || exceedsMaxRecipients
+                ? "font-medium text-status-error-text"
+                : "text-text-low"
+            }
+          >
+            {recipientsStatusLabel(recipients.length, exceedsBalance, exceedsMaxRecipients)}
           </span>
           <span
             className={cn(

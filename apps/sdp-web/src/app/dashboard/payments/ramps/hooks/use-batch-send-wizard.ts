@@ -189,20 +189,24 @@ export function useBatchSendWizard({
         unresolved.push(row.accountId);
       }
     }
-    const projected = new Set([...Object.keys(entries), ...Object.keys(additions)]);
-    if (projected.size > MAX_BATCH_RECIPIENTS) {
+    if (unresolved.length > 0) {
+      return { unresolved };
+    }
+
+    const { currency } = rows[0];
+    const mint = isWellKnownTokenSymbol(currency) ? wellKnownMint(currency, cluster) : currency;
+    if (!mint) {
+      throw new Error(`${currency} is not available on this network.`);
+    }
+
+    const nextEntries = mint === asset ? { ...entries, ...additions } : additions;
+    if (Object.keys(nextEntries).length > MAX_BATCH_RECIPIENTS) {
       throw new Error(
-        `A batch can have at most ${MAX_BATCH_RECIPIENTS} recipients. This import would bring the total to ${projected.size}.`
+        `A batch can have at most ${MAX_BATCH_RECIPIENTS} recipients. This import would bring the total to ${Object.keys(nextEntries).length}.`
       );
     }
-    if (Object.keys(additions).length > 0) {
-      const { currency } = rows[0];
-      const mint = isWellKnownTokenSymbol(currency) ? wellKnownMint(currency, cluster) : currency;
-      if (mint) {
-        setAsset(mint);
-      }
-      setEntries((prev) => ({ ...prev, ...additions }));
-    }
+    setAsset(mint);
+    setEntries(nextEntries);
     return { unresolved };
   };
 
@@ -234,6 +238,7 @@ export function useBatchSendWizard({
   }
   const exceedsBalance =
     totalAmount > 0 && availableAmount !== null && totalAmount > availableAmount;
+  const exceedsMaxRecipients = recipients.length > MAX_BATCH_RECIPIENTS;
   const hasMint = !walletId || selectedAssetBalance !== null;
 
   const request = useMemo(
@@ -339,6 +344,7 @@ export function useBatchSendWizard({
     availableAmount,
     totalAmount,
     exceedsBalance,
+    exceedsMaxRecipients,
     pageRecipients,
     recipientsLoading,
     recipientTotal,
