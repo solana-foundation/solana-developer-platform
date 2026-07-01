@@ -5,6 +5,7 @@ import {
   isWellKnownTokenSymbol,
   type PaymentsDashboardWallet,
   type SolanaCluster,
+  WELL_KNOWN_TOKEN_BY_MINT,
   wellKnownMint,
 } from "@sdp/types";
 import { useRouter } from "next/navigation";
@@ -118,7 +119,17 @@ export function useBatchSendWizard({
     [liveWallets, walletId]
   );
   const assetOptions = useMemo(
-    () => walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint),
+    () =>
+      walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint).map((option) => {
+        const known =
+          WELL_KNOWN_TOKEN_BY_MINT.has(option.value) ||
+          Boolean(issuedTokenSymbolsByMint[option.value]);
+        return {
+          value: option.value,
+          label: option.label,
+          description: known ? undefined : "Custom token",
+        };
+      }),
     [issuedTokenSymbolsByMint, selectedWallet]
   );
   const selectedAssetBalance = useMemo(
