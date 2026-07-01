@@ -785,33 +785,6 @@ export interface PaymentRampQuoteCurrency {
   symbol?: string;
 }
 
-interface BasePaymentRampExecution {
-  id: string;
-  status: PaymentRampExecutionStatus;
-  redirectUrl?: string;
-  reference?: string;
-}
-
-export type LightsparkPaymentRampExecution = BasePaymentRampExecution & {
-  provider: "lightspark";
-  paymentInstructions?: LightsparkPaymentRampInstruction[];
-};
-
-export type BvnkPaymentRampExecution = BasePaymentRampExecution & {
-  provider: "bvnk";
-  paymentInstructions?: BvnkPaymentRampInstruction[];
-};
-
-export type MoonpayPaymentRampExecution = BasePaymentRampExecution & {
-  provider: "moonpay";
-  paymentInstructions?: never;
-};
-
-export type PaymentRampExecution =
-  | LightsparkPaymentRampExecution
-  | BvnkPaymentRampExecution
-  | MoonpayPaymentRampExecution;
-
 interface BasePaymentRampQuote {
   id: string;
   provider: RampProviderId;

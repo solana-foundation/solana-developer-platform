@@ -9,7 +9,6 @@ import type {
   ListCounterpartyAccountsResponse,
   MoneygramRampEvent,
   PaymentRampEstimateEnvelope,
-  PaymentRampExecution,
   PaymentsWalletAggregateEnvelope,
   RampDirection,
   RampFiatCurrency,
@@ -33,7 +32,7 @@ import {
 } from "./payment-api-errors";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
-export type { PaymentRampExecution, PaymentRampInstruction } from "@sdp/types";
+export type { PaymentRampInstruction } from "@sdp/types";
 export { getPaymentApiError as getApiError } from "./payment-api-errors";
 
 export interface PaymentWalletBalance {
@@ -253,15 +252,6 @@ interface WalletBalancesEnvelope {
         address?: string;
         balances?: PaymentWalletBalance[];
       };
-  error?: {
-    message?: string;
-  };
-}
-
-interface RampExecutionEnvelope {
-  data?: {
-    ramp?: PaymentRampExecution;
-  };
   error?: {
     message?: string;
   };
@@ -547,30 +537,6 @@ export async function fetchCounterpartyAccounts(
     throw new Error(getApiError(body, `Failed to load accounts (${response.status}).`));
   }
   return body.data?.accounts ?? [];
-}
-
-export async function executeRampFlow(
-  direction: "onramp" | "offramp",
-  payload: Record<string, unknown>
-): Promise<PaymentRampExecution> {
-  const response = await fetch(`/api/dashboard/payments/ramps/${direction}/execute`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-  const body = (await response.json().catch(() => ({}))) as RampExecutionEnvelope;
-
-  if (!response.ok) {
-    throw new Error(getApiError(body, `Ramp request failed (${response.status}).`));
-  }
-
-  if (!body.data?.ramp) {
-    throw new Error("Ramp response is missing execution details.");
-  }
-
-  return body.data.ramp;
 }
 
 type SandboxTransferSimulationInput =
