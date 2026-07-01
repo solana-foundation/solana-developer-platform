@@ -46,7 +46,8 @@ export class WalletPolicyEnforcementService {
     const { result, evaluation, updatedOperation } = await (async () => {
       try {
         const result = await this.foundation.evaluateWalletOperationPolicies(operation);
-        if (result.requiresApproval) {
+        const status = walletOperationStatusForDecision(result.decision);
+        if (status === "pending_approval") {
           const approvalRequest = await this.repository.createApprovalRequest(
             createApprovalRequestInput(operation, result)
           );
@@ -66,7 +67,6 @@ export class WalletPolicyEnforcementService {
           ...createPolicyEvaluationInput(result),
           approvalRequestId,
         });
-        const status = walletOperationStatusForDecision(result.decision);
         const updated = await this.repository.updateWalletOperationStatus(operation.id, status);
 
         if (!updated) {
@@ -189,19 +189,12 @@ async function markApprovalRequestAndWalletOperationFailed(
   organizationId: string,
   approvalRequestId: string
 ): Promise<void> {
-  try {
-    await repository.updateApprovalRequestStatus({
-      organizationId,
-      approvalRequestId,
-      status: "failed",
-      operationStatus: "failed",
-    });
-  } catch (error) {
-    console.error("Failed to mark approval request and wallet operation failed", {
-      approvalRequestId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  await repository.updateApprovalRequestStatus({
+    organizationId,
+    approvalRequestId,
+    status: "failed",
+    operationStatus: "failed",
+  });
 }
 
 export async function enforceWalletOperationPolicy(

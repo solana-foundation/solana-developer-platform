@@ -95,6 +95,7 @@ function createRepository(options: {
   apiKeyPolicy?: ActiveApiKeyControlProfileResult | null;
   evaluationError?: Error;
   policyEvaluationError?: Error;
+  approvalStatusUpdateError?: Error;
   existingApprovalRequestStatus?: ApprovalRequestRow["status"];
   statusUpdateFailures?: number;
   statusUpdateError?: Error;
@@ -215,6 +216,10 @@ function createRepository(options: {
       return row;
     }),
     updateApprovalRequestStatus: vi.fn(async (input) => {
+      if (options.approvalStatusUpdateError) {
+        throw options.approvalStatusUpdateError;
+      }
+
       const request = approvalRequests.find(
         (row) => row.id === input.approvalRequestId && row.organization_id === input.organizationId
       );
@@ -343,6 +348,34 @@ describe("WalletPolicyEnforcementService", () => {
       expect.objectContaining({
         approvalRequestId: "appr_1",
       })
+    );
+  });
+
+  it("creates approval requests for manual review decisions", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile([], "review"),
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
+      code: "SIGNING_PENDING",
+      details: {
+        walletOperationId: "wop_1",
+        decision: "review",
+        requiresApproval: false,
+        approvalRequestId: "appr_1",
+      },
+    });
+
+    expect(repository.createApprovalRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        walletOperationId: "wop_1",
+        requestedBy: "key_1",
+      })
+    );
+    expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith(
+      "wop_1",
+      "pending_approval"
     );
   });
 
@@ -480,6 +513,26 @@ describe("WalletPolicyEnforcementService", () => {
       operationStatus: "failed",
     });
     expect(repository.updateWalletOperationStatus).not.toHaveBeenCalledWith("wop_1", "failed");
+  });
+
+  it("surfaces approval cleanup failures after creating an approval request", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile([
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]),
+      policyEvaluationError: new Error("evaluation write unavailable"),
+      approvalStatusUpdateError: new Error("approval cleanup unavailable"),
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(service.enforce(baseOperation)).rejects.toThrow("approval cleanup unavailable");
+
+    expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith({
+      organizationId: "org_1",
+      approvalRequestId: "appr_1",
+      status: "failed",
+      operationStatus: "failed",
+    });
   });
 
   it("lets an API key policy narrow an otherwise allowed wallet operation", async () => {
