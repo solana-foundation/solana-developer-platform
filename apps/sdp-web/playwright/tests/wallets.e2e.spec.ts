@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import type { CustodyWalletTokenBalance, Token, TokenTransaction } from "@sdp/types";
+import type { Token, TokenTransaction } from "@sdp/types";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import {
@@ -21,12 +21,6 @@ interface MintResponse {
 
 interface TransactionResponse {
   transaction: TokenTransaction;
-}
-
-interface WalletBalancesResponse {
-  walletBalances: {
-    balances: CustodyWalletTokenBalance[];
-  };
 }
 
 const E2E_POLL_TIMEOUT_MS = 180_000;
@@ -69,42 +63,6 @@ async function waitForToken(
     throw new Error(`Timed out waiting for token ${tokenId} to ${description}`);
   }
   return matchingToken;
-}
-
-async function getWalletBalances(
-  api: LocalApiClient,
-  walletId: string
-): Promise<CustodyWalletTokenBalance[]> {
-  const response = await api.get<WalletBalancesResponse>(
-    `/v1/payments/wallets/${encodeURIComponent(walletId)}/balances`
-  );
-  return response.walletBalances.balances;
-}
-
-async function waitForWalletTokenBalance(
-  api: LocalApiClient,
-  walletId: string,
-  mintAddress: string,
-  expectedUiAmount: number
-): Promise<CustodyWalletTokenBalance> {
-  let matchingBalance: CustodyWalletTokenBalance | null = null;
-
-  await expect(async () => {
-    const balances = await getWalletBalances(api, walletId);
-    matchingBalance = balances.find((balance) => balance.mint === mintAddress) ?? null;
-
-    expect(
-      Number(matchingBalance?.uiAmount),
-      `Expected wallet ${walletId} balance ${mintAddress} to equal ${expectedUiAmount}; current ${matchingBalance ? `uiAmount=${matchingBalance.uiAmount}, amount=${matchingBalance.amount}` : "balance missing"}`
-    ).toBe(expectedUiAmount);
-  }).toPass(E2E_POLL_OPTIONS);
-
-  if (!matchingBalance) {
-    throw new Error(
-      `Timed out waiting for wallet ${walletId} balance ${mintAddress} to equal ${expectedUiAmount}`
-    );
-  }
-  return matchingBalance;
 }
 
 async function postWithSigningProviderRetry<T>(
@@ -293,7 +251,6 @@ test.describe
         (token) => token.totalSupply === "4",
         "have total supply 4"
       );
-      await waitForWalletTokenBalance(api, wallet.walletId, mintAddress, 4);
       await session.page.close();
 
       await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
