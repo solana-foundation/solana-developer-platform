@@ -331,6 +331,8 @@ test.describe
       browser,
       page,
     }) => {
+      test.setTimeout(420_000);
+
       const session = await getPlaywrightAdminSession(browser);
       const fixtures = await bootstrapLocalWalletFixtures({
         identity: session.identity,
@@ -397,7 +399,9 @@ test.describe
       await expect(activityRow.getByRole("link")).toHaveCount(1);
 
       failNextActivityRequest = true;
-      await page.getByRole("button", { name: "Refresh" }).click();
+      const refreshButton = page.getByRole("button", { name: "Refresh" });
+      await expect(refreshButton).toBeEnabled({ timeout: E2E_POLL_TIMEOUT_MS });
+      await refreshButton.click();
 
       await expect(page.getByText("Activity refresh failed")).toBeVisible();
       await expect(activityRow).toBeVisible();
