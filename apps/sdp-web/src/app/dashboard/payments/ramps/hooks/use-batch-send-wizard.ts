@@ -5,22 +5,24 @@ import {
   isWellKnownTokenSymbol,
   type PaymentsDashboardWallet,
   type SolanaCluster,
+  WELL_KNOWN_TOKEN_BY_MINT,
   wellKnownMint,
 } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
 import {
   type CreateTransferBatchResult,
   createTransferBatch,
   estimateTransferBatch,
   fetchBatchRecipients,
-  fetchWallets,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { BulkImportRow } from "../bulk-import";
 import { batchSendSchema, MAX_BATCH_RECIPIENTS } from "../schema";
 import { walletBalanceAssetOptions } from "../wallet-options";
+import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
 export const BATCH_SEND_STEPS = [
@@ -32,7 +34,6 @@ export type BatchSendStepId = (typeof BATCH_SEND_STEPS)[number]["id"];
 
 export type BatchEligibleRecipient = CounterpartyAccountSummary;
 
-const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 const RECIPIENTS_PAGE_SIZE = 6;
 
 export interface BatchRecipientDraft {
@@ -74,24 +75,10 @@ export function useBatchSendWizard({
   const [submitting, setSubmitting] = useState(false);
   const [batchResult, setBatchResult] = useState<CreateTransferBatchResult | null>(null);
 
-  const { data: swrWallets, error: walletsFetchError } = useSWR<PaymentsDashboardWallet[]>(
-    PAYMENTS_ACTION_WALLETS_KEY,
-    () => fetchWallets({ includeBalances: true }),
-    {
-      fallbackData: wallets.length > 0 ? wallets : undefined,
-      revalidateOnFocus: false,
-      revalidateIfStale: false,
-    }
+  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
+    wallets,
+    walletsError
   );
-  const liveWallets = swrWallets ?? wallets;
-  const walletsLoading = swrWallets === undefined && !walletsFetchError;
-  const liveWalletsError = walletsFetchError
-    ? walletsFetchError instanceof Error
-      ? walletsFetchError.message
-      : "Request failed."
-    : swrWallets === undefined
-      ? walletsError
-      : null;
 
   const trimmedSearch = search.trim();
   const { data: recipientPage, isLoading: recipientsLoading } = useSWR(
@@ -118,7 +105,17 @@ export function useBatchSendWizard({
     [liveWallets, walletId]
   );
   const assetOptions = useMemo(
-    () => walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint),
+    () =>
+      walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint).map((option) => {
+        const known =
+          WELL_KNOWN_TOKEN_BY_MINT.has(option.value) ||
+          Boolean(issuedTokenSymbolsByMint[option.value]);
+        return {
+          value: option.value,
+          label: option.label === option.value ? shortenAddress(option.value) : option.label,
+          description: known ? undefined : "Custom token",
+        };
+      }),
     [issuedTokenSymbolsByMint, selectedWallet]
   );
   const selectedAssetBalance = useMemo(

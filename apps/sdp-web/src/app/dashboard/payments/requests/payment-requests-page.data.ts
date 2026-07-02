@@ -1,43 +1,44 @@
-import type {
-  CryptoAssetSymbol,
-  ListPaymentRequestsResponse,
-  PaginatedResponse,
-  PaymentRequest,
-  PaymentsDashboardWallet,
+import {
+  type ListPaymentRequestsResponse,
+  type PaginatedResponse,
+  type PaymentRequest,
+  type SolanaCluster,
+  WELL_KNOWN_TOKENS,
+  type WellKnownToken,
 } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const PAYMENT_REQUESTS_PAGE_SIZE = 100;
-
-const SUPPORTED_REQUEST_TOKENS = [
-  "SOL",
-  "USDC",
-  "USDT",
-] as const satisfies readonly CryptoAssetSymbol[];
 
 export interface PaymentRequestTokenOption {
   mintAddress: string;
   symbol: string;
 }
 
-export function deriveTokenOptions(
-  wallets: PaymentsDashboardWallet[]
-): PaymentRequestTokenOption[] {
-  const supported = new Set<string>(SUPPORTED_REQUEST_TOKENS);
-  const symbolByMint = new Map<string, string>();
-  for (const wallet of wallets) {
-    if (!wallet.balances) {
-      continue;
-    }
-    for (const balance of wallet.balances) {
-      if (supported.has(balance.token) && !symbolByMint.has(balance.mint)) {
-        symbolByMint.set(balance.mint, balance.token);
-      }
-    }
-  }
-  return [...symbolByMint].map(([mintAddress, symbol]) => ({ mintAddress, symbol }));
+/**
+ * Well-known tokens deployed on the given cluster. Payment requests are
+ * receives, so options are not gated by wallet balances — any requestable
+ * token qualifies.
+ *
+ * @param cluster - Solana cluster the dashboard is currently pointed at.
+ * @returns One `{ mintAddress, symbol }` option per well-known token that has
+ *   a mint on the cluster (e.g. USDT is skipped on devnet). Never throws.
+ */
+export function deriveTokenOptions(cluster: SolanaCluster): PaymentRequestTokenOption[] {
+  return Object.values(WELL_KNOWN_TOKENS).flatMap((token: WellKnownToken) => {
+    const mintAddress = token.mints[cluster];
+    return mintAddress ? [{ mintAddress, symbol: token.symbol }] : [];
+  });
 }
 
+/**
+ * Fetches the first {@link PAYMENT_REQUESTS_PAGE_SIZE} payment requests for
+ * the authenticated project.
+ *
+ * @param request - Authenticated SDP API fetcher.
+ * @returns `{ ok: true, data, total }` on success; on any failure (non-2xx or
+ *   network error) `{ ok: false, data: [], total: 0, error }` — never throws.
+ */
 export async function fetchPaymentRequests(
   request: SdpApiClient["request"]
 ): Promise<PaginatedResponse<PaymentRequest>> {
