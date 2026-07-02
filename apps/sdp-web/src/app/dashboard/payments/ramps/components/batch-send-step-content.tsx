@@ -146,8 +146,15 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
           options={assetOptions}
           placeholder="Select an asset"
           searchable={false}
+          disabled={!walletId || assetOptions.length === 0}
         />
       </div>
+
+      {walletId && assetOptions.length === 0 ? (
+        <p className="text-sm text-status-error-text">
+          This wallet has no assets available to send.
+        </p>
+      ) : null}
 
       <div className="flex items-center justify-between gap-4 px-1">
         <p className="text-xl font-medium tracking-tight text-text-extra-high">
