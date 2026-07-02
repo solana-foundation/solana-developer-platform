@@ -7,6 +7,8 @@ import {
   allowlistEntrySchema,
   apiKeyDetailSchema,
   apiKeyResponseSchema,
+  assetProfileFieldOptionsResponseSchema,
+  assetProfileResponseSchema,
   counterpartyAccountResponseSchema,
   counterpartyFieldOptionsResponseSchema,
   counterpartyResponseSchema,
@@ -29,6 +31,7 @@ import {
   frozenAccountSchema,
   inviteMemberResponseSchema,
   listApiKeysResponseSchema,
+  listAssetProfilesResponseSchema,
   listCounterpartiesResponseSchema,
   listCounterpartyAccountsResponseSchema,
   listMembersResponseSchema,
@@ -101,6 +104,12 @@ export const apiKeyDetailResponse = successResponseSchema(apiKeyDetailSchema);
 export const apiKeyCreateResponse = successResponseSchema(apiKeyResponseSchema);
 export const apiKeyRotateResponse = successResponseSchema(rotateApiKeyResponseSchema);
 export const apiKeyRevokeResponse = successResponseSchema(revokeApiKeyResponseSchema);
+
+export const assetProfileResponse = successResponseSchema(assetProfileResponseSchema);
+export const assetProfileFieldOptionsResponse = successResponseSchema(
+  assetProfileFieldOptionsResponseSchema
+);
+export const listAssetProfilesResponse = successResponseSchema(listAssetProfilesResponseSchema);
 
 export const counterpartyResponse = successResponseSchema(counterpartyResponseSchema);
 export const counterpartyFieldOptionsResponse = successResponseSchema(
