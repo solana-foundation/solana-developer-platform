@@ -239,6 +239,72 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
       })
     ).rejects.toBeInstanceOf(CredentialSecretStoreError);
   });
+
+  it("wraps invalid GCP payload base64 in CredentialSecretStoreError", async () => {
+    const store = new GcpSecretManagerCredentialSecretStore({
+      projectId: "sdp-dev-123",
+      secretPrefix: "sdp-dev-provider-credentials",
+      accessToken: "test-token",
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({
+            payload: {
+              data: "not valid base64!",
+            },
+          })
+        ),
+    });
+
+    await expect(
+      store.read({
+        orgId: "org_123",
+        stored: {
+          storageBackend: "gcp_secret_manager",
+          secretVersionRef:
+            "projects/sdp-dev-123/secrets/sdp-dev-provider-credentials-pcred_123/versions/1",
+        },
+      })
+    ).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
+  });
+
+  it("wraps GCP API network failures in CredentialSecretStoreError", async () => {
+    const store = new GcpSecretManagerCredentialSecretStore({
+      projectId: "sdp-dev-123",
+      secretPrefix: "sdp-dev-provider-credentials",
+      accessToken: "test-token",
+      fetcher: async () => {
+        throw new TypeError("network failure");
+      },
+    });
+
+    await expect(
+      store.write({
+        orgId: "org_123",
+        provider: "privy",
+        providerCredentialId: "pcred_123",
+        payload: { appSecret: "secret" },
+      })
+    ).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
+  });
+
+  it("wraps metadata token network failures in CredentialSecretStoreError", async () => {
+    const store = new GcpSecretManagerCredentialSecretStore({
+      projectId: "sdp-dev-123",
+      secretPrefix: "sdp-dev-provider-credentials",
+      fetcher: async () => {
+        throw new TypeError("metadata unavailable");
+      },
+    });
+
+    await expect(
+      store.write({
+        orgId: "org_123",
+        provider: "privy",
+        providerCredentialId: "pcred_123",
+        payload: { appSecret: "secret" },
+      })
+    ).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
+  });
 });
 
 describe("EncryptedDbCredentialSecretStore", () => {
@@ -367,6 +433,18 @@ describe("resolveCredentialSecretStoreBackend", () => {
         CREDENTIAL_SECRET_STORE_BACKEND: "runtime_env",
       } as Env)
     ).toBe("runtime_env");
+  });
+
+  it("wraps invalid deployment mode defaults in CredentialSecretStoreError", () => {
+    let thrown: unknown;
+    try {
+      resolveCredentialSecretStoreBackend({ SDP_DEPLOYMENT_MODE: "invalid" } as unknown as Env);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(CredentialSecretStoreError);
+    expect(thrown).toMatchObject({ code: "INVALID_CONFIGURATION" });
   });
 });
 

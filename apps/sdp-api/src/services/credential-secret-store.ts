@@ -262,7 +262,17 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
       );
     }
 
-    return parseSecretPayload(decodeBase64ToUtf8(data));
+    let decoded: string;
+    try {
+      decoded = decodeBase64ToUtf8(data);
+    } catch {
+      throw new CredentialSecretStoreError(
+        "GCP Secret Manager returned a payload with invalid base64 encoding",
+        "UPSTREAM_ERROR"
+      );
+    }
+
+    return parseSecretPayload(decoded);
   }
 
   async destroyVersion(params: DestroyCredentialSecretVersionParams): Promise<void> {
@@ -344,14 +354,25 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
 
   private async rawRequest(path: string, init: RequestInit): Promise<Response> {
     const accessToken = await this.getAccessToken();
-    return this.fetcher(`${this.apiBaseUrl}/v1/${path}`, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        ...(init.headers ?? {}),
-      },
-    });
+    try {
+      return await this.fetcher(`${this.apiBaseUrl}/v1/${path}`, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          ...(init.headers ?? {}),
+        },
+      });
+    } catch (error) {
+      if (error instanceof CredentialSecretStoreError) {
+        throw error;
+      }
+
+      throw new CredentialSecretStoreError(
+        "GCP Secret Manager request failed before receiving a response",
+        "UPSTREAM_ERROR"
+      );
+    }
   }
 
   private async getAccessToken(): Promise<string> {
@@ -363,11 +384,23 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
       return this.cachedToken.accessToken;
     }
 
-    const response = await this.fetcher(this.metadataTokenUrl, {
-      headers: {
-        "Metadata-Flavor": "Google",
-      },
-    });
+    let response: Response;
+    try {
+      response = await this.fetcher(this.metadataTokenUrl, {
+        headers: {
+          "Metadata-Flavor": "Google",
+        },
+      });
+    } catch (error) {
+      if (error instanceof CredentialSecretStoreError) {
+        throw error;
+      }
+
+      throw new CredentialSecretStoreError(
+        "GCP metadata token request failed before receiving a response",
+        "UPSTREAM_ERROR"
+      );
+    }
 
     const token = await parseGcpResponse<{ access_token?: string; expires_in?: number }>(response);
     if (!token.access_token) {
@@ -423,7 +456,18 @@ export function resolveCredentialSecretStoreBackend(env: Env): CredentialSecretS
     return configured;
   }
 
-  return getDeploymentMode(env) === "self_hosted" ? "encrypted_db" : "gcp_secret_manager";
+  try {
+    return getDeploymentMode(env) === "self_hosted" ? "encrypted_db" : "gcp_secret_manager";
+  } catch (error) {
+    if (error instanceof CredentialSecretStoreError) {
+      throw error;
+    }
+
+    throw new CredentialSecretStoreError(
+      error instanceof Error ? error.message : "Invalid deployment mode configuration",
+      "INVALID_CONFIGURATION"
+    );
+  }
 }
 
 function buildGcpSecretRef(params: {
