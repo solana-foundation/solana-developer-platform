@@ -21,11 +21,36 @@ function optionalUppercase(max: number, min = 1) {
     .pipe(inner.optional());
 }
 
+function optionalPattern(max: number, pattern: RegExp, message: string) {
+  const inner = z.string().min(1).max(max).regex(pattern, message);
+  return z
+    .string()
+    .trim()
+    .transform((v) => (v.length > 0 ? v : undefined))
+    .pipe(inner.optional());
+}
+
+const E164_PHONE_PATTERN = /^\+[1-9]\d{1,14}$/;
+
+/**
+ * Returns the current UTC date as a `YYYY-MM-DD` string, so date-only values
+ * can be compared lexicographically without timezone-boundary drift from
+ * `Date` object comparisons.
+ */
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 const optionalIsoDate = z
   .string()
   .trim()
   .transform((v) => (v.length > 0 ? v : undefined))
-  .pipe(z.iso.date().optional());
+  .pipe(
+    z.iso
+      .date()
+      .refine((value) => value < todayIsoDate(), { message: "Must be in the past" })
+      .optional()
+  );
 
 export const basicsSchema = z.object({
   entityType: z.enum(COUNTERPARTY_ENTITY_TYPES),
@@ -38,7 +63,7 @@ export const identitySchema = z.object({
   firstName: optionalString(256),
   lastName: optionalString(256),
   dateOfBirth: optionalIsoDate,
-  phone: optionalString(64),
+  phone: optionalPattern(64, E164_PHONE_PATTERN, "Must be in E.164 format (e.g. +14155551234)"),
 });
 
 export const addressSchema = z

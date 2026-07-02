@@ -21,6 +21,16 @@ import {
 const countryCodeSchema = z.enum(COUNTRY_CODES);
 const currencyCodeSchema = z.string().trim().toUpperCase().length(3);
 const subdivisionCodeSchema = z.string().min(1).max(16);
+const E164_PHONE_PATTERN = /^\+[1-9]\d{1,14}$/;
+
+/**
+ * Returns the current UTC date as a `YYYY-MM-DD` string, so date-only values
+ * can be compared lexicographically without timezone-boundary drift from
+ * `Date` object comparisons.
+ */
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 export const counterpartyAddressSchema = z.object({
   line1: z.string().min(1).max(512),
@@ -74,8 +84,14 @@ export const counterpartyIdentitySchema = z.looseObject({
   middleName: z.string().max(256).optional(),
   lastName: z.string().min(1).max(256).optional(),
   secondLastName: z.string().max(256).optional(),
-  dateOfBirth: z.iso.date().optional(),
-  phone: z.string().min(1).max(64).optional(),
+  dateOfBirth: z.iso
+    .date()
+    .refine((value) => value < todayIsoDate(), { message: "dateOfBirth must be in the past" })
+    .optional(),
+  phone: z
+    .string()
+    .regex(E164_PHONE_PATTERN, { message: "phone must be in E.164 format" })
+    .optional(),
   address: counterpartyAddressSchema.optional(),
   birthCountryCode: countryCodeSchema.optional(),
   citizenshipCountryCode: countryCodeSchema.optional(),
