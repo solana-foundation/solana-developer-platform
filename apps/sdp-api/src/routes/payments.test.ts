@@ -2464,6 +2464,14 @@ describe("Payments routes", () => {
       signature: collectionSignature,
       dueAt,
     });
+    const manualAttempt = await getDb(env)
+      .prepare("SELECT metadata FROM payment_subscription_collection_attempts WHERE id = ?")
+      .bind(collectBody.data.collectionAttempt.id)
+      .first<{ metadata: { collectionSource?: string; initiatedByKeyId?: string } }>();
+    expect(manualAttempt?.metadata).toMatchObject({
+      collectionSource: "manual",
+      initiatedByKeyId: TEST_API_KEY.id,
+    });
     expect(collectBody.data.transfer).toMatchObject({
       id: collectBody.data.collectionAttempt.transferId,
       status: "confirmed",

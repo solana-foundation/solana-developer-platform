@@ -181,6 +181,9 @@ export interface Env {
 
   // Recurring payments backend feature flag
   PAYMENTS_RECURRING_ENABLED?: string;
+  PAYMENTS_RECURRING_COLLECTION_ENABLED?: string;
+  PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE?: string;
+  PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;
