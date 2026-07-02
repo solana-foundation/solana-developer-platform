@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
 import {
   CredentialSecretStoreError,
+  createCredentialSecretStore,
   EncryptedDbCredentialSecretStore,
   GcpSecretManagerCredentialSecretStore,
   RuntimeEnvCredentialSecretStore,
@@ -155,6 +156,18 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
         secretVersionRef: "projects/sdp-dev-123/secrets/other-prefix-pcred_123/versions/1",
       })
     ).rejects.toMatchObject({ code: "INVALID_SECRET_REF" });
+  });
+
+  it("rejects project IDs outside GCP's 6-30 character limit", () => {
+    expect(
+      () =>
+        new GcpSecretManagerCredentialSecretStore({
+          projectId: "sdp-dev-123456789012345678901",
+          secretPrefix: "sdp-dev-provider-credentials",
+          accessToken: "test-token",
+          fetcher: async () => new Response("{}"),
+        })
+    ).toThrow(CredentialSecretStoreError);
   });
 
   it("uses the metadata server token flow when no token override is provided", async () => {
@@ -321,5 +334,15 @@ describe("resolveCredentialSecretStoreBackend", () => {
         CREDENTIAL_SECRET_STORE_BACKEND: "runtime_env",
       } as Env)
     ).toBe("runtime_env");
+  });
+});
+
+describe("createCredentialSecretStore", () => {
+  it("wraps missing encrypted DB key configuration in CredentialSecretStoreError", () => {
+    expect(() =>
+      createCredentialSecretStore({
+        CREDENTIAL_SECRET_STORE_BACKEND: "encrypted_db",
+      } as Env)
+    ).toThrow(CredentialSecretStoreError);
   });
 });

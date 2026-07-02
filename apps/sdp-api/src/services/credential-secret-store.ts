@@ -376,7 +376,9 @@ export function createCredentialSecretStore(env: Env): CredentialSecretStore {
     return new RuntimeEnvCredentialSecretStore(env);
   }
 
-  return new EncryptedDbCredentialSecretStore(createEncryptionService(env.CUSTODY_ENCRYPTION_KEY));
+  return new EncryptedDbCredentialSecretStore(
+    createEncryptionService(requireEnv(env.CUSTODY_ENCRYPTION_KEY, "CUSTODY_ENCRYPTION_KEY"))
+  );
 }
 
 export function resolveCredentialSecretStoreBackend(env: Env): CredentialSecretStorageBackend {
@@ -499,7 +501,7 @@ function requireEnv(value: string | undefined, name: string): string {
 }
 
 function assertGcpProjectId(projectId: string): void {
-  if (!projectId.match(/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/)) {
+  if (!projectId.match(/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/)) {
     throw new CredentialSecretStoreError(
       "GCP Secret Manager project id is invalid",
       "INVALID_CONFIGURATION"
