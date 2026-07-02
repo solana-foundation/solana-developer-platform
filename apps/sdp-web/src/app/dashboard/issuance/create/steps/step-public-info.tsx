@@ -4,7 +4,6 @@ import {
   Braces,
   CircleCheck,
   ExternalLink,
-  Eye,
   FileText,
   Landmark,
   Lock,
@@ -106,17 +105,7 @@ export function StepPublicInfo() {
 
       {/* Hero preview — identity + facts side by side to fill the width */}
       <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-6">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-medium uppercase tracking-wide text-[rgba(28,28,29,0.5)]">
-            Preview
-          </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-[rgba(12,128,76,0.08)] px-2.5 py-1 text-xs font-medium text-[#0c804c]">
-            <Eye className="h-3.5 w-3.5" />
-            Public view
-          </span>
-        </div>
-
-        <div className="mt-5 grid gap-6 md:grid-cols-2">
+        <div className="grid gap-6 md:grid-cols-2">
           <div className="flex items-start gap-4">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[rgba(28,28,29,0.06)] text-xl font-semibold text-[#1c1c1d]">
               {draft.symbol.slice(0, 1).toUpperCase() || "?"}

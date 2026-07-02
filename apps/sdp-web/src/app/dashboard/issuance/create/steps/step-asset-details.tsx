@@ -18,7 +18,7 @@ import {
 import { DocumentRows } from "../document-rows";
 import { buildIssuanceMetadata } from "../draft-mapping";
 import type { CustomFieldRow, DraftState } from "../issuance-draft-wizard.types";
-import { MetadataJson } from "../metadata-json";
+import { MetadataJsonPanel, MetadataJsonToggle } from "../metadata-json";
 import { useIssuanceDraft } from "../use-issuance-draft";
 
 const TABS = [
@@ -33,6 +33,7 @@ type UpdateDraft = (patch: Partial<DraftState>) => void;
 export function StepAssetDetails() {
   const { draft, updateDraft } = useIssuanceDraft();
   const [tab, setTab] = useState<string>("overview");
+  const [jsonOpen, setJsonOpen] = useState(false);
   const sections = getCategorySections(draft.assetCategory);
   const metadata = buildIssuanceMetadata(draft);
 
@@ -51,8 +52,10 @@ export function StepAssetDetails() {
             Add the key information about this asset. You can update these details any time.
           </p>
         </div>
-        <MetadataJson metadata={metadata} />
+        <MetadataJsonToggle open={jsonOpen} onToggle={() => setJsonOpen((prev) => !prev)} />
       </div>
+
+      {jsonOpen ? <MetadataJsonPanel metadata={metadata} /> : null}
 
       <p className="text-xs text-[rgba(28,28,29,0.55)]">
         This information is private by default and won&apos;t be visible to the public unless you

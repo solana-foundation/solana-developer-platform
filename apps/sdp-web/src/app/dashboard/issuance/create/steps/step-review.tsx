@@ -163,8 +163,8 @@ function ReviewSection({ section, onEdit }: { section: Section; onEdit: () => vo
   const Icon = section.icon;
   return (
     <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-        <div className="flex items-start gap-3 lg:w-56 lg:shrink-0">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.7)]">
             <Icon className="h-4 w-4" />
           </span>
@@ -173,54 +173,57 @@ function ReviewSection({ section, onEdit }: { section: Section; onEdit: () => vo
             <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.55)]">{section.description}</p>
           </div>
         </div>
-
-        <div className="grid flex-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
-          {section.fields.map((field) => (
-            <FieldCell key={field.label} field={field} />
-          ))}
-        </div>
-
-        <div className="lg:shrink-0">
-          <button
-            type="button"
-            onClick={onEdit}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[rgba(28,28,29,0.12)] px-3 py-1.5 text-sm font-medium text-[rgba(28,28,29,0.75)] transition-colors hover:bg-[rgba(28,28,29,0.04)] hover:text-[#1c1c1d]"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            Edit
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[rgba(28,28,29,0.12)] px-3 py-1.5 text-sm font-medium text-[rgba(28,28,29,0.75)] transition-colors hover:bg-[rgba(28,28,29,0.04)] hover:text-[#1c1c1d]"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+          Edit
+        </button>
       </div>
+
+      <dl className="mt-4 divide-y divide-[rgba(28,28,29,0.06)] border-t border-[rgba(28,28,29,0.06)]">
+        {section.fields.map((field) => (
+          <FieldRow key={field.label} field={field} />
+        ))}
+      </dl>
     </div>
   );
 }
 
-function FieldCell({ field }: { field: Field }) {
+function FieldRow({ field }: { field: Field }) {
   const hasValue = field.value !== null && field.value.trim().length > 0;
   return (
-    <div className="min-w-0">
-      <p className="text-xs text-[rgba(28,28,29,0.52)]">{field.label}</p>
-      {hasValue && field.href ? (
-        <a
-          href={field.href}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-1 inline-flex items-center gap-1 break-all text-sm font-medium text-[#1c1c1d] hover:underline"
-        >
-          {field.value}
-          <ExternalLink className="h-3 w-3 shrink-0" />
-        </a>
-      ) : (
-        <p
-          className={cn(
-            "mt-1 break-words text-sm font-medium",
-            hasValue ? "text-[#1c1c1d]" : "text-[rgba(28,28,29,0.4)]"
-          )}
-        >
-          {hasValue ? field.value : "—"}
-        </p>
-      )}
-      {field.hint ? <p className="mt-1 text-xs text-[rgba(28,28,29,0.5)]">{field.hint}</p> : null}
+    <div className="flex flex-col gap-0.5 py-2.5 sm:flex-row sm:gap-4">
+      <dt className="shrink-0 text-sm text-[rgba(28,28,29,0.52)] sm:w-44 sm:pt-px">
+        {field.label}
+      </dt>
+      <dd className="min-w-0 flex-1">
+        {hasValue && field.href ? (
+          <a
+            href={field.href}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 break-all text-sm font-medium text-[#1c1c1d] hover:underline"
+          >
+            {field.value}
+            <ExternalLink className="h-3 w-3 shrink-0" />
+          </a>
+        ) : (
+          <p
+            className={cn(
+              "break-words text-sm font-medium",
+              hasValue ? "text-[#1c1c1d]" : "text-[rgba(28,28,29,0.4)]"
+            )}
+          >
+            {hasValue ? field.value : "—"}
+          </p>
+        )}
+        {field.hint ? (
+          <p className="mt-0.5 text-xs text-[rgba(28,28,29,0.5)]">{field.hint}</p>
+        ) : null}
+      </dd>
     </div>
   );
 }
