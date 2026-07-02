@@ -79,6 +79,12 @@ const CATEGORY_SECTIONS: Record<AssetCategory, readonly DetailSection[]> = {
       title: "Financial details",
       description: "Key financial attributes of the asset.",
       fields: [
+        {
+          key: "issuerName",
+          label: "Issuer name",
+          control: "text",
+          placeholder: "e.g., Acme Financial Inc.",
+        },
         { key: "backingType", label: "Backing type", control: "select", options: BACKING_OPTIONS },
         { key: "pegCurrency", label: "Currency", control: "select", options: CURRENCY_OPTIONS },
         { key: "pegTarget", label: "Peg or target", control: "text", placeholder: "1.00 USD" },

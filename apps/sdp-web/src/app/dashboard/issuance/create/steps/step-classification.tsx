@@ -1,6 +1,5 @@
 "use client";
 
-import { ChevronDown, Info } from "lucide-react";
 import { motion } from "motion/react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -58,29 +57,6 @@ export function StepClassification() {
         />
         <p className="text-sm text-[rgba(28,28,29,0.55)]">A clear name to identify this asset.</p>
       </div>
-
-      <details className="group rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] p-4">
-        <summary className="flex cursor-pointer list-none items-center gap-3 [&::-webkit-details-marker]:hidden">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.05)] text-[#1c1c1d]">
-            <Info className="h-4 w-4" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium text-[#1c1c1d]">
-              About asset classification
-            </span>
-            <span className="block text-sm text-[rgba(28,28,29,0.6)]">
-              This helps us apply the right settings, compliance requirements, and public
-              disclosures for your asset.
-            </span>
-          </span>
-          <ChevronDown className="h-4 w-4 shrink-0 text-[rgba(28,28,29,0.5)] transition-transform group-open:rotate-180" />
-        </summary>
-        <p className="mt-3 border-t border-[rgba(28,28,29,0.08)] pt-3 text-sm leading-relaxed text-[rgba(28,28,29,0.62)]">
-          The classification determines the asset category and the supported asset types available
-          in the next step. It also drives which fields are published to the public token metadata
-          and which stay private. You can change it before creating the draft.
-        </p>
-      </details>
     </motion.div>
   );
 }

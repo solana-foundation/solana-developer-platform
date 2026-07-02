@@ -6,6 +6,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { createAssetDraftAction } from "./actions";
+import { ClassificationInfoRail } from "./classification-info-rail";
 import { buildIssuanceMetadata, buildTokenInput, getBlockers } from "./draft-mapping";
 import { DraftSummaryRail } from "./draft-summary-rail";
 import { canAdvance, type DetailsStage, type WizardStep } from "./issuance-draft-wizard.types";
@@ -60,7 +61,8 @@ function WizardShell() {
 
   const isClassification = currentStep === "classification";
   const isReview = currentStep === "review";
-  const showRail = currentStep === "asset-details" || isReview;
+  const showSummaryRail = currentStep === "asset-details" || isReview;
+  const showRail = isClassification || showSummaryRail;
   const blockers = getBlockers(draft);
   const canContinue = canAdvance(currentStep, detailsStage, draft);
 
@@ -127,7 +129,8 @@ function WizardShell() {
         <div className="min-w-0">
           <AnimatePresence mode="wait">{renderStep(currentStep, detailsStage)}</AnimatePresence>
         </div>
-        {showRail ? (
+        {isClassification ? <ClassificationInfoRail /> : null}
+        {showSummaryRail ? (
           <DraftSummaryRail
             draft={draft}
             updatedAt={updatedAt}
