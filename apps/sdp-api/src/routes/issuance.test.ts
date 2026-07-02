@@ -7,6 +7,7 @@ import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-prog
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import type { Address } from "@/lib/solana";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
@@ -4425,6 +4426,88 @@ describe("Issuance Routes", () => {
           createOrgSignerSpy.mockRestore();
           createTokenSpy.mockRestore();
           updateTokenAuthoritiesSpy.mockRestore();
+        }
+      });
+
+      it("returns TRANSACTION_FAILED with the on-chain reason when the create tx fails on-chain", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_onchain_fail",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const onChainDetail = 'Transaction failed: {"InstructionError":[0,{"Custom":6001}]}';
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockRejectedValueOnce(new AppError("TRANSACTION_FAILED", onChainDetail));
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+          const payload = (await res.json()) as { error: { code: string; message: string } };
+          expect(payload.error.code).toBe("TRANSACTION_FAILED");
+          expect(payload.error.message).toBe(onChainDetail);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
+        }
+      });
+
+      it("returns SOLANA_RPC_ERROR when the create tx confirmation times out", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_timeout",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const timeoutDetail = "Transaction 5timeoutSig confirmation timed out after 60000ms";
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockRejectedValueOnce(new AppError("SOLANA_RPC_ERROR", timeoutDetail));
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(502);
+          const payload = (await res.json()) as { error: { code: string; message: string } };
+          expect(payload.error.code).toBe("SOLANA_RPC_ERROR");
+          expect(payload.error.message).toBe(timeoutDetail);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
         }
       });
     });
