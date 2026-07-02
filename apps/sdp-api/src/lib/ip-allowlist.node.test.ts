@@ -13,6 +13,11 @@ describe("IP allowlist matching", () => {
     expect(ipMatchesAllowedIps("203.0.114.42", ["203.0.113.0/24"])).toBe(false);
   });
 
+  it("matches IPv4-mapped IPv6 request IPs against IPv4 entries", () => {
+    expect(ipMatchesAllowedIps("::ffff:203.0.113.42", ["203.0.113.42"])).toBe(true);
+    expect(ipMatchesAllowedIps("::ffff:203.0.113.42", ["203.0.113.0/24"])).toBe(true);
+  });
+
   it("matches exact IPv6 entries and IPv6 CIDR ranges", () => {
     expect(ipMatchesAllowedIps("2001:db8::42", ["2001:db8::42"])).toBe(true);
     expect(ipMatchesAllowedIps("2001:db8::42", ["2001:db8::/32"])).toBe(true);

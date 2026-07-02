@@ -75,6 +75,26 @@ describe("authMiddleware allowed IPs", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it("rejects cached API keys without a trusted Cloudflare source IP", async () => {
+    const context = createAuthContext(
+      {
+        ...TEST_CACHED_API_KEY,
+        allowedIps: ["203.0.113.0/24"],
+      },
+      {
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        "x-forwarded-for": "203.0.113.42",
+      }
+    );
+    const next = vi.fn() as Next;
+
+    await expect(authMiddleware()(context, next)).rejects.toMatchObject({
+      code: "INVALID_API_KEY",
+      statusCode: 401,
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it("rejects cached API keys when any allowlist entry is malformed", async () => {
     const context = createAuthContext(
       {

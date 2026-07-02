@@ -82,13 +82,7 @@ function looksLikeJwt(token: string): boolean {
 }
 
 function getRequestIp(c: Context<{ Bindings: Env }>): string | null {
-  const cfIp = c.req.header("cf-connecting-ip")?.trim();
-  if (cfIp) {
-    return cfIp;
-  }
-
-  const forwarded = c.req.header("x-forwarded-for");
-  return forwarded?.split(",")[0]?.trim() || null;
+  return c.req.header("cf-connecting-ip")?.trim() || null;
 }
 
 /**

@@ -26,7 +26,7 @@ export function ipMatchesAllowedIps(ip: string | null, allowedIps: unknown): boo
     return true;
   }
 
-  const parsedIp = ip ? parseIp(ip) : null;
+  const parsedIp = ip ? normalizeIpv4MappedIp(parseIp(ip)) : null;
   if (!parsedIp) {
     return false;
   }
@@ -96,6 +96,18 @@ function parseIp(value: string): ParsedIp | null {
 
 function stripIpv6Brackets(value: string): string {
   return value.startsWith("[") && value.endsWith("]") ? value.slice(1, -1) : value;
+}
+
+function normalizeIpv4MappedIp(ip: ParsedIp | null): ParsedIp | null {
+  if (ip?.version !== 6) {
+    return ip;
+  }
+
+  const isMapped =
+    ip.bytes.slice(0, 10).every((byte) => byte === 0) &&
+    ip.bytes[10] === 0xff &&
+    ip.bytes[11] === 0xff;
+  return isMapped ? { version: 4, bytes: ip.bytes.slice(12) } : ip;
 }
 
 function parseIpv4(value: string): number[] | null {

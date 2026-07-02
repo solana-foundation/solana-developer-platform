@@ -223,7 +223,7 @@ describe("Auth Middleware", () => {
       expect(res.status).toBe(200);
     });
 
-    it("uses x-forwarded-for when Cloudflare IP is unavailable", async () => {
+    it("rejects cached API keys without a trusted Cloudflare source IP", async () => {
       await seedCachedApiKey(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         allowedIps: ["203.0.113.42"],
@@ -240,7 +240,9 @@ describe("Auth Middleware", () => {
         env
       );
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("INVALID_API_KEY");
     });
 
     it("rejects cached API keys outside the configured CIDR", async () => {
@@ -304,6 +306,23 @@ describe("Auth Middleware", () => {
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("INVALID_API_KEY");
+    });
+
+    it("allows database-loaded API keys from a configured CIDR", async () => {
+      await seedDatabaseApiKey(["203.0.113.0/24"]);
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "cf-connecting-ip": "203.0.113.42",
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
     });
   });
 

@@ -374,9 +374,10 @@ export const updateApiKey = async (c: AppContext) => {
     await replaceApiKeyWalletBindings(getDb(c.env), keyId, walletSelection.bindings);
   }
 
-  // Invalidate cache if auth-relevant fields changed
+  // Auth middleware caches these fields by key hash; evict on every auth-relevant write.
   if (
     parsed.data.allowedIps !== undefined ||
+    parsed.data.expiresAt !== undefined ||
     parsed.data.permissions !== undefined ||
     walletSelection.touched
   ) {
