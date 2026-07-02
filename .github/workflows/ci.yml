@@ -525,9 +525,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Dashboard E2E
+          - name: Dashboard E2E (Surfpool Local)
             test_script: test:e2e:dashboard
-            artifact_suffix: dashboard
+            artifact_suffix: dashboard-surfpool
           - name: Issuance E2E (Surfpool Shards)
             test_script: kora:surfpool:e2e:issuance
             artifact_suffix: issuance
@@ -606,10 +606,6 @@ jobs:
             echo "PRIVY_APP_ID and PRIVY_APP_SECRET must be set in the dev_ci Doppler config for browser e2e." >&2
             exit 1
           fi
-          if [ -z "${KORA_RPC_URL:-}" ]; then
-            echo "KORA_RPC_URL must be set in the dev_ci Doppler config for browser e2e." >&2
-            exit 1
-          fi
           EOF
 
       - name: Derive Clerk issuer for local API
@@ -665,7 +661,7 @@ jobs:
       - name: Skip secret-backed browser e2e for fork
         if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
-          echo "::notice title=Fork-safe browser e2e skip::Forked pull requests cannot access DOPPLER_TOKEN_CI, so Clerk/Privy/Kora-backed browser e2e is skipped. Run this PR from an upstream branch before merge if browser e2e coverage is required."
+          echo "::notice title=Fork-safe browser e2e skip::Forked pull requests cannot access DOPPLER_TOKEN_CI, so Clerk/Privy-backed browser e2e is skipped. Run this PR from an upstream branch before merge if browser e2e coverage is required."
 
       - name: Upload Playwright artifacts
         if: always() && env.CI_HAS_DOPPLER_TOKEN == 'true'

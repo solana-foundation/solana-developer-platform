@@ -10,6 +10,7 @@ import {
   createPaymentTransferBatchesRepository,
   createPolicyRepository,
 } from "@/db/repositories";
+import { resolveKoraUserId } from "@/lib/kora-user";
 import type { RampRuntimeContext } from "@/lib/ramps/types";
 import * as feePaymentAdapters from "@/services/adapters/fee-payment";
 import type { Env } from "@/types/env";
@@ -65,7 +66,7 @@ export function getPolicyRepository(c: AppContext) {
 }
 
 export function getFeePayment(c: AppContext) {
-  return feePaymentAdapters.createFeePaymentAdapter(c.env);
+  return feePaymentAdapters.createFeePaymentAdapter(c.env, resolveKoraUserId(c));
 }
 
 export async function getSponsoredFeePayer(c: AppContext): Promise<Address> {

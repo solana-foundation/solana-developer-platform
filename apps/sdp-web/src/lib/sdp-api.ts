@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
+import type { ListProjectsResponse } from "@sdp/types";
 import { cookies } from "next/headers";
 import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
 import { TRACE_ID_HEADER, TRACE_SOURCE_HEADER, type TraceContext } from "./request-tracing";
@@ -133,9 +134,27 @@ async function getSelectedProjectId(): Promise<string | null> {
   return jar.get(PROJECT_COOKIE_NAME)?.value ?? null;
 }
 
+async function getFallbackProjectId(token: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/v1/projects`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+
+    const json = (await res.json()) as { data?: ListProjectsResponse };
+    const projects = json.data?.projects ?? [];
+    return (
+      projects.find((project) => project.slug === "default-sandbox")?.id ?? projects[0]?.id ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
 export async function createSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
   const token = await getClerkToken();
-  const projectId = await getSelectedProjectId();
+  const projectId = (await getSelectedProjectId()) ?? (await getFallbackProjectId(token));
   const request = createSdpApiRequest(token, projectId, traceContext);
 
   return {

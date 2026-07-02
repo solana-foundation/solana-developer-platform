@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   ActiveApiKeyControlProfileResult,
   ActiveWalletControlProfileResult,
+  ApprovalRequestRow,
   CreatePolicyEvaluationInput,
   CreateWalletOperationInput,
   PolicyRepository,
@@ -93,10 +94,14 @@ function createRepository(options: {
   walletPolicy?: ActiveWalletControlProfileResult | null;
   apiKeyPolicy?: ActiveApiKeyControlProfileResult | null;
   evaluationError?: Error;
+  policyEvaluationError?: Error;
+  approvalStatusUpdateError?: Error;
+  existingApprovalRequestStatus?: ApprovalRequestRow["status"];
   statusUpdateFailures?: number;
   statusUpdateError?: Error;
 }) {
   const operations: WalletOperationRow[] = [];
+  const approvalRequests: ApprovalRequestRow[] = [];
   let statusUpdateFailuresRemaining = options.statusUpdateFailures ?? 0;
 
   const repository = {
@@ -142,20 +147,104 @@ function createRepository(options: {
       operation.updated_at = "2026-06-18T00:01:00.000Z";
       return operation;
     }),
-    createPolicyEvaluation: vi.fn(async (input: CreatePolicyEvaluationInput) => ({
-      id: "peval_1",
-      wallet_operation_id: input.walletOperationId,
-      wallet_policy_revision_id: input.walletPolicyRevisionId ?? null,
-      api_key_policy_revision_id: input.apiKeyPolicyRevisionId ?? null,
-      decision: input.decision,
-      reason_code: input.reasonCode,
-      reason: input.reason ?? null,
-      matched_rules: input.matchedRules ?? [],
-      evaluation_context: input.evaluationContext,
-      requires_approval: input.requiresApproval ?? false,
-      approval_request_id: input.approvalRequestId ?? null,
-      created_at: "2026-06-18T00:00:00.000Z",
-    })),
+    createPolicyEvaluation: vi.fn(async (input: CreatePolicyEvaluationInput) => {
+      if (options.policyEvaluationError) {
+        throw options.policyEvaluationError;
+      }
+
+      return {
+        id: "peval_1",
+        wallet_operation_id: input.walletOperationId,
+        wallet_policy_revision_id: input.walletPolicyRevisionId ?? null,
+        api_key_policy_revision_id: input.apiKeyPolicyRevisionId ?? null,
+        decision: input.decision,
+        reason_code: input.reasonCode,
+        reason: input.reason ?? null,
+        matched_rules: input.matchedRules ?? [],
+        evaluation_context: input.evaluationContext,
+        requires_approval: input.requiresApproval ?? false,
+        approval_request_id: input.approvalRequestId ?? null,
+        created_at: "2026-06-18T00:00:00.000Z",
+      };
+    }),
+    createApprovalRequest: vi.fn(async (input) => {
+      const existing = approvalRequests.find(
+        (request) => request.wallet_operation_id === input.walletOperationId
+      );
+      if (existing) return existing;
+
+      if (options.existingApprovalRequestStatus) {
+        const row: ApprovalRequestRow = {
+          id: "appr_existing",
+          organization_id: input.organizationId,
+          project_id: input.projectId,
+          wallet_operation_id: input.walletOperationId,
+          approval_group_id: input.approvalGroupId ?? null,
+          status: options.existingApprovalRequestStatus,
+          provider: input.provider ?? null,
+          provider_reference: input.providerReference ?? null,
+          provider_payload: input.providerPayload ?? {},
+          requested_by: input.requestedBy ?? null,
+          resolved_by: "usr_previous",
+          expires_at: input.expiresAt ?? null,
+          resolved_at: "2026-06-18T00:02:00.000Z",
+          created_at: "2026-06-18T00:00:00.000Z",
+          updated_at: "2026-06-18T00:02:00.000Z",
+        };
+        approvalRequests.push(row);
+        return row;
+      }
+
+      const row: ApprovalRequestRow = {
+        id: `appr_${approvalRequests.length + 1}`,
+        organization_id: input.organizationId,
+        project_id: input.projectId,
+        wallet_operation_id: input.walletOperationId,
+        approval_group_id: input.approvalGroupId ?? null,
+        status: "pending",
+        provider: input.provider ?? null,
+        provider_reference: input.providerReference ?? null,
+        provider_payload: input.providerPayload ?? {},
+        requested_by: input.requestedBy ?? null,
+        resolved_by: null,
+        expires_at: input.expiresAt ?? null,
+        resolved_at: null,
+        created_at: "2026-06-18T00:00:00.000Z",
+        updated_at: "2026-06-18T00:00:00.000Z",
+      };
+      approvalRequests.push(row);
+      return row;
+    }),
+    updateApprovalRequestStatus: vi.fn(async (input) => {
+      if (options.approvalStatusUpdateError) {
+        throw options.approvalStatusUpdateError;
+      }
+
+      const request = approvalRequests.find(
+        (row) => row.id === input.approvalRequestId && row.organization_id === input.organizationId
+      );
+      if (!request) return null;
+      if (request.status !== "pending") return request;
+
+      request.status = input.status;
+      request.resolved_by = input.resolvedBy ?? null;
+      const resolvedAt = input.resolvedAt ?? "2026-06-18T00:02:00.000Z";
+      request.resolved_at = resolvedAt;
+      request.updated_at = resolvedAt;
+
+      const operation = operations.find((row) => row.id === request.wallet_operation_id);
+      if (
+        operation &&
+        input.operationStatus &&
+        (operation.status === "pending_approval" ||
+          (input.operationStatus === "failed" && operation.status === "created"))
+      ) {
+        operation.status = input.operationStatus;
+        operation.updated_at = request.updated_at;
+      }
+
+      return request;
+    }),
     listPolicyEvaluationsForOperation: vi.fn(async () => []),
     getActiveWalletControlProfileByCustodyWalletId: vi.fn(async () => options.walletPolicy ?? null),
     getActiveApiKeyControlProfileByApiKeyId: vi.fn(async () => options.apiKeyPolicy ?? null),
@@ -248,6 +337,244 @@ describe("WalletPolicyEnforcementService", () => {
       "wop_1",
       "pending_approval"
     );
+    expect(repository.createApprovalRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        walletOperationId: "wop_1",
+        approvalGroupId: null,
+        requestedBy: "key_1",
+      })
+    );
+    expect(repository.createPolicyEvaluation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalRequestId: "appr_1",
+      })
+    );
+  });
+
+  it("creates approval requests for manual review decisions", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile([], "review"),
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
+      code: "SIGNING_PENDING",
+      details: {
+        walletOperationId: "wop_1",
+        decision: "review",
+        requiresApproval: false,
+        approvalRequestId: "appr_1",
+      },
+    });
+
+    expect(repository.createApprovalRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        walletOperationId: "wop_1",
+        requestedBy: "key_1",
+      })
+    );
+    expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith(
+      "wop_1",
+      "pending_approval"
+    );
+  });
+
+  it("does not reuse terminal approval requests for a new pending decision", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile([
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]),
+      existingApprovalRequestStatus: "failed",
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(service.enforce(baseOperation)).rejects.toThrow(
+      "Wallet operation approval request is no longer pending"
+    );
+
+    expect(repository.createPolicyEvaluation).not.toHaveBeenCalled();
+    expect(repository.updateApprovalRequestStatus).not.toHaveBeenCalled();
+    expect(repository.updateWalletOperationStatus).toHaveBeenCalledWith("wop_1", "failed");
+    expect(repository.updateWalletOperationStatus).not.toHaveBeenCalledWith(
+      "wop_1",
+      "pending_approval"
+    );
+  });
+
+  it("stores provider-native approval metadata when present", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile([
+        {
+          id: "provider-approval",
+          kind: "approval",
+          families: ["payment"],
+          action: "provider_approval_required",
+          approvalGroupId: "apg_1",
+        },
+      ]),
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(
+      service.enforce({
+        ...baseOperation,
+        providerExtensions: {
+          provider: "fireblocks",
+          providerReference: "fb_tx_1",
+          approvalWindow: "24h",
+        },
+      })
+    ).rejects.toMatchObject({
+      code: "SIGNING_PENDING",
+      details: {
+        decision: "provider_approval_required",
+        approvalRequestId: "appr_1",
+      },
+    });
+
+    expect(repository.createApprovalRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalGroupId: "apg_1",
+        provider: "fireblocks",
+        providerReference: "fb_tx_1",
+        providerPayload: {
+          provider: "fireblocks",
+          providerReference: "fb_tx_1",
+          approvalWindow: "24h",
+        },
+      })
+    );
+  });
+
+  it("approves and cancels approval requests idempotently", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile([
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]),
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
+      code: "SIGNING_PENDING",
+    });
+
+    await expect(
+      service.approveApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).resolves.toMatchObject({
+      status: "approved",
+      resolved_by: "usr_approver",
+    });
+    await expect(
+      service.approveApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).resolves.toMatchObject({
+      status: "approved",
+      resolved_by: "usr_approver",
+    });
+
+    const secondRepository = createRepository({
+      walletPolicy: walletProfile([
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]),
+    });
+    const secondService = new WalletPolicyEnforcementService(secondRepository);
+
+    await expect(secondService.enforce(baseOperation)).rejects.toMatchObject({
+      code: "SIGNING_PENDING",
+    });
+    await expect(
+      secondService.cancelApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).resolves.toMatchObject({
+      status: "canceled",
+      resolved_by: "usr_approver",
+    });
+    await expect(
+      secondService.cancelApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).resolves.toMatchObject({
+      status: "canceled",
+      resolved_by: "usr_approver",
+    });
+  });
+
+  it("rejects conflicting approval request terminal transitions", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile([
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]),
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
+      code: "SIGNING_PENDING",
+    });
+    await service.cancelApprovalRequest("org_1", "appr_1", "usr_approver");
+
+    await expect(
+      service.approveApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "Approval request is already canceled",
+    });
+
+    const secondRepository = createRepository({
+      walletPolicy: walletProfile([
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]),
+    });
+    const secondService = new WalletPolicyEnforcementService(secondRepository);
+
+    await expect(secondService.enforce(baseOperation)).rejects.toMatchObject({
+      code: "SIGNING_PENDING",
+    });
+    await secondService.approveApprovalRequest("org_1", "appr_1", "usr_approver");
+
+    await expect(
+      secondService.cancelApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "Approval request is already approved",
+    });
+  });
+
+  it("fails approval requests and wallet operations together when recording the evaluation fails", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile([
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]),
+      policyEvaluationError: new Error("evaluation write unavailable"),
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(service.enforce(baseOperation)).rejects.toThrow("evaluation write unavailable");
+
+    expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith({
+      organizationId: "org_1",
+      approvalRequestId: "appr_1",
+      status: "failed",
+      operationStatus: "failed",
+    });
+    expect(repository.updateWalletOperationStatus).not.toHaveBeenCalledWith("wop_1", "failed");
+  });
+
+  it("surfaces approval cleanup failures without hiding the original error", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile([
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]),
+      policyEvaluationError: new Error("evaluation write unavailable"),
+      approvalStatusUpdateError: new Error("approval cleanup unavailable"),
+    });
+    const service = new WalletPolicyEnforcementService(repository);
+
+    await expect(service.enforce(baseOperation)).rejects.toThrow(
+      "Wallet operation policy enforcement failed (evaluation write unavailable) and approval cleanup failed (approval cleanup unavailable)"
+    );
+
+    expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith({
+      organizationId: "org_1",
+      approvalRequestId: "appr_1",
+      status: "failed",
+      operationStatus: "failed",
+    });
   });
 
   it("lets an API key policy narrow an otherwise allowed wallet operation", async () => {

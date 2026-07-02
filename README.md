@@ -28,8 +28,8 @@ The supported public API areas are health, API keys, wallets, projects, issuance
 
 Prerequisites:
 
-- Node.js 20+
-- pnpm 10.15+
+- Node.js 22+
+- pnpm 10.16+
 - Git
 
 Install dependencies:
