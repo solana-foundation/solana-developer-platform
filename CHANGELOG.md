@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.34.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.33.0...v0.34.0) (2026-07-02)
+
+### Features
+
+* wire recurring payment cron automation ([#570](https://github.com/solana-foundation/solana-developer-platform/pull/570)) ([0a24f9c](https://github.com/solana-foundation/solana-developer-platform/commit/0a24f9c7046bf0bc5c632b7ab176f42f124f7d0a))
+* **payments:** offer all well-known tokens when creating payment requests ([#575](https://github.com/solana-foundation/solana-developer-platform/pull/575)) ([ecce5fe](https://github.com/solana-foundation/solana-developer-platform/commit/ecce5fefa32e9226e303549c165b841859f52eee))
+* **payments:** label custom tokens in batch asset picker ([#553](https://github.com/solana-foundation/solana-developer-platform/pull/553)) ([30a2c99](https://github.com/solana-foundation/solana-developer-platform/commit/30a2c99d06a9b19ef513f8be12344ed04ff8f6e7))
+* **sdp-api:** add provider credential custody tables (HOO-764) ([#555](https://github.com/solana-foundation/solana-developer-platform/pull/555)) ([d703d44](https://github.com/solana-foundation/solana-developer-platform/commit/d703d4465b1f39f49c2a3cf8b8c5c9c62b7895bb))
+* **api:** add approval request persistence ([#554](https://github.com/solana-foundation/solana-developer-platform/pull/554)) ([31e9772](https://github.com/solana-foundation/solana-developer-platform/commit/31e9772b1661b6f73334a5165389a1eb5ec6d536))
+* **sdp-api:** forward user_id to Kora on sign calls (PRO-1348) ([#548](https://github.com/solana-foundation/solana-developer-platform/pull/548)) ([2850fce](https://github.com/solana-foundation/solana-developer-platform/commit/2850fce4657d4d7f62967c8305e2d103d207adef))
+* add recurring payment lifecycle controls ([#550](https://github.com/solana-foundation/solana-developer-platform/pull/550)) ([1639344](https://github.com/solana-foundation/solana-developer-platform/commit/16393444c1d6769a869b2a97fb2638d1b0b3e34d))
+* **payments:** batch send — recipient selection, bulk import, custom mints ([#549](https://github.com/solana-foundation/solana-developer-platform/pull/549)) ([e4b67b7](https://github.com/solana-foundation/solana-developer-platform/commit/e4b67b7d75a6144bcbfa2eb4f876323054bd8c4f))
+* **api-keys:** surface wallet policy access ([#545](https://github.com/solana-foundation/solana-developer-platform/pull/545)) ([ec3fc29](https://github.com/solana-foundation/solana-developer-platform/commit/ec3fc292e6cb8ae07b1f05b48a1c80a5fc3b319f))
+* **payments:** add recurring payment create flow ([#537](https://github.com/solana-foundation/solana-developer-platform/pull/537)) ([e6fb3f9](https://github.com/solana-foundation/solana-developer-platform/commit/e6fb3f973a21e24cd6d74948ff6fbba2d9a6723e))
+* **payments:** add recurring payment update API ([#547](https://github.com/solana-foundation/solana-developer-platform/pull/547)) ([b78599c](https://github.com/solana-foundation/solana-developer-platform/commit/b78599cf343f86c9c2baced635b58b13ef28ec59))
+* **sdp-api:** batch payment transfers to multiple counterparties ([#535](https://github.com/solana-foundation/solana-developer-platform/pull/535)) ([c3906dd](https://github.com/solana-foundation/solana-developer-platform/commit/c3906dd95f3ddd10a3e7876e897ffc4e5ee2bc0f))
+* **sdp-api:** scaffold batch payments table ([#534](https://github.com/solana-foundation/solana-developer-platform/pull/534)) ([a5cf049](https://github.com/solana-foundation/solana-developer-platform/commit/a5cf0492cce05faef8482acb73689947aff1db7f))
+* **web:** add recurring payment list and detail views ([#527](https://github.com/solana-foundation/solana-developer-platform/pull/527)) ([ffa7591](https://github.com/solana-foundation/solana-developer-platform/commit/ffa7591bf3a05b0b41465362207dfb00c809e3fb))
+* **web:** add wallet policy operation rules flow ([#529](https://github.com/solana-foundation/solana-developer-platform/pull/529)) ([33ae6ec](https://github.com/solana-foundation/solana-developer-platform/commit/33ae6ec41c0ac3466f0ee3c23bdb58e7435df748))
+* **web:** add recurring payments dashboard plumbing ([#525](https://github.com/solana-foundation/solana-developer-platform/pull/525)) ([4c0e2c7](https://github.com/solana-foundation/solana-developer-platform/commit/4c0e2c7f7ea57e3e92fcf7c93e577caf0ca7eae0))
+* **api:** harden recurring activation recovery ([#523](https://github.com/solana-foundation/solana-developer-platform/pull/523)) ([1bef4c3](https://github.com/solana-foundation/solana-developer-platform/commit/1bef4c3378517ef5dbd106947b899efb52458d71))
+* **api:** add recurring payment lifecycle routes ([#517](https://github.com/solana-foundation/solana-developer-platform/pull/517)) ([1241c12](https://github.com/solana-foundation/solana-developer-platform/commit/1241c1239a147c2ecf97ed426b0642e0c1a56b18))
+* **sdp-web:** HOO-475 - Show signer authority indicator for Freeze and Pause actions ([#450](https://github.com/solana-foundation/solana-developer-platform/pull/450)) ([d8a9660](https://github.com/solana-foundation/solana-developer-platform/commit/d8a9660f4b12660baa8773f1c990c97869f0f826))
+* HOO-709 Suport native fee payments using NativeAdapter ([#521](https://github.com/solana-foundation/solana-developer-platform/pull/521)) ([adf47b0](https://github.com/solana-foundation/solana-developer-platform/commit/adf47b097c8c1c5bfc1493c2310676a58f66fc03))
+* **payments:** settle payment requests on read via Solana Pay reference ([#522](https://github.com/solana-foundation/solana-developer-platform/pull/522)) ([849014f](https://github.com/solana-foundation/solana-developer-platform/commit/849014f841b6512fbbd35a1ee4b0475f90e2bb34))
+* **payments:** request-for-payment links with Solana Pay QR + reconciliation ([#515](https://github.com/solana-foundation/solana-developer-platform/pull/515)) ([9d322e0](https://github.com/solana-foundation/solana-developer-platform/commit/9d322e0503f723615b3196995b6069971a8c8275))
+
+### Bug Fixes
+
+* **payments:** revalidate wallet and counterparty caches in action wizards ([#577](https://github.com/solana-foundation/solana-developer-platform/pull/577)) ([da4c559](https://github.com/solana-foundation/solana-developer-platform/commit/da4c559732cc6852be3de2146a224c77dfebec76))
+* **api:** surface typed errors from on-chain submit and confirm paths ([#574](https://github.com/solana-foundation/solana-developer-platform/pull/574)) ([a66aa6a](https://github.com/solana-foundation/solana-developer-platform/commit/a66aa6a67ea4dd05c8d5e7c8164402211b557bee))
+* **ramps:** normalize subdivision codes to BVNK's 2-char stateCode ([#573](https://github.com/solana-foundation/solana-developer-platform/pull/573)) ([f9c0a46](https://github.com/solana-foundation/solana-developer-platform/commit/f9c0a469c47bb6313d6afa295dc8738957d82ee9))
+* **counterparties:** validate dateOfBirth and phone identity fields ([#572](https://github.com/solana-foundation/solana-developer-platform/pull/572)) ([42cc472](https://github.com/solana-foundation/solana-developer-platform/commit/42cc4729cc7549ca531f92b2b87fc5a4ed3f707a))
+* **payments:** include SOL in Pay and Batch asset options ([#571](https://github.com/solana-foundation/solana-developer-platform/pull/571)) ([1ce8a34](https://github.com/solana-foundation/solana-developer-platform/commit/1ce8a34d32da640ccb495699305fad7a8e276f6b))
+* **sdp-web:** compliance screening with provider risk cards ([#533](https://github.com/solana-foundation/solana-developer-platform/pull/533)) ([8d292ff](https://github.com/solana-foundation/solana-developer-platform/commit/8d292ff822fe524acde463a77412e51fc5657c37))
+* standardize UI for lightspark/bvnk and ramps in general ([#531](https://github.com/solana-foundation/solana-developer-platform/pull/531)) ([8b45e0e](https://github.com/solana-foundation/solana-developer-platform/commit/8b45e0ed6262b5b35265c2a9dd4a0fe434d33350))
+* bvnk onramp/offramp bugs and add tests ([#530](https://github.com/solana-foundation/solana-developer-platform/pull/530)) ([df7570e](https://github.com/solana-foundation/solana-developer-platform/commit/df7570e5ce7fe2a93631b4c292b0949296dfc025))
+
+### Documentation
+
+* align Node/pnpm prerequisites with package.json engines ([#556](https://github.com/solana-foundation/solana-developer-platform/pull/556)) ([9692927](https://github.com/solana-foundation/solana-developer-platform/commit/969292751257edfd2809f38ba5e7e5ece5e9976f))
+
+### Refactors
+
+* **payments:** remove ramp execute endpoints, keep quote-only flow ([#552](https://github.com/solana-foundation/solana-developer-platform/pull/552)) ([3e7def4](https://github.com/solana-foundation/solana-developer-platform/commit/3e7def41d1049cd7c8604dc2dfc8dda72a7793c5))
+* centralize well-known token mints into a shared registry ([#520](https://github.com/solana-foundation/solana-developer-platform/pull/520)) ([fedd439](https://github.com/solana-foundation/solana-developer-platform/commit/fedd4393e78de8b52d600936418806b2192d98b3))
+
+### Maintenance
+
+* **surfpool:** finish browser e2e runbook ([#546](https://github.com/solana-foundation/solana-developer-platform/pull/546)) ([fd22072](https://github.com/solana-foundation/solana-developer-platform/commit/fd22072fb82ec90849dbf2b77d38e50b1e5ea0b0))
+* **payments:** fix hardcoded expiry in payment-request repo test ([#551](https://github.com/solana-foundation/solana-developer-platform/pull/551)) ([f1efcf1](https://github.com/solana-foundation/solana-developer-platform/commit/f1efcf14e43a5393204757c965f69fe7590db29f))
+* **kora:** drop kora terraform + infra + observability (moved to sdp-infra) ([#532](https://github.com/solana-foundation/solana-developer-platform/pull/532)) ([749ab48](https://github.com/solana-foundation/solana-developer-platform/commit/749ab480315c9a156724c4ce4d1e616abf180f28))
+* run access custody shard on surfpool local ([#528](https://github.com/solana-foundation/solana-developer-platform/pull/528)) ([8952fc8](https://github.com/solana-foundation/solana-developer-platform/commit/8952fc88b43f6881136909725a94fbc31fbcd107))
+* slim Kora live smoke suite ([#524](https://github.com/solana-foundation/solana-developer-platform/pull/524)) ([78241ac](https://github.com/solana-foundation/solana-developer-platform/commit/78241acbed1f1551a8db5f475bc8abfde1531fff))
+* run API integration shards on Surfpool ([#518](https://github.com/solana-foundation/solana-developer-platform/pull/518)) ([e08817f](https://github.com/solana-foundation/solana-developer-platform/commit/e08817f7d4ee0f481b70fd5a39e87f1cb72f91f9))
+* select surfpool remote rpc ([#516](https://github.com/solana-foundation/solana-developer-platform/pull/516)) ([8853909](https://github.com/solana-foundation/solana-developer-platform/commit/8853909f14194281d9629a3a92476efcaa31b186))
+
 ## [0.33.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.32.0...v0.33.0) (2026-06-24)
 
 ### Features
