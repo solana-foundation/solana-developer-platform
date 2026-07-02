@@ -99,9 +99,24 @@ function resolveExpiryDate(expiryLabel: string): Date | null {
   return new Date(Date.now() + option.hours * 3_600_000);
 }
 
+/**
+ * Formats an expiry instant in the viewer's locale and timezone, e.g.
+ * "June 27, 2026 at 2:30 PM GMT+8". The server stores UTC; this is the
+ * local-time translation for display only.
+ *
+ * @param date - Expiry instant (any timezone; rendered in the browser's).
+ * @returns Locale-formatted date with 12-hour time and timezone name.
+ */
 function formatLocalExpiry(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return date.toLocaleString(undefined, {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZoneName: "short",
+  });
 }
 
 function statusTone(status: PaymentRequestStatus): "success" | "error" | "pending" {
