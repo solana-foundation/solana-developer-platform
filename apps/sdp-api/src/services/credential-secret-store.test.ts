@@ -243,7 +243,9 @@ describe("EncryptedDbCredentialSecretStore", () => {
     expect(stored.storageBackend).toBe("encrypted_db");
     expect(stored.encryptedSecretPayload).toBeTruthy();
     expect(stored.encryptedSecretPayload).not.toContain("privy-secret");
-    await expect(store.read({ orgId: "other_org", stored })).rejects.toThrow();
+    await expect(store.read({ orgId: "other_org", stored })).rejects.toBeInstanceOf(
+      CredentialSecretStoreError
+    );
     await expect(store.read({ orgId: "org_123", stored })).resolves.toEqual(payload);
   });
 

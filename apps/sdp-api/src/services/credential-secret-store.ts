@@ -76,7 +76,18 @@ export class EncryptedDbCredentialSecretStore implements CredentialSecretStore {
       );
     }
 
-    return parseSecretPayload(await this.encryption.decrypt(params.orgId, encryptedPayload));
+    try {
+      return parseSecretPayload(await this.encryption.decrypt(params.orgId, encryptedPayload));
+    } catch (error) {
+      if (error instanceof CredentialSecretStoreError) {
+        throw error;
+      }
+
+      throw new CredentialSecretStoreError(
+        "Encrypted DB credential payload could not be decrypted",
+        "MISSING_SECRET"
+      );
+    }
   }
 
   async destroyVersion(_params: DestroyCredentialSecretVersionParams): Promise<void> {
