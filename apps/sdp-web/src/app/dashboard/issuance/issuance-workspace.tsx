@@ -4,6 +4,7 @@ import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Plus, Search } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
@@ -11,8 +12,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
-import { CreateIssuanceTokenModal } from "./create-token-modal";
 import { getTemplateCatalogEntry, type IssuanceTemplateId } from "./template-catalog";
+
+// Draft creation is a full-page wizard (V2 issuance direction). The legacy
+// create-token-modal.tsx is retained but no longer wired from here.
+const CREATE_DRAFT_PATH = "/dashboard/issuance/create";
 
 const IssuancePlayground = dynamic(
   () => import("./issuance-playground").then((module) => module.IssuancePlayground),
@@ -114,15 +118,13 @@ export function IssuanceWorkspace({
   tokens,
   templates,
   apiKeys,
-  signerWallets,
   apiBaseUrl,
   templatesError,
   tokensNotice,
-  signerWalletsError,
 }: IssuanceWorkspaceProps) {
   const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
+  const router = useRouter();
   const [search, setSearch] = useState("");
-  const [isCreateTokenModalOpen, setIsCreateTokenModalOpen] = useState(false);
   const isPlaygroundTab = issuanceTab === "playground";
 
   useEffect(() => {
@@ -213,7 +215,7 @@ export function IssuanceWorkspace({
             <Button
               type="button"
               className="h-10 rounded-[10px] bg-[#1c1c1d] px-4 text-white hover:bg-[rgba(28,28,29,0.92)]"
-              onClick={() => setIsCreateTokenModalOpen(true)}
+              onClick={() => router.push(CREATE_DRAFT_PATH)}
             >
               Create draft
             </Button>
@@ -310,7 +312,7 @@ export function IssuanceWorkspace({
 
             <button
               type="button"
-              onClick={() => setIsCreateTokenModalOpen(true)}
+              onClick={() => router.push(CREATE_DRAFT_PATH)}
               data-testid="token-add-card"
               className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-[rgba(28,28,29,0.2)] bg-[#fcfcfa] text-[rgba(28,28,29,0.5)] transition-colors hover:border-[rgba(28,28,29,0.35)] hover:text-[rgba(28,28,29,0.75)]"
               aria-label="Add new token"
@@ -318,14 +320,6 @@ export function IssuanceWorkspace({
               <Plus className="h-6 w-6" />
             </button>
           </div>
-
-          <CreateIssuanceTokenModal
-            open={isCreateTokenModalOpen}
-            onOpenChange={setIsCreateTokenModalOpen}
-            signerWallets={signerWallets}
-            signerWalletsError={signerWalletsError}
-            hideTrigger
-          />
         </>
       }
       playground={

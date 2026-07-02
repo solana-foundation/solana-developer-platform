@@ -349,6 +349,14 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
       contentWidthClass: "max-w-none",
     };
   }
+  if (pathname === "/dashboard/issuance/create") {
+    return actionPageConfig({
+      centeredTitle: "New asset",
+      backHref: "/dashboard/issuance",
+      backLabel: "Back to overview",
+      contentWidthClass: "max-w-none",
+    });
+  }
   if (pathname.startsWith("/dashboard/issuance/")) {
     return {
       title: "Issuance",
