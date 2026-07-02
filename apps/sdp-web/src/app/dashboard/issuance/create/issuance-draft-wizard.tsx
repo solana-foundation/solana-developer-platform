@@ -1,5 +1,6 @@
 "use client";
 
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import { AnimatePresence } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -25,20 +26,37 @@ import { WizardProgress } from "./wizard-progress";
 
 const ISSUANCE_OVERVIEW_PATH = "/dashboard/issuance";
 
-export function IssuanceDraftWizard() {
+interface IssuanceDraftWizardProps {
+  signerWallets: PaymentsDashboardWallet[];
+  signerWalletsError: string | null;
+}
+
+export function IssuanceDraftWizard({
+  signerWallets,
+  signerWalletsError,
+}: IssuanceDraftWizardProps) {
   return (
     <IssuanceDraftProvider>
-      <WizardShell />
+      <WizardShell signerWallets={signerWallets} signerWalletsError={signerWalletsError} />
     </IssuanceDraftProvider>
   );
 }
 
-function renderStep(step: WizardStep, detailsStage: DetailsStage) {
+function renderStep(
+  step: WizardStep,
+  detailsStage: DetailsStage,
+  signerWallets: PaymentsDashboardWallet[],
+  signerWalletsError: string | null
+) {
   switch (step) {
     case "classification":
       return <StepClassification />;
     case "asset-details":
-      return detailsStage === "select" ? <StepSubAssetType /> : <StepAssetDetails />;
+      return detailsStage === "select" ? (
+        <StepSubAssetType />
+      ) : (
+        <StepAssetDetails signerWallets={signerWallets} signerWalletsError={signerWalletsError} />
+      );
     case "public-info":
       return <StepPublicInfo />;
     case "review":
@@ -48,7 +66,7 @@ function renderStep(step: WizardStep, detailsStage: DetailsStage) {
   }
 }
 
-function WizardShell() {
+function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardProps) {
   const router = useRouter();
   const {
     draft,
@@ -137,7 +155,9 @@ function WizardShell() {
 
       <div className={showRail ? "grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]" : undefined}>
         <div className="min-w-0">
-          <AnimatePresence mode="wait">{renderStep(currentStep, detailsStage)}</AnimatePresence>
+          <AnimatePresence mode="wait">
+            {renderStep(currentStep, detailsStage, signerWallets, signerWalletsError)}
+          </AnimatePresence>
         </div>
         {isClassification ? <ClassificationInfoRail /> : null}
         {showSummaryRail ? (

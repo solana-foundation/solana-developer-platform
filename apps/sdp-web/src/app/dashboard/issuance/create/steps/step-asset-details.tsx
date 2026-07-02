@@ -1,5 +1,6 @@
 "use client";
 
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
 import { Plus, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
@@ -9,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { TokenSignerSelect } from "../../[tokenId]/token-signer-select";
 import { AdvancedCapacities } from "../advanced-capacities";
 import {
   ACCESS_CONTROL_OPTIONS,
@@ -34,7 +36,13 @@ const TABS = [
 
 type UpdateDraft = (patch: Partial<DraftState>) => void;
 
-export function StepAssetDetails() {
+export function StepAssetDetails({
+  signerWallets,
+  signerWalletsError,
+}: {
+  signerWallets: PaymentsDashboardWallet[];
+  signerWalletsError: string | null;
+}) {
   const { draft, updateDraft } = useIssuanceDraft();
   const [tab, setTab] = useState<string>("overview");
   const [jsonOpen, setJsonOpen] = useState(false);
@@ -205,13 +213,26 @@ export function StepAssetDetails() {
       {tab === "operational" ? (
         <FormCard title="Operational" description="Optional operational settings.">
           <div className="grid gap-4">
-            <TextField
-              label="Signing wallet ID (optional)"
-              value={draft.signingWalletId}
-              onChange={(value) => updateDraft({ signingWalletId: value })}
-              placeholder="wal_…"
-              help="Leave blank to use the project's default signer."
-            />
+            <div>
+              <TokenSignerSelect
+                signerWallets={signerWallets}
+                signerWalletId={draft.signingWalletId}
+                signerUnavailableReason={signerWalletsError}
+                onSignerWalletIdChange={(value) => updateDraft({ signingWalletId: value })}
+                label="Signing wallet"
+                showSelectionSummary
+              />
+              {/* Signer is optional at draft stage — clarify the fallback when
+                  a choice is possible but none is made (skip the single-wallet
+                  "locked" and error cases, which have their own message). */}
+              {!signerWalletsError &&
+              signerWallets.length !== 1 &&
+              !draft.signingWalletId.trim() ? (
+                <p className="mt-1.5 text-xs text-[rgba(28,28,29,0.5)]">
+                  Optional — leave unselected to use the project&apos;s default signer.
+                </p>
+              ) : null}
+            </div>
             <TextField
               label="Metadata URI (optional)"
               value={draft.metadataUri}
