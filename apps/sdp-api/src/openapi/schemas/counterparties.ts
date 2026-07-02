@@ -90,8 +90,9 @@ export const counterpartyAddressSchema = withOpenApi(
       example: "US",
     }),
     subdivisionCode: withOpenApi(counterpartyAddressSchemaBase.shape.subdivisionCode, {
-      description: "ISO 3166-2 subdivision code (state, province, region).",
-      example: "US-CA",
+      description:
+        "Subdivision code (state, province, region) — bare 2-letter code (e.g. `CA`); ISO 3166-2 (`US-CA`) is also accepted, but some providers require the bare form.",
+      example: "CA",
     }),
   }),
   { description: "Postal address for a counterparty." }
@@ -109,8 +110,9 @@ export const counterpartyGovernmentIdSchema = withOpenApi(
       example: "US",
     }),
     subdivisionCode: withOpenApi(counterpartyGovernmentIdSchemaBase.shape.subdivisionCode, {
-      description: "ISO 3166-2 subdivision code of the issuing authority.",
-      example: "US-CA",
+      description:
+        "Subdivision code of the issuing authority — bare 2-letter code (e.g. `CA`); ISO 3166-2 (`US-CA`) is also accepted, but some providers require the bare form.",
+      example: "CA",
     }),
     issueDate: withOpenApi(isoDateSchema.optional(), {
       description: "Issue date (YYYY-MM-DD).",
