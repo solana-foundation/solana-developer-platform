@@ -1,11 +1,12 @@
 "use client";
 
-import type {
-  Counterparty,
-  CounterpartyAccount,
-  PaymentRequest,
-  PaymentRequestStatus,
-  PaymentsDashboardWallet,
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type Counterparty,
+  type CounterpartyAccount,
+  type PaymentRequest,
+  type PaymentRequestStatus,
+  type PaymentsDashboardWallet,
 } from "@sdp/types";
 import {
   BanknoteIcon,
@@ -64,7 +65,7 @@ import { cn } from "@/lib/utils";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
-import type { PaymentRequestTokenOption } from "./payment-requests-page.data";
+import { deriveTokenOptions, type PaymentRequestTokenOption } from "./payment-requests-page.data";
 
 const PaymentRequestsPlayground = dynamic(
   () => import("./payment-requests-playground").then((module) => module.PaymentRequestsPlayground),
@@ -268,9 +269,13 @@ function CreateRequestModal({
               <Input
                 size="xl"
                 id="pr-amount"
+                type="number"
                 inputMode="decimal"
+                min="0"
+                step="any"
                 iconLeft={<BanknoteIcon />}
                 placeholder="0.00"
+                className="[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 value={form.values.amount}
                 onChange={(event: ChangeEvent<HTMLInputElement>) =>
                   form.setField("amount", event.target.value)
@@ -419,7 +424,6 @@ interface PaymentRequestsWorkspaceProps {
   apiBaseUrl: string | null;
   apiKeys: DashboardPlaygroundApiKeyOption[];
   wallets: PaymentsDashboardWallet[];
-  tokens: PaymentRequestTokenOption[];
   counterparties: Counterparty[];
 }
 
@@ -429,12 +433,15 @@ export function PaymentRequestsWorkspace({
   apiBaseUrl,
   apiKeys,
   wallets,
-  tokens,
   counterparties,
 }: PaymentRequestsWorkspaceProps) {
   const router = useRouter();
-  const { counterpartyTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
+  const { counterpartyTab, sdpEnvironment, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
     useDashboardWorkspace();
+  const tokens = useMemo(
+    () => deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]),
+    [sdpEnvironment]
+  );
   const isPlaygroundTab = counterpartyTab === "playground";
   const [selected, setSelected] = useState<PaymentRequest | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
