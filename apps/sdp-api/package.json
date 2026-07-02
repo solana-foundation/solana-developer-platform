@@ -26,7 +26,7 @@
     "rails:discover": "doppler run --config ${DOPPLER_CONFIG:-dev} -- tsx scripts/discover-ramp-rails.ts",
     "rails:generate": "tsx scripts/discover-ramp-rails.ts emit",
     "rails:drift": "tsx scripts/check-ramp-rails-drift.ts",
-    "test": "pnpm test:workers && pnpm test:node",
+    "test": "pnpm db:migrate:test && pnpm test:workers && pnpm test:node",
     "test:workers": "vitest run --config vitest.workers.config.ts",
     "test:node": "vitest run --config vitest.node.config.ts",
     "test:serial": "vitest run --config vitest.workers.config.ts --no-file-parallelism --maxWorkers=1",
