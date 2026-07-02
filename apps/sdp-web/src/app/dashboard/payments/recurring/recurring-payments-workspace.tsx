@@ -130,6 +130,7 @@ interface RecurringPaymentDetailWorkspaceProps {
   amountLabel: string;
   currencyLabel: string;
   collectionAttempts: PaymentSubscriptionCollectionAttempt[];
+  collectionAttemptsTotal: number;
   collectionAttemptsError?: string;
 }
 
@@ -280,21 +281,28 @@ function ExplorerValue({ value }: { value: string | null }) {
 
 function RecurringPaymentCollectionHistory({
   attempts,
+  total,
   error,
   wallets,
 }: {
   attempts: PaymentSubscriptionCollectionAttempt[];
+  total: number;
   error?: string;
   wallets: RecurringPaymentWalletView[];
 }) {
+  const attemptsLabel =
+    total > attempts.length
+      ? `Showing ${attempts.length} of ${total} attempts`
+      : attempts.length === 1
+        ? "1 attempt"
+        : `${attempts.length} attempts`;
+
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-3">
         <h3 className="text-sm font-medium text-text-extra-high">Collection history</h3>
         {attempts.length > 0 ? (
-          <span className="text-xs text-text-low">
-            {attempts.length === 1 ? "1 attempt" : `${attempts.length} attempts`}
-          </span>
+          <span className="text-xs text-text-low">{attemptsLabel}</span>
         ) : null}
       </div>
       <div className="@container/collection-history rounded-xl border border-border-light">
@@ -846,6 +854,7 @@ export function RecurringPaymentDetailWorkspace({
   amountLabel,
   currencyLabel,
   collectionAttempts,
+  collectionAttemptsTotal,
   collectionAttemptsError,
 }: RecurringPaymentDetailWorkspaceProps) {
   const router = useRouter();
@@ -1695,6 +1704,7 @@ export function RecurringPaymentDetailWorkspace({
 
         <RecurringPaymentCollectionHistory
           attempts={collectionAttempts}
+          total={collectionAttemptsTotal}
           error={collectionAttemptsError}
           wallets={wallets}
         />

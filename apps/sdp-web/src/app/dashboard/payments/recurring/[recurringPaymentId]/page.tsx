@@ -110,7 +110,7 @@ export default async function RecurringPaymentDetailRoute({
         ? await trace.step("fetch_recurring_payment_collection_attempts", () =>
             fetchRecurringPaymentCollectionAttempts(apiClient.request, subscriptionId)
           )
-        : { ok: true as const, data: [] };
+        : { ok: true as const, data: { collectionAttempts: [], total: 0 } };
       const knownToken = WELL_KNOWN_TOKEN_BY_MINT.get(recurringPayment.token);
       const tokenLabel =
         knownToken?.symbol ??
@@ -128,7 +128,8 @@ export default async function RecurringPaymentDetailRoute({
           counterpartyLabel={counterpartyLabel}
           amountLabel={formatDisplayAmount(recurringPayment.amount, tokenLabel)}
           currencyLabel={tokenLabel}
-          collectionAttempts={collectionAttemptsResult.data ?? []}
+          collectionAttempts={collectionAttemptsResult.data?.collectionAttempts ?? []}
+          collectionAttemptsTotal={collectionAttemptsResult.data?.total ?? 0}
           collectionAttemptsError={
             collectionAttemptsResult.ok ? undefined : collectionAttemptsResult.error
           }

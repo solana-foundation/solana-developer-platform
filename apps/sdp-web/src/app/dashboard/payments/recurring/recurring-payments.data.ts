@@ -39,6 +39,11 @@ type DashboardApiEnvelope<T> = {
   message?: string;
 };
 
+export interface RecurringPaymentCollectionAttemptsResult {
+  collectionAttempts: PaymentSubscriptionCollectionAttempt[];
+  total: number;
+}
+
 function setPositiveInteger(query: URLSearchParams, key: string, value: number | undefined) {
   if (typeof value === "number" && Number.isInteger(value) && value > 0) {
     query.set(key, String(value));
@@ -244,7 +249,7 @@ export async function fetchRecurringPaymentById(
 export async function fetchRecurringPaymentCollectionAttempts(
   request: SdpApiClient["request"],
   subscriptionId: string
-): Promise<FetchResult<PaymentSubscriptionCollectionAttempt[]>> {
+): Promise<FetchResult<RecurringPaymentCollectionAttemptsResult>> {
   try {
     const response = await request(
       `/v1/payments/subscriptions/${encodeURIComponent(
@@ -262,7 +267,13 @@ export async function fetchRecurringPaymentCollectionAttempts(
     const json = (await response.json()) as {
       data?: ListPaymentSubscriptionCollectionAttemptsResponse;
     };
-    return { ok: true, data: json.data?.collectionAttempts ?? [] };
+    return {
+      ok: true,
+      data: {
+        collectionAttempts: json.data?.collectionAttempts ?? [],
+        total: json.data?.total ?? 0,
+      },
+    };
   } catch (error) {
     return {
       ok: false,
