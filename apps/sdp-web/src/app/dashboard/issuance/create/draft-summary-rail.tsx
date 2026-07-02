@@ -14,10 +14,9 @@ interface DraftSummaryRailProps {
 interface SummaryRowProps {
   label: string;
   value: string | null;
-  code?: string | null;
 }
 
-function SummaryRow({ label, value, code }: SummaryRowProps) {
+function SummaryRow({ label, value }: SummaryRowProps) {
   const hasValue = value !== null && value.trim().length > 0;
   return (
     <div className="flex items-start justify-between gap-3 border-b border-[rgba(28,28,29,0.06)] py-2.5 last:border-b-0">
@@ -31,9 +30,6 @@ function SummaryRow({ label, value, code }: SummaryRowProps) {
         >
           {hasValue ? value : "—"}
         </span>
-        {code ? (
-          <span className="mt-0.5 block truncate text-xs text-[rgba(28,28,29,0.5)]">{code}</span>
-        ) : null}
       </span>
     </div>
   );
@@ -64,16 +60,8 @@ export function DraftSummaryRail({ draft, updatedAt }: DraftSummaryRailProps) {
         <p className="text-base font-medium text-[#1c1c1d]">Summary</p>
 
         <div className="mt-3">
-          <SummaryRow label="Asset category" value={categoryLabel} code={draft.assetCategory} />
-          <SummaryRow
-            label="Asset type"
-            value={typeLabel}
-            code={
-              draft.assetCategory && draft.assetType
-                ? `${draft.assetCategory}/${draft.assetType}`
-                : null
-            }
-          />
+          <SummaryRow label="Asset category" value={categoryLabel} />
+          <SummaryRow label="Asset type" value={typeLabel} />
           <SummaryRow label="Name" value={draft.name} />
           <SummaryRow label="Symbol" value={draft.symbol} />
           <SummaryRow label="Decimals" value={draft.decimals} />
