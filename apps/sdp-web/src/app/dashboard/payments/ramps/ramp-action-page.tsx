@@ -21,6 +21,7 @@ import { CounterpartyRecentTransfers } from "./components/counterparty-recent-tr
 import { type PaymentMethod, PaymentMethodStep } from "./components/payment-method-step";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type SendMode, SendModeToggle } from "./components/send-mode-toggle";
+import { PAYMENTS_ACTION_WALLETS_KEY } from "./hooks/use-payments-action-wallets";
 import { OfframpRail } from "./offramp-rail";
 import { OnchainReceiveRail } from "./onchain-receive-rail";
 import { OnchainSendRail } from "./onchain-send-rail";
@@ -40,7 +41,6 @@ interface PaymentsActionPageProps {
 type WizardStep = { label: string; title: string };
 
 const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
-const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 
 export interface RailProps {
   wallets: PaymentsDashboardWallet[];
@@ -71,8 +71,6 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
     fetchAllCounterparties,
     {
       fallbackData: props.counterpartiesResult,
-      revalidateOnFocus: false,
-      revalidateIfStale: false,
     }
   );
   const liveCounterparties = counterpartiesResult ?? props.counterpartiesResult;

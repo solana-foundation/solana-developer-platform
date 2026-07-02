@@ -3,8 +3,7 @@
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import useSWR from "swr";
-import { fetchWallets } from "@/app/dashboard/payments/payments-workspace.data";
+import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
 export const ONCHAIN_RECEIVE_STEPS = [
@@ -13,8 +12,6 @@ export const ONCHAIN_RECEIVE_STEPS = [
 ] as const satisfies readonly RampWizardStep[];
 
 export type OnchainReceiveStepId = (typeof ONCHAIN_RECEIVE_STEPS)[number]["id"];
-
-const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 
 export interface UseOnchainReceiveWizardProps {
   wallets: PaymentsDashboardWallet[];
@@ -33,24 +30,10 @@ export function useOnchainReceiveWizard({
   const [stepIndex, setStepIndex] = useState(0);
   const [walletId, setWalletId] = useState("");
 
-  const { data: swrWallets, error: walletsFetchError } = useSWR<PaymentsDashboardWallet[]>(
-    PAYMENTS_ACTION_WALLETS_KEY,
-    () => fetchWallets({ includeBalances: true }),
-    {
-      fallbackData: wallets.length > 0 ? wallets : undefined,
-      revalidateOnFocus: false,
-      revalidateIfStale: false,
-    }
+  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
+    wallets,
+    walletsError
   );
-  const liveWallets = swrWallets ?? wallets;
-  const walletsLoading = swrWallets === undefined && !walletsFetchError;
-  const liveWalletsError = walletsFetchError
-    ? walletsFetchError instanceof Error
-      ? walletsFetchError.message
-      : "Request failed."
-    : swrWallets === undefined
-      ? walletsError
-      : null;
 
   const selectedWallet = useMemo(
     () => liveWallets.find((wallet) => wallet.walletId === walletId) ?? null,
