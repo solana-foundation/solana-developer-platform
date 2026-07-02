@@ -105,7 +105,7 @@ function resolveExpiryDate(expiryLabel: string): Date | null {
  * local-time translation for display only.
  *
  * @param date - Expiry instant (any timezone; rendered in the browser's).
- * @returns Locale-formatted date with 12-hour time and timezone name.
+ * @returns Locale-formatted date with time and timezone name.
  */
 function formatLocalExpiry(date: Date): string {
   return date.toLocaleString(undefined, {
@@ -114,7 +114,6 @@ function formatLocalExpiry(date: Date): string {
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-    hour12: true,
     timeZoneName: "short",
   });
 }
@@ -286,7 +285,6 @@ function CreateRequestModal({
                 id="pr-amount"
                 type="number"
                 inputMode="decimal"
-                min="0"
                 step="any"
                 iconLeft={<BanknoteIcon />}
                 placeholder="0.00"
@@ -695,6 +693,7 @@ export function PaymentRequestsWorkspace({
 
       {createOpen ? (
         <CreateRequestModal
+          key={sdpEnvironment}
           wallets={wallets}
           tokens={tokens}
           counterparties={counterparties}
