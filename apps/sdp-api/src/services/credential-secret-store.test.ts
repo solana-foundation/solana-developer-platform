@@ -162,7 +162,7 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
     expect(
       () =>
         new GcpSecretManagerCredentialSecretStore({
-          projectId: "sdp-dev-123456789012345678901",
+          projectId: "sdp-dev-123456789012345678901234",
           secretPrefix: "sdp-dev-provider-credentials",
           accessToken: "test-token",
           fetcher: async () => new Response("{}"),
