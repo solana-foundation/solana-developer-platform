@@ -1746,8 +1746,7 @@ export function RecurringPaymentDetailWorkspace({
                   ) : undefined
                 }
                 onClick={() => {
-                  setCancelConfirmOpen(false);
-                  void submitAction("cancel");
+                  void submitAction("cancel").finally(() => setCancelConfirmOpen(false));
                 }}
               >
                 Cancel payment
