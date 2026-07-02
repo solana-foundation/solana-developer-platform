@@ -93,6 +93,40 @@ describe("counterpartyIdentitySchema phone", () => {
   });
 });
 
+describe("updateCounterpartyObjectSchema identity.dateOfBirth partial update", () => {
+  it("rejects today's date", () => {
+    const result = updateCounterpartyObjectSchema.safeParse({
+      identity: { dateOfBirth: todayIsoDate() },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a future date", () => {
+    const result = updateCounterpartyObjectSchema.safeParse({
+      identity: { dateOfBirth: futureIsoDate() },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a past date", () => {
+    const result = updateCounterpartyObjectSchema.safeParse({
+      identity: { dateOfBirth: "1990-01-15" },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts an omitted dateOfBirth", () => {
+    const result = updateCounterpartyObjectSchema.safeParse({
+      identity: {},
+    });
+
+    expect(result.success).toBe(true);
+  });
+});
+
 describe("updateCounterpartyObjectSchema identity.phone partial update", () => {
   it("rejects a non-E.164 short number", () => {
     const result = updateCounterpartyObjectSchema.safeParse({
