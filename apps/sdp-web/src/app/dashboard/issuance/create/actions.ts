@@ -58,6 +58,9 @@ export async function createAssetDraftAction(
     if (input.token.uri) {
       form.set("uri", input.token.uri);
     }
+    if (input.token.imageUrl) {
+      form.set("imageUrl", input.token.imageUrl);
+    }
     if (input.token.signingWalletId) {
       form.set("signingWalletId", input.token.signingWalletId);
     }

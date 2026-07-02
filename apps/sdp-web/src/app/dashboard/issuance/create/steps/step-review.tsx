@@ -8,13 +8,11 @@ import {
   type LucideIcon,
   Pencil,
   ShieldCheck,
-  TriangleAlert,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { accessControlLabel } from "../asset-details-config";
 import { getAssetTypeLabel, getCategoryLabel } from "../asset-taxonomy";
-import { getRequiredForDeployWarnings } from "../draft-mapping";
 import type { DraftState, WizardStep } from "../issuance-draft-wizard.types";
 import { useIssuanceDraft } from "../use-issuance-draft";
 
@@ -46,7 +44,6 @@ function accessControlHint(mode: DraftState["accessControl"]): string | undefine
 
 export function StepReview() {
   const { draft, goToStep } = useIssuanceDraft();
-  const warnings = getRequiredForDeployWarnings(draft);
 
   const categoryLabel = getCategoryLabel(draft.assetCategory);
   const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType);
@@ -115,6 +112,11 @@ export function StepReview() {
       fields: [
         { label: "Public name", value: draft.name },
         { label: "Public symbol", value: draft.symbol },
+        {
+          label: "Logo",
+          value: draft.imageUrl.trim() || null,
+          href: draft.imageUrl.trim() || null,
+        },
         { label: "Description (public)", value: draft.description },
       ],
     },
@@ -134,19 +136,6 @@ export function StepReview() {
           Please review all details below. You can edit any section before creating your draft.
         </p>
       </div>
-
-      {warnings.length > 0 ? (
-        <div className="flex items-start gap-2.5 rounded-2xl border border-[rgba(234,179,8,0.3)] bg-[rgba(234,179,8,0.08)] px-4 py-3 text-[#92400e]">
-          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-          <div className="min-w-0 text-sm">
-            <p className="font-semibold">Recommended before deploying</p>
-            <p className="mt-0.5 opacity-90">
-              These aren&apos;t required for a draft but are needed before you can deploy on-chain:{" "}
-              {warnings.join(", ")}.
-            </p>
-          </div>
-        </div>
-      ) : null}
 
       {sections.map((section) => (
         <ReviewSection

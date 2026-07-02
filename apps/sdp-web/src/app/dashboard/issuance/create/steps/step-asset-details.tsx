@@ -16,7 +16,11 @@ import {
   getCategorySections,
 } from "../asset-details-config";
 import { DocumentRows } from "../document-rows";
-import { buildIssuanceMetadata } from "../draft-mapping";
+import {
+  buildIssuanceMetadata,
+  getAssetDetailsErrors,
+  getRequiredAssetDetailKeys,
+} from "../draft-mapping";
 import type { CustomFieldRow, DraftState } from "../issuance-draft-wizard.types";
 import { MetadataJsonPanel, MetadataJsonToggle } from "../metadata-json";
 import { useIssuanceDraft } from "../use-issuance-draft";
@@ -36,6 +40,8 @@ export function StepAssetDetails() {
   const [jsonOpen, setJsonOpen] = useState(false);
   const sections = getCategorySections(draft.assetCategory);
   const metadata = buildIssuanceMetadata(draft);
+  const errors = getAssetDetailsErrors(draft);
+  const requiredKeys = getRequiredAssetDetailKeys(draft);
 
   return (
     <motion.div
@@ -81,20 +87,30 @@ export function StepAssetDetails() {
             <div className="grid gap-4 sm:grid-cols-2">
               <TextField
                 label="Symbol"
+                required
                 value={draft.symbol}
                 onChange={(value) => updateDraft({ symbol: value })}
                 placeholder="e.g., vUSD"
+                error={draft.symbol.trim() ? errors.symbol : undefined}
               />
               <TextField
                 label="Decimals"
+                required
                 type="number"
                 value={draft.decimals}
                 onChange={(value) => updateDraft({ decimals: value })}
                 placeholder="e.g., 6"
+                error={draft.decimals.trim() ? errors.decimals : undefined}
               />
             </div>
             <div className="mt-4 grid gap-1.5">
-              <Label htmlFor="asset-description">Description</Label>
+              <Label htmlFor="asset-description">
+                Description{" "}
+                <span aria-hidden className="text-[#c71f37]">
+                  *
+                </span>
+                <span className="sr-only"> (required)</span>
+              </Label>
               <textarea
                 id="asset-description"
                 value={draft.description}
@@ -104,12 +120,21 @@ export function StepAssetDetails() {
                 className="w-full rounded-[14px] border border-[rgba(28,28,29,0.14)] bg-white px-4 py-3 text-sm text-[#1c1c1d] outline-none transition-[box-shadow,border-color] placeholder:text-[rgba(28,28,29,0.4)] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)]"
               />
             </div>
-            <div className="mt-4 max-w-md">
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <TextField
                 label="Website"
                 value={draft.website}
                 onChange={(value) => updateDraft({ website: value })}
                 placeholder="https://…"
+                error={errors.website}
+              />
+              <TextField
+                label="Logo image URL"
+                value={draft.imageUrl}
+                onChange={(value) => updateDraft({ imageUrl: value })}
+                placeholder="https://…/logo.png"
+                help="Shown next to your token in wallets and explorers."
+                error={errors.imageUrl}
               />
             </div>
           </FormCard>
@@ -123,6 +148,8 @@ export function StepAssetDetails() {
                     field={field}
                     draft={draft}
                     updateDraft={updateDraft}
+                    required={requiredKeys.has(field.key)}
+                    error={String(draft[field.key] ?? "").trim() ? errors[field.key] : undefined}
                   />
                 ))}
               </div>
@@ -238,6 +265,8 @@ function TextField({
   placeholder,
   type = "text",
   help,
+  required,
+  error,
 }: {
   label: string;
   value: string;
@@ -245,17 +274,37 @@ function TextField({
   placeholder?: string;
   type?: string;
   help?: string;
+  required?: boolean;
+  error?: string;
 }) {
   return (
     <div className="grid gap-1.5">
-      <Label>{label}</Label>
+      <Label>
+        {label}
+        {required ? (
+          <>
+            {" "}
+            <span aria-hidden className="text-[#c71f37]">
+              *
+            </span>
+            <span className="sr-only"> (required)</span>
+          </>
+        ) : null}
+      </Label>
       <Input
         type={type}
         value={value}
         onChange={(event) => onChange(event.currentTarget.value)}
         placeholder={placeholder}
+        required={required}
+        aria-invalid={error ? true : undefined}
       />
-      {help ? <p className="text-xs text-[rgba(28,28,29,0.5)]">{help}</p> : null}
+      {error ? (
+        <p className="text-xs text-[#c71f37]" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {!error && help ? <p className="text-xs text-[rgba(28,28,29,0.5)]">{help}</p> : null}
     </div>
   );
 }
@@ -292,10 +341,14 @@ function DetailField({
   field,
   draft,
   updateDraft,
+  required,
+  error,
 }: {
   field: FieldDescriptor;
   draft: DraftState;
   updateDraft: UpdateDraft;
+  required?: boolean;
+  error?: string;
 }) {
   const raw = draft[field.key];
 
@@ -322,7 +375,18 @@ function DetailField({
     const value = typeof raw === "string" ? raw : "";
     return (
       <div>
-        <Label>{field.label}</Label>
+        <Label>
+          {field.label}
+          {required ? (
+            <>
+              {" "}
+              <span aria-hidden className="text-[#c71f37]">
+                *
+              </span>
+              <span className="sr-only"> (required)</span>
+            </>
+          ) : null}
+        </Label>
         <div className="mt-1.5">
           <Select
             value={value || null}
@@ -338,6 +402,11 @@ function DetailField({
             ))}
           </Select>
         </div>
+        {error ? (
+          <p className="mt-1 text-xs text-[#c71f37]" role="alert">
+            {error}
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -346,11 +415,13 @@ function DetailField({
   return (
     <TextField
       label={field.label}
+      required={required}
       value={value}
       onChange={(next) => updateDraft({ [field.key]: next } as Partial<DraftState>)}
       placeholder={field.placeholder}
       type={field.control === "number" ? "number" : "text"}
       help={field.help}
+      error={error}
     />
   );
 }

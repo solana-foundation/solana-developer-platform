@@ -24,6 +24,7 @@ export interface TokenInput {
   requiresAllowlist: boolean;
   description?: string;
   uri?: string;
+  imageUrl?: string;
   signingWalletId?: string;
 }
 
@@ -54,6 +55,7 @@ export function buildTokenInput(draft: DraftState): TokenInput {
     requiresAllowlist: draft.accessControl === "allowlist",
     description: draft.description.trim() || undefined,
     uri: draft.metadataUri.trim() || undefined,
+    imageUrl: draft.imageUrl.trim() || undefined,
     signingWalletId: draft.signingWalletId.trim() || undefined,
   };
 }
@@ -181,20 +183,92 @@ export function getPublicProjection(draft: DraftState): ProjectionField[] {
   });
 }
 
-// requiredForDeploy paths that are still empty — surfaced as warnings on Review
-// (they block deploy later, not draft creation now).
-export function getRequiredForDeployWarnings(draft: DraftState): string[] {
-  if (!draft.assetCategory || !draft.assetType) {
-    return [];
+export function isValidUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
   }
-  const entry = getAssetTypeRegistryEntry(draft.assetCategory, draft.assetType);
-  if (!entry) {
-    return [];
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
   }
-  const metadata = buildIssuanceMetadata(draft);
-  return entry.requiredForDeploy
-    .filter((path) => getByPath(metadata, path) === undefined)
-    .map((path) => pathLabel(path));
+}
+
+// Deploy-required metadata dot-paths mapped back to the flat draft field they
+// come from, so a missing deploy field can be flagged on its own input.
+const DEPLOY_PATH_TO_FIELD: Partial<Record<string, keyof DraftState>> = {
+  "asset.issuerName": "issuerName",
+  "asset.pegCurrency": "pegCurrency",
+  "chain.decimals": "decimals",
+};
+
+// The Asset-details fields that must be filled: the on-screen "About this asset"
+// block plus the selected type's deploy-required fields (issuer name, currency,
+// …). Returned as a set of draft keys so the form can mark them required.
+export function getRequiredAssetDetailKeys(draft: DraftState): Set<keyof DraftState> {
+  const keys = new Set<keyof DraftState>(["symbol", "decimals", "description"]);
+  if (draft.assetCategory && draft.assetType) {
+    const entry = getAssetTypeRegistryEntry(draft.assetCategory, draft.assetType);
+    for (const path of entry?.requiredForDeploy ?? []) {
+      const field = DEPLOY_PATH_TO_FIELD[path];
+      if (field) {
+        keys.add(field);
+      }
+    }
+  }
+  return keys;
+}
+
+// Per-field validation for the required Asset-details fields — empty or badly
+// formatted entries map to a user-facing message, keyed by draft field. Drives
+// the form's inline errors, the Continue gate, and the review blockers.
+export function getAssetDetailsErrors(
+  draft: DraftState
+): Partial<Record<keyof DraftState, string>> {
+  const errors: Partial<Record<keyof DraftState, string>> = {};
+
+  const symbol = draft.symbol.trim();
+  if (!symbol) {
+    errors.symbol = "Symbol is required.";
+  } else if (!SYMBOL_RE.test(symbol)) {
+    errors.symbol = "Use 1–10 letters, numbers, or periods.";
+  }
+
+  if (!isValidDecimals(draft.decimals)) {
+    errors.decimals = "Enter a whole number between 0 and 18.";
+  }
+
+  if (!draft.description.trim()) {
+    errors.description = "Description is required.";
+  }
+
+  // Website and logo are optional, but must be valid URLs when provided.
+  if (draft.website.trim() && !isValidUrl(draft.website)) {
+    errors.website = "Enter a valid URL (https://…).";
+  }
+
+  if (draft.imageUrl.trim() && !isValidUrl(draft.imageUrl)) {
+    errors.imageUrl = "Enter a valid URL (https://…).";
+  }
+
+  // Deploy-required registry fields for the selected type (e.g. issuer name,
+  // peg currency) — required so the token can be deployed later.
+  if (draft.assetCategory && draft.assetType) {
+    const entry = getAssetTypeRegistryEntry(draft.assetCategory, draft.assetType);
+    for (const path of entry?.requiredForDeploy ?? []) {
+      const field = DEPLOY_PATH_TO_FIELD[path];
+      if (!field || errors[field]) {
+        continue;
+      }
+      if (!String(draft[field] ?? "").trim()) {
+        errors[field] = `${pathLabel(path)} is required.`;
+      }
+    }
+  }
+
+  return errors;
 }
 
 // Hard blockers that prevent creating the draft at all.
@@ -206,14 +280,8 @@ export function getBlockers(draft: DraftState): string[] {
   if (!draft.name.trim()) {
     blockers.push("Asset name is required.");
   }
-  const symbol = draft.symbol.trim();
-  if (!symbol) {
-    blockers.push("Symbol is required.");
-  } else if (!SYMBOL_RE.test(symbol)) {
-    blockers.push("Symbol must be 1–10 letters, numbers, or periods.");
-  }
-  if (!isValidDecimals(draft.decimals)) {
-    blockers.push("Decimals must be a whole number between 0 and 18.");
+  for (const message of Object.values(getAssetDetailsErrors(draft))) {
+    blockers.push(message);
   }
   return blockers;
 }

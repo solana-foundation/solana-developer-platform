@@ -76,6 +76,7 @@ export async function createIssuanceTokenAction(
   const symbol = String(formData.get("symbol") ?? "").trim();
   const template = String(formData.get("template") ?? "custom").trim();
   const description = String(formData.get("description") ?? "").trim();
+  const imageUrl = String(formData.get("imageUrl") ?? "").trim();
   const signingWalletId = String(formData.get("signingWalletId") ?? "").trim();
   const decimalsRaw = String(formData.get("decimals") ?? "").trim();
   const maxSupplyRaw = String(formData.get("maxSupply") ?? "").trim();
@@ -125,6 +126,7 @@ export async function createIssuanceTokenAction(
     symbol: string;
     template: string;
     uri?: string;
+    imageUrl?: string;
     signingWalletId?: string;
     description?: string;
     decimals?: number;
@@ -147,6 +149,10 @@ export async function createIssuanceTokenAction(
 
   if (description) {
     payload.description = description;
+  }
+
+  if (imageUrl) {
+    payload.imageUrl = imageUrl;
   }
 
   if (signingWalletId) {

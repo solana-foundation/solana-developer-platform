@@ -7,7 +7,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { createAssetDraftAction } from "./actions";
 import { ClassificationInfoRail } from "./classification-info-rail";
-import { buildIssuanceMetadata, buildTokenInput, getBlockers } from "./draft-mapping";
+import {
+  buildIssuanceMetadata,
+  buildTokenInput,
+  getAssetDetailsErrors,
+  getBlockers,
+} from "./draft-mapping";
 import { DraftSummaryRail } from "./draft-summary-rail";
 import { canAdvance, type DetailsStage, type WizardStep } from "./issuance-draft-wizard.types";
 import { StepAssetDetails } from "./steps/step-asset-details";
@@ -64,7 +69,12 @@ function WizardShell() {
   const showSummaryRail = currentStep === "asset-details" || isReview;
   const showRail = isClassification || showSummaryRail;
   const blockers = getBlockers(draft);
-  const canContinue = canAdvance(currentStep, detailsStage, draft);
+  // On the Asset-details form the Continue gate is the full field validation
+  // (required + format); elsewhere it's the coarse structural check.
+  const canContinue =
+    currentStep === "asset-details" && detailsStage === "form"
+      ? Object.keys(getAssetDetailsErrors(draft)).length === 0
+      : canAdvance(currentStep, detailsStage, draft);
 
   const handleCancel = () => {
     reset();

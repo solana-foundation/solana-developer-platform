@@ -75,6 +75,7 @@ export interface DraftState {
   decimals: string;
   description: string;
   website: string;
+  imageUrl: string;
   // Step 2 — stablecoin financial details
   backingType: string;
   pegCurrency: string;
@@ -122,6 +123,7 @@ export function createInitialDraft(): DraftState {
     decimals: "",
     description: "",
     website: "",
+    imageUrl: "",
     backingType: "",
     pegCurrency: "",
     pegTarget: "",
