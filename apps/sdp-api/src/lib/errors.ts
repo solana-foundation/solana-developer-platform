@@ -212,6 +212,10 @@ export function transactionFailed(message?: string, details?: Record<string, unk
   return new AppError("TRANSACTION_FAILED", message, details);
 }
 
+export function solanaRpcError(message?: string, details?: Record<string, unknown>): AppError {
+  return new AppError("SOLANA_RPC_ERROR", message, details);
+}
+
 export function providerNotConfigured(message?: string): AppError {
   return new AppError("PROVIDER_NOT_CONFIGURED", message);
 }
