@@ -3,7 +3,7 @@
 ## Repo Layout and Prerequisites
 
 - [AGENTS.md](./AGENTS.md) — repo layout, public vs. internal API surfaces, generated-file rules, and the canonical `pnpm` check commands.
-- [README.md](./README.md) — Node `>=20` and `pnpm@10.15.1` prerequisites (listed under [README "Prereqs"](./README.md#prereqs)), and the release/deploy model.
+- [README.md](./README.md) — Node `>=22` and `pnpm@10.16.0` prerequisites (listed under [README "Local Development"](./README.md#local-development)), and the release/deploy model.
 - [docs/ops/doppler-secrets.md](./docs/ops/doppler-secrets.md) — Doppler configuration and secrets setup required for local development.
 
 ## Pull Requests

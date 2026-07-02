@@ -1259,6 +1259,72 @@
           }
         },
         {
+          "name": "Estimate transfer batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches/estimate",
+            "description": "Validates a transfer batch request and estimates transaction chunking and fees. This route is scaffolded; estimation is not implemented yet.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"wal_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List transfer batches",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches",
+            "description": "Lists transfer batches for the authenticated organization or project scope."
+          }
+        },
+        {
+          "name": "Create transfer batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches",
+            "description": "Creates a custody-executed outbound transfer batch to counterparty crypto-wallet accounts. This route is scaffolded; execution is not implemented yet.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"wal_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get transfer batch",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches/{{batchId}}",
+            "description": "Retrieves a transfer batch with recipient rows and chunk transfer summaries."
+          }
+        },
+        {
           "name": "List recurring payments",
           "request": {
             "method": "GET",
@@ -1283,6 +1349,39 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"sourceWalletId\": \"wal_source\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get recurring payment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}",
+            "description": "Retrieves an SDP-custody outbound recurring payment record."
+          }
+        },
+        {
+          "name": "Update recurring payment",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}",
+            "description": "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceWalletId\": \"wal_source\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1325,15 +1424,6 @@
             "header": [],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/resume",
             "description": "Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status."
-          }
-        },
-        {
-          "name": "Get recurring payment",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}",
-            "description": "Retrieves an SDP-custody outbound recurring payment record."
           }
         },
         {

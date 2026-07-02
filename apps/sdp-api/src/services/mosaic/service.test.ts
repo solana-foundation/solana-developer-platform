@@ -14,6 +14,7 @@ import * as Kit from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import * as Signers from "@solana/signers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AppError } from "@/lib/errors";
 import { MosaicService } from "@/services/mosaic";
 import type { CreateTokenOptions } from "@/services/mosaic/types";
 import type { FeePaymentPort } from "@/services/ports/fee-payment.port";
@@ -261,6 +262,78 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       expect(confirmSpy).toHaveBeenCalledTimes(1);
       expect(result.signature).toBe(koraSignature);
       expect(result.slot).toBe(7n);
+    });
+
+    it("throws TRANSACTION_FAILED carrying the on-chain error when confirmation reports failure", async () => {
+      const koraSignature = "kora-sig" as Signature;
+      fee.signAndSend.mockResolvedValue(koraSignature);
+
+      vi.spyOn(Signers, "partiallySignTransactionMessageWithSigners").mockResolvedValue({
+        __sentinel: "partial-tx",
+      } as never);
+      vi.spyOn(Kit, "getTransactionEncoder").mockReturnValue({
+        encode: () => new Uint8Array([1, 2, 3]),
+      } as never);
+      const onChainError = { InstructionError: [0, { Custom: 6001 }] };
+      vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
+        signature: koraSignature,
+        slot: 7n,
+        confirmationStatus: "confirmed",
+        err: onChainError,
+      } as Awaited<ReturnType<typeof RpcModule.confirmTransaction>>);
+
+      const error = await service.createToken(srfc37Options()).then(
+        () => {
+          throw new Error("expected createToken to reject");
+        },
+        (e: unknown) => e
+      );
+
+      expect(error).toBeInstanceOf(AppError);
+      const appError = error as AppError;
+      expect(appError.code).toBe("TRANSACTION_FAILED");
+      expect(appError.statusCode).toBe(400);
+      expect(appError.message).toBe(`Transaction failed: ${JSON.stringify(onChainError)}`);
+    });
+
+    it("throws TRANSACTION_FAILED carrying the on-chain error on the direct-submit path", async () => {
+      const directSignature = "direct-sig" as Signature;
+      const sendTransaction = vi.fn().mockReturnValue({
+        send: vi.fn().mockResolvedValue(directSignature),
+      });
+      vi.spyOn(RpcModule, "createRpcForSdk").mockReturnValue({
+        sendTransaction,
+      } as unknown as ReturnType<typeof RpcModule.createRpcForSdk>);
+      const unsponsored = new MosaicService(
+        env as ConstructorParameters<typeof MosaicService>[0],
+        signer
+      );
+
+      vi.spyOn(Kit, "signTransactionMessageWithSigners").mockResolvedValue({
+        __sentinel: "signed-tx",
+      } as never);
+      vi.spyOn(Kit, "getBase64EncodedWireTransaction").mockReturnValue("base64-tx" as never);
+      const onChainError = { InstructionError: [1, { Custom: 42 }] };
+      vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
+        signature: directSignature,
+        slot: 9n,
+        confirmationStatus: "confirmed",
+        err: onChainError,
+      } as Awaited<ReturnType<typeof RpcModule.confirmTransaction>>);
+
+      const error = await unsponsored.createToken(srfc37Options()).then(
+        () => {
+          throw new Error("expected createToken to reject");
+        },
+        (e: unknown) => e
+      );
+
+      expect(sendTransaction).toHaveBeenCalledTimes(1);
+      expect(error).toBeInstanceOf(AppError);
+      const appError = error as AppError;
+      expect(appError.code).toBe("TRANSACTION_FAILED");
+      expect(appError.statusCode).toBe(400);
+      expect(appError.message).toBe(`Transaction failed: ${JSON.stringify(onChainError)}`);
     });
   });
 

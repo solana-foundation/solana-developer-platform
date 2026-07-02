@@ -504,4 +504,185 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       expect(stillActive?.status).toBe("active");
     });
   });
+
+  describe("listBatchRecipients", () => {
+    async function seedNamed(displayName: string, externalId: string) {
+      const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
+      const row = await counterpartiesRepo.createCounterparty({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        externalId,
+        entityType: "individual",
+        displayName,
+        email: `${externalId}@example.com`,
+        identity: { firstName: displayName },
+        createdBy: TEST_USER.id,
+      });
+      if (!row) {
+        throw new Error("failed to seed counterparty");
+      }
+      return row;
+    }
+
+    function seedSolanaAccount(counterpartyId: string, address: string, label: string | null) {
+      return repo.createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId,
+        accountKind: "crypto_wallet",
+        label,
+        details: { network: "solana", address },
+      });
+    }
+
+    it("returns only active Solana crypto-wallet accounts joined to their counterparty", async () => {
+      const acme = await seedNamed("Acme Corp", "ext_acme");
+      const beta = await seedNamed("Beta LLC", "ext_beta");
+
+      await seedSolanaAccount(acme.id, "7xKqAcme", "Treasury");
+      await seedSolanaAccount(beta.id, "3mPoBeta", null);
+      // Excluded: bank account.
+      await repo.createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: acme.id,
+        accountKind: "bank_account",
+        details: { currency: "USD" },
+      });
+      // Excluded: non-Solana crypto wallet.
+      await repo.createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: beta.id,
+        accountKind: "crypto_wallet",
+        details: { network: "ethereum", address: "0xBeta" },
+      });
+      // Excluded: archived Solana wallet.
+      const archived = await seedSolanaAccount(acme.id, "9zArchived", "old");
+      await repo.archiveCounterpartyAccount({
+        counterpartyAccountId: archived?.id ?? "",
+        counterpartyId: acme.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      });
+
+      const { rows, total } = await repo.listBatchRecipients({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        limit: 50,
+        offset: 0,
+      });
+
+      expect(total).toBe(2);
+      // Ordered by display_name ASC.
+      expect(rows[0]).toMatchObject({
+        counterparty_display_name: "Acme Corp",
+        address: "7xKqAcme",
+        account_label: "Treasury",
+      });
+      expect(rows[1]).toMatchObject({
+        counterparty_display_name: "Beta LLC",
+        address: "3mPoBeta",
+        account_label: null,
+      });
+    });
+
+    it("filters by search on counterparty name (case-insensitive), not address", async () => {
+      const acme = await seedNamed("Acme Corp", "ext_acme");
+      const beta = await seedNamed("Beta LLC", "ext_beta");
+      await seedSolanaAccount(acme.id, "7xKqAcme", null);
+      await seedSolanaAccount(beta.id, "3mPoBeta", null);
+
+      const byName = await repo.listBatchRecipients({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        search: "beta",
+        limit: 50,
+        offset: 0,
+      });
+      expect(byName.total).toBe(1);
+      expect(byName.rows[0].counterparty_display_name).toBe("Beta LLC");
+
+      // Address is not a search primitive — searching by an address matches nothing.
+      const byAddress = await repo.listBatchRecipients({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        search: "7xKq",
+        limit: 50,
+        offset: 0,
+      });
+      expect(byAddress.total).toBe(0);
+    });
+
+    it("paginates with limit/offset while reporting the full total", async () => {
+      const a = await seedNamed("Aaa", "ext_a");
+      const b = await seedNamed("Bbb", "ext_b");
+      const c = await seedNamed("Ccc", "ext_c");
+      await seedSolanaAccount(a.id, "addrA", null);
+      await seedSolanaAccount(b.id, "addrB", null);
+      await seedSolanaAccount(c.id, "addrC", null);
+
+      const page1 = await repo.listBatchRecipients({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        limit: 2,
+        offset: 0,
+      });
+      expect(page1.total).toBe(3);
+      expect(page1.rows).toHaveLength(2);
+      expect(page1.rows[0].counterparty_display_name).toBe("Aaa");
+
+      const page2 = await repo.listBatchRecipients({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        limit: 2,
+        offset: 2,
+      });
+      expect(page2.total).toBe(3);
+      expect(page2.rows).toHaveLength(1);
+      expect(page2.rows[0].counterparty_display_name).toBe("Ccc");
+    });
+
+    it("restricts results to the given accountIds and combines with search", async () => {
+      const acme = await seedNamed("Acme Corp", "ext_acme");
+      const beta = await seedNamed("Beta LLC", "ext_beta");
+      const acmeAccount = await seedSolanaAccount(acme.id, "7xKqAcme", null);
+      const betaAccount = await seedSolanaAccount(beta.id, "3mPoBeta", null);
+      if (!acmeAccount || !betaAccount) {
+        throw new Error("failed to seed accounts");
+      }
+
+      const onlyAcme = await repo.listBatchRecipients({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        accountIds: [acmeAccount.id],
+        limit: 50,
+        offset: 0,
+      });
+      expect(onlyAcme.total).toBe(1);
+      expect(onlyAcme.rows[0].account_id).toBe(acmeAccount.id);
+
+      // Bind order must keep search and accountIds independent.
+      const acmeFilteredBySearch = await repo.listBatchRecipients({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        accountIds: [acmeAccount.id, betaAccount.id],
+        search: "beta",
+        limit: 50,
+        offset: 0,
+      });
+      expect(acmeFilteredBySearch.total).toBe(1);
+      expect(acmeFilteredBySearch.rows[0].account_id).toBe(betaAccount.id);
+
+      // An accountId outside the project resolves to nothing.
+      const foreign = await repo.listBatchRecipients({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        accountIds: ["cpa_does_not_exist"],
+        limit: 50,
+        offset: 0,
+      });
+      expect(foreign.total).toBe(0);
+    });
+  });
 });

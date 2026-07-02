@@ -12,11 +12,11 @@ import useSWR from "swr";
 import {
   createTransfer,
   fetchCounterpartyAccounts,
-  fetchWallets,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { useZodForm } from "@/lib/use-zod-form";
 import { onchainDestinationSchema, onchainDetailsSchema, onchainSendSchema } from "../schema";
-import { findWalletBalanceForDisplayToken, resolveWalletAssetOptions } from "../wallet-options";
+import { walletBalanceAssetOptions } from "../wallet-options";
+import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
 export const ONCHAIN_SEND_STEPS = [
@@ -26,8 +26,6 @@ export const ONCHAIN_SEND_STEPS = [
 ] as const satisfies readonly RampWizardStep[];
 
 export type OnchainSendStepId = (typeof ONCHAIN_SEND_STEPS)[number]["id"];
-
-const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 
 function resolveAccountAddress(account: CounterpartyAccount | null): string {
   if (!account) {
@@ -57,7 +55,7 @@ export function useOnchainSendWizard({
   const { values: fields, setField } = useZodForm(onchainSendSchema, {
     accountId: "",
     walletId: "",
-    asset: "USDC",
+    asset: "",
     amount: "",
     memo: "",
   });
@@ -65,24 +63,10 @@ export function useOnchainSendWizard({
   const [submitting, setSubmitting] = useState(false);
   const [transferResult, setTransferResult] = useState<PaymentTransferSummary | null>(null);
 
-  const { data: swrWallets, error: walletsFetchError } = useSWR<PaymentsDashboardWallet[]>(
-    PAYMENTS_ACTION_WALLETS_KEY,
-    () => fetchWallets({ includeBalances: true }),
-    {
-      fallbackData: wallets.length > 0 ? wallets : undefined,
-      revalidateOnFocus: false,
-      revalidateIfStale: false,
-    }
+  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
+    wallets,
+    walletsError
   );
-  const liveWallets = swrWallets ?? wallets;
-  const walletsLoading = swrWallets === undefined && !walletsFetchError;
-  const liveWalletsError = walletsFetchError
-    ? walletsFetchError instanceof Error
-      ? walletsFetchError.message
-      : "Request failed."
-    : swrWallets === undefined
-      ? walletsError
-      : null;
 
   const {
     data: accounts,
@@ -115,22 +99,26 @@ export function useOnchainSendWizard({
   const destinationAddress = resolveAccountAddress(selectedAccount);
 
   const assetOptions = useMemo(
-    () => resolveWalletAssetOptions(selectedWallet, issuedTokenSymbolsByMint),
+    () => walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint),
     [issuedTokenSymbolsByMint, selectedWallet]
+  );
+  const selectedAsset = useMemo(
+    () => assetOptions.find((asset) => asset.value === fields.asset) ?? null,
+    [assetOptions, fields.asset]
   );
 
   const selectWallet = (walletId: string) => {
     setField("walletId", walletId);
     const nextWallet = liveWallets.find((wallet) => wallet.walletId === walletId) ?? null;
-    const nextAssets = resolveWalletAssetOptions(nextWallet, issuedTokenSymbolsByMint);
-    if (!nextAssets.includes(fields.asset)) {
-      setField("asset", nextAssets[0] ?? "");
+    const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint);
+    if (!nextAssets.some((asset) => asset.value === fields.asset)) {
+      setField("asset", nextAssets[0]?.value ?? "");
     }
   };
 
   const selectedAssetBalance = useMemo(
-    () => findWalletBalanceForDisplayToken(selectedWallet, fields.asset, issuedTokenSymbolsByMint),
-    [issuedTokenSymbolsByMint, selectedWallet, fields.asset]
+    () => selectedWallet?.balances?.find((balance) => balance.mint === fields.asset) ?? null,
+    [selectedWallet, fields.asset]
   );
 
   let availableAmount: number | null = null;
@@ -169,7 +157,7 @@ export function useOnchainSendWizard({
   };
 
   const submitTransfer = async () => {
-    if (!fields.walletId || !destinationAddress) {
+    if (!fields.walletId || !destinationAddress || !selectedAssetBalance) {
       return;
     }
     setSubmitting(true);
@@ -178,7 +166,7 @@ export function useOnchainSendWizard({
       const transfer = await createTransfer({
         source: fields.walletId,
         destination: destinationAddress,
-        token: selectedAssetBalance?.mint ?? (fields.asset === "SOL" ? "SOL" : fields.asset),
+        token: selectedAssetBalance.mint,
         amount: fields.amount,
         ...(fields.memo.trim() ? { memo: fields.memo.trim() } : {}),
       });
@@ -242,6 +230,7 @@ export function useOnchainSendWizard({
     selectedAccount,
     destinationAddress,
     assetOptions,
+    selectedAsset,
     selectedAssetBalance,
     availableAmount,
     exceedsBalance,

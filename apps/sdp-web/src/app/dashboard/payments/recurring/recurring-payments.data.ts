@@ -3,14 +3,18 @@ import type {
   ListPaymentRecurringPaymentsResponse,
   PaginatedResponse,
   PaymentRecurringPayment,
+  PaymentRecurringPaymentCollectionResponse,
   PaymentRecurringPaymentResponse,
   PaymentRecurringPaymentStatus,
+  UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { getPaymentApiError, parsePaymentApiErrorText } from "../payment-api-errors";
 import type { FetchResult } from "../payments-page.data";
 
 export const RECURRING_PAYMENTS_PAGE_SIZE = 100;
+
+export type RecurringPaymentAction = "activate" | "collect" | "cancel" | "resume";
 
 export interface RecurringPaymentsListOptions {
   page?: number;
@@ -119,6 +123,49 @@ export async function createRecurringPayment(
     response,
     "Recurring payment creation failed"
   );
+  return data.recurringPayment;
+}
+
+export async function updateRecurringPayment(
+  recurringPaymentId: string,
+  input: UpdatePaymentRecurringPaymentRequest,
+  signal?: AbortSignal
+): Promise<PaymentRecurringPayment> {
+  const response = await fetch(
+    `/api/dashboard/payments/recurring-payments/${encodeURIComponent(recurringPaymentId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+      signal,
+    }
+  );
+  const data = await readDashboardEnvelope<PaymentRecurringPaymentResponse>(
+    response,
+    "Recurring payment update failed"
+  );
+  return data.recurringPayment;
+}
+
+export async function runRecurringPaymentAction(
+  recurringPaymentId: string,
+  action: RecurringPaymentAction,
+  signal?: AbortSignal
+): Promise<PaymentRecurringPayment> {
+  const response = await fetch(
+    `/api/dashboard/payments/recurring-payments/${encodeURIComponent(
+      recurringPaymentId
+    )}/${action}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      signal,
+    }
+  );
+  const data = await readDashboardEnvelope<
+    PaymentRecurringPaymentResponse | PaymentRecurringPaymentCollectionResponse
+  >(response, "Recurring payment action failed");
   return data.recurringPayment;
 }
 

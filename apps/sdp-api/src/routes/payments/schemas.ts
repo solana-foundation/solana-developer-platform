@@ -249,6 +249,7 @@ export const paymentRecurringPaymentStatusSchema = z.enum([
   "pending_activation",
   "activating",
   "active",
+  "updating",
   "canceling",
   "resuming",
   "paused",
@@ -270,6 +271,31 @@ export const createRecurringPaymentSchema = z.object({
   firstCollectionAt: firstCollectionAtTimestampSchema.optional(),
   metadataUri: z.string().url().max(128).optional(),
 });
+
+export const updateRecurringPaymentSchema = z
+  .object({
+    sourceWalletId: z.string().min(1).optional(),
+    counterpartyId: z.string().min(1).optional(),
+    counterpartyAccountId: z.string().min(1).optional(),
+    token: paymentTokenSchema.optional(),
+    amount: paymentAmountSchema.optional(),
+    periodHours: z
+      .number()
+      .int()
+      .positive()
+      .max(24 * 365)
+      .optional(),
+    firstCollectionAt: firstCollectionAtTimestampSchema.nullable().optional(),
+    nextCollectionDueAt: recurringTimestampSchema.nullable().optional(),
+    metadataUri: z.string().url().max(128).nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided",
+  })
+  .refine((value) => !value.counterpartyId || value.counterpartyAccountId, {
+    message: "counterpartyAccountId is required when counterpartyId changes",
+    path: ["counterpartyAccountId"],
+  });
 
 export const activateRecurringPaymentSchema = z.object({}).strict();
 export const cancelRecurringPaymentSchema = z.object({}).strict();
@@ -455,36 +481,6 @@ export const listOfframpCurrenciesQuerySchema = z.object({
   provider: rampProviderSchema.optional(),
 });
 
-const bvnkRuleEntitySchema = z.object({
-  type: z.enum(["INDIVIDUAL", "COMPANY"]),
-  customerIdentifier: z.string().min(1),
-  relationshipType: z.enum(["SELF_OWNED", "THIRD_PARTY"]),
-  firstName: z.string().optional(),
-  lastName: z.string().optional(),
-  dateOfBirth: z.string().optional(),
-  legalName: z.string().optional(),
-  registrationNumber: z.string().optional(),
-  address: z
-    .object({
-      addressLine1: z.string(),
-      addressLine2: z.string().optional(),
-      postalCode: z.string().optional(),
-      city: z.string(),
-      countryCode: z.string(),
-      country: z.string(),
-      stateCode: z.string().optional(),
-    })
-    .optional(),
-});
-
-const bvnkComplianceSchema = z.object({
-  partyDetails: z
-    .array(z.record(z.string(), z.unknown()))
-    .min(1, { message: "partyDetails must include at least one entry" })
-    .optional(),
-  ruleEntity: bvnkRuleEntitySchema.optional(),
-});
-
 export const createTransferSchema = z.object({
   projectId: z.string().min(1).optional(),
   source: z.string().min(1),
@@ -555,7 +551,7 @@ export const transferBatchRecipientStatusSchema = z.enum([
 
 export const transferBatchRecipientSchema = z.object({
   externalId: z.string().min(1).max(256).optional(),
-  counterpartyId: z.string().min(1),
+  counterpartyId: z.string().min(1).optional(),
   counterpartyAccountId: z.string().min(1),
   amount: paymentAmountSchema,
 });
@@ -594,17 +590,6 @@ export const prepareTransferOptionsSchema = z.object({
 export const prepareTransferSchema = createTransferSchema.extend({
   referenceAddress: solanaAddressSchema("referenceAddress").optional(),
   options: prepareTransferOptionsSchema.optional(),
-});
-
-export const executeOnrampSchema = z.object({
-  provider: rampProviderSchema,
-  counterpartyId: z.string().min(1),
-  destinationWallet: z.string().min(1),
-  cryptoToken: rampCurrencyCodeSchema,
-  fiatCurrency: rampFiatCurrencySchema.optional(),
-  fiatAmount: paymentAmountSchema,
-  redirectUrl: z.string().url().optional(),
-  bvnkCompliance: bvnkComplianceSchema.optional(),
 });
 
 export const estimateOnrampSchema = z.object({
@@ -667,17 +652,6 @@ export const createOfframpQuoteSchema = z.object({
   fiatCurrency: rampFiatCurrencySchema.optional(),
   cryptoAmount: paymentAmountSchema,
   redirectUrl: z.string().url().optional(),
-});
-
-export const executeOfframpSchema = z.object({
-  provider: rampProviderSchema,
-  counterpartyId: z.string().min(1),
-  sourceWallet: z.string().min(1),
-  cryptoToken: rampCurrencyCodeSchema,
-  fiatCurrency: rampFiatCurrencySchema.optional(),
-  cryptoAmount: paymentAmountSchema,
-  redirectUrl: z.string().url().optional(),
-  bvnkCompliance: bvnkComplianceSchema.optional(),
 });
 
 export const moneygramRampEventSchema = z.discriminatedUnion("kind", [

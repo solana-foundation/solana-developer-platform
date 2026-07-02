@@ -1,13 +1,13 @@
 # 🔧 @sdp-api-integration
 
-**Internal package** — End-to-end integration test suite for the SDP API against live Solana devnet infrastructure.
+**Internal package** — End-to-end integration test suite for the SDP API. Most deterministic on-chain coverage runs against local Surfpool; live devnet/Kora is reserved for provider smoke tests.
 
 ## What is this?
 
 This package contains integration tests that:
 
-- Test API functionality against real Solana devnet
-- Use live custody providers (Privy, Coinbase CDP, Turnkey, etc.)
+- Test deterministic API functionality against local Surfpool
+- Keep small live-provider smoke coverage for Kora and hosted custody providers
 - Verify token operations (mint, freeze, transfer)
 - Validate payment flows with compliance screening
 - Test wallet creation and management
@@ -18,9 +18,10 @@ This package contains integration tests that:
 
 ### Prerequisites
 
-- **Privy account** with devnet credentials (`PRIVY_APP_ID`, `PRIVY_APP_SECRET`)
-- **Kora instance** running locally or accessible (`KORA_RPC_URL`)
-- **Funded Solana devnet account** (for fee payments)
+- **Node dependencies installed** (`pnpm install`)
+- **Local Postgres available** for API integration and browser E2E state
+- **Privy account** with devnet credentials (`PRIVY_APP_ID`, `PRIVY_APP_SECRET`) for live-provider smoke and browser auth
+- **Hosted Kora instance** (`KORA_RPC_URL`) only for the `Kora / Live Smoke` lane
 - **SDP API running** (local or remote)
 
 ### Running Tests
@@ -43,24 +44,44 @@ pnpm test:integration -- --verbose
 ```
 
 **Notes:**
-- Kora connectivity and fee payer balance are validated up-front — the suite fails fast if Kora is unreachable or underfunded.
-- The suite initializes a Privy signer for the integration org and uses DB-backed default signer resolution.
+- Surfpool-backed shards still configure SDP with `FEE_PAYMENT_PROVIDER=kora`; the harness swaps hosted Kora for a local Kora-compatible endpoint.
+- Live Kora smoke validates Kora connectivity and fee-payer balance up front so it fails fast if Kora is unreachable or underfunded.
+- The live smoke suite initializes a Privy signer for the integration org and uses DB-backed default signer resolution.
+
+### Surfpool vs Live Kora Ownership
+
+The default SDP CI split is local-first. New token, issuance, Mosaic, access, and browser tests should use the Surfpool-backed harness unless the behavior specifically depends on the hosted Kora provider or a live custody provider.
+
+| Lane | CI job names | Owns | Local command |
+|---|---|---|---|
+| Surfpool/local | `Surfpool / Issuance`, `Surfpool / Mosaic`, `Surfpool / Token Flows`, `Surfpool / Access` | Deterministic API integration shards for token deploy/mint/burn/freeze, issuance endpoints, Mosaic flows, API-key/access scope, and local custody execution. | `pnpm kora:surfpool:integration -- <test-files...>` |
+| Surfpool/local browser | `Dashboard E2E (Surfpool Local)`, `Issuance E2E (Surfpool Shards)` | Dashboard issuance, payments, wallet activity, and other browser flows that can run against the local API plus Surfpool. | `pnpm kora:surfpool:run -- pnpm --filter sdp-web run test:e2e:dashboard` or `pnpm kora:surfpool:e2e:issuance` |
+| Kora/devnet smoke | `Kora / Live Smoke` | Hosted Kora client/adapter checks and one reduced sponsored-submission flow against live devnet. | `pnpm kora:devnet:test` |
+
+Keep the Kora/devnet smoke suite intentionally small. It proves that SDP can still talk to hosted Kora and that a real sponsored submission works; token lifecycle behavior and dashboard activity rendering are already covered more deterministically in the Surfpool lanes.
 
 ### Environment Variables
 
 Use Doppler (team members) or export manually:
 
-**Required:**
+**Required for live Kora/devnet smoke:**
 
 - `SOLANA_RPC_URL` — Example: `https://api.devnet.solana.com`
 - `KORA_RPC_URL` — Example: `https://your-kora-devnet-instance.us-central1.run.app`
 - `PRIVY_APP_ID`
 - `PRIVY_APP_SECRET`
 
+**Required for Surfpool/local lanes:**
+
+- `DATABASE_URL` — Defaults to `postgresql://sdp:sdp@127.0.0.1:5432/sdp` in local scripts.
+- `DOPPLER_TOKEN_CI` — Required in upstream CI for managed RPC/browser secrets; fork-safe local shards can run without it where CI says so.
+
 **Optional:**
 
 - `KORA_API_KEY` — Only required if your Kora endpoint requires API key auth.
 - `KORA_MIN_BALANCE_LAMPORTS` — Preflight threshold for the Kora fee payer balance check.
+- `SURFPOOL_REMOTE_RPC_URL` — Explicit upstream RPC for embedded Surfpool lazy account fetching.
+- `SOLANA_RPC_CI_PREFERRED_PROVIDER` — Selects the managed RPC provider used as Surfpool's upstream.
 
 ```bash
 # Solana RPC
@@ -182,6 +203,27 @@ under Doppler, the harness ignores Doppler's hosted `KORA_RPC_URL` and uses
 `http://127.0.0.1:18080` for the local Kora-compatible endpoint; set
 `KORA_SURFPOOL_KORA_RPC_URL` to change that local endpoint. Use
 `KORA_SURFPOOL_RUNTIME=cli` to validate against the Surfpool CLI sidecar instead.
+
+### Surfpool/local shard failed
+
+- Check `.secrets/kora-surfpool/surfpool.log` for embedded Surfpool startup failures.
+- Check `.secrets/kora-surfpool/kora-shim.log` for local Kora-compatible JSON-RPC failures.
+- Run `pnpm kora:surfpool:down` before retrying if a stale local process or port is suspected.
+- If the failure mentions the local fee payer, rerun `pnpm kora:surfpool:up`; it generates `SIGNER_PRIVATE_KEY` when needed and funds the local fee payer with `KORA_FEE_PAYER_LAMPORTS`.
+- If lazy account fetching is flaky, set `SOLANA_RPC_CI_PREFERRED_PROVIDER=default` to run Surfpool offline, or set `SURFPOOL_REMOTE_RPC_URL` to an explicit upstream RPC.
+
+### Live Kora smoke failed
+
+- Confirm `KORA_RPC_URL` points at the hosted devnet Kora service and that `KORA_API_KEY` is present when the service requires it.
+- Check Kora health with `curl "$KORA_RPC_URL/health"` or `curl "$KORA_RPC_URL/liveness"`, depending on the deployed server.
+- If preflight reports a low fee-payer balance, fund the hosted Kora payer before retrying. `KORA_MIN_BALANCE_LAMPORTS` controls the local preflight threshold.
+- Keep new failures in this lane focused on hosted Kora/client/provider behavior. If the failure is token lifecycle or dashboard rendering, prefer moving the assertion to Surfpool/local coverage.
+
+### Secret-backed browser or custody smoke failed
+
+- Forked pull requests do not receive `DOPPLER_TOKEN_CI`, so secret-backed browser and live-provider smoke jobs intentionally skip there.
+- For upstream branches, verify Doppler `dev_ci` has `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `PRIVY_APP_ID`, and `PRIVY_APP_SECRET`.
+- If Clerk auth fails before any Solana transaction runs, debug the browser E2E secret setup rather than the Surfpool harness.
 
 ### "Devnet airdrop failed"
 - Airdrop limit is ~2 SOL per request

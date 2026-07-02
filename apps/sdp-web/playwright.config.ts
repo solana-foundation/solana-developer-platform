@@ -13,7 +13,7 @@ const nextDistDir = process.env.PLAYWRIGHT_NEXT_DIST_DIR ?? ".next-playwright";
 const useNextStart = process.env.PLAYWRIGHT_USE_NEXT_START === "1";
 const webCommand = useNextStart
   ? `corepack pnpm exec next start --hostname localhost --port ${webPort}`
-  : `corepack pnpm exec next dev --hostname localhost --port ${webPort}`;
+  : `corepack pnpm exec next dev --webpack --hostname localhost --port ${webPort}`;
 
 function resolveProcessEnv(): Record<string, string> {
   return Object.fromEntries(

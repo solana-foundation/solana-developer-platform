@@ -21,6 +21,9 @@ export type KoraAdapterConfig = KoraClientOptions & {
    * Note: The Kora SDK does not currently support timeouts directly.
    */
   timeoutMs?: number;
+
+  /** Per-user id forwarded to Kora as `user_id` (required by mainnet's free+usage-tracking config). */
+  userId?: string;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -31,12 +34,14 @@ export class KoraAdapter implements FeePaymentPort {
   readonly providerId = "kora";
 
   private client: KoraClient;
+  private readonly userId?: string;
   private cachedFeePayer: Address | null = null;
   private cachedFeeToken: string | null = null;
 
   constructor(config: KoraAdapterConfig) {
-    const { rpcUrl, apiKey, hmacSecret } = config;
+    const { rpcUrl, apiKey, hmacSecret, userId } = config;
     this.client = new KoraClient({ rpcUrl, apiKey, hmacSecret });
+    this.userId = userId;
   }
 
   /**
@@ -85,9 +90,9 @@ export class KoraAdapter implements FeePaymentPort {
     try {
       const base64Tx = encodeBase64(transaction);
 
-      const { signed_transaction } = await this.client.signTransaction({
-        transaction: base64Tx,
-      });
+      const { signed_transaction } = await this.client.signTransaction(
+        this.buildSignRequest(base64Tx)
+      );
 
       return decodeBase64(signed_transaction);
     } catch (error) {
@@ -110,9 +115,7 @@ export class KoraAdapter implements FeePaymentPort {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const { signature: submittedSignature, signed_transaction } =
-          await this.client.signAndSendTransaction({
-            transaction: base64Tx,
-          });
+          await this.client.signAndSendTransaction(this.buildSignRequest(base64Tx));
 
         if (submittedSignature) {
           return submittedSignature as Signature;
@@ -178,6 +181,15 @@ export class KoraAdapter implements FeePaymentPort {
   // ═══════════════════════════════════════════════════════════════════════════
   // Private Methods
   // ═══════════════════════════════════════════════════════════════════════════
+
+  /** Attach `user_id` to the sign request when configured. */
+  private buildSignRequest(transaction: string): { transaction: string; user_id?: string } {
+    const request: { transaction: string; user_id?: string } = { transaction };
+    if (this.userId) {
+      request.user_id = this.userId;
+    }
+    return request;
+  }
 
   private async resolveFeeToken(): Promise<string> {
     if (this.cachedFeeToken) {

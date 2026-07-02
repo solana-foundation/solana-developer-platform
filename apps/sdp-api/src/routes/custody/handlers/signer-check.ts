@@ -14,6 +14,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
+import { resolveKoraUserId } from "@/lib/kora-user";
 import { success } from "@/lib/response";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
@@ -93,7 +94,7 @@ export const signerCheck = async (c: AppContext) => {
       resolvedWalletId
     );
 
-    const feePayment = createFeePaymentAdapter(c.env);
+    const feePayment = createFeePaymentAdapter(c.env, resolveKoraUserId(c));
     const feePayer = await feePayment.getFeePayer();
 
     const rpcTarget = await resolveRpcTarget({

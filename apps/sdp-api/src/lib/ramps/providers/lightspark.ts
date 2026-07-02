@@ -2,17 +2,15 @@ import type {
   Counterparty,
   CounterpartyProviderData,
   LightsparkGridAmount,
-  LightsparkPaymentRampExecution,
   LightsparkPaymentRampInstruction,
   LightsparkProviderPaymentRampInstruction,
   LightsparkRampSettlement,
   PaymentRampEstimate,
-  PaymentRampExecution,
+  PaymentRampExecutionStatus,
   PaymentRampQuote,
   PaymentRampQuoteCurrency,
   SdpEnvironment,
 } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import {
   CRYPTO_ASSET_DECIMALS,
   type CryptoAssetSymbol,
@@ -31,7 +29,6 @@ import {
   createProviderRampSupport,
   isSolanaCryptoAsset,
   RAMP_RAIL_DUMPS,
-  rampId,
   requireEnv,
   SOLANA_ASSET_TO_RAIL,
 } from "../shared";
@@ -127,7 +124,7 @@ function toLightsparkMinorUnitsInteger(value: bigint, fieldName: string): number
   return Number(value);
 }
 
-function mapLightsparkQuoteStatus(status: string | undefined): PaymentRampExecution["status"] {
+function mapLightsparkQuoteStatus(status: string | undefined): PaymentRampExecutionStatus {
   if (!status) return "pending";
   const normalized = status.trim().toUpperCase();
   if (normalized === "COMPLETED") return "completed";
@@ -478,22 +475,6 @@ export interface LightsparkCustomerResolution {
   customerId: string;
 }
 
-export interface LightsparkExecuteOnrampInput {
-  destinationWalletAddress: string;
-  cryptoToken: string;
-  fiatCurrency?: RampFiatCurrency;
-  fiatAmount: string;
-  providerCustomer: LightsparkCustomerResolution;
-}
-
-export interface LightsparkExecuteOfframpInput {
-  sourceWalletAddress: string;
-  cryptoToken: string;
-  fiatCurrency?: RampFiatCurrency;
-  cryptoAmount: string;
-  providerCustomer: LightsparkCustomerResolution;
-}
-
 interface GridCreateCustomerBody {
   platformCustomerId: string;
   customerType: LightsparkCustomerType;
@@ -560,14 +541,6 @@ interface GridQuoteResponse {
   receivingCurrency: GridCurrency;
   feesIncluded: number;
   expiresAt: string;
-}
-
-interface GridOfframpQuoteBody {
-  source: { sourceType: "ACCOUNT"; accountId: string; currency: string };
-  destination: { destinationType: "ACCOUNT"; accountId: string; currency: string };
-  lockedCurrencySide: "SENDING" | "RECEIVING";
-  lockedCurrencyAmount: number;
-  description: string;
 }
 
 interface GridExchangeRate {
@@ -1328,95 +1301,6 @@ export class LightsparkRampClient implements RampProvider {
     });
 
     return this.toRampQuote(parseLightsparkQuote(response));
-  }
-
-  async executeOnramp(
-    { env, mode }: RampRuntimeContext,
-    input: LightsparkExecuteOnrampInput
-  ): Promise<LightsparkPaymentRampExecution> {
-    const customerId = input.providerCustomer.customerId;
-    const config = readLightsparkConfig(env, mode);
-    const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
-    const fiatCurrency = input.fiatCurrency ?? "USD";
-    const fiatAmountMinorUnits = toLightsparkMinorUnitsInteger(
-      parseDecimalAmount(input.fiatAmount, 2),
-      "fiatAmount"
-    );
-    const destinationAccountId = await this.resolveOnrampDestinationAccountId(
-      config,
-      customerId,
-      input.destinationWalletAddress,
-      cryptoCurrency
-    );
-
-    const quote = await this.gridOnrampQuote(config, {
-      customerId,
-      destinationAccountId,
-      fiatCurrency,
-      cryptoCurrency,
-      fiatAmountMinorUnits,
-    });
-
-    return {
-      id: rampId("ramp"),
-      provider: "lightspark",
-      status: mapLightsparkQuoteStatus(quote.quoteStatus),
-      paymentInstructions: quote.paymentInstructions,
-      reference: quote.id,
-    };
-  }
-
-  async executeOfframp(
-    { env, mode }: RampRuntimeContext,
-    input: LightsparkExecuteOfframpInput
-  ): Promise<LightsparkPaymentRampExecution> {
-    const sourceAccountId = assertLightsparkAccountId(input.sourceWalletAddress, "sourceWallet");
-    const destinationAccountId = assertLightsparkAccountId(
-      input.providerCustomer.customerId,
-      "providerCustomer.customerId"
-    );
-    const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
-    const fiatCurrency = input.fiatCurrency ?? "USD";
-    const cryptoAmountMinorUnits = toLightsparkMinorUnitsInteger(
-      parseDecimalAmount(input.cryptoAmount, getLightsparkCurrencyDecimals(cryptoCurrency)),
-      "cryptoAmount"
-    );
-    const config = readLightsparkConfig(env, mode);
-
-    const quoteResponse = await this.request<GridQuoteResponse, GridOfframpQuoteBody>(
-      config,
-      "quotes",
-      {
-        method: "POST",
-        body: {
-          source: { sourceType: "ACCOUNT", accountId: sourceAccountId, currency: cryptoCurrency },
-          destination: {
-            destinationType: "ACCOUNT",
-            accountId: destinationAccountId,
-            currency: fiatCurrency,
-          },
-          lockedCurrencySide: "SENDING",
-          lockedCurrencyAmount: cryptoAmountMinorUnits,
-          description: "SDP offramp",
-        },
-      }
-    );
-    const quote = parseLightsparkQuote(quoteResponse);
-
-    const executedResponse = await this.request<GridQuoteResponse>(
-      config,
-      `quotes/${encodeURIComponent(quote.id)}/execute`,
-      { method: "POST" }
-    );
-    const executedQuote = parseLightsparkQuote(executedResponse);
-
-    return {
-      id: rampId("ramp"),
-      provider: "lightspark",
-      status: mapLightsparkQuoteStatus(executedQuote.quoteStatus),
-      paymentInstructions: executedQuote.paymentInstructions,
-      reference: quote.id,
-    };
   }
 
   async sandboxSend({ env, mode }: RampRuntimeContext, payload: unknown): Promise<unknown> {

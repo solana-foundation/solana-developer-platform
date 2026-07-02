@@ -1,12 +1,10 @@
 import type {
   Counterparty,
-  MoonpayPaymentRampExecution,
   MoonpayRampSettlement,
   PaymentRampEstimate,
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import {
   type CryptoRailId,
   getCryptoRailAssetLabel,
@@ -333,22 +331,6 @@ function buildMoonpaySettlement(
   };
 }
 
-export interface MoonpayExecuteOnrampInput {
-  destinationWalletAddress: string;
-  cryptoToken: string;
-  fiatCurrency?: RampFiatCurrency;
-  fiatAmount: string;
-  redirectUrl?: string;
-}
-
-export interface MoonpayExecuteOfframpInput {
-  sourceWalletAddress: string;
-  cryptoToken: string;
-  fiatCurrency?: RampFiatCurrency;
-  cryptoAmount: string;
-  redirectUrl?: string;
-}
-
 export class MoonpayRampClient implements RampProvider {
   readonly id = "moonpay";
 
@@ -588,57 +570,6 @@ export class MoonpayRampClient implements RampProvider {
       status: "pending",
       deliveryMode: "hosted",
       hostedUrl,
-    };
-  }
-
-  async executeOnramp(
-    { env, mode }: RampRuntimeContext,
-    input: MoonpayExecuteOnrampInput
-  ): Promise<MoonpayPaymentRampExecution> {
-    const amount = Number.parseFloat(input.fiatAmount);
-    if (!Number.isFinite(amount) || amount < MOONPAY_ONRAMP_MIN_USD) {
-      throw new AppError(
-        "BAD_REQUEST",
-        `MoonPay on-ramp requires fiatAmount to be at least ${MOONPAY_ONRAMP_MIN_USD} USD`
-      );
-    }
-
-    const config = readMoonpayConfig(env, mode);
-    const redirectUrl = await buildSignedMoonpayWidgetUrl(config.onrampUrl, config.secretKey, {
-      apiKey: config.apiKey,
-      baseCurrencyCode: (input.fiatCurrency ?? "USD").toLowerCase(),
-      baseCurrencyAmount: input.fiatAmount,
-      currencyCode: normalizeMoonpayCurrencyCode(input.cryptoToken),
-      walletAddress: input.destinationWalletAddress,
-      redirectURL: input.redirectUrl,
-      externalTransactionId: rampId("sdp_onramp"),
-    });
-
-    return { id: rampId("ramp"), provider: "moonpay", status: "pending", redirectUrl };
-  }
-
-  async executeOfframp(
-    { env, mode }: RampRuntimeContext,
-    input: MoonpayExecuteOfframpInput
-  ): Promise<MoonpayPaymentRampExecution> {
-    const config = readMoonpayConfig(env, mode);
-    const externalTransactionId = rampId("sdp_offramp");
-    const redirectUrl = await buildSignedMoonpayWidgetUrl(config.offrampUrl, config.secretKey, {
-      apiKey: config.apiKey,
-      baseCurrencyCode: normalizeMoonpayCurrencyCode(input.cryptoToken),
-      baseCurrencyAmount: input.cryptoAmount,
-      quoteCurrencyCode: (input.fiatCurrency ?? "USD").toLowerCase(),
-      refundWalletAddress: input.sourceWalletAddress,
-      redirectURL: input.redirectUrl,
-      externalTransactionId,
-    });
-
-    return {
-      id: rampId("ramp"),
-      provider: "moonpay",
-      status: "pending",
-      redirectUrl,
-      reference: externalTransactionId,
     };
   }
 }

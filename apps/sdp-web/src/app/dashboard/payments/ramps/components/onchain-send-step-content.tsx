@@ -21,6 +21,15 @@ import { walletComboboxOptions } from "../wallet-options";
 import { AmountBalanceReadout } from "./amount-balance-readout";
 import { CounterpartyAccountSelector } from "./counterparty-account-selector";
 
+function NoAssetsHint({ walletId, assetCount }: { walletId: string; assetCount: number }) {
+  if (!walletId || assetCount > 0) {
+    return null;
+  }
+  return (
+    <p className="text-sm text-status-error-text">This wallet has no assets available to send.</p>
+  );
+}
+
 function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
@@ -54,6 +63,7 @@ export function OnchainSendStepContent({
     destinationAddress,
     assetOptions,
     availableAmount,
+    selectedAsset,
     selectedAssetBalance,
     exceedsBalance,
     counterpartyId,
@@ -67,6 +77,10 @@ export function OnchainSendStepContent({
   } = wizard;
 
   const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
+  const assetSelectOptions = useMemo(
+    () => assetOptions.map((asset) => ({ value: asset.value, label: asset.label })),
+    [assetOptions]
+  );
 
   if (currentStepId === "DESTINATION") {
     return (
@@ -139,7 +153,7 @@ export function OnchainSendStepContent({
                 availableAmount !== null ? (
                   <AmountBalanceReadout
                     available={selectedAssetBalance ? selectedAssetBalance.uiAmount : "0"}
-                    assetLabel={fields.asset}
+                    assetLabel={selectedAsset?.label ?? fields.asset}
                     exceeds={exceedsBalance}
                     onMax={
                       selectedAssetBalance && availableAmount > 0
@@ -155,11 +169,13 @@ export function OnchainSendStepContent({
             label="Asset"
             value={fields.asset || null}
             onChange={(value) => setField("asset", value)}
-            options={assetOptions.map((value) => ({ value, label: value }))}
+            options={assetSelectOptions}
             placeholder="Select an asset"
             searchable={false}
+            disabled={!fields.walletId || assetSelectOptions.length === 0}
           />
         </div>
+        <NoAssetsHint walletId={fields.walletId} assetCount={assetSelectOptions.length} />
         <div className="flex flex-col gap-2">
           <Label className="text-sm font-medium text-text-low" htmlFor="onchain-send-memo">
             Memo (optional)
@@ -207,7 +223,7 @@ export function OnchainSendStepContent({
   const amountHero = (
     <div className="flex flex-col items-center gap-0.5 border-b border-border-light pb-4">
       <p className="text-3xl font-semibold tracking-tight text-text-extra-high">
-        {fields.amount || "0"} {fields.asset}
+        {fields.amount || "0"} {selectedAsset?.label ?? fields.asset}
       </p>
       <p className="text-sm text-text-low">to {counterpartyName || "counterparty"}</p>
     </div>
