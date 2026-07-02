@@ -59,11 +59,25 @@ export class EncryptedDbCredentialSecretStore implements CredentialSecretStore {
   constructor(private readonly encryption: EncryptionService) {}
 
   async write(params: WriteCredentialSecretParams): Promise<StoredCredentialSecret> {
-    const encrypted = await this.encryption.encrypt(params.orgId, JSON.stringify(params.payload));
+    let encryptedSecretPayload: string;
+    try {
+      encryptedSecretPayload = (
+        await this.encryption.encrypt(params.orgId, JSON.stringify(params.payload))
+      ).ciphertext;
+    } catch (error) {
+      if (error instanceof CredentialSecretStoreError) {
+        throw error;
+      }
+
+      throw new CredentialSecretStoreError(
+        "Encrypted DB credential payload could not be encrypted",
+        "INVALID_CONFIGURATION"
+      );
+    }
 
     return {
       storageBackend: this.storageBackend,
-      encryptedSecretPayload: encrypted.ciphertext,
+      encryptedSecretPayload,
     };
   }
 
@@ -465,7 +479,14 @@ function assertManagedSecretRef(
 
 async function parseGcpResponse<T = unknown>(response: Response): Promise<T> {
   if (response.ok) {
-    return response.json() as Promise<T>;
+    try {
+      return (await response.json()) as T;
+    } catch {
+      throw new CredentialSecretStoreError(
+        "GCP Secret Manager returned an unexpected response format",
+        "UPSTREAM_ERROR"
+      );
+    }
   }
 
   let statusText = response.statusText;

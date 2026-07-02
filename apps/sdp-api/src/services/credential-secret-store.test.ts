@@ -221,6 +221,24 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
       headers: { "Metadata-Flavor": "Google" },
     });
   });
+
+  it("wraps malformed successful GCP responses in CredentialSecretStoreError", async () => {
+    const store = new GcpSecretManagerCredentialSecretStore({
+      projectId: "sdp-dev-123",
+      secretPrefix: "sdp-dev-provider-credentials",
+      accessToken: "test-token",
+      fetcher: async () => new Response("not-json"),
+    });
+
+    await expect(
+      store.write({
+        orgId: "org_123",
+        provider: "privy",
+        providerCredentialId: "pcred_123",
+        payload: { appSecret: "secret" },
+      })
+    ).rejects.toBeInstanceOf(CredentialSecretStoreError);
+  });
 });
 
 describe("EncryptedDbCredentialSecretStore", () => {
@@ -247,6 +265,19 @@ describe("EncryptedDbCredentialSecretStore", () => {
       CredentialSecretStoreError
     );
     await expect(store.read({ orgId: "org_123", stored })).resolves.toEqual(payload);
+  });
+
+  it("wraps encryption failures in CredentialSecretStoreError", async () => {
+    const store = new EncryptedDbCredentialSecretStore(createEncryptionService("not-a-valid-key"));
+
+    await expect(
+      store.write({
+        orgId: "org_123",
+        provider: "privy",
+        providerCredentialId: "pcred_123",
+        payload: { appSecret: "secret" },
+      })
+    ).rejects.toBeInstanceOf(CredentialSecretStoreError);
   });
 
   it("does not expose external version deletion for DB-backed storage", async () => {
