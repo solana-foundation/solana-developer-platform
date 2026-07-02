@@ -12,7 +12,8 @@ import {
   TEST_EXPIRED_KEY,
   TEST_REVOKED_KEY,
 } from "@/test/fixtures/api-keys";
-import { TEST_ORG } from "@/test/fixtures/organizations";
+import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
@@ -40,6 +41,49 @@ describe("Auth Middleware", () => {
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
   });
+
+  async function seedDatabaseApiKey(allowedIps: string[] | null): Promise<void> {
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)"
+        )
+        .bind(TEST_USER.id, TEST_USER.email, 1, TEST_USER.status),
+      getDb(env)
+        .prepare(
+          `INSERT OR REPLACE INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          TEST_PROJECT.id,
+          TEST_PROJECT.organizationId,
+          TEST_PROJECT.name,
+          TEST_PROJECT.slug,
+          TEST_PROJECT.environment,
+          TEST_PROJECT.status,
+          TEST_PROJECT.createdBy
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_keys
+             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, allowed_ips, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          TEST_API_KEY.id,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_USER.id,
+          "Allowed IPs test key",
+          TEST_API_KEY.prefix,
+          validKeyHash,
+          TEST_CACHED_API_KEY.role,
+          JSON.stringify(TEST_CACHED_API_KEY.permissions),
+          allowedIps ? JSON.stringify(allowedIps) : null,
+          "active"
+        ),
+    ]);
+  }
 
   describe("key extraction", () => {
     it("accepts Bearer token format", async () => {
@@ -155,6 +199,111 @@ describe("Auth Middleware", () => {
 
       // Auth succeeded and org exists
       expect(res.status).toBe(200);
+    });
+  });
+
+  describe("allowed IPs", () => {
+    it("allows cached API keys from a configured CIDR", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        allowedIps: ["203.0.113.0/24"],
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "cf-connecting-ip": "203.0.113.42",
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+    });
+
+    it("uses x-forwarded-for when Cloudflare IP is unavailable", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        allowedIps: ["203.0.113.42"],
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "x-forwarded-for": "203.0.113.42, 198.51.100.10",
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+    });
+
+    it("rejects cached API keys outside the configured CIDR", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        allowedIps: ["203.0.113.0/24"],
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "cf-connecting-ip": "198.51.100.42",
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("INVALID_API_KEY");
+    });
+
+    it("rejects malformed cached allowlists closed", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        allowedIps: ["not-a-cidr"],
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "cf-connecting-ip": "203.0.113.42",
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("INVALID_API_KEY");
+    });
+
+    it("enforces allowed IPs for database-loaded API keys", async () => {
+      await seedDatabaseApiKey(["203.0.113.0/24"]);
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "cf-connecting-ip": "198.51.100.42",
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("INVALID_API_KEY");
     });
   });
 

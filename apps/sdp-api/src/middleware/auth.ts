@@ -21,6 +21,7 @@ import {
 } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
+import { ipMatchesAllowedIps } from "@/lib/ip-allowlist";
 import type { KVStore } from "@/runtime/kv";
 import type { Env } from "@/types/env";
 
@@ -78,6 +79,16 @@ function looksLikeApiKey(token: string): boolean {
 
 function looksLikeJwt(token: string): boolean {
   return token.split(".").length === 3;
+}
+
+function getRequestIp(c: Context<{ Bindings: Env }>): string | null {
+  const cfIp = c.req.header("cf-connecting-ip")?.trim();
+  if (cfIp) {
+    return cfIp;
+  }
+
+  const forwarded = c.req.header("x-forwarded-for");
+  return forwarded?.split(",")[0]?.trim() || null;
 }
 
 /**
@@ -271,6 +282,10 @@ export function authMiddleware() {
     // Check expiration
     if (cachedKey.expiresAt && new Date(cachedKey.expiresAt) < new Date()) {
       throw new AppError("EXPIRED_API_KEY");
+    }
+
+    if (!ipMatchesAllowedIps(getRequestIp(c), cachedKey.allowedIps)) {
+      throw new AppError("INVALID_API_KEY", "Invalid API key");
     }
 
     // Set auth context
