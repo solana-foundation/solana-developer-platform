@@ -60,7 +60,7 @@ function WizardShell() {
 
   const isClassification = currentStep === "classification";
   const isReview = currentStep === "review";
-  const showRail = currentStep === "asset-details";
+  const showRail = currentStep === "asset-details" || isReview;
   const blockers = getBlockers(draft);
   const canContinue = canAdvance(currentStep, detailsStage, draft);
 
@@ -127,7 +127,23 @@ function WizardShell() {
         <div className="min-w-0">
           <AnimatePresence mode="wait">{renderStep(currentStep, detailsStage)}</AnimatePresence>
         </div>
-        {showRail ? <DraftSummaryRail draft={draft} updatedAt={updatedAt} /> : null}
+        {showRail ? (
+          <DraftSummaryRail
+            draft={draft}
+            updatedAt={updatedAt}
+            review={
+              isReview
+                ? {
+                    blockers,
+                    submitting,
+                    primaryLabel,
+                    disabled: primaryDisabled,
+                    onSubmit: handleSubmit,
+                  }
+                : undefined
+            }
+          />
+        ) : null}
       </div>
 
       <div className="mt-10 flex items-center justify-between gap-3 border-t border-[rgba(28,28,29,0.1)] pt-5">
@@ -139,13 +155,12 @@ function WizardShell() {
         >
           {isClassification ? "Cancel" : "Back"}
         </Button>
-        <Button
-          type="button"
-          onClick={isReview ? handleSubmit : advance}
-          disabled={primaryDisabled}
-        >
-          {primaryLabel}
-        </Button>
+        {/* On Review the primary action lives in the summary rail (per sketch). */}
+        {isReview ? null : (
+          <Button type="button" onClick={advance} disabled={primaryDisabled}>
+            {primaryLabel}
+          </Button>
+        )}
       </div>
     </div>
   );

@@ -1,15 +1,28 @@
 "use client";
 
-import { ChevronDown, CircleCheck, ExternalLink, Lock } from "lucide-react";
+import {
+  Braces,
+  CircleCheck,
+  ExternalLink,
+  Eye,
+  FileText,
+  Landmark,
+  Lock,
+  type LucideIcon,
+  ShieldCheck,
+  SlidersHorizontal,
+} from "lucide-react";
 import { motion } from "motion/react";
+import { accessControlLabel } from "../asset-details-config";
 import { getAssetTypeLabel, getCategoryLabel } from "../asset-taxonomy";
 import { getPublicProjection } from "../draft-mapping";
 import { CAPACITY_KEYS } from "../issuance-draft-wizard.types";
 import { useIssuanceDraft } from "../use-issuance-draft";
 
-interface PublicItem {
+interface PrivateItem {
+  icon: LucideIcon;
   label: string;
-  value: string;
+  description: string;
 }
 
 export function StepPublicInfo() {
@@ -18,36 +31,63 @@ export function StepPublicInfo() {
   const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType);
 
   // Token identity + classification are always public; registry projection adds
-  // the type-specific public asset fields (issuer, peg, …).
-  const baseItems: (PublicItem | null)[] = [
-    { label: "Name", value: draft.name },
-    { label: "Symbol", value: draft.symbol },
-    draft.description ? { label: "Description (public)", value: draft.description } : null,
-    { label: "Decimals", value: draft.decimals },
-    categoryLabel ? { label: "Category", value: categoryLabel } : null,
-    typeLabel ? { label: "Asset type", value: typeLabel } : null,
-    draft.website ? { label: "Website", value: draft.website } : null,
+  // the type-specific public asset fields (issuer, peg, …). We only need the
+  // field *names* here — the hero preview already shows their values.
+  const baseLabels: (string | null)[] = [
+    "Name",
+    "Symbol",
+    draft.description ? "Description" : null,
+    "Decimals",
+    categoryLabel ? "Category" : null,
+    typeLabel ? "Asset type" : null,
+    draft.website ? "Website" : null,
   ];
-  const projectionExtras: PublicItem[] = getPublicProjection(draft)
+  const projectionExtras = getPublicProjection(draft)
     .filter(
       (field) =>
         field.present && !["asset.name", "asset.description", "chain.decimals"].includes(field.path)
     )
-    .map((field) => ({ label: field.label, value: String(field.value) }));
-  const included = [...baseItems, ...projectionExtras].filter((item): item is PublicItem =>
-    Boolean(item)
+    .map((field) => field.label);
+  const publicLabels = [...baseLabels, ...projectionExtras].filter((label): label is string =>
+    Boolean(label)
   );
 
   const anyCapacity = CAPACITY_KEYS.some((key) => draft.capacities[key]);
-  const privateItems = [
-    draft.accessControl ? "Access control settings" : null,
-    anyCapacity ? "Advanced capacities" : null,
-    draft.reserveCustodian.trim() ? "Reserve custodian" : null,
-    draft.documents.some((doc) => doc.name.trim() || doc.url.trim())
-      ? "Documents & references"
+  const documentCount = draft.documents.filter((doc) => doc.name.trim() || doc.url.trim()).length;
+  const customFieldCount = draft.customFields.filter((field) => field.key.trim()).length;
+  const privateItems: PrivateItem[] = [
+    draft.accessControl
+      ? {
+          icon: ShieldCheck,
+          label: "Access control",
+          description: accessControlLabel(draft.accessControl) ?? "Transfer restrictions",
+        }
       : null,
-    draft.customFields.some((field) => field.key.trim()) ? "Custom fields" : null,
-  ].filter((item): item is string => Boolean(item));
+    anyCapacity
+      ? {
+          icon: SlidersHorizontal,
+          label: "Advanced capacities",
+          description: "KYC, freeze, approvals & reporting",
+        }
+      : null,
+    draft.reserveCustodian.trim()
+      ? { icon: Landmark, label: "Reserve custodian", description: draft.reserveCustodian.trim() }
+      : null,
+    documentCount > 0
+      ? {
+          icon: FileText,
+          label: "Documents & references",
+          description: `${documentCount} attached`,
+        }
+      : null,
+    customFieldCount > 0
+      ? {
+          icon: Braces,
+          label: "Custom fields",
+          description: `${customFieldCount} field${customFieldCount === 1 ? "" : "s"}`,
+        }
+      : null,
+  ].filter((item): item is PrivateItem => Boolean(item));
 
   return (
     <motion.div
@@ -55,22 +95,30 @@ export function StepPublicInfo() {
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      className="space-y-6"
+      className="space-y-5"
     >
       <div>
         <h2 className="text-2xl font-medium text-[#1c1c1d]">Public information</h2>
         <p className="mt-1.5 text-sm text-[rgba(28,28,29,0.62)]">
-          This is how your asset will appear to wallets, explorers, and the public. Only the fields
-          below will be visible.
+          This is how your asset will appear to wallets, explorers, and the public.
         </p>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-2">
-        {/* Preview */}
-        <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
-          <p className="text-xs font-medium tracking-wide text-[rgba(28,28,29,0.5)]">Preview</p>
-          <div className="mt-4 flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(28,28,29,0.06)] text-lg font-semibold text-[#1c1c1d]">
+      {/* Hero preview — identity + facts side by side to fill the width */}
+      <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-6">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium uppercase tracking-wide text-[rgba(28,28,29,0.5)]">
+            Preview
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[rgba(12,128,76,0.08)] px-2.5 py-1 text-xs font-medium text-[#0c804c]">
+            <Eye className="h-3.5 w-3.5" />
+            Public view
+          </span>
+        </div>
+
+        <div className="mt-5 grid gap-6 md:grid-cols-2">
+          <div className="flex items-start gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[rgba(28,28,29,0.06)] text-xl font-semibold text-[#1c1c1d]">
               {draft.symbol.slice(0, 1).toUpperCase() || "?"}
             </div>
             <div className="min-w-0">
@@ -84,12 +132,19 @@ export function StepPublicInfo() {
                   </span>
                 ) : null}
               </div>
+              <p
+                className={
+                  draft.description
+                    ? "mt-2 text-sm text-[rgba(28,28,29,0.62)]"
+                    : "mt-2 text-sm text-[rgba(28,28,29,0.4)]"
+                }
+              >
+                {draft.description || "No public description"}
+              </p>
             </div>
           </div>
-          {draft.description ? (
-            <p className="mt-3 text-sm text-[rgba(28,28,29,0.62)]">{draft.description}</p>
-          ) : null}
-          <div className="mt-4 space-y-1">
+
+          <div className="space-y-1 md:border-l md:border-[rgba(28,28,29,0.08)] md:pl-6">
             <PreviewRow label="Symbol" value={draft.symbol} />
             <PreviewRow label="Decimals" value={draft.decimals} />
             <PreviewRow label="Category" value={categoryLabel} />
@@ -97,50 +152,67 @@ export function StepPublicInfo() {
             <PreviewRow label="Website" value={draft.website} />
           </div>
         </div>
+      </div>
 
-        {/* Included / private */}
+      {/* Public vs private — two balanced columns */}
+      <div className="grid gap-5 lg:grid-cols-2">
         <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
-          <p className="text-base font-medium text-[#1c1c1d]">Included in public view</p>
+          <div className="flex items-center gap-2">
+            <CircleCheck className="h-4 w-4 text-[#0c804c]" />
+            <p className="text-base font-medium text-[#1c1c1d]">Included in public view</p>
+          </div>
           <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
-            These fields will be shown to the public.
+            Visible to wallets, explorers, and anyone who looks up the token.
           </p>
-          <ul className="mt-4 space-y-3">
-            {included.map((item) => (
-              <li key={item.label} className="flex items-start gap-2.5">
-                <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--status-success-text,#0c804c)]" />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[#1c1c1d]">{item.label}</p>
-                  <p className="truncate text-sm text-[rgba(28,28,29,0.6)]">
-                    {item.value.trim() ? item.value : "Not set"}
-                  </p>
-                </div>
-              </li>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {publicLabels.map((label) => (
+              <span
+                key={label}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[rgba(12,128,76,0.2)] bg-[rgba(12,128,76,0.06)] px-3 py-1.5 text-sm font-medium text-[#0c804c]"
+              >
+                <CircleCheck className="h-3.5 w-3.5" />
+                {label}
+              </span>
             ))}
-          </ul>
+          </div>
+        </div>
 
-          <details className="group mt-4 rounded-xl border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] p-3">
-            <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-              <Lock className="h-4 w-4 text-[rgba(28,28,29,0.5)]" />
-              <span className="text-sm font-medium text-[#1c1c1d]">Not included by default</span>
-              <ChevronDown className="ml-auto h-4 w-4 text-[rgba(28,28,29,0.5)] transition-transform group-open:rotate-180" />
-            </summary>
-            <p className="mt-2 text-xs text-[rgba(28,28,29,0.58)]">
-              These stay private unless you choose to include them.
-            </p>
-            {privateItems.length > 0 ? (
-              <ul className="mt-2 space-y-1">
-                {privateItems.map((item) => (
-                  <li key={item} className="text-sm text-[rgba(28,28,29,0.7)]">
-                    {item}
+        <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
+          <div className="flex items-center gap-2">
+            <Lock className="h-4 w-4 text-[rgba(28,28,29,0.55)]" />
+            <p className="text-base font-medium text-[#1c1c1d]">Kept private</p>
+          </div>
+          <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
+            Stored securely and never shown publicly unless you choose to.
+          </p>
+          {privateItems.length > 0 ? (
+            <ul className="mt-4 space-y-2.5">
+              {privateItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <li
+                    key={item.label}
+                    className="flex items-center gap-3 rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-3 py-2.5"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.7)]">
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[#1c1c1d]">{item.label}</p>
+                      <p className="truncate text-xs text-[rgba(28,28,29,0.55)]">
+                        {item.description}
+                      </p>
+                    </div>
                   </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-2 text-sm text-[rgba(28,28,29,0.5)]">
-                No private fields configured.
-              </p>
-            )}
-          </details>
+                );
+              })}
+            </ul>
+          ) : (
+            <div className="mt-4 flex items-center gap-2 rounded-xl border border-dashed border-[rgba(28,28,29,0.14)] px-3 py-5 text-sm text-[rgba(28,28,29,0.5)]">
+              <Lock className="h-4 w-4 shrink-0" />
+              No private details configured yet.
+            </div>
+          )}
         </div>
       </div>
 

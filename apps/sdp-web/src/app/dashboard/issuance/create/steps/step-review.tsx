@@ -1,60 +1,122 @@
 "use client";
 
-import { CircleAlert, CircleCheck, Pencil, TriangleAlert } from "lucide-react";
+import {
+  ExternalLink,
+  FileText,
+  Globe,
+  Info,
+  type LucideIcon,
+  Pencil,
+  ShieldCheck,
+  TriangleAlert,
+} from "lucide-react";
 import { motion } from "motion/react";
-import { accessControlLabel, CAPACITY_META } from "../asset-details-config";
+import { cn } from "@/lib/utils";
+import { accessControlLabel } from "../asset-details-config";
 import { getAssetTypeLabel, getCategoryLabel } from "../asset-taxonomy";
-import { getBlockers, getRequiredForDeployWarnings } from "../draft-mapping";
-import { CAPACITY_KEYS } from "../issuance-draft-wizard.types";
+import { getRequiredForDeployWarnings } from "../draft-mapping";
+import type { DraftState, WizardStep } from "../issuance-draft-wizard.types";
 import { useIssuanceDraft } from "../use-issuance-draft";
 
-interface Row {
+interface Field {
   label: string;
   value: string | null;
+  hint?: string;
+  href?: string | null;
+}
+
+interface Section {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  editStep: WizardStep;
+  fields: Field[];
+}
+
+function accessControlHint(mode: DraftState["accessControl"]): string | undefined {
+  switch (mode) {
+    case "allowlist":
+      return "Only approved addresses can hold or transfer.";
+    case "blocklist":
+      return "Blocked addresses cannot hold or transfer.";
+    default:
+      return undefined;
+  }
 }
 
 export function StepReview() {
   const { draft, goToStep } = useIssuanceDraft();
-  const blockers = getBlockers(draft);
   const warnings = getRequiredForDeployWarnings(draft);
 
-  const enabledCapacities = CAPACITY_KEYS.filter((key) => draft.capacities[key]).map(
-    (key) => CAPACITY_META[key].label
-  );
+  const categoryLabel = getCategoryLabel(draft.assetCategory);
+  const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType);
+  const transferRestrictionsEnabled =
+    draft.accessControl === "allowlist" ||
+    draft.accessControl === "blocklist" ||
+    draft.capacities.transferApprovals;
+  const website = draft.website.trim();
 
-  const classificationRows: Row[] = [
-    { label: "Category", value: getCategoryLabel(draft.assetCategory) },
-    { label: "Asset type", value: getAssetTypeLabel(draft.assetCategory, draft.assetType) },
-    { label: "Name", value: draft.name },
-  ];
-  const detailRows: Row[] = [
-    { label: "Symbol", value: draft.symbol },
-    { label: "Decimals", value: draft.decimals },
-    { label: "Description", value: draft.description },
-    { label: "Website", value: draft.website },
-    { label: "Issuer", value: draft.issuerName },
-    { label: "Peg / target", value: draft.pegTarget },
-    { label: "Reserve custodian", value: draft.reserveCustodian },
+  const sections: Section[] = [
     {
-      label: "Documents",
-      value: (() => {
-        const count = draft.documents.filter((doc) => doc.name.trim() || doc.url.trim()).length;
-        return count > 0 ? `${count} attached` : null;
-      })(),
-    },
-  ];
-  const complianceRows: Row[] = [
-    { label: "Access control", value: accessControlLabel(draft.accessControl) },
-    {
-      label: "Capacities",
-      value: enabledCapacities.length > 0 ? enabledCapacities.join(", ") : null,
+      icon: FileText,
+      title: "Asset",
+      description: "The asset and how it will be represented.",
+      editStep: "classification",
+      fields: [
+        { label: "Asset category", value: categoryLabel },
+        { label: "Asset type", value: typeLabel },
+        { label: "Name", value: draft.name },
+        { label: "Symbol", value: draft.symbol },
+      ],
     },
     {
-      label: "Custom fields",
-      value: (() => {
-        const count = draft.customFields.filter((field) => field.key.trim()).length;
-        return count > 0 ? `${count} added` : null;
-      })(),
+      icon: Info,
+      title: "Asset details",
+      description: "Key information about the asset.",
+      editStep: "asset-details",
+      fields: [
+        { label: "Description", value: draft.description },
+        { label: "Decimals", value: draft.decimals },
+        { label: "Website", value: website || null, href: website || null },
+      ],
+    },
+    {
+      icon: ShieldCheck,
+      title: "Compliance & access",
+      description: "How the asset will be controlled and who can interact with it.",
+      editStep: "asset-details",
+      fields: [
+        {
+          label: "Access control",
+          value: accessControlLabel(draft.accessControl),
+          hint: accessControlHint(draft.accessControl),
+        },
+        {
+          label: "Transfer restrictions",
+          value: transferRestrictionsEnabled ? "Enabled" : "Disabled",
+          hint: transferRestrictionsEnabled
+            ? "Transfers limited to approved participants."
+            : undefined,
+        },
+        {
+          label: "Investor reporting",
+          value: draft.capacities.investorReporting ? "Enabled" : "Disabled",
+          hint: draft.capacities.investorReporting
+            ? "Activity reports available for investors and stakeholders."
+            : undefined,
+        },
+      ],
+    },
+    {
+      icon: Globe,
+      title: "Public information",
+      description: "The safe information that will be visible to anyone.",
+      editStep: "public-info",
+      fields: [
+        { label: "Public name", value: draft.name },
+        { label: "Public symbol", value: draft.symbol },
+        { label: "Description (public)", value: draft.description },
+      ],
     },
   ];
 
@@ -64,136 +126,101 @@ export function StepReview() {
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      className="space-y-6"
+      className="space-y-5"
     >
       <div>
         <h2 className="text-2xl font-medium text-[#1c1c1d]">Review &amp; finish</h2>
         <p className="mt-1.5 text-sm text-[rgba(28,28,29,0.62)]">
-          Confirm the details below, then create your draft.
+          Please review all details below. You can edit any section before creating your draft.
         </p>
       </div>
 
-      {blockers.length > 0 ? (
-        <Callout
-          tone="error"
-          icon={<CircleAlert className="h-4 w-4" />}
-          title="Resolve before creating"
-        >
-          <ul className="mt-1 list-disc space-y-0.5 pl-4">
-            {blockers.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </Callout>
-      ) : (
-        <Callout
-          tone="success"
-          icon={<CircleCheck className="h-4 w-4" />}
-          title="You're ready to create a draft"
-        >
-          You can review, edit, and publish when you're ready.
-        </Callout>
-      )}
-
       {warnings.length > 0 ? (
-        <Callout
-          tone="warning"
-          icon={<TriangleAlert className="h-4 w-4" />}
-          title="Recommended before deploying"
-        >
-          These aren't required for a draft but are needed before you can deploy on-chain:{" "}
-          {warnings.join(", ")}.
-        </Callout>
+        <div className="flex items-start gap-2.5 rounded-2xl border border-[rgba(234,179,8,0.3)] bg-[rgba(234,179,8,0.08)] px-4 py-3 text-[#92400e]">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="min-w-0 text-sm">
+            <p className="font-semibold">Recommended before deploying</p>
+            <p className="mt-0.5 opacity-90">
+              These aren&apos;t required for a draft but are needed before you can deploy on-chain:{" "}
+              {warnings.join(", ")}.
+            </p>
+          </div>
+        </div>
       ) : null}
 
-      <ReviewSection
-        title="Classification"
-        onEdit={() => goToStep("classification")}
-        rows={classificationRows}
-      />
-      <ReviewSection
-        title="Asset details"
-        onEdit={() => goToStep("asset-details")}
-        rows={detailRows}
-      />
-      <ReviewSection
-        title="Compliance & access"
-        onEdit={() => goToStep("asset-details")}
-        rows={complianceRows}
-      />
+      {sections.map((section) => (
+        <ReviewSection
+          key={section.title}
+          section={section}
+          onEdit={() => goToStep(section.editStep)}
+        />
+      ))}
     </motion.div>
   );
 }
 
-function ReviewSection({
-  title,
-  onEdit,
-  rows,
-}: {
-  title: string;
-  onEdit: () => void;
-  rows: Row[];
-}) {
+function ReviewSection({ section, onEdit }: { section: Section; onEdit: () => void }) {
+  const Icon = section.icon;
   return (
     <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
-      <div className="flex items-center justify-between">
-        <p className="text-base font-medium text-[#1c1c1d]">{title}</p>
-        <button
-          type="button"
-          onClick={onEdit}
-          className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-[rgba(28,28,29,0.7)] transition-colors hover:bg-[rgba(28,28,29,0.05)] hover:text-[#1c1c1d]"
-        >
-          <Pencil className="h-3.5 w-3.5" />
-          Edit
-        </button>
-      </div>
-      <div className="mt-3">
-        {rows.map((row) => (
-          <div
-            key={row.label}
-            className="flex items-start justify-between gap-3 border-b border-[rgba(28,28,29,0.06)] py-2.5 last:border-b-0"
-          >
-            <span className="text-sm text-[rgba(28,28,29,0.58)]">{row.label}</span>
-            <span
-              className={
-                row.value?.trim()
-                  ? "min-w-0 max-w-[60%] truncate text-right text-sm font-medium text-[#1c1c1d]"
-                  : "text-right text-sm text-[rgba(28,28,29,0.4)]"
-              }
-            >
-              {row.value?.trim() ? row.value : "—"}
-            </span>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div className="flex items-start gap-3 lg:w-56 lg:shrink-0">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.7)]">
+            <Icon className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-base font-medium text-[#1c1c1d]">{section.title}</p>
+            <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.55)]">{section.description}</p>
           </div>
-        ))}
+        </div>
+
+        <div className="grid flex-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
+          {section.fields.map((field) => (
+            <FieldCell key={field.label} field={field} />
+          ))}
+        </div>
+
+        <div className="lg:shrink-0">
+          <button
+            type="button"
+            onClick={onEdit}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[rgba(28,28,29,0.12)] px-3 py-1.5 text-sm font-medium text-[rgba(28,28,29,0.75)] transition-colors hover:bg-[rgba(28,28,29,0.04)] hover:text-[#1c1c1d]"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Edit
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-function Callout({
-  tone,
-  icon,
-  title,
-  children,
-}: {
-  tone: "success" | "warning" | "error";
-  icon: React.ReactNode;
-  title: string;
-  children: React.ReactNode;
-}) {
-  const toneClass =
-    tone === "success"
-      ? "border-[rgba(12,128,76,0.2)] bg-[rgba(12,128,76,0.06)] text-[#0c804c]"
-      : tone === "warning"
-        ? "border-[rgba(234,179,8,0.3)] bg-[rgba(234,179,8,0.08)] text-[#92400e]"
-        : "border-[rgba(199,31,55,0.25)] bg-[rgba(199,31,55,0.06)] text-[#8a1f2a]";
+function FieldCell({ field }: { field: Field }) {
+  const hasValue = field.value !== null && field.value.trim().length > 0;
   return (
-    <div className={`flex items-start gap-2.5 rounded-2xl border px-4 py-3 ${toneClass}`}>
-      <span className="mt-0.5 shrink-0">{icon}</span>
-      <div className="min-w-0 text-sm">
-        <p className="font-semibold">{title}</p>
-        <div className="mt-0.5 opacity-90">{children}</div>
-      </div>
+    <div className="min-w-0">
+      <p className="text-xs text-[rgba(28,28,29,0.52)]">{field.label}</p>
+      {hasValue && field.href ? (
+        <a
+          href={field.href}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-1 inline-flex items-center gap-1 break-all text-sm font-medium text-[#1c1c1d] hover:underline"
+        >
+          {field.value}
+          <ExternalLink className="h-3 w-3 shrink-0" />
+        </a>
+      ) : (
+        <p
+          className={cn(
+            "mt-1 break-words text-sm font-medium",
+            hasValue ? "text-[#1c1c1d]" : "text-[rgba(28,28,29,0.4)]"
+          )}
+        >
+          {hasValue ? field.value : "—"}
+        </p>
+      )}
+      {field.hint ? <p className="mt-1 text-xs text-[rgba(28,28,29,0.5)]">{field.hint}</p> : null}
     </div>
   );
 }
