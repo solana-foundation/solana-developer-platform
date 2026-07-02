@@ -12,14 +12,12 @@ import {
 import {
   AlertCircleIcon,
   BanIcon,
-  CheckCircle2Icon,
   ChevronDownIcon,
   CopyIcon,
   CreditCardIcon,
   ExternalLinkIcon,
   InfoIcon,
   Loader2Icon,
-  PauseIcon,
   PencilIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -448,18 +446,16 @@ function ActionBand({
   title,
   children,
 }: {
-  variant: "info" | "success" | "warning" | "danger";
+  variant: "info" | "warning" | "danger";
   title: string;
   children: ReactNode;
 }) {
   const styles = {
     info: "border-border-light bg-[var(--sdp-color-info-bg)] text-[color:var(--sdp-color-info-text)]",
-    success: "border-border-light bg-status-success-bg text-status-success-text",
     warning: "border-border-light bg-status-warning-bg text-status-warning-text",
     danger: "border-status-error-border bg-status-error-bg text-status-error-text",
   }[variant];
-  const Icon =
-    variant === "danger" ? AlertCircleIcon : variant === "success" ? CheckCircle2Icon : InfoIcon;
+  const Icon = variant === "danger" ? AlertCircleIcon : InfoIcon;
 
   return (
     <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${styles}`}>
@@ -595,17 +591,6 @@ function RecurringPaymentActionsMenu({
             <span>{primaryAction.label}</span>
           </DropdownMenuItem>
         ) : null}
-        {status === "active" ? (
-          <DropdownMenuItem disabled className="items-start">
-            <PauseIcon className="mt-0.5 size-4" />
-            <span className="grid gap-0.5">
-              <span>Pause payment</span>
-              <span className="text-xs font-normal text-text-low">
-                Pause is not supported by the API yet.
-              </span>
-            </span>
-          </DropdownMenuItem>
-        ) : null}
         {disabledLabel ? (
           <DropdownMenuItem disabled>
             <Loader2Icon className="size-4 animate-spin" />
@@ -641,11 +626,9 @@ function RecurringPaymentActionsMenu({
 
 function RecurringPaymentLifecycleBand({
   status,
-  dueNow,
   actionError,
 }: {
   status: PaymentRecurringPaymentStatus;
-  dueNow: boolean;
   actionError: DetailActionError | null;
 }) {
   if (actionError) {
@@ -662,13 +645,6 @@ function RecurringPaymentLifecycleBand({
     return (
       <ActionBand variant="info" title="Ready to activate">
         Creates the subscription and schedules the first payment.
-      </ActionBand>
-    );
-  }
-  if (dueNow) {
-    return (
-      <ActionBand variant="success" title="Due now">
-        Manual collection is available until the automated collector runs.
       </ActionBand>
     );
   }
@@ -1170,11 +1146,7 @@ export function RecurringPaymentDetailWorkspace({
           />
         </div>
 
-        <RecurringPaymentLifecycleBand
-          status={recurringPayment.status}
-          dueNow={dueNow}
-          actionError={actionError}
-        />
+        <RecurringPaymentLifecycleBand status={recurringPayment.status} actionError={actionError} />
 
         <div className="rounded-xl border border-border-light px-4">
           <div className="divide-y divide-border-light">
