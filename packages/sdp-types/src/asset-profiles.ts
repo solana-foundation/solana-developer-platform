@@ -19,9 +19,9 @@ export type AssetCategory = (typeof ASSET_CATEGORIES)[number];
 // instrument-specific types such as money market funds, bonds, stocks). The
 // ASSET_TYPE_REGISTRY below must define an entry for every pair listed here.
 export const ASSET_TYPES = {
-  generic: ["generic"],
-  stablecoin: ["fiat_backed", "generic"],
-  tokenized_security: ["generic"],
+  generic: ["generic", "commodity", "real_estate", "collectible"],
+  stablecoin: ["fiat_backed", "crypto_backed", "generic"],
+  tokenized_security: ["generic", "equity", "debt", "fund"],
 } as const satisfies Record<AssetCategory, readonly string[]>;
 
 export type AssetType<C extends AssetCategory = AssetCategory> = (typeof ASSET_TYPES)[C][number];
@@ -81,6 +81,62 @@ export const ASSET_TYPE_REGISTRY: readonly AssetTypeRegistryEntry[] = [
     label: "Generic tokenized security",
     publicProjection: ["asset.name", "asset.issuerName"],
     requiredForDeploy: ["asset.issuerName"],
+  },
+  {
+    category: "stablecoin",
+    type: "crypto_backed",
+    version: 1,
+    label: "Crypto-backed stablecoin",
+    publicProjection: ["asset.name", "asset.pegCurrency", "chain.decimals"],
+    requiredForDeploy: [],
+  },
+  {
+    category: "tokenized_security",
+    type: "equity",
+    version: 1,
+    label: "Tokenized equity",
+    publicProjection: ["asset.name", "asset.issuerName"],
+    requiredForDeploy: ["asset.issuerName"],
+  },
+  {
+    category: "tokenized_security",
+    type: "debt",
+    version: 1,
+    label: "Tokenized debt",
+    publicProjection: ["asset.name", "asset.issuerName"],
+    requiredForDeploy: ["asset.issuerName"],
+  },
+  {
+    category: "tokenized_security",
+    type: "fund",
+    version: 1,
+    label: "Tokenized fund",
+    publicProjection: ["asset.name", "asset.issuerName"],
+    requiredForDeploy: ["asset.issuerName"],
+  },
+  {
+    category: "generic",
+    type: "commodity",
+    version: 1,
+    label: "Tokenized commodity",
+    publicProjection: ["asset.name", "asset.description"],
+    requiredForDeploy: [],
+  },
+  {
+    category: "generic",
+    type: "real_estate",
+    version: 1,
+    label: "Tokenized real estate",
+    publicProjection: ["asset.name", "asset.description"],
+    requiredForDeploy: [],
+  },
+  {
+    category: "generic",
+    type: "collectible",
+    version: 1,
+    label: "Tokenized collectible",
+    publicProjection: ["asset.name", "asset.description"],
+    requiredForDeploy: [],
   },
 ];
 
