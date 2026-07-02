@@ -3,6 +3,10 @@ import type { PaymentRecurringPaymentRow } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
 import { createSigningService } from "@/services/domain/signing.service";
 import {
+  DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
+  parsePositiveIntegerConfig,
+} from "@/services/payments/recurring-payment-config";
+import {
   activateRecurringPayment,
   cancelRecurringPayment,
   collectRecurringPayment,
@@ -13,7 +17,6 @@ import type { Env } from "@/types/env";
 
 const DEFAULT_BATCH_SIZE = 25;
 const MAX_BATCH_SIZE = 100;
-const DEFAULT_RETRY_AFTER_MINUTES = 30;
 const STALE_AFTER_MS = 15 * 60 * 1000;
 
 export interface CollectDueRecurringPaymentsResult {
@@ -21,14 +24,6 @@ export interface CollectDueRecurringPaymentsResult {
   collected: number;
   failed: number;
   skipped: number;
-}
-
-function parsePositiveIntegerConfig(value: string | undefined, fallback: number): number {
-  if (value === undefined || value.trim() === "") {
-    return fallback;
-  }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function batchSize(env: Env): number {
@@ -41,7 +36,7 @@ function batchSize(env: Env): number {
 function retryAfterMinutes(env: Env): number {
   return parsePositiveIntegerConfig(
     env.PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
-    DEFAULT_RETRY_AFTER_MINUTES
+    DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES
   );
 }
 

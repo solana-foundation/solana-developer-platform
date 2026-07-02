@@ -57,6 +57,10 @@ import * as solanaRpc from "@/services/solana/rpc";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "./counterparty-account-resolution";
+import {
+  DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
+  parsePositiveIntegerConfig,
+} from "./recurring-payment-config";
 
 const U64_MAX = 18_446_744_073_709_551_615n;
 const OPERATION_STALE_AFTER_MS = 15 * 60 * 1000;
@@ -64,7 +68,6 @@ const ACTIVATION_STALE_AFTER_MS = OPERATION_STALE_AFTER_MS;
 const COLLECTION_STALE_AFTER_MS = OPERATION_STALE_AFTER_MS;
 const LIFECYCLE_STALE_AFTER_MS = OPERATION_STALE_AFTER_MS;
 const UPDATE_STALE_AFTER_MS = OPERATION_STALE_AFTER_MS;
-const DEFAULT_COLLECTION_RETRY_AFTER_MINUTES = 30;
 
 type RecurringCollectionSource = "manual" | "automated";
 
@@ -249,14 +252,6 @@ function isRecurringCollectionSource(value: unknown): value is RecurringCollecti
   return value === "manual" || value === "automated";
 }
 
-function parsePositiveIntegerConfig(value: string | undefined, fallback: number): number {
-  if (value === undefined || value.trim() === "") {
-    return fallback;
-  }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 function recurringCollectionMetadata(input: {
   metadata?: Record<string, unknown>;
   recurringPaymentId: string;
@@ -305,7 +300,7 @@ async function resolveDestinationTokenAccount(input: {
 function collectionRetryMetadata(env: Env, error: unknown): Record<string, unknown> {
   const retryAfterMinutes = parsePositiveIntegerConfig(
     env.PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
-    DEFAULT_COLLECTION_RETRY_AFTER_MINUTES
+    DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES
   );
   return {
     error: activationErrorMessage(error),
