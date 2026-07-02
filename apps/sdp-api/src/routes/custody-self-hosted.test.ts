@@ -60,6 +60,9 @@ const managedCustodyProviderEnvKeys = [
   "DFNS_AUTH_TOKEN",
   "DFNS_CREDENTIAL_ID",
   "DFNS_PRIVATE_KEY",
+  "IBM_HAVEN_AUTH_TOKEN",
+  "IBM_HAVEN_CREDENTIAL_ID",
+  "IBM_HAVEN_PRIVATE_KEY",
   "ANCHORAGE_API_KEY",
 ] as const;
 

@@ -65,6 +65,7 @@ export async function createSignerFromBase58(privateKeyBase58: string): Promise<
  * - "para": Uses Para via KeychainParaAdapter
  * - "turnkey": Uses Turnkey via KeychainTurnkeyAdapter
  * - "dfns": Uses DFNS via KeychainDfnsAdapter
+ * - "ibm_haven": Uses IBM Digital Asset Haven (white-label Dfns) via KeychainIbmHavenAdapter
  * - "anchorage": Not supported for signing (wallet lifecycle only)
  * - "utila": Uses Utila via KeychainUtilaAdapter
  *

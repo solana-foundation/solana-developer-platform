@@ -11,6 +11,8 @@ import {
 } from "@/services/custody/provisioning";
 import {
   createDfnsApiClient,
+  createIbmHavenApiClient,
+  IBM_HAVEN_PROVIDER_LABEL,
   normalizeDfnsWalletId,
   resolveDfnsNetwork,
 } from "@/services/dfns/client";
@@ -23,6 +25,7 @@ import {
   normalizeAnchorageWalletId,
   normalizeCoinbaseCdpWalletId,
   normalizeFireblocksWalletId,
+  normalizeIbmHavenWalletId,
   normalizeParaWalletId,
   normalizePrivyWalletId,
   normalizeTurnkeyWalletId,
@@ -174,6 +177,31 @@ const providerWalletLifecycleRegistry = {
 
       return {
         walletId: normalizeDfnsWalletId(provisioned.id),
+        publicKey: provisioned.address,
+      };
+    },
+  },
+  ibm_haven: {
+    create: async ({ env, params, parsed }) => {
+      const provisioned = await withProvisioningError("IBM Digital Asset Haven", async () => {
+        const client = await createIbmHavenApiClient(env, { apiBaseUrl: parsed.apiBaseUrl });
+        return client.wallets.createWallet({
+          body: {
+            network: resolveDfnsNetwork(parsed.network, IBM_HAVEN_PROVIDER_LABEL),
+            ...(params.label ? { name: params.label } : {}),
+          },
+        });
+      });
+
+      if (!provisioned.id || !provisioned.address) {
+        throw new SigningError(
+          "IBM Digital Asset Haven wallet creation returned incomplete payload",
+          "NETWORK_ERROR"
+        );
+      }
+
+      return {
+        walletId: normalizeIbmHavenWalletId(provisioned.id),
         publicKey: provisioned.address,
       };
     },
