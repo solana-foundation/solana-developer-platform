@@ -1,11 +1,13 @@
 import type {
   CreatePaymentRecurringPaymentRequest,
   ListPaymentRecurringPaymentsResponse,
+  ListPaymentSubscriptionCollectionAttemptsResponse,
   PaginatedResponse,
   PaymentRecurringPayment,
   PaymentRecurringPaymentCollectionResponse,
   PaymentRecurringPaymentResponse,
   PaymentRecurringPaymentStatus,
+  PaymentSubscriptionCollectionAttempt,
   UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
@@ -235,6 +237,36 @@ export async function fetchRecurringPaymentById(
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Unable to load recurring payment",
+    };
+  }
+}
+
+export async function fetchRecurringPaymentCollectionAttempts(
+  request: SdpApiClient["request"],
+  subscriptionId: string
+): Promise<FetchResult<PaymentSubscriptionCollectionAttempt[]>> {
+  try {
+    const response = await request(
+      `/v1/payments/subscriptions/${encodeURIComponent(
+        subscriptionId
+      )}/collection-attempts?page=1&pageSize=25`
+    );
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error: parsePaymentApiErrorText(await response.text()),
+      };
+    }
+
+    const json = (await response.json()) as {
+      data?: ListPaymentSubscriptionCollectionAttemptsResponse;
+    };
+    return { ok: true, data: json.data?.collectionAttempts ?? [] };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unable to load collection history",
     };
   }
 }

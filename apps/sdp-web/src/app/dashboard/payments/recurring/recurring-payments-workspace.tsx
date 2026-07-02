@@ -4,19 +4,27 @@ import {
   type CounterpartyAccount,
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentStatus,
+  type PaymentSubscriptionCollectionAttempt,
+  type PaymentSubscriptionCollectionAttemptStatus,
   type PaymentsDashboardWallet,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import {
   AlertCircleIcon,
+  BanIcon,
   CheckCircle2Icon,
+  ChevronDownIcon,
   CopyIcon,
   CreditCardIcon,
+  ExternalLinkIcon,
   InfoIcon,
   Loader2Icon,
+  PauseIcon,
   PencilIcon,
   PlusIcon,
+  RefreshCwIcon,
   RepeatIcon,
+  RotateCcwIcon,
   WalletIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -27,6 +35,13 @@ import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Combobox } from "@/components/ui/combobox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
@@ -39,6 +54,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
+import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { walletBalanceAssetOptions } from "../ramps/wallet-options";
 import {
   type RecurringPaymentAction,
@@ -70,6 +86,25 @@ const STATUS_VARIANTS = {
   expired: "danger",
 } as const satisfies Record<PaymentRecurringPaymentStatus, BadgeVariant>;
 
+const COLLECTION_STATUS_LABELS = {
+  pending: "Pending",
+  processing: "Processing",
+  confirmed: "Collected",
+  failed: "Failed",
+  skipped: "Skipped",
+} as const satisfies Record<PaymentSubscriptionCollectionAttemptStatus, string>;
+
+const COLLECTION_STATUS_VARIANTS = {
+  pending: "warning",
+  processing: "info",
+  confirmed: "success",
+  failed: "danger",
+  skipped: "default",
+} as const satisfies Record<PaymentSubscriptionCollectionAttemptStatus, BadgeVariant>;
+
+const COLLECTION_ATTEMPTED_COLUMN_CLASS = "hidden @4xl/collection-history:table-cell";
+const COLLECTION_TRANSFER_COLUMN_CLASS = "hidden @6xl/collection-history:table-cell";
+
 type RecurringPaymentWalletView = PaymentsDashboardWallet;
 
 interface RecurringPaymentCounterpartyView {
@@ -94,6 +129,8 @@ interface RecurringPaymentDetailWorkspaceProps {
   counterpartyLabel: string;
   amountLabel: string;
   currencyLabel: string;
+  collectionAttempts: PaymentSubscriptionCollectionAttempt[];
+  collectionAttemptsError?: string;
 }
 
 function RecurringPaymentStatusBadge({ status }: { status: PaymentRecurringPaymentStatus }) {
@@ -215,6 +252,137 @@ function CopyableValue({
         <CopyIcon />
       </Button>
     </span>
+  );
+}
+
+function CollectionStatusBadge({ status }: { status: PaymentSubscriptionCollectionAttemptStatus }) {
+  return (
+    <Badge variant={COLLECTION_STATUS_VARIANTS[status]}>{COLLECTION_STATUS_LABELS[status]}</Badge>
+  );
+}
+
+function ExplorerValue({ value }: { value: string | null }) {
+  if (!value) {
+    return <span className="text-text-low">Not set</span>;
+  }
+
+  return (
+    <span className="inline-flex max-w-full items-center gap-1.5">
+      <CopyableValue value={value} label={shortenAddress(value)} />
+      <Button asChild variant="ghost" size="icon-xs" aria-label="Open signature">
+        <a href={getDevnetExplorerUrl(value)} target="_blank" rel="noreferrer">
+          <ExternalLinkIcon />
+        </a>
+      </Button>
+    </span>
+  );
+}
+
+function RecurringPaymentCollectionHistory({
+  attempts,
+  error,
+  wallets,
+}: {
+  attempts: PaymentSubscriptionCollectionAttempt[];
+  error?: string;
+  wallets: RecurringPaymentWalletView[];
+}) {
+  return (
+    <div>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-medium text-text-extra-high">Collection history</h3>
+        {attempts.length > 0 ? (
+          <span className="text-xs text-text-low">
+            {attempts.length === 1 ? "1 attempt" : `${attempts.length} attempts`}
+          </span>
+        ) : null}
+      </div>
+      <div className="@container/collection-history rounded-xl border border-border-light">
+        {error ? (
+          <div role="alert" className="p-4 text-sm text-status-error-text">
+            Unable to load collection history: {error}
+          </div>
+        ) : attempts.length === 0 ? (
+          <div className="p-4 text-sm text-text-medium">
+            No collection attempts yet. The next scheduled collection is shown above.
+          </div>
+        ) : (
+          <div className="overflow-hidden">
+            <Table className="[&_table]:w-full [&_table]:min-w-0 [&_table]:table-fixed">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[28%] @4xl/collection-history:w-[20%] @6xl/collection-history:w-[17%] @7xl/collection-history:w-[15%]">
+                    Due
+                  </TableHead>
+                  <TableHead
+                    className={`${COLLECTION_ATTEMPTED_COLUMN_CLASS} w-[20%] @6xl/collection-history:w-[16%] @7xl/collection-history:w-[15%]`}
+                  >
+                    Attempted
+                  </TableHead>
+                  <TableHead className="w-[25%] @4xl/collection-history:w-[21%] @6xl/collection-history:w-[17%] @7xl/collection-history:w-[16%]">
+                    Amount
+                  </TableHead>
+                  <TableHead className="w-[23%] @4xl/collection-history:w-[18%] @6xl/collection-history:w-[15%] @7xl/collection-history:w-[14%]">
+                    Status
+                  </TableHead>
+                  <TableHead
+                    className={`${COLLECTION_TRANSFER_COLUMN_CLASS} w-[22%] @7xl/collection-history:w-[18%]`}
+                  >
+                    Transfer
+                  </TableHead>
+                  <TableHead className="w-[24%] @4xl/collection-history:w-[21%] @6xl/collection-history:w-[18%] @7xl/collection-history:w-[22%]">
+                    Explorer
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {attempts.map((attempt) => (
+                  <TableRow key={attempt.id}>
+                    <TableCell className="whitespace-nowrap text-sm">
+                      <span className="block truncate">{formatTimestamp(attempt.dueAt)}</span>
+                    </TableCell>
+                    <TableCell
+                      className={`${COLLECTION_ATTEMPTED_COLUMN_CLASS} whitespace-nowrap text-sm text-text-medium`}
+                    >
+                      <span className="block truncate">
+                        {attempt.attemptedAt ? formatTimestamp(attempt.attemptedAt) : "Not set"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-sm font-medium">
+                      <span className="block truncate">
+                        {formatDisplayAmount(
+                          attempt.amount,
+                          resolveTokenLabel(attempt.token, wallets)
+                        )}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <CollectionStatusBadge status={attempt.status} />
+                        {attempt.error ? (
+                          <p className="max-w-[14rem] truncate text-xs text-status-error-text">
+                            {attempt.error}
+                          </p>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell className={COLLECTION_TRANSFER_COLUMN_CLASS}>
+                      <CopyableValue
+                        value={attempt.transferId}
+                        label={attempt.transferId ? shortenAddress(attempt.transferId) : undefined}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <ExplorerValue value={attempt.signature} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -360,20 +528,26 @@ function secondaryDetailAction(
   };
 }
 
-function RecurringPaymentActionButtons({
+function RecurringPaymentActionsMenu({
   status,
   dueNow,
   pendingAction,
   actionError,
   disabled,
+  editable,
+  onEdit,
   onAction,
+  onCancel,
 }: {
   status: PaymentRecurringPaymentStatus;
   dueNow: boolean;
   pendingAction: RecurringPaymentAction | null;
   actionError: DetailActionError | null;
   disabled?: boolean;
+  editable: boolean;
+  onEdit: () => void;
   onAction: (action: RecurringPaymentAction) => void;
+  onCancel: () => void;
 }) {
   const disabledLabel = disabledActionLabel(status);
   const primaryAction = primaryDetailAction(status, dueNow, actionError);
@@ -381,49 +555,79 @@ function RecurringPaymentActionButtons({
   const actionsDisabled = Boolean(pendingAction) || Boolean(disabled);
 
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      {disabledLabel ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
         <Button
           type="button"
-          size="sm"
-          disabled
-          iconLeft={<Loader2Icon className="size-4 shrink-0 animate-spin" />}
-        >
-          {disabledLabel}
-        </Button>
-      ) : null}
-      {primaryAction ? (
-        <Button
-          type="button"
+          variant="secondary"
           size="sm"
           disabled={actionsDisabled}
-          iconLeft={
-            pendingAction === primaryAction.action ? (
-              <Loader2Icon className="size-4 shrink-0 animate-spin" />
-            ) : undefined
-          }
-          onClick={() => onAction(primaryAction.action)}
+          iconRight={<ChevronDownIcon className="size-4" />}
         >
-          {primaryAction.label}
+          Actions
         </Button>
-      ) : null}
-      {secondaryAction ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={actionsDisabled}
-          iconLeft={
-            pendingAction === secondaryAction.action ? (
-              <Loader2Icon className="size-4 shrink-0 animate-spin" />
-            ) : undefined
-          }
-          onClick={() => onAction(secondaryAction.action)}
-        >
-          {secondaryAction.label}
-        </Button>
-      ) : null}
-    </div>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuItem onSelect={onEdit} disabled={!editable || actionsDisabled}>
+          <PencilIcon className="size-4" />
+          <span>Edit payment</span>
+        </DropdownMenuItem>
+        {primaryAction ? (
+          <DropdownMenuItem
+            onSelect={() => onAction(primaryAction.action)}
+            disabled={actionsDisabled}
+          >
+            {pendingAction === primaryAction.action ? (
+              <Loader2Icon className="size-4 animate-spin" />
+            ) : primaryAction.action === "resume" ? (
+              <RotateCcwIcon className="size-4" />
+            ) : (
+              <RefreshCwIcon className="size-4" />
+            )}
+            <span>{primaryAction.label}</span>
+          </DropdownMenuItem>
+        ) : null}
+        {status === "active" ? (
+          <DropdownMenuItem disabled className="items-start">
+            <PauseIcon className="mt-0.5 size-4" />
+            <span className="grid gap-0.5">
+              <span>Pause payment</span>
+              <span className="text-xs font-normal text-text-low">
+                Pause is not supported by the API yet.
+              </span>
+            </span>
+          </DropdownMenuItem>
+        ) : null}
+        {disabledLabel ? (
+          <DropdownMenuItem disabled>
+            <Loader2Icon className="size-4 animate-spin" />
+            <span>{disabledLabel}</span>
+          </DropdownMenuItem>
+        ) : null}
+        {secondaryAction ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={onCancel}
+              disabled={actionsDisabled}
+              className="items-start text-status-error-text focus:text-status-error-text"
+            >
+              {pendingAction === secondaryAction.action ? (
+                <Loader2Icon className="mt-0.5 size-4 animate-spin" />
+              ) : (
+                <BanIcon className="mt-0.5 size-4" />
+              )}
+              <span className="grid gap-0.5">
+                <span>{secondaryAction.label}</span>
+                <span className="text-xs font-normal text-status-error-text">
+                  Stop future collections
+                </span>
+              </span>
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -641,10 +845,13 @@ export function RecurringPaymentDetailWorkspace({
   counterpartyLabel,
   amountLabel,
   currencyLabel,
+  collectionAttempts,
+  collectionAttemptsError,
 }: RecurringPaymentDetailWorkspaceProps) {
   const router = useRouter();
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [editingWallet, setEditingWallet] = useState(false);
   const [selectedWalletId, setSelectedWalletId] = useState(recurringPayment.sourceWalletId);
   const [walletValidationError, setWalletValidationError] = useState<string | null>(null);
@@ -931,11 +1138,12 @@ export function RecurringPaymentDetailWorkspace({
               {counterpartyLabel} · {amountLabel} · {scheduleLabel}
             </p>
           </div>
-          <RecurringPaymentActionButtons
+          <RecurringPaymentActionsMenu
             status={recurringPayment.status}
             dueNow={dueNow}
             pendingAction={pendingAction}
             actionError={actionError}
+            editable={isEditable}
             disabled={
               savingWallet ||
               savingReceivingAccount ||
@@ -943,7 +1151,13 @@ export function RecurringPaymentDetailWorkspace({
               savingCurrency ||
               savingAmount
             }
+            onEdit={() => {
+              setSelectedAmount(recurringPayment.amount);
+              setAmountValidationError(null);
+              setEditingAmount(true);
+            }}
             onAction={(action) => void submitAction(action)}
+            onCancel={() => setCancelConfirmOpen(true)}
           />
         </div>
 
@@ -1479,26 +1693,58 @@ export function RecurringPaymentDetailWorkspace({
           </form>
         </Modal>
 
-        <div>
-          <h3 className="mb-3 text-sm font-medium text-text-extra-high">Billing setup</h3>
-          <div className="divide-y divide-border-light rounded-xl border border-border-light px-4">
-            <DetailRow label="Plan reference">
-              <CopyableValue value={recurringPayment.planId} />
-            </DetailRow>
-            <DetailRow label="Setup confirmed">
-              {formatOptionalTimestamp(recurringPayment.planCreatedAt)}
-            </DetailRow>
-            <DetailRow label="Setup transaction">
-              <CopyableValue value={recurringPayment.planCreationSignature} />
-            </DetailRow>
-            <DetailRow label="Subscription reference">
-              <CopyableValue value={recurringPayment.subscriptionId} />
-            </DetailRow>
-            <DetailRow label="Authorization transaction">
-              <CopyableValue value={recurringPayment.authorizationSignature} />
-            </DetailRow>
+        <RecurringPaymentCollectionHistory
+          attempts={collectionAttempts}
+          error={collectionAttemptsError}
+          wallets={wallets}
+        />
+
+        <Modal
+          isOpen={cancelConfirmOpen}
+          ariaLabel="Cancel recurring payment"
+          onClose={pendingAction === "cancel" ? undefined : () => setCancelConfirmOpen(false)}
+          size="sm"
+        >
+          <div className="space-y-5 p-6">
+            <div className="space-y-1">
+              <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
+                Cancel recurring payment?
+              </h2>
+              <p className="text-sm text-text-medium">
+                This stops future collections for {counterpartyLabel}. You can resume the payment
+                later from the Actions menu.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={pendingAction === "cancel"}
+                onClick={() => setCancelConfirmOpen(false)}
+              >
+                Keep payment
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                disabled={pendingAction === "cancel"}
+                iconLeft={
+                  pendingAction === "cancel" ? (
+                    <Loader2Icon className="size-4 shrink-0 animate-spin" />
+                  ) : undefined
+                }
+                onClick={() => {
+                  setCancelConfirmOpen(false);
+                  void submitAction("cancel");
+                }}
+              >
+                Cancel payment
+              </Button>
+            </div>
           </div>
-        </div>
+        </Modal>
       </div>
     </div>
   );
