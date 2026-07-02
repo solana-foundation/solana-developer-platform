@@ -1,7 +1,6 @@
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import {
   formatCurrencyAmount,
-  isSolBalance,
   resolveAggregateBalanceDisplayToken,
   resolveTotalBalance,
 } from "@/app/dashboard/payments/payments-overview.utils";
@@ -42,10 +41,6 @@ export function walletBalanceAssetOptions(
   const assetOptions: ComboboxOption[] = [];
 
   for (const balance of wallet?.balances ?? []) {
-    if (isSolBalance(balance)) {
-      continue;
-    }
-
     const mint = balance.mint.trim();
     const label = resolveAggregateBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
     if (
