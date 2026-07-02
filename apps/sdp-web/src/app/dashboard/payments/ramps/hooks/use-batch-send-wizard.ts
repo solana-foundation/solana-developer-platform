@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
 import {
   type CreateTransferBatchResult,
   createTransferBatch,
@@ -126,7 +127,7 @@ export function useBatchSendWizard({
           Boolean(issuedTokenSymbolsByMint[option.value]);
         return {
           value: option.value,
-          label: option.label,
+          label: option.label === option.value ? shortenAddress(option.value) : option.label,
           description: known ? undefined : "Custom token",
         };
       }),
