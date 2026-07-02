@@ -113,7 +113,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_140px]">
+      <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_200px]">
         <Combobox
           label="From"
           value={walletId || null}
@@ -146,8 +146,15 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
           options={assetOptions}
           placeholder="Select an asset"
           searchable={false}
+          disabled={!walletId || assetOptions.length === 0}
         />
       </div>
+
+      {walletId && assetOptions.length === 0 ? (
+        <p className="text-sm text-status-error-text">
+          This wallet has no assets available to send.
+        </p>
+      ) : null}
 
       <div className="flex items-center justify-between gap-4 px-1">
         <p className="text-xl font-medium tracking-tight text-text-extra-high">
