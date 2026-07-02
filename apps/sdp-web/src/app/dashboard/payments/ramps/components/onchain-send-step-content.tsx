@@ -21,6 +21,15 @@ import { walletComboboxOptions } from "../wallet-options";
 import { AmountBalanceReadout } from "./amount-balance-readout";
 import { CounterpartyAccountSelector } from "./counterparty-account-selector";
 
+function NoAssetsHint({ walletId, assetCount }: { walletId: string; assetCount: number }) {
+  if (!walletId || assetCount > 0) {
+    return null;
+  }
+  return (
+    <p className="text-sm text-status-error-text">This wallet has no assets available to send.</p>
+  );
+}
+
 function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
@@ -166,6 +175,7 @@ export function OnchainSendStepContent({
             disabled={!fields.walletId || assetSelectOptions.length === 0}
           />
         </div>
+        <NoAssetsHint walletId={fields.walletId} assetCount={assetSelectOptions.length} />
         <div className="flex flex-col gap-2">
           <Label className="text-sm font-medium text-text-low" htmlFor="onchain-send-memo">
             Memo (optional)

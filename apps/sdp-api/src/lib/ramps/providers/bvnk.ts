@@ -48,7 +48,7 @@ import type {
   RampWebhookValidationResult,
   ValidateCounterpartyOptions,
 } from "../types";
-import { bvnkCounterpartyRequirements } from "../validation/bvnk";
+import { bvnkCounterpartyRequirements, normalizeBvnkStateCode } from "../validation/bvnk";
 
 const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
 const BVNK_SANDBOX_API_URL = "https://api.sandbox.bvnk.com";
@@ -1845,7 +1845,9 @@ export function buildBvnkRuleEntity(counterparty: CounterpartyRow): BvnkRuleEnti
             city: address.city,
             countryCode: address.countryCode,
             country: address.countryCode,
-            ...(address.subdivisionCode ? { stateCode: address.subdivisionCode } : {}),
+            ...(address.subdivisionCode
+              ? { stateCode: normalizeBvnkStateCode(address.countryCode, address.subdivisionCode) }
+              : {}),
           },
         }
       : {}),
