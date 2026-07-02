@@ -214,18 +214,30 @@ export async function collectDueRecurringPayments(
 
   const staleCollectionPayments = await rowsForQuery(
     env,
-    `SELECT rp.*
-       FROM payment_recurring_payments rp
-       JOIN payment_subscription_collection_attempts a
-         ON a.organization_id = rp.organization_id
-        AND a.project_id = rp.project_id
-        AND a.subscription_id = rp.subscription_id
-        AND a.due_at = rp.next_collection_due_at
-      WHERE rp.status = 'active'
-        AND rp.next_collection_due_at IS NOT NULL
-        AND a.status IN ('processing', 'confirmed')
-        AND (a.status = 'confirmed' OR a.updated_at <= ?)
-      ORDER BY a.updated_at ASC
+    `SELECT *
+       FROM (
+         SELECT
+           rp.*,
+           a.updated_at AS attempt_updated_at,
+           ROW_NUMBER() OVER (
+             PARTITION BY rp.id
+             ORDER BY
+               CASE WHEN a.status = 'confirmed' THEN 0 ELSE 1 END,
+               a.updated_at ASC
+           ) AS attempt_rank
+         FROM payment_recurring_payments rp
+         JOIN payment_subscription_collection_attempts a
+           ON a.organization_id = rp.organization_id
+          AND a.project_id = rp.project_id
+          AND a.subscription_id = rp.subscription_id
+          AND a.due_at = rp.next_collection_due_at
+        WHERE rp.status = 'active'
+          AND rp.next_collection_due_at IS NOT NULL
+          AND a.status IN ('processing', 'confirmed')
+          AND (a.status = 'confirmed' OR a.updated_at <= ?)
+       ) recoverable_attempts
+      WHERE attempt_rank = 1
+      ORDER BY attempt_updated_at ASC
       LIMIT ?`,
     staleBefore,
     limit

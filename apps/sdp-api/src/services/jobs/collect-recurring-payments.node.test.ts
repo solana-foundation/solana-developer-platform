@@ -186,6 +186,11 @@ describe("collectDueRecurringPayments", () => {
     expect(dueQuery?.query).toContain(
       "active_attempt.status IN ('pending', 'processing', 'confirmed')"
     );
+    const staleCollectionQuery = mocks.queryCalls.find((call) =>
+      call.query.includes("JOIN payment_subscription_collection_attempts")
+    );
+    expect(staleCollectionQuery?.query).toContain("ROW_NUMBER() OVER");
+    expect(staleCollectionQuery?.query).toContain("PARTITION BY rp.id");
   });
 
   it("treats collection conflicts as duplicate-prevention skips", async () => {
