@@ -113,7 +113,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_140px]">
+      <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_200px]">
         <Combobox
           label="From"
           value={walletId || null}
