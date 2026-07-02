@@ -2,6 +2,7 @@
 
 import { ChevronRight, ExternalLink, Info } from "lucide-react";
 import { motion } from "motion/react";
+import { getDefaultAccessControl, getRecommendedCapacities } from "../asset-details-config";
 import { getCategoryPresentation } from "../asset-taxonomy";
 import { SelectionCard } from "../selection-card";
 import { useIssuanceDraft } from "../use-issuance-draft";
@@ -89,7 +90,18 @@ export function StepSubAssetType() {
               title={subType.label}
               description={subType.description}
               selected={draft.assetType === subType.type}
-              onSelect={() => updateDraft({ assetType: subType.type })}
+              onSelect={() => {
+                if (draft.assetType === subType.type) {
+                  return;
+                }
+                // Picking a (new) type pre-selects its recommended capacities
+                // and default access control (the "Recommended" defaults).
+                updateDraft({
+                  assetType: subType.type,
+                  capacities: getRecommendedCapacities(category.category, subType.type),
+                  accessControl: getDefaultAccessControl(category.category),
+                });
+              }}
             />
           ))}
         </div>

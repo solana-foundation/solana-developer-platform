@@ -2,6 +2,7 @@
 
 import { ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { accessControlLabel } from "./asset-details-config";
 import { getAssetTypeLabel, getCategoryLabel } from "./asset-taxonomy";
 import type { DraftState } from "./issuance-draft-wizard.types";
 
@@ -52,6 +53,10 @@ function formatUpdatedAt(updatedAt: string | null): string | null {
 export function DraftSummaryRail({ draft, updatedAt }: DraftSummaryRailProps) {
   const categoryLabel = getCategoryLabel(draft.assetCategory);
   const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType);
+  const transferRestrictionsEnabled =
+    draft.accessControl === "allowlist" ||
+    draft.accessControl === "blocklist" ||
+    draft.capacities.transferApprovals;
 
   return (
     <aside className="lg:sticky lg:top-4">
@@ -72,9 +77,15 @@ export function DraftSummaryRail({ draft, updatedAt }: DraftSummaryRailProps) {
           <SummaryRow label="Name" value={draft.name} />
           <SummaryRow label="Symbol" value={draft.symbol} />
           <SummaryRow label="Decimals" value={draft.decimals} />
-          <SummaryRow label="Access control" value={draft.accessControl} />
-          <SummaryRow label="Transfer restrictions" value={draft.transferRestrictions} />
-          <SummaryRow label="Investor reporting" value={draft.investorReporting} />
+          <SummaryRow label="Access control" value={accessControlLabel(draft.accessControl)} />
+          <SummaryRow
+            label="Transfer restrictions"
+            value={transferRestrictionsEnabled ? "Enabled" : null}
+          />
+          <SummaryRow
+            label="Investor reporting"
+            value={draft.capacities.investorReporting ? "Enabled" : null}
+          />
           <SummaryRow label="Website" value={draft.website} />
           <SummaryRow label="Last updated" value={formatUpdatedAt(updatedAt)} />
         </div>
