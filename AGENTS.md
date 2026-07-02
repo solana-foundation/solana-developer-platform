@@ -48,6 +48,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 ## Repo-local skills
 
 - `skills/sdp-tokenization/SKILL.md`: consumer-facing skill for explaining how to tokenize assets with SDP using the supported public docs and API surface.
+- `.agents/skills/sdp-ui-designer/SKILL.md`: SDP UI design skill for designing, prototyping, reviewing, or implementing payments, wallets, counterparty, and issuance UI. Its bundle ships the canonical token reference (`sdp-design-system.css`) and the UI handoff rules (`AGENTS.md`) alongside the skill; treat those as the design source of truth for UI work.
 
 When updating repo-local skills:
 
