@@ -4,7 +4,7 @@ import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
 import { Plus, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,9 +39,11 @@ type UpdateDraft = (patch: Partial<DraftState>) => void;
 export function StepAssetDetails({
   signerWallets,
   signerWalletsError,
+  showErrors,
 }: {
   signerWallets: PaymentsDashboardWallet[];
   signerWalletsError: string | null;
+  showErrors: boolean;
 }) {
   const { draft, updateDraft } = useIssuanceDraft();
   const [tab, setTab] = useState<string>("overview");
@@ -50,6 +52,28 @@ export function StepAssetDetails({
   const metadata = buildIssuanceMetadata(draft);
   const errors = getAssetDetailsErrors(draft);
   const requiredKeys = getRequiredAssetDetailKeys(draft);
+  const hasErrors = Object.keys(errors).length > 0;
+
+  // Surface a field's error once the user has typed into it (live format
+  // feedback) or once they've attempted to continue (revealing still-empty
+  // required fields). Keeps the form quiet on first load, then guides on submit.
+  const fieldError = (key: keyof DraftState): string | undefined => {
+    const message = errors[key];
+    if (!message) {
+      return undefined;
+    }
+    const hasContent = String(draft[key] ?? "").trim().length > 0;
+    return hasContent || showErrors ? message : undefined;
+  };
+  const descriptionError = fieldError("description");
+
+  // A failed continue attempt highlights fields that all live on the Overview
+  // tab — jump there so the user can see what needs fixing.
+  useEffect(() => {
+    if (showErrors && hasErrors) {
+      setTab("overview");
+    }
+  }, [showErrors, hasErrors]);
 
   return (
     <motion.div
@@ -92,14 +116,14 @@ export function StepAssetDetails({
             title="About this asset"
             description="Basic information that describes what this asset is."
           >
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid items-start gap-4 sm:grid-cols-2">
               <TextField
                 label="Symbol"
                 required
                 value={draft.symbol}
                 onChange={(value) => updateDraft({ symbol: value })}
                 placeholder="e.g., vUSD"
-                error={draft.symbol.trim() ? errors.symbol : undefined}
+                error={fieldError("symbol")}
               />
               <TextField
                 label="Decimals"
@@ -108,7 +132,7 @@ export function StepAssetDetails({
                 value={draft.decimals}
                 onChange={(value) => updateDraft({ decimals: value })}
                 placeholder="e.g., 6"
-                error={draft.decimals.trim() ? errors.decimals : undefined}
+                error={fieldError("decimals")}
               />
             </div>
             <div className="mt-4 grid gap-1.5">
@@ -125,16 +149,27 @@ export function StepAssetDetails({
                 onChange={(event) => updateDraft({ description: event.currentTarget.value })}
                 rows={3}
                 placeholder="Describe what this asset represents."
-                className="w-full rounded-[14px] border border-[rgba(28,28,29,0.14)] bg-white px-4 py-3 text-sm text-[#1c1c1d] outline-none transition-[box-shadow,border-color] placeholder:text-[rgba(28,28,29,0.4)] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)]"
+                aria-invalid={descriptionError ? true : undefined}
+                className={cn(
+                  "w-full rounded-[14px] border bg-white px-4 py-3 text-sm text-[#1c1c1d] outline-none transition-[box-shadow,border-color] placeholder:text-[rgba(28,28,29,0.4)]",
+                  descriptionError
+                    ? "border-[#c71f37] focus:border-[#c71f37] focus:ring-2 focus:ring-[rgba(199,31,55,0.15)]"
+                    : "border-[rgba(28,28,29,0.14)] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)]"
+                )}
               />
+              {descriptionError ? (
+                <p className="text-xs text-[#c71f37]" role="alert">
+                  {descriptionError}
+                </p>
+              ) : null}
             </div>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <div className="mt-4 grid items-start gap-4 sm:grid-cols-2">
               <TextField
                 label="Website"
                 value={draft.website}
                 onChange={(value) => updateDraft({ website: value })}
                 placeholder="https://…"
-                error={errors.website}
+                error={fieldError("website")}
               />
               <TextField
                 label="Logo image URL"
@@ -142,14 +177,14 @@ export function StepAssetDetails({
                 onChange={(value) => updateDraft({ imageUrl: value })}
                 placeholder="https://…/logo.png"
                 help="Shown next to your token in wallets and explorers."
-                error={errors.imageUrl}
+                error={fieldError("imageUrl")}
               />
             </div>
           </FormCard>
 
           {sections.map((section) => (
             <FormCard key={section.title} title={section.title} description={section.description}>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid items-start gap-4 sm:grid-cols-2">
                 {section.fields.map((field) => (
                   <DetailField
                     key={field.key}
@@ -157,7 +192,7 @@ export function StepAssetDetails({
                     draft={draft}
                     updateDraft={updateDraft}
                     required={requiredKeys.has(field.key)}
-                    error={String(draft[field.key] ?? "").trim() ? errors[field.key] : undefined}
+                    error={fieldError(field.key)}
                   />
                 ))}
               </div>
@@ -318,14 +353,9 @@ function TextField({
         onChange={(event) => onChange(event.currentTarget.value)}
         placeholder={placeholder}
         required={required}
-        aria-invalid={error ? true : undefined}
+        error={error}
+        description={help}
       />
-      {error ? (
-        <p className="text-xs text-[#c71f37]" role="alert">
-          {error}
-        </p>
-      ) : null}
-      {!error && help ? <p className="text-xs text-[rgba(28,28,29,0.5)]">{help}</p> : null}
     </div>
   );
 }
@@ -410,6 +440,7 @@ function DetailField({
         </Label>
         <div className="mt-1.5">
           <Select
+            className={cn(error && "ring-2 ring-inset ring-[#c71f37]")}
             value={value || null}
             onValueChange={(next) =>
               updateDraft({ [field.key]: next ?? "" } as Partial<DraftState>)

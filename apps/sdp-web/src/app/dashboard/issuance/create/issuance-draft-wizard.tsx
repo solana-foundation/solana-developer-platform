@@ -3,7 +3,7 @@
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { AnimatePresence } from "motion/react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { createAssetDraftAction } from "./actions";
@@ -46,7 +46,8 @@ function renderStep(
   step: WizardStep,
   detailsStage: DetailsStage,
   signerWallets: PaymentsDashboardWallet[],
-  signerWalletsError: string | null
+  signerWalletsError: string | null,
+  showErrors: boolean
 ) {
   switch (step) {
     case "classification":
@@ -55,7 +56,11 @@ function renderStep(
       return detailsStage === "select" ? (
         <StepSubAssetType />
       ) : (
-        <StepAssetDetails signerWallets={signerWallets} signerWalletsError={signerWalletsError} />
+        <StepAssetDetails
+          signerWallets={signerWallets}
+          signerWalletsError={signerWalletsError}
+          showErrors={showErrors}
+        />
       );
     case "public-info":
       return <StepPublicInfo />;
@@ -81,22 +86,45 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
   } = useIssuanceDraft();
   const [submitting, setSubmitting] = useState(false);
   const [createdTokenId, setCreatedTokenId] = useState<string | null>(null);
+  // Set when the user tries to advance past the Asset-details form with errors:
+  // flips the form into "show all errors" mode and locks Continue until fixed.
+  const [attemptedAdvance, setAttemptedAdvance] = useState(false);
 
   const isClassification = currentStep === "classification";
   const isReview = currentStep === "review";
   const showSummaryRail = currentStep === "asset-details" || isReview;
   const showRail = isClassification || showSummaryRail;
   const blockers = getBlockers(draft);
-  // On the Asset-details form the Continue gate is the full field validation
-  // (required + format); elsewhere it's the coarse structural check.
-  const canContinue =
-    currentStep === "asset-details" && detailsStage === "form"
-      ? Object.keys(getAssetDetailsErrors(draft)).length === 0
-      : canAdvance(currentStep, detailsStage, draft);
+
+  // Reset the attempt flag whenever the step or sub-stage changes, so each step
+  // starts clean and only reveals errors after its own failed Continue.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: step/sub-stage are the reset triggers, not values read in the effect.
+  useEffect(() => {
+    setAttemptedAdvance(false);
+  }, [currentStep, detailsStage]);
+
+  // On the Asset-details form, Continue stays enabled until the user attempts to
+  // advance with validation errors — then it locks (and the fields highlight)
+  // until every error is resolved. Every other step keeps the coarse gate.
+  const isDetailsForm = currentStep === "asset-details" && detailsStage === "form";
+  const detailsErrorCount = Object.keys(getAssetDetailsErrors(draft)).length;
+  const canContinue = isDetailsForm
+    ? !(attemptedAdvance && detailsErrorCount > 0)
+    : canAdvance(currentStep, detailsStage, draft);
 
   const handleCancel = () => {
     reset();
     router.push(ISSUANCE_OVERVIEW_PATH);
+  };
+
+  const handleAdvance = () => {
+    // A failed attempt on the details form reveals the field errors and blocks
+    // navigation instead of silently no-oping; otherwise advance normally.
+    if (isDetailsForm && detailsErrorCount > 0) {
+      setAttemptedAdvance(true);
+      return;
+    }
+    advance();
   };
 
   const handleSubmit = async () => {
@@ -156,7 +184,13 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
       <div className={showRail ? "grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]" : undefined}>
         <div className="min-w-0">
           <AnimatePresence mode="wait">
-            {renderStep(currentStep, detailsStage, signerWallets, signerWalletsError)}
+            {renderStep(
+              currentStep,
+              detailsStage,
+              signerWallets,
+              signerWalletsError,
+              attemptedAdvance
+            )}
           </AnimatePresence>
         </div>
         {isClassification ? <ClassificationInfoRail /> : null}
@@ -190,7 +224,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
         </Button>
         {/* On Review the primary action lives in the summary rail (per sketch). */}
         {isReview ? null : (
-          <Button type="button" onClick={advance} disabled={primaryDisabled}>
+          <Button type="button" onClick={handleAdvance} disabled={primaryDisabled}>
             {primaryLabel}
           </Button>
         )}

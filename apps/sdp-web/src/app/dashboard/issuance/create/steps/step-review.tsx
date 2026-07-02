@@ -1,26 +1,40 @@
 "use client";
 
 import {
+  AlignLeft,
+  ArrowLeftRight,
+  Building2,
+  ClipboardList,
+  DollarSign,
   ExternalLink,
   FileText,
   Globe,
+  Hash,
+  Image as ImageIcon,
   Info,
+  KeyRound,
+  Layers,
   type LucideIcon,
   Pencil,
   ShieldCheck,
+  Tag,
+  Type,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
-import { accessControlLabel } from "../asset-details-config";
+import { accessControlLabel, getCategorySections } from "../asset-details-config";
 import { getAssetTypeLabel, getCategoryLabel } from "../asset-taxonomy";
 import type { DraftState, WizardStep } from "../issuance-draft-wizard.types";
 import { useIssuanceDraft } from "../use-issuance-draft";
 
 interface Field {
+  icon: LucideIcon;
   label: string;
   value: string | null;
   hint?: string;
   href?: string | null;
+  /** Optional image URL rendered as a small thumbnail beside the value (e.g. logo). */
+  preview?: string | null;
 }
 
 interface Section {
@@ -52,6 +66,12 @@ export function StepReview() {
     draft.accessControl === "blocklist" ||
     draft.capacities.transferApprovals;
   const website = draft.website.trim();
+  const logo = draft.imageUrl.trim();
+  // Issuer name is only collected for categories whose detail form includes it
+  // (stablecoins & tokenized securities), so only surface it when it applies.
+  const collectsIssuerName = getCategorySections(draft.assetCategory).some((section) =>
+    section.fields.some((field) => field.key === "issuerName")
+  );
 
   const sections: Section[] = [
     {
@@ -60,10 +80,10 @@ export function StepReview() {
       description: "The asset and how it will be represented.",
       editStep: "classification",
       fields: [
-        { label: "Asset category", value: categoryLabel },
-        { label: "Asset type", value: typeLabel },
-        { label: "Name", value: draft.name },
-        { label: "Symbol", value: draft.symbol },
+        { icon: Layers, label: "Asset category", value: categoryLabel },
+        { icon: Tag, label: "Asset type", value: typeLabel },
+        { icon: Type, label: "Name", value: draft.name },
+        { icon: DollarSign, label: "Symbol", value: draft.symbol },
       ],
     },
     {
@@ -72,9 +92,18 @@ export function StepReview() {
       description: "Key information about the asset.",
       editStep: "asset-details",
       fields: [
-        { label: "Description", value: draft.description },
-        { label: "Decimals", value: draft.decimals },
-        { label: "Website", value: website || null, href: website || null },
+        { icon: AlignLeft, label: "Description", value: draft.description },
+        ...(collectsIssuerName
+          ? [
+              {
+                icon: Building2,
+                label: "Issuer name",
+                value: draft.issuerName.trim() || null,
+              },
+            ]
+          : []),
+        { icon: Hash, label: "Decimals", value: draft.decimals },
+        { icon: Globe, label: "Website", value: website || null, href: website || null },
       ],
     },
     {
@@ -84,11 +113,13 @@ export function StepReview() {
       editStep: "asset-details",
       fields: [
         {
+          icon: KeyRound,
           label: "Access control",
           value: accessControlLabel(draft.accessControl),
           hint: accessControlHint(draft.accessControl),
         },
         {
+          icon: ArrowLeftRight,
           label: "Transfer restrictions",
           value: transferRestrictionsEnabled ? "Enabled" : "Disabled",
           hint: transferRestrictionsEnabled
@@ -96,6 +127,7 @@ export function StepReview() {
             : undefined,
         },
         {
+          icon: ClipboardList,
           label: "Investor reporting",
           value: draft.capacities.investorReporting ? "Enabled" : "Disabled",
           hint: draft.capacities.investorReporting
@@ -110,14 +142,16 @@ export function StepReview() {
       description: "The safe information that will be visible to anyone.",
       editStep: "public-info",
       fields: [
-        { label: "Public name", value: draft.name },
-        { label: "Public symbol", value: draft.symbol },
+        { icon: Type, label: "Public name", value: draft.name },
+        { icon: DollarSign, label: "Public symbol", value: draft.symbol },
         {
+          icon: ImageIcon,
           label: "Logo",
-          value: draft.imageUrl.trim() || null,
-          href: draft.imageUrl.trim() || null,
+          value: logo || null,
+          href: logo || null,
+          preview: logo || null,
         },
-        { label: "Description (public)", value: draft.description },
+        { icon: AlignLeft, label: "Description (public)", value: draft.description },
       ],
     },
   ];
@@ -151,11 +185,11 @@ export function StepReview() {
 function ReviewSection({ section, onEdit }: { section: Section; onEdit: () => void }) {
   const Icon = section.icon;
   return (
-    <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.7)]">
-            <Icon className="h-4 w-4" />
+    <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white">
+      <div className="flex items-start justify-between gap-4 border-b border-[rgba(28,28,29,0.07)] px-5 py-4">
+        <div className="flex items-start gap-3.5">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[rgba(28,28,29,0.05)] text-[#1c1c1d]">
+            <Icon className="h-5 w-5" />
           </span>
           <div className="min-w-0">
             <p className="text-base font-medium text-[#1c1c1d]">{section.title}</p>
@@ -172,7 +206,7 @@ function ReviewSection({ section, onEdit }: { section: Section; onEdit: () => vo
         </button>
       </div>
 
-      <dl className="mt-4 divide-y divide-[rgba(28,28,29,0.06)] border-t border-[rgba(28,28,29,0.06)]">
+      <dl className="divide-y divide-[rgba(28,28,29,0.06)] px-5 py-1">
         {section.fields.map((field) => (
           <FieldRow key={field.label} field={field} />
         ))}
@@ -182,19 +216,29 @@ function ReviewSection({ section, onEdit }: { section: Section; onEdit: () => vo
 }
 
 function FieldRow({ field }: { field: Field }) {
+  const Icon = field.icon;
   const hasValue = field.value !== null && field.value.trim().length > 0;
+  const showPreview = hasValue && Boolean(field.preview?.trim());
   return (
-    <div className="flex flex-col gap-0.5 py-2.5 sm:flex-row sm:gap-4">
-      <dt className="shrink-0 text-sm text-[rgba(28,28,29,0.52)] sm:w-44 sm:pt-px">
+    <div className="flex flex-col gap-1 py-3 sm:flex-row sm:items-start sm:gap-4">
+      <dt className="flex shrink-0 items-center gap-2 text-sm text-[rgba(28,28,29,0.52)] sm:w-52 sm:pt-0.5">
+        <Icon className="h-4 w-4 shrink-0 text-[rgba(28,28,29,0.38)]" />
         {field.label}
       </dt>
       <dd className="min-w-0 flex-1">
-        {hasValue && field.href ? (
+        {showPreview ? (
+          // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
+          <img
+            src={field.preview ?? undefined}
+            alt=""
+            className="h-10 w-10 shrink-0 rounded-lg bg-white object-cover ring-1 ring-black/5"
+          />
+        ) : hasValue && field.href ? (
           <a
             href={field.href}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 break-all text-sm font-medium text-[#1c1c1d] hover:underline"
+            className="inline-flex min-w-0 items-center gap-1 break-all text-sm font-normal text-[#1c1c1d] hover:underline"
           >
             {field.value}
             <ExternalLink className="h-3 w-3 shrink-0" />
@@ -202,16 +246,14 @@ function FieldRow({ field }: { field: Field }) {
         ) : (
           <p
             className={cn(
-              "break-words text-sm font-medium",
+              "break-words text-sm font-normal",
               hasValue ? "text-[#1c1c1d]" : "text-[rgba(28,28,29,0.4)]"
             )}
           >
             {hasValue ? field.value : "—"}
           </p>
         )}
-        {field.hint ? (
-          <p className="mt-0.5 text-xs text-[rgba(28,28,29,0.5)]">{field.hint}</p>
-        ) : null}
+        {field.hint ? <p className="mt-1 text-xs text-[rgba(28,28,29,0.5)]">{field.hint}</p> : null}
       </dd>
     </div>
   );
