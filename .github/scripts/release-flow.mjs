@@ -8,12 +8,12 @@ const dryRun = process.argv.includes("--dry-run");
 const repo = process.env.GITHUB_REPOSITORY ?? detectRepositoryFromGit();
 const token = process.env.GITHUB_TOKEN;
 
-if (mode !== "release") {
-  console.error("Usage: node .github/scripts/release-flow.mjs release [--dry-run]");
+if (!["plan", "release"].includes(mode)) {
+  console.error("Usage: node .github/scripts/release-flow.mjs <plan|release> [--dry-run]");
   process.exit(1);
 }
 
-if (!dryRun && (!repo || !token)) {
+if (mode === "release" && !dryRun && (!repo || !token)) {
   console.error("GITHUB_REPOSITORY and GITHUB_TOKEN are required");
   process.exit(1);
 }
@@ -127,6 +127,14 @@ function commitRecords(range) {
     })
     .filter((entry) => !entry.subject.startsWith("chore(main): release "))
     .filter((entry) => entry.subject !== "chore: format release files");
+}
+
+function parsedCommitsSince(previousTag) {
+  const range = previousTag ? `${previousTag}..HEAD` : "HEAD";
+  return commitRecords(range).map((entry) => ({
+    ...entry,
+    ...parseConventionalCommit(entry.subject, entry.body),
+  }));
 }
 
 function parseConventionalCommit(subject, body) {
@@ -288,6 +296,11 @@ async function githubRequest(method, resourcePath, body) {
   return response.json();
 }
 
+async function githubReleaseExists(tagName) {
+  const existingReleases = await githubRequest("GET", `/repos/${repo}/releases?per_page=100`);
+  return existingReleases.some((release) => release.tag_name === tagName);
+}
+
 function ensureCleanTree() {
   const status = git(["status", "--short"]);
   if (status.trim()) {
@@ -326,10 +339,7 @@ async function publishRelease(version, previousTag) {
     });
   }
 
-  const existingReleases = await githubRequest("GET", `/repos/${repo}/releases?per_page=100`);
-  const alreadyPublished = existingReleases.some((release) => release.tag_name === tagName);
-
-  if (alreadyPublished) {
+  if (await githubReleaseExists(tagName)) {
     console.log(`GitHub release ${tagName} already exists`);
     return;
   }
@@ -350,6 +360,61 @@ async function publishRelease(version, previousTag) {
   });
 
   console.log(`Published release ${tagName}`);
+}
+
+async function planRelease() {
+  const subject = latestCommitSubject();
+  const packageJson = readJson(packageJsonPath);
+  const releaseVersion = versionFromReleaseSubject(subject);
+
+  if (releaseVersion) {
+    if (packageJson.version !== releaseVersion) {
+      throw new Error(
+        `Release commit version ${releaseVersion} does not match package.json ${packageJson.version}`
+      );
+    }
+
+    const tagName = `v${releaseVersion}`;
+    const alreadyPublished = token ? await githubReleaseExists(tagName) : false;
+    return {
+      reason: alreadyPublished
+        ? `Release ${tagName} is already published`
+        : `Release ${tagName} needs publishing`,
+      shouldRelease: !alreadyPublished,
+    };
+  }
+
+  const previousTag = latestReleaseTag();
+  const previousVersion = versionFromReleaseTag(previousTag);
+
+  if (previousVersion && packageJson.version !== previousVersion) {
+    return {
+      reason: `package.json ${packageJson.version} is ahead of ${previousTag}`,
+      shouldRelease: false,
+    };
+  }
+
+  const commits = parsedCommitsSince(previousTag);
+  return {
+    reason:
+      commits.length === 0
+        ? "No unreleased commits found"
+        : `${commits.length} unreleased commit(s) found`,
+    shouldRelease: commits.length > 0,
+  };
+}
+
+function writePlan(plan) {
+  const shouldRelease = plan.shouldRelease ? "true" : "false";
+  console.log(`should_release=${shouldRelease}`);
+  console.log(`reason=${plan.reason}`);
+
+  if (process.env.GITHUB_OUTPUT) {
+    fs.appendFileSync(
+      process.env.GITHUB_OUTPUT,
+      `should_release=${shouldRelease}\nreason=${plan.reason}\n`
+    );
+  }
 }
 
 async function release() {
@@ -384,11 +449,7 @@ async function release() {
     return;
   }
 
-  const range = previousTag ? `${previousTag}..HEAD` : "HEAD";
-  const parsedCommits = commitRecords(range).map((entry) => ({
-    ...entry,
-    ...parseConventionalCommit(entry.subject, entry.body),
-  }));
+  const parsedCommits = parsedCommitsSince(previousTag);
 
   if (parsedCommits.length === 0) {
     console.log("No unreleased commits found");
@@ -437,4 +498,8 @@ async function release() {
   await publishRelease(nextVersion, previousTag);
 }
 
-await release();
+if (mode === "plan") {
+  writePlan(await planRelease());
+} else {
+  await release();
+}

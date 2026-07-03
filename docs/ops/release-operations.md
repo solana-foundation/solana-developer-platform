@@ -129,8 +129,9 @@ The `main` branch automatically deploys to the **dev environment** via the [Depl
 The Release Flow GitHub Action automatically:
 
 1. Analyzes commits since the last release
-2. Determines the next version (MAJOR/MINOR/PATCH)
-3. Waits on the GitHub Actions `release-production` environment approval
+2. Skips without approval if no release or recovery work is needed
+3. Determines the next version (MAJOR/MINOR/PATCH)
+4. Waits on the GitHub Actions `release-production` environment approval
 
 After approval, it commits the release files directly to `main`:
 
