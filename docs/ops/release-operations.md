@@ -29,10 +29,17 @@ Before deploying, configure these GitHub settings:
 
 ### GitHub Environments
 
-Create two environments in repository settings:
+Create these environments in repository settings:
 
 - **Environment**: `dev`
 - **Environment**: `production`
+- **Environment**: `release-production`
+
+Configure required reviewers on `release-production`. This is the human release
+approval gate before the release commit, tag, and production deploy are created.
+The `production` environment is used by the deploy workflow for production
+secrets and should only have required reviewers if you intentionally want a
+second approval on the tag deploy itself.
 
 ### Environment Secrets
 
@@ -43,6 +50,9 @@ Add to each environment:
 
 **For `production` environment:**
 - `DOPPLER_TOKEN` — Doppler API token with read access to `prd` config
+
+**For `release-production` environment:**
+- No secrets required
 
 ### Repository Secrets
 
@@ -120,7 +130,7 @@ The Release Flow GitHub Action automatically:
 
 1. Analyzes commits since the last release
 2. Determines the next version (MAJOR/MINOR/PATCH)
-3. Waits on the GitHub Actions `production` environment approval
+3. Waits on the GitHub Actions `release-production` environment approval
 
 After approval, it commits the release files directly to `main`:
 
