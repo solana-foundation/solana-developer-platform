@@ -307,10 +307,19 @@ function tagExists(tagName) {
     .includes(tagName);
 }
 
+function configureGitIdentity() {
+  git(["config", "user.name", "github-actions[bot]"], { capture: false });
+  // biome-ignore lint/security/noSecrets: Public GitHub Actions bot noreply address, not a secret.
+  git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], {
+    capture: false,
+  });
+}
+
 async function publishRelease(version, previousTag) {
   const tagName = `v${version}`;
 
   if (!tagExists(tagName)) {
+    configureGitIdentity();
     git(["tag", "-a", tagName, "-m", tagName], { capture: false });
     git(["push", `https://x-access-token:${token}@github.com/${repo}.git`, tagName], {
       capture: false,
@@ -416,11 +425,7 @@ async function release() {
     return;
   }
 
-  git(["config", "user.name", "github-actions[bot]"], { capture: false });
-  // biome-ignore lint/security/noSecrets: Public GitHub Actions bot noreply address, not a secret.
-  git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], {
-    capture: false,
-  });
+  configureGitIdentity();
   git(["add", "package.json", "CHANGELOG.md", ".github/.release-please-manifest.json"], {
     capture: false,
   });
