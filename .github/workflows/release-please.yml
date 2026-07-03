@@ -1,9 +1,12 @@
 name: Release Flow
 
 on:
-  push:
+  workflow_dispatch:
+  pull_request:
     branches:
       - main
+    types:
+      - closed
 
 permissions:
   contents: write
@@ -11,7 +14,7 @@ permissions:
 
 jobs:
   prepare-release-pr:
-    if: "${{ !startsWith(github.event.head_commit.message, 'chore(main): release ') }}"
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,13 +35,21 @@ jobs:
         run: node .github/scripts/release-flow.mjs prepare
 
   publish-release:
-    if: "${{ startsWith(github.event.head_commit.message, 'chore(main): release ') }}"
+    if: >-
+      ${{
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.merged == true &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.ref == 'codex/release-main' &&
+        startsWith(github.event.pull_request.title, 'chore(main): release ')
+      }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.3
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
       - name: Setup Node
@@ -50,4 +61,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_PR_TITLE: ${{ github.event.pull_request.title }}
         run: node .github/scripts/release-flow.mjs publish
