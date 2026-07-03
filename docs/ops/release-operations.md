@@ -115,31 +115,29 @@ git push origin main
 
 The `main` branch automatically deploys to the **dev environment** via the [Deploy SDP API workflow](../../.github/workflows/deploy-sdp-api.yml).
 
-### 3. Release Flow Opens a Release PR
+### 3. Approve the Release Flow
 
 The Release Flow GitHub Action automatically:
 
 1. Analyzes commits since the last release
 2. Determines the next version (MAJOR/MINOR/PATCH)
-3. Opens a release PR with:
+3. Waits on the GitHub Actions `production` environment approval
+
+After approval, it commits the release files directly to `main`:
+
    - Updated `package.json`
    - Updated `.github/.release-please-manifest.json`
    - Generated `CHANGELOG.md` entries
-   - Proposed version tag
 
-Example release PR title: `chore(main): release 1.2.0`
+Example release commit title: `chore(main): release 1.2.0`
 
 Release automation uses the repository GitHub App credentials in
 `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY`, not a personal GitHub token.
+The GitHub App must be allowed to push release commits to protected `main`.
 
-### 4. Merge the Release PR and Approve Production
+### 4. Publish Production
 
-When the release PR is merged, the publish job waits on the GitHub Actions
-`production` environment before creating the tag and GitHub release. Configure
-required reviewers on that environment in GitHub if production release approval
-is required.
-
-After approval:
+After the release commit is pushed:
 
 1. Release Flow creates a Git tag (e.g., `v1.2.0`)
 2. The tag push triggers the [Deploy SDP API workflow](../../.github/workflows/deploy-sdp-api.yml)

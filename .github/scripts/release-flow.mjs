@@ -8,8 +8,8 @@ const dryRun = process.argv.includes("--dry-run");
 const repo = process.env.GITHUB_REPOSITORY ?? detectRepositoryFromGit();
 const token = process.env.GITHUB_TOKEN;
 
-if (!mode || !["prepare", "publish"].includes(mode)) {
-  console.error("Usage: node .github/scripts/release-flow.mjs <prepare|publish> [--dry-run]");
+if (mode !== "release") {
+  console.error("Usage: node .github/scripts/release-flow.mjs release [--dry-run]");
   process.exit(1);
 }
 
@@ -22,7 +22,6 @@ const repoRoot = process.cwd();
 const packageJsonPath = path.join(repoRoot, "package.json");
 const changelogPath = path.join(repoRoot, "CHANGELOG.md");
 const manifestPath = path.join(repoRoot, ".github/.release-please-manifest.json");
-const releaseBranch = "codex/release-main";
 
 const changelogSections = [
   { key: "feat", heading: "Features" },
@@ -272,46 +271,11 @@ async function githubRequest(method, resourcePath, body) {
   return response.json();
 }
 
-async function upsertReleasePullRequest(version, body) {
-  const [owner] = repo.split("/");
-  const pulls = await githubRequest(
-    "GET",
-    `/repos/${repo}/pulls?state=open&base=main&head=${owner}:${encodeURIComponent(releaseBranch)}`
-  );
-
-  if (pulls.length > 0) {
-    const existing = pulls[0];
-    await githubRequest("PATCH", `/repos/${repo}/pulls/${existing.number}`, {
-      title: `chore(main): release ${version}`,
-      body,
-    });
-    return existing.number;
-  }
-
-  const created = await githubRequest("POST", `/repos/${repo}/pulls`, {
-    title: `chore(main): release ${version}`,
-    head: releaseBranch,
-    base: "main",
-    body,
-  });
-
-  return created.number;
-}
-
 function ensureCleanTree() {
   const status = git(["status", "--short"]);
   if (status.trim()) {
     throw new Error(`Working tree is not clean:\n${status}`);
   }
-}
-
-function releasePrBody(version, sectionMarkdown) {
-  return `## Summary
-- release ${version}
-- update the root package version and changelog
-
-## Changelog
-${sectionMarkdown}`.trim();
 }
 
 function latestCommitSubject() {
@@ -326,9 +290,48 @@ function tagExists(tagName) {
     .includes(tagName);
 }
 
-async function prepareRelease() {
+async function publishRelease(version, previousTag) {
+  const tagName = `v${version}`;
+
+  if (tagExists(tagName)) {
+    console.log(`Tag ${tagName} already exists`);
+    return;
+  }
+
+  git(["tag", "-a", tagName, "-m", tagName], { capture: false });
+  git(["push", `https://x-access-token:${token}@github.com/${repo}.git`, tagName], {
+    capture: false,
+  });
+
+  const notes = await githubRequest("POST", `/repos/${repo}/releases/generate-notes`, {
+    tag_name: tagName,
+    previous_tag_name: previousTag ?? undefined,
+    target_commitish: git(["rev-parse", "HEAD"]),
+  });
+
+  const existingReleases = await githubRequest("GET", `/repos/${repo}/releases?per_page=100`);
+  const alreadyPublished = existingReleases.some((release) => release.tag_name === tagName);
+
+  if (alreadyPublished) {
+    console.log(`GitHub release ${tagName} already exists`);
+    return;
+  }
+
+  await githubRequest("POST", `/repos/${repo}/releases`, {
+    tag_name: tagName,
+    name: tagName,
+    body: notes.body,
+    draft: false,
+    prerelease: false,
+    generate_release_notes: false,
+  });
+
+  console.log(`Published release ${tagName}`);
+}
+
+async function release() {
   if (latestCommitSubject().startsWith("chore(main): release ")) {
-    console.log("Skipping release preparation on release commit");
+    console.log("Skipping release on release commit");
     return;
   }
 
@@ -366,8 +369,6 @@ async function prepareRelease() {
 
   ensureCleanTree();
 
-  git(["checkout", "-B", releaseBranch], { capture: false });
-
   manifest["."] = nextVersion;
 
   updatePackageVersion(packageJsonPath, packageJson.version, nextVersion);
@@ -396,88 +397,11 @@ async function prepareRelease() {
     capture: false,
   });
   git(["commit", "-m", `chore(main): release ${nextVersion}`], { capture: false });
-  git(
-    [
-      "push",
-      `https://x-access-token:${token}@github.com/${repo}.git`,
-      `HEAD:${releaseBranch}`,
-      "--force",
-    ],
-    { capture: false }
-  );
-
-  const prNumber = await upsertReleasePullRequest(
-    nextVersion,
-    releasePrBody(nextVersion, sectionMarkdown)
-  );
-  console.log(`Release PR ready: #${prNumber}`);
-}
-
-async function publishRelease() {
-  const packageJson = readJson(packageJsonPath);
-  const version = packageJson.version;
-  const tagName = `v${version}`;
-  const subject = latestCommitSubject();
-  const releaseSubject = `chore(main): release ${version}`;
-  const releasePrTitle = process.env.RELEASE_PR_TITLE?.trim();
-  const releasePrTitleMatches =
-    releasePrTitle === releaseSubject || releasePrTitle?.startsWith(`${releaseSubject} `);
-
-  if (!subject.startsWith(releaseSubject) && !releasePrTitleMatches) {
-    console.log(`Skipping release publish for non-release commit: ${subject}`);
-    return;
-  }
-
-  if (tagExists(tagName)) {
-    console.log(`Tag ${tagName} already exists`);
-    return;
-  }
-
-  const previousTag = latestReleaseTag();
-
-  if (dryRun) {
-    console.log(`Would publish ${tagName} after ${previousTag ?? "initial release"}`);
-    return;
-  }
-
-  git(["config", "user.name", "github-actions[bot]"], { capture: false });
-  // biome-ignore lint/security/noSecrets: Public GitHub Actions bot noreply address, not a secret.
-  git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], {
-    capture: false,
-  });
-  git(["tag", "-a", tagName, "-m", tagName], { capture: false });
-  git(["push", `https://x-access-token:${token}@github.com/${repo}.git`, tagName], {
+  git(["push", `https://x-access-token:${token}@github.com/${repo}.git`, "HEAD:main"], {
     capture: false,
   });
 
-  const notes = await githubRequest("POST", `/repos/${repo}/releases/generate-notes`, {
-    tag_name: tagName,
-    previous_tag_name: previousTag ?? undefined,
-    target_commitish: git(["rev-parse", "HEAD"]),
-  });
-
-  const existingReleases = await githubRequest("GET", `/repos/${repo}/releases?per_page=100`);
-  const alreadyPublished = existingReleases.some((release) => release.tag_name === tagName);
-
-  if (alreadyPublished) {
-    console.log(`GitHub release ${tagName} already exists`);
-    return;
-  }
-
-  await githubRequest("POST", `/repos/${repo}/releases`, {
-    tag_name: tagName,
-    name: tagName,
-    body: notes.body,
-    draft: false,
-    prerelease: false,
-    generate_release_notes: false,
-  });
-
-  console.log(`Published release ${tagName}`);
+  await publishRelease(nextVersion, previousTag);
 }
 
-if (mode === "prepare") {
-  await prepareRelease();
-} else {
-  await publishRelease();
-}
+await release();

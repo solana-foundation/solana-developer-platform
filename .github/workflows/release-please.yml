@@ -4,56 +4,18 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
-    types:
-      - closed
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
-  prepare-release-pr:
-    if: ${{ github.event_name == 'push' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create release app token
-        id: release-app
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
-      - name: Checkout
-        uses: actions/checkout@v6.0.3
-        with:
-          fetch-depth: 0
-          token: ${{ steps.release-app.outputs.token }}
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Prepare release PR
-        env:
-          GITHUB_TOKEN: ${{ steps.release-app.outputs.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: node .github/scripts/release-flow.mjs prepare
-
-  publish-release:
-    if: >-
-      ${{
-        github.event_name == 'pull_request' &&
-        github.event.pull_request.merged == true &&
-        github.event.pull_request.head.repo.full_name == github.repository &&
-        github.event.pull_request.head.ref == 'codex/release-main' &&
-        startsWith(github.event.pull_request.title, 'chore(main): release ')
-      }}
+  release:
+    if: "${{ !startsWith(github.event.head_commit.message, 'chore(main): release ') }}"
     runs-on: ubuntu-latest
     environment: production
+    concurrency:
+      group: release-flow-main
+      cancel-in-progress: true
     steps:
       - name: Create release app token
         id: release-app
@@ -66,7 +28,7 @@ jobs:
         uses: actions/checkout@v6.0.3
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: main
           token: ${{ steps.release-app.outputs.token }}
 
       - name: Setup Node
@@ -74,9 +36,8 @@ jobs:
         with:
           node-version: 22
 
-      - name: Publish release tag and GitHub release
+      - name: Publish approved release
         env:
           GITHUB_TOKEN: ${{ steps.release-app.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          RELEASE_PR_TITLE: ${{ github.event.pull_request.title }}
-        run: node .github/scripts/release-flow.mjs publish
+        run: node .github/scripts/release-flow.mjs release
