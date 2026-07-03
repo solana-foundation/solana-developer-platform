@@ -3,6 +3,7 @@ import type { RampProviderId } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import { Webhook } from "svix";
 import { getDb } from "@/db";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
 import { readString } from "@/lib/json";
@@ -281,7 +282,7 @@ async function ensureOrganizationMapping(
       });
     }
   } catch (err) {
-    if (err instanceof Error && err.message?.includes("UNIQUE constraint")) {
+    if (isPostgresUniqueViolation(err)) {
       const retry = await findOrganizationMapping(c, org.id);
       if (retry) {
         return {
