@@ -82,18 +82,35 @@ function updatePackageVersion(filePath, currentVersion, nextVersion) {
   fs.writeFileSync(filePath, updated);
 }
 
-function latestReleaseTag() {
+function releaseTags() {
   const output = git(["tag", "--list", "v*.*.*", "--sort=-v:refname"]);
-  return (
-    output
-      .split("\n")
-      .map((line) => line.trim())
-      .find(Boolean) || null
-  );
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function latestReleaseTag() {
+  return releaseTags()[0] ?? null;
+}
+
+function previousReleaseTag(tagName) {
+  const tags = releaseTags();
+  const index = tags.indexOf(tagName);
+
+  if (index === -1) {
+    return tags[0] ?? null;
+  }
+
+  return tags[index + 1] ?? null;
 }
 
 function versionFromReleaseTag(tagName) {
   return tagName?.match(/^v(\d+\.\d+\.\d+)$/)?.[1] ?? null;
+}
+
+function versionFromReleaseSubject(subject) {
+  return subject.match(/^chore\(main\): release (\d+\.\d+\.\d+)/)?.[1] ?? null;
 }
 
 function commitRecords(range) {
@@ -327,12 +344,26 @@ async function publishRelease(version, previousTag) {
 }
 
 async function release() {
-  if (latestCommitSubject().startsWith("chore(main): release ")) {
-    console.log("Skipping release on release commit");
+  const subject = latestCommitSubject();
+  const packageJson = readJson(packageJsonPath);
+  const releaseVersion = versionFromReleaseSubject(subject);
+
+  if (releaseVersion) {
+    if (packageJson.version !== releaseVersion) {
+      throw new Error(
+        `Release commit version ${releaseVersion} does not match package.json ${packageJson.version}`
+      );
+    }
+
+    console.log(`Publishing release ${releaseVersion} from release commit`);
+    if (dryRun) {
+      return;
+    }
+
+    await publishRelease(releaseVersion, previousReleaseTag(`v${releaseVersion}`));
     return;
   }
 
-  const packageJson = readJson(packageJsonPath);
   const manifest = readJson(manifestPath);
   const previousTag = latestReleaseTag();
   const previousVersion = versionFromReleaseTag(previousTag);
