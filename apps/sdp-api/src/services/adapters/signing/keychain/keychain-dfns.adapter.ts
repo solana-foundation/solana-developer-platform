@@ -57,7 +57,10 @@ export class KeychainDfnsAdapter extends BaseKeychainAdapter {
   private async getDfnsSigner(walletId?: string): Promise<DfnsSigner> {
     const normalizedWalletId = walletId ?? this.config.defaultWalletId;
     if (!normalizedWalletId) {
-      throw new SigningError("DFNS wallet ID is required", "PROVIDER_NOT_CONFIGURED");
+      throw new SigningError(
+        `${this.providerLabel} wallet ID is required`,
+        "PROVIDER_NOT_CONFIGURED"
+      );
     }
 
     const cacheKey = normalizedWalletId;

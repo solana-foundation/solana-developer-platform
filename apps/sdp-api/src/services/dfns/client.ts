@@ -135,6 +135,7 @@ interface DfnsClientContext {
   baseUrl: string;
   /** Provider display label for error messages ("DFNS" or the white-label name). */
   providerLabel: string;
+  userAgent: string;
 }
 
 interface DfnsRequestOptions {
@@ -154,11 +155,11 @@ interface DfnsSignatureResult {
 }
 
 const DFNS_USER_AGENT = "sdp-api-dfns/1.0";
+const IBM_HAVEN_USER_AGENT = "sdp-api-ibm-haven/1.0";
 
 const DFNS_DEFAULT_HEADERS: Readonly<Record<string, string>> = {
   Accept: "application/json",
   "Content-Type": "application/json",
-  "User-Agent": DFNS_USER_AGENT,
 };
 
 function createDfnsCredentialSignature(
@@ -177,7 +178,10 @@ function createDfnsCredentialSignature(
     // If parsing fails, fall back to using the PEM directly.
   }
 
-  const attempts: Array<{ algorithm: "sha256" | "none"; digest: string | undefined }> = [];
+  const attempts: Array<{
+    algorithm: "sha256" | "none";
+    digest: string | undefined;
+  }> = [];
   if (keyType === "rsa" || keyType === "rsa-pss") {
     attempts.push(
       { algorithm: "sha256", digest: "sha256" },
@@ -257,6 +261,7 @@ function createDfnsRequestHeaders(
   return {
     Authorization: `Bearer ${ctx.authToken}`,
     ...DFNS_DEFAULT_HEADERS,
+    "User-Agent": ctx.userAgent,
     ...(userActionToken ? { "x-dfns-useraction": userActionToken } : {}),
   };
 }
@@ -296,6 +301,7 @@ function resolveDfnsContext(env: Env, options?: { apiBaseUrl?: string }): DfnsCl
     privateKey,
     baseUrl: options?.apiBaseUrl ?? env.DFNS_API_BASE_URL ?? DEFAULT_DFNS_API_BASE_URL,
     providerLabel: DFNS_PROVIDER_LABEL,
+    userAgent: DFNS_USER_AGENT,
   };
 }
 
@@ -558,6 +564,7 @@ function resolveIbmHavenContext(env: Env, options?: { apiBaseUrl?: string }): Df
     privateKey,
     baseUrl: options?.apiBaseUrl ?? env.IBM_HAVEN_API_BASE_URL ?? DEFAULT_IBM_HAVEN_API_BASE_URL,
     providerLabel: IBM_HAVEN_PROVIDER_LABEL,
+    userAgent: IBM_HAVEN_USER_AGENT,
   };
 }
 
