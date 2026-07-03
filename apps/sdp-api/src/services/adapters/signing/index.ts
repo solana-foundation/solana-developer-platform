@@ -13,6 +13,7 @@
  * - "para": Para hosted wallets (KeychainParaAdapter)
  * - "turnkey": Turnkey hosted wallets (KeychainTurnkeyAdapter)
  * - "dfns": DFNS hosted wallets (KeychainDfnsAdapter)
+ * - "ibm_haven": IBM Digital Asset Haven hosted wallets (KeychainIbmHavenAdapter)
  * - "utila": Utila vault wallets (KeychainUtilaAdapter)
  */
 
