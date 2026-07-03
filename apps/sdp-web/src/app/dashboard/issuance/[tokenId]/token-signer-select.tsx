@@ -12,6 +12,10 @@ interface TokenSignerSelectProps {
   onSignerWalletIdChange: (value: string) => void;
   label?: string;
   showSelectionSummary?: boolean;
+  /** When true, an empty wallet list is an expected/optional state (e.g. draft
+   *  creation, which falls back to the project's default signer) rather than a
+   *  blocking error — keeps the helper text neutral instead of red. */
+  optional?: boolean;
 }
 
 export function TokenSignerSelect({
@@ -21,15 +25,27 @@ export function TokenSignerSelect({
   onSignerWalletIdChange,
   label = "Signer",
   showSelectionSummary = false,
+  optional = false,
 }: TokenSignerSelectProps) {
   const fieldId = useId();
-  const isUnavailable = Boolean(signerUnavailableReason) || signerWallets.length === 0;
+  const hasReason = Boolean(signerUnavailableReason);
+  const hasNoWallets = !hasReason && signerWallets.length === 0;
+  const isUnavailable = hasReason || signerWallets.length === 0;
   const isLocked = !isUnavailable && signerWallets.length === 1;
-  const message = signerUnavailableReason
+  // Red only signals a genuine problem: an explicit unavailable reason, or no
+  // wallets in a context that requires a signer. An empty list where the signer
+  // is optional (draft creation) is expected, so it stays neutral — and we never
+  // say "the selected wallet" when there is nothing to select.
+  const isError = hasReason || (hasNoWallets && !optional);
+  const message = hasReason
     ? signerUnavailableReason
-    : isLocked
-      ? "SDP will sign this action with the required authority wallet."
-      : "SDP will sign this transaction with the selected wallet.";
+    : hasNoWallets
+      ? optional
+        ? "No signer wallets available — SDP will use the project's default signer."
+        : "No signer wallets available."
+      : isLocked
+        ? "SDP will sign this action with the required authority wallet."
+        : "SDP will sign this transaction with the selected wallet.";
   const selectedWallet =
     signerWallets.find((wallet) => wallet.walletId === signerWalletId) ?? signerWallets[0] ?? null;
 
@@ -65,7 +81,7 @@ export function TokenSignerSelect({
       <p
         className={[
           "text-sm leading-5",
-          isUnavailable ? "text-[#9e2b38]" : "text-[rgba(28,28,29,0.68)]",
+          isError ? "text-[#9e2b38]" : "text-[rgba(28,28,29,0.68)]",
         ].join(" ")}
       >
         {message}

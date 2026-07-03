@@ -256,13 +256,13 @@ export function StepAssetDetails({
                 onSignerWalletIdChange={(value) => updateDraft({ signingWalletId: value })}
                 label="Signing wallet"
                 showSelectionSummary
+                optional
               />
-              {/* Signer is optional at draft stage — clarify the fallback when
-                  a choice is possible but none is made (skip the single-wallet
-                  "locked" and error cases, which have their own message). */}
-              {!signerWalletsError &&
-              signerWallets.length !== 1 &&
-              !draft.signingWalletId.trim() ? (
+              {/* Signer is optional at draft stage — clarify the fallback only
+                  when a choice is actually possible (more than one wallet) and
+                  none is made. The 0-wallet and single-wallet cases show their
+                  own message inside the field. */}
+              {!signerWalletsError && signerWallets.length > 1 && !draft.signingWalletId.trim() ? (
                 <p className="mt-1.5 text-xs text-[rgba(28,28,29,0.5)]">
                   Optional — leave unselected to use the project&apos;s default signer.
                 </p>

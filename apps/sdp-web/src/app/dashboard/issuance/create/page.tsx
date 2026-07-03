@@ -1,12 +1,17 @@
 import { auth } from "@clerk/nextjs/server";
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import { IssuanceDraftWizard } from "./issuance-draft-wizard";
 
 export default async function CreateAssetPage() {
+  if (!isAssetProfilesUiEnabled()) {
+    notFound();
+  }
+
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
