@@ -293,21 +293,12 @@ function tagExists(tagName) {
 async function publishRelease(version, previousTag) {
   const tagName = `v${version}`;
 
-  if (tagExists(tagName)) {
-    console.log(`Tag ${tagName} already exists`);
-    return;
+  if (!tagExists(tagName)) {
+    git(["tag", "-a", tagName, "-m", tagName], { capture: false });
+    git(["push", `https://x-access-token:${token}@github.com/${repo}.git`, tagName], {
+      capture: false,
+    });
   }
-
-  git(["tag", "-a", tagName, "-m", tagName], { capture: false });
-  git(["push", `https://x-access-token:${token}@github.com/${repo}.git`, tagName], {
-    capture: false,
-  });
-
-  const notes = await githubRequest("POST", `/repos/${repo}/releases/generate-notes`, {
-    tag_name: tagName,
-    previous_tag_name: previousTag ?? undefined,
-    target_commitish: git(["rev-parse", "HEAD"]),
-  });
 
   const existingReleases = await githubRequest("GET", `/repos/${repo}/releases?per_page=100`);
   const alreadyPublished = existingReleases.some((release) => release.tag_name === tagName);
@@ -316,6 +307,12 @@ async function publishRelease(version, previousTag) {
     console.log(`GitHub release ${tagName} already exists`);
     return;
   }
+
+  const notes = await githubRequest("POST", `/repos/${repo}/releases/generate-notes`, {
+    tag_name: tagName,
+    previous_tag_name: previousTag ?? undefined,
+    target_commitish: git(["rev-parse", "HEAD"]),
+  });
 
   await githubRequest("POST", `/repos/${repo}/releases`, {
     tag_name: tagName,
