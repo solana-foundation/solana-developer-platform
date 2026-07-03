@@ -330,6 +330,18 @@ function tagExists(tagName) {
     .includes(tagName);
 }
 
+function releaseCommitForVersion(version) {
+  const releaseCommit = git([
+    "log",
+    "--format=%H",
+    "--fixed-strings",
+    `--grep=chore(main): release ${version}`,
+    "-1",
+  ]);
+
+  return releaseCommit || git(["rev-parse", "HEAD"]);
+}
+
 function configureGitIdentity() {
   git(["config", "user.name", "github-actions[bot]"], { capture: false });
   // biome-ignore lint/security/noSecrets: Public GitHub Actions bot noreply address, not a secret.
@@ -340,10 +352,11 @@ function configureGitIdentity() {
 
 async function publishRelease(version, previousTag) {
   const tagName = `v${version}`;
+  const targetCommit = releaseCommitForVersion(version);
 
   if (!tagExists(tagName)) {
     configureGitIdentity();
-    git(["tag", "-a", tagName, "-m", tagName], { capture: false });
+    git(["tag", "-a", tagName, "-m", tagName, targetCommit], { capture: false });
     git(["push", `https://x-access-token:${token}@github.com/${repo}.git`, tagName], {
       capture: false,
     });
@@ -357,7 +370,7 @@ async function publishRelease(version, previousTag) {
   const notes = await githubRequest("POST", `/repos/${repo}/releases/generate-notes`, {
     tag_name: tagName,
     previous_tag_name: previousTag ?? undefined,
-    target_commitish: git(["rev-parse", "HEAD"]),
+    target_commitish: targetCommit,
   });
 
   await githubRequest("POST", `/repos/${repo}/releases`, {
