@@ -406,9 +406,11 @@ async function publishRelease() {
   const tagName = `v${version}`;
   const subject = latestCommitSubject();
   const releaseSubject = `chore(main): release ${version}`;
-  const releasePrTitle = process.env.RELEASE_PR_TITLE;
+  const releasePrTitle = process.env.RELEASE_PR_TITLE?.trim();
+  const releasePrTitleMatches =
+    releasePrTitle === releaseSubject || releasePrTitle?.startsWith(`${releaseSubject} `);
 
-  if (!subject.startsWith(releaseSubject) && releasePrTitle !== releaseSubject) {
+  if (!subject.startsWith(releaseSubject) && !releasePrTitleMatches) {
     console.log(`Skipping release publish for non-release commit: ${subject}`);
     return;
   }
