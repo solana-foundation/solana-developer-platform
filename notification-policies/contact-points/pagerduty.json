@@ -3,10 +3,11 @@
   "type": "pagerduty",
   "settings": {
     "integrationKey": "${PAGERDUTY_INTEGRATION_KEY}",
-    "severity": "{{ .CommonLabels.severity | default \"critical\" }}",
-    "class": "{{ .CommonLabels.scope | default \"sdp\" }}",
-    "component": "{{ .CommonLabels.service | default \"kora\" }}",
+    "severity": "{{ if eq .CommonLabels.severity \"critical\" }}critical{{ else if eq .CommonLabels.severity \"warning\" }}warning{{ else }}info{{ end }}",
+    "class": "sdp",
+    "component": "{{ .CommonLabels.alertname }}",
     "group": "sdp",
+    "source": "sdp.grafana.net",
     "summary": "{{ .CommonAnnotations.summary }}{{ if not .CommonAnnotations.summary }}{{ .CommonLabels.alertname }}{{ end }}"
   },
   "disableResolveMessage": false
