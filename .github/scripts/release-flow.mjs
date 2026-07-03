@@ -93,6 +93,10 @@ function latestReleaseTag() {
   );
 }
 
+function versionFromReleaseTag(tagName) {
+  return tagName?.match(/^v(\d+\.\d+\.\d+)$/)?.[1] ?? null;
+}
+
 function commitRecords(range) {
   // biome-ignore lint/security/noSecrets: git log delimiters use fixed hex markers, not credentials.
   const output = git(["log", "--format=%H%x1f%s%x1f%b%x1e", range]);
@@ -331,6 +335,15 @@ async function prepareRelease() {
   const packageJson = readJson(packageJsonPath);
   const manifest = readJson(manifestPath);
   const previousTag = latestReleaseTag();
+  const previousVersion = versionFromReleaseTag(previousTag);
+
+  if (previousVersion && packageJson.version !== previousVersion) {
+    console.log(
+      `Skipping release preparation because package.json ${packageJson.version} is ahead of ${previousTag}`
+    );
+    return;
+  }
+
   const range = previousTag ? `${previousTag}..HEAD` : "HEAD";
   const parsedCommits = commitRecords(range).map((entry) => ({
     ...entry,

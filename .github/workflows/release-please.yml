@@ -1,7 +1,9 @@
 name: Release Flow
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
@@ -14,14 +16,21 @@ permissions:
 
 jobs:
   prepare-release-pr:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Create release app token
+        id: release-app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - name: Checkout
         uses: actions/checkout@v6.0.3
         with:
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          token: ${{ steps.release-app.outputs.token }}
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -30,7 +39,7 @@ jobs:
 
       - name: Prepare release PR
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.release-app.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node .github/scripts/release-flow.mjs prepare
 
@@ -44,13 +53,21 @@ jobs:
         startsWith(github.event.pull_request.title, 'chore(main): release ')
       }}
     runs-on: ubuntu-latest
+    environment: production
     steps:
+      - name: Create release app token
+        id: release-app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - name: Checkout
         uses: actions/checkout@v6.0.3
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.merge_commit_sha }}
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          token: ${{ steps.release-app.outputs.token }}
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -59,7 +76,7 @@ jobs:
 
       - name: Publish release tag and GitHub release
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.release-app.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           RELEASE_PR_TITLE: ${{ github.event.pull_request.title }}
         run: node .github/scripts/release-flow.mjs publish
