@@ -84,6 +84,7 @@ import {
   tokenTemplateResponseSchema,
   tokenTransactionListItemSchema,
   tokenTransactionSchema,
+  tokenWithAssetProfileResponseSchema,
   transferBatchEstimateResponseSchema,
   transferBatchResponseSchema,
   transferBatchSchema,
@@ -130,6 +131,9 @@ export const rpcProvidersResponse = successResponseSchema(rpcProvidersResponseSc
 export const rpcRelayResponse = successResponseSchema(rpcRelayResponseSchema);
 
 export const tokenResponse = successResponseSchema(tokenResponseSchema);
+export const tokenWithAssetProfileResponse = successResponseSchema(
+  tokenWithAssetProfileResponseSchema
+);
 export const tokenListResponse = paginatedResponseSchema(tokenSchema);
 export const tokenTransactionsResponse = paginatedResponseSchema(tokenTransactionSchema);
 export const issuanceTransactionsResponse = paginatedResponseSchema(tokenTransactionListItemSchema);

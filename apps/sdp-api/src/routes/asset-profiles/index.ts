@@ -4,9 +4,9 @@ import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
+import { createTokenWithAssetProfile } from "./create";
 import {
   archiveAssetProfile,
-  createAssetProfile,
   getAssetProfile,
   getAssetProfileFieldOptions,
   listAssetProfiles,
@@ -28,9 +28,9 @@ assetProfiles.use("*", requireAssetProfilesFeature);
 assetProfiles.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 assetProfiles.use("*", projectContextMiddleware());
 
-assetProfiles.get("/metadata", requirePermissions("tokens:read"), getAssetProfileFieldOptions);
+assetProfiles.get("/field-options", requirePermissions("tokens:read"), getAssetProfileFieldOptions);
 assetProfiles.get("/", requirePermissions("tokens:read"), listAssetProfiles);
-assetProfiles.post("/", requirePermissions("tokens:write"), createAssetProfile);
+assetProfiles.post("/", requirePermissions("tokens:write"), createTokenWithAssetProfile);
 assetProfiles.get("/:profileId", requirePermissions("tokens:read"), getAssetProfile);
 assetProfiles.patch("/:profileId", requirePermissions("tokens:write"), updateAssetProfile);
 assetProfiles.delete("/:profileId", requirePermissions("tokens:write"), archiveAssetProfile);

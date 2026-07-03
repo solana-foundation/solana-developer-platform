@@ -2,7 +2,6 @@ import { ASSET_CATEGORIES, ASSET_TYPES } from "@sdp/types";
 import {
   assetCategorySchema as assetCategorySchemaBase,
   assetProfileIdSchema as assetProfileIdSchemaBase,
-  createAssetProfileObjectSchema as createAssetProfileObjectSchemaBase,
   issuanceMetadataSchema as issuanceMetadataSchemaBase,
   listAssetProfilesQuerySchema as listAssetProfilesQuerySchemaBase,
   updateAssetProfileObjectSchema as updateAssetProfileObjectSchemaBase,
@@ -147,28 +146,6 @@ export const listAssetProfilesQuerySchema = listAssetProfilesQuerySchemaBase.ext
     example: "stablecoin",
   }),
 });
-
-export const createAssetProfileRequestSchema = withOpenApi(
-  createAssetProfileObjectSchemaBase.extend({
-    tokenId: withOpenApi(createAssetProfileObjectSchemaBase.shape.tokenId, {
-      description: "Identifier of the issued token to attach the profile to.",
-      example: "tok_example",
-    }),
-    assetCategory: withOpenApi(createAssetProfileObjectSchemaBase.shape.assetCategory, {
-      description: "Asset category. Defaults to generic.",
-      example: "stablecoin",
-    }),
-    assetType: withOpenApi(createAssetProfileObjectSchemaBase.shape.assetType, {
-      description: "Asset type within the category. Must be supported for the category.",
-      example: "fiat_backed",
-    }),
-    issuanceMetadata: withOpenApi(issuanceMetadataSchema.optional(), {
-      description: "Optional canonical issuance metadata. Public metadata is derived from it.",
-      example: issuanceMetadataExample,
-    }),
-  }),
-  { description: "Create asset profile request body." }
-);
 
 export const updateAssetProfileRequestSchema = withOpenApi(
   updateAssetProfileObjectSchemaBase.extend({

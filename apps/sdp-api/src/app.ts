@@ -270,11 +270,14 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/organizations", organizations);
   v1.route("/api-keys", apiKeys);
   v1.route("/counterparties", counterparties);
-  v1.route("/asset-profiles", assetProfiles);
   v1.route("/members", members);
   v1.route("/auth", auth);
   v1.route("/projects", projects);
   v1.route("/rpc", rpc);
+  // Asset profiles live under the issuance namespace, as a sibling of
+  // /issuance/tokens. The router is self-contained (own auth + feature-flag + project
+  // middleware).
+  v1.route("/issuance/asset-profiles", assetProfiles);
   v1.route("/issuance", issuance);
   v1.route("/wallets", wallets);
   v1.route("/onboarding", onboarding);
