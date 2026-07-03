@@ -434,6 +434,18 @@ async function planRelease() {
     };
   }
 
+  if (
+    previousTag &&
+    previousVersion === packageJson.version &&
+    token &&
+    !(await githubReleaseExists(previousTag))
+  ) {
+    return {
+      reason: `Release ${previousTag} needs publishing`,
+      shouldRelease: true,
+    };
+  }
+
   const commits = parsedCommitsSince(previousTag);
   return {
     reason:
@@ -489,6 +501,17 @@ async function release(attempt = 1) {
     }
 
     await publishRelease(packageJson.version, previousReleaseTag(`v${packageJson.version}`));
+    return;
+  }
+
+  if (
+    !dryRun &&
+    previousTag &&
+    previousVersion === packageJson.version &&
+    !(await githubReleaseExists(previousTag))
+  ) {
+    console.log(`Publishing missing GitHub release ${previousTag}`);
+    await publishRelease(packageJson.version, previousReleaseTag(previousTag));
     return;
   }
 
