@@ -15,7 +15,6 @@ jobs:
     environment: production
     concurrency:
       group: release-flow-main
-      cancel-in-progress: false
     steps:
       - name: Create release app token
         id: release-app
