@@ -9,6 +9,11 @@
 
 import { createApp } from "@/app";
 import { runPendingTransfersReconciliation } from "@/cron/pending-transfers";
+import { runRecurringPaymentsCollection } from "@/cron/recurring-payments";
+import {
+  isRecurringPaymentCollectionEnabled,
+  isRecurringPaymentsEnabled,
+} from "@/lib/feature-flags";
 import { withProcessEnvFallback } from "@/lib/runtime-env";
 import { WorkersBackgroundRunner } from "@/runtime/background-cf";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
@@ -27,11 +32,20 @@ const worker = {
     ctx: ExecutionContext
   ): Promise<void> {
     const runtimeEnv = withProcessEnvFallback(env);
+    const bg = new WorkersBackgroundRunner(ctx);
+    const observability = isSentryEnabled(runtimeEnv) ? cloudflareObservability : undefined;
     runPendingTransfersReconciliation({
       env: runtimeEnv,
-      bg: new WorkersBackgroundRunner(ctx),
-      observability: isSentryEnabled(runtimeEnv) ? cloudflareObservability : undefined,
+      bg,
+      observability,
     });
+    if (isRecurringPaymentsEnabled(runtimeEnv) && isRecurringPaymentCollectionEnabled(runtimeEnv)) {
+      runRecurringPaymentsCollection({
+        env: runtimeEnv,
+        bg,
+        observability,
+      });
+    }
   },
   request(
     input: RequestInfo | URL,

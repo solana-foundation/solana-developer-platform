@@ -3,6 +3,10 @@ import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
+import {
+  RECURRING_PAYMENTS_COLLECTION_CRON,
+  runRecurringPaymentsCollection,
+} from "./recurring-payments";
 import { startCron } from "./runner";
 
 const scheduleMock = vi.fn();
@@ -32,6 +36,13 @@ vi.mock("./pending-transfers", async (importOriginal) => {
   };
 });
 
+vi.mock("./recurring-payments", () => {
+  return {
+    RECURRING_PAYMENTS_COLLECTION_CRON: "*/5 * * * *",
+    runRecurringPaymentsCollection: vi.fn(),
+  };
+});
+
 function makeBg(): BackgroundRunner {
   return { run: vi.fn(), awaitAll: vi.fn(async () => {}), draining: false };
 }
@@ -50,6 +61,7 @@ describe("startCron", () => {
     stopMock.mockReset();
     scheduleMock.mockReturnValue(fakeTask);
     vi.mocked(runPendingTransfersReconciliation).mockReset();
+    vi.mocked(runRecurringPaymentsCollection).mockReset();
   });
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
@@ -68,6 +80,37 @@ describe("startCron", () => {
     startCron({ env: {} as Env, bg: makeBg() });
     expect(scheduleMock).toHaveBeenCalledTimes(1);
     expect(scheduleMock.mock.calls[0][0]).toBe(PENDING_TRANSFERS_CRON);
+  });
+
+  it("does not schedule recurring collection unless both recurring flags are enabled", () => {
+    startCron({
+      env: { PAYMENTS_RECURRING_ENABLED: "true" } as Env,
+      bg: makeBg(),
+    });
+    startCron({
+      env: { PAYMENTS_RECURRING_COLLECTION_ENABLED: "true" } as Env,
+      bg: makeBg(),
+    });
+
+    expect(scheduleMock).toHaveBeenCalledTimes(2);
+    expect(scheduleMock.mock.calls.map((call) => call[0])).toEqual([
+      PENDING_TRANSFERS_CRON,
+      PENDING_TRANSFERS_CRON,
+    ]);
+  });
+
+  it("schedules recurring collection when both recurring flags are enabled", () => {
+    startCron({
+      env: {
+        PAYMENTS_RECURRING_ENABLED: "true",
+        PAYMENTS_RECURRING_COLLECTION_ENABLED: "true",
+      } as Env,
+      bg: makeBg(),
+    });
+
+    expect(scheduleMock).toHaveBeenCalledTimes(2);
+    expect(scheduleMock.mock.calls[0][0]).toBe(PENDING_TRANSFERS_CRON);
+    expect(scheduleMock.mock.calls[1][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
   });
 
   it("schedules when DISABLE_CRON is set to a recognised falsy value ('false' / '0')", () => {
@@ -109,6 +152,19 @@ describe("startCron", () => {
     expect(runPendingTransfersReconciliation).toHaveBeenCalledWith({ env, bg, observability });
   });
 
+  it("recurring tick invokes runRecurringPaymentsCollection with the supplied deps", () => {
+    const bg = makeBg();
+    const env = {
+      PAYMENTS_RECURRING_ENABLED: "true",
+      PAYMENTS_RECURRING_COLLECTION_ENABLED: "true",
+    } as Env;
+    const observability = makeObservability();
+    startCron({ env, bg, observability });
+    const tick = scheduleMock.mock.calls[1][1] as () => void;
+    tick();
+    expect(runRecurringPaymentsCollection).toHaveBeenCalledWith({ env, bg, observability });
+  });
+
   it("tick passes observability=undefined through when caller did not supply one", () => {
     const bg = makeBg();
     const env = {} as Env;
@@ -135,5 +191,18 @@ describe("startCron", () => {
     expect(handle).not.toBeNull();
     await handle?.stop();
     expect(stopMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returned handle.stop() stops every scheduled task", async () => {
+    const handle = startCron({
+      env: {
+        PAYMENTS_RECURRING_ENABLED: "true",
+        PAYMENTS_RECURRING_COLLECTION_ENABLED: "true",
+      } as Env,
+      bg: makeBg(),
+    });
+    expect(handle).not.toBeNull();
+    await handle?.stop();
+    expect(stopMock).toHaveBeenCalledTimes(2);
   });
 });

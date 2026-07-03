@@ -158,6 +158,10 @@ function getLocalDevVar(name: string): string | null {
   return getLocalDevVars().get(name) ?? null;
 }
 
+function isKoraSurfpoolShim(): boolean {
+  return process.env.KORA_SURFPOOL_SHIM === "true";
+}
+
 export function getPlaywrightCustodyProvider(): PlaywrightCustodyProvider {
   const configuredProvider = process.env.SDP_INTEGRATION_CUSTODY_PROVIDER?.trim();
   if (!configuredProvider) {
@@ -574,6 +578,19 @@ async function fundWalletToLamports(
   }
 
   const lamportsNeeded = minimumLamports - existingLamports;
+  if (isKoraSurfpoolShim()) {
+    try {
+      await requestWalletAirdropLamports(api, walletAddress, lamportsNeeded);
+      await waitForWalletLamports(api, walletAddress, minimumLamports);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Failed to fund wallet ${walletAddress} to ${minimumLamports} lamports via Surfpool local RPC: ${message}`
+      );
+    }
+  }
+
   let koraFundingError: unknown = null;
   const koraFunded = await fundAddressViaKoraFeePayer(
     api,

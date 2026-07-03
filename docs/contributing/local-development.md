@@ -30,7 +30,6 @@ The OpenAPI source in `apps/sdp-api/src/openapi` is the source of truth for the 
 | `packages/sdp-types` | Shared runtime types and product constants |
 | `packages/sdp-api-integration` | Maintainer-oriented integration tests |
 | `infra/postgres` | Local Postgres setup |
-| `infra/kora` | Fee-payer service setup |
 | `docs/ops` | Operator and maintainer notes |
 
 ## Local Setup
