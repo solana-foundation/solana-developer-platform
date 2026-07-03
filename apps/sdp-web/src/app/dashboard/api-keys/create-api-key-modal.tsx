@@ -1,9 +1,10 @@
 "use client";
 
 import type { PaymentsDashboardWallet, SdpEnvironment } from "@sdp/types";
-import { Plus } from "lucide-react";
-import { type Dispatch, type SetStateAction, useState } from "react";
+import { Info, KeyRound, type LucideIcon, Plus, ShieldCheck, Wallet } from "lucide-react";
+import { type Dispatch, type ReactNode, type SetStateAction, useState } from "react";
 import { useFormStatus } from "react-dom";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,6 +61,36 @@ function truncateAddress(value: string): string {
   return `${value.slice(0, 6)}...${value.slice(-6)}`;
 }
 
+function PolicyScopeBadge() {
+  return (
+    <Badge variant="default" className="shrink-0 whitespace-nowrap text-[10px]">
+      No API-key policy
+    </Badge>
+  );
+}
+
+function ReviewDetail({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: LucideIcon;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-3 px-4 py-3.5">
+      <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.64)]">
+        <Icon className="size-3.5" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-xs font-medium text-[rgba(28,28,29,0.56)]">{label}</p>
+        <div className="mt-1 text-sm text-[#1c1c1d]">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 interface CreateApiKeyModalProps {
   wallets: PaymentsDashboardWallet[];
   triggerMode?: "button" | "icon";
@@ -114,6 +145,13 @@ function WalletAccessSection({
           <p className="text-xs text-[rgba(28,28,29,0.65)]">
             This key can use every wallet available in its org or project scope.
           </p>
+          {draft.walletScope === "all" ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[rgba(28,28,29,0.68)]">
+              <ShieldCheck className="size-3.5" />
+              <span>Operation policy</span>
+              <PolicyScopeBadge />
+            </div>
+          ) : null}
         </div>
       </label>
 
@@ -164,6 +202,13 @@ function WalletAccessSection({
                         <p className="text-xs text-[rgba(28,28,29,0.65)]">
                           {wallet.walletId} · {truncateAddress(wallet.publicKey)}
                         </p>
+                        {checked ? (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-2 py-1.5 text-xs text-[rgba(28,28,29,0.68)]">
+                            <ShieldCheck className="size-3.5" />
+                            <span>Operation policy</span>
+                            <PolicyScopeBadge />
+                          </div>
+                        ) : null}
                       </div>
                     </label>
                   );
@@ -335,41 +380,64 @@ function CreateApiKeyReviewStep({
         <input type="hidden" name="signingWalletId" value={draft.defaultWalletId} />
       ) : null}
 
-      <div className="grid gap-2 rounded-lg border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] p-3 text-sm text-[rgba(28,28,29,0.72)]">
-        <div>
-          <span className="font-medium text-[#1c1c1d]">Name:</span> {draft.name}
-        </div>
-        <div>
-          <span className="font-medium text-[#1c1c1d]">Role:</span> {formatRoleLabel(draft.role)}
-        </div>
-        <div>
-          <span className="font-medium text-[#1c1c1d]">Environment:</span>{" "}
-          {formatEnvironmentLabel(environment)}
-        </div>
-        <div>
-          <span className="font-medium text-[#1c1c1d]">Expires:</span>{" "}
-          {formatDisplayDate(draft.expiresAt)}
-        </div>
-        <div>
-          <span className="font-medium text-[#1c1c1d]">Wallet access:</span>{" "}
-          {draft.walletScope === "all" ? "All wallets" : "Selected wallets"}
-        </div>
-        {draft.walletScope === "selected" ? (
-          <>
-            <div>
-              <span className="font-medium text-[#1c1c1d]">Selected:</span>{" "}
-              {selectedWallets.map(formatWalletLabel).join(", ")}
+      <div className="overflow-hidden rounded-lg border border-[rgba(28,28,29,0.12)] bg-white">
+        <div className="flex flex-col gap-2 border-b border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold text-[#1c1c1d]">{draft.name}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[rgba(28,28,29,0.62)]">
+              <span>{formatEnvironmentLabel(environment)}</span>
+              <span aria-hidden="true">·</span>
+              <span>Expires {formatDisplayDate(draft.expiresAt)}</span>
             </div>
-            <div>
-              <span className="font-medium text-[#1c1c1d]">Default signing wallet:</span>{" "}
-              {defaultSelectedWallet ? formatWalletLabel(defaultSelectedWallet) : "None"}
+          </div>
+        </div>
+
+        <div className="grid divide-y divide-[rgba(28,28,29,0.08)] sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+          <ReviewDetail icon={KeyRound} label="Endpoint permissions">
+            {formatRoleLabel(draft.role)}
+          </ReviewDetail>
+
+          <ReviewDetail icon={Wallet} label="Wallet access">
+            <div className="space-y-2">
+              <p>
+                {draft.walletScope === "all" ? "All wallets" : `${selectedWallets.length} selected`}
+              </p>
+              {draft.walletScope === "selected" ? (
+                <div className="space-y-1.5 text-xs text-[rgba(28,28,29,0.62)]">
+                  <p>
+                    Default:{" "}
+                    <span className="text-[#1c1c1d]">
+                      {defaultSelectedWallet ? formatWalletLabel(defaultSelectedWallet) : "None"}
+                    </span>
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedWallets.map((wallet) => (
+                      <span
+                        key={wallet.walletId}
+                        className="max-w-full truncate rounded-sm bg-[rgba(28,28,29,0.06)] px-1.5 py-0.5"
+                      >
+                        {formatWalletLabel(wallet)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
-          </>
-        ) : null}
+          </ReviewDetail>
+        </div>
+
+        <div className="grid divide-y divide-[rgba(28,28,29,0.08)] border-t border-[rgba(28,28,29,0.08)] sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+          <ReviewDetail icon={ShieldCheck} label="Policy">
+            <span className="text-[rgba(28,28,29,0.74)]">No API-key policy</span>
+          </ReviewDetail>
+
+          <ReviewDetail icon={Info} label="Security note">
+            <span className="text-[rgba(28,28,29,0.74)]">
+              The full key will only be shown once after creation.
+            </span>
+          </ReviewDetail>
+        </div>
       </div>
-      <p className="text-xs text-[rgba(28,28,29,0.72)]">
-        After creation, the full key will be shown once in a secure modal.
-      </p>
       <CreateApiKeyReviewActions onBack={onBack} />
     </form>
   );
@@ -379,7 +447,7 @@ function CreateApiKeyReviewActions({ onBack }: { onBack: () => void }) {
   const { pending } = useFormStatus();
 
   return (
-    <div className="mt-3 flex items-center justify-end gap-2">
+    <div className="mt-4 flex items-center justify-end gap-2 border-t border-[rgba(28,28,29,0.08)] pt-4">
       <Button type="button" variant="secondary" onClick={onBack} disabled={pending}>
         Back
       </Button>
@@ -472,7 +540,7 @@ export function CreateApiKeyModal({
           <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
             {step === 1
               ? "Define key details and wallet access, then confirm."
-              : "Review and confirm the request."}
+              : "Review the request before creating the key."}
           </p>
         </div>
 

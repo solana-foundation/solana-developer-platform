@@ -14,6 +14,7 @@ import {
   createSolanaRpcSubscriptions,
   type Signature,
 } from "@solana/kit";
+import { solanaRpcError } from "@/lib/errors";
 import { isTransientRpcError } from "@/lib/rpc";
 import { getSolanaConfig } from "@/lib/solana";
 import type { Env } from "@/types/env";
@@ -277,7 +278,7 @@ export async function sendAndConfirmTransaction(
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
-  throw new Error(`Transaction ${signature} confirmation timed out after ${timeoutMs}ms`);
+  throw solanaRpcError(`Transaction ${signature} confirmation timed out after ${timeoutMs}ms`);
 }
 
 /**
@@ -319,7 +320,7 @@ export async function confirmTransaction(
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
-  throw new Error(`Transaction ${signature} confirmation timed out`);
+  throw solanaRpcError(`Transaction ${signature} confirmation timed out after ${timeoutMs}ms`);
 }
 
 /**

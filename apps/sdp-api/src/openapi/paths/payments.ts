@@ -10,8 +10,6 @@ import {
   createTransferRequestSchema,
   errorResponseSchema,
   estimateTransferBatchRequestSchema,
-  executeOfframpRequestSchema,
-  executeOnrampRequestSchema,
   paymentListRecurringPaymentsQuerySchema,
   paymentListSubscriptionCollectionAttemptsQuerySchema,
   paymentListSubscriptionPlansQuerySchema,
@@ -32,6 +30,7 @@ import {
   prepareSubscriptionPlanCreateRequestSchema,
   prepareTransferRequestSchema,
   simulateSandboxTransferRequestSchema,
+  updateRecurringPaymentRequestSchema,
   updateSubscriptionPlanRequestSchema,
   updateSubscriptionRequestSchema,
   updateWalletPolicyRequestSchema,
@@ -39,9 +38,7 @@ import {
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
   offrampCurrenciesResponse,
-  offrampExecutionResponse,
   onrampCurrenciesResponse,
-  onrampExecutionResponse,
   onrampQuoteResponse,
   paymentRecurringPaymentCollectionResponse,
   paymentRecurringPaymentListResponse,
@@ -378,6 +375,32 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(paymentRecurringPaymentListResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "patch",
+    path: "/v1/payments/recurring-payments/{id}",
+    tags: ["Payments"],
+    summary: "Update recurring payment",
+    operationId: "updatePaymentRecurringPayment",
+    description:
+      "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+      body: {
+        required: true,
+        content: jsonContent(updateRecurringPaymentRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Recurring payment updated",
+        content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -921,54 +944,6 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(onrampQuoteResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/payments/ramps/onramp/execute",
-    tags: ["Payments"],
-    summary: "Execute on-ramp",
-    operationId: "executePaymentOnramp",
-    description: "Creates a fiat-to-crypto on-ramp session through the selected provider.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(executeOnrampRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "On-ramp execution initiated",
-        content: jsonContent(onrampExecutionResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/payments/ramps/offramp/execute",
-    tags: ["Payments"],
-    summary: "Execute off-ramp",
-    operationId: "executePaymentOfframp",
-    description: "Creates a crypto-to-fiat off-ramp session through the selected provider.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(executeOfframpRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Off-ramp execution initiated",
-        content: jsonContent(offrampExecutionResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
     },
   });
 

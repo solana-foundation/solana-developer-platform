@@ -2,7 +2,6 @@ import type {
   BvnkFiatFundingInstruction,
   BvnkPaymentRampInstruction,
   PaymentRampEstimate,
-  PaymentRampExecution,
   PaymentRampQuote,
   RampProviderEstimateResult,
 } from "@sdp/types";
@@ -30,11 +29,9 @@ import {
   counterpartyNotProvisioned,
   internalError,
   notFound,
-  rampExecuteNotSupported,
 } from "@/lib/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import {
-  buildBvnkOnrampInstruction,
   buildBvnkOnrampPaymentRuleKey,
   buildBvnkPartyDetails,
   bvnkOnboardingRequirements,
@@ -55,7 +52,6 @@ import { success } from "@/lib/response";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import {
   enforceWalletOperationPolicy,
-  recordLegacyWalletPolicyDenial,
   walletOperationActorFromAuth,
 } from "@/services/policy-enforcement.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
@@ -66,15 +62,12 @@ import {
   resolveSdpEnvironment,
 } from "../context";
 import { mapTransferRow } from "../mappers";
-import { assertWalletPolicyAllowsTransfer } from "../policy";
 import {
   cancelRampTransferSchema,
   createOfframpQuoteSchema,
   createOnrampQuoteSchema,
   estimateOfframpSchema,
   estimateOnrampSchema,
-  executeOfframpSchema,
-  executeOnrampSchema,
   listOfframpCurrenciesQuerySchema,
   listOnrampCurrenciesQuerySchema,
   simulateSandboxTransferSchema,
@@ -100,13 +93,6 @@ type OfframpCurrencyPair = {
   source: (typeof OFFRAMP_SUPPORT)[number]["source"];
   dest: (typeof OFFRAMP_SUPPORT)[number]["dest"];
   providers: RampProviderId[];
-};
-
-type ExecuteOnrampInput = z.infer<typeof executeOnrampSchema>;
-
-type ExecuteOfframpInput = z.infer<typeof executeOfframpSchema>;
-type ExecutableOfframpInput = ExecuteOfframpInput & {
-  provider: Exclude<RampProviderId, "bvnk">;
 };
 
 type SubmitCounterpartyRequirementsInput = z.infer<typeof submitCounterpartyRequirementsSchema>;
@@ -144,11 +130,7 @@ export async function assertRampProviderAvailable(
 type RampQuoteDirection = "onramp" | "offramp";
 type ScopedRampWallet = ResolvedScope["wallets"][number];
 
-type RampPolicyOperationType =
-  | "ramp_onramp_quote"
-  | "ramp_offramp_quote"
-  | "ramp_onramp_execute"
-  | "ramp_offramp_execute";
+type RampPolicyOperationType = "ramp_onramp_quote" | "ramp_offramp_quote";
 
 interface PersistRampQuoteTransferInput {
   scope: ResolvedScope;
@@ -361,122 +343,6 @@ async function completePendingBvnkOfframpTransfer(
   }
 }
 
-async function executeOnrampWithProvider(
-  c: AppContext,
-  input: ExecuteOnrampInput
-): Promise<PaymentRampExecution> {
-  const scope = await resolveScope(c);
-  await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
-  const ctx = rampRuntime(c);
-
-  const destinationWalletAddress = resolveWalletAddress(
-    scope.wallets,
-    input.destinationWallet,
-    "destinationWallet",
-    scope.auth,
-    ["payments:write"]
-  );
-  const destinationWallet = scope.wallets.find(
-    (wallet) =>
-      wallet.walletId === input.destinationWallet || wallet.publicKey === destinationWalletAddress
-  );
-
-  const projectId = requireProjectId(c);
-  const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
-    counterpartyId: input.counterpartyId,
-    organizationId: scope.auth.organizationId,
-    projectId,
-  });
-  if (!counterparty) throw notFound("Counterparty");
-
-  if (destinationWallet) {
-    await enforceRampWalletOperationPolicy(c, {
-      scope,
-      wallet: destinationWallet,
-      operationType: "ramp_onramp_execute",
-      provider: input.provider,
-      counterpartyId: input.counterpartyId,
-      asset: input.cryptoToken,
-      amount: input.fiatAmount ?? null,
-      destination: destinationWalletAddress,
-      rawPayload: {
-        fiatCurrency: input.fiatCurrency ?? null,
-        fiatAmount: input.fiatAmount ?? null,
-        cryptoToken: input.cryptoToken,
-      },
-    });
-  }
-
-  switch (input.provider) {
-    case "moonpay":
-      return await RAMP_PROVIDER_CLIENTS.moonpay.executeOnramp(ctx, {
-        destinationWalletAddress,
-        cryptoToken: input.cryptoToken,
-        fiatCurrency: input.fiatCurrency,
-        fiatAmount: input.fiatAmount,
-        redirectUrl: input.redirectUrl,
-      });
-    case "lightspark": {
-      const providerCustomer = await ensureLightsparkCustomer(c, { counterparty, projectId });
-      return await RAMP_PROVIDER_CLIENTS.lightspark.executeOnramp(ctx, {
-        destinationWalletAddress,
-        cryptoToken: input.cryptoToken,
-        fiatCurrency: input.fiatCurrency,
-        fiatAmount: input.fiatAmount,
-        providerCustomer,
-      });
-    }
-    case "bvnk": {
-      if (!input.fiatCurrency) throw badRequest("fiatCurrency is required for BVNK on-ramp.");
-      const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
-      const customer = await ensureBvnkCustomer(c, counterparty, projectId, {
-        fiatCurrency: input.fiatCurrency,
-      });
-      const bvnkPaymentRule = await ensureBvnkPaymentRule(
-        c,
-        ctx,
-        counterparty,
-        projectId,
-        customer,
-        {
-          currency,
-          network,
-          destinationWalletAddress,
-          fiatCurrency: input.fiatCurrency,
-        }
-      );
-      const instruction = buildBvnkOnrampInstruction(bvnkPaymentRule, {
-        network,
-        destinationWalletAddress,
-        fiatCurrency: input.fiatCurrency,
-        mode: ctx.mode,
-      });
-      const reference =
-        bvnkPaymentRule.onboardingStatus === "ready"
-          ? bvnkPaymentRule.entry.ruleId
-          : bvnkPaymentRule.customer.customerReference;
-      if (!reference) {
-        throw internalError(
-          `BVNK on-ramp missing reference at status "${bvnkPaymentRule.onboardingStatus}".`
-        );
-      }
-      return {
-        id: reference,
-        provider: "bvnk",
-        status: "pending",
-        reference,
-        paymentInstructions: [instruction],
-      };
-    }
-    case "moneygram":
-      throw badRequest("MoneyGram on-ramp is not available.");
-    default: {
-      const _exhaustive: never = input.provider;
-      throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
-    }
-  }
-}
-
 export async function advanceCounterpartyRequirements(
   c: AppContext,
   input: SubmitCounterpartyRequirementsInput & { counterparty: CounterpartyRow; projectId: string }
@@ -556,96 +422,6 @@ export async function advanceCounterpartyRequirements(
     }
     default: {
       const _exhaustive: never = input;
-      throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
-    }
-  }
-}
-
-async function executeOfframpWithProvider(
-  c: AppContext,
-  input: ExecutableOfframpInput
-): Promise<PaymentRampExecution> {
-  const scope = await resolveScope(c);
-  await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
-  const ctx = rampRuntime(c);
-
-  const sourceWallet = scope.wallets.find(
-    (wallet) => wallet.walletId === input.sourceWallet || wallet.publicKey === input.sourceWallet
-  );
-
-  // Lightspark off-ramp source may be an external Grid account id. When it is
-  // one of our SDP wallets, resolve it normally so permissions and policy checks
-  // apply to the wallet address used by the provider.
-  const sourceWalletAddress =
-    input.provider === "lightspark" && !sourceWallet
-      ? input.sourceWallet
-      : resolveWalletAddress(scope.wallets, input.sourceWallet, "sourceWallet", scope.auth, [
-          "payments:write",
-        ]);
-
-  const projectId = requireProjectId(c);
-  const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
-    counterpartyId: input.counterpartyId,
-    organizationId: scope.auth.organizationId,
-    projectId,
-  });
-  if (!counterparty) throw notFound("Counterparty");
-
-  if (sourceWallet) {
-    const enforcement = await enforceRampWalletOperationPolicy(c, {
-      scope,
-      wallet: sourceWallet,
-      operationType: "ramp_offramp_execute",
-      provider: input.provider,
-      counterpartyId: input.counterpartyId,
-      asset: input.cryptoToken,
-      amount: input.cryptoAmount,
-      rawPayload: {
-        fiatCurrency: input.fiatCurrency ?? null,
-        cryptoToken: input.cryptoToken,
-        cryptoAmount: input.cryptoAmount,
-      },
-    });
-    try {
-      await assertWalletPolicyAllowsTransfer(c, {
-        organizationId: scope.auth.organizationId,
-        projectId: scope.auth.projectId,
-        wallet: sourceWallet,
-        enforceDestinationAllowlist: false,
-        token: input.cryptoToken,
-        amount: input.cryptoAmount,
-      });
-    } catch (error) {
-      await recordLegacyWalletPolicyDenial(c.env, enforcement, error);
-      throw error;
-    }
-  }
-
-  switch (input.provider) {
-    case "moonpay":
-      return await RAMP_PROVIDER_CLIENTS.moonpay.executeOfframp(ctx, {
-        sourceWalletAddress,
-        cryptoToken: input.cryptoToken,
-        fiatCurrency: input.fiatCurrency,
-        cryptoAmount: input.cryptoAmount,
-        redirectUrl: input.redirectUrl,
-      });
-    case "lightspark": {
-      const providerCustomer = await ensureLightsparkCustomer(c, { counterparty, projectId });
-      return await RAMP_PROVIDER_CLIENTS.lightspark.executeOfframp(ctx, {
-        sourceWalletAddress,
-        cryptoToken: input.cryptoToken,
-        fiatCurrency: input.fiatCurrency,
-        cryptoAmount: input.cryptoAmount,
-        providerCustomer,
-      });
-    }
-    case "moneygram":
-      throw badRequest(
-        "MoneyGram off-ramp runs through the widget session created at quote time; execute is not supported."
-      );
-    default: {
-      const _exhaustive: never = input.provider;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
     }
   }
@@ -1087,40 +863,6 @@ export async function cancelRampTransfer(c: AppContext) {
   }
 
   return success(c, { transfer: mapTransferRow(updated) });
-}
-
-export async function executeOnramp(c: AppContext): Promise<Response> {
-  const body = await c.req.json();
-  const parsed = executeOnrampSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const ramp = await executeOnrampWithProvider(c, parsed.data);
-  return success(c, { ramp });
-}
-
-export async function executeOfframp(c: AppContext): Promise<Response> {
-  const body = await c.req.json();
-  const parsed = executeOfframpSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const input = parsed.data;
-  const { provider } = input;
-  if (provider === "bvnk") {
-    throw rampExecuteNotSupported("bvnk", "offramp");
-  }
-
-  const ramp = await executeOfframpWithProvider(c, { ...input, provider });
-  return success(c, { ramp });
 }
 
 export async function listOnrampCurrencies(c: AppContext) {

@@ -34,7 +34,7 @@
 
   <!-- Entry points -->
   <rect x="110" y="210" width="250" height="66" rx="8" fill="#e0e7ff" stroke="#4f46e5"/>
-  <text x="235" y="238" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">/v1/asset-profiles</text>
+  <text x="235" y="238" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">/v1/issuance/asset-profiles</text>
   <text x="235" y="258" text-anchor="middle" font-size="12" fill="#334155">routes · tokens:read / tokens:write</text>
 
   <rect x="720" y="210" width="250" height="66" rx="8" fill="#dcfce7" stroke="#16a34a"/>
@@ -45,8 +45,8 @@
   <!-- Handlers -->
   <rect x="110" y="320" width="400" height="84" rx="8" fill="#eef2ff" stroke="#6366f1"/>
   <text x="310" y="348" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">handlers.ts  +  schemas.ts (Zod)</text>
-  <text x="310" y="370" text-anchor="middle" font-size="12" fill="#334155">validate · token ownership</text>
-  <text x="310" y="388" text-anchor="middle" font-size="12" fill="#334155">one profile per token · audit</text>
+  <text x="310" y="370" text-anchor="middle" font-size="12" fill="#334155">validate (Zod) · one profile per token</text>
+  <text x="310" y="388" text-anchor="middle" font-size="12" fill="#334155">POST → create token + profile · audit</text>
 
   <!-- Registry -->
   <rect x="560" y="312" width="320" height="100" rx="8" fill="#fef3c7" stroke="#d97706"/>
@@ -78,6 +78,14 @@
 
   <rect x="620" y="700" width="130" height="64" rx="8" fill="#f1f5f9" stroke="#475569"/>
   <text x="685" y="736" text-anchor="middle" font-size="12" font-weight="600" fill="#0f172a">issued_tokens</text>
+
+  <!-- Atomic-create callout -->
+  <rect x="112" y="654" width="166" height="92" rx="8" fill="#eef2ff" stroke="#6366f1" stroke-dasharray="5 4"/>
+  <text x="195" y="678" text-anchor="middle" font-size="11.5" font-weight="700" fill="#0f172a">POST create</text>
+  <text x="195" y="697" text-anchor="middle" font-size="10.5" fill="#334155">issued_tokens +</text>
+  <text x="195" y="713" text-anchor="middle" font-size="10.5" fill="#334155">asset_profiles written</text>
+  <text x="195" y="731" text-anchor="middle" font-size="10.5" font-weight="700" fill="#4f46e5">in ONE transaction</text>
+  <line x1="279" y1="700" x2="298" y2="700" stroke="#475569" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aSlate)"/>
 
   <!-- Arrows -->
   <!-- C1 -> E1 -->

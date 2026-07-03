@@ -10,6 +10,7 @@ import {
   getCounterpartyFieldOptions,
   getCounterpartyRequirements,
   listCounterparties,
+  listProjectCounterpartyAccounts,
   submitCounterpartyRequirements,
   updateCounterparty,
 } from "./handlers";
@@ -23,6 +24,11 @@ counterparties.get(
   "/metadata",
   requirePermissions("counterparties:read"),
   getCounterpartyFieldOptions
+);
+counterparties.get(
+  "/accounts",
+  requirePermissions("counterparties:read"),
+  listProjectCounterpartyAccounts
 );
 counterparties.get("/", requirePermissions("counterparties:read"), listCounterparties);
 counterparties.post("/", requirePermissions("counterparties:write"), createCounterparty);

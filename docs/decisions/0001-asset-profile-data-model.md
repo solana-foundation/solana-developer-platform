@@ -79,6 +79,21 @@ read performance.
 Archival is a soft delete (`status = 'archived'`), matching the counterparty
 pattern, and an archived profile can coexist with a new active one.
 
+### 6. A profile is created together with its token, in one transaction
+
+There is no "create profile for an existing token" endpoint. A token and its
+profile are created by a single request, `POST /v1/issuance/asset-profiles`,
+which writes the `issued_tokens` row and the `asset_profiles` row inside one DB
+transaction: if either write fails, both roll back. This makes "every issued
+token has a profile" an invariant established at creation rather than a
+follow-up call a client might skip, and removes the standalone-create
+concurrency window (a fresh, globally unique `token_id` is minted per request,
+so two concurrent creates can never contend for the same token's active-profile
+slot). The profile still conceptually *extends* a token (Section 1); it is just
+never born separately. The asset-profile resource lives under the issuance
+namespace (`/v1/issuance/asset-profiles`, a sibling of `/v1/issuance/tokens`);
+reads, updates, and archival are its `GET`/`PATCH`/`DELETE` operations.
+
 ## Alternatives considered
 
 - **Compute the public projection on every URI read** instead of caching.

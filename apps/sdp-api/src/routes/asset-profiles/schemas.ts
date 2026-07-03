@@ -34,7 +34,7 @@ export const issuanceMetadataSchema = z.looseObject({
   custom: customMetadataSchema.optional(),
 });
 
-function assertAssetTypeSupported(
+export function assertAssetTypeSupported(
   value: { assetCategory?: string; assetType?: string },
   ctx: z.RefinementCtx
 ): void {
@@ -50,18 +50,6 @@ function assertAssetTypeSupported(
   }
 }
 
-// Exported as a plain object so the OpenAPI layer can `.extend` it with
-// field-level docs/examples (the refined form below is not extendable).
-export const createAssetProfileObjectSchema = z.object({
-  tokenId: z.string().min(1),
-  assetCategory: assetCategorySchema.default("generic"),
-  assetType: assetTypeSchema.default("generic"),
-  // public metadata is server-computed and intentionally not accepted here.
-  issuanceMetadata: issuanceMetadataSchema.optional(),
-});
-
-export const createAssetProfileSchema =
-  createAssetProfileObjectSchema.superRefine(assertAssetTypeSupported);
 
 export const updateAssetProfileObjectSchema = z.object({
   assetCategory: assetCategorySchema.optional(),

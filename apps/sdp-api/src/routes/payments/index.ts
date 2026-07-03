@@ -22,8 +22,6 @@ import {
   estimateOfframp,
   estimateOnramp,
   estimateTransferBatch,
-  executeOfframp,
-  executeOnramp,
   getRecurringPayment,
   getSubscription,
   getSubscriptionPlan,
@@ -49,6 +47,7 @@ import {
   recordRampProviderEvent,
   resumeRecurringPayment,
   simulateSandboxTransfer,
+  updateRecurringPayment,
   updateSubscription,
   updateSubscriptionPlan,
   updateWalletPolicy,
@@ -104,6 +103,11 @@ payments.post(
   createRecurringPayment
 );
 payments.get("/recurring-payments", requirePermissions("payments:read"), listRecurringPayments);
+payments.patch(
+  "/recurring-payments/:id",
+  requirePermissions("payments:write", "wallets:read", "counterparties:read"),
+  updateRecurringPayment
+);
 payments.post(
   "/recurring-payments/:id/activate",
   requirePermissions("payments:write", "wallets:read"),
@@ -218,19 +222,9 @@ payments.post(
   createOnrampQuote
 );
 payments.post(
-  "/ramps/onramp/execute",
-  requirePermissions("payments:write", "wallets:read"),
-  executeOnramp
-);
-payments.post(
   "/ramps/offramp/quote",
   requirePermissions("payments:write", "wallets:read"),
   createOfframpQuote
-);
-payments.post(
-  "/ramps/offramp/execute",
-  requirePermissions("payments:write", "wallets:read"),
-  executeOfframp
 );
 payments.post(
   "/ramps/:provider/events",

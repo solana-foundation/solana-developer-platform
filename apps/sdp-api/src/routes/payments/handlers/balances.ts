@@ -17,7 +17,10 @@ import {
 import { formatDecimalAmount } from "@/lib/amount";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { attachUsdValuesToBalances } from "@/services/helius-das.service";
+import {
+  attachTokenSymbolsToBalances,
+  attachUsdValuesToBalances,
+} from "@/services/helius-das.service";
 import * as solanaRpc from "@/services/solana/rpc";
 import { type AppContext, getPaymentsRepository, getPolicyRepository } from "../context";
 import {
@@ -28,6 +31,7 @@ import {
 } from "../policy";
 import { updateWalletPolicySchema } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
+import { resolveIssuedTokenLabelsByMint } from "../token-labels";
 import { resolveWalletFromParams } from "./transfers";
 
 function mapWalletControlProfileSummary(
@@ -176,6 +180,7 @@ export async function getWalletBalances(c: AppContext) {
   const { wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
 
   const rpc = solanaRpc.createRpc(c.env);
+  const tokenLabelsByMint = await resolveIssuedTokenLabelsByMint(c);
   let lamports = 0n;
   let splBalances: Awaited<ReturnType<typeof tokenAccounts.getSplTokenBalances>> = [];
 
@@ -192,7 +197,9 @@ export async function getWalletBalances(c: AppContext) {
   }
 
   try {
-    splBalances = await tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address);
+    splBalances = await tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address, {
+      tokenLabelsByMint,
+    });
   } catch (error) {
     console.error("getWalletBalances: failed to fetch SPL balances", {
       requestId: c.get("requestId"),
@@ -202,7 +209,7 @@ export async function getWalletBalances(c: AppContext) {
     });
   }
 
-  const balances = await attachUsdValuesToBalances(c.env, [
+  const labeledBalances = await attachTokenSymbolsToBalances(c.env, [
     {
       token: "SOL",
       mint: tokenAccounts.SOL_MINT,
@@ -212,6 +219,7 @@ export async function getWalletBalances(c: AppContext) {
     },
     ...splBalances,
   ]);
+  const balances = await attachUsdValuesToBalances(c.env, labeledBalances);
 
   return success(c, {
     walletBalances: {

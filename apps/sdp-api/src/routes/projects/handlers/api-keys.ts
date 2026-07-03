@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import { buildApiKeyAccessSummaries } from "@/routes/api-keys/access-response";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
@@ -58,22 +59,38 @@ export const listProjectApiKeys = async (c: AppContext) => {
 
   await assertProjectAccess(c, auth, projectId);
 
-  const apiKeyService = new ApiKeyService(getDb(c.env));
+  const db = getDb(c.env);
+  const apiKeyService = new ApiKeyService(db);
   const apiKeys = await apiKeyService.listForProject(projectId);
+  const accessSummaryByKeyId = await buildApiKeyAccessSummaries(
+    c.env,
+    db,
+    apiKeys.map((key) => key.id)
+  );
 
   return success(c, {
-    apiKeys: apiKeys.map((key) => ({
-      id: key.id,
-      name: key.name,
-      description: key.description,
-      keyPrefix: key.keyPrefix,
-      role: key.role as ApiKeyRole,
-      environment: key.environment as "sandbox" | "production",
-      status: key.status,
-      lastUsedAt: key.lastUsedAt,
-      expiresAt: key.expiresAt,
-      createdAt: key.createdAt,
-    })),
+    apiKeys: apiKeys.map((key) => {
+      const accessSummary = accessSummaryByKeyId.get(key.id);
+      const walletBindings = accessSummary?.walletBindings ?? [];
+
+      return {
+        id: key.id,
+        name: key.name,
+        description: key.description,
+        keyPrefix: key.keyPrefix,
+        role: key.role as ApiKeyRole,
+        environment: key.environment as "sandbox" | "production",
+        status: key.status,
+        walletScope: key.walletScope,
+        signingWalletId: key.signingWalletId,
+        signingWalletIds: walletBindings.map((binding) => binding.walletId),
+        walletBindings,
+        policyBindings: accessSummary?.policyBindings ?? [],
+        lastUsedAt: key.lastUsedAt,
+        expiresAt: key.expiresAt,
+        createdAt: key.createdAt,
+      };
+    }),
   });
 };
 

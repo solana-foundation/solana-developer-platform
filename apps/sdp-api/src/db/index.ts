@@ -1,5 +1,6 @@
 export type { DatabaseBindings as AppDbBindings, DatabaseClient as AppDb } from "./client";
 export {
+  asTransactionalClient,
   closeDatabasePools,
   createDatabaseClient,
   type DatabaseBindings,

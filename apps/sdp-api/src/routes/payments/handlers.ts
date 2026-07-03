@@ -6,8 +6,6 @@ export {
   createOnrampQuote,
   estimateOfframp,
   estimateOnramp,
-  executeOfframp,
-  executeOnramp,
   listOfframpCurrencies,
   listOnrampCurrencies,
   simulateSandboxTransfer,
@@ -21,6 +19,7 @@ export {
   getRecurringPayment,
   listRecurringPayments,
   resumeRecurringPayment,
+  updateRecurringPayment,
 } from "./handlers/recurring-payments";
 export {
   createSubscription,

@@ -7,6 +7,8 @@
 // migration. This mirrors how COUNTERPARTY_ACCOUNT_KINDS gates the open-TEXT
 // `account_kind` column.
 
+import type { Token } from "./tokens";
+
 // --- Asset Category --------------------------------------------------------
 
 export const ASSET_CATEGORIES = ["generic", "stablecoin", "tokenized_security"] as const;
@@ -210,6 +212,11 @@ export interface UpdateAssetProfileRequest {
 }
 
 export interface AssetProfileResponse {
+  assetProfile: AssetProfile;
+}
+
+export interface TokenWithAssetProfileResponse {
+  token: Token;
   assetProfile: AssetProfile;
 }
 

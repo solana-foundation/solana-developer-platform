@@ -12,27 +12,24 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import type { AssetProfileRow } from "@/db/repositories/asset-profile.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { resolveCreatorUserId } from "@/lib/creator";
 import {
   badRequest,
   badRequestParams,
   badRequestQuery,
-  conflict,
   internalError,
   notFound,
 } from "@/lib/errors";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
-import { created, noContent, success } from "@/lib/response";
+import { noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { type AppContext, getAssetProfilesRepository, getTokenRepository } from "./context";
+import { type AppContext, getAssetProfilesRepository } from "./context";
 import {
   assetProfileIdParamsSchema,
-  createAssetProfileSchema,
   listAssetProfilesQuerySchema,
   updateAssetProfileSchema,
 } from "./schemas";
 
-function mapToAssetProfile(row: AssetProfileRow): AssetProfile {
+export function mapToAssetProfile(row: AssetProfileRow): AssetProfile {
   return {
     id: row.id,
     organizationId: row.organization_id,
@@ -113,77 +110,6 @@ export const getAssetProfile = async (c: AppContext) => {
 
   const response: AssetProfileResponse = { assetProfile: mapToAssetProfile(profile) };
   return success(c, response);
-};
-
-export const createAssetProfile = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const body = await c.req.json();
-  const parsed = createAssetProfileSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
-
-  const { tokenId, assetCategory, assetType, issuanceMetadata } = parsed.data;
-
-  // The token must exist and belong to this org/project (getById is unscoped).
-  const token = await getTokenRepository(c).getById(tokenId);
-  if (!token || token.organizationId !== auth.organizationId || token.projectId !== projectId) {
-    throw notFound("Token");
-  }
-
-  const repo = getAssetProfilesRepository(c);
-
-  // Enforce the "one active profile per token" rule at the app layer too, so we
-  // can return a clear 409 instead of surfacing the partial unique index error.
-  const existing = await repo.getActiveAssetProfileByTokenId({
-    tokenId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-  if (existing) {
-    throw conflict("This token already has an asset profile");
-  }
-
-  const registryEntry = getAssetTypeRegistryEntry(assetCategory, assetType);
-  if (!registryEntry) {
-    throw internalError("Missing registry entry for a validated asset type");
-  }
-
-  const metadata = issuanceMetadata ?? {};
-  const publicMetadata = projectPublicMetadata(assetCategory, assetType, metadata);
-  const createdBy = await resolveCreatorUserId(c);
-
-  const profile = await repo.createAssetProfile({
-    organizationId: auth.organizationId,
-    projectId,
-    tokenId,
-    assetCategory,
-    assetType,
-    assetTypeVersion: registryEntry.version,
-    issuanceMetadata: metadata,
-    publicMetadata,
-    createdBy,
-  });
-
-  if (!profile) {
-    throw internalError("Failed to create asset profile");
-  }
-
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    organizationId: auth.organizationId,
-    userId: auth.userId ?? undefined,
-    apiKeyId: auth.apiKeyId ?? undefined,
-    action: "create",
-    resourceType: "asset_profile",
-    resourceId: profile.id,
-    metadata: { tokenId, assetCategory, assetType },
-  });
-
-  const response: AssetProfileResponse = { assetProfile: mapToAssetProfile(profile) };
-  return created(c, response);
 };
 
 export const updateAssetProfile = async (c: AppContext) => {

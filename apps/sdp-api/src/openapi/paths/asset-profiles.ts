@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import {
   assetProfileIdParamSchema,
-  createAssetProfileRequestSchema,
+  createTokenWithAssetProfileRequestSchema,
   errorResponseSchema,
   listAssetProfilesQuerySchema,
   updateAssetProfileRequestSchema,
@@ -13,12 +13,13 @@ import {
   assetProfileFieldOptionsResponse,
   assetProfileResponse,
   listAssetProfilesResponse,
+  tokenWithAssetProfileResponse,
 } from "./responses";
 
 export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "get",
-    path: "/v1/asset-profiles/metadata",
+    path: "/v1/issuance/asset-profiles/field-options",
     tags: ["Asset Profiles"],
     summary: "Get asset profile field options",
     operationId: "getAssetProfileFieldOptions",
@@ -39,7 +40,7 @@ export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/asset-profiles",
+    path: "/v1/issuance/asset-profiles",
     tags: ["Asset Profiles"],
     summary: "List asset profiles",
     operationId: "listAssetProfiles",
@@ -60,32 +61,32 @@ export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/asset-profiles",
+    path: "/v1/issuance/asset-profiles",
     tags: ["Asset Profiles"],
-    summary: "Create asset profile",
-    operationId: "createAssetProfile",
+    summary: "Create token with asset profile",
+    operationId: "createTokenWithAssetProfile",
     description:
-      "Creates an asset profile for an issued token. The token must belong to the caller's project and must not already have an active profile. Public metadata is derived from the supplied issuance metadata via the asset type's projection rules.",
+      "Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile. Requires the Asset Profiles feature to be enabled.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       body: {
         required: true,
-        content: jsonContent(createAssetProfileRequestSchema),
+        content: jsonContent(createTokenWithAssetProfileRequestSchema),
       },
     },
     responses: {
       201: {
-        description: "Asset profile created",
-        content: jsonContent(assetProfileResponse),
+        description: "Token and asset profile created",
+        content: jsonContent(tokenWithAssetProfileResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
     },
   });
 
   registry.registerPath({
     method: "get",
-    path: "/v1/asset-profiles/{profileId}",
+    path: "/v1/issuance/asset-profiles/{profileId}",
     tags: ["Asset Profiles"],
     summary: "Get asset profile",
     operationId: "getAssetProfile",
@@ -108,7 +109,7 @@ export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "patch",
-    path: "/v1/asset-profiles/{profileId}",
+    path: "/v1/issuance/asset-profiles/{profileId}",
     tags: ["Asset Profiles"],
     summary: "Update asset profile",
     operationId: "updateAssetProfile",
@@ -136,7 +137,7 @@ export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "delete",
-    path: "/v1/asset-profiles/{profileId}",
+    path: "/v1/issuance/asset-profiles/{profileId}",
     tags: ["Asset Profiles"],
     summary: "Archive asset profile",
     operationId: "archiveAssetProfile",

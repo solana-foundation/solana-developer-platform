@@ -41,10 +41,8 @@ import {
   listSessionsResponseSchema,
   listTemplatesResponseSchema,
   offrampCurrenciesResponseSchema,
-  offrampExecutionResponseSchema,
   onboardingStatusResponseSchema,
   onrampCurrenciesResponseSchema,
-  onrampExecutionResponseSchema,
   onrampQuoteResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
@@ -86,6 +84,7 @@ import {
   tokenTemplateResponseSchema,
   tokenTransactionListItemSchema,
   tokenTransactionSchema,
+  tokenWithAssetProfileResponseSchema,
   transferBatchEstimateResponseSchema,
   transferBatchResponseSchema,
   transferBatchSchema,
@@ -132,6 +131,9 @@ export const rpcProvidersResponse = successResponseSchema(rpcProvidersResponseSc
 export const rpcRelayResponse = successResponseSchema(rpcRelayResponseSchema);
 
 export const tokenResponse = successResponseSchema(tokenResponseSchema);
+export const tokenWithAssetProfileResponse = successResponseSchema(
+  tokenWithAssetProfileResponseSchema
+);
 export const tokenListResponse = paginatedResponseSchema(tokenSchema);
 export const tokenTransactionsResponse = paginatedResponseSchema(tokenTransactionSchema);
 export const issuanceTransactionsResponse = paginatedResponseSchema(tokenTransactionListItemSchema);
@@ -236,9 +238,7 @@ export const paymentSubscriptionCollectionAttemptListResponse = successResponseS
 );
 export const onrampCurrenciesResponse = successResponseSchema(onrampCurrenciesResponseSchema);
 export const offrampCurrenciesResponse = successResponseSchema(offrampCurrenciesResponseSchema);
-export const onrampExecutionResponse = successResponseSchema(onrampExecutionResponseSchema);
 export const onrampQuoteResponse = successResponseSchema(onrampQuoteResponseSchema);
-export const offrampExecutionResponse = successResponseSchema(offrampExecutionResponseSchema);
 export const sandboxTransferSimulationResponse = successResponseSchema(
   sandboxTransferSimulationResponseSchema
 );

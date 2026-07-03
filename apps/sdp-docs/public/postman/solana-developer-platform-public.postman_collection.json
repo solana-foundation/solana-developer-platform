@@ -1259,6 +1259,72 @@
           }
         },
         {
+          "name": "Estimate transfer batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches/estimate",
+            "description": "Validates a transfer batch request and estimates transaction chunking and fees. This route is scaffolded; estimation is not implemented yet.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"wal_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List transfer batches",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches",
+            "description": "Lists transfer batches for the authenticated organization or project scope."
+          }
+        },
+        {
+          "name": "Create transfer batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches",
+            "description": "Creates a custody-executed outbound transfer batch to counterparty crypto-wallet accounts. This route is scaffolded; execution is not implemented yet.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"wal_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get transfer batch",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches/{{batchId}}",
+            "description": "Retrieves a transfer batch with recipient rows and chunk transfer summaries."
+          }
+        },
+        {
           "name": "List recurring payments",
           "request": {
             "method": "GET",
@@ -1283,6 +1349,39 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"sourceWalletId\": \"wal_source\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get recurring payment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}",
+            "description": "Retrieves an SDP-custody outbound recurring payment record."
+          }
+        },
+        {
+          "name": "Update recurring payment",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}",
+            "description": "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceWalletId\": \"wal_source\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1325,15 +1424,6 @@
             "header": [],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/resume",
             "description": "Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status."
-          }
-        },
-        {
-          "name": "Get recurring payment",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}",
-            "description": "Retrieves an SDP-custody outbound recurring payment record."
           }
         },
         {
@@ -1774,7 +1864,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/asset-profiles/metadata",
+            "url": "{{baseUrl}}/v1/issuance/asset-profiles/field-options",
             "description": "Returns the supported asset categories and the asset types available within each, for building an asset profile form."
           }
         },
@@ -1783,12 +1873,12 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/asset-profiles",
+            "url": "{{baseUrl}}/v1/issuance/asset-profiles",
             "description": "Lists asset profiles for the authenticated organization and project."
           }
         },
         {
-          "name": "Create asset profile",
+          "name": "Create token with asset profile",
           "request": {
             "method": "POST",
             "header": [
@@ -1798,11 +1888,11 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/asset-profiles",
-            "description": "Creates an asset profile for an issued token. The token must belong to the caller's project and must not already have an active profile. Public metadata is derived from the supplied issuance metadata via the asset type's projection rules.",
+            "url": "{{baseUrl}}/v1/issuance/asset-profiles",
+            "description": "Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile. Requires the Asset Profiles feature to be enabled.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tokenId\": \"tok_example\",\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    }\n  }\n}",
+              "raw": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingWalletId\": \"wal_example\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true,\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1816,7 +1906,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/asset-profiles/{{profileId}}",
+            "url": "{{baseUrl}}/v1/issuance/asset-profiles/{{profileId}}",
             "description": "Gets an asset profile by id."
           }
         },
@@ -1831,7 +1921,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/asset-profiles/{{profileId}}",
+            "url": "{{baseUrl}}/v1/issuance/asset-profiles/{{profileId}}",
             "description": "Updates an asset profile. At least one field must be provided. The resulting category/type pair must be supported. Public metadata is recomputed when metadata or the asset type changes.",
             "body": {
               "mode": "raw",
@@ -1849,7 +1939,7 @@
           "request": {
             "method": "DELETE",
             "header": [],
-            "url": "{{baseUrl}}/v1/asset-profiles/{{profileId}}",
+            "url": "{{baseUrl}}/v1/issuance/asset-profiles/{{profileId}}",
             "description": "Archives an asset profile. Archived profiles are hidden from default lists."
           }
         }

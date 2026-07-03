@@ -305,6 +305,87 @@ describe("PolicyRepository (postgres)", () => {
     expect(evaluations[0]?.evaluation_context).toBeNull();
   });
 
+  it("creates one approval request per wallet operation and resolves it idempotently", async () => {
+    const operation = await repo.createWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      operationFamily: "payment",
+      operationType: "payment_transfer",
+      status: "pending_approval",
+    });
+    expect(operation).not.toBeNull();
+
+    const request = await repo.createApprovalRequest({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      walletOperationId: operation?.id ?? "",
+      provider: "fireblocks",
+      providerReference: "fb_tx_1",
+      providerPayload: { provider: "fireblocks", providerReference: "fb_tx_1" },
+      requestedBy: TEST_USER.id,
+    });
+    const duplicate = await repo.createApprovalRequest({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      walletOperationId: operation?.id ?? "",
+      provider: "fireblocks",
+      providerReference: "fb_tx_1",
+    });
+
+    expect(duplicate?.id).toBe(request?.id);
+    expect(request).toMatchObject({
+      wallet_operation_id: operation?.id,
+      status: "pending",
+      provider: "fireblocks",
+      provider_reference: "fb_tx_1",
+      provider_payload: { provider: "fireblocks", providerReference: "fb_tx_1" },
+      requested_by: TEST_USER.id,
+    });
+
+    await expect(
+      repo.updateApprovalRequestStatus({
+        organizationId: "org_other",
+        approvalRequestId: request?.id ?? "",
+        status: "approved",
+        operationStatus: "executing",
+        resolvedBy: TEST_USER.id,
+      })
+    ).resolves.toBeNull();
+
+    await expect(
+      repo.updateApprovalRequestStatus({
+        organizationId: TEST_ORG.id,
+        approvalRequestId: request?.id ?? "",
+        status: "approved",
+        operationStatus: "executing",
+        resolvedBy: TEST_USER.id,
+        resolvedAt: "2026-06-18T02:00:00.000Z",
+      })
+    ).resolves.toMatchObject({
+      id: request?.id,
+      status: "approved",
+      resolved_by: TEST_USER.id,
+    });
+    await expect(
+      repo.updateApprovalRequestStatus({
+        organizationId: TEST_ORG.id,
+        approvalRequestId: request?.id ?? "",
+        status: "approved",
+        operationStatus: "executing",
+        resolvedBy: TEST_USER.id,
+      })
+    ).resolves.toMatchObject({
+      id: request?.id,
+      status: "approved",
+    });
+
+    const updatedOperation = await repo.getWalletOperationById(operation?.id ?? "");
+    expect(updatedOperation?.status).toBe("executing");
+  });
+
   it("preserves an explicit null wallet operation actor through service mapping", async () => {
     const service = new PolicyFoundationService(repo);
 
