@@ -286,7 +286,9 @@ async function githubRequest(method, resourcePath, body) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`${method} ${resourcePath} failed: ${response.status} ${text}`);
+    const error = new Error(`${method} ${resourcePath} failed: ${response.status} ${text}`);
+    error.status = response.status;
+    throw error;
   }
 
   if (response.status === 204) {
@@ -297,8 +299,16 @@ async function githubRequest(method, resourcePath, body) {
 }
 
 async function githubReleaseExists(tagName) {
-  const existingReleases = await githubRequest("GET", `/repos/${repo}/releases?per_page=100`);
-  return existingReleases.some((release) => release.tag_name === tagName);
+  try {
+    await githubRequest("GET", `/repos/${repo}/releases/tags/${encodeURIComponent(tagName)}`);
+    return true;
+  } catch (error) {
+    if (error.status === 404) {
+      return false;
+    }
+
+    throw error;
+  }
 }
 
 function ensureCleanTree() {
@@ -388,9 +398,15 @@ async function planRelease() {
   const previousVersion = versionFromReleaseTag(previousTag);
 
   if (previousVersion && packageJson.version !== previousVersion) {
+    const packageTag = `v${packageJson.version}`;
+    const alreadyPublished =
+      tagExists(packageTag) && token ? await githubReleaseExists(packageTag) : false;
+
     return {
-      reason: `package.json ${packageJson.version} is ahead of ${previousTag}`,
-      shouldRelease: false,
+      reason: alreadyPublished
+        ? `Release ${packageTag} is already published`
+        : `Release ${packageTag} needs publishing`,
+      shouldRelease: !alreadyPublished,
     };
   }
 
@@ -443,9 +459,12 @@ async function release() {
   const previousVersion = versionFromReleaseTag(previousTag);
 
   if (previousVersion && packageJson.version !== previousVersion) {
-    console.log(
-      `Skipping release preparation because package.json ${packageJson.version} is ahead of ${previousTag}`
-    );
+    console.log(`Publishing package.json release ${packageJson.version} from ahead-of-tag state`);
+    if (dryRun) {
+      return;
+    }
+
+    await publishRelease(packageJson.version, previousReleaseTag(`v${packageJson.version}`));
     return;
   }
 
