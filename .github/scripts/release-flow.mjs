@@ -334,12 +334,23 @@ function releaseCommitForVersion(version) {
   const releaseCommit = git([
     "log",
     "--format=%H",
-    "--fixed-strings",
-    `--grep=chore(main): release ${version}`,
+    "--extended-regexp",
+    `--grep=^chore\\(main\\): release ${escapeRegExp(version)}$`,
     "-1",
   ]);
 
   return releaseCommit || git(["rev-parse", "HEAD"]);
+}
+
+function refreshFromMain() {
+  git(["fetch", "origin", "main"], { capture: false });
+  git(["reset", "--hard", "origin/main"], { capture: false });
+}
+
+function pushReleaseCommit() {
+  git(["push", `https://x-access-token:${token}@github.com/${repo}.git`, "HEAD:main"], {
+    capture: false,
+  });
 }
 
 function configureGitIdentity() {
@@ -446,7 +457,7 @@ function writePlan(plan) {
   }
 }
 
-async function release() {
+async function release(attempt = 1) {
   const subject = latestCommitSubject();
   const packageJson = readJson(packageJsonPath);
   const releaseVersion = versionFromReleaseSubject(subject);
@@ -523,9 +534,18 @@ async function release() {
     capture: false,
   });
   git(["commit", "-m", `chore(main): release ${nextVersion}`], { capture: false });
-  git(["push", `https://x-access-token:${token}@github.com/${repo}.git`, "HEAD:main"], {
-    capture: false,
-  });
+  try {
+    pushReleaseCommit();
+  } catch (error) {
+    if (attempt >= 3) {
+      throw error;
+    }
+
+    console.log("Release commit push failed; refreshing main and retrying release");
+    refreshFromMain();
+    await release(attempt + 1);
+    return;
+  }
 
   await publishRelease(nextVersion, previousTag);
 }
