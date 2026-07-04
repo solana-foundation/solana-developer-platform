@@ -50,7 +50,6 @@ export function assertAssetTypeSupported(
   }
 }
 
-
 export const updateAssetProfileObjectSchema = z.object({
   assetCategory: assetCategorySchema.optional(),
   assetType: assetTypeSchema.optional(),
