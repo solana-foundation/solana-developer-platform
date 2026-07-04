@@ -35,9 +35,6 @@ export interface CreateAssetDraftInput {
   assetCategory: AssetCategory;
   assetType: string;
   issuanceMetadata: IssuanceMetadata;
-  // Set when retrying after the token was created but the profile POST failed —
-  // skips token creation so we never make a duplicate token.
-  existingTokenId?: string;
 }
 
 export interface CreateAssetDraftResult {

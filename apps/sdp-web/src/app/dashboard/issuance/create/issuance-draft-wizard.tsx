@@ -85,7 +85,6 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
     reset,
   } = useIssuanceDraft();
   const [submitting, setSubmitting] = useState(false);
-  const [createdTokenId, setCreatedTokenId] = useState<string | null>(null);
   // Set when the user tries to advance past the Asset-details form with errors:
   // flips the form into "show all errors" mode and locks Continue until fixed.
   const [attemptedAdvance, setAttemptedAdvance] = useState(false);
@@ -139,17 +138,12 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
         assetCategory: draft.assetCategory,
         assetType: draft.assetType,
         issuanceMetadata: buildIssuanceMetadata(draft),
-        existingTokenId: createdTokenId ?? undefined,
       });
       if (result.state === "success" && result.tokenId) {
         toast.success("Asset draft created.", { id: toastId, position: "bottom-right" });
         reset();
         router.push(`${ISSUANCE_OVERVIEW_PATH}/${result.tokenId}`);
         return;
-      }
-      // Keep any created tokenId so a retry re-attaches the profile only.
-      if (result.tokenId) {
-        setCreatedTokenId(result.tokenId);
       }
       toast.error(result.message, { id: toastId, position: "bottom-right" });
     } catch (error) {
@@ -162,13 +156,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
     }
   };
 
-  const primaryLabel = isReview
-    ? submitting
-      ? "Creating…"
-      : createdTokenId
-        ? "Retry"
-        : "Create draft"
-    : "Continue";
+  const primaryLabel = isReview ? (submitting ? "Creating…" : "Create draft") : "Continue";
   const primaryDisabled = isReview ? blockers.length > 0 || submitting : !canContinue;
 
   return (
