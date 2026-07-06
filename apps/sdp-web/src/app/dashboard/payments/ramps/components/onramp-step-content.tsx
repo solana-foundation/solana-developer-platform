@@ -3,8 +3,9 @@
 import { DollarSignIcon } from "lucide-react";
 import { ONRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
-import { HostedRampFrame } from "./hosted-ramp-frame";
+import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
+import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { hasOnboardingLifecycle, simulateActionLabels } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
@@ -102,7 +103,11 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "hosted") {
     return (
       <div className="space-y-6">
-        <HostedRampFrame title={`${quote.provider} deposit`} src={quote.hostedUrl} />
+        {quote.provider === "coinbase" ? (
+          <CoinbaseRampFrame orderId={quote.id} src={quote.hostedUrl} />
+        ) : (
+          <MoonpayRampFrame title={`${quote.provider} deposit`} src={quote.hostedUrl} />
+        )}
         <div className="border-t border-border-light pt-5">
           <RampStatusPanel direction="onramp" transfer={transferStatus} />
         </div>

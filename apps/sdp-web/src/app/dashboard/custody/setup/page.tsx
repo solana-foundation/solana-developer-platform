@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { createOrgSdpApiClient, createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../../onboarding-status";
 import { isKnownCustodyProvider, type KnownCustodyProvider } from "../provider-catalog";
 import { WalletSetupFlow } from "./wallet-setup-flow";
@@ -69,17 +69,21 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const initialProvider = parseProvider(getSearchParamValue(resolvedSearchParams, "provider"));
 
-  const apiClient = await trace.step("create_sdp_api_client", () =>
-    createSdpApiClient(trace.childContext("dashboard.custody.setup.api"))
+  const orgClient = await trace.step("create_org_sdp_api_client", () =>
+    createOrgSdpApiClient(trace.childContext("dashboard.custody.setup.org.api"))
   );
   const onboarding = await trace.step("fetch_onboarding_status", () =>
-    apiClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status")
+    orgClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status")
   );
 
   if (!onboarding.linked || !onboarding.organization) {
     redirect("/dashboard/wallets");
   }
   const organizationId = onboarding.organization.id;
+
+  const apiClient = await trace.step("create_sdp_api_client", () =>
+    createSdpApiClient(trace.childContext("dashboard.custody.setup.api"))
+  );
 
   const [configsResult, providerAccessResult] = await Promise.all([
     trace.step("fetch_custody_configs", () =>

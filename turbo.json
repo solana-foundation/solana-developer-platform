@@ -154,7 +154,8 @@
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": ["PORT"]
     },
     "dev:local": {
       "cache": false,

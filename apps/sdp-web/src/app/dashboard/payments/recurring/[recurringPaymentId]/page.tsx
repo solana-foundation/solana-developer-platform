@@ -9,7 +9,10 @@ import type { SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparty } from "../../counterparty/counterparty-page.data";
 import { formatDisplayAmount, shortenAddress } from "../../payments-overview.utils";
 import { fetchPaymentsWallets } from "../../payments-page.data";
-import { fetchRecurringPaymentById } from "../recurring-payments.data";
+import {
+  fetchRecurringPaymentById,
+  fetchRecurringPaymentCollectionAttempts,
+} from "../recurring-payments.data";
 import { RecurringPaymentDetailWorkspace } from "../recurring-payments-workspace";
 
 export const dynamic = "force-dynamic";
@@ -102,6 +105,12 @@ export default async function RecurringPaymentDetailRoute({
         "fetch_recurring_payment_counterparty_accounts",
         () => fetchAllCounterpartyWalletAccounts(apiClient.request, recurringPayment.counterpartyId)
       );
+      const subscriptionId = recurringPayment.subscriptionId;
+      const collectionAttemptsResult = subscriptionId
+        ? await trace.step("fetch_recurring_payment_collection_attempts", () =>
+            fetchRecurringPaymentCollectionAttempts(apiClient.request, subscriptionId)
+          )
+        : { ok: true as const, data: { collectionAttempts: [], total: 0 } };
       const knownToken = WELL_KNOWN_TOKEN_BY_MINT.get(recurringPayment.token);
       const tokenLabel =
         knownToken?.symbol ??
@@ -119,6 +128,11 @@ export default async function RecurringPaymentDetailRoute({
           counterpartyLabel={counterpartyLabel}
           amountLabel={formatDisplayAmount(recurringPayment.amount, tokenLabel)}
           currencyLabel={tokenLabel}
+          collectionAttempts={collectionAttemptsResult.data?.collectionAttempts ?? []}
+          collectionAttemptsTotal={collectionAttemptsResult.data?.total ?? 0}
+          collectionAttemptsError={
+            collectionAttemptsResult.ok ? undefined : collectionAttemptsResult.error
+          }
         />
       );
     }
