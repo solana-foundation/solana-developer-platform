@@ -1,6 +1,6 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "private": true,
   "packageManager": "pnpm@10.16.0",
   "engines": {
