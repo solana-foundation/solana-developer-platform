@@ -18,7 +18,16 @@ catalog:
   '@solana/sysvars': ^6.5.0
   '@solana/transactions': ^6.5.0
 
+# Relaxed for the keychain v1 peer trial; flip back to true once its peer
+# ranges settle.
 strictPeerDependencies: false
+
+saveExact: true
+engineStrict: true
+preferOffline: true
+
+# 7-day cooldown on new releases.
+minimumReleaseAge: 10080
 # pnpm 10.16 matches minimumReleaseAgeExclude by exact dependency alias.
 # Keep @solana packages explicit until this workspace can rely on scoped wildcard exclusions.
 minimumReleaseAgeExclude:

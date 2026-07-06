@@ -6,7 +6,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createOrgSdpApiClient } from "@/lib/sdp-api";
 import { OrganizationRpcSettingsForm } from "./organization-rpc-settings-form";
 
 type OrganizationSettings = {
@@ -50,7 +50,7 @@ export default async function SettingsPage() {
 
   try {
     const apiClient = await trace.step("create_sdp_api_client", () =>
-      createSdpApiClient(trace.childContext("dashboard.settings.api"))
+      createOrgSdpApiClient(trace.childContext("dashboard.settings.api"))
     );
     let onboardingFailed = false;
 

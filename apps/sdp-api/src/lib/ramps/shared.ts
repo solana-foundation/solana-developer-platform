@@ -65,4 +65,10 @@ export const RAMP_RAIL_DUMPS = {
   moneygram: {
     currencies: { name: "moneygram/currencies", file: dumpFile("moneygram/currencies") },
   },
+  coinbase: {
+    buyOptions: {
+      name: "coinbase/buy_options",
+      file: dumpFile("coinbase/buy_options"),
+    },
+  },
 } as const;
