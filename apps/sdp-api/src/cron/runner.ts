@@ -12,10 +12,18 @@
  */
 
 import { type ScheduledTask, schedule } from "node-cron";
+import {
+  isRecurringPaymentCollectionEnabled,
+  isRecurringPaymentsEnabled,
+} from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
+import {
+  RECURRING_PAYMENTS_COLLECTION_CRON,
+  runRecurringPaymentsCollection,
+} from "./recurring-payments";
 
 export interface CronDeps {
   env: Env;
@@ -60,21 +68,42 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // work gets registered after the awaitAll() snapshot is taken.
   let stopping = false;
 
-  const task: ScheduledTask = schedule(PENDING_TRANSFERS_CRON, () => {
-    if (stopping) {
-      return;
-    }
-    runPendingTransfersReconciliation({
-      env: deps.env,
-      bg: deps.bg,
-      observability: deps.observability,
-    });
-  });
+  const tasks: ScheduledTask[] = [];
+
+  tasks.push(
+    schedule(PENDING_TRANSFERS_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      runPendingTransfersReconciliation({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
+
+  if (isRecurringPaymentsEnabled(deps.env) && isRecurringPaymentCollectionEnabled(deps.env)) {
+    tasks.push(
+      schedule(RECURRING_PAYMENTS_COLLECTION_CRON, () => {
+        if (stopping) {
+          return;
+        }
+        runRecurringPaymentsCollection({
+          env: deps.env,
+          bg: deps.bg,
+          observability: deps.observability,
+        });
+      })
+    );
+  }
 
   return {
     stop() {
       stopping = true;
-      return task.stop();
+      for (const task of tasks) {
+        task.stop();
+      }
     },
   };
 }

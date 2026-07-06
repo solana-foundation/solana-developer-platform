@@ -13,8 +13,6 @@ import {
   createTransferBatchSchema as createTransferBatchSchemaBase,
   createTransferSchema as createTransferSchemaBase,
   estimateTransferBatchSchema as estimateTransferBatchSchemaBase,
-  executeOfframpSchema as executeOfframpSchemaBase,
-  executeOnrampSchema as executeOnrampSchemaBase,
   listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase,
   listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
   listRecurringPaymentsQuerySchema as listRecurringPaymentsQuerySchemaBase,
@@ -1499,59 +1497,6 @@ export const paymentSubscriptionCollectionAttemptListResponseSchema = z
   })
   .openapi({ description: "Collection attempt list response payload." });
 
-export const executeOnrampRequestSchema = executeOnrampSchemaBase
-  .extend({
-    provider: withOpenApi(executeOnrampSchemaBase.shape.provider, {
-      description:
-        "Ramp provider identifier. Explicit provider selection is required because each provider has different flow requirements.",
-      example: "moonpay",
-    }),
-    counterpartyId: withOpenApi(executeOnrampSchemaBase.shape.counterpartyId, {
-      description:
-        "Counterparty identifier. Required for Lightspark to resolve the Grid customer that funds the quote.",
-      example: "cp_example",
-    }),
-    destinationWallet: withOpenApi(executeOnrampSchemaBase.shape.destinationWallet, {
-      description: "Destination wallet ID or Solana address for purchased crypto.",
-      example: "wal_example",
-    }),
-    cryptoToken: withOpenApi(executeOnrampSchemaBase.shape.cryptoToken, {
-      description:
-        "Crypto token symbol or provider currency code. Simple symbols like `USDC` and `SOL` are normalized server-side for supported providers.",
-      example: "USDC",
-    }),
-    fiatCurrency: withOpenApi(executeOnrampSchemaBase.shape.fiatCurrency, {
-      description: "Fiat currency for on-ramp.",
-      example: "USD",
-    }),
-    fiatAmount: withOpenApi(executeOnrampSchemaBase.shape.fiatAmount, {
-      description:
-        "Fiat amount to purchase crypto with. MoonPay on-ramp requires at least 20 units of the selected fiat currency.",
-      example: "100.00",
-    }),
-    redirectUrl: withOpenApi(executeOnrampSchemaBase.shape.redirectUrl, {
-      description: "Optional redirect URL after provider flow completes.",
-    }),
-    bvnkCompliance: withOpenApi(executeOnrampSchemaBase.shape.bvnkCompliance, {
-      description:
-        "BVNK-only compliance details. Optional on BVNK on-ramp; required on BVNK off-ramp (which validates that `partyDetails` has at least one entry). Omit the field entirely for `moonpay` and `lightspark`.",
-      example: { partyDetails: [{ type: "individual" }] },
-    }),
-  })
-  .openapi({
-    description:
-      'Execute on-ramp request payload. Note: BVNK on-ramp requires additional provider-side account enablement and compliance setup beyond API credentials. The default example is shaped for `provider: "moonpay"`; switch `provider` to `bvnk` to attach `bvnkCompliance.partyDetails`.',
-    example: {
-      provider: "moonpay",
-      counterpartyId: "cp_example",
-      destinationWallet: "wal_example",
-      cryptoToken: "USDC",
-      fiatCurrency: "USD",
-      fiatAmount: "100.00",
-      redirectUrl: "https://example.com",
-    },
-  });
-
 export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
   .extend({
     provider: withOpenApi(createOnrampQuoteSchemaBase.shape.provider, {
@@ -1596,53 +1541,6 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
       fiatCurrency: "USD",
       fiatAmount: "100.00",
       redirectUrl: "https://example.com/onramp/complete",
-    },
-  });
-
-export const executeOfframpRequestSchema = executeOfframpSchemaBase
-  .extend({
-    provider: withOpenApi(executeOfframpSchemaBase.shape.provider, {
-      description:
-        "Ramp provider identifier. Explicit provider selection is required because each provider has different flow requirements.",
-      example: "moonpay",
-    }),
-    sourceWallet: withOpenApi(executeOfframpSchemaBase.shape.sourceWallet, {
-      description: "Source wallet ID or Solana address for crypto-to-fiat off-ramp.",
-      example: "wal_example",
-    }),
-    cryptoToken: withOpenApi(executeOfframpSchemaBase.shape.cryptoToken, {
-      description:
-        "Crypto token symbol or provider currency code. Simple symbols like `USDC` and `SOL` are normalized server-side for supported providers.",
-      example: "USDC",
-    }),
-    fiatCurrency: withOpenApi(executeOfframpSchemaBase.shape.fiatCurrency, {
-      description: "Fiat payout currency.",
-      example: "USD",
-    }),
-    cryptoAmount: withOpenApi(executeOfframpSchemaBase.shape.cryptoAmount, {
-      description: "Crypto amount to sell for fiat.",
-      example: "50.00",
-    }),
-    redirectUrl: withOpenApi(executeOfframpSchemaBase.shape.redirectUrl, {
-      description: "Optional redirect URL after provider flow completes.",
-    }),
-    bvnkCompliance: withOpenApi(executeOfframpSchemaBase.shape.bvnkCompliance, {
-      description:
-        "BVNK-only compliance details. Required on BVNK off-ramp (`partyDetails` must contain at least one entry). Omit the field entirely for `moonpay` and `lightspark`.",
-      example: { partyDetails: [{ type: "individual" }] },
-    }),
-  })
-  .openapi({
-    description:
-      'Execute off-ramp request payload. The default example is shaped for `provider: "moonpay"`; switch `provider` to `bvnk` to attach `bvnkCompliance.partyDetails`.',
-    example: {
-      provider: "moonpay",
-      counterpartyId: "cp_example",
-      sourceWallet: "wal_example",
-      cryptoToken: "USDC",
-      fiatCurrency: "USD",
-      cryptoAmount: "50.00",
-      redirectUrl: "https://example.com",
     },
   });
 
@@ -2025,51 +1923,6 @@ export const offrampCurrenciesResponseSchema = z
   })
   .openapi({ description: "Off-ramp currency support response payload." });
 
-export const onrampExecutionSchema = z
-  .object({
-    id: z.string().openapi({ description: "Ramp execution identifier.", example: "ramp_example" }),
-    provider: z
-      .enum(RAMP_PROVIDERS)
-      .openapi({ description: "Selected provider used for execution.", example: "moonpay" }),
-    status: z
-      .enum(["pending", "processing", "completed", "failed"])
-      .openapi({ description: "Ramp execution status.", example: "pending" }),
-    redirectUrl: z
-      .string()
-      .url()
-      .optional()
-      .openapi({ description: "Redirect URL for the ramp provider." }),
-    paymentInstructions: z.array(rampPaymentInstructionSchema).optional().openapi({
-      description: "Provider payment instructions for funding or completing the ramp.",
-    }),
-    reference: z
-      .string()
-      .optional()
-      .openapi({ description: "Provider quote or transaction reference." }),
-  })
-  .openapi({ description: "On-ramp execution status." });
-
-export const offrampExecutionSchema = z
-  .object({
-    id: z.string().openapi({ description: "Ramp execution identifier.", example: "ramp_example" }),
-    provider: z
-      .enum(RAMP_PROVIDERS)
-      .openapi({ description: "Selected provider used for execution.", example: "moonpay" }),
-    status: z
-      .enum(["pending", "processing", "completed", "failed"])
-      .openapi({ description: "Ramp execution status.", example: "pending" }),
-    redirectUrl: z
-      .string()
-      .url()
-      .optional()
-      .openapi({ description: "Redirect URL for the ramp provider." }),
-    paymentInstructions: z.array(rampPaymentInstructionSchema).optional().openapi({
-      description: "Provider payment instructions for funding or completing the ramp.",
-    }),
-    reference: z.string().optional().openapi({ description: "Provider reference for the payout." }),
-  })
-  .openapi({ description: "Off-ramp execution status." });
-
 export const walletPolicyResponseSchema = z
   .object({
     policy: walletPolicySchema.openapi({ description: "Wallet policy configuration." }),
@@ -2109,23 +1962,11 @@ export const transferBatchEstimateResponseSchema = z
   })
   .openapi({ description: "Transfer batch estimate response payload." });
 
-export const onrampExecutionResponseSchema = z
-  .object({
-    ramp: onrampExecutionSchema.openapi({ description: "On-ramp execution details." }),
-  })
-  .openapi({ description: "On-ramp execution response payload." });
-
 export const onrampQuoteResponseSchema = z
   .object({
     quote: onrampQuoteSchema.openapi({ description: "On-ramp quote details." }),
   })
   .openapi({ description: "On-ramp quote response payload." });
-
-export const offrampExecutionResponseSchema = z
-  .object({
-    ramp: offrampExecutionSchema.openapi({ description: "Off-ramp execution details." }),
-  })
-  .openapi({ description: "Off-ramp execution response payload." });
 
 export const sandboxTransferSimulationResponseSchema = z
   .object({

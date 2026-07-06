@@ -8,10 +8,17 @@ import type {
   CustodyWalletAggregate,
   ListCounterpartiesResponse,
   ListCounterpartyAccountsResponse,
+  ListProjectCounterpartyAccountsEnvelope,
+  ListProjectCounterpartyAccountsResponse,
   MoneygramRampEvent,
   PaymentRampEstimateEnvelope,
-  PaymentRampExecution,
   PaymentsWalletAggregateEnvelope,
+  PaymentTransferBatch,
+  PaymentTransferBatchEnvelope,
+  PaymentTransferBatchEstimate,
+  PaymentTransferBatchEstimateEnvelope,
+  PaymentTransferBatchRequest,
+  PaymentTransferRecipient,
   RampDirection,
   RampEventProvider,
   RampFiatCurrency,
@@ -35,7 +42,7 @@ import {
 } from "./payment-api-errors";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
-export type { PaymentRampExecution, PaymentRampInstruction } from "@sdp/types";
+export type { PaymentRampInstruction } from "@sdp/types";
 export { getPaymentApiError as getApiError } from "./payment-api-errors";
 
 export interface PaymentWalletBalance {
@@ -255,15 +262,6 @@ interface WalletBalancesEnvelope {
         address?: string;
         balances?: PaymentWalletBalance[];
       };
-  error?: {
-    message?: string;
-  };
-}
-
-interface RampExecutionEnvelope {
-  data?: {
-    ramp?: PaymentRampExecution;
-  };
   error?: {
     message?: string;
   };
@@ -515,6 +513,80 @@ export async function createTransfer(input: {
   return body.data.transfer;
 }
 
+export async function fetchBatchRecipients(input: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  ids?: string[];
+  signal?: AbortSignal;
+}): Promise<ListProjectCounterpartyAccountsResponse> {
+  const query = new URLSearchParams({
+    ...(input.page ? { page: String(input.page) } : {}),
+    ...(input.pageSize ? { pageSize: String(input.pageSize) } : {}),
+    ...(input.search ? { search: input.search } : {}),
+    ...(input.ids && input.ids.length > 0 ? { ids: input.ids.join(",") } : {}),
+  });
+  const response = await fetch(`/api/dashboard/counterparty/accounts?${query.toString()}`, {
+    method: "GET",
+    cache: "no-store",
+    signal: input.signal,
+  });
+  const body = (await response.json().catch(() => ({}))) as ListProjectCounterpartyAccountsEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Recipient list request failed (${response.status}).`));
+  }
+  if (!body.data) {
+    throw new Error("Recipient list response is missing recipients.");
+  }
+  return body.data;
+}
+
+export async function estimateTransferBatch(
+  input: PaymentTransferBatchRequest
+): Promise<PaymentTransferBatchEstimate> {
+  const response = await fetch("/api/dashboard/payments/transfers/batch/estimate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEstimateEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Batch estimate request failed (${response.status}).`));
+  }
+  if (!body.data?.estimate) {
+    throw new Error("Batch estimate response is missing estimate details.");
+  }
+  return body.data.estimate;
+}
+
+export interface CreateTransferBatchResult {
+  batch: PaymentTransferBatch;
+  recipients: PaymentTransferRecipient[];
+  transfers: TransferRecord[];
+}
+
+export async function createTransferBatch(
+  input: PaymentTransferBatchRequest
+): Promise<CreateTransferBatchResult> {
+  const response = await fetch("/api/dashboard/payments/transfers/batch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Batch transfer request failed (${response.status}).`));
+  }
+  if (!body.data?.batch || !body.data.recipients || !body.data.transfers) {
+    throw new Error("Batch transfer response is missing batch details.");
+  }
+  return {
+    batch: body.data.batch,
+    recipients: body.data.recipients,
+    transfers: body.data.transfers,
+  };
+}
+
 async function postRampEvent(
   provider: RampEventProvider,
   event: MoneygramRampEvent | CoinbaseRampEvent
@@ -560,30 +632,6 @@ export async function fetchCounterpartyAccounts(
     throw new Error(getApiError(body, `Failed to load accounts (${response.status}).`));
   }
   return body.data?.accounts ?? [];
-}
-
-export async function executeRampFlow(
-  direction: "onramp" | "offramp",
-  payload: Record<string, unknown>
-): Promise<PaymentRampExecution> {
-  const response = await fetch(`/api/dashboard/payments/ramps/${direction}/execute`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-  const body = (await response.json().catch(() => ({}))) as RampExecutionEnvelope;
-
-  if (!response.ok) {
-    throw new Error(getApiError(body, `Ramp request failed (${response.status}).`));
-  }
-
-  if (!body.data?.ramp) {
-    throw new Error("Ramp response is missing execution details.");
-  }
-
-  return body.data.ramp;
 }
 
 type SandboxTransferSimulationInput =

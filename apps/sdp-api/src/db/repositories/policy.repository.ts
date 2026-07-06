@@ -1,5 +1,6 @@
 import type {
   ApiKeyWalletPolicyBindingScope,
+  ApprovalRequestStatus,
   PolicyDecision,
   PolicyDefaultAction,
   PolicyEvaluationContext,
@@ -39,6 +40,10 @@ export function generateWalletOperationId(): string {
 
 export function generatePolicyEvaluationId(): string {
   return `peval_${crypto.randomUUID()}`;
+}
+
+export function generateApprovalRequestId(): string {
+  return `appr_${crypto.randomUUID()}`;
 }
 
 export interface WalletControlProfileRow {
@@ -143,6 +148,24 @@ export interface PolicyEvaluationRow {
   requires_approval: boolean;
   approval_request_id: string | null;
   created_at: string;
+}
+
+export interface ApprovalRequestRow {
+  id: string;
+  organization_id: string;
+  project_id: string | null;
+  wallet_operation_id: string;
+  approval_group_id: string | null;
+  status: ApprovalRequestStatus;
+  provider: string | null;
+  provider_reference: string | null;
+  provider_payload: Record<string, unknown>;
+  requested_by: string | null;
+  resolved_by: string | null;
+  expires_at: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ActiveWalletControlProfileResult {
@@ -274,6 +297,27 @@ export interface CreatePolicyEvaluationInput {
   approvalRequestId?: string | null;
 }
 
+export interface CreateApprovalRequestInput {
+  organizationId: string;
+  projectId: string | null;
+  walletOperationId: string;
+  approvalGroupId?: string | null;
+  provider?: string | null;
+  providerReference?: string | null;
+  providerPayload?: Record<string, unknown>;
+  requestedBy?: string | null;
+  expiresAt?: string | null;
+}
+
+export interface UpdateApprovalRequestStatusInput {
+  organizationId: string;
+  approvalRequestId: string;
+  status: ApprovalRequestStatus;
+  operationStatus?: WalletOperationStatus;
+  resolvedBy?: string | null;
+  resolvedAt?: string;
+}
+
 export interface PolicyRepositoryContext {
   db: RepositoryDbClient;
 }
@@ -342,4 +386,8 @@ export interface PolicyRepository {
   ): Promise<WalletOperationRow | null>;
   createPolicyEvaluation(input: CreatePolicyEvaluationInput): Promise<PolicyEvaluationRow | null>;
   listPolicyEvaluationsForOperation(walletOperationId: string): Promise<PolicyEvaluationRow[]>;
+  createApprovalRequest(input: CreateApprovalRequestInput): Promise<ApprovalRequestRow | null>;
+  updateApprovalRequestStatus(
+    input: UpdateApprovalRequestStatusInput
+  ): Promise<ApprovalRequestRow | null>;
 }

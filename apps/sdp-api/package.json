@@ -58,7 +58,7 @@
     "@solana/keychain-turnkey": "1.3.0",
     "@solana/keychain-utila": "1.3.0",
     "@solana/kit": "catalog:",
-    "@solana/kora": "0.2.1",
+    "@solana/kora": "0.3.0-beta.2",
     "@solana/mosaic-sdk": "catalog:",
     "@solana/pay": "1.0.0-beta.14",
     "@solana/signers": "catalog:",

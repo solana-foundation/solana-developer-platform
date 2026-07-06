@@ -66,6 +66,29 @@ export function shortenAddress(address: string): string {
   return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
 }
 
+const TOKEN_AMOUNT_PATTERN = /^-?\d+(?:\.\d+)?$/;
+const TOKEN_AMOUNT_FORMATTER = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 9,
+});
+
+export function formatTokenAmount(value: number | string): string {
+  const rawValue = String(value).trim();
+  if (TOKEN_AMOUNT_PATTERN.test(rawValue)) {
+    const [whole = "", fraction] = rawValue.split(".");
+    const groupedWhole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return fraction ? `${groupedWhole}.${fraction}` : groupedWhole;
+  }
+
+  const numericValue = Number(rawValue);
+  return Number.isFinite(numericValue)
+    ? TOKEN_AMOUNT_FORMATTER.format(numericValue)
+    : String(value);
+}
+
+export function formatLamportsAsSol(lamports: bigint): string {
+  return `${formatTokenAmount(Number(lamports) / 1_000_000_000)} SOL`;
+}
+
 export function formatDisplayAmount(value?: string, token?: string): string {
   if (!value) {
     return token ? `- ${token}` : "-";
@@ -320,7 +343,7 @@ export function resolveAggregateBalanceDisplayToken(
   const issuedTokenSymbol = issuedTokenSymbolsByMint[normalizedMint]?.trim();
 
   if (issuedTokenSymbol) {
-    return issuedTokenSymbol;
+    return issuedTokenSymbol.toUpperCase();
   }
 
   const wellKnownTokenSymbol = WELL_KNOWN_TOKEN_BY_MINT.get(normalizedMint)?.symbol;
@@ -328,7 +351,12 @@ export function resolveAggregateBalanceDisplayToken(
     return wellKnownTokenSymbol;
   }
 
-  const normalizedToken = balance.token.trim().toUpperCase();
+  const rawToken = balance.token.trim();
+  if (rawToken === normalizedMint) {
+    return normalizedMint;
+  }
+
+  const normalizedToken = rawToken.toUpperCase();
   if (normalizedToken) {
     return normalizedToken;
   }

@@ -16,7 +16,6 @@ import {
   type CounterpartiesResult,
   cancelRampTransfer,
   fetchAllCounterparties,
-  fetchWallets,
   getApiError,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import {
@@ -29,8 +28,8 @@ import {
 import { useZodForm } from "@/lib/use-zod-form";
 import { type RampFields, rampSelectionSchema } from "../schema";
 import { useCounterpartyRequirements } from "./use-counterparty-requirements";
+import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 
-const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
 
 export function isTerminalRampTransferStatus(status: string) {
@@ -161,32 +160,16 @@ export function useRampWizard<TId extends string>(
       : null
   );
 
-  const { data: swrWallets, error: walletsFetchError } = useSWR<PaymentsDashboardWallet[]>(
-    PAYMENTS_ACTION_WALLETS_KEY,
-    () => fetchWallets({ includeBalances: true }),
-    {
-      fallbackData: wallets.length > 0 ? wallets : undefined,
-      revalidateOnFocus: false,
-      revalidateIfStale: false,
-    }
+  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
+    wallets,
+    walletsError
   );
-  const liveWallets = swrWallets ?? wallets;
-  const walletsLoading = swrWallets === undefined && !walletsFetchError;
-  const liveWalletsError = walletsFetchError
-    ? walletsFetchError instanceof Error
-      ? walletsFetchError.message
-      : "Request failed."
-    : swrWallets === undefined
-      ? walletsError
-      : null;
 
   const { data: liveCounterpartiesResult, mutate: mutateCounterparties } = useSWR(
     PAYMENTS_ACTION_COUNTERPARTIES_KEY,
     fetchAllCounterparties,
     {
       fallbackData: counterpartiesResult,
-      revalidateOnFocus: false,
-      revalidateIfStale: false,
     }
   );
 

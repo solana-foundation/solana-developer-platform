@@ -38,10 +38,8 @@ import {
   listSessionsResponseSchema,
   listTemplatesResponseSchema,
   offrampCurrenciesResponseSchema,
-  offrampExecutionResponseSchema,
   onboardingStatusResponseSchema,
   onrampCurrenciesResponseSchema,
-  onrampExecutionResponseSchema,
   onrampQuoteResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
@@ -227,9 +225,7 @@ export const paymentSubscriptionCollectionAttemptListResponse = successResponseS
 );
 export const onrampCurrenciesResponse = successResponseSchema(onrampCurrenciesResponseSchema);
 export const offrampCurrenciesResponse = successResponseSchema(offrampCurrenciesResponseSchema);
-export const onrampExecutionResponse = successResponseSchema(onrampExecutionResponseSchema);
 export const onrampQuoteResponse = successResponseSchema(onrampQuoteResponseSchema);
-export const offrampExecutionResponse = successResponseSchema(offrampExecutionResponseSchema);
 export const sandboxTransferSimulationResponse = successResponseSchema(
   sandboxTransferSimulationResponseSchema
 );

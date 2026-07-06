@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import { AppError } from "@/lib/errors";
 import {
   BvnkRampClient,
   buildBvnkCustomerExternalReference,
   buildBvnkOfframpWalletName,
   buildBvnkOnrampPaymentRuleKey,
   buildBvnkOnrampWalletName,
+  buildBvnkRuleEntity,
   buildBvnkWalletIdempotencyKey,
   bvnkOnrampStatusFromProviderData,
   bvnkUnverifiedOnboardingStatus,
@@ -289,5 +292,58 @@ describe("BVNK on-ramp payment rule key", () => {
     expect(() => buildBvnkOnrampPaymentRuleKey("NOPE", "USDC", "SOLANA", "dest")).toThrow(
       "Malformed BVNK on-ramp payment rule key input"
     );
+  });
+});
+
+function counterpartyRow(overrides?: Partial<CounterpartyRow>): CounterpartyRow {
+  return {
+    id: "cp_123",
+    organization_id: "org_123",
+    project_id: "proj_123",
+    external_id: null,
+    entity_type: "individual",
+    display_name: "Ada Lovelace",
+    email: "ada@example.com",
+    identity: {
+      firstName: "Ada",
+      lastName: "Lovelace",
+      address: {
+        line1: "1 Market St",
+        city: "San Francisco",
+        countryCode: "US",
+        subdivisionCode: "US-TX",
+      },
+    },
+    provider_data: {},
+    status: "active",
+    created_by: null,
+    created_at: "2026-06-11T00:00:00.000Z",
+    updated_at: "2026-06-11T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("buildBvnkRuleEntity", () => {
+  it("normalizes an ISO-prefixed stored subdivision code to BVNK's bare stateCode", () => {
+    const entity = buildBvnkRuleEntity(counterpartyRow());
+
+    expect(entity.address?.stateCode).toBe("TX");
+  });
+
+  it("throws for a non-US subdivision that does not resolve to 2 characters", () => {
+    const row = counterpartyRow({
+      identity: {
+        firstName: "Ada",
+        lastName: "Lovelace",
+        address: {
+          line1: "1 High St",
+          city: "London",
+          countryCode: "GB",
+          subdivisionCode: "GB-ENG",
+        },
+      },
+    });
+
+    expect(() => buildBvnkRuleEntity(row)).toThrowError(AppError);
   });
 });

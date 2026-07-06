@@ -375,6 +375,42 @@ describe("payment transfer batches", () => {
     expect(getFeeForMessageMock).toHaveBeenCalledTimes(1);
   });
 
+  it("estimates a batch when counterpartyId is omitted (derived from account)", async () => {
+    const getFeeForMessageMock = vi.fn(() => ({
+      send: async () => ({ value: 5000n }),
+    }));
+    createRpcMock.mockReturnValueOnce({
+      getFeeForMessage: getFeeForMessageMock,
+    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+
+    const counterpartyId = await seedCounterparty("batch_derive_counterparty");
+    const accountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches/estimate",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyAccountId: accountId, amount: "0.1" }],
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { estimate: { recipientCount: number } } };
+    expect(body.data.estimate.recipientCount).toBe(1);
+  });
+
   it("creates a SOL transfer batch and records chunk transfers", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);

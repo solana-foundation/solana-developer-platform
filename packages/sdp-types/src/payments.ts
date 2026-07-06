@@ -292,6 +292,32 @@ export interface PaymentTransferRecipient {
   updatedAt: string;
 }
 
+export const COUNTERPARTY_ACCOUNT_SUMMARY_TYPES = ["crypto_account"] as const;
+
+export type CounterpartyAccountSummaryType = (typeof COUNTERPARTY_ACCOUNT_SUMMARY_TYPES)[number];
+
+export interface CounterpartyAccountSummary {
+  counterpartyId: string;
+  counterpartyAccountId: string;
+  name: string;
+  address: string;
+  label: string | null;
+}
+
+export interface ListProjectCounterpartyAccountsResponse {
+  accounts: CounterpartyAccountSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ListProjectCounterpartyAccountsEnvelope {
+  data?: ListProjectCounterpartyAccountsResponse;
+  error?: {
+    message?: string;
+  };
+}
+
 export interface PaymentTransferBatchEstimate {
   recipientCount: number;
   transactionCount: number;
@@ -784,33 +810,6 @@ export interface PaymentRampQuoteCurrency {
   name?: string;
   symbol?: string;
 }
-
-interface BasePaymentRampExecution {
-  id: string;
-  status: PaymentRampExecutionStatus;
-  redirectUrl?: string;
-  reference?: string;
-}
-
-export type LightsparkPaymentRampExecution = BasePaymentRampExecution & {
-  provider: "lightspark";
-  paymentInstructions?: LightsparkPaymentRampInstruction[];
-};
-
-export type BvnkPaymentRampExecution = BasePaymentRampExecution & {
-  provider: "bvnk";
-  paymentInstructions?: BvnkPaymentRampInstruction[];
-};
-
-export type MoonpayPaymentRampExecution = BasePaymentRampExecution & {
-  provider: "moonpay";
-  paymentInstructions?: never;
-};
-
-export type PaymentRampExecution =
-  | LightsparkPaymentRampExecution
-  | BvnkPaymentRampExecution
-  | MoonpayPaymentRampExecution;
 
 interface BasePaymentRampQuote {
   id: string;

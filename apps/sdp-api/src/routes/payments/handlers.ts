@@ -6,8 +6,6 @@ export {
   createOnrampQuote,
   estimateOfframp,
   estimateOnramp,
-  executeOfframp,
-  executeOnramp,
   listOfframpCurrencies,
   listOnrampCurrencies,
   simulateSandboxTransfer,

@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, type SdpPlugin } from "@/app";
 import type { MonitorOptions, Observability, ObservabilityScope } from "@/runtime/observability";
+import { FeePaymentError } from "@/services/ports";
 import { env as baseEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 
 const THROW_PATH = "/__internal_error_test_throw";
+const FEE_ERROR_PATH = "/__fee_error_test_throw";
 
 function makeObservability(): {
   obs: Observability;
@@ -36,6 +38,12 @@ function buildApp(observability: Observability) {
   // onError path without modifying the production createApp surface.
   app.all(THROW_PATH, () => {
     throw new Error("test trigger for onError");
+  });
+  app.all(FEE_ERROR_PATH, () => {
+    throw new FeePaymentError(
+      "Failed to sign and send transaction: RPC Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x1",
+      "SIGNING_FAILED"
+    );
   });
   return app;
 }
@@ -106,6 +114,23 @@ describe("createApp onError SENTRY_DSN guard", () => {
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(withScope).not.toHaveBeenCalled();
+    expect(captureException).not.toHaveBeenCalled();
+  });
+
+  it("maps fee payment program errors to product-safe messages", async () => {
+    const { obs, captureException, withScope } = makeObservability();
+    const app = buildApp(obs);
+
+    const res = await app.request(FEE_ERROR_PATH, {}, baseEnv);
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("TRANSACTION_FAILED");
+    expect(body.error.message).toBe(
+      "The wallet used for this payment does not have enough funds. Add funds and try again."
+    );
+    expect(body.error.message).not.toContain("custom program error");
     expect(withScope).not.toHaveBeenCalled();
     expect(captureException).not.toHaveBeenCalled();
   });

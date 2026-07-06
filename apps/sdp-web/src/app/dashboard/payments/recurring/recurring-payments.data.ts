@@ -1,16 +1,22 @@
 import type {
   CreatePaymentRecurringPaymentRequest,
   ListPaymentRecurringPaymentsResponse,
+  ListPaymentSubscriptionCollectionAttemptsResponse,
   PaginatedResponse,
   PaymentRecurringPayment,
+  PaymentRecurringPaymentCollectionResponse,
   PaymentRecurringPaymentResponse,
   PaymentRecurringPaymentStatus,
+  PaymentSubscriptionCollectionAttempt,
+  UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { getPaymentApiError, parsePaymentApiErrorText } from "../payment-api-errors";
 import type { FetchResult } from "../payments-page.data";
 
 export const RECURRING_PAYMENTS_PAGE_SIZE = 100;
+
+export type RecurringPaymentAction = "activate" | "collect" | "cancel" | "resume";
 
 export interface RecurringPaymentsListOptions {
   page?: number;
@@ -32,6 +38,11 @@ type DashboardApiEnvelope<T> = {
       };
   message?: string;
 };
+
+export interface RecurringPaymentCollectionAttemptsResult {
+  collectionAttempts: PaymentSubscriptionCollectionAttempt[];
+  total: number;
+}
 
 function setPositiveInteger(query: URLSearchParams, key: string, value: number | undefined) {
   if (typeof value === "number" && Number.isInteger(value) && value > 0) {
@@ -122,6 +133,49 @@ export async function createRecurringPayment(
   return data.recurringPayment;
 }
 
+export async function updateRecurringPayment(
+  recurringPaymentId: string,
+  input: UpdatePaymentRecurringPaymentRequest,
+  signal?: AbortSignal
+): Promise<PaymentRecurringPayment> {
+  const response = await fetch(
+    `/api/dashboard/payments/recurring-payments/${encodeURIComponent(recurringPaymentId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+      signal,
+    }
+  );
+  const data = await readDashboardEnvelope<PaymentRecurringPaymentResponse>(
+    response,
+    "Recurring payment update failed"
+  );
+  return data.recurringPayment;
+}
+
+export async function runRecurringPaymentAction(
+  recurringPaymentId: string,
+  action: RecurringPaymentAction,
+  signal?: AbortSignal
+): Promise<PaymentRecurringPayment> {
+  const response = await fetch(
+    `/api/dashboard/payments/recurring-payments/${encodeURIComponent(
+      recurringPaymentId
+    )}/${action}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      signal,
+    }
+  );
+  const data = await readDashboardEnvelope<
+    PaymentRecurringPaymentResponse | PaymentRecurringPaymentCollectionResponse
+  >(response, "Recurring payment action failed");
+  return data.recurringPayment;
+}
+
 export async function fetchRecurringPayments(
   request: SdpApiClient["request"],
   options: RecurringPaymentsListOptions = {}
@@ -188,6 +242,42 @@ export async function fetchRecurringPaymentById(
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Unable to load recurring payment",
+    };
+  }
+}
+
+export async function fetchRecurringPaymentCollectionAttempts(
+  request: SdpApiClient["request"],
+  subscriptionId: string
+): Promise<FetchResult<RecurringPaymentCollectionAttemptsResult>> {
+  try {
+    const response = await request(
+      `/v1/payments/subscriptions/${encodeURIComponent(
+        subscriptionId
+      )}/collection-attempts?page=1&pageSize=25`
+    );
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error: parsePaymentApiErrorText(await response.text()),
+      };
+    }
+
+    const json = (await response.json()) as {
+      data?: ListPaymentSubscriptionCollectionAttemptsResponse;
+    };
+    return {
+      ok: true,
+      data: {
+        collectionAttempts: json.data?.collectionAttempts ?? [],
+        total: json.data?.total ?? 0,
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unable to load collection history",
     };
   }
 }

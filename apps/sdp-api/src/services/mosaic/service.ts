@@ -69,6 +69,7 @@ import {
   TOKEN_2022_PROGRAM_ADDRESS,
 } from "@solana-program/token-2022";
 import { parseDecimalAmount } from "@/lib/amount";
+import { transactionFailed } from "@/lib/errors";
 import type { FeePaymentPort } from "@/services/ports/fee-payment.port";
 import { confirmTransaction, createRpcForSdk } from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
@@ -1165,7 +1166,7 @@ export class MosaicService {
       );
 
       if (confirmation.err) {
-        throw new Error(`Transaction failed: ${safeStringify(confirmation.err)}`);
+        throw transactionFailed(`Transaction failed: ${safeStringify(confirmation.err)}`);
       }
 
       return {
@@ -1192,7 +1193,7 @@ export class MosaicService {
     );
 
     if (confirmation.err) {
-      throw new Error(`Transaction failed: ${safeStringify(confirmation.err)}`);
+      throw transactionFailed(`Transaction failed: ${safeStringify(confirmation.err)}`);
     }
 
     return {

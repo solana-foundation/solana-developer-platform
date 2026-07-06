@@ -60,12 +60,7 @@ export default async function RecurringPaymentsPage() {
             initialRecurringPayments={recurringPaymentsResult.data}
             initialTotal={recurringPaymentsResult.total}
             initialError={recurringPaymentsResult.error}
-            wallets={(walletsResult.data ?? []).map((wallet) => ({
-              walletId: wallet.walletId,
-              label: wallet.label,
-              publicKey: wallet.publicKey,
-              balances: wallet.balances ?? [],
-            }))}
+            wallets={walletsResult.data ?? []}
             counterparties={resolvedCounterparties.map((counterparty) => ({
               id: counterparty.id,
               displayName: counterparty.displayName,

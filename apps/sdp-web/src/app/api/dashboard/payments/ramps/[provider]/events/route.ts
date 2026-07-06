@@ -1,23 +1,19 @@
+import { RAMP_EVENT_PROVIDERS } from "@sdp/types";
 import { NextResponse } from "next/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
 type RouteContext = {
-  params: Promise<{ direction: string }>;
+  params: Promise<{ provider: string }>;
 };
-
-async function readParams(context: RouteContext) {
-  const resolved = await context.params;
-  return resolved.direction;
-}
 
 export async function POST(request: Request, context: RouteContext) {
   try {
-    const direction = await readParams(context);
-    if (direction !== "onramp" && direction !== "offramp") {
+    const { provider } = await context.params;
+    if (!(RAMP_EVENT_PROVIDERS as readonly string[]).includes(provider)) {
       return NextResponse.json(
         {
           error: {
-            message: "Unsupported ramp direction",
+            message: "Unsupported ramp event provider",
           },
         },
         { status: 400 }
@@ -26,11 +22,8 @@ export async function POST(request: Request, context: RouteContext) {
 
     const body = await request.text();
     const apiClient = await createSdpApiClient();
-    const response = await apiClient.request(`/v1/payments/ramps/${direction}/execute`, {
+    const response = await apiClient.request(`/v1/payments/ramps/${provider}/events`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body,
     });
 
@@ -47,7 +40,7 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json(
       {
         error: {
-          message: error instanceof Error ? error.message : "Ramp request failed",
+          message: error instanceof Error ? error.message : "Ramp event request failed",
         },
       },
       { status: 500 }
