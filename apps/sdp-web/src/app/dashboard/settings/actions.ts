@@ -1,7 +1,7 @@
 "use server";
 
 import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types";
-import { sdpApiOrgFetch } from "@/lib/sdp-api";
+import { createOrgSdpApiClient } from "@/lib/sdp-api";
 
 type OrganizationSettings = {
   rpcProvider?: OrganizationRpcProvider;
@@ -48,15 +48,13 @@ export async function updateOrganizationRpcSettingsAction(
     : "default";
 
   try {
-    const updated = await sdpApiOrgFetch<OrganizationRecord>(
-      `/v1/organizations/${organizationId}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify({
-          settings: { rpcProvider: resolvedProvider },
-        }),
-      }
-    );
+    const client = await createOrgSdpApiClient();
+    const updated = await client.fetch<OrganizationRecord>(`/v1/organizations/${organizationId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        settings: { rpcProvider: resolvedProvider },
+      }),
+    });
 
     const persistedProvider = updated.settings?.rpcProvider ?? "default";
     if (persistedProvider !== resolvedProvider) {

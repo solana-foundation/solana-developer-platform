@@ -158,7 +158,7 @@ async function buildSdpApiClient(
 
 /**
  * Creates a project-scoped SDP API client. Throws when no project is
- * selected — org-scoped endpoints go through `sdpApiOrgFetch` instead.
+ * selected — org-scoped endpoints go through `createOrgSdpApiClient` instead.
  */
 export async function createSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
   const projectId = await getSelectedProjectId();
@@ -169,30 +169,11 @@ export async function createSdpApiClient(traceContext?: TraceContext): Promise<S
 }
 
 /**
- * Fetches an org-scoped sdp-api endpoint (projects, members, allowlist,
- * organizations) that does not require a selected project.
+ * Creates an org-scoped SDP API client (no project header) for the endpoints
+ * that exist outside any project: projects, members, allowlist, organizations.
  */
-export async function sdpApiOrgFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const client = await buildSdpApiClient(null);
-  return client.fetch<T>(path, options);
-}
-
-export async function sdpApiProjectRequest(
-  path: string,
-  options: RequestInit = {},
-  traceContext?: TraceContext
-): Promise<Response> {
-  const client = await createSdpApiClient(traceContext);
-  return client.request(path, options);
-}
-
-export async function sdpApiProjectFetch<T>(
-  path: string,
-  options: RequestInit = {},
-  traceContext?: TraceContext
-): Promise<T> {
-  const client = await createSdpApiClient(traceContext);
-  return client.fetch<T>(path, options);
+export async function createOrgSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
+  return buildSdpApiClient(null, traceContext);
 }
 
 function proxyFailure(

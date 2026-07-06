@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { sdpApiProjectFetch, sdpApiProjectRequest } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 
 const DEVNET_FAUCET_LAMPORTS = 1_000_000_000;
 const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -50,7 +50,7 @@ function getApiErrorMessageFromText(body: string): string {
 function toApiActionErrorMessage(error: unknown): string {
   const raw = extractErrorMessage(error).trim();
 
-  // Format thrown by sdpApiProjectFetch helpers: "SDP API request failed (XXX): <body>"
+  // Format thrown by SdpApiClient.request/fetch: "SDP API request failed (XXX): <body>"
   const match = /^SDP API request failed \((\d+)\):\s*([\s\S]*)$/.exec(raw);
   if (!match) {
     return raw || "Unknown error";
@@ -84,7 +84,8 @@ async function sdpApiFetchWithApiKey<T>(
   apiKey: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const res = await sdpApiProjectRequest(path, {
+  const client = await createSdpApiClient();
+  const res = await client.request(path, {
     ...options,
     headers: {
       ...(options.headers ?? {}),
@@ -154,8 +155,10 @@ async function initializeCustodyWallet(formData: FormData) {
     }
   }
 
+  const client = await createSdpApiClient();
+
   try {
-    await sdpApiProjectFetch("/v1/wallets/initialize", {
+    await client.fetch("/v1/wallets/initialize", {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -166,7 +169,7 @@ async function initializeCustodyWallet(formData: FormData) {
       apiError?.status === 409 &&
       apiError.message.includes("Signing already initialized for org")
     ) {
-      await sdpApiProjectFetch("/v1/wallets", {
+      await client.fetch("/v1/wallets", {
         method: "POST",
         body: JSON.stringify({
           provider,
@@ -206,7 +209,8 @@ async function createCustodyWalletForProvider(formData: FormData) {
     | undefined;
   const label = getOptionalString(formData, "label");
 
-  await sdpApiProjectFetch("/v1/wallets", {
+  const client = await createSdpApiClient();
+  await client.fetch("/v1/wallets", {
     method: "POST",
     body: JSON.stringify({ provider, label }),
   });
@@ -273,7 +277,8 @@ export async function updateWalletLabelAction(
   const nextLabel = label.trim();
 
   try {
-    await sdpApiProjectFetch(`/v1/wallets/${encodeURIComponent(resolvedWalletId)}`, {
+    const client = await createSdpApiClient();
+    await client.fetch(`/v1/wallets/${encodeURIComponent(resolvedWalletId)}`, {
       method: "PATCH",
       body: JSON.stringify({
         label: nextLabel || null,
@@ -367,9 +372,10 @@ export async function checkWalletSignerMemoAction(
   const memo = `Wallet signer check (${resolvedWalletId}) ${new Date(now).toISOString()}`;
 
   let ephemeralKey: EphemeralApiKeyResponse["apiKey"] | null = null;
+  const client = await createSdpApiClient();
 
   try {
-    const created = await sdpApiProjectFetch<EphemeralApiKeyResponse>("/v1/api-keys", {
+    const created = await client.fetch<EphemeralApiKeyResponse>("/v1/api-keys", {
       method: "POST",
       body: JSON.stringify({
         name: keyName,
@@ -405,7 +411,7 @@ export async function checkWalletSignerMemoAction(
   } finally {
     if (ephemeralKey) {
       try {
-        await sdpApiProjectFetch(`/v1/api-keys/${ephemeralKey.id}`, {
+        await client.fetch(`/v1/api-keys/${ephemeralKey.id}`, {
           method: "DELETE",
           body: JSON.stringify({ confirmation: ephemeralKey.name }),
         });
@@ -435,18 +441,16 @@ export async function requestDevnetSolanaFaucetAction(
       return { status: "error", message: "Sign in to request devnet SOL." };
     }
 
-    const relay = await sdpApiProjectFetch<RpcRelayResponse<SolanaRpcAirdropResponse>>(
-      "/v1/rpc/proxy",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: `wallet-faucet-${resolvedWalletId}`,
-          method: "requestAirdrop",
-          params: [resolvedWalletAddress, DEVNET_FAUCET_LAMPORTS],
-        }),
-      }
-    );
+    const client = await createSdpApiClient();
+    const relay = await client.fetch<RpcRelayResponse<SolanaRpcAirdropResponse>>("/v1/rpc/proxy", {
+      method: "POST",
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: `wallet-faucet-${resolvedWalletId}`,
+        method: "requestAirdrop",
+        params: [resolvedWalletAddress, DEVNET_FAUCET_LAMPORTS],
+      }),
+    });
 
     if (!relay.upstream.ok) {
       return {
