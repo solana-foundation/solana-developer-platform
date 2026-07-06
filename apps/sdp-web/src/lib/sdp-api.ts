@@ -23,12 +23,15 @@ function getApiBaseUrl(): string {
   return base.replace(/\/$/, "");
 }
 
-async function getClerkToken(): Promise<string> {
-  const { getToken, orgId } = await auth();
-  if (!orgId) {
-    throw new Error("Active Clerk organization required");
-  }
+type ClerkGetToken = (options?: { template?: string }) => Promise<string | null>;
 
+/**
+ * Acquires the sdp-api bearer token from a Clerk `getToken`, honoring
+ * CLERK_JWT_TEMPLATE when configured. Takes `getToken` as a parameter because
+ * server contexts get it from `auth()` while the proxy middleware gets it from
+ * its `clerkMiddleware` callback.
+ */
+export async function acquireClerkToken(getToken: ClerkGetToken): Promise<string> {
   const template = process.env.CLERK_JWT_TEMPLATE;
   if (template) {
     const token = await getToken({ template });
@@ -44,6 +47,14 @@ async function getClerkToken(): Promise<string> {
   }
 
   return token;
+}
+
+async function getClerkToken(): Promise<string> {
+  const { getToken, orgId } = await auth();
+  if (!orgId) {
+    throw new Error("Active Clerk organization required");
+  }
+  return acquireClerkToken(getToken);
 }
 
 type SdpApiRequestFn = (path: string, options?: RequestInit) => Promise<Response>;
@@ -145,13 +156,7 @@ export async function getSelectedProjectId(): Promise<string | undefined> {
   return jar.get(PROJECT_COOKIE_NAME)?.value;
 }
 
-async function buildSdpApiClient(
-  projectId: string | null,
-  traceContext?: TraceContext
-): Promise<SdpApiClient> {
-  const token = await getClerkToken();
-  const request = createSdpApiRequest(token, projectId, traceContext);
-
+function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {
   return {
     request,
     fetch: async <T>(path: string, options: RequestInit = {}): Promise<T> => {
@@ -159,6 +164,22 @@ async function buildSdpApiClient(
       return parseSdpApiResponse<T>(res);
     },
   };
+}
+
+async function buildSdpApiClient(
+  projectId: string | null,
+  traceContext?: TraceContext
+): Promise<SdpApiClient> {
+  const token = await getClerkToken();
+  return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
+}
+
+/**
+ * Creates an org-scoped client from an explicit bearer token, for the proxy
+ * middleware where Clerk's request-bound `auth()` helper is unavailable.
+ */
+export function createTokenSdpApiClient(token: string): SdpApiClient {
+  return assembleSdpApiClient(createSdpApiRequest(token, null));
 }
 
 /**
