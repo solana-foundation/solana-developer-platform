@@ -205,23 +205,6 @@ export interface PaymentTransferEnvelope {
   };
 }
 
-export interface PaymentTransferPrepareEnvelope {
-  data?: {
-    transfer?: PaymentTransferSummary;
-    preparedTransaction?: PreparedPaymentTransaction;
-    privateTransfer?: PreparedPrivateTransfer;
-    simulation?: {
-      success: boolean;
-      logs: string[];
-      unitsConsumed: string | null;
-      error: string | null;
-    };
-  };
-  error?: {
-    message?: string;
-  };
-}
-
 export type PaymentTransferBatchStatus =
   | "pending"
   | "processing"

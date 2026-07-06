@@ -105,7 +105,6 @@ const TEST_BVNK_WALLET_ID = "a:24122329329347:HsdJVhW:1";
 const TEST_BVNK_OFFRAMP_WALLET_ID = "a:99887766554433:OffRmpW:1";
 const TEST_BVNK_API_BASE_URL = "https://api.sandbox.bvnk.test";
 const TEST_MAGICBLOCK_API_BASE_URL = "https://payments.magicblock.test";
-const TEST_MAGICBLOCK_AUTH_TOKEN = "magicblock_auth_token";
 const TEST_MAGICBLOCK_SPONSOR_FEE_PAYER = "CrankS2fXgMGvQJ3VBrZmRfGrfogDY6pq5YcgkPEpSNf";
 const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet;
 const MOONPAY_PARAM_BASE_CURRENCY_AMOUNT = "baseCurrencyAmount";
@@ -5826,13 +5825,39 @@ describe("Payments routes", () => {
     ]);
   });
 
-  it("blocks prepare transfer when destination is outside allowlist", async () => {
+  it("blocks create transfer when projected daily total exceeds maxDailyAmount", async () => {
     await seedWalletPolicy({
-      destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2],
+      destinationAllowlist: [],
+      maxDailyAmount: "2.0",
     });
 
+    const now = new Date().toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers
+           (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        "xfr_existing_daily_limit",
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_WALLET_ID,
+        TEST_SOLANA_ADDRESSES.wallet1,
+        TEST_SOLANA_ADDRESSES.wallet2,
+        "SOL",
+        "1.4",
+        null,
+        "transfer",
+        "outbound",
+        "confirmed",
+        now,
+        now
+      )
+      .run();
+
     const res = await app.request(
-      "/v1/payments/transfers/prepare",
+      "/v1/payments/transfers",
       {
         method: "POST",
         headers: {
@@ -5843,7 +5868,7 @@ describe("Payments routes", () => {
           source: TEST_WALLET_ID,
           destination: TEST_SOLANA_ADDRESSES.wallet3,
           token: "SOL",
-          amount: "1",
+          amount: "0.7",
         }),
       },
       env
@@ -5853,10 +5878,13 @@ describe("Payments routes", () => {
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("FORBIDDEN");
 
-    const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
-      id: string;
-    }>();
-    expect(transfers.results).toHaveLength(0);
+    const transfers = await getDb(env)
+      .prepare("SELECT id FROM payment_transfers ORDER BY id ASC")
+      .all<{
+        id: string;
+      }>();
+    expect(transfers.results).toHaveLength(1);
+    expect(transfers.results[0]?.id).toBe("xfr_existing_daily_limit");
 
     const operation = await getDb(env)
       .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
@@ -5864,7 +5892,7 @@ describe("Payments routes", () => {
     expect(operation).toMatchObject({
       status: "failed",
       operation_family: "payment",
-      operation_type: "payment_transfer_prepare",
+      operation_type: "payment_transfer_execute",
     });
 
     const evaluations = await getDb(env)
@@ -5882,14 +5910,9 @@ describe("Payments routes", () => {
     );
   });
 
-  it("blocks prepare transfer when amount exceeds maxTransferAmount", async () => {
-    await seedWalletPolicy({
-      destinationAllowlist: [],
-      maxTransferAmount: "1.5",
-    });
-
+  it("blocks create transfer with zero amount before creating a transfer record", async () => {
     const res = await app.request(
-      "/v1/payments/transfers/prepare",
+      "/v1/payments/transfers",
       {
         method: "POST",
         headers: {
@@ -5900,15 +5923,19 @@ describe("Payments routes", () => {
           source: TEST_WALLET_ID,
           destination: TEST_SOLANA_ADDRESSES.wallet2,
           token: "SOL",
-          amount: "2.0",
+          amount: "0",
         }),
       },
       env
     );
 
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("FORBIDDEN");
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { code: string; message: string; details?: { errors?: Record<string, string[]> } };
+    };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toContain("Invalid request body");
+    expect(body.error.details?.errors?.amount).toContain("Amount must be greater than zero");
 
     const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
       id: string;
@@ -5916,301 +5943,40 @@ describe("Payments routes", () => {
     expect(transfers.results).toHaveLength(0);
   });
 
-  describe("prepare transfer — happy path", () => {
-    it("creates a pending SOL transfer with no wallet policy", async () => {
-      const res = await app.request(
-        "/v1/payments/transfers/prepare",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            source: TEST_WALLET_ID,
-            destination: TEST_SOLANA_ADDRESSES.wallet2,
-            token: "SOL",
-            amount: "1",
-          }),
-        },
-        env
-      );
+  async function seedTransfer(params: {
+    id: string;
+    status: string;
+    signature?: string | null;
+    walletId?: string;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers
+           (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, signature, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        params.id,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        params.walletId ?? TEST_WALLET_ID,
+        TEST_SOLANA_ADDRESSES.wallet1,
+        TEST_SOLANA_ADDRESSES.wallet2,
+        "SOL",
+        "1",
+        null,
+        "transfer",
+        "outbound",
+        params.status,
+        params.signature ?? null,
+        now,
+        now
+      )
+      .run();
+  }
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: {
-          transfer: { id: string; status: string };
-          preparedTransaction: { serialized: string; blockhash: string };
-        };
-      };
-      expect(body.data.transfer.status).toBe("pending");
-      expect(body.data.transfer.id).toMatch(/^xfr_/);
-      expect(body.data.preparedTransaction.serialized).toBeTruthy();
-      expect(body.data.preparedTransaction.blockhash).toBe(
-        "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"
-      );
-
-      const row = await getDb(env)
-        .prepare("SELECT status, serialized_tx FROM payment_transfers WHERE id = ?")
-        .bind(body.data.transfer.id)
-        .first<{ status: string; serialized_tx: string | null }>();
-      expect(row?.status).toBe("pending");
-      expect(row?.serialized_tx).toBeTruthy();
-    });
-
-    it("creates a pending SOL transfer when destination is on the allowlist", async () => {
-      await seedWalletPolicy({
-        destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2],
-      });
-
-      const res = await app.request(
-        "/v1/payments/transfers/prepare",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            source: TEST_WALLET_ID,
-            destination: TEST_SOLANA_ADDRESSES.wallet2,
-            token: "SOL",
-            amount: "1",
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: {
-          transfer: { id: string; status: string };
-          preparedTransaction: { serialized: string };
-        };
-      };
-      expect(body.data.transfer.status).toBe("pending");
-      expect(body.data.transfer.id).toMatch(/^xfr_/);
-      expect(body.data.preparedTransaction.serialized).toBeTruthy();
-    });
-
-    it("prepares a MagicBlock private SPL transfer that settles to base balance", async () => {
-      env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
-      env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = TEST_MAGICBLOCK_AUTH_TOKEN;
-      createRpcMock.mockReturnValueOnce({
-        getTokenSupply: () => ({
-          send: async () => ({ value: { decimals: 6 } }),
-        }),
-      } as unknown as ReturnType<typeof solanaRpc.createRpc>);
-
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            kind: "transfer",
-            version: "v0",
-            transactionBase64: "AQID",
-            sendTo: "base",
-            recentBlockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
-            lastValidBlockHeight: 123456,
-            instructionCount: 4,
-            requiredSigners: [TEST_SOLANA_ADDRESSES.wallet1],
-            validator: TEST_SOLANA_ADDRESSES.wallet3,
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        )
-      );
-
-      try {
-        const res = await app.request(
-          "/v1/payments/transfers/prepare",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${TEST_API_KEY.raw}`,
-            },
-            body: JSON.stringify({
-              source: TEST_WALLET_ID,
-              destination: TEST_SOLANA_ADDRESSES.wallet2,
-              token: DEVNET_USDC_MINT,
-              amount: "1.25",
-              memo: "Invoice #1042",
-              privateTransfer: {
-                provider: "magicblock",
-                magicBlock: {
-                  initIfMissing: true,
-                  initAtasIfMissing: true,
-                  minDelayMs: "0",
-                  maxDelayMs: "1000",
-                  split: 2,
-                },
-              },
-            }),
-          },
-          env
-        );
-
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as {
-          data: {
-            transfer: { id: string; status: string; type: string };
-            preparedTransaction: {
-              serialized: string;
-              blockhash: string;
-              lastValidBlockHeight: string;
-            };
-            privateTransfer: {
-              provider: string;
-              magicBlock: {
-                kind: string;
-                version: string;
-                instructionCount: number;
-                requiredSigners: string[];
-                validator?: string;
-              };
-            };
-          };
-        };
-
-        expect(body.data.transfer.status).toBe("pending");
-        expect(body.data.transfer.type).toBe("transfer_confidential");
-        expect(body.data.preparedTransaction).toMatchObject({
-          serialized: "AQID",
-          blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
-          lastValidBlockHeight: "123456",
-        });
-        expect(body.data.privateTransfer).toMatchObject({
-          provider: "magicblock",
-          magicBlock: {
-            kind: "transfer",
-            version: "v0",
-            instructionCount: 4,
-            requiredSigners: [TEST_SOLANA_ADDRESSES.wallet1],
-            validator: TEST_SOLANA_ADDRESSES.wallet3,
-          },
-        });
-
-        expect(fetchSpy).toHaveBeenCalledTimes(1);
-        const [url, init] = fetchSpy.mock.calls[0] ?? [];
-        expect(String(url)).toBe(`${TEST_MAGICBLOCK_API_BASE_URL}/v1/spl/transfer`);
-        expect((init?.headers as Record<string, string>).Authorization).toBe(
-          `Bearer ${TEST_MAGICBLOCK_AUTH_TOKEN}`
-        );
-        const providerPayload = JSON.parse(String(init?.body)) as Record<string, unknown>;
-        expect(providerPayload).toMatchObject({
-          from: TEST_SOLANA_ADDRESSES.wallet1,
-          to: TEST_SOLANA_ADDRESSES.wallet2,
-          cluster: "devnet",
-          mint: DEVNET_USDC_MINT,
-          amount: 1_250_000,
-          visibility: "private",
-          fromBalance: "base",
-          toBalance: "base",
-          memo: "Invoice #1042",
-          initIfMissing: true,
-          initAtasIfMissing: true,
-          minDelayMs: "0",
-          maxDelayMs: "1000",
-          split: 2,
-        });
-
-        const row = await getDb(env)
-          .prepare("SELECT status, type, serialized_tx FROM payment_transfers WHERE id = ?")
-          .bind(body.data.transfer.id)
-          .first<{ status: string; type: string; serialized_tx: string | null }>();
-        expect(row).toMatchObject({
-          status: "pending",
-          type: "transfer_confidential",
-          serialized_tx: "AQID",
-        });
-      } finally {
-        fetchSpy.mockRestore();
-      }
-    });
-
-    it("rejects unsupported MagicBlock balance routing options", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-      try {
-        const res = await app.request(
-          "/v1/payments/transfers/prepare",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${TEST_API_KEY.raw}`,
-            },
-            body: JSON.stringify({
-              source: TEST_WALLET_ID,
-              destination: TEST_SOLANA_ADDRESSES.wallet2,
-              token: DEVNET_USDC_MINT,
-              amount: "1",
-              privateTransfer: {
-                provider: "magicblock",
-                magicBlock: {
-                  sourceBalance: "base",
-                  settlement: "shielded",
-                },
-              },
-            }),
-          },
-          env
-        );
-
-        expect(res.status).toBe(400);
-        const body = (await res.json()) as { error: { code: string; message: string } };
-        expect(body.error.code).toBe("BAD_REQUEST");
-        expect(body.error.message).toBe("Invalid request body");
-        expect(fetchSpy).not.toHaveBeenCalled();
-      } finally {
-        fetchSpy.mockRestore();
-      }
-    });
-
-    it("rejects simulated MagicBlock private transfers before calling the provider", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-      try {
-        const res = await app.request(
-          "/v1/payments/transfers/prepare",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${TEST_API_KEY.raw}`,
-            },
-            body: JSON.stringify({
-              source: TEST_WALLET_ID,
-              destination: TEST_SOLANA_ADDRESSES.wallet2,
-              token: DEVNET_USDC_MINT,
-              amount: "1",
-              options: { simulate: true },
-              privateTransfer: {
-                provider: "magicblock",
-                magicBlock: {},
-              },
-            }),
-          },
-          env
-        );
-
-        expect(res.status).toBe(400);
-        const body = (await res.json()) as { error: { code: string; message: string } };
-        expect(body.error.code).toBe("BAD_REQUEST");
-        expect(body.error.message).toContain("Simulation is not supported");
-        expect(fetchSpy).not.toHaveBeenCalled();
-
-        const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
-          id: string;
-        }>();
-        expect(transfers.results).toHaveLength(0);
-      } finally {
-        fetchSpy.mockRestore();
-      }
-    });
-
+  describe("execute transfer — happy path", () => {
     it("rejects MagicBlock execution when gasless sponsorship is explicitly disabled", async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch");
 
@@ -6523,241 +6289,6 @@ describe("Payments routes", () => {
       }
     });
 
-    it("returns 400 when required field amount is missing", async () => {
-      const res = await app.request(
-        "/v1/payments/transfers/prepare",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            source: TEST_WALLET_ID,
-            destination: TEST_SOLANA_ADDRESSES.wallet2,
-            token: "SOL",
-            // amount omitted
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("BAD_REQUEST");
-
-      const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
-        id: string;
-      }>();
-      expect(transfers.results).toHaveLength(0);
-    });
-
-    it("returns 400 when destination address is too short", async () => {
-      const res = await app.request(
-        "/v1/payments/transfers/prepare",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            source: TEST_WALLET_ID,
-            destination: "bad",
-            token: "SOL",
-            amount: "1",
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("BAD_REQUEST");
-    });
-
-    it("returns 404 when source wallet does not exist", async () => {
-      const res = await app.request(
-        "/v1/payments/transfers/prepare",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            source: "wal_nonexistent_wallet",
-            destination: TEST_SOLANA_ADDRESSES.wallet2,
-            token: "SOL",
-            amount: "1",
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(404);
-      const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("NOT_FOUND");
-
-      const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
-        id: string;
-      }>();
-      expect(transfers.results).toHaveLength(0);
-    });
-  });
-
-  it("blocks create transfer when projected daily total exceeds maxDailyAmount", async () => {
-    await seedWalletPolicy({
-      destinationAllowlist: [],
-      maxDailyAmount: "2.0",
-    });
-
-    const now = new Date().toISOString();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO payment_transfers
-           (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "xfr_existing_daily_limit",
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        TEST_WALLET_ID,
-        TEST_SOLANA_ADDRESSES.wallet1,
-        TEST_SOLANA_ADDRESSES.wallet2,
-        "SOL",
-        "1.4",
-        null,
-        "transfer",
-        "outbound",
-        "confirmed",
-        now,
-        now
-      )
-      .run();
-
-    const res = await app.request(
-      "/v1/payments/transfers",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          source: TEST_WALLET_ID,
-          destination: TEST_SOLANA_ADDRESSES.wallet3,
-          token: "SOL",
-          amount: "0.7",
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("FORBIDDEN");
-
-    const transfers = await getDb(env)
-      .prepare("SELECT id FROM payment_transfers ORDER BY id ASC")
-      .all<{
-        id: string;
-      }>();
-    expect(transfers.results).toHaveLength(1);
-    expect(transfers.results[0]?.id).toBe("xfr_existing_daily_limit");
-
-    const operation = await getDb(env)
-      .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
-      .first<{ status: string; operation_family: string; operation_type: string }>();
-    expect(operation).toMatchObject({
-      status: "failed",
-      operation_family: "payment",
-      operation_type: "payment_transfer_execute",
-    });
-
-    const evaluations = await getDb(env)
-      .prepare("SELECT decision, reason_code FROM policy_evaluations")
-      .all<{ decision: string; reason_code: string }>();
-    expect(evaluations.results).toHaveLength(2);
-    expect(evaluations.results).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ decision: "allow" }),
-        expect.objectContaining({
-          decision: "deny",
-          reason_code: "legacy_wallet_policy_denied",
-        }),
-      ])
-    );
-  });
-
-  it("blocks create transfer with zero amount before creating a transfer record", async () => {
-    const res = await app.request(
-      "/v1/payments/transfers",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          source: TEST_WALLET_ID,
-          destination: TEST_SOLANA_ADDRESSES.wallet2,
-          token: "SOL",
-          amount: "0",
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as {
-      error: { code: string; message: string; details?: { errors?: Record<string, string[]> } };
-    };
-    expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.message).toContain("Invalid request body");
-    expect(body.error.details?.errors?.amount).toContain("Amount must be greater than zero");
-
-    const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
-      id: string;
-    }>();
-    expect(transfers.results).toHaveLength(0);
-  });
-
-  async function seedTransfer(params: {
-    id: string;
-    status: string;
-    signature?: string | null;
-    walletId?: string;
-  }): Promise<void> {
-    const now = new Date().toISOString();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO payment_transfers
-           (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, signature, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        params.id,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        params.walletId ?? TEST_WALLET_ID,
-        TEST_SOLANA_ADDRESSES.wallet1,
-        TEST_SOLANA_ADDRESSES.wallet2,
-        "SOL",
-        "1",
-        null,
-        "transfer",
-        "outbound",
-        params.status,
-        params.signature ?? null,
-        now,
-        now
-      )
-      .run();
-  }
-
-  describe("execute transfer — happy path", () => {
     it("blocks a transfer denied by an active wallet control profile before signing", async () => {
       await seedWalletControlProfile({
         rules: [{ id: "small-transfer-only", kind: "amount", max: "0.5" }],
