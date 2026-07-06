@@ -91,6 +91,3 @@ minimumReleaseAgeExclude:
   - '@solana/transaction-confirmation'
   - '@solana/transaction-messages'
   - '@solana/transactions'
-  - 'uncrypto'
-  - 'viem'
-  - 'zod'
