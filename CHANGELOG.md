@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.35.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.35.0...v0.35.1) (2026-07-06)
+
+### Maintenance
+
+* harden npm and GitHub Actions supply chain ([#593](https://github.com/solana-foundation/solana-developer-platform/pull/593)) ([eb59d6b](https://github.com/solana-foundation/solana-developer-platform/commit/eb59d6b95989b7a3e5e9b14a7b6ee26fc519667d))
+
 ## [0.35.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.34.0...v0.35.0) (2026-07-06)
 
 ### Features
