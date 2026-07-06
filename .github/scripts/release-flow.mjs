@@ -310,7 +310,12 @@ async function githubGraphqlRequest(query, variables) {
   });
 
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`GraphQL request failed: ${response.status} ${text}`);
+  }
 
   if (!response.ok || payload.errors?.length) {
     const message = payload.errors?.map((error) => error.message).join("; ") || text;
@@ -380,7 +385,7 @@ function configureGitIdentity() {
 function releaseFileAddition(relativePath) {
   return {
     path: relativePath,
-    contents: Buffer.from(fs.readFileSync(path.join(repoRoot, relativePath))).toString("base64"),
+    contents: fs.readFileSync(path.join(repoRoot, relativePath)).toString("base64"),
   };
 }
 
