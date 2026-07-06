@@ -165,7 +165,7 @@ importers:
         specifier: 1.95.2
         version: 1.95.2
       zod:
-        specifier: ^4.4.1
+        specifier: 4.4.3
         version: 4.4.3
     devDependencies:
       '@asteasolutions/zod-to-openapi':
