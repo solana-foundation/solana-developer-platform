@@ -1866,7 +1866,6 @@ Prepare endpoints accept `options.simulate: true` to dry-run the transaction bef
 | Force-burn | `POST .../force-burn` | `POST .../force-burn/prepare` |
 | Seize | `POST .../seize` | `POST .../seize/prepare` |
 | Update authority | `POST .../authority` | `POST .../authority/prepare` |
-| Transfer | `POST /v1/payments/transfers` | `POST /v1/payments/transfers/prepare` |
 
 Issuance paths are prefixed with `https://api.solana.com/v1/issuance/tokens/{tokenId}`.
 
@@ -1919,7 +1918,7 @@ Every page in this section links to specific endpoints in the auto-generated [Pa
 ### How payments work on SDP
 Source: https://platform.solana.com/docs/payments/concepts
 
-> Wallets, tokens, signing modes, fees, and the data model that backs SDP payments.
+> Wallets, tokens, server-side signing, fees, and the data model that backs SDP payments.
 
 SDP payments move value between Solana accounts: a custody wallet sends tokens to a destination address, SDP records the transfer, and the rest of the section describes how to send those, accept incoming ones, ramp into and out of fiat, and reconcile activity against your product database.
 
@@ -1927,32 +1926,25 @@ This page introduces the building blocks the rest of the section assumes.
 
 ## Custody wallets
 
-Every SDP payment is anchored to a **custody wallet** — a Solana keypair whose private key SDP holds, scoped to an organization and (optionally) a project. Wallets sign on your behalf in Execute mode and contribute to balances and policies for the addresses you control.
+Every SDP payment is anchored to a **custody wallet** — a Solana keypair whose private key SDP holds, scoped to an organization and (optionally) a project. Wallets sign outbound transfers on your behalf and contribute to balances and policies for the addresses you control.
 
 You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)) and reference them by their SDP `wallet_id` (`wal_…`). Transfer endpoints expect the **source** as a custody wallet ID — the wallet is resolved server-side from the caller's custody-wallet list — and the **destination** as the on-chain Solana address of the recipient. Ramp endpoints vary by provider: MoonPay and BVNK accept either a wallet ID or a Solana address for `sourceWallet` / `destinationWallet`; Lightspark uses its own `ExternalAccount:…` identifiers (onramp `destinationWallet` also accepts a Solana address, offramp `sourceWallet` does not).
 
 ## Tokens and token accounts
 
-Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` (and its `/prepare` variant) requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
+Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
 
 **Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to issuance operations (mint, burn, seize, force-burn) as well as payments transfers. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
 
-## Signing modes
+## Transfer execution
 
-Every payments mutation supports two signing modes:
+Outbound wallet transfers are server-executed through `POST /v1/payments/transfers`. SDP builds the transaction, signs with the source wallet's custody key, submits it on the configured Solana cluster, and records the resulting transfer lifecycle.
 
-- **Execute** — `POST /v1/payments/transfers`. SDP signs with the source wallet's custody key and submits the transaction.
-- **Prepare** — `POST /v1/payments/transfers/prepare`. SDP builds and serializes the transaction but does not sign or submit it; you sign client-side (hardware wallet, multisig, user prompt) and submit the result yourself.
-
-See [Prepare vs Execute](/docs/guides/prepare-vs-execute) for the full guide on choosing between them. The rest of this section shows both modes side by side wherever the choice matters.
+The rest of this section assumes transfers are submitted by SDP from a custody wallet you control.
 
 ## Fees and sponsorship
 
-Solana fees are paid in SOL by the transaction's fee payer. On Execute-mode transfers, the source custody wallet is the fee payer by default; SDP can be configured to sponsor fees so end-user wallets do not need a SOL balance.
-
-In Prepare mode, the serialized transaction already includes the fee-payer assignment; sign it as-is or rebuild with a different fee payer of your own.
-
-The `Prepare` endpoint also accepts an `options.priorityFee` field (`"none" | "low" | "medium" | "high" | "auto"`) as a roadmap hook. The value is validated but **not yet applied** to the built transaction — priority fees ship as a separate piece of work.
+Solana fees are paid in SOL by the transaction's fee payer. On wallet transfers, the source custody wallet is the fee payer by default; SDP can be configured to sponsor fees so end-user wallets do not need a SOL balance.
 
 ## The transfer data model
 
@@ -1971,7 +1963,7 @@ Every successful or attempted transfer creates a `Transfer` record. The fields t
 | `error` | Set if the transfer failed; the rest of the record explains what reached the network. |
 | `risk` | Optional risk-score metadata, when a risk provider is configured. |
 
-The status path depends on how the transfer was created. Execute-mode starts at `processing` and moves to `confirmed` → `finalized`. Prepare-mode starts at `pending` (serialized tx saved but not submitted) and moves to `processing` once the signed tx is submitted; if the blockhash expires before submission it transitions to `failed` without ever producing a `signature`. Inbound transfers discovered on-chain surface directly at `confirmed`. See [Verifying a payment](/docs/payments/accept-verification#status-lifecycle) for the full state table.
+Outbound wallet transfers start at `processing` and move to `confirmed` → `finalized`. Inbound transfers discovered on-chain surface directly at `confirmed`. Ramp transfers can start at `pending` while provider-side steps are still underway. See [Verifying a payment](/docs/payments/accept-verification#status-lifecycle) for the full state table.
 
 ## What SDP does and does not give you
 
@@ -1979,7 +1971,6 @@ SDP exposes everything you need to **send**, **track**, and **reconcile** paymen
 
 ## Related
 
-- [Prepare vs Execute](/docs/guides/prepare-vs-execute) — SDP's two signing modes in depth.
 - [Payments API reference](/docs/reference/api/payments) — auto-generated endpoint reference.
 - [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow) — a step-by-step tutorial through the same lifecycle from a different angle.
 
@@ -1990,7 +1981,7 @@ SDP exposes everything you need to **send**, **track**, and **reconcile** paymen
 ### Basic payment
 Source: https://platform.solana.com/docs/payments/send-basic-payment
 
-> Send a single token transfer with SDP, using either Execute or Prepare mode.
+> Send a single token transfer with SDP.
 
 SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana wallet address**. The `source` field on the request is an SDP custody wallet ID (`wal_…`), resolved server-side from the caller's wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
 
@@ -1999,8 +1990,8 @@ Transfers are available through the Payments dashboard and the API.
 ## Prerequisites
 
 - A deployed token with minted supply
-- A custody wallet to use as the `source`. Execute mode additionally requires the wallet to have a custody signer configured so SDP can sign and submit; Prepare mode doesn't (you'll sign client-side).
-- An API key with both `payments:write` and `wallets:read` permissions, where the key's `payments:write` scope includes the source wallet — both endpoints (`POST /v1/payments/transfers` and `POST /v1/payments/transfers/prepare`) are gated by that pair at the route layer, and the source wallet is then re-checked against the key's `payments:write` wallet scope.
+- A custody wallet to use as the `source`, with a custody signer configured so SDP can sign and submit.
+- An API key with both `payments:write` and `wallets:read` permissions, where the key's `payments:write` scope includes the source wallet — `POST /v1/payments/transfers` is gated by that pair at the route layer, and the source wallet is then re-checked against the key's `payments:write` wallet scope.
 
 ## How it works
 
@@ -2039,7 +2030,7 @@ Fill in:
 </Tab>
 <Tab value="API">
 
-Prepare the request body:
+Build the request body:
 
 ```typescript
 const body = {
@@ -2061,7 +2052,7 @@ const body = {
 
 <Step number={2} title="Execute the transfer">
 
-Submit the transfer. In Execute mode SDP signs and submits. In Prepare mode you receive an unsigned transaction to sign client-side. See [Prepare vs Execute](/docs/guides/prepare-vs-execute) for guidance.
+Submit the transfer. SDP signs with the source custody wallet and submits the transaction.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -2073,8 +2064,6 @@ The transfer status updates to `Confirmed` once the transaction is finalized.
 
 </Tab>
 <Tab value="API">
-
-**Execute mode**
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -2127,68 +2116,6 @@ HttpRequest request = HttpRequest.newBuilder()
           "token": "9aBCd...4eEf",
           "amount": "100.00",
           "memo": "Payment for invoice #1234"
-        }"""))
-    .build();
-```
-</Tab>
-</Tabs>
-
-**Prepare mode** — append `/prepare` and add `"options": { "simulate": true }` for a dry-run.
-
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
-```bash
-curl -X POST https://api.solana.com/v1/payments/transfers/prepare \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "source": "wal_example",
-    "destination": "7xKXz...9fGh",
-    "token": "9aBCd...4eEf",
-    "amount": "100.00",
-    "memo": "Payment for invoice #1234",
-    "options": { "simulate": true }
-  }'
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript
-const response = await fetch(
-  "https://api.solana.com/v1/payments/transfers/prepare",
-  {
-    method: "POST",
-    headers: {
-      "Authorization": "Bearer sk_test_...",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      source: "wal_example",
-      destination: "7xKXz...9fGh",
-      token: "9aBCd...4eEf",
-      amount: "100.00",
-      memo: "Payment for invoice #1234",
-      options: { simulate: true },
-    }),
-  }
-);
-const { data } = await response.json();
-// data.preparedTransaction.serialized — sign and submit
-```
-</Tab>
-<Tab value="Java">
-```java
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/transfers/prepare"))
-    .header("Authorization", "Bearer sk_test_...")
-    .header("Content-Type", "application/json")
-    .POST(HttpRequest.BodyPublishers.ofString("""
-        {
-          "source": "wal_example",
-          "destination": "7xKXz...9fGh",
-          "token": "9aBCd...4eEf",
-          "amount": "100.00",
-          "memo": "Payment for invoice #1234",
-          "options": { "simulate": true }
         }"""))
     .build();
 ```
@@ -2588,13 +2515,13 @@ The `status` field on the `Transfer` record takes one of five values:
 
 | Status | Meaning |
 | --- | --- |
-| `pending` | Prepare-mode outbound transfers — `POST /v1/payments/transfers/prepare` saves the serialized transaction and the record stays `pending` until the client submits the signed tx (then it moves to `processing`) or the blockhash expires (then the `track-pending-transfers` job marks it `failed`). No `signature` yet. |
-| `processing` | The transfer is in flight. For Execute-mode this is the **initial state** at record creation: the request has been accepted and the transaction is being built and submitted; the `signature` field is not yet populated when the record is first written. Prepare-mode transfers also enter `processing` once the signed transaction is submitted. |
+| `pending` | Provider-backed ramp transfer setup is still underway. Wallet transfers created with `POST /v1/payments/transfers` do not start here; they start at `processing`. No wallet-transfer `signature` yet. |
+| `processing` | The transfer is in flight. For outbound wallet transfers this is the **initial state** at record creation: the request has been accepted and the transaction is being built and submitted; the `signature` field is not yet populated when the record is first written. |
 | `confirmed` | The cluster has confirmed the transaction. `signature` and `slot` are populated. `blockTime` may also be set, but is not guaranteed at this stage — treat it as optional until `finalized`. |
-| `finalized` | The slot containing the transaction is locked in by the network — finality at the Solana cluster's strongest guarantee. `signature` and `slot` are populated; `blockTime` is best-effort and may remain `null` for Execute-mode transfers whose finalization is observed by the `track-pending-transfers` job (which updates status and slot but does not backfill block time). When you need a definitive timestamp, resolve it from the on-chain `signature` via Solana RPC. Safe to treat as irreversible. |
+| `finalized` | The slot containing the transaction is locked in by the network — finality at the Solana cluster's strongest guarantee. `signature` and `slot` are populated; `blockTime` is best-effort and may remain `null` for wallet transfers whose finalization is observed by the `track-pending-transfers` job (which updates status and slot but does not backfill block time). When you need a definitive timestamp, resolve it from the on-chain `signature` via Solana RPC. Safe to treat as irreversible. |
 | `failed` | The transaction was built and submitted but rejected by the network (insufficient funds, frozen account, expired blockhash, etc.). The `error` field describes what reached the chain. |
 
-A transfer moves forward through `processing → confirmed → finalized` for Execute-mode, or `pending → processing → confirmed → finalized` for Prepare-mode (with `pending → failed` if the blockhash expires before submission). **Inbound transfers** discovered via on-chain signature history surface directly at `confirmed` (or `failed` if the on-chain transaction errored) — they never appear as `pending`. Any state can transition to `failed`; `failed` is terminal.
+A wallet transfer created with `POST /v1/payments/transfers` moves forward through `processing → confirmed → finalized`. Ramp transfers may begin at `pending` before moving into provider-specific processing. **Inbound transfers** discovered via on-chain signature history surface directly at `confirmed` (or `failed` if the on-chain transaction errored) — they never appear as `pending`. Any state can transition to `failed`; `failed` is terminal.
 
 ## Finality on Solana
 
@@ -5114,14 +5041,13 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `GET` | `/v1/payments/ramps/offramp/currency` | List off-ramp currency support |
-| `POST` | `/v1/payments/ramps/offramp/execute` | Execute off-ramp |
 | `GET` | `/v1/payments/ramps/onramp/currency` | List on-ramp currency support |
-| `POST` | `/v1/payments/ramps/onramp/execute` | Execute on-ramp |
 | `POST` | `/v1/payments/ramps/onramp/quote` | Create on-ramp quote |
 | `POST` | `/v1/payments/ramps/sandbox/simulate` | Simulate sandbox transfer |
 | `GET` | `/v1/payments/recurring-payments` | List recurring payments |
 | `POST` | `/v1/payments/recurring-payments` | Create recurring payment |
 | `GET` | `/v1/payments/recurring-payments/{id}` | Get recurring payment |
+| `PATCH` | `/v1/payments/recurring-payments/{id}` | Update recurring payment |
 | `POST` | `/v1/payments/recurring-payments/{id}/activate` | Activate recurring payment |
 | `POST` | `/v1/payments/recurring-payments/{id}/cancel` | Cancel recurring payment |
 | `POST` | `/v1/payments/recurring-payments/{id}/collect` | Collect recurring payment |
@@ -5141,10 +5067,13 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-cancel` | Prepare subscription cancellation |
 | `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-collection` | Prepare subscription collection |
 | `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-resume` | Prepare subscription resume |
+| `GET` | `/v1/payments/transfer-batches` | List transfer batches |
+| `POST` | `/v1/payments/transfer-batches` | Create transfer batch |
+| `GET` | `/v1/payments/transfer-batches/{batchId}` | Get transfer batch |
+| `POST` | `/v1/payments/transfer-batches/estimate` | Estimate transfer batch |
 | `GET` | `/v1/payments/transfers` | List transfers |
 | `POST` | `/v1/payments/transfers` | Execute transfer (custody) |
 | `GET` | `/v1/payments/transfers/{transferId}` | Get transfer |
-| `POST` | `/v1/payments/transfers/prepare` | Prepare transfer (unsigned) |
 | `GET` | `/v1/payments/wallets/{walletId}/balances` | Get wallet balances |
 | `GET` | `/v1/payments/wallets/{walletId}/policies` | Get wallet policy |
 | `PUT` | `/v1/payments/wallets/{walletId}/policies` | Update wallet policy |

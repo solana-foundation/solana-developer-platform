@@ -1193,30 +1193,6 @@
           }
         },
         {
-          "name": "Prepare transfer (unsigned)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/payments/transfers/prepare",
-            "description": "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built here and returned for client review and signing.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\",\n  \"privateTransfer\": {\n    \"provider\": \"magicblock\",\n    \"magicBlock\": {\n      \"initIfMissing\": true,\n      \"initAtasIfMissing\": true,\n      \"maxDelayMs\": \"1000\"\n    }\n  },\n  \"referenceAddress\": \"RefY2HwGmCKvJsXJzhRkc7m9D4N6pQ5tT3aB8fE1uV2W\",\n  \"options\": {\n    \"priorityFee\": \"auto\"\n  }\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
           "name": "List transfers",
           "request": {
             "method": "GET",
@@ -1745,54 +1721,6 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"destinationWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com/onramp/complete\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Execute on-ramp",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/payments/ramps/onramp/execute",
-            "description": "Creates a fiat-to-crypto on-ramp session through the selected provider.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cp_example\",\n  \"destinationWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Execute off-ramp",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/payments/ramps/offramp/execute",
-            "description": "Creates a crypto-to-fiat off-ramp session through the selected provider.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cp_example\",\n  \"sourceWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"cryptoAmount\": \"50.00\",\n  \"redirectUrl\": \"https://example.com\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

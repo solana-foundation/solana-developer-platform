@@ -582,16 +582,6 @@ export const listTransferBatchesQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-export const prepareTransferOptionsSchema = z.object({
-  priorityFee: priorityFeeSchema.optional(),
-  simulate: z.boolean().optional(),
-});
-
-export const prepareTransferSchema = createTransferSchema.extend({
-  referenceAddress: solanaAddressSchema("referenceAddress").optional(),
-  options: prepareTransferOptionsSchema.optional(),
-});
-
 export const estimateOnrampSchema = z.object({
   assetRail: onrampCryptoRailSchema,
   fiatCurrency: rampFiatCurrencySchema,

@@ -44,4 +44,4 @@ export {
   getTransferBatch,
   listTransferBatches,
 } from "./handlers/transfer-batches";
-export { createTransfer, getTransfer, listTransfers, prepareTransfer } from "./handlers/transfers";
+export { createTransfer, getTransfer, listTransfers } from "./handlers/transfers";
