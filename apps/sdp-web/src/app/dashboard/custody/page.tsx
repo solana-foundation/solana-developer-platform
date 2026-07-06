@@ -18,7 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { createOrgSdpApiClient, createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../onboarding-status";
 import { WalletsWorkspace } from "./wallets-workspace";
 
@@ -140,11 +140,11 @@ export default async function CustodyPage() {
   const trace = createTimedTrace("dashboard.custody.page");
 
   try {
-    const apiClient = await trace.step("create_sdp_api_client", () =>
-      createSdpApiClient(trace.childContext("dashboard.custody.api"))
+    const orgClient = await trace.step("create_org_sdp_api_client", () =>
+      createOrgSdpApiClient(trace.childContext("dashboard.custody.org.api"))
     );
     const onboarding = await trace.step("fetch_onboarding_status", () =>
-      apiClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status")
+      orgClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status")
     );
 
     if (!onboarding.linked) {
@@ -160,6 +160,9 @@ export default async function CustodyPage() {
       );
     }
 
+    const apiClient = await trace.step("create_sdp_api_client", () =>
+      createSdpApiClient(trace.childContext("dashboard.custody.api"))
+    );
     const [configsResult, walletsResult, apiKeysResult, providerAccessResult] = await Promise.all([
       trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(apiClient.request))),
       trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(apiClient.request))),
