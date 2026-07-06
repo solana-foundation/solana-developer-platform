@@ -27,6 +27,12 @@ function getUnauthenticatedUrl(req: NextRequest): string {
  * projects or the lookup fails; the request then proceeds cookieless and the
  * existing route-level "Selected project required" handling surfaces the
  * failure instead of the proxy taking down every dashboard request.
+ *
+ * The "default-sandbox" slug is safe to hardcode: sdp-api's project
+ * provisioning (project.service.ts) assigns exactly that slug to every org's
+ * auto-created sandbox project and slugs aren't user-editable, so it's a
+ * platform invariant — the same discriminator DashboardWorkspaceProvider and
+ * reconcileProjectCookieAction already match on.
  */
 async function resolveDefaultProjectId(
   getToken: (options?: { template?: string }) => Promise<string | null>
