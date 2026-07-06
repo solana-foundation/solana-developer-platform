@@ -1,8 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
-import type { ListProjectsResponse } from "@sdp/types";
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
-import { TRACE_ID_HEADER, TRACE_SOURCE_HEADER, type TraceContext } from "./request-tracing";
+import {
+  createTimedTrace,
+  logRouteResult,
+  TRACE_ID_HEADER,
+  TRACE_SOURCE_HEADER,
+  type TraceContext,
+} from "./request-tracing";
 
 function getApiBaseUrl(): string {
   const base =
@@ -17,12 +23,15 @@ function getApiBaseUrl(): string {
   return base.replace(/\/$/, "");
 }
 
-async function getClerkToken(): Promise<string> {
-  const { getToken, orgId } = await auth();
-  if (!orgId) {
-    throw new Error("Active Clerk organization required");
-  }
+type ClerkGetToken = (options?: { template?: string }) => Promise<string | null>;
 
+/**
+ * Acquires the sdp-api bearer token from a Clerk `getToken`, honoring
+ * CLERK_JWT_TEMPLATE when configured. Takes `getToken` as a parameter because
+ * server contexts get it from `auth()` while the proxy middleware gets it from
+ * its `clerkMiddleware` callback.
+ */
+export async function acquireClerkToken(getToken: ClerkGetToken): Promise<string> {
   const template = process.env.CLERK_JWT_TEMPLATE;
   if (template) {
     const token = await getToken({ template });
@@ -38,6 +47,14 @@ async function getClerkToken(): Promise<string> {
   }
 
   return token;
+}
+
+async function getClerkToken(): Promise<string> {
+  const { getToken, orgId } = await auth();
+  if (!orgId) {
+    throw new Error("Active Clerk organization required");
+  }
+  return acquireClerkToken(getToken);
 }
 
 type SdpApiRequestFn = (path: string, options?: RequestInit) => Promise<Response>;
@@ -129,34 +146,17 @@ export interface SdpApiClient {
   fetch: <T>(path: string, options?: RequestInit) => Promise<T>;
 }
 
-async function getSelectedProjectId(): Promise<string | null> {
+/**
+ * Reads the selected project id from the project cookie. Route handlers that
+ * build a project-scoped client outside `proxyToSdpApi` check this first so a
+ * missing selection surfaces as a 400 instead of a thrown 500.
+ */
+export async function getSelectedProjectId(): Promise<string | undefined> {
   const jar = await cookies();
-  return jar.get(PROJECT_COOKIE_NAME)?.value ?? null;
+  return jar.get(PROJECT_COOKIE_NAME)?.value;
 }
 
-async function getFallbackProjectId(token: string): Promise<string | null> {
-  try {
-    const res = await fetch(`${getApiBaseUrl()}/v1/projects`, {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-
-    const json = (await res.json()) as { data?: ListProjectsResponse };
-    const projects = json.data?.projects ?? [];
-    return (
-      projects.find((project) => project.slug === "default-sandbox")?.id ?? projects[0]?.id ?? null
-    );
-  } catch {
-    return null;
-  }
-}
-
-export async function createSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
-  const token = await getClerkToken();
-  const projectId = (await getSelectedProjectId()) ?? (await getFallbackProjectId(token));
-  const request = createSdpApiRequest(token, projectId, traceContext);
-
+function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {
   return {
     request,
     fetch: async <T>(path: string, options: RequestInit = {}): Promise<T> => {
@@ -166,21 +166,107 @@ export async function createSdpApiClient(traceContext?: TraceContext): Promise<S
   };
 }
 
-export async function sdpApiRequest(
-  path: string,
-  options: RequestInit = {},
+async function buildSdpApiClient(
+  projectId: string | null,
   traceContext?: TraceContext
-): Promise<Response> {
-  const client = await createSdpApiClient(traceContext);
-  return client.request(path, options);
+): Promise<SdpApiClient> {
+  const token = await getClerkToken();
+  return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
 }
 
-export async function sdpApiFetch<T>(
-  path: string,
-  options: RequestInit = {},
-  traceContext?: TraceContext
-): Promise<T> {
-  const client = await createSdpApiClient(traceContext);
-  const res = await client.request(path, options);
-  return parseSdpApiResponse<T>(res);
+/**
+ * Creates an org-scoped client from an explicit bearer token, for the proxy
+ * middleware where Clerk's request-bound `auth()` helper is unavailable.
+ */
+export function createTokenSdpApiClient(token: string): SdpApiClient {
+  return assembleSdpApiClient(createSdpApiRequest(token, null));
+}
+
+/**
+ * Creates a project-scoped SDP API client. Throws when no project is
+ * selected — org-scoped endpoints go through `createOrgSdpApiClient` instead.
+ */
+export async function createSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
+  const projectId = await getSelectedProjectId();
+  if (!projectId) {
+    throw new Error("Selected project required");
+  }
+  return buildSdpApiClient(projectId, traceContext);
+}
+
+/**
+ * Creates an org-scoped SDP API client (no project header) for the endpoints
+ * that exist outside any project: projects, members, allowlist, organizations.
+ */
+export async function createOrgSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
+  return buildSdpApiClient(null, traceContext);
+}
+
+function proxyFailure(
+  trace: ReturnType<typeof createTimedTrace>,
+  status: number,
+  message: string
+): NextResponse {
+  logRouteResult(trace, status, { error: message });
+  return NextResponse.json(
+    { error: { message } },
+    {
+      status,
+      headers: { "X-SDP-Trace-ID": trace.traceId, "Server-Timing": trace.serverTiming() },
+    }
+  );
+}
+
+/**
+ * Proxies a dashboard API route to sdp-api: forwards the incoming method and
+ * body to `path` and streams the upstream response back with trace headers.
+ * Unauthenticated callers get 401/403; other local failures 500, with the
+ * standard `{ error: { message } }` envelope.
+ */
+export async function proxyToSdpApi({
+  request,
+  traceSource,
+  path,
+}: {
+  request: Request;
+  traceSource: string;
+  path: string;
+}): Promise<NextResponse> {
+  const trace = createTimedTrace(traceSource, request);
+
+  const { userId, orgId } = await auth();
+  if (!userId) {
+    return proxyFailure(trace, 401, "Authentication required");
+  }
+  if (!orgId) {
+    return proxyFailure(trace, 403, "Active organization required");
+  }
+  const projectId = await getSelectedProjectId();
+  if (!projectId) {
+    return proxyFailure(trace, 400, "Selected project required");
+  }
+
+  try {
+    const apiClient = await createSdpApiClient(trace.childContext(`${traceSource}.api`));
+    const method = request.method;
+    const body = method === "GET" || method === "HEAD" ? undefined : await request.text();
+    const response = await apiClient.request(path, { method, body });
+
+    logRouteResult(trace, response.status);
+
+    return new NextResponse(response.body, {
+      status: response.status,
+      headers: {
+        "Content-Type": response.headers.get("Content-Type") ?? "application/json",
+        "X-SDP-Trace-ID": trace.traceId,
+        "Server-Timing": trace.serverTiming(),
+      },
+    });
+  } catch (error) {
+    return proxyFailure(
+      trace,
+      500,
+      error instanceof Error ? error.message : "SDP API proxy request failed"
+    );
+  }
 }

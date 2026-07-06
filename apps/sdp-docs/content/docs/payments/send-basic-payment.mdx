@@ -1,6 +1,6 @@
 ---
 title: Basic payment
-description: Send a single token transfer with SDP, using either Execute or Prepare mode.
+description: Send a single token transfer with SDP.
 steps:
   - Set up the transfer
   - Execute the transfer
@@ -14,8 +14,8 @@ Transfers are available through the Payments dashboard and the API.
 ## Prerequisites
 
 - A deployed token with minted supply
-- A custody wallet to use as the `source`. Execute mode additionally requires the wallet to have a custody signer configured so SDP can sign and submit; Prepare mode doesn't (you'll sign client-side).
-- An API key with both `payments:write` and `wallets:read` permissions, where the key's `payments:write` scope includes the source wallet — both endpoints (`POST /v1/payments/transfers` and `POST /v1/payments/transfers/prepare`) are gated by that pair at the route layer, and the source wallet is then re-checked against the key's `payments:write` wallet scope.
+- A custody wallet to use as the `source`, with a custody signer configured so SDP can sign and submit.
+- An API key with both `payments:write` and `wallets:read` permissions, where the key's `payments:write` scope includes the source wallet — `POST /v1/payments/transfers` is gated by that pair at the route layer, and the source wallet is then re-checked against the key's `payments:write` wallet scope.
 
 ## How it works
 
@@ -54,7 +54,7 @@ Fill in:
 </Tab>
 <Tab value="API">
 
-Prepare the request body:
+Build the request body:
 
 ```typescript
 const body = {
@@ -76,7 +76,7 @@ const body = {
 
 <Step number={2} title="Execute the transfer">
 
-Submit the transfer. In Execute mode SDP signs and submits. In Prepare mode you receive an unsigned transaction to sign client-side. See [Prepare vs Execute](/docs/guides/prepare-vs-execute) for guidance.
+Submit the transfer. SDP signs with the source custody wallet and submits the transaction.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -88,8 +88,6 @@ The transfer status updates to `Confirmed` once the transaction is finalized.
 
 </Tab>
 <Tab value="API">
-
-**Execute mode**
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -142,68 +140,6 @@ HttpRequest request = HttpRequest.newBuilder()
           "token": "9aBCd...4eEf",
           "amount": "100.00",
           "memo": "Payment for invoice #1234"
-        }"""))
-    .build();
-```
-</Tab>
-</Tabs>
-
-**Prepare mode** — append `/prepare` and add `"options": { "simulate": true }` for a dry-run.
-
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
-```bash
-curl -X POST https://api.solana.com/v1/payments/transfers/prepare \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "source": "wal_example",
-    "destination": "7xKXz...9fGh",
-    "token": "9aBCd...4eEf",
-    "amount": "100.00",
-    "memo": "Payment for invoice #1234",
-    "options": { "simulate": true }
-  }'
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript
-const response = await fetch(
-  "https://api.solana.com/v1/payments/transfers/prepare",
-  {
-    method: "POST",
-    headers: {
-      "Authorization": "Bearer sk_test_...",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      source: "wal_example",
-      destination: "7xKXz...9fGh",
-      token: "9aBCd...4eEf",
-      amount: "100.00",
-      memo: "Payment for invoice #1234",
-      options: { simulate: true },
-    }),
-  }
-);
-const { data } = await response.json();
-// data.preparedTransaction.serialized — sign and submit
-```
-</Tab>
-<Tab value="Java">
-```java
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/transfers/prepare"))
-    .header("Authorization", "Bearer sk_test_...")
-    .header("Content-Type", "application/json")
-    .POST(HttpRequest.BodyPublishers.ofString("""
-        {
-          "source": "wal_example",
-          "destination": "7xKXz...9fGh",
-          "token": "9aBCd...4eEf",
-          "amount": "100.00",
-          "memo": "Payment for invoice #1234",
-          "options": { "simulate": true }
         }"""))
     .build();
 ```

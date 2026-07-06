@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { sdpApiFetch } from "@/lib/sdp-api";
+import { createOrgSdpApiClient } from "@/lib/sdp-api";
 
 export interface AllowlistEntry {
   id: string;
@@ -13,7 +13,8 @@ export interface AllowlistEntry {
 }
 
 export async function listAllowlistEntries(): Promise<AllowlistEntry[]> {
-  const response = await sdpApiFetch<{ entries: AllowlistEntry[] }>("/admin/allowlist");
+  const client = await createOrgSdpApiClient();
+  const response = await client.fetch<{ entries: AllowlistEntry[] }>("/admin/allowlist");
   return response.entries;
 }
 
@@ -25,7 +26,8 @@ export async function addAllowlistEntry(formData: FormData) {
     throw new Error("Allowlist value is required");
   }
 
-  await sdpApiFetch("/admin/allowlist", {
+  const client = await createOrgSdpApiClient();
+  await client.fetch("/admin/allowlist", {
     method: "POST",
     body: JSON.stringify({ type, value }),
   });
@@ -39,7 +41,8 @@ export async function removeAllowlistEntry(formData: FormData) {
     throw new Error("Allowlist entry id is required");
   }
 
-  await sdpApiFetch(`/admin/allowlist/${id}`, {
+  const client = await createOrgSdpApiClient();
+  await client.fetch(`/admin/allowlist/${id}`, {
     method: "DELETE",
   });
 

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { sdpApiFetch } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { API_KEY_FLASH_COOKIE, API_KEYS_PAGE_PATH, type ApiKeyFlash } from "./api-key-flash";
 
 function parsePositiveInt(value: FormDataEntryValue | null, fallback: number): number {
@@ -81,7 +81,8 @@ async function deactivateApiKeyRequest(input: {
   }
 
   try {
-    await sdpApiFetch(`/v1/api-keys/${keyId}`, {
+    const client = await createSdpApiClient();
+    await client.fetch(`/v1/api-keys/${keyId}`, {
       method: "DELETE",
       body: JSON.stringify({
         confirmation,
@@ -169,7 +170,8 @@ export async function createApiKeyAction(formData: FormData) {
   }
 
   try {
-    const response = await sdpApiFetch<{
+    const client = await createSdpApiClient();
+    const response = await client.fetch<{
       apiKey: {
         id: string;
         name: string;
@@ -212,7 +214,8 @@ export async function rotateApiKeyAction(formData: FormData) {
   }
 
   try {
-    const response = await sdpApiFetch<{
+    const client = await createSdpApiClient();
+    const response = await client.fetch<{
       apiKey: {
         id: string;
         name: string;
