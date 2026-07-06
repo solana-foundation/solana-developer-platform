@@ -16,11 +16,11 @@ export async function GET(request: Request, context: RouteContext) {
     return disabledResponse();
   }
   const { recurringPaymentId } = await context.params;
-  return proxyToSdpApi(
+  return proxyToSdpApi({
     request,
-    "route.dashboard.recurring-payments.get",
-    `/v1/payments/recurring-payments/${encodeURIComponent(recurringPaymentId)}`
-  );
+    traceSource: "route.dashboard.recurring-payments.get",
+    path: `/v1/payments/recurring-payments/${encodeURIComponent(recurringPaymentId)}`,
+  });
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
@@ -28,9 +28,9 @@ export async function PATCH(request: Request, context: RouteContext) {
     return disabledResponse();
   }
   const { recurringPaymentId } = await context.params;
-  return proxyToSdpApi(
+  return proxyToSdpApi({
     request,
-    "route.dashboard.recurring-payments.update",
-    `/v1/payments/recurring-payments/${encodeURIComponent(recurringPaymentId)}`
-  );
+    traceSource: "route.dashboard.recurring-payments.update",
+    path: `/v1/payments/recurring-payments/${encodeURIComponent(recurringPaymentId)}`,
+  });
 }

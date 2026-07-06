@@ -7,5 +7,9 @@ export async function GET(request: Request) {
     query.set("includeAllProviders", "true");
   }
 
-  return proxyToSdpApi(request, "route.dashboard.wallets", `/v1/wallets?${query.toString()}`);
+  return proxyToSdpApi({
+    request,
+    traceSource: "route.dashboard.wallets",
+    path: `/v1/wallets?${query.toString()}`,
+  });
 }

@@ -7,9 +7,9 @@ export async function GET(request: Request) {
     query.set("includeAllProviders", "true");
   }
 
-  return proxyToSdpApi(
+  return proxyToSdpApi({
     request,
-    "route.dashboard.wallets.aggregate",
-    `/v1/wallets/aggregate?${query.toString()}`
-  );
+    traceSource: "route.dashboard.wallets.aggregate",
+    path: `/v1/wallets/aggregate?${query.toString()}`,
+  });
 }

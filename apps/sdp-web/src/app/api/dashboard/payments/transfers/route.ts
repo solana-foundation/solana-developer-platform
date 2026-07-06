@@ -15,11 +15,11 @@ export async function GET(request: Request) {
   ].some((param) => url.searchParams.has(param));
 
   if (hasDirectTransferFilter) {
-    return proxyToSdpApi(
+    return proxyToSdpApi({
       request,
-      "route.dashboard.payments.transfers.get",
-      `/v1/payments/transfers${url.search}`
-    );
+      traceSource: "route.dashboard.payments.transfers.get",
+      path: `/v1/payments/transfers${url.search}`,
+    });
   }
 
   const trace = createTimedTrace("route.dashboard.payments.transfers.get", request);
@@ -74,9 +74,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  return proxyToSdpApi(
+  return proxyToSdpApi({
     request,
-    "route.dashboard.payments.transfers.post",
-    "/v1/payments/transfers"
-  );
+    traceSource: "route.dashboard.payments.transfers.post",
+    path: "/v1/payments/transfers",
+  });
 }

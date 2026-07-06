@@ -213,11 +213,15 @@ function proxyFailure(
  * Unauthenticated callers get 401/403; other local failures 500, with the
  * standard `{ error: { message } }` envelope.
  */
-export async function proxyToSdpApi(
-  request: Request,
-  traceSource: string,
-  path: string
-): Promise<NextResponse> {
+export async function proxyToSdpApi({
+  request,
+  traceSource,
+  path,
+}: {
+  request: Request;
+  traceSource: string;
+  path: string;
+}): Promise<NextResponse> {
   const trace = createTimedTrace(traceSource, request);
 
   const { userId, orgId } = await auth();

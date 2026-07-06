@@ -18,9 +18,9 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  return proxyToSdpApi(
+  return proxyToSdpApi({
     request,
-    "route.dashboard.payments.ramps.estimate.post",
-    `/v1/payments/ramps/${direction}/estimate`
-  );
+    traceSource: "route.dashboard.payments.ramps.estimate.post",
+    path: `/v1/payments/ramps/${direction}/estimate`,
+  });
 }

@@ -1,9 +1,9 @@
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 export async function POST(request: Request) {
-  return proxyToSdpApi(
+  return proxyToSdpApi({
     request,
-    "route.dashboard.payments.ramps.moneygram.events.post",
-    "/v1/payments/ramps/moneygram/events"
-  );
+    traceSource: "route.dashboard.payments.ramps.moneygram.events.post",
+    path: "/v1/payments/ramps/moneygram/events",
+  });
 }

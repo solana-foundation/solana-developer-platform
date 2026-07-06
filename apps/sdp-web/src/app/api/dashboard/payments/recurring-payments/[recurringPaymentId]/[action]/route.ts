@@ -29,9 +29,9 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  return proxyToSdpApi(
+  return proxyToSdpApi({
     request,
-    "route.dashboard.recurring-payments.action",
-    `/v1/payments/recurring-payments/${encodeURIComponent(recurringPaymentId)}/${action}`
-  );
+    traceSource: "route.dashboard.recurring-payments.action",
+    path: `/v1/payments/recurring-payments/${encodeURIComponent(recurringPaymentId)}/${action}`,
+  });
 }
