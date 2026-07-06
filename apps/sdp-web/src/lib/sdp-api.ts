@@ -1,8 +1,15 @@
 import { auth } from "@clerk/nextjs/server";
 import type { ListProjectsResponse } from "@sdp/types";
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
-import { TRACE_ID_HEADER, TRACE_SOURCE_HEADER, type TraceContext } from "./request-tracing";
+import {
+  createTimedTrace,
+  logRouteResult,
+  TRACE_ID_HEADER,
+  TRACE_SOURCE_HEADER,
+  type TraceContext,
+} from "./request-tracing";
 
 function getApiBaseUrl(): string {
   const base =
@@ -17,10 +24,22 @@ function getApiBaseUrl(): string {
   return base.replace(/\/$/, "");
 }
 
+export class SdpApiAuthError extends Error {
+  readonly status: 401 | 403;
+
+  constructor(status: 401 | 403, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
 async function getClerkToken(): Promise<string> {
-  const { getToken, orgId } = await auth();
+  const { userId, getToken, orgId } = await auth();
+  if (!userId) {
+    throw new SdpApiAuthError(401, "Authentication required");
+  }
   if (!orgId) {
-    throw new Error("Active Clerk organization required");
+    throw new SdpApiAuthError(403, "Active organization required");
   }
 
   const template = process.env.CLERK_JWT_TEMPLATE;
@@ -183,4 +202,48 @@ export async function sdpApiFetch<T>(
   const client = await createSdpApiClient(traceContext);
   const res = await client.request(path, options);
   return parseSdpApiResponse<T>(res);
+}
+
+/**
+ * Proxies a dashboard API route to sdp-api: authenticates via the SDP API
+ * client, forwards the incoming method and body to `path`, and streams the
+ * upstream response back with trace headers. Auth failures become 401/403 and
+ * other local failures 500, with the standard `{ error: { message } }`
+ * envelope.
+ */
+export async function proxyToSdpApi(
+  request: Request,
+  traceSource: string,
+  path: string
+): Promise<NextResponse> {
+  const trace = createTimedTrace(traceSource, request);
+
+  try {
+    const apiClient = await createSdpApiClient(trace.childContext(`${traceSource}.api`));
+    const method = request.method;
+    const body = method === "GET" || method === "HEAD" ? undefined : await request.text();
+    const response = await apiClient.request(path, { method, body });
+
+    logRouteResult(trace, response.status);
+
+    return new NextResponse(response.body, {
+      status: response.status,
+      headers: {
+        "Content-Type": response.headers.get("Content-Type") ?? "application/json",
+        "X-SDP-Trace-ID": trace.traceId,
+        "Server-Timing": trace.serverTiming(),
+      },
+    });
+  } catch (error) {
+    const status = error instanceof SdpApiAuthError ? error.status : 500;
+    const message = error instanceof Error ? error.message : "SDP API proxy request failed";
+    logRouteResult(trace, status, { error: message });
+    return NextResponse.json(
+      { error: { message } },
+      {
+        status,
+        headers: { "X-SDP-Trace-ID": trace.traceId, "Server-Timing": trace.serverTiming() },
+      }
+    );
+  }
 }
