@@ -5,7 +5,7 @@ import {
   type KnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createOrgSdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 
 interface OnboardingStatusResponse {
   linked: boolean;
@@ -38,13 +38,10 @@ export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.wallets.quick_action_status", request);
 
   try {
-    const apiClient = await createSdpApiClient(
-      trace.childContext("route.dashboard.wallets.quick_action_status.api")
+    const orgClient = await createOrgSdpApiClient(
+      trace.childContext("route.dashboard.wallets.quick_action_status.org.api")
     );
-    const [onboarding, configsResponse] = await Promise.all([
-      apiClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status"),
-      apiClient.request("/v1/wallets/configs"),
-    ]);
+    const onboarding = await orgClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
 
     if (!onboarding.linked) {
       const response = NextResponse.json(
@@ -64,6 +61,11 @@ export async function GET(request: Request) {
       logRouteResult(trace, 200, { linked: false });
       return response;
     }
+
+    const apiClient = await createSdpApiClient(
+      trace.childContext("route.dashboard.wallets.quick_action_status.api")
+    );
+    const configsResponse = await apiClient.request("/v1/wallets/configs");
 
     if (configsResponse.status === 404) {
       const response = NextResponse.json(
