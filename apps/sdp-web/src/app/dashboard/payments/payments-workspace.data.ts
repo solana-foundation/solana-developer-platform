@@ -591,7 +591,7 @@ async function postRampEvent(
   provider: RampEventProvider,
   event: MoneygramRampEvent | CoinbaseRampEvent
 ): Promise<TransferRecord> {
-  const response = await fetch(`/api/dashboard/payments/ramps/${provider}/events`, {
+  const response = await fetch(`/api/dashboard/payments/ramps/events/${provider}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
