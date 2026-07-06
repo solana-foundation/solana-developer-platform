@@ -220,7 +220,8 @@ export async function proxyToSdpApi({
   if (!orgId) {
     return proxyFailure(trace, 403, "Active organization required");
   }
-  if (!(await getSelectedProjectId())) {
+  const projectId = await getSelectedProjectId();
+  if (!projectId) {
     return proxyFailure(trace, 400, "Selected project required");
   }
 

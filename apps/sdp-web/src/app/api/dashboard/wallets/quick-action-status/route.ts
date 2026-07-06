@@ -62,7 +62,8 @@ export async function GET(request: Request) {
       return response;
     }
 
-    if (!(await getSelectedProjectId())) {
+    const projectId = await getSelectedProjectId();
+    if (!projectId) {
       const response = NextResponse.json(
         { error: { message: "Selected project required" } },
         {

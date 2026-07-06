@@ -24,7 +24,8 @@ export async function GET(request: Request) {
 
   const trace = createTimedTrace("route.dashboard.payments.transfers.get", request);
 
-  if (!(await getSelectedProjectId())) {
+  const projectId = await getSelectedProjectId();
+  if (!projectId) {
     logRouteResult(trace, 400, { error: "Selected project required" });
     return NextResponse.json(
       { error: { message: "Selected project required" } },
