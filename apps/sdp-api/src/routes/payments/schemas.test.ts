@@ -5,7 +5,6 @@ import {
   createRecurringPaymentSchema,
   createTransferSchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
-  prepareTransferSchema,
   updateRecurringPaymentSchema,
   updateWalletPolicySchema,
 } from "./schemas";
@@ -15,18 +14,15 @@ const VALID_DESTINATION = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
 
 const tokenSchema = createTransferSchema.shape.token;
 const destinationSchema = createTransferSchema.shape.destination;
-const referenceAddressSchema = prepareTransferSchema.shape.referenceAddress;
 const destinationAllowlistSchema = updateWalletPolicySchema.shape.destinationAllowlist;
 const recurringPaymentTokenSchema = createRecurringPaymentSchema.shape.token;
 
 describe("payments schema inferred types", () => {
-  it("destination, referenceAddress, and allowlist entries infer as string", () => {
+  it("destination and allowlist entries infer as string", () => {
     type CreateTransfer = z.infer<typeof createTransferSchema>;
-    type PrepareTransfer = z.infer<typeof prepareTransferSchema>;
     type UpdateWalletPolicy = z.infer<typeof updateWalletPolicySchema>;
 
     expectTypeOf<CreateTransfer["destination"]>().toEqualTypeOf<string>();
-    expectTypeOf<PrepareTransfer["referenceAddress"]>().toEqualTypeOf<string | undefined>();
     expectTypeOf<UpdateWalletPolicy["destinationAllowlist"]>().toEqualTypeOf<string[]>();
   });
 });
@@ -199,25 +195,6 @@ describe("recurring payment schema", () => {
     expect(updateRecurringPaymentSchema.safeParse({ metadataUri: "not-a-url" }).success).toBe(
       false
     );
-  });
-});
-
-describe("payments referenceAddress schema", () => {
-  it("is optional (undefined parses)", () => {
-    expect(referenceAddressSchema.parse(undefined)).toBe(undefined);
-  });
-
-  it("accepts a valid base58 address", () => {
-    expect(referenceAddressSchema.parse(VALID_DESTINATION)).toBe(VALID_DESTINATION);
-  });
-
-  it("rejects right-length non-base58 with a field-specific message", () => {
-    const result = referenceAddressSchema.safeParse("!".repeat(43));
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const messages = result.error.issues.map((issue) => issue.message);
-      expect(messages).toContain("referenceAddress must be a base58 Solana address");
-    }
   });
 });
 
