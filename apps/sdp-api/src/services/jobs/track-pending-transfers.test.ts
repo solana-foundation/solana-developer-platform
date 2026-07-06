@@ -82,54 +82,6 @@ describe("trackPendingTransfers", () => {
     await clearTestDatabase(env);
   });
 
-  describe("expireStalePendingTransfers", () => {
-    it("marks stale pending transfers (no signature, > 2 min old) as failed", async () => {
-      await insertTransfer({
-        id: "xfr_stale_pending",
-        status: "pending",
-        signature: null,
-        createdAt: minutesAgo(3),
-        updatedAt: minutesAgo(3),
-      });
-
-      await trackPendingTransfers(env);
-
-      const updated = await getTransfer("xfr_stale_pending");
-      expect(updated?.status).toBe("failed");
-      expect(updated?.error).toBe("Transaction expired: blockhash no longer valid");
-    });
-
-    it("does not expire recent pending transfers (< 2 min old)", async () => {
-      await insertTransfer({
-        id: "xfr_fresh_pending",
-        status: "pending",
-        signature: null,
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
-
-      await trackPendingTransfers(env);
-
-      const unchanged = await getTransfer("xfr_fresh_pending");
-      expect(unchanged?.status).toBe("pending");
-    });
-
-    it("does not expire pending transfers that already have a signature", async () => {
-      await insertTransfer({
-        id: "xfr_pending_with_sig",
-        status: "pending",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(3),
-        updatedAt: minutesAgo(3),
-      });
-
-      await trackPendingTransfers(env);
-
-      const unchanged = await getTransfer("xfr_pending_with_sig");
-      expect(unchanged?.status).toBe("pending");
-    });
-  });
-
   describe("recoverStuckProcessingTransfers", () => {
     it("marks stuck processing transfers (no signature, > 5 min stale) as failed", async () => {
       await insertTransfer({
@@ -299,7 +251,7 @@ describe("trackPendingTransfers", () => {
       expect(unchanged?.status).toBe("processing");
     });
 
-    it("reconciles mixed pending and processing rows in one Postgres-backed run", async () => {
+    it("reconciles mixed processing rows in one Postgres-backed run", async () => {
       getSignatureStatusesMock.mockResolvedValueOnce([
         {
           slot: 22222n,
@@ -309,13 +261,6 @@ describe("trackPendingTransfers", () => {
         },
       ]);
 
-      await insertTransfer({
-        id: "xfr_batch_pending_expired",
-        status: "pending",
-        signature: null,
-        createdAt: minutesAgo(4),
-        updatedAt: minutesAgo(4),
-      });
       await insertTransfer({
         id: "xfr_batch_processing_confirmed",
         status: "processing",
@@ -333,14 +278,11 @@ describe("trackPendingTransfers", () => {
 
       await trackPendingTransfers(env);
 
-      const [expired, confirmed, stuck] = await Promise.all([
-        getTransfer("xfr_batch_pending_expired"),
+      const [confirmed, stuck] = await Promise.all([
         getTransfer("xfr_batch_processing_confirmed"),
         getTransfer("xfr_batch_processing_stuck"),
       ]);
 
-      expect(expired?.status).toBe("failed");
-      expect(expired?.error).toBe("Transaction expired: blockhash no longer valid");
       expect(confirmed?.status).toBe("confirmed");
       expect(confirmed?.slot).toBe(22222);
       expect(stuck?.status).toBe("failed");
@@ -348,10 +290,9 @@ describe("trackPendingTransfers", () => {
     });
 
     it("does not call getSignatureStatuses when there are no processing transfers with signatures", async () => {
-      // Only a pending transfer, no processing-with-signature
       await insertTransfer({
-        id: "xfr_only_pending",
-        status: "pending",
+        id: "xfr_processing_without_sig",
+        status: "processing",
         signature: null,
         createdAt: minutesAgo(1),
         updatedAt: minutesAgo(1),

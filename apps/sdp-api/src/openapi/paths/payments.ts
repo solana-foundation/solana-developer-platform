@@ -28,7 +28,6 @@ import {
   prepareSubscriptionCollectionRequestSchema,
   prepareSubscriptionLifecycleRequestSchema,
   prepareSubscriptionPlanCreateRequestSchema,
-  prepareTransferRequestSchema,
   simulateSandboxTransferRequestSchema,
   updateRecurringPaymentRequestSchema,
   updateSubscriptionPlanRequestSchema,
@@ -53,7 +52,6 @@ import {
   preparePaymentSubscriptionCollectionResponse,
   preparePaymentSubscriptionLifecycleResponse,
   preparePaymentSubscriptionPlanResponse,
-  prepareTransferResponse,
   sandboxTransferSimulationResponse,
   transferBatchEstimateResponse,
   transferBatchListResponse,
@@ -142,31 +140,6 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   // ═══════════════════════════════════════════════════════════════════════════
   // Transfers
   // ═══════════════════════════════════════════════════════════════════════════
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/payments/transfers/prepare",
-    tags: ["Payments"],
-    summary: "Prepare transfer (unsigned)",
-    operationId: "preparePaymentTransfer",
-    description:
-      "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built here and returned for client review and signing.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(prepareTransferRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Transfer prepared",
-        content: jsonContent(prepareTransferResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
-    },
-  });
 
   registry.registerPath({
     method: "post",
