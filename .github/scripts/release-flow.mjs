@@ -298,6 +298,33 @@ async function githubRequest(method, resourcePath, body) {
   return response.json();
 }
 
+async function githubGraphqlRequest(query, variables) {
+  const response = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
+  const text = await response.text();
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`GraphQL request failed: ${response.status} ${text}`);
+  }
+
+  if (!response.ok || payload.errors?.length) {
+    const message = payload.errors?.map((error) => error.message).join("; ") || text;
+    throw new Error(`GraphQL request failed: ${response.status} ${message}`);
+  }
+
+  return payload.data;
+}
+
 async function githubReleaseExists(tagName) {
   try {
     await githubRequest("GET", `/repos/${repo}/releases/tags/${encodeURIComponent(tagName)}`);
@@ -347,18 +374,59 @@ function refreshFromMain() {
   git(["reset", "--hard", "origin/main"], { capture: false });
 }
 
-function pushReleaseCommit() {
-  git(["push", `https://x-access-token:${token}@github.com/${repo}.git`, "HEAD:main"], {
-    capture: false,
-  });
-}
-
 function configureGitIdentity() {
   git(["config", "user.name", "github-actions[bot]"], { capture: false });
   // biome-ignore lint/security/noSecrets: Public GitHub Actions bot noreply address, not a secret.
   git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], {
     capture: false,
   });
+}
+
+function releaseFileAddition(relativePath) {
+  return {
+    path: relativePath,
+    contents: fs.readFileSync(path.join(repoRoot, relativePath)).toString("base64"),
+  };
+}
+
+async function createSignedReleaseCommit(version) {
+  const expectedHeadOid = git(["rev-parse", "HEAD"]);
+  const query = `
+    mutation CreateReleaseCommit($input: CreateCommitOnBranchInput!) {
+      createCommitOnBranch(input: $input) {
+        commit {
+          oid
+          url
+        }
+      }
+    }
+  `;
+
+  const data = await githubGraphqlRequest(query, {
+    input: {
+      branch: {
+        repositoryNameWithOwner: repo,
+        branchName: "main",
+      },
+      expectedHeadOid,
+      message: {
+        headline: `chore(main): release ${version}`,
+      },
+      fileChanges: {
+        additions: [
+          releaseFileAddition("package.json"),
+          releaseFileAddition("CHANGELOG.md"),
+          releaseFileAddition(".github/.release-please-manifest.json"),
+        ],
+      },
+    },
+  });
+
+  const commit = data.createCommitOnBranch.commit;
+  console.log(`Created signed release commit ${commit.oid}`);
+  git(["fetch", "origin", "main"], { capture: false });
+  git(["reset", "--hard", commit.oid], { capture: false });
+  return commit.oid;
 }
 
 async function publishRelease(version, previousTag) {
@@ -552,19 +620,14 @@ async function release(attempt = 1) {
     return;
   }
 
-  configureGitIdentity();
-  git(["add", "package.json", "CHANGELOG.md", ".github/.release-please-manifest.json"], {
-    capture: false,
-  });
-  git(["commit", "-m", `chore(main): release ${nextVersion}`], { capture: false });
   try {
-    pushReleaseCommit();
+    await createSignedReleaseCommit(nextVersion);
   } catch (error) {
     if (attempt >= 3) {
       throw error;
     }
 
-    console.log("Release commit push failed; refreshing main and retrying release");
+    console.log("Release commit creation failed; refreshing main and retrying release");
     refreshFromMain();
     await release(attempt + 1);
     return;
