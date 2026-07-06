@@ -688,7 +688,6 @@ export const moneygramRampEventSchema = z.discriminatedUnion("kind", [
 
 export const coinbaseRampEventSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("committed"), orderId: z.string().min(1) }),
-  z.object({ kind: z.literal("completed"), orderId: z.string().min(1) }),
   z.object({ kind: z.literal("errored"), orderId: z.string().min(1), reason: z.string().min(1) }),
 ]) satisfies z.ZodType<CoinbaseRampEvent>;
 

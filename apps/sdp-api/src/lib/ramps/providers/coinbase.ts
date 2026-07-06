@@ -2,7 +2,7 @@ import { generateJwt } from "@coinbase/cdp-sdk/auth";
 import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/types";
 import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
-import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
+import { AppError, badRequest, providerNotConfigured, providerUnavailable } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { providerFetchJson } from "../fetch";
 import { readyCounterparty } from "../requirements";
@@ -298,6 +298,13 @@ export class CoinbaseRampClient implements RampProvider {
 
     const crypto = Number.parseFloat(quote.purchase_amount.value);
     const subtotal = Number.parseFloat(quote.payment_subtotal.value);
+    if (!Number.isFinite(crypto) || crypto === 0 || !Number.isFinite(subtotal)) {
+      throw providerUnavailable("Coinbase returned an unusable buy quote.", {
+        provider: this.id,
+        purchaseAmount: quote.purchase_amount.value,
+        paymentSubtotal: quote.payment_subtotal.value,
+      });
+    }
     return {
       provider: this.id,
       direction: "onramp",
@@ -324,26 +331,46 @@ export class CoinbaseRampClient implements RampProvider {
     throw badRequest("Coinbase Onramp does not support off-ramp.", { provider: this.id });
   }
 
+  /**
+   * Creates a guest-checkout Apple Pay order and returns its hosted payment link.
+   *
+   * Sandbox-only for now. Coinbase requires `agreementAcceptedAt` / `phoneNumberVerifiedAt`
+   * timestamps attesting that the buyer accepted their user agreement and passed phone OTP;
+   * sandbox orders (never charged) accept a request-time stamp, but production must carry
+   * the real timestamps from an OTP flow SDP has not built yet — so production mode fails
+   * loudly instead of sending a false attestation.
+   *
+   * Sandbox orders are flagged by a `sandbox-` prefix on `partnerUserRef` (not separate
+   * credentials): the order always succeeds and the card is never charged. The payment link
+   * gets `useApplePaySandbox=true`, which is required for local-dev embedding and swaps the
+   * real Apple Pay sheet with a fake popup.
+   *
+   * `domain` is omitted: it must be a CDP-portal-registered domain — Coinbase rejects
+   * `localhost` in any form with "Domain is not allow listed" (verified empirically); the
+   * docs' localhost exemption applies to embedding the link, not to this field. The
+   * production flow will need it passed once domain registration exists.
+   *
+   * @see https://docs.cdp.coinbase.com/onramp/headless-onramp/overview#web-app-testing
+   */
   async createOnrampQuote(
     { env, mode }: RampRuntimeContext,
     input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote> {
+    if (mode !== "sandbox") {
+      throw providerUnavailable(
+        "Coinbase Onramp production orders require real agreement/OTP verification timestamps, which are not implemented yet.",
+        { provider: this.id }
+      );
+    }
     if (!input.email || !input.phone) {
       throw badRequest(
         "Coinbase Onramp requires the counterparty to have an email and phone number.",
         { provider: this.id }
       );
     }
-    if (!input.domain) {
-      throw badRequest("Coinbase Onramp requires an embedding domain for the Apple Pay link.", {
-        provider: this.id,
-      });
-    }
 
     const now = new Date().toISOString();
-    // Sandbox transactions are flagged by a `sandbox-` prefix on partnerUserRef, not by credentials.
-    const partnerUserRef =
-      mode === "sandbox" ? `sandbox-${input.externalCustomerId}` : input.externalCustomerId;
+    const partnerUserRef = `sandbox-${input.externalCustomerId}`;
     // Coinbase wants strict E.164; strip any formatting the counterparty phone was stored with.
     const phoneNumber = input.phone.replace(/[\s()-]/g, "");
 
@@ -361,21 +388,25 @@ export class CoinbaseRampClient implements RampProvider {
         email: input.email,
         phoneNumber,
         agreementAcceptedAt: now,
-        // ponytail: sandbox stamps verification now; production must pass real OTP verification ids.
         phoneNumberVerifiedAt: now,
         partnerUserRef,
-        domain: input.domain,
       }
     );
 
-    console.log(`[coinbase onramp] order ${order.orderId} → hosted url: ${paymentLink.url}`);
+    const hostedUrl = new URL(paymentLink.url);
+    hostedUrl.searchParams.set("useApplePaySandbox", "true");
+
+    // The payment link URL is a signed, time-limited credential — never log it.
+    console.log(
+      `[coinbase onramp] order ${order.orderId} created (type: ${paymentLink.paymentLinkType})`
+    );
 
     return {
       provider: this.id,
       id: order.orderId,
       status: "pending",
       deliveryMode: "hosted",
-      hostedUrl: paymentLink.url,
+      hostedUrl: hostedUrl.href,
     };
   }
 

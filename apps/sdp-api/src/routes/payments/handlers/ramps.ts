@@ -613,7 +613,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
-        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        externalCustomerId: counterparty.id,
         email: counterparty.email,
         phone: counterparty.identity.phone,
         domain: input.domain,

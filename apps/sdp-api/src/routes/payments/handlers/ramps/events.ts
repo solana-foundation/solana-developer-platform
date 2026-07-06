@@ -126,14 +126,6 @@ async function recordCoinbaseRampEvent(c: AppContext, body: unknown) {
       });
       return transferResponse(c, updated);
     }
-    case "completed": {
-      const updated = await repo.updateTransfer({
-        transferId: transfer.id,
-        status: "completed",
-        updatedAt: now,
-      });
-      return transferResponse(c, updated);
-    }
     case "errored": {
       const updated = await repo.updateTransfer({
         transferId: transfer.id,
