@@ -371,10 +371,8 @@ export async function checkWalletSignerMemoAction(
   const keyName = `wallet-check-${resolvedWalletId.slice(-8)}-${now.toString(36)}`;
   const memo = `Wallet signer check (${resolvedWalletId}) ${new Date(now).toISOString()}`;
 
-  let ephemeralKey: EphemeralApiKeyResponse["apiKey"] | null = null;
-  const client = await createSdpApiClient();
-
   try {
+    const client = await createSdpApiClient();
     const created = await client.fetch<EphemeralApiKeyResponse>("/v1/api-keys", {
       method: "POST",
       body: JSON.stringify({
@@ -386,30 +384,24 @@ export async function checkWalletSignerMemoAction(
         expiresAt: new Date(now + 10 * 60 * 1000).toISOString(),
       }),
     });
+    const ephemeralKey = created.apiKey;
 
-    ephemeralKey = created.apiKey;
+    try {
+      const check = await sdpApiFetchWithApiKey<WalletSignerCheckResponse>(
+        "/v1/wallets/signer-check",
+        ephemeralKey.key,
+        {
+          method: "POST",
+          body: JSON.stringify({ memo }),
+        }
+      );
 
-    const check = await sdpApiFetchWithApiKey<WalletSignerCheckResponse>(
-      "/v1/wallets/signer-check",
-      ephemeralKey.key,
-      {
-        method: "POST",
-        body: JSON.stringify({ memo }),
-      }
-    );
-
-    return {
-      status: "success",
-      walletId: check.walletId,
-      signature: check.signature,
-    };
-  } catch (error) {
-    return {
-      status: "error",
-      message: toApiActionErrorMessage(error),
-    };
-  } finally {
-    if (ephemeralKey) {
+      return {
+        status: "success",
+        walletId: check.walletId,
+        signature: check.signature,
+      };
+    } finally {
       try {
         await client.fetch(`/v1/api-keys/${ephemeralKey.id}`, {
           method: "DELETE",
@@ -419,6 +411,11 @@ export async function checkWalletSignerMemoAction(
         // Best-effort cleanup of short-lived key.
       }
     }
+  } catch (error) {
+    return {
+      status: "error",
+      message: toApiActionErrorMessage(error),
+    };
   }
 }
 
