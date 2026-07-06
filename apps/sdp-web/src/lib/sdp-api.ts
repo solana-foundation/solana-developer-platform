@@ -135,7 +135,12 @@ export interface SdpApiClient {
   fetch: <T>(path: string, options?: RequestInit) => Promise<T>;
 }
 
-async function getSelectedProjectId(): Promise<string | undefined> {
+/**
+ * Reads the selected project id from the project cookie. Route handlers that
+ * build a project-scoped client outside `proxyToSdpApi` check this first so a
+ * missing selection surfaces as a 400 instead of a thrown 500.
+ */
+export async function getSelectedProjectId(): Promise<string | undefined> {
   const jar = await cookies();
   return jar.get(PROJECT_COOKIE_NAME)?.value;
 }

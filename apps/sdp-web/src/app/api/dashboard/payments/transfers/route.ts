@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchDashboardPaymentTransfers } from "@/app/dashboard/payments/payments-page.data";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createSdpApiClient, proxyToSdpApi } from "@/lib/sdp-api";
+import { createSdpApiClient, getSelectedProjectId, proxyToSdpApi } from "@/lib/sdp-api";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -23,6 +23,17 @@ export async function GET(request: Request) {
   }
 
   const trace = createTimedTrace("route.dashboard.payments.transfers.get", request);
+
+  if (!(await getSelectedProjectId())) {
+    logRouteResult(trace, 400, { error: "Selected project required" });
+    return NextResponse.json(
+      { error: { message: "Selected project required" } },
+      {
+        status: 400,
+        headers: { "X-SDP-Trace-ID": trace.traceId, "Server-Timing": trace.serverTiming() },
+      }
+    );
+  }
 
   try {
     const apiClient = await createSdpApiClient(
