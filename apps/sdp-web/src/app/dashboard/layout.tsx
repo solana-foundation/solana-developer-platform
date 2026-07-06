@@ -10,11 +10,11 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
-import { sdpApiFetch } from "@/lib/sdp-api";
+import { sdpApiOrgFetch } from "@/lib/sdp-api";
 
 async function loadProjects(): Promise<Project[]> {
   try {
-    const response = await sdpApiFetch<ListProjectsResponse>("/v1/projects");
+    const response = await sdpApiOrgFetch<ListProjectsResponse>("/v1/projects");
     return response.projects;
   } catch {
     return [];

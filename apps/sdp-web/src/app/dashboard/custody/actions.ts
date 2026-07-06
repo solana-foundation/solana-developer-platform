@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { sdpApiFetch, sdpApiRequest } from "@/lib/sdp-api";
+import { sdpApiProjectFetch, sdpApiProjectRequest } from "@/lib/sdp-api";
 
 const DEVNET_FAUCET_LAMPORTS = 1_000_000_000;
 const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -50,7 +50,7 @@ function getApiErrorMessageFromText(body: string): string {
 function toApiActionErrorMessage(error: unknown): string {
   const raw = extractErrorMessage(error).trim();
 
-  // Format thrown by sdpApiFetch helpers: "SDP API request failed (XXX): <body>"
+  // Format thrown by sdpApiProjectFetch helpers: "SDP API request failed (XXX): <body>"
   const match = /^SDP API request failed \((\d+)\):\s*([\s\S]*)$/.exec(raw);
   if (!match) {
     return raw || "Unknown error";
@@ -84,7 +84,7 @@ async function sdpApiFetchWithApiKey<T>(
   apiKey: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const res = await sdpApiRequest(path, {
+  const res = await sdpApiProjectRequest(path, {
     ...options,
     headers: {
       ...(options.headers ?? {}),
@@ -155,7 +155,7 @@ async function initializeCustodyWallet(formData: FormData) {
   }
 
   try {
-    await sdpApiFetch("/v1/wallets/initialize", {
+    await sdpApiProjectFetch("/v1/wallets/initialize", {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -166,7 +166,7 @@ async function initializeCustodyWallet(formData: FormData) {
       apiError?.status === 409 &&
       apiError.message.includes("Signing already initialized for org")
     ) {
-      await sdpApiFetch("/v1/wallets", {
+      await sdpApiProjectFetch("/v1/wallets", {
         method: "POST",
         body: JSON.stringify({
           provider,
@@ -206,7 +206,7 @@ async function createCustodyWalletForProvider(formData: FormData) {
     | undefined;
   const label = getOptionalString(formData, "label");
 
-  await sdpApiFetch("/v1/wallets", {
+  await sdpApiProjectFetch("/v1/wallets", {
     method: "POST",
     body: JSON.stringify({ provider, label }),
   });
@@ -273,7 +273,7 @@ export async function updateWalletLabelAction(
   const nextLabel = label.trim();
 
   try {
-    await sdpApiFetch(`/v1/wallets/${encodeURIComponent(resolvedWalletId)}`, {
+    await sdpApiProjectFetch(`/v1/wallets/${encodeURIComponent(resolvedWalletId)}`, {
       method: "PATCH",
       body: JSON.stringify({
         label: nextLabel || null,
@@ -369,7 +369,7 @@ export async function checkWalletSignerMemoAction(
   let ephemeralKey: EphemeralApiKeyResponse["apiKey"] | null = null;
 
   try {
-    const created = await sdpApiFetch<EphemeralApiKeyResponse>("/v1/api-keys", {
+    const created = await sdpApiProjectFetch<EphemeralApiKeyResponse>("/v1/api-keys", {
       method: "POST",
       body: JSON.stringify({
         name: keyName,
@@ -405,7 +405,7 @@ export async function checkWalletSignerMemoAction(
   } finally {
     if (ephemeralKey) {
       try {
-        await sdpApiFetch(`/v1/api-keys/${ephemeralKey.id}`, {
+        await sdpApiProjectFetch(`/v1/api-keys/${ephemeralKey.id}`, {
           method: "DELETE",
           body: JSON.stringify({ confirmation: ephemeralKey.name }),
         });
@@ -435,15 +435,18 @@ export async function requestDevnetSolanaFaucetAction(
       return { status: "error", message: "Sign in to request devnet SOL." };
     }
 
-    const relay = await sdpApiFetch<RpcRelayResponse<SolanaRpcAirdropResponse>>("/v1/rpc/proxy", {
-      method: "POST",
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: `wallet-faucet-${resolvedWalletId}`,
-        method: "requestAirdrop",
-        params: [resolvedWalletAddress, DEVNET_FAUCET_LAMPORTS],
-      }),
-    });
+    const relay = await sdpApiProjectFetch<RpcRelayResponse<SolanaRpcAirdropResponse>>(
+      "/v1/rpc/proxy",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: `wallet-faucet-${resolvedWalletId}`,
+          method: "requestAirdrop",
+          params: [resolvedWalletAddress, DEVNET_FAUCET_LAMPORTS],
+        }),
+      }
+    );
 
     if (!relay.upstream.ok) {
       return {

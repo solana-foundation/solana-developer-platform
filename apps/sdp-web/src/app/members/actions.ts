@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { sdpApiFetch } from "@/lib/sdp-api";
+import { sdpApiOrgFetch } from "@/lib/sdp-api";
 
 export interface Member {
   id: string;
@@ -16,7 +16,7 @@ export interface Member {
 }
 
 export async function listMembers(): Promise<Member[]> {
-  const response = await sdpApiFetch<{ members: Member[] }>("/v1/members");
+  const response = await sdpApiOrgFetch<{ members: Member[] }>("/v1/members");
   return response.members;
 }
 
@@ -28,7 +28,7 @@ export async function inviteMember(formData: FormData) {
     throw new Error("Email is required");
   }
 
-  await sdpApiFetch("/v1/members/invite", {
+  await sdpApiOrgFetch("/v1/members/invite", {
     method: "POST",
     body: JSON.stringify({ email, role }),
   });

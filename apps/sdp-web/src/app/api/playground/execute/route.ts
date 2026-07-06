@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { sdpApiRequest } from "@/lib/sdp-api";
+import { sdpApiProjectRequest } from "@/lib/sdp-api";
 
 type PlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
       headers.Authorization = `Bearer ${normalizedApiKey}`;
     }
 
-    const response = await sdpApiRequest(
+    const response = await sdpApiProjectRequest(
       path,
       {
         method,

@@ -1,5 +1,4 @@
 import { auth } from "@clerk/nextjs/server";
-import type { ListProjectsResponse } from "@sdp/types";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
@@ -136,32 +135,16 @@ export interface SdpApiClient {
   fetch: <T>(path: string, options?: RequestInit) => Promise<T>;
 }
 
-async function getSelectedProjectId(): Promise<string | null> {
+async function getSelectedProjectId(): Promise<string | undefined> {
   const jar = await cookies();
-  return jar.get(PROJECT_COOKIE_NAME)?.value ?? null;
+  return jar.get(PROJECT_COOKIE_NAME)?.value;
 }
 
-async function getFallbackProjectId(token: string): Promise<string | null> {
-  try {
-    const res = await fetch(`${getApiBaseUrl()}/v1/projects`, {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-
-    const json = (await res.json()) as { data?: ListProjectsResponse };
-    const projects = json.data?.projects ?? [];
-    return (
-      projects.find((project) => project.slug === "default-sandbox")?.id ?? projects[0]?.id ?? null
-    );
-  } catch {
-    return null;
-  }
-}
-
-export async function createSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
+async function buildSdpApiClient(
+  projectId: string | null,
+  traceContext?: TraceContext
+): Promise<SdpApiClient> {
   const token = await getClerkToken();
-  const projectId = (await getSelectedProjectId()) ?? (await getFallbackProjectId(token));
   const request = createSdpApiRequest(token, projectId, traceContext);
 
   return {
@@ -173,7 +156,28 @@ export async function createSdpApiClient(traceContext?: TraceContext): Promise<S
   };
 }
 
-export async function sdpApiRequest(
+/**
+ * Creates a project-scoped SDP API client. Throws when no project is
+ * selected — org-scoped endpoints go through `sdpApiOrgFetch` instead.
+ */
+export async function createSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
+  const projectId = await getSelectedProjectId();
+  if (!projectId) {
+    throw new Error("Selected project required");
+  }
+  return buildSdpApiClient(projectId, traceContext);
+}
+
+/**
+ * Fetches an org-scoped sdp-api endpoint (projects, members, allowlist,
+ * organizations) that does not require a selected project.
+ */
+export async function sdpApiOrgFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const client = await buildSdpApiClient(null);
+  return client.fetch<T>(path, options);
+}
+
+export async function sdpApiProjectRequest(
   path: string,
   options: RequestInit = {},
   traceContext?: TraceContext
@@ -182,7 +186,7 @@ export async function sdpApiRequest(
   return client.request(path, options);
 }
 
-export async function sdpApiFetch<T>(
+export async function sdpApiProjectFetch<T>(
   path: string,
   options: RequestInit = {},
   traceContext?: TraceContext
@@ -230,6 +234,9 @@ export async function proxyToSdpApi({
   }
   if (!orgId) {
     return proxyFailure(trace, 403, "Active organization required");
+  }
+  if (!(await getSelectedProjectId())) {
+    return proxyFailure(trace, 400, "Selected project required");
   }
 
   try {

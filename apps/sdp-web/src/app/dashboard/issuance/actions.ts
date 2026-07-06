@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { sdpApiRequest } from "@/lib/sdp-api";
+import { sdpApiProjectRequest } from "@/lib/sdp-api";
 import { isValidTokenDecimals } from "./create-token-modal.utils";
 import { issuanceTemplateCatalog } from "./template-catalog";
 
@@ -172,7 +172,7 @@ export async function createIssuanceTokenAction(
   }
 
   try {
-    const response = await sdpApiRequest("/v1/issuance/tokens", {
+    const response = await sdpApiProjectRequest("/v1/issuance/tokens", {
       method: "POST",
       body: JSON.stringify(payload),
     });
