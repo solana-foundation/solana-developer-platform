@@ -131,7 +131,7 @@ jobs:
 
       - name: Install Doppler CLI
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
-        uses: dopplerhq/cli-action@v4
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
       - name: Unit tests (Doppler)
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
@@ -436,7 +436,7 @@ jobs:
 
       - name: Install Doppler CLI
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
-        uses: dopplerhq/cli-action@v4
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
       - name: Validate integration runtime secrets
         if: matrix.provider == 'kora' && env.CI_HAS_DOPPLER_TOKEN == 'true'
@@ -589,7 +589,7 @@ jobs:
 
       - name: Install Doppler CLI
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
-        uses: dopplerhq/cli-action@v4
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
       - name: Validate browser e2e runtime secrets
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'

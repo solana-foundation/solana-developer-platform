@@ -23,7 +23,6 @@ docs
 infra
 scripts
 skills
-bun.lock
 
 .env
 .env.*
