@@ -6,7 +6,7 @@ import { isRampEventProvider } from "@/lib/ramps/shared";
 import { success } from "@/lib/response";
 import { type AppContext, getPaymentsRepository } from "../../context";
 import { mapTransferRow } from "../../mappers";
-import { moneygramRampEventSchema } from "../../schemas";
+import { coinbaseRampEventSchema, moneygramRampEventSchema } from "../../schemas";
 
 const TERMINAL_RAMP_STATUSES = [
   "completed",
@@ -63,7 +63,7 @@ async function requireVerifiedCryptoLeg(
 
 function transferResponse(c: AppContext, row: PaymentTransferRow | null) {
   if (!row) {
-    throw internalError("Failed to update the MoneyGram ramp transfer.");
+    throw internalError("Failed to update the ramp transfer.");
   }
   return success(c, { transfer: mapTransferRow(row) });
 }
@@ -75,6 +75,74 @@ export async function recordRampProviderEvent(c: AppContext) {
   }
 
   const body = await c.req.json();
+  switch (provider) {
+    case "moneygram":
+      return recordMoneygramRampEvent(c, body);
+    case "coinbase":
+      return recordCoinbaseRampEvent(c, body);
+    default: {
+      const exhaustive: never = provider;
+      throw internalError(`Unhandled ramp event provider: ${String(exhaustive)}`);
+    }
+  }
+}
+
+async function recordCoinbaseRampEvent(c: AppContext, body: unknown) {
+  const parsed = coinbaseRampEventSchema.safeParse(body);
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+  const event = parsed.data;
+
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const repo = getPaymentsRepository(c);
+
+  const transfer = await repo.getTransferByProviderReference({
+    provider: "coinbase",
+    providerReference: event.orderId,
+    organizationId: auth.organizationId,
+    projectId,
+  });
+  if (!transfer) {
+    throw notFound("Ramp transfer");
+  }
+  if (transfer.type !== "onramp") {
+    throw badRequest("Coinbase events only apply to on-ramp transfers.");
+  }
+  if (isTerminalRampStatus(transfer.status)) {
+    return success(c, { transfer: mapTransferRow(transfer) });
+  }
+
+  const now = new Date().toISOString();
+  switch (event.kind) {
+    case "committed": {
+      const updated = await repo.updateTransfer({
+        transferId: transfer.id,
+        status: "settling",
+        updatedAt: now,
+      });
+      return transferResponse(c, updated);
+    }
+    case "errored": {
+      const updated = await repo.updateTransfer({
+        transferId: transfer.id,
+        status: "failed",
+        error: event.reason,
+        updatedAt: now,
+      });
+      return transferResponse(c, updated);
+    }
+    default: {
+      const exhaustive: never = event;
+      throw internalError(`Unhandled Coinbase ramp event: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}
+
+async function recordMoneygramRampEvent(c: AppContext, body: unknown) {
   const parsed = moneygramRampEventSchema.safeParse(body);
   if (!parsed.success) {
     throw badRequest("Invalid request body", {
@@ -88,7 +156,7 @@ export async function recordRampProviderEvent(c: AppContext) {
   const repo = getPaymentsRepository(c);
 
   const transfer = await repo.getTransferByProviderReference({
-    provider,
+    provider: "moneygram",
     providerReference: event.sessionId,
     organizationId: auth.organizationId,
     projectId,

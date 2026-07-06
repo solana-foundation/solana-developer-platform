@@ -1,4 +1,5 @@
 import {
+  type CoinbaseRampEvent,
   type MoneygramRampEvent,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
@@ -602,6 +603,8 @@ export const createOnrampQuoteSchema = z.object({
   fiatCurrency: rampFiatCurrencySchema.optional(),
   fiatAmount: paymentAmountSchema,
   redirectUrl: z.string().url().optional(),
+  // Embedding domain for Coinbase's Apple Pay payment link (browser origin host).
+  domain: z.string().min(1).optional(),
 });
 
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
@@ -632,6 +635,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       collectedData: z.record(z.string(), z.string()).optional(),
     }),
   ]),
+  z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),
 ]);
 
 export const createOfframpQuoteSchema = z.object({
@@ -671,6 +675,11 @@ export const moneygramRampEventSchema = z.discriminatedUnion("kind", [
     sessionId: z.string().min(1),
   }),
 ]) satisfies z.ZodType<MoneygramRampEvent>;
+
+export const coinbaseRampEventSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("committed"), orderId: z.string().min(1) }),
+  z.object({ kind: z.literal("errored"), orderId: z.string().min(1), reason: z.string().min(1) }),
+]) satisfies z.ZodType<CoinbaseRampEvent>;
 
 const simulateLightsparkSandboxTransferPayloadSchema = z.object({
   quoteId: z.string().min(1),
