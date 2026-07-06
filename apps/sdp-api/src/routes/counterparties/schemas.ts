@@ -124,6 +124,7 @@ export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("provide
     destinationWallet: z.string().min(1).optional(),
   }),
   z.object({ provider: z.literal("moneygram"), direction: rampDirectionSchema }),
+  z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),
   z.discriminatedUnion("direction", [
     z.object({ provider: z.literal("lightspark"), direction: z.literal("onramp") }),
     z.object({

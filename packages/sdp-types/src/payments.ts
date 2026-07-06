@@ -828,7 +828,7 @@ export type PaymentRampQuote =
       paymentInstructions: BvnkPaymentRampInstruction[];
     })
   | (BasePaymentRampQuote & {
-      provider: "moonpay" | "bvnk";
+      provider: "moonpay" | "bvnk" | "coinbase";
       deliveryMode: "hosted";
       hostedUrl: string;
     })
@@ -842,8 +842,20 @@ export type PaymentRampQuote =
       sdkUrl: string;
     });
 
-export const RAMP_EVENT_PROVIDERS = ["moneygram"] as const;
+export const RAMP_EVENT_PROVIDERS = ["moneygram", "coinbase"] as const;
 export type RampEventProvider = (typeof RAMP_EVENT_PROVIDERS)[number];
+
+/**
+ * Coinbase headless on-ramp events, forwarded from the payment-link iframe's
+ * postMessage stream (`onramp_api.*`). `orderId` is the create-order id used as
+ * the transfer's provider reference. Client events are provisional and only
+ * advance the transfer to non-terminal states; the server-side webhook is the
+ * settlement authority — it alone completes the transfer, carrying the actual
+ * delivered crypto amount, which a client-set terminal status would block.
+ */
+export type CoinbaseRampEvent =
+  | { kind: "committed"; orderId: string }
+  | { kind: "errored"; orderId: string; reason: string };
 
 export type MoneygramRampEvent =
   | { kind: "signed"; sessionId: string; cryptoTransferId: string }
