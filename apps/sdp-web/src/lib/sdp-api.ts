@@ -192,8 +192,7 @@ export async function sdpApiProjectFetch<T>(
   traceContext?: TraceContext
 ): Promise<T> {
   const client = await createSdpApiClient(traceContext);
-  const res = await client.request(path, options);
-  return parseSdpApiResponse<T>(res);
+  return client.fetch<T>(path, options);
 }
 
 function proxyFailure(
