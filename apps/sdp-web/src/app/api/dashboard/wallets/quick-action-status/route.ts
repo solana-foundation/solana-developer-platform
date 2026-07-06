@@ -34,6 +34,12 @@ function formatProviderHint(providerLabels: string[]): string {
   return `${head}, or ${tail}`;
 }
 
+/**
+ * Not a pure proxy: combines org-scoped onboarding status with project-scoped
+ * wallet configs into a derived payload, so it must repeat proxyToSdpApi's
+ * missing-project 400 itself — after the linked gate, because an unlinked org
+ * legitimately has no project yet and must get the linked:false payload.
+ */
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.wallets.quick_action_status", request);
 

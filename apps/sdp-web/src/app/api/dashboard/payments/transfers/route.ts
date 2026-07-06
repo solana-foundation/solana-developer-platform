@@ -3,6 +3,12 @@ import { fetchDashboardPaymentTransfers } from "@/app/dashboard/payments/payment
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient, getSelectedProjectId, proxyToSdpApi } from "@/lib/sdp-api";
 
+/**
+ * Not a pure proxy: without a direct filter this aggregates transfers via
+ * fetchDashboardPaymentTransfers, so that branch builds its own client and
+ * must repeat proxyToSdpApi's missing-project 400 up front — otherwise
+ * createSdpApiClient's throw would surface as a 500.
+ */
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const hasDirectTransferFilter = [
