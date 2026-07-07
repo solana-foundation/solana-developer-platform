@@ -1,4 +1,5 @@
 import { type AssetCategory, getAssetTypeRegistryEntry, type IssuanceMetadata } from "@sdp/types";
+import { detailFieldOptionLabel } from "./asset-details-config";
 import { CAPACITY_KEYS, type DraftState, isValidDecimals } from "./issuance-draft-wizard.types";
 
 const SYMBOL_RE = /^[A-Za-z0-9.]{1,10}$/;
@@ -232,10 +233,15 @@ export function getPublicFieldCandidates(draft: DraftState): PublicFieldCandidat
   const enabled = new Set(draft.publicFields);
   return PUBLIC_FIELD_POOL.flatMap(({ path, label }) => {
     const raw = getByPath(metadata, path);
-    const value = typeof raw === "string" ? raw.trim() : raw == null ? "" : String(raw);
-    if (!value) {
+    const rawValue = typeof raw === "string" ? raw.trim() : raw == null ? "" : String(raw);
+    if (!rawValue) {
       return [];
     }
+    // Select-backed fields (backingType, jurisdiction, offeringType, …) store
+    // their system value (e.g. "fiat"); show the human label wherever one is
+    // defined, falling back to the raw value for free-text fields.
+    const key = path.split(".").pop() ?? path;
+    const value = detailFieldOptionLabel(key, rawValue) ?? rawValue;
     return [{ path, label, value, enabled: enabled.has(path) }];
   });
 }

@@ -6,10 +6,7 @@ import { useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { AdvancedCapacities } from "../../../create/advanced-capacities";
-import {
-  ACCESS_CONTROL_OPTIONS,
-  accessControlLabel,
-} from "../../../create/asset-details-config";
+import { ACCESS_CONTROL_OPTIONS, accessControlLabel } from "../../../create/asset-details-config";
 import { FormCard, ReadOnlyField } from "../../../create/form-primitives";
 import type { DraftState } from "../../../create/issuance-draft-wizard.types";
 import { TokenControlListsSection } from "../../token-control-lists-section";
@@ -32,13 +29,16 @@ export function ComplianceTab({
 }) {
   const { draft, updateDraft } = form;
   const isDeployed = Boolean(token.mintAddress);
-  const enforcedLabel =
-    accessControlLabel(ops.accessControlMode) ?? "No transfer restrictions";
+  const enforcedLabel = accessControlLabel(ops.accessControlMode) ?? "No transfer restrictions";
 
   const availableActions: Array<{ id: AdminAction; label: string }> = [
-    ...(ops.controlListCopy ? [{ id: "allowlist" as const, label: ops.controlListCopy.label }] : []),
+    ...(ops.controlListCopy
+      ? [{ id: "allowlist" as const, label: ops.controlListCopy.label }]
+      : []),
     ...(canManageTokenAdmin
       ? [
+          { id: "seize" as const, label: "Force transfer" },
+          { id: "force-burn" as const, label: "Force burn" },
           { id: "freeze" as const, label: "Freeze" },
           { id: "pause" as const, label: "Pause" },
         ]

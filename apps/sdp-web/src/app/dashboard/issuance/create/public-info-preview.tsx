@@ -164,9 +164,6 @@ export function PublicInfoPreview({
         {/* Checklist — what's public, with interactive toggles. */}
         <div>
           <p className="text-sm font-medium text-[#1c1c1d]">Included in public view</p>
-          <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
-            These fields will be shown to the public.
-          </p>
 
           <div className="mt-3 divide-y divide-[rgba(28,28,29,0.06)] rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white px-4">
             {alwaysPublic.map((field) => (

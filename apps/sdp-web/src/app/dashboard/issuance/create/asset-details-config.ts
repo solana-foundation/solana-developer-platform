@@ -164,6 +164,28 @@ export function getCategorySections(category: AssetCategory | null): readonly De
   return CATEGORY_SECTIONS[category] ?? [];
 }
 
+// value -> label per select-backed field, derived from every category's field
+// options. Keys are unique across categories today, so a flat merge is safe.
+const OPTION_LABELS_BY_KEY: Partial<Record<DetailFieldKey, Record<string, string>>> = {};
+for (const sections of Object.values(CATEGORY_SECTIONS)) {
+  for (const section of sections) {
+    for (const field of section.fields) {
+      if (field.options) {
+        OPTION_LABELS_BY_KEY[field.key] = Object.fromEntries(
+          field.options.map((option) => [option.value, option.label])
+        );
+      }
+    }
+  }
+}
+
+// Human label for a select-backed field's stored value (e.g. backingType
+// "fiat" -> "Fiat-backed"). Undefined for free-text fields or unknown values,
+// so callers can fall back to the raw value.
+export function detailFieldOptionLabel(key: string, value: string): string | undefined {
+  return OPTION_LABELS_BY_KEY[key as DetailFieldKey]?.[value];
+}
+
 export const ACCESS_CONTROL_OPTIONS: readonly { value: AccessControlMode; label: string }[] = [
   { value: "allowlist", label: "Allow list" },
   { value: "blocklist", label: "Block list" },

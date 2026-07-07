@@ -64,7 +64,7 @@ export function TokenSignerSelect({
       <p
         className={[
           "text-sm leading-5",
-          isError ? "text-[#9e2b38]" : "text-[rgba(28,28,29,0.68)]",
+          signerUnavailableReason ? "text-[#9e2b38]" : "text-[rgba(28,28,29,0.68)]",
         ].join(" ")}
       >
         {message}

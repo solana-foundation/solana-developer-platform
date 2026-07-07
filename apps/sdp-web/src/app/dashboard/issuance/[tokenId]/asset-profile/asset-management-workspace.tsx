@@ -224,9 +224,7 @@ export function AssetManagementWorkspace({
             canManageTokenAdmin={canManageTokenAdmin}
           />
         ) : null}
-        {activeTab === "operations" ? (
-          <OperationsTab token={token} ops={ops} canManageTokenAdmin={canManageTokenAdmin} />
-        ) : null}
+        {activeTab === "operations" ? <OperationsTab ops={ops} /> : null}
         {activeTab === "permissions" ? (
           <PermissionsTab ops={ops} canManageTokenAdmin={canManageTokenAdmin} />
         ) : null}

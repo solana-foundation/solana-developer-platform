@@ -1,16 +1,11 @@
 "use client";
 
-import type { Token } from "@sdp/types";
-import { Coins, Flame, type LucideIcon, Rocket, ShieldAlert } from "lucide-react";
-import { useState } from "react";
+import { Coins, Flame, type LucideIcon, Rocket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TokenDisabledActionTooltip } from "../../token-disabled-action-tooltip";
 import type { FundManagementModalAction } from "../../token-fund-management-section";
-import type { AdminAction } from "../../token-management-workspace.types";
 import { TokenTransactionsSection } from "../../token-transactions-section";
 import type { TokenOperations } from "../use-token-operations";
-import { ActionPills } from "./action-pills";
-import { OpsActionForms } from "./ops-action-forms";
 
 interface OperationRow {
   id: FundManagementModalAction;
@@ -22,15 +17,7 @@ interface OperationRow {
   disabledReason: string | null;
 }
 
-export function OperationsTab({
-  token,
-  ops,
-  canManageTokenAdmin,
-}: {
-  token: Token;
-  ops: TokenOperations;
-  canManageTokenAdmin: boolean;
-}) {
+export function OperationsTab({ ops }: { ops: TokenOperations }) {
   const operationRows: OperationRow[] = ops.canDeployToken
     ? [
         {
@@ -63,14 +50,6 @@ export function OperationsTab({
           disabledReason: ops.fundManagementDisabledReasons.burn,
         },
       ];
-
-  const adminActions: Array<{ id: AdminAction; label: string }> = canManageTokenAdmin
-    ? [
-        { id: "seize", label: "Force transfer" },
-        { id: "force-burn", label: "Force burn" },
-      ]
-    : [];
-  const [activeAdminAction, setActiveAdminAction] = useState<AdminAction | null>(null);
 
   return (
     <div className="space-y-5">
@@ -106,35 +85,6 @@ export function OperationsTab({
           );
         })}
       </div>
-
-      {adminActions.length > 0 && !ops.canDeployToken ? (
-        <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
-          <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.05)] text-[#1c1c1d]">
-              <ShieldAlert className="h-4.5 w-4.5" />
-            </span>
-            <div>
-              <p className="text-base font-medium text-[#1c1c1d]">Administrative actions</p>
-              <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
-                Force transfer or burn tokens from any account using the permanent delegate.
-              </p>
-            </div>
-          </div>
-          <div className="mt-4 space-y-4">
-            <ActionPills
-              actions={adminActions}
-              activeAction={activeAdminAction}
-              disabledReasons={ops.complianceActionDisabledReasons}
-              onSelectAction={(action) =>
-                setActiveAdminAction((current) => (current === action ? null : action))
-              }
-            />
-            {activeAdminAction ? (
-              <OpsActionForms ops={ops} token={token} activeAction={activeAdminAction} />
-            ) : null}
-          </div>
-        </div>
-      ) : null}
 
       <TokenTransactionsSection
         transactions={ops.transactions}
