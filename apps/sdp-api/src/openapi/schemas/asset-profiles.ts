@@ -26,15 +26,23 @@ export const assetCategorySchema = withOpenApi(assetCategorySchemaBase, {
 });
 
 const issuanceMetadataExample = {
-  asset: { name: "Acme USD", issuerName: "Acme Financial Inc.", pegCurrency: "USD" },
+  asset: {
+    name: "Acme USD",
+    issuerName: "Acme Financial Inc.",
+    pegCurrency: "USD",
+    website: "https://acme.example",
+  },
   compliance: { transferRestrictions: "reg_d" },
   chain: { decimals: 6 },
   custom: { customer: { internalDeskId: "FX-22" }, integration: {} },
+  visibility: { public: ["asset.name", "asset.issuerName", "asset.pegCurrency", "chain.decimals"] },
 };
 
 export const issuanceMetadataSchema = withOpenApi(issuanceMetadataSchemaBase, {
   description:
-    "Canonical, private master metadata for the asset. SDP-owned namespaces (asset, compliance, chain) plus a namespaced custom bucket (customer, integration). Only registry-projected fields are ever exposed publicly; compliance and custom fields are private by default.",
+    "Canonical, private master metadata for the asset. SDP-owned namespaces (asset, compliance, chain) plus a namespaced custom bucket (customer, integration). " +
+    "The optional `visibility.public` array holds the issuance_metadata dot-paths the issuer chose to expose publicly; when omitted, the asset type's registry default is used. " +
+    "Only asset.* and chain.decimals paths can ever be projected publicly — compliance and custom fields are private by default and can never be exposed, even if listed in visibility.public.",
   example: issuanceMetadataExample,
 });
 
@@ -64,7 +72,7 @@ export const assetProfileSchema = withOpenApi(
     assetTypeVersion: withOpenApi(z.number().int().positive(), {
       description:
         "Version of the asset type registry contract this profile was validated against.",
-      example: 1,
+      example: 2,
     }),
     issuanceMetadata: issuanceMetadataSchema,
     publicMetadata: publicTokenMetadataSchema,

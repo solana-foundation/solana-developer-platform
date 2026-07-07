@@ -8,6 +8,7 @@ import { createTokenWithAssetProfile } from "./create";
 import {
   archiveAssetProfile,
   getAssetProfile,
+  getAssetProfileByTokenId,
   getAssetProfileFieldOptions,
   listAssetProfiles,
   updateAssetProfile,
@@ -31,6 +32,11 @@ assetProfiles.use("*", projectContextMiddleware());
 assetProfiles.get("/field-options", requirePermissions("tokens:read"), getAssetProfileFieldOptions);
 assetProfiles.get("/", requirePermissions("tokens:read"), listAssetProfiles);
 assetProfiles.post("/", requirePermissions("tokens:write"), createTokenWithAssetProfile);
+assetProfiles.get(
+  "/by-token/:tokenId",
+  requirePermissions("tokens:read"),
+  getAssetProfileByTokenId
+);
 assetProfiles.get("/:profileId", requirePermissions("tokens:read"), getAssetProfile);
 assetProfiles.patch("/:profileId", requirePermissions("tokens:write"), updateAssetProfile);
 assetProfiles.delete("/:profileId", requirePermissions("tokens:write"), archiveAssetProfile);

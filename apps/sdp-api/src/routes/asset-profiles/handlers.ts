@@ -25,6 +25,7 @@ import { AuditService } from "@/services/audit.service";
 import { type AppContext, getAssetProfilesRepository } from "./context";
 import {
   assetProfileIdParamsSchema,
+  assetProfileTokenIdParamsSchema,
   listAssetProfilesQuerySchema,
   updateAssetProfileSchema,
 } from "./schemas";
@@ -100,6 +101,30 @@ export const getAssetProfile = async (c: AppContext) => {
   const repo = getAssetProfilesRepository(c);
   const profile = await repo.getAssetProfileById({
     profileId: params.data.profileId,
+    organizationId: auth.organizationId,
+    projectId,
+  });
+
+  if (!profile) {
+    throw notFound("Asset profile");
+  }
+
+  const response: AssetProfileResponse = { assetProfile: mapToAssetProfile(profile) };
+  return success(c, response);
+};
+
+export const getAssetProfileByTokenId = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = assetProfileTokenIdParamsSchema.safeParse(c.req.param());
+
+  if (!params.success) {
+    throw badRequestParams();
+  }
+
+  const repo = getAssetProfilesRepository(c);
+  const profile = await repo.getActiveAssetProfileByTokenId({
+    tokenId: params.data.tokenId,
     organizationId: auth.organizationId,
     projectId,
   });

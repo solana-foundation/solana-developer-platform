@@ -42,9 +42,12 @@ export interface AssetTypeRegistryEntry {
   // Stored on the profile row as asset_type_version.
   version: number;
   label: string;
-  // Dot-paths into issuance_metadata that are safe to expose publicly. The
-  // application layer projects exactly these into the cached public_metadata
-  // column; everything else (notably compliance.* and custom.*) stays private.
+  // Dot-paths into issuance_metadata that are public by default for this type.
+  // Used as the projection when a profile has no explicit issuer selection
+  // (issuance_metadata.visibility.public); once the issuer customizes it, their
+  // selection is projected instead. Either way the application layer clamps to
+  // public-safe namespaces (asset.* and chain.decimals), so compliance.* and
+  // custom.* can never be exposed.
   publicProjection: readonly string[];
   // Dot-paths required before the token may be deployed (lifecycle gate).
   requiredForDeploy: readonly string[];
@@ -55,89 +58,95 @@ export const ASSET_TYPE_REGISTRY: readonly AssetTypeRegistryEntry[] = [
   {
     category: "generic",
     type: "generic",
-    version: 1,
+    version: 2,
     label: "Generic asset",
-    publicProjection: ["asset.name", "asset.description"],
+    publicProjection: ["asset.name", "asset.description", "asset.website"],
     requiredForDeploy: [],
   },
   {
     category: "stablecoin",
     type: "fiat_backed",
-    version: 1,
+    version: 2,
     label: "Fiat-backed stablecoin",
-    publicProjection: ["asset.name", "asset.issuerName", "asset.pegCurrency", "chain.decimals"],
+    publicProjection: [
+      "asset.name",
+      "asset.issuerName",
+      "asset.pegCurrency",
+      "chain.decimals",
+      "asset.website",
+    ],
     requiredForDeploy: ["asset.issuerName", "asset.pegCurrency"],
   },
   {
     category: "stablecoin",
     type: "generic",
-    version: 1,
+    version: 2,
     label: "Generic stablecoin",
-    publicProjection: ["asset.name", "asset.pegCurrency", "chain.decimals"],
+    publicProjection: ["asset.name", "asset.pegCurrency", "chain.decimals", "asset.website"],
     requiredForDeploy: [],
   },
   {
     category: "tokenized_security",
     type: "generic",
-    version: 1,
+    version: 2,
     label: "Generic tokenized security",
-    publicProjection: ["asset.name", "asset.issuerName"],
+    publicProjection: ["asset.name", "asset.issuerName", "asset.website"],
     requiredForDeploy: ["asset.issuerName"],
   },
   {
     category: "stablecoin",
     type: "crypto_backed",
-    version: 1,
+    version: 2,
     label: "Crypto-backed stablecoin",
-    publicProjection: ["asset.name", "asset.pegCurrency", "chain.decimals"],
+    publicProjection: ["asset.name", "asset.pegCurrency", "chain.decimals", "asset.website"],
     requiredForDeploy: [],
   },
   {
     category: "tokenized_security",
     type: "equity",
-    version: 1,
+    version: 2,
     label: "Tokenized equity",
-    publicProjection: ["asset.name", "asset.issuerName"],
+    publicProjection: ["asset.name", "asset.issuerName", "asset.website"],
     requiredForDeploy: ["asset.issuerName"],
   },
   {
     category: "tokenized_security",
     type: "debt",
-    version: 1,
+    version: 2,
     label: "Tokenized debt",
-    publicProjection: ["asset.name", "asset.issuerName"],
+    publicProjection: ["asset.name", "asset.issuerName", "asset.website"],
     requiredForDeploy: ["asset.issuerName"],
   },
   {
     category: "tokenized_security",
     type: "fund",
-    version: 1,
+    version: 2,
     label: "Tokenized fund",
-    publicProjection: ["asset.name", "asset.issuerName"],
+    publicProjection: ["asset.name", "asset.issuerName", "asset.website"],
     requiredForDeploy: ["asset.issuerName"],
   },
   {
     category: "generic",
     type: "commodity",
-    version: 1,
+    version: 2,
     label: "Tokenized commodity",
-    publicProjection: ["asset.name", "asset.description"],
+    publicProjection: ["asset.name", "asset.description", "asset.website"],
     requiredForDeploy: [],
   },
   {
     category: "generic",
     type: "real_estate",
-    version: 1,
+    version: 2,
     label: "Tokenized real estate",
-    publicProjection: ["asset.name", "asset.description"],
+    publicProjection: ["asset.name", "asset.description", "asset.website"],
     requiredForDeploy: [],
   },
   {
     category: "generic",
     type: "collectible",
-    version: 1,
+    version: 2,
     label: "Tokenized collectible",
-    publicProjection: ["asset.name", "asset.description"],
+    publicProjection: ["asset.name", "asset.description", "asset.website"],
     requiredForDeploy: [],
   },
 ];
@@ -163,6 +172,16 @@ export interface CustomMetadata {
   integration?: Record<string, unknown>;
 }
 
+// Issuer-controlled public/private field selection. `public` holds the
+// issuance_metadata dot-paths the issuer chose to expose (e.g. "asset.issuerName").
+// Absent ⇒ the type's registry `publicProjection` is used as the default.
+// The application layer clamps these to public-safe namespaces (asset.* and
+// chain.decimals) before projecting, so compliance.*/custom.* can never leak,
+// and `visibility` itself is never projected into public_metadata.
+export interface VisibilityMetadata {
+  public?: string[];
+}
+
 export interface IssuanceMetadata {
   asset?: AssetMetadata;
   // Private by default — never auto-projected into public metadata.
@@ -170,6 +189,8 @@ export interface IssuanceMetadata {
   // SDP-enriched from on-chain reads.
   chain?: ChainMetadata;
   custom?: CustomMetadata;
+  // Which fields the issuer publishes. Never itself exposed publicly.
+  visibility?: VisibilityMetadata;
   [extension: string]: unknown;
 }
 

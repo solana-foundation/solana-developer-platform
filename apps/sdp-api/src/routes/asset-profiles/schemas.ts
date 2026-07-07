@@ -17,11 +17,24 @@ export const assetProfileIdParamsSchema = z.object({
   profileId: assetProfileIdSchema,
 });
 
+export const assetProfileTokenIdParamsSchema = z.object({
+  tokenId: z.string().min(1),
+});
+
 // custom.* is namespaced so customer and integration fields can never collide
 // with SDP-defined fields. Each namespace is an open object.
 const customMetadataSchema = z.object({
   customer: jsonObjectSchema.optional(),
   integration: jsonObjectSchema.optional(),
+});
+
+// Issuer-controlled public/private field selection. `public` lists the
+// issuance_metadata dot-paths (e.g. "asset.issuerName") the issuer chose to
+// expose. Absent ⇒ the asset type's registry default is used. The application
+// layer clamps these to public-safe namespaces (asset.* and chain.decimals)
+// before projecting, so compliance.* and custom.* can never be exposed.
+const visibilityMetadataSchema = z.object({
+  public: z.array(z.string()).optional(),
 });
 
 // Strict on the SDP-owned namespaces, but loose *within* them for v1 (the PRD
@@ -32,6 +45,7 @@ export const issuanceMetadataSchema = z.looseObject({
   compliance: jsonObjectSchema.optional(),
   chain: jsonObjectSchema.optional(),
   custom: customMetadataSchema.optional(),
+  visibility: visibilityMetadataSchema.optional(),
 });
 
 export function assertAssetTypeSupported(
