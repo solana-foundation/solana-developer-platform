@@ -1,7 +1,7 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { Loader2 } from "lucide-react";
+import { Loader2Icon, SparklesIcon, WalletIcon } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -171,7 +171,7 @@ function LoadingSection({ message }: { message: string }) {
   return (
     <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-6 py-10">
       <div className="flex items-center gap-3 text-sm text-[rgba(28,28,29,0.64)]">
-        <Loader2 className="size-4 animate-spin" />
+        <Loader2Icon className="size-4 animate-spin" />
         <span>{message}</span>
       </div>
     </div>
@@ -1557,7 +1557,7 @@ export function TokenManagementWorkspace({
                 signerUnavailableReason={deploySignerSelection.unavailableReason}
                 onSignerWalletIdChange={setDeploySignerWalletId}
               />
-              <div className="flex items-center justify-end gap-2">
+              <div className="flex items-center justify-between gap-2">
                 <button
                   type="button"
                   onClick={closeFundManagementModal}
@@ -1566,22 +1566,25 @@ export function TokenManagementWorkspace({
                 >
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  onClick={() => deployToken("wallet")}
-                  disabled={isPending || Boolean(deploySignerSelection.unavailableReason)}
-                  className="inline-flex h-10 items-center rounded-[12px] border border-[rgba(28,28,29,0.16)] bg-white px-4 text-sm font-medium text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.04)] disabled:pointer-events-none disabled:opacity-50"
-                >
-                  Deploy with Wallet
-                </button>
-                <button
-                  type="button"
-                  onClick={() => deployToken("sponsored")}
-                  disabled={isPending || Boolean(deploySignerSelection.unavailableReason)}
-                  className="inline-flex h-10 items-center rounded-[12px] bg-[#0f0f10] px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
-                >
-                  Deploy with Kora
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => deployToken("wallet")}
+                    disabled={isPending || Boolean(deploySignerSelection.unavailableReason)}
+                    className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-[rgba(28,28,29,0.16)] bg-white px-4 text-sm font-medium text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.04)] disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    <WalletIcon className="size-4" />
+                    Deploy with Wallet
+                  </button>
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-[#0f0f10] px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    <SparklesIcon className="size-4" />
+                    Deploy with Kora
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1650,7 +1653,7 @@ export function TokenManagementWorkspace({
 
       {isPending ? (
         <div className="fixed right-4 bottom-4 z-30 inline-flex items-center gap-2 rounded-lg border border-[rgba(28,28,29,0.12)] bg-white px-3 py-2 text-sm shadow-lg">
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Loader2Icon className="h-4 w-4 animate-spin" />
           Running action...
         </div>
       ) : null}
