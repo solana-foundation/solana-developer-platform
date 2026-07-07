@@ -143,7 +143,7 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
       assetProfile = profileResult.data;
       if (profileResult.error && profileResult.status !== 404) {
         trace.log({
-          ok: true,
+          ok: false,
           tokenId,
           profileStatus: profileResult.status,
           profileError: profileResult.error,
