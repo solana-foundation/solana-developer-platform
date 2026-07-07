@@ -55,6 +55,15 @@ export interface Env {
   // a disable-only mechanism.
   SDP_DEPLOYMENT_MODE?: "managed" | "self_hosted";
 
+  // Credential secret store selection for BYO custody credentials.
+  // Managed SDP should use GCP Secret Manager. Self-hosted deployments default
+  // to encrypted DB storage and can also resolve provider credentials directly
+  // from runtime env bindings.
+  CREDENTIAL_SECRET_STORE_BACKEND?: "gcp_secret_manager" | "encrypted_db" | "runtime_env";
+  GCP_SECRET_MANAGER_PROJECT_ID?: string;
+  GCP_SECRET_MANAGER_SECRET_PREFIX?: string;
+  GCP_SECRET_MANAGER_API_BASE_URL?: string;
+
   // Secrets (set via wrangler secret)
   API_KEY_PEPPER?: string;
   CUSTODY_ENCRYPTION_KEY?: string; // For encrypting org private keys in DB
