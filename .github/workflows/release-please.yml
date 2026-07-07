@@ -33,11 +33,10 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node .github/scripts/release-flow.mjs plan
 
-  release:
+  prepare-release-pr:
     needs: plan
     if: ${{ needs.plan.outputs.should_release == 'true' }}
     runs-on: ubuntu-latest
-    environment: release-production
     concurrency:
       group: release-flow-main
       cancel-in-progress: false
@@ -48,6 +47,8 @@ jobs:
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Checkout
         uses: actions/checkout@v6.0.3
@@ -61,8 +62,41 @@ jobs:
         with:
           node-version: 22
 
-      - name: Publish approved release
+      - name: Prepare release PR
         env:
           GITHUB_TOKEN: ${{ steps.release-app.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: node .github/scripts/release-flow.mjs release
+        run: node .github/scripts/release-flow.mjs prepare
+
+  publish-release:
+    if: "${{ startsWith(github.event.head_commit.message, 'chore(main): release ') }}"
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-flow-main
+      cancel-in-progress: false
+    steps:
+      - name: Create release app token
+        id: release-app
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ steps.release-app.outputs.token }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Publish release tag and GitHub release
+        env:
+          GITHUB_TOKEN: ${{ steps.release-app.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node .github/scripts/release-flow.mjs publish
