@@ -15,19 +15,27 @@ import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import type { Env } from "@/types/env";
 import { MosaicService } from "./service";
 
+export type MosaicFeePayment = "sponsored" | "wallet";
+
 /**
- * Create a MosaicService with a signer and optional Kora fee payment integration.
+ * Create a MosaicService with a signer and an explicit fee-payment mode.
  *
  * This is the primary factory function for creating token issuance services.
  * Use this instead of createToken2022Service for template-based tokens.
  *
  * @param env - Environment bindings
  * @param signer - Transaction signer (from SigningService.getTransactionSigner)
- *
- * When KORA_RPC_URL is set in the environment, the service will use Kora
- * to pay transaction fees (gasless for the custody wallet).
+ * @param feePayment - "sponsored" routes fees through the Kora relay when
+ * KORA_RPC_URL is configured (gasless for the custody wallet) and degrades to
+ * signer-paid fees when it is not; "wallet" always makes the signer pay
+ * transaction fees from its own SOL.
  */
-export function createMosaicService(env: Env, signer: TransactionSigner): MosaicService {
-  const feePayment = env.KORA_RPC_URL ? createFeePaymentAdapter(env) : undefined;
-  return new MosaicService(env, signer, feePayment);
+export function createMosaicService(
+  env: Env,
+  signer: TransactionSigner,
+  feePayment: MosaicFeePayment
+): MosaicService {
+  const sponsor =
+    feePayment === "sponsored" && env.KORA_RPC_URL ? createFeePaymentAdapter(env) : undefined;
+  return new MosaicService(env, signer, sponsor);
 }

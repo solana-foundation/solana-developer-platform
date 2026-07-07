@@ -1,27 +1,9 @@
-import { NextResponse } from "next/server";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { proxyToSdpApi } from "@/lib/sdp-api";
 
 export async function POST(request: Request) {
-  try {
-    const body = await request.text();
-    const apiClient = await createSdpApiClient();
-    const response = await apiClient.request("/v1/payments/transfer-batches", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-    });
-
-    const responseBody = await response.text();
-    const contentType = response.headers.get("Content-Type") ?? "application/json";
-
-    return new NextResponse(responseBody, {
-      status: response.status,
-      headers: { "Content-Type": contentType },
-    });
-  } catch (error) {
-    return NextResponse.json(
-      { error: { message: error instanceof Error ? error.message : "Batch transfer failed" } },
-      { status: 500 }
-    );
-  }
+  return proxyToSdpApi({
+    request,
+    traceSource: "route.dashboard.payments.transfers.batch.post",
+    path: "/v1/payments/transfer-batches",
+  });
 }

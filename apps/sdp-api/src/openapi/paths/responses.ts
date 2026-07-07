@@ -65,7 +65,6 @@ import {
   preparePaymentSubscriptionLifecycleResponseSchema,
   preparePaymentSubscriptionPlanResponseSchema,
   prepareSeizeResponseSchema,
-  prepareTransferResponseSchema,
   prepareUpdateAuthorityResponseSchema,
   projectMemberResponseSchema,
   projectResponseSchema,
@@ -191,7 +190,6 @@ export const listTemplatesResponse = successResponseSchema(listTemplatesResponse
 export const onboardingStatusResponse = successResponseSchema(onboardingStatusResponseSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
 export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSchema);
-export const prepareTransferResponse = successResponseSchema(prepareTransferResponseSchema);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
 export const transferBatchResponse = successResponseSchema(transferBatchResponseSchema);

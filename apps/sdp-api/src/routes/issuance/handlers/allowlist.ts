@@ -87,7 +87,7 @@ async function syncNewAllowlistEntryOnChain(opts: {
     opts.projectId,
     opts.signingWalletId ?? undefined
   );
-  const mosaic = createMosaicService(opts.c.env, signer);
+  const mosaic = createMosaicService(opts.c.env, signer, "sponsored");
 
   try {
     await mosaic.addToList({ list: opts.list, wallet: opts.wallet });
@@ -130,7 +130,7 @@ async function removeExistingAllowlistEntryOnChain(opts: {
     opts.projectId,
     opts.signingWalletId ?? undefined
   );
-  const mosaic = createMosaicService(opts.c.env, signer);
+  const mosaic = createMosaicService(opts.c.env, signer, "sponsored");
   const removeOperation = mosaic.removeFromList({
     list: opts.list,
     wallet: opts.wallet,

@@ -8,7 +8,12 @@ import { Modal } from "@/components/ui/modal";
 const FRAME_ALLOW =
   "accelerometer; autoplay; camera; encrypted-media; fullscreen; geolocation; gyroscope; payment";
 
-export function HostedRampFrame({ title, src }: { title: string; src: string }) {
+/**
+ * Embeds the MoonPay widget for on-ramp deposits and off-ramp payouts. The
+ * widget renders its whole KYC + payment flow inline, so it keeps a fullscreen
+ * escape hatch for the cramped steps.
+ */
+export function MoonpayRampFrame({ title, src }: { title: string; src: string }) {
   const [expanded, setExpanded] = useState(false);
 
   return (

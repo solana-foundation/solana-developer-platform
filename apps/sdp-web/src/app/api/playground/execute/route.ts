@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { sdpApiRequest } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 
 type PlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -72,21 +72,18 @@ export async function POST(request: Request) {
       headers.Authorization = `Bearer ${normalizedApiKey}`;
     }
 
-    const response = await sdpApiRequest(
-      path,
-      {
-        method,
-        headers,
-        body:
-          method !== "GET" &&
-          method !== "DELETE" &&
-          payload.body !== null &&
-          payload.body !== undefined
-            ? JSON.stringify(payload.body)
-            : undefined,
-      },
-      trace.childContext("route.playground.execute.api")
-    );
+    const client = await createSdpApiClient(trace.childContext("route.playground.execute.api"));
+    const response = await client.request(path, {
+      method,
+      headers,
+      body:
+        method !== "GET" &&
+        method !== "DELETE" &&
+        payload.body !== null &&
+        payload.body !== undefined
+          ? JSON.stringify(payload.body)
+          : undefined,
+    });
 
     const text = await response.text();
     const body = text

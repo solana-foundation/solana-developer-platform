@@ -3,7 +3,7 @@
 import type { ListProjectsResponse } from "@sdp/types";
 import { cookies } from "next/headers";
 import { PROJECT_COOKIE_NAME, PROJECT_COOKIE_OPTIONS } from "./project-cookie";
-import { sdpApiFetch } from "./sdp-api";
+import { createOrgSdpApiClient } from "./sdp-api";
 
 export async function selectProjectAction(projectId: string | null): Promise<void> {
   const store = await cookies();
@@ -29,7 +29,8 @@ export async function selectProjectAction(projectId: string | null): Promise<voi
 export async function reconcileProjectCookieAction(): Promise<boolean> {
   let projects: ListProjectsResponse["projects"] = [];
   try {
-    projects = (await sdpApiFetch<ListProjectsResponse>("/v1/projects")).projects;
+    const client = await createOrgSdpApiClient();
+    projects = (await client.fetch<ListProjectsResponse>("/v1/projects")).projects;
   } catch {
     return false;
   }

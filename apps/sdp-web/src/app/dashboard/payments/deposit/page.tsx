@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createOrgSdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../../onboarding-status";
 import { fetchCounterparties } from "../counterparty/counterparty-page.data";
 import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
@@ -17,10 +17,11 @@ export default async function PaymentsDepositPage() {
     redirect("/dashboard");
   }
 
+  const orgClient = await createOrgSdpApiClient();
   const apiClient = await createSdpApiClient();
   const [issuedTokenSymbolsResult, onboardingStatus, counterpartiesResult] = await Promise.all([
     fetchPaymentsIssuedTokenSymbols(apiClient.request),
-    apiClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status").catch(
+    orgClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status").catch(
       () =>
         ({
           linked: false,
@@ -34,7 +35,7 @@ export default async function PaymentsDepositPage() {
   );
   const providerAccess =
     onboardingStatus.organization &&
-    (await fetchProviderAvailability(apiClient.request, onboardingStatus.organization.id).catch(
+    (await fetchProviderAvailability(orgClient.request, onboardingStatus.organization.id).catch(
       () => null
     ));
 

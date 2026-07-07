@@ -122,6 +122,11 @@ export interface RampOnrampQuoteInput {
   customerId?: string;
   redirectUrl?: string;
   bvnkCompliance?: BvnkComplianceInput;
+  /** Buyer contact required by Coinbase headless create-order; sourced from the counterparty. */
+  email?: string;
+  phone?: string;
+  /** Browser origin host the Coinbase Apple Pay link renders on (required for iframe embedding). */
+  domain?: string;
 }
 
 export interface RampOfframpQuoteInput {

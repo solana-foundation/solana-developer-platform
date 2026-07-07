@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.36.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.35.1...v0.36.0) (2026-07-07)
+
+### Features
+
+* **issuance:** allow manual fee payer when deploying through Kora fails ([#601](https://github.com/solana-foundation/solana-developer-platform/pull/601)) ([6fbb352](https://github.com/solana-foundation/solana-developer-platform/commit/6fbb3529b3150afa5f98c6489f9d9b73986a32c7))
+
+### Maintenance
+
+* create release branch when ref update returns 422 ([#602](https://github.com/solana-foundation/solana-developer-platform/pull/602)) ([fffefed](https://github.com/solana-foundation/solana-developer-platform/commit/fffefede848272094889737e4df021f060b6634e))
+
+## [0.35.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.35.0...v0.35.1) (2026-07-07)
+
+### Maintenance
+
+* create signed release PR commits ([ef053df](https://github.com/solana-foundation/solana-developer-platform/commit/ef053df212faec0d3236597dc3467b7264c21f34))
+* release through auto-merged PR ([#597](https://github.com/solana-foundation/solana-developer-platform/pull/597)) ([0b20f73](https://github.com/solana-foundation/solana-developer-platform/commit/0b20f737c9e36f5b1395492ec8d8f7cb5ee936b5))
+* sign generated release commits ([#596](https://github.com/solana-foundation/solana-developer-platform/pull/596)) ([c3d43ff](https://github.com/solana-foundation/solana-developer-platform/commit/c3d43ff628aedcd876ab8e7fa2551d872fbe36fd))
+* release directly after production approval ([#586](https://github.com/solana-foundation/solana-developer-platform/pull/586)) ([15ac676](https://github.com/solana-foundation/solana-developer-platform/commit/15ac6765f7a36de9f400611ff4b119a4f56ee1f9))
+* harden npm and GitHub Actions supply chain ([#593](https://github.com/solana-foundation/solana-developer-platform/pull/593)) ([eb59d6b](https://github.com/solana-foundation/solana-developer-platform/commit/eb59d6b95989b7a3e5e9b14a7b6ee26fc519667d))
+
+## [0.35.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.34.0...v0.35.0) (2026-07-06)
+
+### Features
+
+* **ramps:** Coinbase Onramp (headless v2 Apple Pay) provider ([#590](https://github.com/solana-foundation/solana-developer-platform/pull/590)) ([ec7119c](https://github.com/solana-foundation/solana-developer-platform/commit/ec7119c322cea87dc63afd30fd54e3c85d700c78))
+* finalize recurring payment detail UI ([#582](https://github.com/solana-foundation/solana-developer-platform/pull/582)) ([d69b4de](https://github.com/solana-foundation/solana-developer-platform/commit/d69b4deb5a52a4999db190b9c2a2ef8328080d29))
+
+### Bug Fixes
+
+* **payments:** remove POST /transfers/prepare — prepared transfers polluted history as failed ([#589](https://github.com/solana-foundation/solana-developer-platform/pull/589)) ([7709468](https://github.com/solana-foundation/solana-developer-platform/commit/770946822c4cccdd3a3b4ceb12e21b7fb7e94aff))
+* **observability:** set PagerDuty payload.source so kora alerts deliver ([#576](https://github.com/solana-foundation/solana-developer-platform/pull/576)) ([eec6c84](https://github.com/solana-foundation/solana-developer-platform/commit/eec6c84aeaaec774dc0ae5b23b173fb4ca87ad07))
+
+### Documentation
+
+* drop stale infra/kora entry from repository map ([#583](https://github.com/solana-foundation/solana-developer-platform/pull/583)) ([85414fe](https://github.com/solana-foundation/solana-developer-platform/commit/85414fe17aeeebedff117f7c84ab3ecf7eb809b3))
+
+### Refactors
+
+* **sdp-web:** extract shared proxyToSdpApi helper for dashboard API routes ([#592](https://github.com/solana-foundation/solana-developer-platform/pull/592)) ([ebb689a](https://github.com/solana-foundation/solana-developer-platform/commit/ebb689a8d85f57eba62fa9f19166dce65f9f2ac4))
+
+### Maintenance
+
+* **kora:** remove grafana observability (consolidated into sdp-infra) ([#591](https://github.com/solana-foundation/solana-developer-platform/pull/591)) ([a9fba02](https://github.com/solana-foundation/solana-developer-platform/commit/a9fba02db9743135682693aa1e617451d01da06f))
+
+### Other Changes
+
+* first time login fix ([#594](https://github.com/solana-foundation/solana-developer-platform/pull/594)) ([fac503c](https://github.com/solana-foundation/solana-developer-platform/commit/fac503cd1ac477c9d2b0befb32fddc5f4cb5bffe))
+
 ## [0.34.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.33.0...v0.34.0) (2026-07-02)
 
 ### Features
