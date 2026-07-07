@@ -11,6 +11,8 @@ interface TokenSignerSelectProps {
   signerUnavailableReason: string | null;
   onSignerWalletIdChange: (value: string) => void;
   label?: string;
+  /** Overrides the default signing helper line when the selection is available. */
+  helperText?: string;
   showSelectionSummary?: boolean;
 }
 
@@ -20,15 +22,16 @@ export function TokenSignerSelect({
   signerUnavailableReason,
   onSignerWalletIdChange,
   label = "Signer",
+  helperText,
   showSelectionSummary = false,
 }: TokenSignerSelectProps) {
   const isUnavailable = Boolean(signerUnavailableReason) || signerWallets.length === 0;
   const isLocked = !isUnavailable && signerWallets.length === 1;
-  const message = signerUnavailableReason
-    ? signerUnavailableReason
-    : isLocked
-      ? "SDP will sign this action with the required authority wallet."
-      : "SDP will sign this transaction with the selected wallet.";
+  const defaultMessage = isLocked
+    ? "SDP will sign this action with the required authority wallet."
+    : "SDP will sign this transaction with the selected wallet.";
+  const availableMessage = helperText === undefined ? defaultMessage : helperText;
+  const message = signerUnavailableReason ? signerUnavailableReason : availableMessage;
   const selectedWallet =
     signerWallets.find((wallet) => wallet.walletId === signerWalletId) ?? signerWallets[0] ?? null;
 

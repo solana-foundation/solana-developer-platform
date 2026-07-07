@@ -1548,9 +1548,7 @@ export function TokenManagementWorkspace({
               Deploy token
             </p>
             <p className="mt-2 text-[14px] leading-[1.45] text-[rgba(28,28,29,0.72)]">
-              This will deploy the token onchain so operations can run. The selected wallet becomes
-              the token authority and, with Deploy with Wallet, pays the transaction fee and account
-              rent from its own SOL. Deploy with Kora sponsors those fees instead.
+              This will deploy the token onchain so operations can run.
             </p>
             <div className="mt-5 space-y-5">
               <TokenSignerSelect
@@ -1558,6 +1556,7 @@ export function TokenManagementWorkspace({
                 signerWalletId={deploySignerWalletId}
                 signerUnavailableReason={deploySignerSelection.unavailableReason}
                 onSignerWalletIdChange={setDeploySignerWalletId}
+                helperText="Pay the transaction and account fees from the signer wallet, or with Kora sponsorship."
               />
               <div className="flex items-center justify-between gap-2">
                 <button
