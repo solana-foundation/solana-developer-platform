@@ -1,0 +1,280 @@
+"use client";
+
+import { type LucideIcon, Plus, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectItem } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+import type { FieldDescriptor } from "./asset-details-config";
+import type { CustomFieldRow, DraftState } from "./issuance-draft-wizard.types";
+
+type UpdateDraft = (patch: Partial<DraftState>) => void;
+
+export function FormCard({
+  title,
+  description,
+  icon: Icon,
+  children,
+}: {
+  title: string;
+  description?: string;
+  icon?: LucideIcon;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
+      <div className="flex items-start gap-3">
+        {Icon ? (
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.05)] text-[#1c1c1d]">
+            <Icon className="h-4.5 w-4.5" />
+          </span>
+        ) : null}
+        <div>
+          <p className="text-base font-medium text-[#1c1c1d]">{title}</p>
+          {description ? (
+            <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">{description}</p>
+          ) : null}
+        </div>
+      </div>
+      <div className="mt-4">{children}</div>
+    </div>
+  );
+}
+
+export function TextField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+  help,
+  required,
+  error,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  type?: string;
+  help?: string;
+  required?: boolean;
+  error?: string;
+}) {
+  return (
+    <div className="grid gap-1.5">
+      <Label>
+        {label}
+        {required ? (
+          <>
+            {" "}
+            <span aria-hidden className="text-[#c71f37]">
+              *
+            </span>
+            <span className="sr-only"> (required)</span>
+          </>
+        ) : null}
+      </Label>
+      <Input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        placeholder={placeholder}
+        required={required}
+        error={error}
+        description={help}
+      />
+    </div>
+  );
+}
+
+export function ReadOnlyField({
+  label,
+  value,
+  lockReason,
+}: {
+  label: string;
+  value: string;
+  lockReason?: string;
+}) {
+  return (
+    <div className="grid gap-1.5">
+      <Label>{label}</Label>
+      <div className="flex h-10 items-center rounded-[14px] border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] px-4 text-sm text-[rgba(28,28,29,0.62)]">
+        {value || "—"}
+      </div>
+      {lockReason ? <p className="text-xs text-[rgba(28,28,29,0.5)]">{lockReason}</p> : null}
+    </div>
+  );
+}
+
+export function ToggleSwitch({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative h-6 w-11 shrink-0 rounded-full transition-colors",
+        checked ? "bg-[#1c1c1d]" : "bg-[rgba(28,28,29,0.2)]"
+      )}
+    >
+      <span
+        className={cn(
+          "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform",
+          checked ? "translate-x-[22px]" : "translate-x-0.5"
+        )}
+      />
+    </button>
+  );
+}
+
+export function DetailField({
+  field,
+  draft,
+  updateDraft,
+  required,
+  error,
+}: {
+  field: FieldDescriptor;
+  draft: DraftState;
+  updateDraft: UpdateDraft;
+  required?: boolean;
+  error?: string;
+}) {
+  const raw = draft[field.key];
+
+  if (field.control === "toggle") {
+    const checked = Boolean(raw);
+    return (
+      <div>
+        <Label>{field.label}</Label>
+        <div className="mt-1.5 flex items-center gap-2">
+          <ToggleSwitch
+            checked={checked}
+            onChange={(next) => updateDraft({ [field.key]: next } as Partial<DraftState>)}
+          />
+          <span className="text-sm text-[rgba(28,28,29,0.6)]">
+            {checked ? "Enabled" : "Disabled"}
+          </span>
+        </div>
+        {field.help ? <p className="mt-1 text-xs text-[rgba(28,28,29,0.5)]">{field.help}</p> : null}
+      </div>
+    );
+  }
+
+  if (field.control === "select") {
+    const value = typeof raw === "string" ? raw : "";
+    return (
+      <div>
+        <Label>
+          {field.label}
+          {required ? (
+            <>
+              {" "}
+              <span aria-hidden className="text-[#c71f37]">
+                *
+              </span>
+              <span className="sr-only"> (required)</span>
+            </>
+          ) : null}
+        </Label>
+        <div className="mt-1.5">
+          <Select
+            className={cn(error && "ring-2 ring-inset ring-[#c71f37]")}
+            value={value || null}
+            onValueChange={(next) =>
+              updateDraft({ [field.key]: next ?? "" } as Partial<DraftState>)
+            }
+            placeholder={`Select ${field.label.toLowerCase()}`}
+          >
+            {field.options?.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </Select>
+        </div>
+        {error ? (
+          <p className="mt-1 text-xs text-[#c71f37]" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  const value = typeof raw === "string" ? raw : "";
+  return (
+    <TextField
+      label={field.label}
+      required={required}
+      value={value}
+      onChange={(next) => updateDraft({ [field.key]: next } as Partial<DraftState>)}
+      placeholder={field.placeholder}
+      type={field.control === "number" ? "number" : "text"}
+      help={field.help}
+      error={error}
+    />
+  );
+}
+
+export function CustomFieldRows({
+  fields,
+  onChange,
+}: {
+  fields: CustomFieldRow[];
+  onChange: (fields: CustomFieldRow[]) => void;
+}) {
+  const update = (id: string, patch: Partial<CustomFieldRow>) =>
+    onChange(fields.map((field) => (field.id === id ? { ...field, ...patch } : field)));
+  const remove = (id: string) => onChange(fields.filter((field) => field.id !== id));
+
+  return (
+    <div className="space-y-3">
+      {fields.map((field) => (
+        <div
+          key={field.id}
+          className="grid grid-cols-1 gap-2 rounded-xl border border-[rgba(28,28,29,0.1)] bg-white p-3 sm:grid-cols-[1fr_1.4fr_auto]"
+        >
+          <Input
+            placeholder="Key"
+            value={field.key}
+            onChange={(event) => update(field.id, { key: event.currentTarget.value })}
+          />
+          <Input
+            placeholder="Value"
+            value={field.value}
+            onChange={(event) => update(field.id, { value: event.currentTarget.value })}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => remove(field.id)}
+            aria-label="Remove field"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        onClick={() => onChange([...fields, { id: crypto.randomUUID(), key: "", value: "" }])}
+        iconLeft={<Plus className="h-4 w-4" />}
+      >
+        Add field
+      </Button>
+    </div>
+  );
+}

@@ -66,7 +66,7 @@ export const ASSET_TAXONOMY: readonly CategoryPresentation[] = [
   },
   {
     category: "tokenized_security",
-    label: "Tokenized Securities",
+    label: "Tokenized Security",
     description: "Regulated financial instruments or digital representations of securities.",
     icon: ScrollText,
     subTypes: [
@@ -92,7 +92,7 @@ export const ASSET_TAXONOMY: readonly CategoryPresentation[] = [
   },
   {
     category: "generic",
-    label: "Non-Security Digital Assets",
+    label: "Non-Security Digital Asset",
     description: "Other tokenized assets that don't fit the above categories.",
     icon: Boxes,
     subTypes: [

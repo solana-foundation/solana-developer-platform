@@ -127,7 +127,36 @@ export function buildIssuanceMetadata(draft: DraftState): IssuanceMetadata {
   );
   const custom = pruneEmpty({ customer: Object.keys(customer).length > 0 ? customer : undefined });
 
-  return pruneEmpty({ asset, compliance, chain, custom }) as IssuanceMetadata;
+  const base = pruneEmpty({ asset, compliance, chain, custom });
+  // Only persist an explicit `visibility` selection when it differs from the
+  // type's registry default. When it matches, we leave `visibility` off and let
+  // the server fall back to the default projection — keeping metadata minimal
+  // and load-then-save idempotent. Attached outside pruneEmpty so a non-default
+  // (including empty) selection always survives; the server clamps it to
+  // public-safe paths before projecting.
+  const defaults =
+    draft.assetCategory && draft.assetType
+      ? getDefaultPublicFields(draft.assetCategory, draft.assetType)
+      : [];
+  if (samePathSet(draft.publicFields, defaults)) {
+    return base as IssuanceMetadata;
+  }
+  return { ...base, visibility: { public: draft.publicFields } } as IssuanceMetadata;
+}
+
+// Order-independent equality of two dot-path selections.
+function samePathSet(a: string[], b: string[]): boolean {
+  const left = new Set(a);
+  const right = new Set(b);
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const path of left) {
+    if (!right.has(path)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function getByPath(source: unknown, path: string): unknown {
@@ -139,21 +168,39 @@ export function getByPath(source: unknown, path: string): unknown {
   }, source);
 }
 
-export interface ProjectionField {
-  path: string;
-  label: string;
-  value: unknown;
-  present: boolean;
-}
-
 const PATH_LABELS: Record<string, string> = {
   "asset.name": "Name",
   "asset.description": "Description",
   "asset.issuerName": "Issuer name",
   "asset.pegCurrency": "Peg currency",
+  "asset.pegTarget": "Peg target",
+  "asset.backingType": "Backing type",
+  "asset.reserveAsset": "Reserve asset",
+  "asset.reserveCustodian": "Reserve custodian",
   "asset.website": "Website",
+  "asset.jurisdiction": "Jurisdiction",
+  "asset.offeringType": "Offering type",
+  "asset.underlyingAsset": "Underlying asset",
+  "asset.custodian": "Custodian",
   "chain.decimals": "Decimals",
 };
+
+// The asset.* metadata fields the issuer may expose or keep private on the
+// Public information step. Token identity (name/symbol/decimals/description/logo)
+// and classification are inherently public and are NOT part of this pool.
+export const PUBLIC_FIELD_POOL: readonly { path: string; label: string }[] = [
+  { path: "asset.issuerName", label: PATH_LABELS["asset.issuerName"] },
+  { path: "asset.pegCurrency", label: PATH_LABELS["asset.pegCurrency"] },
+  { path: "asset.pegTarget", label: PATH_LABELS["asset.pegTarget"] },
+  { path: "asset.backingType", label: PATH_LABELS["asset.backingType"] },
+  { path: "asset.reserveAsset", label: PATH_LABELS["asset.reserveAsset"] },
+  { path: "asset.reserveCustodian", label: PATH_LABELS["asset.reserveCustodian"] },
+  { path: "asset.website", label: PATH_LABELS["asset.website"] },
+  { path: "asset.jurisdiction", label: PATH_LABELS["asset.jurisdiction"] },
+  { path: "asset.offeringType", label: PATH_LABELS["asset.offeringType"] },
+  { path: "asset.underlyingAsset", label: PATH_LABELS["asset.underlyingAsset"] },
+  { path: "asset.custodian", label: PATH_LABELS["asset.custodian"] },
+];
 
 export function pathLabel(path: string): string {
   if (PATH_LABELS[path]) {
@@ -163,21 +210,45 @@ export function pathLabel(path: string): string {
   return last.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
 }
 
-// Registry-driven public projection for the selected (category, type), resolved
-// against the assembled metadata (Step 3 preview).
-export function getPublicProjection(draft: DraftState): ProjectionField[] {
-  if (!draft.assetCategory || !draft.assetType) {
-    return [];
-  }
-  const entry = getAssetTypeRegistryEntry(draft.assetCategory, draft.assetType);
-  if (!entry) {
-    return [];
-  }
+// The per-type default public selection (the preselect). The registry's
+// publicProjection doubles as the default set of published dot-paths.
+export function getDefaultPublicFields(category: AssetCategory, type: string): string[] {
+  const entry = getAssetTypeRegistryEntry(category, type);
+  return entry ? [...entry.publicProjection] : [];
+}
+
+export interface PublicFieldCandidate {
+  path: string;
+  label: string;
+  value: string;
+  enabled: boolean;
+}
+
+// The toggleable public fields that currently have a value, each with its
+// public on/off state. Drives the interactive public-info UI: identity and
+// classification are inherently public and never appear here.
+export function getPublicFieldCandidates(draft: DraftState): PublicFieldCandidate[] {
   const metadata = buildIssuanceMetadata(draft);
-  return entry.publicProjection.map((path) => {
-    const value = getByPath(metadata, path);
-    return { path, label: pathLabel(path), value, present: value !== undefined };
+  const enabled = new Set(draft.publicFields);
+  return PUBLIC_FIELD_POOL.flatMap(({ path, label }) => {
+    const raw = getByPath(metadata, path);
+    const value = typeof raw === "string" ? raw.trim() : raw == null ? "" : String(raw);
+    if (!value) {
+      return [];
+    }
+    return [{ path, label, value, enabled: enabled.has(path) }];
   });
+}
+
+// Add or remove a dot-path from the published set (dedup-safe).
+export function togglePublicField(current: string[], path: string, enabled: boolean): string[] {
+  const next = new Set(current);
+  if (enabled) {
+    next.add(path);
+  } else {
+    next.delete(path);
+  }
+  return [...next];
 }
 
 export function isValidUrl(value: string): boolean {

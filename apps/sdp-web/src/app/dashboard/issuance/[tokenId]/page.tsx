@@ -1,9 +1,11 @@
 import { auth } from "@clerk/nextjs/server";
-import type { Token } from "@sdp/types";
+import type { AssetProfile, Token } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
+import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { AssetManagementWorkspace } from "./asset-profile/asset-management-workspace";
 import { TokenManagementWorkspace } from "./token-management-workspace";
 
 interface TokenManagementPageProps {
@@ -87,6 +89,15 @@ function mapToken(payload: unknown): Token | null {
   return token ?? null;
 }
 
+function mapAssetProfile(payload: unknown): AssetProfile | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const assetProfile = (payload as { assetProfile?: AssetProfile }).assetProfile;
+  return assetProfile ?? null;
+}
+
 export default async function IssuanceTokenManagementPage({ params }: TokenManagementPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
@@ -117,10 +128,48 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
       notFound();
     }
 
+    // Tokens with an active asset profile get the new management workspace
+    // (behind the asset-profiles UI flag). Any profile-fetch failure — 404 (no
+    // profile), 403 (backend flag off), 5xx — degrades to the legacy workspace.
+    let assetProfile: AssetProfile | null = null;
+    if (isAssetProfilesUiEnabled()) {
+      const profileResult = await trace.step("fetch_asset_profile", () =>
+        fetchData<AssetProfile | null>(
+          apiClient.request,
+          `/v1/issuance/asset-profiles/by-token/${tokenId}`,
+          mapAssetProfile
+        )
+      );
+      assetProfile = profileResult.data;
+      if (profileResult.error && profileResult.status !== 404) {
+        trace.log({
+          ok: true,
+          tokenId,
+          profileStatus: profileResult.status,
+          profileError: profileResult.error,
+        });
+      }
+    }
+
     trace.log({
       ok: true,
       tokenId,
+      hasAssetProfile: assetProfile !== null,
     });
+
+    if (assetProfile) {
+      return (
+        <AssetManagementWorkspace
+          token={tokenResult.data}
+          assetProfile={assetProfile}
+          tokenError={
+            tokenResult.error
+              ? `Token API ${tokenResult.status ?? "unavailable"}: ${tokenResult.error}`
+              : null
+          }
+        />
+      );
+    }
 
     return (
       <TokenManagementWorkspace

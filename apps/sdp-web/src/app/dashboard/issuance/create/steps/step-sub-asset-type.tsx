@@ -4,6 +4,7 @@ import { ChevronRight, ExternalLink, Info } from "lucide-react";
 import { motion } from "motion/react";
 import { getDefaultAccessControl, getRecommendedCapacities } from "../asset-details-config";
 import { getCategoryPresentation } from "../asset-taxonomy";
+import { getDefaultPublicFields } from "../draft-mapping";
 import { SelectionCard } from "../selection-card";
 import { useIssuanceDraft } from "../use-issuance-draft";
 
@@ -94,12 +95,14 @@ export function StepSubAssetType() {
                 if (draft.assetType === subType.type) {
                   return;
                 }
-                // Picking a (new) type pre-selects its recommended capacities
-                // and default access control (the "Recommended" defaults).
+                // Picking a (new) type pre-selects its recommended capacities,
+                // default access control, and default public fields (the
+                // "Recommended" defaults the user can still change).
                 updateDraft({
                   assetType: subType.type,
                   capacities: getRecommendedCapacities(category.category, subType.type),
                   accessControl: getDefaultAccessControl(category.category),
+                  publicFields: getDefaultPublicFields(category.category, subType.type),
                 });
               }}
             />

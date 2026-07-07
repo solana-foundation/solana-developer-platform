@@ -100,6 +100,10 @@ export interface DraftState {
   metadataUri: string;
   // Step 2 — custom fields (custom.customer.*)
   customFields: CustomFieldRow[];
+  // Step 3 — public metadata visibility: the issuance_metadata dot-paths the
+  // issuer publishes (e.g. "asset.issuerName"). Persisted as
+  // issuance_metadata.visibility.public; preselected per asset type.
+  publicFields: string[];
 }
 
 export function createInitialCapacities(): Record<CapacityKey, boolean> {
@@ -141,6 +145,7 @@ export function createInitialDraft(): DraftState {
     signingWalletId: "",
     metadataUri: "",
     customFields: [],
+    publicFields: [],
   };
 }
 
