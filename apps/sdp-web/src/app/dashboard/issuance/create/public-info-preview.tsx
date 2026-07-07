@@ -97,9 +97,9 @@ export function PublicInfoPreview({
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-base font-medium text-[#1c1c1d]">Public token information</h3>
+        <h3 className="text-xl font-medium text-[#1c1c1d]">Public token information</h3>
         <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
-          This information is safe to share and will be served from your asset&apos;s public page.
+          This is how your asset will appear to wallets, explorers, and the public.
         </p>
       </div>
 
