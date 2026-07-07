@@ -195,6 +195,15 @@ export async function createSdpApiClient(traceContext?: TraceContext): Promise<S
 }
 
 /**
+ * Convenience helper for server actions that need to make a raw request to SDP
+ * API with the current project and Clerk auth context.
+ */
+export async function sdpApiRequest(path: string, options: RequestInit = {}): Promise<Response> {
+  const apiClient = await createSdpApiClient();
+  return apiClient.request(path, options);
+}
+
+/**
  * Creates an org-scoped SDP API client (no project header) for the endpoints
  * that exist outside any project: projects, members, allowlist, organizations.
  */
@@ -212,7 +221,10 @@ function proxyFailure(
     { error: { message } },
     {
       status,
-      headers: { "X-SDP-Trace-ID": trace.traceId, "Server-Timing": trace.serverTiming() },
+      headers: {
+        "X-SDP-Trace-ID": trace.traceId,
+        "Server-Timing": trace.serverTiming(),
+      },
     }
   );
 }

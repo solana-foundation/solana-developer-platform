@@ -1,6 +1,28 @@
 "use client";
 
-import { Check, ChevronDown, ExternalLink, Lock } from "lucide-react";
+import {
+  Activity,
+  Banknote,
+  Check,
+  ChevronDown,
+  CircleCheck,
+  Clock,
+  Coins,
+  DollarSign,
+  ExternalLink,
+  FileText,
+  Globe,
+  Hash,
+  Image,
+  KeyRound,
+  Layers,
+  Lock,
+  MapPin,
+  ShieldCheck,
+  Tag,
+  Target,
+  User,
+} from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { getAssetTypeLabel, getCategoryLabel } from "./asset-taxonomy";
@@ -43,6 +65,45 @@ export function PublicInfoPreview({
   const categoryLabel = getCategoryLabel(draft.assetCategory);
   const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType);
 
+  // Helper: map a fact path or label to a small icon element
+  const getIconFor = (labelOrPath?: string) => {
+    const cls = "h-3.5 w-3.5 text-[rgba(28,28,29,0.45)] shrink-0";
+    if (!labelOrPath) return <CircleCheck className={cls} />;
+    const key = labelOrPath.toLowerCase();
+
+    // Map common labels to distinct, sensible icons.
+    if (key === "name") return <Tag className={cls} />;
+    if (key === "symbol") return <Hash className={cls} />;
+    if (key === "decimals") return <Clock className={cls} />;
+    if (key === "category") return <Layers className={cls} />;
+    if (key === "asset type" || key === "type") return <FileText className={cls} />;
+    if (key === "logo" || key === "image" || key === "icon") return <Image className={cls} />;
+    if (key === "description") return <Activity className={cls} />;
+    if (key.includes("website") || key.includes("url")) return <Globe className={cls} />;
+    if (key.includes("mint") || key.includes("address")) return <KeyRound className={cls} />;
+    if (key.includes("supply") || key.includes("total")) return <Coins className={cls} />;
+    if (key.includes("issuer") || key.includes("owner") || key.includes("authority"))
+      return <User className={cls} />;
+    if (key.includes("jurisdiction") || key.includes("country") || key.includes("location"))
+      return <MapPin className={cls} />;
+    if (key.includes("backing") || key.includes("reserve") || key.includes("collateral"))
+      return <ShieldCheck className={cls} />;
+
+    // Prefer a distinct target icon for peg-target fields so they don't
+    // reuse the generic currency icon.
+    if (key.includes("peg")) {
+      if (key.includes("target") || key.includes("to") || key.includes("against"))
+        return <Target className={cls} />;
+      if (key.includes("currency") || key.includes("fiat")) return <DollarSign className={cls} />;
+      return <Target className={cls} />;
+    }
+
+    if (key.includes("currency") || key.includes("fiat")) return <DollarSign className={cls} />;
+    if (key.includes("reserve") || key.includes("asset")) return <Banknote className={cls} />;
+
+    return <CircleCheck className={cls} />;
+  };
+
   // Core identity + classification: inherent to the token / served from the
   // token record, so always public and not toggleable.
   const alwaysPublic: StaticField[] = [
@@ -78,17 +139,29 @@ export function PublicInfoPreview({
 
   // Preview facts: fixed identity facts plus every currently-public optional
   // field, so hiding a field also removes it from the preview.
-  const facts: { label: string; value: string; href?: string }[] = [
-    draft.symbol.trim() ? { label: "Symbol", value: draft.symbol.trim() } : null,
-    { label: "Decimals", value: draft.decimals.trim() || "—" },
-    categoryLabel ? { label: "Category", value: categoryLabel } : null,
-    typeLabel ? { label: "Asset type", value: typeLabel } : null,
+  const facts: {
+    label: string;
+    value: string;
+    href?: string;
+    path?: string;
+  }[] = [
+    draft.symbol.trim() ? { label: "Symbol", value: draft.symbol.trim(), path: "symbol" } : null,
+    {
+      label: "Decimals",
+      value: draft.decimals.trim() || "—",
+      path: "decimals",
+    },
+    categoryLabel ? { label: "Category", value: categoryLabel, path: "category" } : null,
+    typeLabel ? { label: "Asset type", value: typeLabel, path: "type" } : null,
     ...enabledCandidates.map((candidate) => ({
       label: candidate.label,
       value: candidate.value,
       href: candidate.path === "asset.website" ? candidate.value : undefined,
+      path: candidate.path,
     })),
-  ].filter((fact): fact is { label: string; value: string; href?: string } => Boolean(fact));
+  ].filter((fact): fact is { label: string; value: string; href?: string; path?: string } =>
+    Boolean(fact)
+  );
 
   const toggle = onToggleField
     ? (path: string, next: boolean) => onToggleField(path, next)
@@ -111,14 +184,26 @@ export function PublicInfoPreview({
             <div className="flex items-start gap-4">
               {draft.imageUrl.trim() ? (
                 // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
-                <img
-                  src={draft.imageUrl}
-                  alt={`${draft.name || "Asset"} logo`}
-                  className="h-14 w-14 shrink-0 rounded-full border border-[rgba(28,28,29,0.1)] object-cover"
-                />
+                <div className="relative h-14 w-14 shrink-0">
+                  <span
+                    className="absolute -inset-0.5 rounded-full bg-[rgba(28,28,29,0.02)]"
+                    aria-hidden
+                  />
+                  <img
+                    src={draft.imageUrl}
+                    alt={`${draft.name || "Asset"} logo`}
+                    className="relative h-14 w-14 rounded-full border border-[rgba(28,28,29,0.1)] object-cover"
+                  />
+                </div>
               ) : (
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.05)] text-xl font-semibold text-[#1c1c1d]">
-                  {draft.symbol.slice(0, 1).toUpperCase() || "?"}
+                <div className="relative">
+                  <span
+                    className="absolute -inset-0.5 rounded-full bg-[rgba(28,28,29,0.02)]"
+                    aria-hidden
+                  />
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.05)] text-xl font-semibold text-[#1c1c1d]">
+                    {draft.symbol.slice(0, 1).toUpperCase() || "?"}
+                  </div>
                 </div>
               )}
               <div className="min-w-0">
@@ -129,6 +214,28 @@ export function PublicInfoPreview({
                   {draft.symbol.trim() ? (
                     <span className="rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.7)]">
                       {draft.symbol.trim()}
+                    </span>
+                  ) : null}
+
+                  {/* Decorative header badge (subtle, non-assertive preview badge) */}
+                  <span className="ml-1 flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.6)]">
+                    <CircleCheck className="h-3 w-3 text-[rgba(28,28,29,0.5)]" />
+                    Preview
+                  </span>
+                </div>
+
+                {/* Classification badges */}
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {categoryLabel ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-2 py-0.5 text-xs text-[rgba(28,28,29,0.7)]">
+                      {getIconFor("category")}
+                      <span className="truncate">{categoryLabel}</span>
+                    </span>
+                  ) : null}
+                  {typeLabel ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-2 py-0.5 text-xs text-[rgba(28,28,29,0.7)]">
+                      {getIconFor("type")}
+                      <span className="truncate">{typeLabel}</span>
                     </span>
                   ) : null}
                 </div>
@@ -149,7 +256,10 @@ export function PublicInfoPreview({
             <dl className="mt-4 space-y-2.5 border-t border-[rgba(28,28,29,0.08)] pt-4">
               {facts.map((fact) => (
                 <div key={fact.label} className="flex items-center justify-between gap-4">
-                  <dt className="shrink-0 text-sm text-[rgba(28,28,29,0.55)]">{fact.label}</dt>
+                  <dt className="flex items-center gap-2 shrink-0 text-sm text-[rgba(28,28,29,0.55)]">
+                    {getIconFor(fact.path)}
+                    <span>{fact.label}</span>
+                  </dt>
                   <dd className="min-w-0 text-right text-sm font-medium text-[#1c1c1d]">
                     {fact.href ? (
                       <a

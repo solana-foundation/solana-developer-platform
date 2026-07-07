@@ -165,7 +165,7 @@ export function OverviewTab({
               ) : (
                 <CircleCheck className="h-4.5 w-4.5 shrink-0 text-[#0c804c]" />
               )}
-              <p className="text-[15px] font-semibold text-[#1c1c1d]">Deploy readiness</p>
+              <p className="text-[15px] font-semibold text-[#1c1c1d]">Ready for deploy</p>
             </div>
             {deployBlockers.length > 0 ? (
               <ul className="mt-2 space-y-1">
