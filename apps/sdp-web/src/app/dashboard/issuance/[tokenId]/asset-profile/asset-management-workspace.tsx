@@ -123,12 +123,7 @@ export function AssetManagementWorkspace({
     if (activeTab !== "operations" && ops.fundManagementModalAction) {
       ops.closeFundManagementModal();
     }
-  }, [
-    activeTab,
-    ops.fundManagementModalAction,
-    ops.closeFundManagementModal,
-    ops,
-  ]);
+  }, [activeTab, ops.fundManagementModalAction, ops.closeFundManagementModal]);
 
   const effectivePauseDisabledReason = ops.effectivePauseDisabledReason;
 
