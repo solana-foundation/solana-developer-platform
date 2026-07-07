@@ -4,6 +4,10 @@ const PROCESS_ENV_FALLBACK_KEYS = [
   "ENVIRONMENT",
   "API_VERSION",
   "SDP_DEPLOYMENT_MODE",
+  "CREDENTIAL_SECRET_STORE_BACKEND",
+  "GCP_SECRET_MANAGER_PROJECT_ID",
+  "GCP_SECRET_MANAGER_SECRET_PREFIX",
+  "GCP_SECRET_MANAGER_API_BASE_URL",
   // Selects the KV / DB runtime branch. Without this, code outside the
   // server.ts hardcode (scripts, tests) sees SDP_RUNTIME undefined and
   // defaults to Cloudflare mode even when the process is plainly Node.
