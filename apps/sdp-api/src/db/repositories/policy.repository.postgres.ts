@@ -23,6 +23,7 @@ import type {
   CreateWalletControlProfileInput,
   CreateWalletControlProfileRevisionInput,
   CreateWalletOperationInput,
+  ListWalletPolicyEvaluationAuditsInput,
   PolicyEvaluationRow,
   PolicyRepository,
   UpdateApprovalRequestStatusInput,
@@ -30,6 +31,7 @@ import type {
   WalletControlProfileRevisionRow,
   WalletControlProfileRow,
   WalletOperationRow,
+  WalletPolicyEvaluationAuditRow,
 } from "./policy.repository";
 import {
   generateApiKeyControlProfileId,
@@ -198,6 +200,29 @@ function mapPolicyEvaluationRow(row: Record<string, unknown>): PolicyEvaluationR
     requires_approval: row.requires_approval as boolean,
     approval_request_id: (row.approval_request_id as string | null | undefined) ?? null,
     created_at: row.created_at as string,
+  };
+}
+
+function mapWalletPolicyEvaluationAuditRow(
+  row: Record<string, unknown>
+): WalletPolicyEvaluationAuditRow {
+  return {
+    wallet_operation_id: row.wallet_operation_id as string,
+    policy_evaluation_id: row.policy_evaluation_id as string,
+    operation_family: row.operation_family as WalletPolicyEvaluationAuditRow["operation_family"],
+    operation_type: row.operation_type as string,
+    asset: (row.asset as string | null | undefined) ?? null,
+    amount: (row.amount as string | null | undefined) ?? null,
+    destination: (row.destination as string | null | undefined) ?? null,
+    operation_status: row.operation_status as WalletPolicyEvaluationAuditRow["operation_status"],
+    decision: row.decision as WalletPolicyEvaluationAuditRow["decision"],
+    reason_code: row.reason_code as string,
+    reason: (row.reason as string | null | undefined) ?? null,
+    requires_approval: row.requires_approval as boolean,
+    approval_request_id: (row.approval_request_id as string | null | undefined) ?? null,
+    operation_created_at: row.operation_created_at as string,
+    operation_updated_at: row.operation_updated_at as string,
+    evaluated_at: row.evaluated_at as string,
   };
 }
 
@@ -1024,6 +1049,40 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
 
     async listPolicyEvaluationsForOperation(walletOperationId: string) {
       return listPolicyEvaluationsForOperationInternal(db, walletOperationId);
+    },
+
+    async listWalletPolicyEvaluationAudits(input: ListWalletPolicyEvaluationAuditsInput) {
+      const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
+      const rows = await db
+        .prepare(
+          `SELECT
+             wo.id AS wallet_operation_id,
+             pe.id AS policy_evaluation_id,
+             wo.operation_family,
+             wo.operation_type,
+             wo.asset,
+             wo.amount,
+             wo.destination,
+             wo.status AS operation_status,
+             pe.decision,
+             pe.reason_code,
+             pe.reason,
+             pe.requires_approval,
+             pe.approval_request_id,
+             wo.created_at AS operation_created_at,
+             wo.updated_at AS operation_updated_at,
+             pe.created_at AS evaluated_at
+           FROM policy_evaluations pe
+           INNER JOIN wallet_operations wo ON wo.id = pe.wallet_operation_id
+           WHERE wo.organization_id = ?
+             AND wo.custody_wallet_id = ?
+           ORDER BY pe.created_at DESC, wo.created_at DESC
+           LIMIT ?`
+        )
+        .bind(input.organizationId, input.custodyWalletId, limit)
+        .all<Record<string, unknown>>();
+
+      return rows.results.map(mapWalletPolicyEvaluationAuditRow);
     },
 
     async createApprovalRequest(input: CreateApprovalRequestInput) {

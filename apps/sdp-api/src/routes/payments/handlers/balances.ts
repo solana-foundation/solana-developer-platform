@@ -1,5 +1,6 @@
 import type {
   PaymentWalletControlProfileSummary,
+  PaymentWalletPolicyAuditEntry,
   PolicyDefaultAction,
   PolicyRule,
 } from "@sdp/types";
@@ -9,6 +10,7 @@ import { type DatabaseExecutor, getDb } from "@/db";
 import {
   type ActiveWalletControlProfileResult,
   createPostgresPaymentsRepository,
+  type WalletPolicyEvaluationAuditRow,
 } from "@/db/repositories";
 import {
   generateWalletControlProfileId,
@@ -60,6 +62,42 @@ async function getWalletControlProfileSummary(
     await getPolicyRepository(c).getActiveWalletControlProfileByCustodyWalletId(custodyWalletId);
 
   return active ? mapWalletControlProfileSummary(active) : null;
+}
+
+function mapPolicyAuditEntry(row: WalletPolicyEvaluationAuditRow): PaymentWalletPolicyAuditEntry {
+  return {
+    walletOperationId: row.wallet_operation_id,
+    policyEvaluationId: row.policy_evaluation_id,
+    operationFamily: row.operation_family,
+    operationType: row.operation_type,
+    asset: row.asset,
+    amount: row.amount,
+    destination: row.destination,
+    status: row.operation_status,
+    decision: row.decision,
+    reasonCode: row.reason_code,
+    reason: row.reason,
+    requiresApproval: row.requires_approval,
+    approvalRequestId: row.approval_request_id,
+    operationCreatedAt: row.operation_created_at,
+    operationUpdatedAt: row.operation_updated_at,
+    evaluatedAt: row.evaluated_at,
+  };
+}
+
+async function getWalletPolicyAudit(
+  c: AppContext,
+  input: { organizationId: string; custodyWalletId: string }
+) {
+  const rows = await getPolicyRepository(c).listWalletPolicyEvaluationAudits({
+    organizationId: input.organizationId,
+    custodyWalletId: input.custodyWalletId,
+    limit: 10,
+  });
+
+  return {
+    recentEvaluations: rows.map(mapPolicyAuditEntry),
+  };
 }
 
 async function activateWalletControlProfileRevisionInTransaction({
@@ -231,16 +269,21 @@ export async function getWalletBalances(c: AppContext) {
 }
 
 export async function getWalletPolicy(c: AppContext) {
-  const { wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
+  const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
   const repository = getPaymentsRepository(c);
 
   const rows = await repository.getWalletPoliciesByCustodyWalletId(wallet.id);
   const payload = buildWalletPolicyPayload(wallet.walletId, rows, wallet.createdAt);
   const controlProfile = await getWalletControlProfileSummary(c, wallet.id);
+  const audit = await getWalletPolicyAudit(c, {
+    organizationId: auth.organizationId,
+    custodyWalletId: wallet.id,
+  });
 
   return success(c, {
     policy: {
       ...payload,
+      audit,
       ...(controlProfile
         ? {
             defaultAction: controlProfile.defaultAction,
@@ -330,10 +373,15 @@ export async function updateWalletPolicy(c: AppContext) {
   }
 
   const payload = buildWalletPolicyPayload(wallet.walletId, rows, now);
+  const audit = await getWalletPolicyAudit(c, {
+    organizationId: auth.organizationId,
+    custodyWalletId: wallet.id,
+  });
 
   return success(c, {
     policy: {
       ...payload,
+      audit,
       ...(controlProfile
         ? {
             defaultAction: controlProfile.defaultAction,
