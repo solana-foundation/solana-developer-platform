@@ -426,6 +426,7 @@ export const deployToken = async (c: AppContext) => {
         ablListAddress: result.listAddress,
         aclMode,
         feePayment,
+        feeWalletId,
       },
     });
 
@@ -443,6 +444,7 @@ export const deployToken = async (c: AppContext) => {
         ablListAddress: result.listAddress,
         aclMode,
         feePayment,
+        feeWalletId,
       },
     });
 
