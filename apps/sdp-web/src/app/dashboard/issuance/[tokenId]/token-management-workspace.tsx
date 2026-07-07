@@ -1577,14 +1577,16 @@ export function TokenManagementWorkspace({
                     <WalletIcon className="size-4" />
                     Deploy with Wallet
                   </button>
-                  <button
-                    type="button"
-                    disabled
-                    className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-[#0f0f10] px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    <SparklesIcon className="size-4" />
-                    Deploy with Kora
-                  </button>
+                  <TokenDisabledActionTooltip reason="Kora sponsorship is unavailable right now.">
+                    <button
+                      type="button"
+                      disabled
+                      className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-[#0f0f10] px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <SparklesIcon className="size-4" />
+                      Deploy with Kora
+                    </button>
+                  </TokenDisabledActionTooltip>
                 </div>
               </div>
             </div>
