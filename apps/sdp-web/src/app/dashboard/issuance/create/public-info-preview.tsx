@@ -280,7 +280,7 @@ export function PublicInfoPreview({
             </span>
           </div>
 
-          <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white">
+          <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white">
             {/* Coverage meter sits inside the card so its top edge aligns with the preview card. */}
             <div className="border-b border-[rgba(28,28,29,0.08)] px-4 py-3">
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-[rgba(28,28,29,0.08)]">
@@ -293,7 +293,7 @@ export function PublicInfoPreview({
                 {publicCount} of {totalCount} fields public
               </p>
             </div>
-            <div className="divide-y divide-[rgba(28,28,29,0.06)] px-4">
+            <div className="divide-y divide-[rgba(28,28,29,0.06)]">
               {alwaysPublic.map((field) => (
                 <FieldRow key={field.key} label={field.label} value={field.value} checked locked />
               ))}
@@ -335,7 +335,7 @@ export function PublicInfoPreview({
                 />
               </button>
               {showOptional ? (
-                <div className="divide-y divide-[rgba(28,28,29,0.06)] border-t border-[rgba(28,28,29,0.08)] px-4">
+                <div className="divide-y divide-[rgba(28,28,29,0.06)] border-t border-[rgba(28,28,29,0.08)]">
                   {optionalInteractive.map((candidate) => (
                     <FieldRow
                       key={candidate.path}
@@ -663,6 +663,9 @@ function ExplorerPreview({
   );
 }
 
+// A single checklist row. When it has a toggle (and isn't locked) the *entire*
+// row is the click target — pointer cursor, full-width hover tint — not just the
+// round check. Locked identity rows and read-only renders stay static divs.
 function FieldRow({
   label,
   value,
@@ -678,9 +681,11 @@ function FieldRow({
   locked?: boolean;
   disabled?: boolean;
 }) {
-  return (
-    <div className="flex items-start gap-3 py-3">
-      <RoundCheck checked={checked} onToggle={onToggle} locked={locked} disabled={disabled} />
+  const hasToggle = Boolean(onToggle) && !locked;
+
+  const body = (
+    <>
+      <RoundCheck checked={checked} interactive={hasToggle && !disabled} disabled={disabled} />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-[#1c1c1d]">{label}</p>
         {value ? (
@@ -695,38 +700,11 @@ function FieldRow({
           <Lock className="h-3.5 w-3.5" />
         </span>
       ) : null}
-    </div>
-  );
-}
-
-function RoundCheck({
-  checked,
-  onToggle,
-  locked,
-  disabled,
-}: {
-  checked: boolean;
-  onToggle?: () => void;
-  locked?: boolean;
-  disabled?: boolean;
-}) {
-  const base = cn(
-    "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors",
-    checked
-      ? "border-[#0f0f10] bg-[#0f0f10] text-white"
-      : "border-[rgba(28,28,29,0.28)] bg-white text-transparent"
+    </>
   );
 
-  if (!onToggle || locked || disabled) {
-    return (
-      <span
-        className={cn(base, disabled && "opacity-60")}
-        aria-hidden="true"
-        aria-disabled={disabled}
-      >
-        <Check className="h-3 w-3" strokeWidth={3} />
-      </span>
-    );
+  if (!hasToggle) {
+    return <div className="flex items-start gap-3 px-4 py-3">{body}</div>;
   }
 
   return (
@@ -736,13 +714,46 @@ function RoundCheck({
       aria-disabled={disabled}
       aria-label={checked ? "Public — hide this field" : "Hidden — show this field publicly"}
       onClick={onToggle}
+      disabled={disabled}
       className={cn(
-        base,
-        "cursor-pointer hover:border-[#0f0f10]",
-        !checked && "hover:bg-[rgba(28,28,29,0.04)]"
+        "group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors",
+        disabled
+          ? "cursor-default"
+          : "cursor-pointer hover:bg-[rgba(28,28,29,0.03)] focus-visible:bg-[rgba(28,28,29,0.04)] focus-visible:outline-none"
+      )}
+    >
+      {body}
+    </button>
+  );
+}
+
+// Purely presentational round checkbox; the click is handled by the parent
+// FieldRow so the whole row is interactive. `interactive` adds the hover
+// affordance (mirrored off the row via group-hover).
+function RoundCheck({
+  checked,
+  interactive,
+  disabled,
+}: {
+  checked: boolean;
+  interactive?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors",
+        checked
+          ? "border-[#0f0f10] bg-[#0f0f10] text-white"
+          : "border-[rgba(28,28,29,0.28)] bg-white text-transparent",
+        interactive &&
+          !checked &&
+          "group-hover:border-[#0f0f10] group-hover:bg-[rgba(28,28,29,0.06)]",
+        disabled && "opacity-60"
       )}
     >
       <Check className="h-3 w-3" strokeWidth={3} />
-    </button>
+    </span>
   );
 }

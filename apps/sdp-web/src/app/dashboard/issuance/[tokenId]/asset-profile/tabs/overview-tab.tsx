@@ -35,11 +35,13 @@ export function OverviewTab({
   assetProfile,
   draft,
   ops,
+  onDeploy,
 }: {
   token: Token;
   assetProfile: AssetProfile;
   draft: DraftState;
   ops: TokenOperations;
+  onDeploy: () => void;
 }) {
   const category = getCategoryPresentation(assetProfile.assetCategory);
   const subType = getSubTypePresentation(assetProfile.assetCategory, assetProfile.assetType);
@@ -166,16 +168,12 @@ export function OverviewTab({
           </div>
         ) : null}
         {ops.canDeployToken ? (
-          <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-4">
-            <div className="flex items-center gap-2">
-              {deployBlockers.length > 0 ? (
+          deployBlockers.length > 0 ? (
+            <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-4">
+              <div className="flex items-center gap-2">
                 <TriangleAlert className="h-4.5 w-4.5 shrink-0 text-[#92400e]" />
-              ) : (
-                <CircleCheck className="h-4.5 w-4.5 shrink-0 text-[#0c804c]" />
-              )}
-              <p className="text-[15px] font-semibold text-[#1c1c1d]">Ready for deploy</p>
-            </div>
-            {deployBlockers.length > 0 ? (
+                <p className="text-[15px] font-semibold text-[#1c1c1d]">Ready for deploy</p>
+              </div>
               <ul className="mt-2 space-y-1">
                 {deployBlockers.map((blocker) => (
                   <li key={blocker} className="text-[13px] leading-relaxed text-[#92400e]">
@@ -183,12 +181,23 @@ export function OverviewTab({
                   </li>
                 ))}
               </ul>
-            ) : (
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onDeploy}
+              className="group flex cursor-pointer flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-4 text-left transition-colors hover:border-[rgba(28,28,29,0.2)] hover:bg-[rgba(28,28,29,0.02)]"
+            >
+              <div className="flex items-center gap-2">
+                <CircleCheck className="h-4.5 w-4.5 shrink-0 text-[#0c804c]" />
+                <p className="text-[15px] font-semibold text-[#1c1c1d]">Ready for deploy</p>
+                <ArrowUpRight className="ml-auto h-4 w-4 shrink-0 text-[rgba(28,28,29,0.4)] transition-colors group-hover:text-[#1c1c1d]" />
+              </div>
               <p className="mt-2 text-[13px] leading-relaxed text-[rgba(28,28,29,0.62)]">
-                This asset is ready to deploy from the Operations tab.
+                This asset is ready to deploy — continue in the Operations tab.
               </p>
-            )}
-          </div>
+            </button>
+          )
         ) : null}
       </div>
     </div>

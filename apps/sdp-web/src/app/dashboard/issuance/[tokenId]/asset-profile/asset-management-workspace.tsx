@@ -107,6 +107,16 @@ export function AssetManagementWorkspace({
     [pathname, router, searchParams]
   );
 
+  // Deploy from anywhere in the workspace: jump to Operations and open the
+  // deploy modal (shared by the header CTA and the overview readiness card).
+  const handleDeploy = useCallback(() => {
+    if (!ops.canDeployToken) {
+      return;
+    }
+    syncActiveTabInUrl("operations");
+    ops.openFundManagementModal("deploy");
+  }, [ops.canDeployToken, ops.openFundManagementModal, syncActiveTabInUrl]);
+
   // Normalize legacy/unknown tab params in the URL.
   useEffect(() => {
     if (!requestedTabParam) {
@@ -139,13 +149,7 @@ export function AssetManagementWorkspace({
         canManageTokenAdmin={canManageTokenAdmin}
         onCopyAddress={() => void ops.handleCopy(token.mintAddress)}
         onCopyTokenId={() => void ops.handleCopy(token.id, "Token ID copied")}
-        onDeploy={() => {
-          if (!ops.canDeployToken) {
-            return;
-          }
-          syncActiveTabInUrl("operations");
-          ops.openFundManagementModal("deploy");
-        }}
+        onDeploy={handleDeploy}
         onUnpause={() => ops.handlePause(false)}
       />
 
@@ -203,6 +207,7 @@ export function AssetManagementWorkspace({
             assetProfile={form.assetProfile}
             draft={form.draft}
             ops={ops}
+            onDeploy={handleDeploy}
           />
         ) : null}
         {activeTab === "details" ? <DetailsTab token={token} form={form} ops={ops} /> : null}

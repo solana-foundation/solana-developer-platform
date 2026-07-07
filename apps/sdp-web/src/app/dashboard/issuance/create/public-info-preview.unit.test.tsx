@@ -30,6 +30,15 @@ describe("PublicInfoPreview", () => {
     expect(markup).toContain("public");
   });
 
+  it("makes each toggleable field row a full-width button", () => {
+    const markup = renderToStaticMarkup(
+      <PublicInfoPreview draft={stablecoinDraft()} onToggleField={() => undefined} />
+    );
+
+    // The whole row is the click target, not just the round check.
+    expect(markup).toMatch(/<button[^>]*w-full items-start/);
+  });
+
   it("hides the mint address until the token is deployed", () => {
     const markup = renderToStaticMarkup(
       <PublicInfoPreview draft={stablecoinDraft()} onToggleField={() => undefined} />
