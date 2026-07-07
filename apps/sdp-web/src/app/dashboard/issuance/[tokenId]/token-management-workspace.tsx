@@ -13,7 +13,6 @@ import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialo
 import { TokenActionForms } from "./token-action-forms";
 import { TokenAuthorityModal } from "./token-authority-modal";
 import { TokenControlListsSection } from "./token-control-lists-section";
-import { TokenDeployConfirmationDialog } from "./token-deploy-confirmation-dialog";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import {
   type FundManagementModalAction,
@@ -227,8 +226,6 @@ export function TokenManagementWorkspace({
   const [fundManagementModalAction, setFundManagementModalAction] =
     useState<FundManagementModalAction | null>(null);
   const [deploySignerWalletId, setDeploySignerWalletId] = useState("");
-  const [deployFeeWalletId, setDeployFeeWalletId] = useState("");
-  const [isDeployConfirmationOpen, setIsDeployConfirmationOpen] = useState(false);
   const [metadataForm, setMetadataForm] = useState(() => createInitialMetadataForm(token));
   const [mintForm, setMintForm] = useState(createInitialMintForm);
   const [burnForm, setBurnForm] = useState(createInitialBurnForm);
@@ -718,13 +715,8 @@ export function TokenManagementWorkspace({
     });
   };
 
-  const handleDeploy = () => {
-    setDeployFeeWalletId(deploySignerWalletId);
-    setIsDeployConfirmationOpen(true);
-  };
-
-  const confirmDeploy = (feePayment: DeployFeePayment) => {
-    setIsDeployConfirmationOpen(false);
+  const deployToken = (feePayment: DeployFeePayment) => {
+    closeFundManagementModal();
     void runActionImmediately(
       {
         label: "Deploy token",
@@ -733,7 +725,6 @@ export function TokenManagementWorkspace({
         body: {
           signingWalletId: deploySignerWalletId || undefined,
           feePayment,
-          feeWalletId: feePayment === "wallet" ? deployFeeWalletId || undefined : undefined,
         },
       },
       {
@@ -1205,9 +1196,6 @@ export function TokenManagementWorkspace({
     closeFundManagementModal();
 
     switch (action) {
-      case "deploy":
-        handleDeploy();
-        return;
       case "mint":
         handleMint();
         return;
@@ -1580,11 +1568,19 @@ export function TokenManagementWorkspace({
                 </button>
                 <button
                   type="button"
-                  onClick={() => submitFundManagementAction("deploy")}
+                  onClick={() => deployToken("wallet")}
+                  disabled={isPending || Boolean(deploySignerSelection.unavailableReason)}
+                  className="inline-flex h-10 items-center rounded-[12px] border border-[rgba(28,28,29,0.16)] bg-white px-4 text-sm font-medium text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.04)] disabled:pointer-events-none disabled:opacity-50"
+                >
+                  Deploy with Wallet
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deployToken("sponsored")}
                   disabled={isPending || Boolean(deploySignerSelection.unavailableReason)}
                   className="inline-flex h-10 items-center rounded-[12px] bg-[#0f0f10] px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
                 >
-                  Deploy now
+                  Deploy with Kora
                 </button>
               </div>
             </div>
@@ -1650,17 +1646,6 @@ export function TokenManagementWorkspace({
         isPending={isPending}
         onCancel={dismissActionConfirmation}
         onConfirm={confirmAction}
-      />
-
-      <TokenDeployConfirmationDialog
-        isOpen={isDeployConfirmationOpen}
-        isPending={isPending}
-        feeWallets={deploySignerSelection.wallets}
-        feeWalletId={deployFeeWalletId}
-        feeWalletUnavailableReason={deploySignerSelection.unavailableReason}
-        onFeeWalletIdChange={setDeployFeeWalletId}
-        onCancel={() => setIsDeployConfirmationOpen(false)}
-        onConfirm={confirmDeploy}
       />
 
       {isPending ? (

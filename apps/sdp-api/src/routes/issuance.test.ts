@@ -4389,64 +4389,6 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("pays fees from the dedicated fee wallet when feeWalletId differs from the signer", async () => {
-        const token = await seedIssuedToken({
-          id: "tok_deploy_fee_wallet_dedicated",
-          mintAddress: null,
-          status: "pending",
-          uri: null,
-          requiresAllowlist: false,
-        });
-
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never)
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet3 } as never);
-        const getAccountInfoSpy = vi
-          .spyOn(SolanaRpc, "getAccountInfo")
-          .mockResolvedValueOnce({ lamports: 20_000_000n } as never);
-        const createTokenSpy = vi
-          .spyOn(MosaicService.prototype, "createToken")
-          .mockResolvedValueOnce(mockDeployResult as never);
-
-        try {
-          const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-              },
-              body: JSON.stringify({ feePayment: "wallet", feeWalletId: "wallet_fee_dedicated" }),
-            },
-            env
-          );
-
-          expect(res.status).toBe(200);
-          expect(createOrgSignerSpy).toHaveBeenCalledTimes(2);
-          expect(createOrgSignerSpy).toHaveBeenLastCalledWith(
-            expect.anything(),
-            expect.anything(),
-            expect.anything(),
-            "wallet_fee_dedicated"
-          );
-          expect(getAccountInfoSpy).toHaveBeenCalledWith(
-            expect.anything(),
-            TEST_SOLANA_ADDRESSES.wallet3
-          );
-          expect(createTokenSpy).toHaveBeenCalledWith(
-            expect.objectContaining({
-              feePayer: expect.objectContaining({ address: TEST_SOLANA_ADDRESSES.wallet3 }),
-            })
-          );
-        } finally {
-          createOrgSignerSpy.mockRestore();
-          getAccountInfoSpy.mockRestore();
-          createTokenSpy.mockRestore();
-        }
-      });
-
       it("routes sponsored deploys through the Kora fee-payment adapter", async () => {
         const token = await seedIssuedToken({
           id: "tok_deploy_sponsored_fee",

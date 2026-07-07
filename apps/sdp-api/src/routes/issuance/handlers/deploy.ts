@@ -5,10 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import {
-  assertApiKeyWalletAccess,
-  resolveApiKeySigningWalletId,
-} from "@/services/api-key-scope.service";
+import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import {
   createMosaicService,
@@ -79,20 +76,10 @@ async function persistRecoveredMint(params: {
   custodyAddress: Address;
   aclMode: ReturnType<typeof getMosaicAclMode>;
   feePayment: MosaicFeePayment;
-  feeWalletId: string | undefined;
   result: MintMetadataUpdateError["result"];
 }): Promise<void> {
-  const {
-    tokenService,
-    txId,
-    tokenId,
-    token,
-    custodyAddress,
-    aclMode,
-    feePayment,
-    feeWalletId,
-    result,
-  } = params;
+  const { tokenService, txId, tokenId, token, custodyAddress, aclMode, feePayment, result } =
+    params;
   const { mint, signature, slot, listAddress } = result;
   // The caller only invokes this once it has confirmed the mint landed on-chain;
   // bail defensively (and to narrow the type) if it somehow didn't.
@@ -130,7 +117,6 @@ async function persistRecoveredMint(params: {
         ablListAddress: listAddress,
         aclMode,
         feePayment,
-        feeWalletId,
         metadataUriFailed: true,
       },
     });
@@ -288,11 +274,7 @@ export const deployToken = async (c: AppContext) => {
     throw badRequest("Token already has a mint address");
   }
 
-  const { feePayment, feeWalletId } = parsed.data;
-
-  if (feeWalletId && feePayment !== "wallet") {
-    throw badRequest('feeWalletId is only valid with feePayment "wallet"');
-  }
+  const { feePayment } = parsed.data;
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
@@ -306,7 +288,6 @@ export const deployToken = async (c: AppContext) => {
       },
       status: token.status,
       feePayment,
-      feeWalletId,
     },
   });
 
@@ -321,7 +302,6 @@ export const deployToken = async (c: AppContext) => {
       name: token.name,
       symbol: token.symbol,
       feePayment,
-      feeWalletId,
     },
     initiatedByKeyId: auth.id,
     idempotencyKey: idempotencyMetadata.idempotencyKey,
@@ -356,18 +336,8 @@ export const deployToken = async (c: AppContext) => {
     );
     custodyAddress = signer.address;
 
-    let feePayerSigner = signer;
     if (feePayment === "wallet") {
-      if (feeWalletId && feeWalletId !== signingWalletId) {
-        assertApiKeyWalletAccess(auth, feeWalletId, ["tokens:write"]);
-        feePayerSigner = await createOrgSigner(
-          c.env,
-          auth.organizationId,
-          auth.projectId,
-          feeWalletId
-        );
-      }
-      await assertWalletCanPayDeployFees(c.env, feePayerSigner.address);
+      await assertWalletCanPayDeployFees(c.env, signer.address);
     }
 
     // Create Mosaic service for template-based token deployment
@@ -389,7 +359,7 @@ export const deployToken = async (c: AppContext) => {
       decimals: token.decimals,
       mintAuthority: signer,
       freezeAuthority: token.isFreezable ? custodyAddress : null,
-      feePayer: feePayerSigner,
+      feePayer: signer,
       extensions: token.extensions ?? undefined,
       enableAbl,
       aclMode,
@@ -426,7 +396,6 @@ export const deployToken = async (c: AppContext) => {
         ablListAddress: result.listAddress,
         aclMode,
         feePayment,
-        feeWalletId,
       },
     });
 
@@ -444,7 +413,6 @@ export const deployToken = async (c: AppContext) => {
         ablListAddress: result.listAddress,
         aclMode,
         feePayment,
-        feeWalletId,
       },
     });
 
@@ -465,7 +433,6 @@ export const deployToken = async (c: AppContext) => {
         custodyAddress,
         aclMode,
         feePayment,
-        feeWalletId,
         result: error.result,
       });
 
