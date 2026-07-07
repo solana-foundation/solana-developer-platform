@@ -384,6 +384,71 @@ function configureGitIdentity() {
   });
 }
 
+function releaseFileAddition(relativePath) {
+  return {
+    path: relativePath,
+    contents: fs.readFileSync(path.join(repoRoot, relativePath)).toString("base64"),
+  };
+}
+
+async function resetReleaseBranch(baseSha) {
+  const encodedBranch = releaseBranch.split("/").map(encodeURIComponent).join("/");
+  const refPath = `/repos/${repo}/git/refs/heads/${encodedBranch}`;
+
+  try {
+    await githubRequest("PATCH", refPath, { sha: baseSha, force: true });
+  } catch (error) {
+    if (error.status !== 404) {
+      throw error;
+    }
+
+    await githubRequest("POST", `/repos/${repo}/git/refs`, {
+      ref: `refs/heads/${releaseBranch}`,
+      sha: baseSha,
+    });
+  }
+}
+
+async function createReleaseBranchCommit(version) {
+  const expectedHeadOid = git(["rev-parse", "HEAD"]);
+  await resetReleaseBranch(expectedHeadOid);
+
+  const query = `
+    mutation CreateReleaseBranchCommit($input: CreateCommitOnBranchInput!) {
+      createCommitOnBranch(input: $input) {
+        commit {
+          oid
+          url
+        }
+      }
+    }
+  `;
+
+  const data = await githubGraphqlRequest(query, {
+    input: {
+      branch: {
+        repositoryNameWithOwner: repo,
+        branchName: releaseBranch,
+      },
+      expectedHeadOid,
+      message: {
+        headline: `chore(main): release ${version}`,
+      },
+      fileChanges: {
+        additions: [
+          releaseFileAddition("package.json"),
+          releaseFileAddition("CHANGELOG.md"),
+          releaseFileAddition(".github/.release-please-manifest.json"),
+        ],
+      },
+    },
+  });
+
+  const commit = data.createCommitOnBranch.commit;
+  console.log(`Created release branch commit ${commit.oid}`);
+  return commit.oid;
+}
+
 async function enableAutoMerge(pullRequestId, version) {
   const query = `
     mutation EnableReleaseAutoMerge($pullRequestId: ID!, $commitHeadline: String!) {
@@ -693,20 +758,7 @@ async function prepareRelease(attempt = 1) {
   }
 
   try {
-    configureGitIdentity();
-    git(["add", "package.json", "CHANGELOG.md", ".github/.release-please-manifest.json"], {
-      capture: false,
-    });
-    git(["commit", "-m", `chore(main): release ${nextVersion}`], { capture: false });
-    git(
-      [
-        "push",
-        `https://x-access-token:${token}@github.com/${repo}.git`,
-        `HEAD:${releaseBranch}`,
-        "--force",
-      ],
-      { capture: false }
-    );
+    await createReleaseBranchCommit(nextVersion);
     const prNumber = await upsertReleasePullRequest(
       nextVersion,
       releasePrBody(nextVersion, sectionMarkdown)
