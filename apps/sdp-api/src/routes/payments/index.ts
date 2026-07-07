@@ -43,7 +43,6 @@ import {
   prepareResumeSubscription,
   prepareSubscriptionAuthorization,
   prepareSubscriptionCollection,
-  prepareTransfer,
   recordRampProviderEvent,
   resumeRecurringPayment,
   simulateSandboxTransfer,
@@ -86,11 +85,6 @@ payments.put(
   "/wallets/:walletId/policies",
   requirePermissions("wallets:write", "payments:write"),
   updateWalletPolicy
-);
-payments.post(
-  "/transfers/prepare",
-  requirePermissions("payments:write", "wallets:read"),
-  prepareTransfer
 );
 payments.post(
   "/subscription-plans",

@@ -420,6 +420,8 @@ export async function advanceCounterpartyRequirements(
       );
       return bvnkOnboardingRequirements(resolution, input.direction);
     }
+    case "coinbase":
+      return readyCounterparty("coinbase", input.direction);
     default: {
       const _exhaustive: never = input;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
@@ -605,6 +607,19 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     }
     case "moneygram":
       throw badRequest("MoneyGram on-ramp is not available.");
+    case "coinbase": {
+      quote = await RAMP_PROVIDER_CLIENTS.coinbase.createOnrampQuote(rampRuntime(c), {
+        cryptoToken: input.cryptoToken,
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        destinationWalletAddress,
+        externalCustomerId: counterparty.id,
+        email: counterparty.email,
+        phone: counterparty.identity.phone,
+        domain: input.domain,
+      });
+      break;
+    }
     default: {
       const exhaustive: never = input.provider;
       throw new AppError(
@@ -782,6 +797,8 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       });
       break;
     }
+    case "coinbase":
+      throw badRequest("Coinbase Onramp does not support off-ramp.");
     default: {
       const exhaustive: never = input.provider;
       throw new AppError(

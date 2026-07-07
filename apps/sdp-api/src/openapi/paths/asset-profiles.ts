@@ -6,6 +6,7 @@ import {
   createTokenWithAssetProfileRequestSchema,
   errorResponseSchema,
   listAssetProfilesQuerySchema,
+  tokenIdParamSchema,
   updateAssetProfileRequestSchema,
 } from "../schemas";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
@@ -86,6 +87,29 @@ export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
+    path: "/v1/issuance/asset-profiles/by-token/{tokenId}",
+    tags: ["Asset Profiles"],
+    summary: "Get asset profile by token",
+    operationId: "getAssetProfileByToken",
+    description: "Gets the active asset profile for an issued token, if one exists.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+    },
+    responses: {
+      200: {
+        description: "Asset profile",
+        content: jsonContent(assetProfileResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
     path: "/v1/issuance/asset-profiles/{profileId}",
     tags: ["Asset Profiles"],
     summary: "Get asset profile",
@@ -114,7 +138,7 @@ export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
     summary: "Update asset profile",
     operationId: "updateAssetProfile",
     description:
-      "Updates an asset profile. At least one field must be provided. The resulting category/type pair must be supported. Public metadata is recomputed when metadata or the asset type changes.",
+      "Updates an asset profile. At least one field must be provided. The resulting category/type pair must be supported. Public metadata is recomputed when metadata or the asset type changes; set issuanceMetadata.visibility.public to control which fields are exposed (asset.* and chain.decimals only).",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

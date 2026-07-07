@@ -24,7 +24,6 @@ packages/sdp-api-integration
 infra
 scripts
 skills
-bun.lock
 
 # Local env files — host-only; container envs come from build-args / -e
 .env

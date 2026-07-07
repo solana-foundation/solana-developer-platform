@@ -147,6 +147,9 @@ export const updateTokenSchema = z.object({
   uri: z.string().url().nullable().optional(),
   imageUrl: z.string().url().nullable().optional(),
   status: z.enum(["active", "paused"]).optional(),
+  // Access-control enforcement input for deploy; only accepted while the token
+  // is still undeployed (the handler rejects it after deployment).
+  requiresAllowlist: z.boolean().optional(),
 });
 
 export const mintSchema = z.object({
@@ -247,6 +250,7 @@ export const updateAuthoritySchema = z.object({
 
 export const deployTokenSchema = z.object({
   signingWalletId: z.string().min(1).optional(),
+  feePayment: z.enum(["sponsored", "wallet"]).default("sponsored"),
 });
 
 // Records a confirmed non-custodial deploy: the client sends the `mint` it

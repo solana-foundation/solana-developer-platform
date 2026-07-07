@@ -834,6 +834,11 @@ export const updateTokenRequestSchema = updateTokenSchemaBase
       description: "Token operational status.",
       example: "active",
     }),
+    requiresAllowlist: withOpenApi(updateTokenSchemaBase.shape.requiresAllowlist, {
+      description:
+        "Whether transfers are restricted to allowlisted accounts. Only accepted while the token is undeployed (pending, no mint address); returns 400 after deployment.",
+      example: true,
+    }),
   })
   .openapi({ description: "Update token request body." });
 

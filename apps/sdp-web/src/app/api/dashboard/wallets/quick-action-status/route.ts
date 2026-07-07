@@ -5,7 +5,7 @@ import {
   type KnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createOrgSdpApiClient, createSdpApiClient, getSelectedProjectId } from "@/lib/sdp-api";
 
 interface OnboardingStatusResponse {
   linked: boolean;
@@ -34,17 +34,20 @@ function formatProviderHint(providerLabels: string[]): string {
   return `${head}, or ${tail}`;
 }
 
+/**
+ * Not a pure proxy: combines org-scoped onboarding status with project-scoped
+ * wallet configs into a derived payload, so it must repeat proxyToSdpApi's
+ * missing-project 400 itself — after the linked gate, because an unlinked org
+ * legitimately has no project yet and must get the linked:false payload.
+ */
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.wallets.quick_action_status", request);
 
   try {
-    const apiClient = await createSdpApiClient(
-      trace.childContext("route.dashboard.wallets.quick_action_status.api")
+    const orgClient = await createOrgSdpApiClient(
+      trace.childContext("route.dashboard.wallets.quick_action_status.org.api")
     );
-    const [onboarding, configsResponse] = await Promise.all([
-      apiClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status"),
-      apiClient.request("/v1/wallets/configs"),
-    ]);
+    const onboarding = await orgClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
 
     if (!onboarding.linked) {
       const response = NextResponse.json(
@@ -64,6 +67,24 @@ export async function GET(request: Request) {
       logRouteResult(trace, 200, { linked: false });
       return response;
     }
+
+    const projectId = await getSelectedProjectId();
+    if (!projectId) {
+      const response = NextResponse.json(
+        { error: { message: "Selected project required" } },
+        {
+          status: 400,
+          headers: { "X-SDP-Trace-ID": trace.traceId, "Server-Timing": trace.serverTiming() },
+        }
+      );
+      logRouteResult(trace, 400, { error: "Selected project required" });
+      return response;
+    }
+
+    const apiClient = await createSdpApiClient(
+      trace.childContext("route.dashboard.wallets.quick_action_status.api")
+    );
+    const configsResponse = await apiClient.request("/v1/wallets/configs");
 
     if (configsResponse.status === 404) {
       const response = NextResponse.json(

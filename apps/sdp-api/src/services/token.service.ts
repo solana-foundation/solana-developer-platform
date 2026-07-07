@@ -53,6 +53,8 @@ export interface UpdateTokenInput {
   imageUrl?: string | null;
   status?: "active" | "paused";
   signingWalletId?: string | null;
+  /** Only accepted while the token is undeployed (enforced by the route handler). */
+  requiresAllowlist?: boolean;
 }
 
 export interface CreateTokenTransactionInput {
@@ -561,7 +563,7 @@ export class TokenService {
 
     const now = new Date().toISOString();
     const updates: string[] = [];
-    const values: (string | null)[] = [];
+    const values: (string | number | null)[] = [];
 
     if (input.name !== undefined) {
       updates.push("name = ?");
@@ -591,6 +593,11 @@ export class TokenService {
     if (input.signingWalletId !== undefined) {
       updates.push("signing_wallet_id = ?");
       values.push(input.signingWalletId);
+    }
+
+    if (input.requiresAllowlist !== undefined) {
+      updates.push("allowlist_enabled = ?");
+      values.push(input.requiresAllowlist ? 1 : 0);
     }
 
     if (updates.length === 0) {

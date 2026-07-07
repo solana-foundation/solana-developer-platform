@@ -314,12 +314,10 @@ test.describe
       await expect(deployRow.getByRole("button", { name: "Deploy" })).toBeVisible();
       await deployRow.getByRole("button", { name: "Deploy" }).click();
       await expect(
-        page.getByText("This will deploy the token on-chain so operations can run.")
+        page.getByText("This will deploy the token onchain so operations can run.")
       ).toBeVisible();
-      await page.getByRole("button", { name: "Deploy now", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "Deploy token?" })).toBeVisible();
       const successCount = await page.getByText("Deploy transaction finalized.").count();
-      await confirmAction(page, "Deploy now");
+      await page.getByRole("button", { name: "Deploy with Wallet", exact: true }).click();
       await waitForToast(page, "Deploy transaction finalized.", successCount);
       await expect
         .poll(

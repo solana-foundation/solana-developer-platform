@@ -28,7 +28,9 @@ const FAKE_LIST_ADDRESS = "List1111111111111111111111111111111111111" as Address
 // Structurally-valid placeholder addresses for helper defaults, so callers that
 // don't override these still get a well-formed CreateTokenOptions.
 const PLACEHOLDER_MINT_AUTHORITY = "Mint1111111111111111111111111111111111111" as Address;
-const PLACEHOLDER_FEE_PAYER = "Fee11111111111111111111111111111111111111" as Address;
+const PLACEHOLDER_FEE_PAYER = Kit.createNoopSigner(
+  "Fee11111111111111111111111111111111111111" as Address
+);
 
 type CreateStablecoinReturn = Awaited<ReturnType<typeof MosaicSdk.createStablecoinInitTransaction>>;
 
@@ -143,7 +145,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       mintAuthority: signer.address,
       // any non-null freeze authority enables sRFC-37 (value is opaque to the stub)
       freezeAuthority: signer.address,
-      feePayer: signer.address,
+      feePayer: signer,
       enableTokenAcl: true,
     });
   }
@@ -172,7 +174,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
         stablecoinOptions({
           mintAuthority: signer.address,
           freezeAuthority: signer.address,
-          feePayer: signer.address,
+          feePayer: signer,
           enableTokenAcl: false,
           enableAbl: false,
         })
@@ -183,7 +185,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
     });
 
     it("falls back to options.feePayer when no fee sponsor is configured", async () => {
-      const ownFeePayer = (await Kit.generateKeyPairSigner()).address;
+      const ownFeePayer = await Kit.generateKeyPairSigner();
       const unsponsored = new MosaicService(
         env as ConstructorParameters<typeof MosaicService>[0],
         signer
@@ -215,7 +217,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       const result = await service.prepareCreateToken(srfc37Options());
 
       expect(fee.getFeePayer).not.toHaveBeenCalled();
-      expect(stablecoinBuilderCall(builderSpy.mock.calls[0]).feePayer).toBe(signer.address);
+      expect(stablecoinBuilderCall(builderSpy.mock.calls[0]).feePayer).toBe(signer);
       expect(result.serializedTx).toBe("base64-tx");
     });
   });
@@ -355,7 +357,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
         stablecoinOptions({
           mintAuthority,
           freezeAuthority: signer.address,
-          feePayer: signer.address,
+          feePayer: signer,
           enableTokenAcl: true,
         })
       );
@@ -375,7 +377,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
         stablecoinOptions({
           mintAuthority: signer.address,
           freezeAuthority: signer.address,
-          feePayer: signer.address,
+          feePayer: signer,
           enableTokenAcl: false,
           enableAbl: false,
         })
@@ -395,7 +397,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
         stablecoinOptions({
           mintAuthority: signer.address,
           freezeAuthority: null,
-          feePayer: signer.address,
+          feePayer: signer,
           enableTokenAcl: true,
         })
       );
