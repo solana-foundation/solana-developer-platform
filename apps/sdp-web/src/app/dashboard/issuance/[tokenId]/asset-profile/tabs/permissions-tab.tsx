@@ -65,9 +65,7 @@ function SectionHeading({
       </span>
       <div>
         <p className="text-base font-medium text-[#1c1c1d]">{title}</p>
-        <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
-          {description}
-        </p>
+        <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">{description}</p>
       </div>
     </div>
   );

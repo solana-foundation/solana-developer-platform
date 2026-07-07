@@ -14,11 +14,5 @@ export function PublicInfoTab({
   onToggleField: (path: string, enabled: boolean) => void;
   disabled?: boolean;
 }) {
-  return (
-    <PublicInfoPreview
-      draft={draft}
-      onToggleField={onToggleField}
-      disabled={disabled}
-    />
-  );
+  return <PublicInfoPreview draft={draft} onToggleField={onToggleField} disabled={disabled} />;
 }

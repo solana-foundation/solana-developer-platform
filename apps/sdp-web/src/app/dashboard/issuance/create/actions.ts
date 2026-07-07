@@ -1,17 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { parseErrorMessage } from "@/lib/api-error";
 import { sdpApiRequest } from "@/lib/sdp-api";
 import type { CreateAssetDraftInput, CreateAssetDraftResult } from "./draft-mapping";
-
-function parseErrorMessage(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as { error?: { message?: string }; message?: string };
-    return parsed?.error?.message ?? parsed?.message ?? body ?? "Unknown error";
-  } catch {
-    return body || "Unknown error";
-  }
-}
 
 /**
  * Create an issued-token draft together with its Asset Profile in a single call.
@@ -67,7 +59,9 @@ export async function createAssetDraftAction(
       return { state: "error", message, tokenId: null };
     }
 
-    const json = (await response.json()) as { data?: { token?: { id?: string } } };
+    const json = (await response.json()) as {
+      data?: { token?: { id?: string } };
+    };
     const tokenId = json?.data?.token?.id ?? null;
 
     revalidatePath("/dashboard/issuance");

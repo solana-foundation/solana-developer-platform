@@ -15,17 +15,10 @@ function newRow(): DocumentRow {
   return { id: crypto.randomUUID(), docType: "", name: "", url: "" };
 }
 
-export function DocumentRows({
-  documents,
-  onChange,
-  disabled,
-}: DocumentRowsProps) {
+export function DocumentRows({ documents, onChange, disabled }: DocumentRowsProps) {
   const update = (id: string, patch: Partial<DocumentRow>) =>
-    onChange(
-      documents.map((doc) => (doc.id === id ? { ...doc, ...patch } : doc)),
-    );
-  const remove = (id: string) =>
-    onChange(documents.filter((doc) => doc.id !== id));
+    onChange(documents.map((doc) => (doc.id === id ? { ...doc, ...patch } : doc)));
+  const remove = (id: string) => onChange(documents.filter((doc) => doc.id !== id));
 
   return (
     <div className="space-y-3">
@@ -38,25 +31,19 @@ export function DocumentRows({
             placeholder="Document type"
             disabled={disabled}
             value={doc.docType}
-            onChange={(event) =>
-              update(doc.id, { docType: event.currentTarget.value })
-            }
+            onChange={(event) => update(doc.id, { docType: event.currentTarget.value })}
           />
           <Input
             placeholder="Name"
             disabled={disabled}
             value={doc.name}
-            onChange={(event) =>
-              update(doc.id, { name: event.currentTarget.value })
-            }
+            onChange={(event) => update(doc.id, { name: event.currentTarget.value })}
           />
           <Input
             placeholder="https://…"
             disabled={disabled}
             value={doc.url}
-            onChange={(event) =>
-              update(doc.id, { url: event.currentTarget.value })
-            }
+            onChange={(event) => update(doc.id, { url: event.currentTarget.value })}
           />
           <Button
             type="button"

@@ -34,9 +34,7 @@ export function FormCard({
         <div>
           <p className="text-base font-medium text-[#1c1c1d]">{title}</p>
           {description ? (
-            <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
-              {description}
-            </p>
+            <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">{description}</p>
           ) : null}
         </div>
       </div>
@@ -109,9 +107,7 @@ export function ReadOnlyField({
       <div className="flex h-10 items-center rounded-[14px] border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] px-4 text-sm text-[rgba(28,28,29,0.62)]">
         {value || "—"}
       </div>
-      {lockReason ? (
-        <p className="text-xs text-[rgba(28,28,29,0.5)]">{lockReason}</p>
-      ) : null}
+      {lockReason ? <p className="text-xs text-[rgba(28,28,29,0.5)]">{lockReason}</p> : null}
     </div>
   );
 }
@@ -134,13 +130,13 @@ export function ToggleSwitch({
       onClick={() => onChange(!checked)}
       className={cn(
         "relative h-6 w-11 shrink-0 rounded-full transition-colors",
-        checked ? "bg-[#1c1c1d]" : "bg-[rgba(28,28,29,0.2)]",
+        checked ? "bg-[#1c1c1d]" : "bg-[rgba(28,28,29,0.2)]"
       )}
     >
       <span
         className={cn(
           "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform",
-          checked ? "translate-x-[22px]" : "translate-x-0.5",
+          checked ? "translate-x-[22px]" : "translate-x-0.5"
         )}
       />
     </button>
@@ -173,17 +169,13 @@ export function DetailField({
           <ToggleSwitch
             checked={checked}
             disabled={disabled}
-            onChange={(next) =>
-              updateDraft({ [field.key]: next } as Partial<DraftState>)
-            }
+            onChange={(next) => updateDraft({ [field.key]: next } as Partial<DraftState>)}
           />
           <span className="text-sm text-[rgba(28,28,29,0.6)]">
             {checked ? "Enabled" : "Disabled"}
           </span>
         </div>
-        {field.help ? (
-          <p className="mt-1 text-xs text-[rgba(28,28,29,0.5)]">{field.help}</p>
-        ) : null}
+        {field.help ? <p className="mt-1 text-xs text-[rgba(28,28,29,0.5)]">{field.help}</p> : null}
       </div>
     );
   }
@@ -237,9 +229,7 @@ export function DetailField({
       required={required}
       disabled={disabled}
       value={value}
-      onChange={(next) =>
-        updateDraft({ [field.key]: next } as Partial<DraftState>)
-      }
+      onChange={(next) => updateDraft({ [field.key]: next } as Partial<DraftState>)}
       placeholder={field.placeholder}
       type={field.control === "number" ? "number" : "text"}
       help={field.help}
@@ -258,11 +248,8 @@ export function CustomFieldRows({
   disabled?: boolean;
 }) {
   const update = (id: string, patch: Partial<CustomFieldRow>) =>
-    onChange(
-      fields.map((field) => (field.id === id ? { ...field, ...patch } : field)),
-    );
-  const remove = (id: string) =>
-    onChange(fields.filter((field) => field.id !== id));
+    onChange(fields.map((field) => (field.id === id ? { ...field, ...patch } : field)));
+  const remove = (id: string) => onChange(fields.filter((field) => field.id !== id));
 
   return (
     <div className="space-y-3">
@@ -275,17 +262,13 @@ export function CustomFieldRows({
             placeholder="Key"
             disabled={disabled}
             value={field.key}
-            onChange={(event) =>
-              update(field.id, { key: event.currentTarget.value })
-            }
+            onChange={(event) => update(field.id, { key: event.currentTarget.value })}
           />
           <Input
             placeholder="Value"
             disabled={disabled}
             value={field.value}
-            onChange={(event) =>
-              update(field.id, { value: event.currentTarget.value })
-            }
+            onChange={(event) => update(field.id, { value: event.currentTarget.value })}
           />
           <Button
             type="button"
@@ -304,9 +287,7 @@ export function CustomFieldRows({
         variant="secondary"
         size="sm"
         disabled={disabled}
-        onClick={() =>
-          onChange([...fields, { id: crypto.randomUUID(), key: "", value: "" }])
-        }
+        onClick={() => onChange([...fields, { id: crypto.randomUUID(), key: "", value: "" }])}
         iconLeft={<Plus className="h-4 w-4" />}
       >
         Add field

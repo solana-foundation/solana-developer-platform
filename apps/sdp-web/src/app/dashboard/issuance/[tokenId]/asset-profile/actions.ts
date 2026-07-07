@@ -2,21 +2,13 @@
 
 import type { AssetProfile } from "@sdp/types";
 import { revalidatePath } from "next/cache";
+import { parseErrorMessage } from "@/lib/api-error";
 import { sdpApiRequest } from "@/lib/sdp-api";
 import {
   mergeIssuanceMetadataForUpdate,
   type UpdateAssetProfileActionInput,
   type UpdateAssetProfileActionResult,
 } from "./asset-profile-mapping";
-
-function parseErrorMessage(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as { error?: { message?: string }; message?: string };
-    return parsed?.error?.message ?? parsed?.message ?? body ?? "Unknown error";
-  } catch {
-    return body || "Unknown error";
-  }
-}
 
 /**
  * Save the asset-management edit form: PATCH the token row (what deploy and the
@@ -49,7 +41,11 @@ export async function updateAssetProfileAction(
     };
     const currentProfile = profileJson?.data?.assetProfile;
     if (!currentProfile) {
-      return { state: "error", message: "Asset profile not found.", assetProfile: null };
+      return {
+        state: "error",
+        message: "Asset profile not found.",
+        assetProfile: null,
+      };
     }
 
     const mergedMetadata = mergeIssuanceMetadataForUpdate(

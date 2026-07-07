@@ -269,7 +269,9 @@ export function useTokenOperations({
     }
     return selection;
   };
-  const signerSelectionFor = (action: Parameters<typeof getSignerSelectionForAction>[0]["action"]) =>
+  const signerSelectionFor = (
+    action: Parameters<typeof getSignerSelectionForAction>[0]["action"]
+  ) =>
     withWalletLoadError(
       getSignerSelectionForAction({ action, token, authorityWallets, metadataAuthority })
     );
