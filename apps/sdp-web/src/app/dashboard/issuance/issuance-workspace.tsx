@@ -156,7 +156,6 @@ export function IssuanceWorkspace({
       void import("./issuance-playground");
     };
 
-    // biome-ignore lint/security/noSecrets: requestIdleCallback is a browser API, not a secret.
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       const idleId = window.requestIdleCallback(preloadPlayground);
       return () => window.cancelIdleCallback(idleId);
@@ -257,8 +256,7 @@ export function IssuanceWorkspace({
                     <div className="mb-4 flex items-start justify-between gap-3">
                       <div className="h-14 w-14 overflow-hidden rounded-full border border-[rgba(28,28,29,0.1)] bg-white">
                         {token.imageUrl ? (
-                          // Token logos are dynamic external assets from API data.
-                          // eslint-disable-next-line @next/next/no-img-element
+                          // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
                           <img
                             src={token.imageUrl}
                             alt={`${token.name} logo`}

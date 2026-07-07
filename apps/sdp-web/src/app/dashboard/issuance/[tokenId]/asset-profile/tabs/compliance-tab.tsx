@@ -29,7 +29,6 @@ export function ComplianceTab({
 }) {
   const { draft, updateDraft, saving } = form;
   const isDeployed = Boolean(token.mintAddress);
-  const enforcedLabel = accessControlLabel(ops.accessControlMode) ?? "No transfer restrictions";
 
   const availableActions: Array<{ id: AdminAction; label: string }> = [
     ...(ops.controlListCopy

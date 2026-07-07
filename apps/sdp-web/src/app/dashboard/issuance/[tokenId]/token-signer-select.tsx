@@ -30,13 +30,25 @@ export function TokenSignerSelect({
   showSelectionSummary = false,
   optional = false,
 }: TokenSignerSelectProps) {
-  const isUnavailable = Boolean(signerUnavailableReason) || signerWallets.length === 0;
+  const hasReason = Boolean(signerUnavailableReason);
+  const hasNoWallets = !hasReason && signerWallets.length === 0;
+  const isUnavailable = hasReason || signerWallets.length === 0;
   const isLocked = !isUnavailable && signerWallets.length === 1;
+  // Red only signals a genuine problem: an explicit unavailable reason, or no
+  // wallets in a context that requires a signer. An empty list where the signer
+  // is optional (draft creation) is expected, so it stays neutral.
+  const isError = hasReason || (hasNoWallets && !optional);
   const defaultMessage = isLocked
     ? "SDP will sign this action with the required authority wallet."
     : "SDP will sign this transaction with the selected wallet.";
   const availableMessage = helperText === undefined ? defaultMessage : helperText;
-  const message = signerUnavailableReason ? signerUnavailableReason : availableMessage;
+  const message = signerUnavailableReason
+    ? signerUnavailableReason
+    : hasNoWallets
+      ? optional
+        ? "No signer wallets available — SDP will use the project's default signer."
+        : "No signer wallets available."
+      : availableMessage;
   const selectedWallet =
     signerWallets.find((wallet) => wallet.walletId === signerWalletId) ?? signerWallets[0] ?? null;
 
@@ -64,7 +76,7 @@ export function TokenSignerSelect({
       <p
         className={[
           "text-sm leading-5",
-          signerUnavailableReason ? "text-[#9e2b38]" : "text-[rgba(28,28,29,0.68)]",
+          isError ? "text-[#9e2b38]" : "text-[rgba(28,28,29,0.68)]",
         ].join(" ")}
       >
         {message}
