@@ -14,6 +14,7 @@ import {
   createMosaicService,
   deriveAblListAddress,
   MintMetadataUpdateError,
+  type MosaicFeePayment,
   PACKET_DATA_SIZE,
 } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
@@ -77,9 +78,21 @@ async function persistRecoveredMint(params: {
   token: NonNullable<Awaited<ReturnType<TokenService["getToken"]>>>;
   custodyAddress: Address;
   aclMode: ReturnType<typeof getMosaicAclMode>;
+  feePayment: MosaicFeePayment;
+  feeWalletId: string | undefined;
   result: MintMetadataUpdateError["result"];
 }): Promise<void> {
-  const { tokenService, txId, tokenId, token, custodyAddress, aclMode, result } = params;
+  const {
+    tokenService,
+    txId,
+    tokenId,
+    token,
+    custodyAddress,
+    aclMode,
+    feePayment,
+    feeWalletId,
+    result,
+  } = params;
   const { mint, signature, slot, listAddress } = result;
   // The caller only invokes this once it has confirmed the mint landed on-chain;
   // bail defensively (and to narrow the type) if it somehow didn't.
@@ -116,6 +129,8 @@ async function persistRecoveredMint(params: {
         freezeAuthority,
         ablListAddress: listAddress,
         aclMode,
+        feePayment,
+        feeWalletId,
         metadataUriFailed: true,
       },
     });
@@ -291,6 +306,7 @@ export const deployToken = async (c: AppContext) => {
       },
       status: token.status,
       feePayment,
+      feeWalletId,
     },
   });
 
@@ -446,6 +462,8 @@ export const deployToken = async (c: AppContext) => {
         token,
         custodyAddress,
         aclMode,
+        feePayment,
+        feeWalletId,
         result: error.result,
       });
 

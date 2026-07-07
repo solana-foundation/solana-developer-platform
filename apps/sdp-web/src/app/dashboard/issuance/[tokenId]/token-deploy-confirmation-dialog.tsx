@@ -40,7 +40,7 @@ export function TokenDeployConfirmationDialog({
       <h4 className="pr-12 text-[22px] leading-[1.2] font-medium text-[#1c1c1d]">Deploy token?</h4>
       <p className="mt-2 text-[15px] leading-[1.45] text-[rgba(28,28,29,0.72)]">
         This will submit the deploy transaction on-chain. Kora sponsors the fees, or pay them with
-        SOL from the selected fee wallet.
+        SOL from the selected fee wallet — the picker only applies to Deploy with Wallet.
       </p>
       <div className="mt-5">
         <TokenSignerSelect
