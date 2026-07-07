@@ -210,6 +210,8 @@ export function AssetManagementWorkspace({
           <PublicInfoTab
             draft={form.draft}
             disabled={form.saving}
+            mintAddress={token.mintAddress}
+            explorerHref={ops.explorerHref}
             onToggleField={(path, enabled) =>
               form.updateDraft({
                 publicFields: togglePublicField(form.draft.publicFields, path, enabled),

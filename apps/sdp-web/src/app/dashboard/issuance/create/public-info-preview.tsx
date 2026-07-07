@@ -8,6 +8,7 @@ import {
   CircleCheck,
   Clock,
   Coins,
+  Copy,
   DollarSign,
   ExternalLink,
   FileText,
@@ -23,8 +24,12 @@ import {
   Tag,
   Target,
   User,
+  Wallet,
 } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { getAssetTypeLabel, getCategoryLabel } from "./asset-taxonomy";
 import { getDefaultPublicFields, getPublicFieldCandidates, safeLinkHref } from "./draft-mapping";
@@ -43,6 +48,30 @@ interface Fact {
   path?: string;
 }
 
+// The three surfaces the public asset can appear on. The preview card renders a
+// distinct mock per surface so the "wallets, explorers, and the public" copy is
+// literal rather than aspirational.
+type PreviewSurface = "wallet" | "explorer" | "token";
+
+const SURFACES: readonly {
+  id: PreviewSurface;
+  label: string;
+  Icon: LucideIcon;
+}[] = [
+  { id: "token", label: "Token page", Icon: FileText },
+  { id: "explorer", label: "Explorer", Icon: Globe },
+  { id: "wallet", label: "Wallet", Icon: Wallet },
+];
+
+interface PreviewProps {
+  draft: DraftState;
+  facts: Fact[];
+  categoryLabel: string | null;
+  typeLabel: string | null;
+  mintAddress?: string | null;
+  explorerHref?: string | null;
+}
+
 // Human filename for a logo URL (falls back to the raw value).
 function fileName(url: string): string {
   const trimmed = url.trim();
@@ -52,6 +81,12 @@ function fileName(url: string): string {
   } catch {
     return fromPath(trimmed) || trimmed;
   }
+}
+
+// Short, non-mono rendering of an on-chain address (SDP rule: addresses are not
+// monospace). Mirrors the truncation used in the asset profile header.
+function shortAddress(address: string): string {
+  return `${address.slice(0, 5)}…${address.slice(-4)}`;
 }
 
 // Exact label/path matches take precedence over the substring rules below.
@@ -101,30 +136,44 @@ function iconFor(labelOrPath?: string): LucideIcon {
   return rule?.icon ?? CircleCheck;
 }
 
+// Small inline classification chip used in the identity header.
+function ClassificationChip({ label, path }: { label: string; path: string }) {
+  const Icon = iconFor(path);
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-2 py-0.5 text-xs text-[rgba(28,28,29,0.7)]">
+      <Icon className="h-3.5 w-3.5 shrink-0 text-[rgba(28,28,29,0.5)]" />
+      <span className="truncate">{label}</span>
+    </span>
+  );
+}
+
 // The public-vs-private projection shared by the creation wizard (Step 3) and
 // the asset management workspace (Public information tab). A live preview of the
-// public asset card sits beside an interactive checklist: core identity fields
-// are always public (locked), optional asset.* fields can be toggled, and
-// non-default optional fields live under a collapse. When `onToggleField` is
-// omitted the checklist renders read-only.
+// public asset card — switchable between wallet, explorer, and token-page
+// surfaces — sits beside an interactive checklist with a public-coverage meter:
+// core identity fields are always public (locked), optional asset.* fields can
+// be toggled, and non-default optional fields live under a collapse. When
+// `onToggleField` is omitted the checklist renders read-only. `mintAddress` /
+// `explorerHref` are only present once a token is deployed (the asset-profile
+// tab); the create wizard leaves them undefined and the address UI degrades to a
+// placeholder.
 export function PublicInfoPreview({
   draft,
   onToggleField,
   disabled,
+  mintAddress,
+  explorerHref,
 }: {
   draft: DraftState;
   onToggleField?: (path: string, enabled: boolean) => void;
   disabled?: boolean;
+  mintAddress?: string | null;
+  explorerHref?: string | null;
 }) {
   const [showOptional, setShowOptional] = useState(false);
+  const [surface, setSurface] = useState<PreviewSurface>("token");
   const categoryLabel = getCategoryLabel(draft.assetCategory);
   const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType);
-
-  // Helper: map a fact path or label to a small icon element
-  const getIconFor = (labelOrPath?: string) => {
-    const Icon = iconFor(labelOrPath);
-    return <Icon className="h-3.5 w-3.5 text-[rgba(28,28,29,0.45)] shrink-0" />;
-  };
 
   // Core identity + classification: inherent to the token / served from the
   // token record, so always public and not toggleable.
@@ -159,6 +208,12 @@ export function PublicInfoPreview({
   const defaultInteractive = candidates.filter((candidate) => defaultPaths.has(candidate.path));
   const optionalInteractive = candidates.filter((candidate) => !defaultPaths.has(candidate.path));
 
+  // Public-coverage summary: locked identity fields are always public; optional
+  // candidates count only when enabled.
+  const publicCount = alwaysPublic.length + enabledCandidates.length;
+  const totalCount = alwaysPublic.length + candidates.length;
+  const coveragePct = totalCount > 0 ? Math.round((publicCount / totalCount) * 100) : 0;
+
   // Preview facts: fixed identity facts plus every currently-public optional
   // field, so hiding a field also removes it from the preview.
   const facts: Fact[] = [
@@ -180,6 +235,15 @@ export function PublicInfoPreview({
     })),
   ];
 
+  const previewProps: PreviewProps = {
+    draft,
+    facts,
+    categoryLabel,
+    typeLabel,
+    mintAddress,
+    explorerHref,
+  };
+
   const toggle = onToggleField
     ? (path: string, next: boolean) => onToggleField(path, next)
     : undefined;
@@ -194,128 +258,56 @@ export function PublicInfoPreview({
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Preview — how the asset appears publicly. */}
+        {/* Preview — how the asset appears publicly, across surfaces. */}
         <div>
-          <p className="mb-2 text-sm font-medium text-[#1c1c1d]">Preview</p>
+          <div className="mb-2 flex h-8 items-center justify-between gap-3">
+            <p className="text-sm font-medium text-[#1c1c1d]">Preview</p>
+            <SurfaceSwitch value={surface} onChange={setSurface} />
+          </div>
           <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
-            <div className="flex items-start gap-4">
-              {draft.imageUrl.trim() ? (
-                <div className="relative h-14 w-14 shrink-0">
-                  <span
-                    className="absolute -inset-0.5 rounded-full bg-[rgba(28,28,29,0.02)]"
-                    aria-hidden
-                  />
-                  {/* biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here. */}
-                  <img
-                    src={draft.imageUrl}
-                    alt={`${draft.name || "Asset"} logo`}
-                    className="relative h-14 w-14 rounded-full border border-[rgba(28,28,29,0.1)] object-cover"
-                  />
-                </div>
-              ) : (
-                <div className="relative">
-                  <span
-                    className="absolute -inset-0.5 rounded-full bg-[rgba(28,28,29,0.02)]"
-                    aria-hidden
-                  />
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.05)] text-xl font-semibold text-[#1c1c1d]">
-                    {draft.symbol.slice(0, 1).toUpperCase() || "?"}
-                  </div>
-                </div>
-              )}
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h4 className="text-lg leading-tight font-semibold tracking-tight text-[#1c1c1d]">
-                    {draft.name.trim() || "Untitled asset"}
-                  </h4>
-                  {draft.symbol.trim() ? (
-                    <span className="rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.7)]">
-                      {draft.symbol.trim()}
-                    </span>
-                  ) : null}
-
-                  {/* Decorative header badge (subtle, non-assertive preview badge) */}
-                  <span className="ml-1 flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.6)]">
-                    <CircleCheck className="h-3 w-3 text-[rgba(28,28,29,0.5)]" />
-                    Preview
-                  </span>
-                </div>
-
-                {/* Classification badges */}
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  {categoryLabel ? (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-2 py-0.5 text-xs text-[rgba(28,28,29,0.7)]">
-                      {getIconFor("category")}
-                      <span className="truncate">{categoryLabel}</span>
-                    </span>
-                  ) : null}
-                  {typeLabel ? (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-2 py-0.5 text-xs text-[rgba(28,28,29,0.7)]">
-                      {getIconFor("type")}
-                      <span className="truncate">{typeLabel}</span>
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-
-            <p
-              className={cn(
-                "mt-3 text-sm leading-relaxed",
-                draft.description.trim()
-                  ? "text-[rgba(28,28,29,0.62)]"
-                  : "text-[rgba(28,28,29,0.4)]"
-              )}
-            >
-              {draft.description.trim() || "No public description"}
-            </p>
-
-            <dl className="mt-4 space-y-2.5 border-t border-[rgba(28,28,29,0.08)] pt-4">
-              {facts.map((fact) => (
-                <div key={fact.label} className="flex items-center justify-between gap-4">
-                  <dt className="flex items-center gap-2 shrink-0 text-sm text-[rgba(28,28,29,0.55)]">
-                    {getIconFor(fact.path)}
-                    <span>{fact.label}</span>
-                  </dt>
-                  <dd className="min-w-0 text-right text-sm font-medium text-[#1c1c1d]">
-                    {fact.href ? (
-                      <a
-                        href={fact.href}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex max-w-full items-center gap-1 truncate hover:underline"
-                      >
-                        <span className="truncate">{fact.value}</span>
-                        <ExternalLink className="h-3 w-3 shrink-0" />
-                      </a>
-                    ) : (
-                      <span className="block truncate">{fact.value}</span>
-                    )}
-                  </dd>
-                </div>
-              ))}
-            </dl>
+            {surface === "wallet" ? <WalletPreview {...previewProps} /> : null}
+            {surface === "explorer" ? <ExplorerPreview {...previewProps} /> : null}
+            {surface === "token" ? <TokenPreview {...previewProps} /> : null}
           </div>
         </div>
 
-        {/* Checklist — what's public, with interactive toggles. */}
+        {/* Checklist — public coverage + what's public, with interactive toggles. */}
         <div>
-          <p className="text-sm font-medium text-[#1c1c1d]">Included in public view</p>
+          <div className="mb-2 flex h-8 items-center justify-between gap-3">
+            <p className="text-sm font-medium text-[#1c1c1d]">Included in public view</p>
+            <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.6)]">
+              {publicCount} public
+            </span>
+          </div>
 
-          <div className="mt-3 divide-y divide-[rgba(28,28,29,0.06)] rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white px-4">
-            {alwaysPublic.map((field) => (
-              <FieldRow key={field.key} label={field.label} value={field.value} checked locked />
-            ))}
-            {defaultInteractive.map((candidate) => (
-              <FieldRow
-                key={candidate.path}
-                label={candidate.label}
-                value={candidate.value}
-                checked={candidate.enabled}
-                disabled={disabled}
-                onToggle={toggle ? () => toggle(candidate.path, !candidate.enabled) : undefined}
-              />
-            ))}
+          <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white">
+            {/* Coverage meter sits inside the card so its top edge aligns with the preview card. */}
+            <div className="border-b border-[rgba(28,28,29,0.08)] px-4 py-3">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-[rgba(28,28,29,0.08)]">
+                <div
+                  className="h-full rounded-full bg-[#0f0f10] transition-[width]"
+                  style={{ width: `${coveragePct}%` }}
+                />
+              </div>
+              <p className="mt-1.5 text-xs text-[rgba(28,28,29,0.5)]">
+                {publicCount} of {totalCount} fields public
+              </p>
+            </div>
+            <div className="divide-y divide-[rgba(28,28,29,0.06)] px-4">
+              {alwaysPublic.map((field) => (
+                <FieldRow key={field.key} label={field.label} value={field.value} checked locked />
+              ))}
+              {defaultInteractive.map((candidate) => (
+                <FieldRow
+                  key={candidate.path}
+                  label={candidate.label}
+                  value={candidate.value}
+                  checked={candidate.enabled}
+                  disabled={disabled}
+                  onToggle={toggle ? () => toggle(candidate.path, !candidate.enabled) : undefined}
+                />
+              ))}
+            </div>
           </div>
 
           {optionalInteractive.length > 0 ? (
@@ -361,6 +353,311 @@ export function PublicInfoPreview({
             </div>
           ) : null}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Segmented control switching the preview between wallet / explorer / token
+// surfaces. Hand-rolled to keep the flat SDP grammar (tinted track, white active
+// pill, no shadow); the active pill's border is mirrored by a transparent border
+// on inactive items so nothing shifts on selection.
+function SurfaceSwitch({
+  value,
+  onChange,
+}: {
+  value: PreviewSurface;
+  onChange: (next: PreviewSurface) => void;
+}) {
+  return (
+    <div className="inline-flex items-center gap-0.5 rounded-full border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] p-0.5">
+      {SURFACES.map(({ id, label, Icon }) => {
+        const active = id === value;
+        return (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(id)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+              active
+                ? "border-[rgba(28,28,29,0.08)] bg-white text-[#1c1c1d]"
+                : "border-transparent text-[rgba(28,28,29,0.55)] hover:text-[#1c1c1d]"
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Token logo with a subtle inset halo and a symbol-initial fallback. `size`
+// scales for the compact wallet row vs. the fuller token/explorer headers.
+function AssetAvatar({
+  imageUrl,
+  name,
+  symbol,
+  size = "md",
+}: {
+  imageUrl: string;
+  name: string;
+  symbol: string;
+  size?: "sm" | "md";
+}) {
+  const dim = size === "sm" ? "h-10 w-10" : "h-14 w-14";
+  const initial = symbol.slice(0, 1).toUpperCase() || "?";
+
+  if (imageUrl.trim()) {
+    return (
+      <div className={cn("relative shrink-0", dim)}>
+        <span className="absolute -inset-0.5 rounded-full bg-[rgba(28,28,29,0.02)]" aria-hidden />
+        {/* biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here. */}
+        <img
+          src={imageUrl}
+          alt={`${name || "Asset"} logo`}
+          className={cn(
+            "relative rounded-full border border-[rgba(28,28,29,0.1)] object-cover",
+            dim
+          )}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative shrink-0">
+      <span className="absolute -inset-0.5 rounded-full bg-[rgba(28,28,29,0.02)]" aria-hidden />
+      <div
+        className={cn(
+          "flex shrink-0 items-center justify-center rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.05)] font-semibold text-[#1c1c1d]",
+          dim,
+          size === "sm" ? "text-base" : "text-xl"
+        )}
+      >
+        {initial}
+      </div>
+    </div>
+  );
+}
+
+// Name + symbol pill + non-assertive "Preview" badge, then classification chips.
+// Shared by the token and explorer surfaces.
+function IdentityHeader({
+  draft,
+  categoryLabel,
+  typeLabel,
+}: Pick<PreviewProps, "draft" | "categoryLabel" | "typeLabel">) {
+  return (
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="text-lg leading-tight font-semibold tracking-tight text-[#1c1c1d]">
+          {draft.name.trim() || "Untitled asset"}
+        </h4>
+        {draft.symbol.trim() ? (
+          <span className="rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.7)]">
+            {draft.symbol.trim()}
+          </span>
+        ) : null}
+        <span className="ml-1 flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.6)]">
+          <CircleCheck className="h-3 w-3 text-[rgba(28,28,29,0.5)]" />
+          Preview
+        </span>
+      </div>
+
+      {categoryLabel || typeLabel ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {categoryLabel ? <ClassificationChip label={categoryLabel} path="category" /> : null}
+          {typeLabel ? <ClassificationChip label={typeLabel} path="type" /> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// A tinted row exposing the on-chain mint address with copy + explorer actions.
+// Falls back to a placeholder before the token is deployed.
+function AddressRow({
+  mintAddress,
+  explorerHref,
+}: Pick<PreviewProps, "mintAddress" | "explorerHref">) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-3 py-2.5">
+      <div className="min-w-0">
+        <p className="text-xs text-[rgba(28,28,29,0.5)]">Mint address</p>
+        {mintAddress ? (
+          <p className="mt-0.5 truncate text-sm font-medium text-[#1c1c1d]">
+            {shortAddress(mintAddress)}
+          </p>
+        ) : (
+          <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.45)]">Assigned at launch</p>
+        )}
+      </div>
+      {mintAddress ? (
+        <div className="flex shrink-0 items-center gap-1">
+          <CopyIconButton value={mintAddress} label="Copy mint address" />
+          {explorerHref ? (
+            <Button asChild variant="ghost" size="icon-xs" aria-label="View on explorer">
+              <a href={explorerHref} target="_blank" rel="noreferrer">
+                <ExternalLink />
+              </a>
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Copy affordance mirroring the payments CopyButton pattern.
+function CopyIconButton({ value, label }: { value: string; label: string }) {
+  const { copy, copied } = useCopy(1200);
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      aria-label={label}
+      onClick={() => {
+        void copy(value);
+        toast.success("Copied", { position: "bottom-right" });
+      }}
+    >
+      {copied ? <Check className="text-status-success-text" /> : <Copy />}
+    </Button>
+  );
+}
+
+// Token-page surface — the fullest view: identity header, description, an
+// icon-chip fact list, and (once deployed) a mint-address footer.
+function TokenPreview({
+  draft,
+  facts,
+  categoryLabel,
+  typeLabel,
+  mintAddress,
+  explorerHref,
+}: PreviewProps) {
+  return (
+    <div>
+      <div className="flex items-start gap-4">
+        <AssetAvatar imageUrl={draft.imageUrl} name={draft.name} symbol={draft.symbol} />
+        <IdentityHeader draft={draft} categoryLabel={categoryLabel} typeLabel={typeLabel} />
+      </div>
+
+      <p
+        className={cn(
+          "mt-3 text-sm leading-relaxed",
+          draft.description.trim() ? "text-[rgba(28,28,29,0.62)]" : "text-[rgba(28,28,29,0.4)]"
+        )}
+      >
+        {draft.description.trim() || "No public description"}
+      </p>
+
+      <dl className="mt-4 space-y-2 border-t border-[rgba(28,28,29,0.08)] pt-4">
+        {facts.map((fact) => {
+          const Icon = iconFor(fact.path);
+          return (
+            <div key={fact.label} className="flex items-center gap-3">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.5)] [&_svg]:size-4">
+                <Icon />
+              </span>
+              <div className="flex min-w-0 flex-1 items-center justify-between gap-4">
+                <dt className="shrink-0 text-sm text-[rgba(28,28,29,0.55)]">{fact.label}</dt>
+                <dd className="min-w-0 text-right text-sm font-medium text-[#1c1c1d]">
+                  {fact.href ? (
+                    <a
+                      href={fact.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex max-w-[200px] items-center gap-1 truncate hover:underline"
+                    >
+                      <span className="truncate">{fact.value}</span>
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
+                  ) : (
+                    <span className="block truncate">{fact.value}</span>
+                  )}
+                </dd>
+              </div>
+            </div>
+          );
+        })}
+      </dl>
+
+      {mintAddress ? (
+        <div className="mt-4 border-t border-[rgba(28,28,29,0.08)] pt-4">
+          <AddressRow mintAddress={mintAddress} explorerHref={explorerHref} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Wallet surface — a compact token-list row: logo + name / classification on the
+// left, symbol + decimals on the right.
+function WalletPreview({ draft, categoryLabel, typeLabel }: PreviewProps) {
+  const secondary = [draft.symbol.trim(), categoryLabel || typeLabel].filter(Boolean).join(" · ");
+  return (
+    <div className="flex items-center gap-3">
+      <AssetAvatar imageUrl={draft.imageUrl} name={draft.name} symbol={draft.symbol} size="sm" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-[#1c1c1d]">
+          {draft.name.trim() || "Untitled asset"}
+        </p>
+        <p className="mt-0.5 truncate text-xs text-[rgba(28,28,29,0.5)]">{secondary || "—"}</p>
+      </div>
+      <div className="shrink-0 text-right">
+        <p className="text-sm font-medium text-[#1c1c1d]">{draft.symbol.trim() || "—"}</p>
+        <p className="mt-0.5 text-xs text-[rgba(28,28,29,0.5)]">
+          {draft.decimals.trim() || "—"} decimals
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Explorer surface — identity header, a prominent mint-address row, then a
+// wrapped strip of metadata pills (label + value), the way an explorer lists
+// token metadata.
+function ExplorerPreview({
+  draft,
+  facts,
+  categoryLabel,
+  typeLabel,
+  mintAddress,
+  explorerHref,
+}: PreviewProps) {
+  return (
+    <div>
+      <div className="flex items-start gap-4">
+        <AssetAvatar imageUrl={draft.imageUrl} name={draft.name} symbol={draft.symbol} />
+        <IdentityHeader draft={draft} categoryLabel={categoryLabel} typeLabel={typeLabel} />
+      </div>
+
+      <div className="mt-4">
+        <AddressRow mintAddress={mintAddress} explorerHref={explorerHref} />
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 border-t border-[rgba(28,28,29,0.08)] pt-4">
+        {facts.map((fact) => {
+          const Icon = iconFor(fact.path);
+          return (
+            <span
+              key={fact.label}
+              className="inline-flex min-w-0 items-center gap-1.5 rounded-lg border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-2.5 py-1.5"
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0 text-[rgba(28,28,29,0.45)]" />
+              <span className="text-xs text-[rgba(28,28,29,0.55)]">{fact.label}</span>
+              <span className="max-w-[12rem] truncate text-xs font-medium text-[#1c1c1d]">
+                {fact.value}
+              </span>
+            </span>
+          );
+        })}
       </div>
     </div>
   );
