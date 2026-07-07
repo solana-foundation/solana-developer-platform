@@ -5,13 +5,14 @@ import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
 import { Loader2 } from "lucide-react";
 import { motion } from "motion/react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { togglePublicField } from "../../create/draft-mapping";
 import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
 import { TokenAuthorityModal } from "../token-authority-modal";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
+import type { FundManagementModalAction } from "../token-fund-management-section";
 import { TokenManagementModalShell } from "../token-management-modal-shell";
 import { TokenSignerSelect } from "../token-signer-select";
 import { AssetProfileHeader } from "./asset-profile-header";
@@ -60,6 +61,16 @@ function resolveTab(value: string | null): AssetManagementTab {
   return "overview";
 }
 
+export function shouldOpenPendingFundManagementModal({
+  activeTab,
+  pendingFundManagementModalAction,
+}: {
+  activeTab: AssetManagementTab;
+  pendingFundManagementModalAction: FundManagementModalAction | null;
+}) {
+  return Boolean(pendingFundManagementModalAction && activeTab === "operations");
+}
+
 export function AssetManagementWorkspace({
   token,
   assetProfile,
@@ -77,6 +88,9 @@ export function AssetManagementWorkspace({
 
   const requestedTabParam = searchParams.get("tab");
   const activeTab = resolveTab(requestedTabParam);
+  const [pendingFundManagementModalAction, setPendingFundManagementModalAction] = useState<
+    "deploy" | "mint" | "burn" | null
+  >(null);
 
   const ops = useTokenOperations({
     token,
@@ -113,9 +127,15 @@ export function AssetManagementWorkspace({
     if (!ops.canDeployToken) {
       return;
     }
+
+    if (activeTab === "operations") {
+      ops.openFundManagementModal("deploy");
+      return;
+    }
+
+    setPendingFundManagementModalAction("deploy");
     syncActiveTabInUrl("operations");
-    ops.openFundManagementModal("deploy");
-  }, [ops.canDeployToken, ops.openFundManagementModal, syncActiveTabInUrl]);
+  }, [activeTab, ops.canDeployToken, ops.openFundManagementModal, syncActiveTabInUrl]);
 
   // Normalize legacy/unknown tab params in the URL.
   useEffect(() => {
@@ -133,6 +153,21 @@ export function AssetManagementWorkspace({
       ops.closeFundManagementModal();
     }
   }, [activeTab, ops.fundManagementModalAction, ops.closeFundManagementModal]);
+
+  useEffect(() => {
+    if (
+      !shouldOpenPendingFundManagementModal({
+        activeTab,
+        pendingFundManagementModalAction,
+      }) ||
+      !pendingFundManagementModalAction
+    ) {
+      return;
+    }
+
+    ops.openFundManagementModal(pendingFundManagementModalAction);
+    setPendingFundManagementModalAction(null);
+  }, [activeTab, ops.openFundManagementModal, pendingFundManagementModalAction]);
 
   const effectivePauseDisabledReason = ops.effectivePauseDisabledReason;
 
