@@ -191,6 +191,10 @@ export interface IssuanceDraftContextValue {
   advance: () => void;
   goBack: () => void;
   reset: () => void;
+  // Clear the persisted draft without touching the in-memory wizard state, so a
+  // successful submit can wipe storage while keeping the current step on screen
+  // (the wizard unmounts on navigation, so its state is discarded anyway).
+  clearStoredDraft: () => void;
 }
 
 const IssuanceDraftContext = createContext<IssuanceDraftContextValue | null>(null);
@@ -234,6 +238,7 @@ export function IssuanceDraftProvider({ children }: { children: ReactNode }) {
         clearStoredState();
         dispatch({ type: "reset" });
       },
+      clearStoredDraft: () => clearStoredState(),
     }),
     [state]
   );

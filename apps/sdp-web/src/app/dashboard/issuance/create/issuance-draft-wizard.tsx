@@ -3,7 +3,7 @@
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { AnimatePresence } from "motion/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { createAssetDraftAction } from "./actions";
@@ -83,11 +83,18 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
     goBack,
     goToStep,
     reset,
+    clearStoredDraft,
   } = useIssuanceDraft();
   const [submitting, setSubmitting] = useState(false);
+  // Keeps the wizard mounted on the Review step while the management page loads
+  // after a successful submit, so the form never visibly snaps back to step 1.
+  const [isNavigating, startNavigation] = useTransition();
   // Set when the user tries to advance past the Asset-details form with errors:
   // flips the form into "show all errors" mode and locks Continue until fixed.
   const [attemptedAdvance, setAttemptedAdvance] = useState(false);
+  // Busy through both the create request and the post-submit navigation, so the
+  // action stays locked and in its loading state until the management page shows.
+  const isBusy = submitting || isNavigating;
 
   const isClassification = currentStep === "classification";
   const isReview = currentStep === "review";
@@ -127,7 +134,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
   };
 
   const handleSubmit = async () => {
-    if (blockers.length > 0 || submitting || !draft.assetCategory || !draft.assetType) {
+    if (blockers.length > 0 || isBusy || !draft.assetCategory || !draft.assetType) {
       return;
     }
     setSubmitting(true);
@@ -141,8 +148,14 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
       });
       if (result.state === "success" && result.tokenId) {
         toast.success("Asset draft created.", { id: toastId, position: "bottom-right" });
-        reset();
-        router.push(`${ISSUANCE_OVERVIEW_PATH}/${result.tokenId}`);
+        // Wipe the persisted draft now, but leave the in-memory step untouched so
+        // the wizard keeps rendering Review. The transition holds this page on
+        // screen until the management page has loaded, then it unmounts — so the
+        // reset is effectively invisible instead of flashing step 1 mid-load.
+        clearStoredDraft();
+        startNavigation(() => {
+          router.push(`${ISSUANCE_OVERVIEW_PATH}/${result.tokenId}`);
+        });
         return;
       }
       toast.error(result.message, { id: toastId, position: "bottom-right" });
@@ -156,8 +169,8 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
     }
   };
 
-  const primaryLabel = isReview ? (submitting ? "Creating…" : "Create draft") : "Continue";
-  const primaryDisabled = isReview ? blockers.length > 0 || submitting : !canContinue;
+  const primaryLabel = isReview ? (isBusy ? "Creating…" : "Create draft") : "Continue";
+  const primaryDisabled = isReview ? blockers.length > 0 || isBusy : !canContinue;
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-10 md:px-6">
@@ -190,7 +203,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
               isReview
                 ? {
                     blockers,
-                    submitting,
+                    submitting: isBusy,
                     primaryLabel,
                     disabled: primaryDisabled,
                     onSubmit: handleSubmit,
@@ -206,7 +219,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
           type="button"
           variant="secondary"
           onClick={isClassification ? handleCancel : goBack}
-          disabled={submitting}
+          disabled={isBusy}
         >
           {isClassification ? "Cancel" : "Back"}
         </Button>

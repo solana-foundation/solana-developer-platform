@@ -19,7 +19,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import IssuanceLoading from "@/app/dashboard/issuance/loading";
+import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
 import CounterpartyLoading from "@/app/dashboard/payments/counterparty/loading";
 import PaymentsLoading from "@/app/dashboard/payments/loading";
@@ -440,7 +440,7 @@ function resolvePageLoadingComponent(pathname: string): React.ComponentType {
   if (pathname.startsWith("/dashboard/payments")) return PaymentsLoading;
   if (pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody"))
     return WalletsLoading;
-  if (pathname.startsWith("/dashboard/issuance")) return IssuanceLoading;
+  if (pathname.startsWith("/dashboard/issuance")) return IssuancePageSkeleton;
   return DashboardLoading;
 }
 
