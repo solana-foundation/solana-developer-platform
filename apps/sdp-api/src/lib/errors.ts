@@ -4,6 +4,7 @@
 
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import { redactCredentialSecrets, redactCredentialString } from "@/lib/redaction";
 
 export type ErrorCode =
   | "BAD_REQUEST"
@@ -162,11 +163,12 @@ export class AppError extends Error {
   }
 
   toResponse(): ErrorResponse {
+    const details = this.details ? redactCredentialSecrets(this.details) : undefined;
     return {
       error: {
         code: this.code,
-        message: this.message,
-        ...(this.details && { details: this.details }),
+        message: redactCredentialString(this.message),
+        ...(details && { details }),
       },
     };
   }

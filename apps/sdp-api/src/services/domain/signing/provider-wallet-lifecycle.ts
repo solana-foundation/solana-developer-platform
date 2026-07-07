@@ -291,7 +291,7 @@ async function withProvisioningError<T>(providerName: string, run: () => Promise
     }
 
     throw new SigningError(
-      `Failed to provision ${providerName} wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
+      `Failed to provision ${providerName} wallet`,
       "NETWORK_ERROR",
       error instanceof Error ? error : undefined
     );
