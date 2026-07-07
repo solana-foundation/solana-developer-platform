@@ -146,15 +146,22 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
         assetType: draft.assetType,
         issuanceMetadata: buildIssuanceMetadata(draft),
       });
-      if (result.state === "success" && result.tokenId) {
+      if (result.state === "success") {
         toast.success("Asset draft created.", { id: toastId, position: "bottom-right" });
         // Wipe the persisted draft now, but leave the in-memory step untouched so
         // the wizard keeps rendering Review. The transition holds this page on
         // screen until the management page has loaded, then it unmounts — so the
         // reset is effectively invisible instead of flashing step 1 mid-load.
+        //
+        // The write is a single DB transaction, so success means the draft exists
+        // even when the response omits the token id — clear the stored draft
+        // regardless (so a retry can't duplicate it) and deep-link when we have an
+        // id, otherwise fall back to the overview where the new draft is listed.
         clearStoredDraft();
         startNavigation(() => {
-          router.push(`${ISSUANCE_OVERVIEW_PATH}/${result.tokenId}`);
+          router.push(
+            result.tokenId ? `${ISSUANCE_OVERVIEW_PATH}/${result.tokenId}` : ISSUANCE_OVERVIEW_PATH
+          );
         });
         return;
       }

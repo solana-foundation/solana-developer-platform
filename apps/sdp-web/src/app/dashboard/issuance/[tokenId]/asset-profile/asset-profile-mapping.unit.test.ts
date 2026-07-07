@@ -272,6 +272,20 @@ describe("areDraftsEquivalent", () => {
     expect(areDraftsEquivalent(a, b)).toBe(true);
   });
 
+  it("ignores a type-only document row that can never be persisted", () => {
+    const token = makeToken();
+    const profile = makeProfile(FOREIGN_METADATA);
+    const a = profileToDraftState(profile, token);
+    // A row with only a type selected is dropped by buildIssuanceMetadata and by
+    // hydration, so it must not mark the form dirty (would strand it "unsaved").
+    const withTypeOnlyRow = {
+      ...a,
+      documents: [...a.documents, { id: "type-only", docType: "prospectus", name: "", url: "" }],
+    };
+
+    expect(areDraftsEquivalent(a, withTypeOnlyRow)).toBe(true);
+  });
+
   it("detects a real change", () => {
     const token = makeToken();
     const profile = makeProfile(FOREIGN_METADATA);

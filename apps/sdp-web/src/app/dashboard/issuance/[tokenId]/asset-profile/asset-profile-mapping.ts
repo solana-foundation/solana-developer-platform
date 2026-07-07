@@ -275,8 +275,11 @@ function canonicalDraft(draft: DraftState): Record<string, unknown> {
     offeringType: draft.offeringType,
     underlyingAsset: draft.underlyingAsset.trim(),
     custodian: draft.custodian.trim(),
+    // Mirror buildIssuanceMetadata's filter: a row with only a type (no name or
+    // url) is never persisted or re-hydrated, so it must not read as a change —
+    // otherwise a type-only row leaves the form permanently "dirty".
     documents: draft.documents
-      .filter((doc) => doc.docType.trim() || doc.name.trim() || doc.url.trim())
+      .filter((doc) => doc.name.trim() || doc.url.trim())
       .map((doc) => ({ docType: doc.docType.trim(), name: doc.name.trim(), url: doc.url.trim() })),
     accessControl: draft.accessControl,
     capacities: CAPACITY_KEYS.map((key) => draft.capacities[key]),
