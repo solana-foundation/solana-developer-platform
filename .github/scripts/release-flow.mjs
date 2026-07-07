@@ -621,9 +621,36 @@ async function publishApprovedRelease() {
   console.log(`Skipping release publish for non-release commit: ${subject}`);
 }
 
+async function existingReleaseNeedsPublishing(packageJson) {
+  const previousTag = latestReleaseTag();
+  const previousVersion = versionFromReleaseTag(previousTag);
+
+  if (previousVersion && packageJson.version !== previousVersion) {
+    const packageTag = `v${packageJson.version}`;
+    return !tagExists(packageTag) || (token ? !(await githubReleaseExists(packageTag)) : true);
+  }
+
+  return (
+    !dryRun &&
+    previousTag &&
+    previousVersion === packageJson.version &&
+    token &&
+    !(await githubReleaseExists(previousTag))
+  );
+}
+
 async function prepareRelease(attempt = 1) {
   const packageJson = readJson(packageJsonPath);
   const manifest = readJson(manifestPath);
+
+  if (await existingReleaseNeedsPublishing(packageJson)) {
+    console.log("Publishing existing release before preparing the next release PR");
+    await publishApprovedRelease();
+    if (dryRun) {
+      return;
+    }
+  }
+
   const previousTag = latestReleaseTag();
 
   const parsedCommits = parsedCommitsSince(previousTag);
