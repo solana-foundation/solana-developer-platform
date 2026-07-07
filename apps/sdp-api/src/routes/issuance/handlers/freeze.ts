@@ -228,7 +228,7 @@ export const freezeAccount = async (c: AppContext) => {
   }
 
   // Execute freeze on Solana first (Token ACL-aware via Mosaic)
-  const mosaic = createMosaicService(c.env, signer);
+  const mosaic = createMosaicService(c.env, signer, "sponsored");
 
   try {
     const result = await mosaic.freezeAccount({
@@ -432,7 +432,7 @@ export const unfreezeAccount = async (c: AppContext) => {
   }
 
   // Execute thaw on Solana first (Token ACL-aware via Mosaic)
-  const mosaic = createMosaicService(c.env, signer);
+  const mosaic = createMosaicService(c.env, signer, "sponsored");
 
   try {
     const result = await mosaic.thawAccount({

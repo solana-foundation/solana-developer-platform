@@ -13,6 +13,7 @@ import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialo
 import { TokenActionForms } from "./token-action-forms";
 import { TokenAuthorityModal } from "./token-authority-modal";
 import { TokenControlListsSection } from "./token-control-lists-section";
+import { TokenDeployConfirmationDialog } from "./token-deploy-confirmation-dialog";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import {
   type FundManagementModalAction,
@@ -29,6 +30,7 @@ import {
 import type {
   ActionExecutionInput,
   AdminAction,
+  DeployFeePayment,
   PermissionRow,
   RunActionOptions,
   TokenManagementTab,
@@ -225,6 +227,8 @@ export function TokenManagementWorkspace({
   const [fundManagementModalAction, setFundManagementModalAction] =
     useState<FundManagementModalAction | null>(null);
   const [deploySignerWalletId, setDeploySignerWalletId] = useState("");
+  const [deployFeeWalletId, setDeployFeeWalletId] = useState("");
+  const [isDeployConfirmationOpen, setIsDeployConfirmationOpen] = useState(false);
   const [metadataForm, setMetadataForm] = useState(() => createInitialMetadataForm(token));
   const [mintForm, setMintForm] = useState(createInitialMintForm);
   const [burnForm, setBurnForm] = useState(createInitialBurnForm);
@@ -715,20 +719,24 @@ export function TokenManagementWorkspace({
   };
 
   const handleDeploy = () => {
-    runAction(
+    setDeployFeeWalletId(deploySignerWalletId);
+    setIsDeployConfirmationOpen(true);
+  };
+
+  const confirmDeploy = (feePayment: DeployFeePayment) => {
+    setIsDeployConfirmationOpen(false);
+    void runActionImmediately(
       {
         label: "Deploy token",
         method: "POST",
         path: `${tokenBasePath}/deploy`,
         body: {
           signingWalletId: deploySignerWalletId || undefined,
+          feePayment,
+          feeWalletId: feePayment === "wallet" ? deployFeeWalletId || undefined : undefined,
         },
       },
       {
-        requiresConfirmation: true,
-        confirmationTitle: "Deploy token?",
-        confirmationDescription: "This will submit the deploy transaction on-chain.",
-        confirmButtonLabel: "Deploy now",
         submitToast: "Submitting deploy transaction...",
         successToast: "Deploy transaction finalized.",
       }
@@ -1642,6 +1650,17 @@ export function TokenManagementWorkspace({
         isPending={isPending}
         onCancel={dismissActionConfirmation}
         onConfirm={confirmAction}
+      />
+
+      <TokenDeployConfirmationDialog
+        isOpen={isDeployConfirmationOpen}
+        isPending={isPending}
+        feeWallets={deploySignerSelection.wallets}
+        feeWalletId={deployFeeWalletId}
+        feeWalletUnavailableReason={deploySignerSelection.unavailableReason}
+        onFeeWalletIdChange={setDeployFeeWalletId}
+        onCancel={() => setIsDeployConfirmationOpen(false)}
+        onConfirm={confirmDeploy}
       />
 
       {isPending ? (

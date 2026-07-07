@@ -68,7 +68,7 @@ export const prepareForceBurn = async (c: AppContext) => {
   const source = assertValidAddress(parsed.data.forceBurn.source, "source");
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
-  const mosaic = createMosaicService(c.env, signer);
+  const mosaic = createMosaicService(c.env, signer, "sponsored");
   const prepared = await mosaic.prepareForceBurn({
     mint: mintAddress,
     source,
@@ -196,7 +196,7 @@ export const executeForceBurn = async (c: AppContext) => {
     return success(c, { transaction: tx });
   }
 
-  const mosaic = createMosaicService(c.env, signer);
+  const mosaic = createMosaicService(c.env, signer, "sponsored");
 
   try {
     const result = await mosaic.forceBurn({

@@ -5,7 +5,10 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
+import {
+  assertApiKeyWalletAccess,
+  resolveApiKeySigningWalletId,
+} from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import {
   createMosaicService,
@@ -17,6 +20,7 @@ import { createOrgSigner } from "@/services/solana";
 import {
   accountExists,
   createRpc,
+  getAccountInfo,
   getSignatureStatuses,
   getTransaction,
   type ParsedTransaction,
@@ -32,6 +36,30 @@ import { buildIdempotencyMetadata } from "./idempotency";
 import { canonicalMetadataUrl, resolveMetadataOrigin } from "./metadata";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+/**
+ * Conservative floor (0.01 SOL) a signing wallet must hold for a wallet-paid
+ * deploy: covers mint + ABL account rent and transaction fees with headroom,
+ * not an exact quote.
+ */
+const MIN_WALLET_PAID_DEPLOY_LAMPORTS = 10_000_000n;
+
+/**
+ * Ensure the signing wallet holds enough SOL to pay deploy rent and fees
+ * itself, so wallet-paid deploys fail with a clear error up front instead of a
+ * raw Solana debit failure mid-transaction. A missing account means the wallet
+ * has never been funded, i.e. zero balance.
+ */
+async function assertWalletCanPayDeployFees(env: Env, address: Address): Promise<void> {
+  const account = await getAccountInfo(createRpc(env), address);
+  const lamports = account === null ? 0n : account.lamports;
+  if (lamports < MIN_WALLET_PAID_DEPLOY_LAMPORTS) {
+    throw badRequest(
+      `Signing wallet ${address} holds ${lamports} lamports but needs at least ` +
+        `${MIN_WALLET_PAID_DEPLOY_LAMPORTS} to pay deployment rent and fees from its own SOL`
+    );
+  }
+}
 
 /**
  * Persist a mint that landed on-chain even though its metadata-URI follow-up
@@ -245,6 +273,12 @@ export const deployToken = async (c: AppContext) => {
     throw badRequest("Token already has a mint address");
   }
 
+  const { feePayment, feeWalletId } = parsed.data;
+
+  if (feeWalletId && feePayment !== "wallet") {
+    throw badRequest('feeWalletId is only valid with feePayment "wallet"');
+  }
+
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
     operation: "deploy",
@@ -256,6 +290,7 @@ export const deployToken = async (c: AppContext) => {
         template: token.template,
       },
       status: token.status,
+      feePayment,
     },
   });
 
@@ -269,6 +304,8 @@ export const deployToken = async (c: AppContext) => {
       template: token.template,
       name: token.name,
       symbol: token.symbol,
+      feePayment,
+      feeWalletId,
     },
     initiatedByKeyId: auth.id,
     idempotencyKey: idempotencyMetadata.idempotencyKey,
@@ -303,8 +340,22 @@ export const deployToken = async (c: AppContext) => {
     );
     custodyAddress = signer.address;
 
+    let feePayerSigner = signer;
+    if (feePayment === "wallet") {
+      if (feeWalletId && feeWalletId !== signingWalletId) {
+        assertApiKeyWalletAccess(auth, feeWalletId, ["tokens:write"]);
+        feePayerSigner = await createOrgSigner(
+          c.env,
+          auth.organizationId,
+          auth.projectId,
+          feeWalletId
+        );
+      }
+      await assertWalletCanPayDeployFees(c.env, feePayerSigner.address);
+    }
+
     // Create Mosaic service for template-based token deployment
-    const mosaic = createMosaicService(c.env, signer);
+    const mosaic = createMosaicService(c.env, signer, feePayment);
 
     const result = await mosaic.createToken({
       template: token.template,
@@ -322,7 +373,7 @@ export const deployToken = async (c: AppContext) => {
       decimals: token.decimals,
       mintAuthority: signer,
       freezeAuthority: token.isFreezable ? custodyAddress : null,
-      feePayer: signer,
+      feePayer: feePayerSigner,
       extensions: token.extensions ?? undefined,
       enableAbl,
       aclMode,
@@ -358,6 +409,7 @@ export const deployToken = async (c: AppContext) => {
         freezeAuthority: token.isFreezable ? custodyAddress : null,
         ablListAddress: result.listAddress,
         aclMode,
+        feePayment,
       },
     });
 
@@ -374,6 +426,7 @@ export const deployToken = async (c: AppContext) => {
         template: token.template,
         ablListAddress: result.listAddress,
         aclMode,
+        feePayment,
       },
     });
 
@@ -467,7 +520,7 @@ export const prepareDeploy = async (c: AppContext) => {
   const custodyAddress = signer.address;
 
   // Create Mosaic service and prepare transaction
-  const mosaic = createMosaicService(c.env, signer);
+  const mosaic = createMosaicService(c.env, signer, "sponsored");
 
   const enableAbl = shouldEnableOnChainAcl(token);
   const aclMode = getMosaicAclMode(token);
@@ -767,7 +820,7 @@ export const prepareDeployMetadata = async (c: AppContext) => {
   ]);
 
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  const mosaic = createMosaicService(c.env, signer);
+  const mosaic = createMosaicService(c.env, signer, "sponsored");
 
   // Resolve the same uri prepareDeploy used so the on-chain pointer ends up at
   // the SDP-hosted (or issuer-supplied) URL.
