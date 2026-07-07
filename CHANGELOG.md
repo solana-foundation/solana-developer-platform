@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.36.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.35.1...v0.36.0) (2026-07-07)
+
+### Features
+
+* **issuance:** allow manual fee payer when deploying through Kora fails ([#601](https://github.com/solana-foundation/solana-developer-platform/pull/601)) ([6fbb352](https://github.com/solana-foundation/solana-developer-platform/commit/6fbb3529b3150afa5f98c6489f9d9b73986a32c7))
+
+### Maintenance
+
+* create release branch when ref update returns 422 ([#602](https://github.com/solana-foundation/solana-developer-platform/pull/602)) ([fffefed](https://github.com/solana-foundation/solana-developer-platform/commit/fffefede848272094889737e4df021f060b6634e))
+
 ## [0.35.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.35.0...v0.35.1) (2026-07-07)
 
 ### Maintenance
