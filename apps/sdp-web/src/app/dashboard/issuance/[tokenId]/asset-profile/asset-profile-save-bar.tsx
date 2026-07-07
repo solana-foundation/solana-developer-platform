@@ -35,10 +35,10 @@ export function AssetProfileSaveBar({
           </Button>
           <Button type="button" size="sm" onClick={onSave} disabled={saving || errorCount > 0}>
             {saving ? (
-              <>
+              <div className="flex items-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Saving…
-              </>
+              </div>
             ) : (
               "Save changes"
             )}

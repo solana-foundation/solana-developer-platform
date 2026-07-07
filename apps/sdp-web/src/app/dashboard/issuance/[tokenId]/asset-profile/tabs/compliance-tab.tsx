@@ -88,11 +88,6 @@ export function ComplianceTab({
               </p>
             </div>
           )}
-          <ReadOnlyField
-            label="Enforced on-chain"
-            value={enforcedLabel}
-            lockReason="On-chain enforcement was configured at creation."
-          />
         </div>
       </FormCard>
 
