@@ -7,9 +7,9 @@ import { Combobox } from "@/components/ui/combobox";
 import { OFFRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ramps";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import { walletComboboxOptions } from "../wallet-options";
-import { HostedRampFrame } from "./hosted-ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
+import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { hasOnboardingLifecycle } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
@@ -196,7 +196,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   if (currentStepId === "COMPLETE" && quote?.deliveryMode === "hosted") {
     return (
       <div className="space-y-6">
-        <HostedRampFrame title={`${quote.provider} payout`} src={quote.hostedUrl} />
+        <MoonpayRampFrame title={`${quote.provider} payout`} src={quote.hostedUrl} />
         <div className="border-t border-border-light pt-5">
           <RampStatusPanel direction="offramp" transfer={transferStatus} />
         </div>

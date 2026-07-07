@@ -10,7 +10,7 @@ export {
   listOnrampCurrencies,
   simulateSandboxTransfer,
 } from "./handlers/ramps";
-export { recordRampProviderEvent } from "./handlers/ramps/moneygram";
+export { recordRampProviderEvent } from "./handlers/ramps/events";
 export {
   activateRecurringPayment,
   cancelRecurringPayment,
@@ -44,4 +44,4 @@ export {
   getTransferBatch,
   listTransferBatches,
 } from "./handlers/transfer-batches";
-export { createTransfer, getTransfer, listTransfers, prepareTransfer } from "./handlers/transfers";
+export { createTransfer, getTransfer, listTransfers } from "./handlers/transfers";

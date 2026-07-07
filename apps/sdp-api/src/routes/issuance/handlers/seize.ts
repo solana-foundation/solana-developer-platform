@@ -80,7 +80,7 @@ export const prepareSeize = async (c: AppContext) => {
   const destination = assertValidAddress(parsed.data.seize.destination, "destination");
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
-  const mosaic = createMosaicService(c.env, signer);
+  const mosaic = createMosaicService(c.env, signer, "sponsored");
   const prepared = await mosaic.prepareForceTransfer({
     mint: mintAddress,
     source,
@@ -223,7 +223,7 @@ export const executeSeize = async (c: AppContext) => {
     return success(c, { transaction: tx });
   }
 
-  const mosaic = createMosaicService(c.env, signer);
+  const mosaic = createMosaicService(c.env, signer, "sponsored");
 
   try {
     const result = await mosaic.forceTransfer({

@@ -102,7 +102,7 @@ export const pauseToken = async (c: AppContext) => {
       throw badRequest("Pause authority is not controlled by custody");
     }
 
-    const mosaic = createMosaicService(c.env, signer);
+    const mosaic = createMosaicService(c.env, signer, "sponsored");
 
     const result = await mosaic.pauseToken({
       mint: mintAddress,
@@ -223,7 +223,7 @@ export const unpauseToken = async (c: AppContext) => {
       throw badRequest("Pause authority is not controlled by custody");
     }
 
-    const mosaic = createMosaicService(c.env, signer);
+    const mosaic = createMosaicService(c.env, signer, "sponsored");
 
     const result = await mosaic.unpauseToken({
       mint: mintAddress,

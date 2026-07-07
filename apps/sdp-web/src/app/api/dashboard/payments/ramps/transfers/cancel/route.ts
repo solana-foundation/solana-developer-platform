@@ -1,32 +1,9 @@
-import { NextResponse } from "next/server";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { proxyToSdpApi } from "@/lib/sdp-api";
 
 export async function POST(request: Request) {
-  try {
-    const body = await request.text();
-    const apiClient = await createSdpApiClient();
-    const response = await apiClient.request("/v1/payments/ramps/transfers/cancel", {
-      method: "POST",
-      body,
-    });
-
-    const responseBody = await response.text();
-    const contentType = response.headers.get("Content-Type") ?? "application/json";
-
-    return new NextResponse(responseBody, {
-      status: response.status,
-      headers: {
-        "Content-Type": contentType,
-      },
-    });
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error: {
-          message: error instanceof Error ? error.message : "Transfer cancellation failed",
-        },
-      },
-      { status: 500 }
-    );
-  }
+  return proxyToSdpApi({
+    request,
+    traceSource: "route.dashboard.payments.ramps.transfers.cancel.post",
+    path: "/v1/payments/ramps/transfers/cancel",
+  });
 }

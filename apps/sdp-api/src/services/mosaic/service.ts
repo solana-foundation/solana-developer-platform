@@ -247,16 +247,17 @@ export class MosaicService {
       result = await this.signAndSubmitWithMintKeypair(slimTx, mintKeypair);
 
       // The mint is now live on-chain. In custodial deploy `this.signer` is the
-      // mint's metadata update authority, so it can set the uri
-      // (resolveFeePayerSigner swaps in Kora). If that follow-up fails, surface
-      // the created mint so the caller can persist it — otherwise a retry mints
-      // a second, orphaned token.
+      // mint's metadata update authority, so it can set the uri; the caller's
+      // fee payer pays for the follow-up too (resolveFeePayerSigner swaps in
+      // Kora when sponsored). If that follow-up fails, surface the created mint
+      // so the caller can persist it — otherwise a retry mints a second,
+      // orphaned token.
       try {
         await this.updateMetadata({
           mint,
           uri: requestedUri,
           updateAuthority: this.signer,
-          feePayer: this.signer,
+          feePayer: options.feePayer,
         });
       } catch (cause) {
         throw new MintMetadataUpdateError({ ...result, mint, listAddress }, { cause });

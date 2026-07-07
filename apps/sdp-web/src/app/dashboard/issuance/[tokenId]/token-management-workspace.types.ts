@@ -25,6 +25,8 @@ export type AdminAction =
   | "freeze"
   | "allowlist";
 
+export type DeployFeePayment = "sponsored" | "wallet";
+
 export interface ActionExecutionInput {
   label: string;
   method: HttpMethod;

@@ -208,7 +208,7 @@ export const updateToken = async (c: AppContext) => {
         currentAuthority: currentAuthorityRaw,
       });
 
-      const mosaic = createMosaicService(c.env, signer);
+      const mosaic = createMosaicService(c.env, signer, "sponsored");
       const result = await mosaic.updateMetadata({
         mint: assertValidAddress(existing.mintAddress as string, "mintAddress"),
         ...metadataPatch,

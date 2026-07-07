@@ -122,8 +122,8 @@ export interface CreateTokenOptions {
   mintAuthority: Address | TransactionSigner;
   /** Freeze authority (null to disable) */
   freezeAuthority: Address | null;
-  /** Fee payer address */
-  feePayer: Address | TransactionSigner;
+  /** Fee payer for the deploy transaction */
+  feePayer: TransactionSigner;
   /** Extension configuration from SDP */
   extensions?: TokenExtensionsConfig;
   /** Enable on-chain ABL */
