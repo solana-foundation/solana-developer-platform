@@ -27,7 +27,7 @@ import {
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { getAssetTypeLabel, getCategoryLabel } from "./asset-taxonomy";
-import { getDefaultPublicFields, getPublicFieldCandidates } from "./draft-mapping";
+import { getDefaultPublicFields, getPublicFieldCandidates, safeLinkHref } from "./draft-mapping";
 import type { DraftState } from "./issuance-draft-wizard.types";
 
 interface StaticField {
@@ -175,7 +175,7 @@ export function PublicInfoPreview({
     ...enabledCandidates.map((candidate) => ({
       label: candidate.label,
       value: candidate.value,
-      href: candidate.path === "asset.website" ? candidate.value : undefined,
+      href: candidate.path === "asset.website" ? safeLinkHref(candidate.value) : undefined,
       path: candidate.path,
     })),
   ];

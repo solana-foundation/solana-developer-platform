@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { cn, formatDisplayLabel } from "@/lib/utils";
 import { getCategoryPresentation, getSubTypePresentation } from "../../../create/asset-taxonomy";
-import { getAssetDetailsErrors } from "../../../create/draft-mapping";
+import { getAssetDetailsErrors, safeLinkHref } from "../../../create/draft-mapping";
 import type { DraftState } from "../../../create/issuance-draft-wizard.types";
 import { formatDate } from "../../token-management-workspace.utils";
 import type { TokenOperations } from "../use-token-operations";
@@ -45,6 +45,7 @@ export function OverviewTab({
   const subType = getSubTypePresentation(assetProfile.assetCategory, assetProfile.assetType);
   const deployBlockers = ops.canDeployToken ? Object.values(getAssetDetailsErrors(draft)) : [];
   const website = draft.website.trim();
+  const websiteHref = safeLinkHref(website);
 
   return (
     <div className="space-y-4">
@@ -62,16 +63,23 @@ export function OverviewTab({
               {token.description || "No description yet — add one in the Details tab."}
             </p>
             {website ? (
-              <a
-                href={website}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-2.5 inline-flex items-center gap-1.5 text-[13px] font-medium text-[#1c1c1d] hover:underline"
-              >
-                <Globe className="h-3.5 w-3.5 text-[rgba(28,28,29,0.5)]" />
-                {website}
-                <ArrowUpRight className="h-3 w-3 shrink-0" />
-              </a>
+              websiteHref ? (
+                <a
+                  href={websiteHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2.5 inline-flex items-center gap-1.5 text-[13px] font-medium text-[#1c1c1d] hover:underline"
+                >
+                  <Globe className="h-3.5 w-3.5 text-[rgba(28,28,29,0.5)]" />
+                  {website}
+                  <ArrowUpRight className="h-3 w-3 shrink-0" />
+                </a>
+              ) : (
+                <span className="mt-2.5 inline-flex items-center gap-1.5 text-[13px] font-medium text-[rgba(28,28,29,0.62)]">
+                  <Globe className="h-3.5 w-3.5 text-[rgba(28,28,29,0.5)]" />
+                  {website}
+                </span>
+              )
             ) : null}
             {token.mintAddress ? (
               <div className="mt-3 flex items-center gap-2 rounded-lg border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-3 py-2">

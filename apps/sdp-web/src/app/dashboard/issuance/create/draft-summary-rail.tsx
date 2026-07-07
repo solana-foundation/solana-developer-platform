@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { accessControlLabel } from "./asset-details-config";
 import { getAssetTypeLabel, getCategoryLabel } from "./asset-taxonomy";
+import { safeLinkHref } from "./draft-mapping";
 import type { DraftState } from "./issuance-draft-wizard.types";
 
 export interface RailReviewProps {
@@ -126,7 +127,12 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
             label="Investor reporting"
             value={draft.capacities.investorReporting ? "Enabled" : null}
           />
-          <SummaryRow icon={Globe} label="Website" value={website || null} href={website || null} />
+          <SummaryRow
+            icon={Globe}
+            label="Website"
+            value={website || null}
+            href={safeLinkHref(website) ?? null}
+          />
           <SummaryRow icon={Clock} label="Last updated" value={formatUpdatedAt(updatedAt)} />
         </div>
 

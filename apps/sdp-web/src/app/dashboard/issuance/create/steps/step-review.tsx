@@ -24,6 +24,7 @@ import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { accessControlLabel, getCategorySections } from "../asset-details-config";
 import { getAssetTypeLabel, getCategoryLabel } from "../asset-taxonomy";
+import { safeLinkHref } from "../draft-mapping";
 import type { DraftState, WizardStep } from "../issuance-draft-wizard.types";
 import { useIssuanceDraft } from "../use-issuance-draft";
 
@@ -103,7 +104,12 @@ export function StepReview() {
             ]
           : []),
         { icon: Hash, label: "Decimals", value: draft.decimals },
-        { icon: Globe, label: "Website", value: website || null, href: website || null },
+        {
+          icon: Globe,
+          label: "Website",
+          value: website || null,
+          href: safeLinkHref(website) ?? null,
+        },
       ],
     },
     {
@@ -148,7 +154,7 @@ export function StepReview() {
           icon: ImageIcon,
           label: "Logo",
           value: logo || null,
-          href: logo || null,
+          href: safeLinkHref(logo) ?? null,
           preview: logo || null,
         },
         { icon: AlignLeft, label: "Description (public)", value: draft.description },
