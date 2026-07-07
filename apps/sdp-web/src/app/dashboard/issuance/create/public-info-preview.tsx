@@ -316,7 +316,7 @@ export function PublicInfoPreview({
                 type="button"
                 onClick={() => setShowOptional((value) => !value)}
                 aria-expanded={showOptional}
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[rgba(28,28,29,0.02)]"
+                className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[rgba(28,28,29,0.03)] focus-visible:bg-[rgba(28,28,29,0.04)] focus-visible:outline-none"
               >
                 <div className="flex items-start gap-2">
                   <Lock className="mt-0.5 h-4 w-4 shrink-0 text-[rgba(28,28,29,0.5)]" />
