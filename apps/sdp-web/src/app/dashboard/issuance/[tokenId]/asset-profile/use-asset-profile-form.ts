@@ -4,10 +4,16 @@ import type { AssetProfile, Token } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { buildIssuanceMetadata, getAssetDetailsErrors } from "../../create/draft-mapping";
+import {
+  buildIssuanceMetadata,
+  getAssetDetailsErrors,
+} from "../../create/draft-mapping";
 import type { DraftState } from "../../create/issuance-draft-wizard.types";
 import { updateAssetProfileAction } from "./actions";
-import { areDraftsEquivalent, profileToDraftState } from "./asset-profile-mapping";
+import {
+  areDraftsEquivalent,
+  profileToDraftState,
+} from "./asset-profile-mapping";
 
 /**
  * Edit-in-place form state for the asset management workspace: one draft
@@ -32,7 +38,10 @@ export function useAssetProfileForm({
     }
   }, [initialAssetProfile, assetProfile.updatedAt]);
 
-  const baseline = useMemo(() => profileToDraftState(assetProfile, token), [assetProfile, token]);
+  const baseline = useMemo(
+    () => profileToDraftState(assetProfile, token),
+    [assetProfile, token],
+  );
   const [draft, setDraft] = useState<DraftState>(baseline);
   const [baselineKey, setBaselineKey] = useState(assetProfile.updatedAt);
   // Re-hydrate the form when the underlying profile changes (post-save or after
@@ -49,6 +58,9 @@ export function useAssetProfileForm({
   const [showErrors, setShowErrors] = useState(false);
 
   const updateDraft = (patch: Partial<DraftState>) => {
+    if (saving) {
+      return;
+    }
     setDraft((previous) => ({ ...previous, ...patch }));
   };
 
@@ -87,7 +99,9 @@ export function useAssetProfileForm({
           imageUrl: draft.imageUrl.trim() || null,
           // Access-control enforcement can only change while undeployed; the
           // API rejects the field after deploy.
-          ...(isDeployed ? {} : { requiresAllowlist: draft.accessControl === "allowlist" }),
+          ...(isDeployed
+            ? {}
+            : { requiresAllowlist: draft.accessControl === "allowlist" }),
         },
       });
 
@@ -101,7 +115,12 @@ export function useAssetProfileForm({
       if (result.assetProfile) {
         setAssetProfile(result.assetProfile);
         setBaselineKey(result.assetProfile.updatedAt);
-        setDraft(profileToDraftState(result.assetProfile, { ...token, ...draftTokenPatch(draft) }));
+        setDraft(
+          profileToDraftState(result.assetProfile, {
+            ...token,
+            ...draftTokenPatch(draft),
+          }),
+        );
       }
       router.refresh();
     } finally {

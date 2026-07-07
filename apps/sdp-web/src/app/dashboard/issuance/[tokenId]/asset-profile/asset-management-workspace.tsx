@@ -81,7 +81,8 @@ export function AssetManagementWorkspace({
   const ops = useTokenOperations({
     token,
     shouldLoadSupportingData: activeTab !== "overview",
-    shouldLoadAuthorityWallets: activeTab !== "overview" || token.status === "pending",
+    shouldLoadAuthorityWallets:
+      activeTab !== "overview" || token.status === "pending",
     canManageTokenAdmin,
   });
   const form = useAssetProfileForm({ token, assetProfile });
@@ -104,7 +105,7 @@ export function AssetManagementWorkspace({
 
       router.push(nextUrl, { scroll: false });
     },
-    [pathname, router, searchParams]
+    [pathname, router, searchParams],
   );
 
   // Normalize legacy/unknown tab params in the URL.
@@ -122,7 +123,12 @@ export function AssetManagementWorkspace({
     if (activeTab !== "operations" && ops.fundManagementModalAction) {
       ops.closeFundManagementModal();
     }
-  }, [activeTab, ops.fundManagementModalAction, ops.closeFundManagementModal, ops]);
+  }, [
+    activeTab,
+    ops.fundManagementModalAction,
+    ops.closeFundManagementModal,
+    ops,
+  ]);
 
   const effectivePauseDisabledReason = ops.effectivePauseDisabledReason;
 
@@ -152,7 +158,9 @@ export function AssetManagementWorkspace({
       <Tabs
         bordered
         value={activeTab}
-        onValueChange={(value) => syncActiveTabInUrl(value as AssetManagementTab)}
+        onValueChange={(value) =>
+          syncActiveTabInUrl(value as AssetManagementTab)
+        }
       >
         <TabList>
           {managementTabs.map((tab) => (
@@ -165,7 +173,9 @@ export function AssetManagementWorkspace({
 
       {tokenError ? (
         <div className="rounded-xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] px-4 py-3">
-          <p className="text-sm font-medium text-[#8a1f2a]">Token load warning</p>
+          <p className="text-sm font-medium text-[#8a1f2a]">
+            Token load warning
+          </p>
           <p className="mt-1 text-sm text-[#8a1f2a]">{tokenError}</p>
         </div>
       ) : null}
@@ -173,10 +183,12 @@ export function AssetManagementWorkspace({
       {token.status === "paused" ? (
         <div className="flex flex-col gap-3 rounded-xl border border-[rgba(217,119,6,0.24)] bg-[rgba(245,158,11,0.08)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-[#92400e]">Token is paused</p>
+            <p className="text-sm font-medium text-[#92400e]">
+              Token is paused
+            </p>
             <p className="mt-1 text-sm text-[#92400e]">
-              Minting, burning, and administrative transfer actions are disabled until the token is
-              unpaused.
+              Minting, burning, and administrative transfer actions are disabled
+              until the token is unpaused.
             </p>
           </div>
           {canManageTokenAdmin ? (
@@ -187,7 +199,9 @@ export function AssetManagementWorkspace({
                 type="button"
                 size="sm"
                 onClick={() => ops.handlePause(false)}
-                disabled={ops.isPending || Boolean(effectivePauseDisabledReason)}
+                disabled={
+                  ops.isPending || Boolean(effectivePauseDisabledReason)
+                }
               >
                 Unpause token
               </Button>
@@ -196,7 +210,11 @@ export function AssetManagementWorkspace({
         </div>
       ) : null}
 
-      <motion.div key={activeTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+      <motion.div
+        key={activeTab}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
         {activeTab === "overview" ? (
           <OverviewTab
             token={token}
@@ -205,13 +223,20 @@ export function AssetManagementWorkspace({
             ops={ops}
           />
         ) : null}
-        {activeTab === "details" ? <DetailsTab token={token} form={form} ops={ops} /> : null}
+        {activeTab === "details" ? (
+          <DetailsTab token={token} form={form} ops={ops} />
+        ) : null}
         {activeTab === "public-info" ? (
           <PublicInfoTab
             draft={form.draft}
+            disabled={form.saving}
             onToggleField={(path, enabled) =>
               form.updateDraft({
-                publicFields: togglePublicField(form.draft.publicFields, path, enabled),
+                publicFields: togglePublicField(
+                  form.draft.publicFields,
+                  path,
+                  enabled,
+                ),
               })
             }
           />
@@ -244,7 +269,9 @@ export function AssetManagementWorkspace({
         newAuthority={ops.authorityModalNewAuthority}
         authorityWallets={ops.authorityWallets}
         authorityWalletsError={ops.authorityWalletsError}
-        signerUnavailableReason={ops.authorityModalSignerSelection.unavailableReason}
+        signerUnavailableReason={
+          ops.authorityModalSignerSelection.unavailableReason
+        }
         isPending={ops.isPending}
         onNewAuthorityChange={ops.setAuthorityModalNewAuthority}
         onCancel={ops.handleAuthorityModalClose}
@@ -268,7 +295,9 @@ export function AssetManagementWorkspace({
               <TokenSignerSelect
                 signerWallets={ops.deploySignerSelection.wallets}
                 signerWalletId={ops.deploySignerWalletId}
-                signerUnavailableReason={ops.deploySignerSelection.unavailableReason}
+                signerUnavailableReason={
+                  ops.deploySignerSelection.unavailableReason
+                }
                 onSignerWalletIdChange={ops.setDeploySignerWalletId}
               />
               <div className="flex items-center justify-end gap-2">
@@ -283,7 +312,10 @@ export function AssetManagementWorkspace({
                 <button
                   type="button"
                   onClick={() => ops.submitFundManagementAction("deploy")}
-                  disabled={ops.isPending || Boolean(ops.deploySignerSelection.unavailableReason)}
+                  disabled={
+                    ops.isPending ||
+                    Boolean(ops.deploySignerSelection.unavailableReason)
+                  }
                   className="inline-flex h-10 items-center rounded-[12px] bg-[#0f0f10] px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
                 >
                   Deploy now

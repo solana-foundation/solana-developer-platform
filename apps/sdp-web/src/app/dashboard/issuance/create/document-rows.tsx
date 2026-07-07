@@ -8,16 +8,24 @@ import type { DocumentRow } from "./issuance-draft-wizard.types";
 interface DocumentRowsProps {
   documents: DocumentRow[];
   onChange: (documents: DocumentRow[]) => void;
+  disabled?: boolean;
 }
 
 function newRow(): DocumentRow {
   return { id: crypto.randomUUID(), docType: "", name: "", url: "" };
 }
 
-export function DocumentRows({ documents, onChange }: DocumentRowsProps) {
+export function DocumentRows({
+  documents,
+  onChange,
+  disabled,
+}: DocumentRowsProps) {
   const update = (id: string, patch: Partial<DocumentRow>) =>
-    onChange(documents.map((doc) => (doc.id === id ? { ...doc, ...patch } : doc)));
-  const remove = (id: string) => onChange(documents.filter((doc) => doc.id !== id));
+    onChange(
+      documents.map((doc) => (doc.id === id ? { ...doc, ...patch } : doc)),
+    );
+  const remove = (id: string) =>
+    onChange(documents.filter((doc) => doc.id !== id));
 
   return (
     <div className="space-y-3">
@@ -28,23 +36,33 @@ export function DocumentRows({ documents, onChange }: DocumentRowsProps) {
         >
           <Input
             placeholder="Document type"
+            disabled={disabled}
             value={doc.docType}
-            onChange={(event) => update(doc.id, { docType: event.currentTarget.value })}
+            onChange={(event) =>
+              update(doc.id, { docType: event.currentTarget.value })
+            }
           />
           <Input
             placeholder="Name"
+            disabled={disabled}
             value={doc.name}
-            onChange={(event) => update(doc.id, { name: event.currentTarget.value })}
+            onChange={(event) =>
+              update(doc.id, { name: event.currentTarget.value })
+            }
           />
           <Input
             placeholder="https://…"
+            disabled={disabled}
             value={doc.url}
-            onChange={(event) => update(doc.id, { url: event.currentTarget.value })}
+            onChange={(event) =>
+              update(doc.id, { url: event.currentTarget.value })
+            }
           />
           <Button
             type="button"
             variant="ghost"
             size="icon-sm"
+            disabled={disabled}
             onClick={() => remove(doc.id)}
             aria-label="Remove document"
           >
@@ -56,6 +74,7 @@ export function DocumentRows({ documents, onChange }: DocumentRowsProps) {
         type="button"
         variant="secondary"
         size="sm"
+        disabled={disabled}
         onClick={() => onChange([...documents, newRow()])}
         iconLeft={<Plus className="h-4 w-4" />}
       >

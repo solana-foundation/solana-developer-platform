@@ -17,7 +17,10 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { getCategorySections } from "../../../create/asset-details-config";
 import { DocumentRows } from "../../../create/document-rows";
-import { buildIssuanceMetadata, getRequiredAssetDetailKeys } from "../../../create/draft-mapping";
+import {
+  buildIssuanceMetadata,
+  getRequiredAssetDetailKeys,
+} from "../../../create/draft-mapping";
 import {
   CustomFieldRows,
   DetailField,
@@ -26,7 +29,10 @@ import {
   TextField,
 } from "../../../create/form-primitives";
 import type { DraftState } from "../../../create/issuance-draft-wizard.types";
-import { MetadataJsonPanel, MetadataJsonToggle } from "../../../create/metadata-json";
+import {
+  MetadataJsonPanel,
+  MetadataJsonToggle,
+} from "../../../create/metadata-json";
 import {
   findWalletByWalletId,
   getSignerWalletOptionLabel,
@@ -51,7 +57,7 @@ export function DetailsTab({
   form: AssetProfileForm;
   ops: TokenOperations;
 }) {
-  const { draft, updateDraft, errors, showErrors } = form;
+  const { draft, updateDraft, saving, errors, showErrors } = form;
   const [jsonOpen, setJsonOpen] = useState(false);
   const sections = getCategorySections(draft.assetCategory);
   const requiredKeys = getRequiredAssetDetailKeys(draft);
@@ -69,7 +75,10 @@ export function DetailsTab({
   const nameError = fieldError("name");
   const descriptionError = fieldError("description");
 
-  const signerWallet = findWalletByWalletId(ops.authorityWallets, draft.signingWalletId);
+  const signerWallet = findWalletByWalletId(
+    ops.authorityWallets,
+    draft.signingWalletId,
+  );
   const signerLabel = signerWallet
     ? getSignerWalletOptionLabel(signerWallet)
     : draft.signingWalletId || "Project default signer";
@@ -79,13 +88,18 @@ export function DetailsTab({
       <div className="flex items-start justify-between gap-4">
         <p className="inline-flex items-center gap-1.5 text-sm text-[rgba(28,28,29,0.55)]">
           <Lock className="h-3.5 w-3.5 shrink-0" />
-          This information is private by default and won&apos;t be visible to the public unless you
-          choose to include it.
+          This information is private by default and won&apos;t be visible to
+          the public unless you choose to include it.
         </p>
-        <MetadataJsonToggle open={jsonOpen} onToggle={() => setJsonOpen((prev) => !prev)} />
+        <MetadataJsonToggle
+          open={jsonOpen}
+          onToggle={() => setJsonOpen((prev) => !prev)}
+        />
       </div>
 
-      {jsonOpen ? <MetadataJsonPanel metadata={buildIssuanceMetadata(draft)} /> : null}
+      {jsonOpen ? (
+        <MetadataJsonPanel metadata={buildIssuanceMetadata(draft)} />
+      ) : null}
 
       <FormCard
         title="About this asset"
@@ -96,13 +110,18 @@ export function DetailsTab({
           <TextField
             label="Name"
             required
+            disabled={saving}
             value={draft.name}
             onChange={(value) => updateDraft({ name: value })}
             placeholder="e.g., Verde Dollar"
             error={nameError}
           />
           <div className="grid grid-cols-2 items-start gap-4">
-            <ReadOnlyField label="Symbol" value={token.symbol} lockReason="Locked after creation" />
+            <ReadOnlyField
+              label="Symbol"
+              value={token.symbol}
+              lockReason="Locked after creation"
+            />
             <ReadOnlyField
               label="Decimals"
               value={String(token.decimals)}
@@ -120,8 +139,11 @@ export function DetailsTab({
           </Label>
           <textarea
             id="asset-description"
+            disabled={saving}
             value={draft.description}
-            onChange={(event) => updateDraft({ description: event.currentTarget.value })}
+            onChange={(event) =>
+              updateDraft({ description: event.currentTarget.value })
+            }
             rows={3}
             placeholder="Describe what this asset represents."
             aria-invalid={descriptionError ? true : undefined}
@@ -129,7 +151,7 @@ export function DetailsTab({
               "w-full rounded-[14px] border bg-white px-4 py-3 text-sm text-[#1c1c1d] outline-none transition-[box-shadow,border-color] placeholder:text-[rgba(28,28,29,0.4)]",
               descriptionError
                 ? "border-[#c71f37] focus:border-[#c71f37] focus:ring-2 focus:ring-[rgba(199,31,55,0.15)]"
-                : "border-[rgba(28,28,29,0.14)] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)]"
+                : "border-[rgba(28,28,29,0.14)] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)]",
             )}
           />
           {descriptionError ? (
@@ -141,6 +163,7 @@ export function DetailsTab({
         <div className="mt-4 grid items-start gap-4 sm:grid-cols-2">
           <TextField
             label="Website"
+            disabled={saving}
             value={draft.website}
             onChange={(value) => updateDraft({ website: value })}
             placeholder="https://…"
@@ -148,6 +171,7 @@ export function DetailsTab({
           />
           <TextField
             label="Logo image URL"
+            disabled={saving}
             value={draft.imageUrl}
             onChange={(value) => updateDraft({ imageUrl: value })}
             placeholder="https://…/logo.png"
@@ -172,6 +196,7 @@ export function DetailsTab({
                 draft={draft}
                 updateDraft={updateDraft}
                 required={requiredKeys.has(field.key)}
+                disabled={saving}
                 error={fieldError(field.key)}
               />
             ))}
@@ -187,6 +212,7 @@ export function DetailsTab({
         <DocumentRows
           documents={draft.documents}
           onChange={(documents) => updateDraft({ documents })}
+          disabled={saving}
         />
       </FormCard>
 
@@ -198,6 +224,7 @@ export function DetailsTab({
         <CustomFieldRows
           fields={draft.customFields}
           onChange={(customFields) => updateDraft({ customFields })}
+          disabled={saving}
         />
       </FormCard>
 
@@ -214,6 +241,7 @@ export function DetailsTab({
           />
           <TextField
             label="Metadata URI (optional)"
+            disabled={saving}
             value={draft.metadataUri}
             onChange={(value) => updateDraft({ metadataUri: value })}
             placeholder="https://…/metadata.json"

@@ -8,9 +8,17 @@ import { PublicInfoPreview } from "../../../create/public-info-preview";
 export function PublicInfoTab({
   draft,
   onToggleField,
+  disabled,
 }: {
   draft: DraftState;
   onToggleField: (path: string, enabled: boolean) => void;
+  disabled?: boolean;
 }) {
-  return <PublicInfoPreview draft={draft} onToggleField={onToggleField} />;
+  return (
+    <PublicInfoPreview
+      draft={draft}
+      onToggleField={onToggleField}
+      disabled={disabled}
+    />
+  );
 }

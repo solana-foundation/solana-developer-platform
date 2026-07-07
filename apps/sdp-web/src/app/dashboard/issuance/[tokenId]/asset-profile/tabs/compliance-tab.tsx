@@ -6,7 +6,10 @@ import { useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { AdvancedCapacities } from "../../../create/advanced-capacities";
-import { ACCESS_CONTROL_OPTIONS, accessControlLabel } from "../../../create/asset-details-config";
+import {
+  ACCESS_CONTROL_OPTIONS,
+  accessControlLabel,
+} from "../../../create/asset-details-config";
 import { FormCard, ReadOnlyField } from "../../../create/form-primitives";
 import type { DraftState } from "../../../create/issuance-draft-wizard.types";
 import { TokenControlListsSection } from "../../token-control-lists-section";
@@ -27,9 +30,10 @@ export function ComplianceTab({
   ops: TokenOperations;
   canManageTokenAdmin: boolean;
 }) {
-  const { draft, updateDraft } = form;
+  const { draft, updateDraft, saving } = form;
   const isDeployed = Boolean(token.mintAddress);
-  const enforcedLabel = accessControlLabel(ops.accessControlMode) ?? "No transfer restrictions";
+  const enforcedLabel =
+    accessControlLabel(ops.accessControlMode) ?? "No transfer restrictions";
 
   const availableActions: Array<{ id: AdminAction; label: string }> = [
     ...(ops.controlListCopy
@@ -45,7 +49,7 @@ export function ComplianceTab({
       : []),
   ];
   const [activeAction, setActiveAction] = useState<AdminAction | null>(
-    availableActions[0]?.id ?? null
+    availableActions[0]?.id ?? null,
   );
 
   return (
@@ -67,9 +71,13 @@ export function ComplianceTab({
               <Label>Access control</Label>
               <div className="mt-1.5">
                 <Select
+                  disabled={saving}
                   value={draft.accessControl || null}
                   onValueChange={(value) =>
-                    updateDraft({ accessControl: (value ?? "") as DraftState["accessControl"] })
+                    updateDraft({
+                      accessControl: (value ??
+                        "") as DraftState["accessControl"],
+                    })
                   }
                   placeholder="Select access control"
                 >
@@ -94,6 +102,7 @@ export function ComplianceTab({
       </FormCard>
 
       <AdvancedCapacities
+        disabled={saving}
         value={draft.capacities}
         onChange={(key, checked) =>
           updateDraft({ capacities: { ...draft.capacities, [key]: checked } })
@@ -103,7 +112,9 @@ export function ComplianceTab({
       {availableActions.length > 0 ? (
         <div className="space-y-4 pt-2">
           <div>
-            <p className="text-base font-medium text-[#1c1c1d]">Compliance controls</p>
+            <p className="text-base font-medium text-[#1c1c1d]">
+              Compliance controls
+            </p>
             <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
               On-chain actions for this token — these take effect immediately.
             </p>
@@ -116,7 +127,11 @@ export function ComplianceTab({
           />
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
             <div>
-              <OpsActionForms ops={ops} token={token} activeAction={activeAction} />
+              <OpsActionForms
+                ops={ops}
+                token={token}
+                activeAction={activeAction}
+              />
             </div>
             <TokenControlListsSection
               showControlList={ops.showControlList}
