@@ -618,7 +618,7 @@ export function TokenManagementWorkspace({
         {
           id: "deploy" as const,
           title: "Deploy Token",
-          helper: "Deploy this token on-chain before running other fund operations.",
+          helper: "Deploy this token onchain before running other fund operations.",
           actionLabel: "Deploy",
           disabled: Boolean(fundManagementDisabledReasons.deploy),
           disabledReason: fundManagementDisabledReasons.deploy,
@@ -781,7 +781,7 @@ export function TokenManagementWorkspace({
       {
         requiresConfirmation: true,
         confirmationTitle: "Mint tokens?",
-        confirmationDescription: "This will submit a mint transaction on-chain.",
+        confirmationDescription: "This will submit a mint transaction onchain.",
         confirmButtonLabel: "Mint now",
         submitToast: "Submitting mint transaction...",
         successToast: "Mint transaction finalized.",
@@ -827,7 +827,7 @@ export function TokenManagementWorkspace({
       {
         requiresConfirmation: true,
         confirmationTitle: "Burn tokens?",
-        confirmationDescription: "This will submit a burn transaction on-chain.",
+        confirmationDescription: "This will submit a burn transaction onchain.",
         confirmButtonLabel: "Burn now",
         submitToast: "Submitting burn transaction...",
         successToast: "Burn transaction finalized.",
@@ -876,7 +876,7 @@ export function TokenManagementWorkspace({
       {
         requiresConfirmation: true,
         confirmationTitle: "Force transfer?",
-        confirmationDescription: "This will submit a seize (force transfer) transaction on-chain.",
+        confirmationDescription: "This will submit a seize (force transfer) transaction onchain.",
         confirmButtonLabel: "Transfer now",
         submitToast: "Submitting force transfer transaction...",
         successToast: "Force transfer transaction finalized.",
@@ -923,7 +923,7 @@ export function TokenManagementWorkspace({
       {
         requiresConfirmation: true,
         confirmationTitle: "Force burn tokens?",
-        confirmationDescription: "This will submit a force-burn transaction on-chain.",
+        confirmationDescription: "This will submit a force-burn transaction onchain.",
         confirmButtonLabel: "Force burn now",
         submitToast: "Submitting force-burn transaction...",
         successToast: "Force-burn transaction finalized.",
@@ -948,7 +948,7 @@ export function TokenManagementWorkspace({
       {
         requiresConfirmation: true,
         confirmationTitle: "Update authority?",
-        confirmationDescription: "This will submit an authority update transaction on-chain.",
+        confirmationDescription: "This will submit an authority update transaction onchain.",
         confirmButtonLabel: "Update now",
         submitToast: "Submitting authority update transaction...",
         successToast: "Authority update finalized.",
@@ -973,8 +973,8 @@ export function TokenManagementWorkspace({
         requiresConfirmation: true,
         confirmationTitle: pause ? "Pause token?" : "Unpause token?",
         confirmationDescription: pause
-          ? "This will submit a pause transaction on-chain."
-          : "This will submit an unpause transaction on-chain.",
+          ? "This will submit a pause transaction onchain."
+          : "This will submit an unpause transaction onchain.",
         confirmButtonLabel: pause ? "Pause now" : "Unpause now",
         submitToast: pause
           ? "Submitting pause transaction..."
@@ -1009,7 +1009,7 @@ export function TokenManagementWorkspace({
         {
           requiresConfirmation: true,
           confirmationTitle: "Unfreeze account?",
-          confirmationDescription: "This will submit an unfreeze transaction on-chain.",
+          confirmationDescription: "This will submit an unfreeze transaction onchain.",
           confirmButtonLabel: "Unfreeze now",
           submitToast: "Submitting unfreeze transaction...",
           successToast: "Unfreeze transaction finalized.",
@@ -1031,7 +1031,7 @@ export function TokenManagementWorkspace({
       {
         requiresConfirmation: true,
         confirmationTitle: "Freeze account?",
-        confirmationDescription: "This will submit a freeze transaction on-chain.",
+        confirmationDescription: "This will submit a freeze transaction onchain.",
         confirmButtonLabel: "Freeze now",
         submitToast: "Submitting freeze transaction...",
         successToast: "Freeze transaction finalized.",
@@ -1548,7 +1548,9 @@ export function TokenManagementWorkspace({
               Deploy token
             </p>
             <p className="mt-2 text-[14px] leading-[1.45] text-[rgba(28,28,29,0.72)]">
-              This will deploy the token on-chain so operations can run.
+              This will deploy the token onchain so operations can run. The selected wallet becomes
+              the token authority and, with Deploy with Wallet, pays the transaction fee and account
+              rent from its own SOL. Deploy with Kora sponsors those fees instead.
             </p>
             <div className="mt-5 space-y-5">
               <TokenSignerSelect
