@@ -398,7 +398,8 @@ async function resetReleaseBranch(baseSha) {
   try {
     await githubRequest("PATCH", refPath, { sha: baseSha, force: true });
   } catch (error) {
-    if (error.status !== 404) {
+    // Updating a missing ref returns 422 "Reference does not exist", not 404.
+    if (error.status !== 404 && error.status !== 422) {
       throw error;
     }
 
