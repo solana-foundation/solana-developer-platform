@@ -1,7 +1,7 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { Loader2 } from "lucide-react";
+import { Loader2Icon, SparklesIcon, WalletIcon } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -29,6 +29,7 @@ import {
 import type {
   ActionExecutionInput,
   AdminAction,
+  DeployFeePayment,
   PermissionRow,
   RunActionOptions,
   TokenManagementTab,
@@ -170,7 +171,7 @@ function LoadingSection({ message }: { message: string }) {
   return (
     <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-6 py-10">
       <div className="flex items-center gap-3 text-sm text-[rgba(28,28,29,0.64)]">
-        <Loader2 className="size-4 animate-spin" />
+        <Loader2Icon className="size-4 animate-spin" />
         <span>{message}</span>
       </div>
     </div>
@@ -617,7 +618,7 @@ export function TokenManagementWorkspace({
         {
           id: "deploy" as const,
           title: "Deploy Token",
-          helper: "Deploy this token on-chain before running other fund operations.",
+          helper: "Deploy this token onchain before running other fund operations.",
           actionLabel: "Deploy",
           disabled: Boolean(fundManagementDisabledReasons.deploy),
           disabledReason: fundManagementDisabledReasons.deploy,
@@ -714,21 +715,19 @@ export function TokenManagementWorkspace({
     });
   };
 
-  const handleDeploy = () => {
-    runAction(
+  const deployToken = (feePayment: DeployFeePayment) => {
+    closeFundManagementModal();
+    void runActionImmediately(
       {
         label: "Deploy token",
         method: "POST",
         path: `${tokenBasePath}/deploy`,
         body: {
           signingWalletId: deploySignerWalletId || undefined,
+          feePayment,
         },
       },
       {
-        requiresConfirmation: true,
-        confirmationTitle: "Deploy token?",
-        confirmationDescription: "This will submit the deploy transaction on-chain.",
-        confirmButtonLabel: "Deploy now",
         submitToast: "Submitting deploy transaction...",
         successToast: "Deploy transaction finalized.",
       }
@@ -782,7 +781,7 @@ export function TokenManagementWorkspace({
       {
         requiresConfirmation: true,
         confirmationTitle: "Mint tokens?",
-        confirmationDescription: "This will submit a mint transaction on-chain.",
+        confirmationDescription: "This will submit a mint transaction onchain.",
         confirmButtonLabel: "Mint now",
         submitToast: "Submitting mint transaction...",
         successToast: "Mint transaction finalized.",
@@ -828,7 +827,7 @@ export function TokenManagementWorkspace({
       {
         requiresConfirmation: true,
         confirmationTitle: "Burn tokens?",
-        confirmationDescription: "This will submit a burn transaction on-chain.",
+        confirmationDescription: "This will submit a burn transaction onchain.",
         confirmButtonLabel: "Burn now",
         submitToast: "Submitting burn transaction...",
         successToast: "Burn transaction finalized.",
@@ -877,7 +876,7 @@ export function TokenManagementWorkspace({
       {
         requiresConfirmation: true,
         confirmationTitle: "Force transfer?",
-        confirmationDescription: "This will submit a seize (force transfer) transaction on-chain.",
+        confirmationDescription: "This will submit a seize (force transfer) transaction onchain.",
         confirmButtonLabel: "Transfer now",
         submitToast: "Submitting force transfer transaction...",
         successToast: "Force transfer transaction finalized.",
@@ -924,7 +923,7 @@ export function TokenManagementWorkspace({
       {
         requiresConfirmation: true,
         confirmationTitle: "Force burn tokens?",
-        confirmationDescription: "This will submit a force-burn transaction on-chain.",
+        confirmationDescription: "This will submit a force-burn transaction onchain.",
         confirmButtonLabel: "Force burn now",
         submitToast: "Submitting force-burn transaction...",
         successToast: "Force-burn transaction finalized.",
@@ -949,7 +948,7 @@ export function TokenManagementWorkspace({
       {
         requiresConfirmation: true,
         confirmationTitle: "Update authority?",
-        confirmationDescription: "This will submit an authority update transaction on-chain.",
+        confirmationDescription: "This will submit an authority update transaction onchain.",
         confirmButtonLabel: "Update now",
         submitToast: "Submitting authority update transaction...",
         successToast: "Authority update finalized.",
@@ -974,8 +973,8 @@ export function TokenManagementWorkspace({
         requiresConfirmation: true,
         confirmationTitle: pause ? "Pause token?" : "Unpause token?",
         confirmationDescription: pause
-          ? "This will submit a pause transaction on-chain."
-          : "This will submit an unpause transaction on-chain.",
+          ? "This will submit a pause transaction onchain."
+          : "This will submit an unpause transaction onchain.",
         confirmButtonLabel: pause ? "Pause now" : "Unpause now",
         submitToast: pause
           ? "Submitting pause transaction..."
@@ -1010,7 +1009,7 @@ export function TokenManagementWorkspace({
         {
           requiresConfirmation: true,
           confirmationTitle: "Unfreeze account?",
-          confirmationDescription: "This will submit an unfreeze transaction on-chain.",
+          confirmationDescription: "This will submit an unfreeze transaction onchain.",
           confirmButtonLabel: "Unfreeze now",
           submitToast: "Submitting unfreeze transaction...",
           successToast: "Unfreeze transaction finalized.",
@@ -1032,7 +1031,7 @@ export function TokenManagementWorkspace({
       {
         requiresConfirmation: true,
         confirmationTitle: "Freeze account?",
-        confirmationDescription: "This will submit a freeze transaction on-chain.",
+        confirmationDescription: "This will submit a freeze transaction onchain.",
         confirmButtonLabel: "Freeze now",
         submitToast: "Submitting freeze transaction...",
         successToast: "Freeze transaction finalized.",
@@ -1197,9 +1196,6 @@ export function TokenManagementWorkspace({
     closeFundManagementModal();
 
     switch (action) {
-      case "deploy":
-        handleDeploy();
-        return;
       case "mint":
         handleMint();
         return;
@@ -1552,7 +1548,7 @@ export function TokenManagementWorkspace({
               Deploy token
             </p>
             <p className="mt-2 text-[14px] leading-[1.45] text-[rgba(28,28,29,0.72)]">
-              This will deploy the token on-chain so operations can run.
+              This will deploy the token onchain so operations can run.
             </p>
             <div className="mt-5 space-y-5">
               <TokenSignerSelect
@@ -1560,8 +1556,9 @@ export function TokenManagementWorkspace({
                 signerWalletId={deploySignerWalletId}
                 signerUnavailableReason={deploySignerSelection.unavailableReason}
                 onSignerWalletIdChange={setDeploySignerWalletId}
+                helperText="Pay the transaction and account fees from the signer wallet, or with Kora sponsorship."
               />
-              <div className="flex items-center justify-end gap-2">
+              <div className="flex items-center justify-between gap-2">
                 <button
                   type="button"
                   onClick={closeFundManagementModal}
@@ -1570,14 +1567,27 @@ export function TokenManagementWorkspace({
                 >
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  onClick={() => submitFundManagementAction("deploy")}
-                  disabled={isPending || Boolean(deploySignerSelection.unavailableReason)}
-                  className="inline-flex h-10 items-center rounded-[12px] bg-[#0f0f10] px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
-                >
-                  Deploy now
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => deployToken("wallet")}
+                    disabled={isPending || Boolean(deploySignerSelection.unavailableReason)}
+                    className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-[rgba(28,28,29,0.16)] bg-white px-4 text-sm font-medium text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.04)] disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    <WalletIcon className="size-4" />
+                    Deploy with Wallet
+                  </button>
+                  <TokenDisabledActionTooltip reason="Kora sponsorship is unavailable right now.">
+                    <button
+                      type="button"
+                      disabled
+                      className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-[#0f0f10] px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <SparklesIcon className="size-4" />
+                      Deploy with Kora
+                    </button>
+                  </TokenDisabledActionTooltip>
+                </div>
               </div>
             </div>
           </div>
@@ -1646,7 +1656,7 @@ export function TokenManagementWorkspace({
 
       {isPending ? (
         <div className="fixed right-4 bottom-4 z-30 inline-flex items-center gap-2 rounded-lg border border-[rgba(28,28,29,0.12)] bg-white px-3 py-2 text-sm shadow-lg">
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Loader2Icon className="h-4 w-4 animate-spin" />
           Running action...
         </div>
       ) : null}

@@ -227,6 +227,7 @@ export const updateAuthoritySchema = z.object({
 
 export const deployTokenSchema = z.object({
   signingWalletId: z.string().min(1).optional(),
+  feePayment: z.enum(["sponsored", "wallet"]).default("sponsored"),
 });
 
 // Records a confirmed non-custodial deploy: the client sends the `mint` it
