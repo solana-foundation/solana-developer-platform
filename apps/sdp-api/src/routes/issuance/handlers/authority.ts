@@ -98,7 +98,7 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     requestedWalletId: parsed.data.signingWalletId,
     currentAuthority: currentAuthorityRaw,
   });
-  const mosaic = createMosaicService(c.env, signer);
+  const mosaic = createMosaicService(c.env, signer, "sponsored");
 
   const prepared = await mosaic.prepareUpdateAuthority({
     mint: mintAddress,
@@ -246,7 +246,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     return success(c, { transaction: tx });
   }
 
-  const mosaic = createMosaicService(c.env, signer);
+  const mosaic = createMosaicService(c.env, signer, "sponsored");
 
   try {
     const result = await mosaic.updateAuthority({

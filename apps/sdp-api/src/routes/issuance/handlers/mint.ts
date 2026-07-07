@@ -238,7 +238,7 @@ export const prepareMint = async (c: AppContext) => {
 
   // Build unsigned transaction using Mosaic
   // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
-  const mosaic = createMosaicService(c.env, signer);
+  const mosaic = createMosaicService(c.env, signer, "sponsored");
 
   // For allowlist tokens with on-chain ABL, sync the destination wallet to
   // the on-chain list (and DB mirror) before preparing the mint tx so the
@@ -386,7 +386,7 @@ export const executeMint = async (c: AppContext) => {
   // (`isWalletOnList` returns true) since the original call drove the
   // wallet on-chain.
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  const mosaic = createMosaicService(c.env, signer);
+  const mosaic = createMosaicService(c.env, signer, "sponsored");
   const addedToAllowlist = ablListAddress
     ? await syncDestinationToOnChainAllowlist({
         tokenService,

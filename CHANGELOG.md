@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.36.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.35.1...v0.36.0) (2026-07-07)
+
+### Features
+
+* **issuance:** allow manual fee payer when deploying through Kora fails ([#601](https://github.com/solana-foundation/solana-developer-platform/pull/601)) ([6fbb352](https://github.com/solana-foundation/solana-developer-platform/commit/6fbb3529b3150afa5f98c6489f9d9b73986a32c7))
+
+### Maintenance
+
+* create release branch when ref update returns 422 ([#602](https://github.com/solana-foundation/solana-developer-platform/pull/602)) ([fffefed](https://github.com/solana-foundation/solana-developer-platform/commit/fffefede848272094889737e4df021f060b6634e))
+
+## [0.35.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.35.0...v0.35.1) (2026-07-07)
+
+### Maintenance
+
+* create signed release PR commits ([ef053df](https://github.com/solana-foundation/solana-developer-platform/commit/ef053df212faec0d3236597dc3467b7264c21f34))
+* release through auto-merged PR ([#597](https://github.com/solana-foundation/solana-developer-platform/pull/597)) ([0b20f73](https://github.com/solana-foundation/solana-developer-platform/commit/0b20f737c9e36f5b1395492ec8d8f7cb5ee936b5))
+* sign generated release commits ([#596](https://github.com/solana-foundation/solana-developer-platform/pull/596)) ([c3d43ff](https://github.com/solana-foundation/solana-developer-platform/commit/c3d43ff628aedcd876ab8e7fa2551d872fbe36fd))
+* release directly after production approval ([#586](https://github.com/solana-foundation/solana-developer-platform/pull/586)) ([15ac676](https://github.com/solana-foundation/solana-developer-platform/commit/15ac6765f7a36de9f400611ff4b119a4f56ee1f9))
+* harden npm and GitHub Actions supply chain ([#593](https://github.com/solana-foundation/solana-developer-platform/pull/593)) ([eb59d6b](https://github.com/solana-foundation/solana-developer-platform/commit/eb59d6b95989b7a3e5e9b14a7b6ee26fc519667d))
+
 ## [0.35.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.34.0...v0.35.0) (2026-07-06)
 
 ### Features
