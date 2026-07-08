@@ -32,4 +32,4 @@ Skip the flows you don't support — they're parallel capabilities, not a strict
 
 ## Reference implementation
 
-`apps/sdp-api/src/lib/ramps/providers/lightspark.ts` is the canonical example the skills point at. The type system is the checklist: adding your provider id to `RAMP_PROVIDERS` breaks compilation at every site you must wire.
+`apps/sdp-api/src/lib/ramps/providers/lightspark/client.ts` is the canonical example the skills point at. The type system is the checklist: adding your provider id to `RAMP_PROVIDERS` breaks compilation at every site you must wire.

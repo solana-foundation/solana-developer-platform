@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { redactCredentialString } from "@/lib/redaction";
 import { SigningError } from "@/services/ports";
 
 function hasEmptyResponseBody(response: Response): boolean {
@@ -6,7 +7,10 @@ function hasEmptyResponseBody(response: Response): boolean {
 }
 
 export async function readErrorResponseText(response: Response): Promise<string> {
-  return response.text().catch(() => "Failed to read error response");
+  return response
+    .text()
+    .then((body) => redactCredentialString(body))
+    .catch(() => "Failed to read error response");
 }
 
 export async function parseJsonResponse<T>(response: Response): Promise<T> {

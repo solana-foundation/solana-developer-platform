@@ -7,7 +7,7 @@ description: Scaffold and wire a new ramp provider into SDP so the platform know
 
 Step 1. This makes the platform *aware* of your provider and routes to it. The method bodies (estimate, quote, webhook, requirements, rails) are the other skills — here you build the skeleton and wire every dispatch site.
 
-Canonical example to copy: **`apps/sdp-api/src/lib/ramps/providers/lightspark.ts`** (the class) + how it's referenced across the files below.
+Canonical example to copy: **`apps/sdp-api/src/lib/ramps/providers/lightspark/client.ts`** (the class) + how it's referenced across the files below.
 
 ## The mantra: add the id, follow the compiler
 
@@ -25,7 +25,7 @@ Five sites break, in roughly this order:
 | `lib/ramps/index.ts` | `RAMP_PROVIDER_CLIENTS` is `as const satisfies Record<RampProviderId, …>` | `<id>: new <Id>RampClient()` |
 | `services/provider-availability.service.ts` | `ramps: Record<RampProviderId, ProviderAvailabilityDefinition>` | `<id>: { label, isConfigured }` |
 | `routes/payments/handlers/ramps.ts` | quote, requirements, and (currently unused) execute switches end in `const _exhaustive: never` | a `case "<id>"` in each |
-| `routes/webhooks/handlers.ts` | webhook dispatch switch ends in `satisfies never` | a `case "<id>"` |
+| `routes/webhooks/handlers.ts` | `RAMP_PROVIDER_WEBHOOK_PROCESSOR` is `as const satisfies Record<Exclude<RampProviderId, …>, WebhookProcessor<…>>` | `<id>: new <Id>WebhookProcessor()` (or extend the `Exclude` list if you skip webhooks) |
 | `provider-access.ts` tier defaults | `createBooleanRecord(RAMP_PROVIDERS, …)` | (optional) add `<id>` to a tier's enabled list |
 
 ## The wiring
@@ -75,17 +75,17 @@ The keys you reference in step 3 (and in your config reader) must exist on the `
 Add a `case "<id>"` to each switch the compiler flags — the quote paths and `advanceCounterpartyRequirements`, plus the `executeOnramp`/`executeOfframp` switches. (Execute isn't currently exercised, but those switches still end in a `never` default, so add a case to compile.) The handler resolves DB state (counterparty, wallet, customer) and passes pre-resolved inputs to your client — the client never touches the DB. Provider-specific DB resolution that's too big to inline goes in `routes/payments/handlers/ramps/<id>.ts` (see `ramps/lightspark.ts`).
 
 ### 6. Webhook dispatch — `routes/webhooks/handlers.ts`
-Add a `case "<id>"` calling your `handle<Id>RampWebhook`. `parseRampWebhookProvider` accepts the id automatically once it's in `RAMP_PROVIDER_CLIENTS`. (Webhook *implementation* is the `integrate-webhook` skill.)
+Add `<id>: new <Id>WebhookProcessor()` to the `RAMP_PROVIDER_WEBHOOK_PROCESSOR` map (or extend its `Exclude<RampProviderId, …>` if your provider has no webhooks). `parseRampWebhookProvider` accepts the id automatically once it's in that map. (Webhook *implementation*, including the `WebhookProcessor` class itself, is the `integrate-webhook` skill.)
 
 ## The provider class + config reader
 
-Create `lib/ramps/providers/<id>.ts`:
+Create `lib/ramps/providers/<id>/client.ts`:
 
 ```ts
 export class <Id>RampClient implements RampProvider {
   readonly id = "<id>";
   // estimate*, createOfframpQuote, validateCounterparty, _discoverRails,
-  // readRailSupport, validateWebhook — bodies live in the capability skills.
+  // readRailSupport — bodies live in the capability skills.
 }
 ```
 

@@ -1,6 +1,6 @@
 import type {
-  CounterpartyEntityType,
-  CounterpartyIdentity,
+  CounterpartyBusinessIdentity,
+  CounterpartyIndividualIdentity,
   CounterpartyProviderData,
   CounterpartyStatus,
 } from "@sdp/types";
@@ -18,21 +18,30 @@ import type {
 import { generateCounterpartyId } from "./counterparty.repository";
 
 function mapCounterpartyRow(row: Record<string, unknown>): CounterpartyRow {
-  return {
+  const base = {
     id: row.id as string,
     organization_id: row.organization_id as string,
     project_id: row.project_id as string,
     external_id: row.external_id as string | null,
-    entity_type: row.entity_type as CounterpartyEntityType,
     display_name: row.display_name as string,
     email: row.email as string,
-    identity: row.identity as CounterpartyIdentity,
     provider_data: row.provider_data as CounterpartyProviderData,
     status: row.status as CounterpartyStatus,
     created_by: row.created_by as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
+  return row.entity_type === "individual"
+    ? {
+        ...base,
+        entity_type: "individual",
+        identity: row.identity as CounterpartyIndividualIdentity,
+      }
+    : {
+        ...base,
+        entity_type: "business",
+        identity: row.identity as CounterpartyBusinessIdentity,
+      };
 }
 
 async function getCounterpartyByIdInternal(

@@ -55,6 +55,11 @@ const PROVIDER_LOGOS: Partial<
     backgroundClassName: "bg-white",
     paddingClassName: "p-2",
   },
+  ibm_haven: {
+    src: "/provider-logos/ibm-haven.svg",
+    backgroundClassName: "bg-white",
+    paddingClassName: "p-1.5",
+  },
 };
 
 interface WalletProviderMarkProps {

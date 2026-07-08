@@ -1,4 +1,9 @@
-import type { PolicyDefaultAction, PolicyRule } from "@sdp/types";
+import type {
+  PolicyDefaultAction,
+  PolicyEvaluationContext,
+  PolicyRule,
+  WalletOperationFamily,
+} from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { ApiKeyService } from "@/services/api-key.service";
@@ -272,6 +277,100 @@ describe("PolicyRepository (postgres)", () => {
       status: "pending_approval",
     });
     expect(updatedOperation?.updated_at).not.toBe(operation?.updated_at);
+  });
+
+  it("lists recent policy evaluations scoped to a wallet for audit review", async () => {
+    await seedAdditionalCustodyWallet();
+
+    const operation = await repo.createWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      operationFamily: "ramp",
+      operationType: "onramp_quote",
+      asset: "USDC",
+      amount: "25.00",
+      destination: "recipient_1",
+      status: "pending_approval",
+    });
+    expect(operation).not.toBeNull();
+
+    const approvalRequest = await repo.createApprovalRequest({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      walletOperationId: operation?.id ?? "",
+      provider: "future-provider",
+      providerReference: "provider_approval_1",
+    });
+    expect(approvalRequest).not.toBeNull();
+
+    const evaluation = await repo.createPolicyEvaluation({
+      walletOperationId: operation?.id ?? "",
+      decision: "approval_required",
+      reasonCode: "wallet_policy_match",
+      reason: "Ramp operation matched approval policy.",
+      matchedRules: [{ ruleId: "approval-required" }],
+      evaluationContext: buildPolicyEvaluationContext({
+        operationId: operation?.id ?? "",
+        custodyWalletId: TEST_CUSTODY_WALLET.id,
+        walletId: TEST_CUSTODY_WALLET.walletId,
+        operationFamily: "ramp",
+        operationType: "onramp_quote",
+      }),
+      requiresApproval: true,
+      approvalRequestId: approvalRequest?.id,
+    });
+    expect(evaluation).not.toBeNull();
+
+    const otherWalletOperation = await repo.createWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: SECOND_CUSTODY_WALLET.id,
+      walletId: SECOND_CUSTODY_WALLET.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      operationFamily: "payment",
+      operationType: "payment_transfer",
+      status: "failed",
+    });
+    expect(otherWalletOperation).not.toBeNull();
+
+    await repo.createPolicyEvaluation({
+      walletOperationId: otherWalletOperation?.id ?? "",
+      decision: "deny",
+      reasonCode: "wallet_policy_match",
+      evaluationContext: buildPolicyEvaluationContext({
+        operationId: otherWalletOperation?.id ?? "",
+        custodyWalletId: SECOND_CUSTODY_WALLET.id,
+        walletId: SECOND_CUSTODY_WALLET.walletId,
+        operationFamily: "payment",
+        operationType: "payment_transfer",
+      }),
+    });
+
+    const audits = await repo.listWalletPolicyEvaluationAudits({
+      organizationId: TEST_ORG.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      limit: 10,
+    });
+
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      wallet_operation_id: operation?.id,
+      policy_evaluation_id: evaluation?.id,
+      operation_family: "ramp",
+      operation_type: "onramp_quote",
+      asset: "USDC",
+      amount: "25.00",
+      destination: "recipient_1",
+      operation_status: "pending_approval",
+      decision: "approval_required",
+      reason_code: "wallet_policy_match",
+      reason: "Ramp operation matched approval policy.",
+      requires_approval: true,
+      approval_request_id: approvalRequest?.id,
+    });
   });
 
   it("maps legacy policy evaluation rows without a structured context to null", async () => {
@@ -1001,6 +1100,46 @@ async function seedEndpointWalletPermission(id: string, walletId: string): Promi
     )
     .bind(id, TEST_API_KEY.id, walletId)
     .run();
+}
+
+function buildPolicyEvaluationContext(input: {
+  operationId: string;
+  custodyWalletId: string;
+  walletId: string;
+  operationFamily: WalletOperationFamily;
+  operationType: string;
+}): PolicyEvaluationContext {
+  return {
+    operation: {
+      id: input.operationId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: input.custodyWalletId,
+      walletId: input.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      actor: { type: "api_key", id: TEST_API_KEY.id, apiKeyId: TEST_API_KEY.id },
+      source: "api",
+      operationFamily: input.operationFamily,
+      operationType: input.operationType,
+      asset: null,
+      amount: null,
+      destination: null,
+      context: {},
+      providerExtensions: {},
+      idempotencyKey: null,
+      rawPayload: {},
+      createdAt: "2026-06-18T00:00:00.000Z",
+    },
+    walletPolicy: {
+      source: "implicit_default_allow",
+      profileId: null,
+      revisionId: null,
+      defaultAction: "allow",
+      decision: "allow",
+      requiresApproval: false,
+    },
+    apiKeyPolicy: null,
+  };
 }
 
 async function createActiveApiKeyControlProfile(

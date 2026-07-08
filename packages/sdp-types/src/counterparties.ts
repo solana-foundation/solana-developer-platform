@@ -3,9 +3,6 @@ import type { Country, CountryCode } from "./countries";
 export const COUNTERPARTY_ENTITY_TYPES = ["individual", "business"] as const;
 export type CounterpartyEntityType = (typeof COUNTERPARTY_ENTITY_TYPES)[number];
 
-export const COUNTERPARTY_ID_TYPES = ["PAS", "DRV", "STA", "GOV"] as const;
-export type CounterpartyIdType = (typeof COUNTERPARTY_ID_TYPES)[number];
-
 export interface CounterpartyAddress {
   line1: string;
   line2?: string;
@@ -15,15 +12,6 @@ export interface CounterpartyAddress {
   subdivisionCode?: string;
 }
 
-export interface CounterpartyGovernmentId {
-  type: CounterpartyIdType;
-  number: string;
-  issueCountry: CountryCode;
-  subdivisionCode?: string;
-  issueDate?: string;
-  expiryDate?: string;
-}
-
 export const COUNTERPARTY_EMPLOYMENT_STATUSES = [
   "SELF_EMPLOYED",
   "SALARIED",
@@ -31,7 +19,6 @@ export const COUNTERPARTY_EMPLOYMENT_STATUSES = [
   "RETIRED",
   "NOT_PROVIDED",
 ] as const;
-export type CounterpartyEmploymentStatus = (typeof COUNTERPARTY_EMPLOYMENT_STATUSES)[number];
 
 export const COUNTERPARTY_SOURCE_OF_FUNDS = [
   "SALARY",
@@ -42,7 +29,6 @@ export const COUNTERPARTY_SOURCE_OF_FUNDS = [
   "GAMBLING",
   "REAL_ESTATE",
 ] as const;
-export type CounterpartySourceOfFunds = (typeof COUNTERPARTY_SOURCE_OF_FUNDS)[number];
 
 export const COUNTERPARTY_PEP_STATUSES = [
   "NOT_PEP",
@@ -53,7 +39,6 @@ export const COUNTERPARTY_PEP_STATUSES = [
   "CLOSE_ASSOCIATES",
   "FAMILY_MEMBERS",
 ] as const;
-export type CounterpartyPepStatus = (typeof COUNTERPARTY_PEP_STATUSES)[number];
 
 export const COUNTERPARTY_INTENDED_USE = [
   "TRANSFERS_OWN_WALLET",
@@ -62,7 +47,6 @@ export const COUNTERPARTY_INTENDED_USE = [
   "GOODS_SERVICES",
   "DONATIONS",
 ] as const;
-export type CounterpartyIntendedUse = (typeof COUNTERPARTY_INTENDED_USE)[number];
 
 export const COUNTERPARTY_YEARLY_INCOME = [
   "INCOME_0_TO_50K",
@@ -73,7 +57,6 @@ export const COUNTERPARTY_YEARLY_INCOME = [
   "INCOME_750K_TO_1M",
   "INCOME_ABOVE_1M",
 ] as const;
-export type CounterpartyYearlyIncome = (typeof COUNTERPARTY_YEARLY_INCOME)[number];
 
 export const COUNTERPARTY_INDUSTRY_SECTORS = [
   "INVESTMENT",
@@ -120,76 +103,50 @@ export const COUNTERPARTY_INDUSTRY_SECTORS = [
   "TRAVEL_TRANSPORT",
   "WEAPONS",
 ] as const;
-export type CounterpartyIndustrySector = (typeof COUNTERPARTY_INDUSTRY_SECTORS)[number];
 
-export interface CounterpartyMonetaryAmount {
-  amount: string;
-  currency: string;
+export interface CounterpartyBusinessIdentity {
+  address: CounterpartyAddress;
 }
 
-export interface CounterpartyTaxIdentification {
-  number: string;
-  residenceCountryCode: CountryCode;
-}
-
-export interface CounterpartyComplianceCdd {
-  employmentStatus: CounterpartyEmploymentStatus;
-  sourceOfFunds: CounterpartySourceOfFunds;
-  pepStatus: CounterpartyPepStatus;
-  intendedUseOfAccount: CounterpartyIntendedUse;
-  expectedMonthlyVolume: CounterpartyMonetaryAmount;
-  estimatedYearlyIncome: CounterpartyYearlyIncome;
-  employmentIndustrySector: CounterpartyIndustrySector;
-}
-
-export interface CounterpartyCompliance {
-  taxIdentification?: CounterpartyTaxIdentification;
-  nationality?: CountryCode;
-  birthCountryCode?: CountryCode;
-  cdd?: CounterpartyComplianceCdd;
-}
-
-export interface CounterpartyIdentity {
-  firstName?: string;
+export interface CounterpartyIndividualIdentity {
+  firstName: string;
   middleName?: string;
-  lastName?: string;
+  lastName: string;
   secondLastName?: string;
-  dateOfBirth?: string;
-  phone?: string;
-  address?: CounterpartyAddress;
-  birthCountryCode?: CountryCode;
-  citizenshipCountryCode?: CountryCode;
-  governmentId?: CounterpartyGovernmentId;
-  compliance?: CounterpartyCompliance;
-  [extension: string]: unknown;
+  dateOfBirth: string;
+  phone: string;
+  address: CounterpartyAddress;
 }
+
+export type CounterpartyIdentity = CounterpartyIndividualIdentity | CounterpartyBusinessIdentity;
 
 export type CounterpartyStatus = "active" | "archived";
 
 export type CounterpartyProviderData = Record<string, unknown>;
 
-export interface Counterparty {
+/** entityType discriminates the identity shape: checking it narrows `identity`. */
+export type CounterpartyEntityIdentity =
+  | { entityType: "individual"; identity: CounterpartyIndividualIdentity }
+  | { entityType: "business"; identity: CounterpartyBusinessIdentity };
+
+export type Counterparty = {
   id: string;
   organizationId: string;
   projectId: string | null;
   externalId: string | null;
-  entityType: CounterpartyEntityType;
   displayName: string;
   email: string;
-  identity: CounterpartyIdentity;
   status: CounterpartyStatus;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
-}
+} & CounterpartyEntityIdentity;
 
-export interface CreateCounterpartyRequest {
+export type CreateCounterpartyRequest = {
   externalId?: string;
-  entityType: CounterpartyEntityType;
   displayName: string;
   email: string;
-  identity?: CounterpartyIdentity;
-}
+} & CounterpartyEntityIdentity;
 
 export interface UpdateCounterpartyRequest {
   externalId?: string | null;
@@ -205,15 +162,6 @@ export interface CounterpartyResponse {
 
 export interface CounterpartyFieldOptions {
   entityTypes: readonly CounterpartyEntityType[];
-  governmentIdTypes: readonly CounterpartyIdType[];
-  compliance: {
-    employmentStatuses: readonly CounterpartyEmploymentStatus[];
-    sourceOfFunds: readonly CounterpartySourceOfFunds[];
-    pepStatuses: readonly CounterpartyPepStatus[];
-    intendedUseOfAccount: readonly CounterpartyIntendedUse[];
-    estimatedYearlyIncome: readonly CounterpartyYearlyIncome[];
-    employmentIndustrySectors: readonly CounterpartyIndustrySector[];
-  };
   countries: readonly Country[];
   usStates: readonly { code: string; name: string }[];
 }

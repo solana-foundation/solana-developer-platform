@@ -1,29 +1,24 @@
-import type {
-  Counterparty,
-  CounterpartyProviderData,
-  LightsparkGridAmount,
-  LightsparkPaymentRampInstruction,
-  LightsparkProviderPaymentRampInstruction,
-  LightsparkRampSettlement,
-  PaymentRampEstimate,
-  PaymentRampExecutionStatus,
-  PaymentRampQuote,
-  PaymentRampQuoteCurrency,
-  SdpEnvironment,
+import {
+  type Counterparty,
+  type LightsparkPaymentRampInstruction,
+  type LightsparkProviderPaymentRampInstruction,
+  type PaymentRampEstimate,
+  type PaymentRampExecutionStatus,
+  type PaymentRampQuote,
+  type PaymentRampQuoteCurrency,
+  type SdpEnvironment,
+  WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import {
-  CRYPTO_ASSET_DECIMALS,
   type CryptoAssetSymbol,
   getCryptoRailAssetLabel,
   parseFiatCurrency,
 } from "@sdp/types/payment-rails";
-import type { CollectedFieldData, CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { AppError, badRequest, providerNotConfigured, providerUnavailable } from "@/lib/errors";
-import { hashString } from "@/lib/hash";
 import { assertValidAddress, isAddress } from "@/lib/solana";
-import { verifyWebhookSignature } from "@/lib/webhook-signature";
-import { type ProviderRequestInit, providerFetchJson } from "../fetch";
+import { type ProviderRequestInit, providerFetchJson } from "../../fetch";
 import {
   basicAuthHeader,
   createProviderRampSupport,
@@ -31,7 +26,7 @@ import {
   RAMP_RAIL_DUMPS,
   requireEnv,
   SOLANA_ASSET_TO_RAIL,
-} from "../shared";
+} from "../../shared";
 import type {
   ProviderRampSupport,
   RampDumpReader,
@@ -41,12 +36,9 @@ import type {
   RampOnrampQuoteInput,
   RampProvider,
   RampRuntimeContext,
-  RampSettlementEvent,
-  RampWebhookValidationContext,
-  RampWebhookValidationResult,
   ValidateCounterpartyOptions,
-} from "../types";
-import { lightsparkCounterpartyRequirements } from "../validation/lightspark";
+} from "../../types";
+import { lightsparkCounterpartyRequirements } from "./counterparty";
 
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
 
@@ -85,10 +77,10 @@ function normalizeLightsparkCurrencyCode(value: string): string {
 function getLightsparkCurrencyDecimals(currencyCode: string): number {
   const normalized = currencyCode.trim().toUpperCase();
   if (normalized === "BTC") return 8;
-  if (isSolanaCryptoAsset(normalized)) return CRYPTO_ASSET_DECIMALS[normalized];
+  if (isSolanaCryptoAsset(normalized)) return WELL_KNOWN_TOKENS[normalized].decimals;
   throw new AppError(
     "BAD_REQUEST",
-    `Unsupported lightspark cryptoToken: ${currencyCode}. Supported values: BTC, ${Object.keys(CRYPTO_ASSET_DECIMALS).join(", ")}`
+    `Unsupported lightspark cryptoToken: ${currencyCode}. Supported values: BTC, ${Object.keys(WELL_KNOWN_TOKENS).join(", ")}`
   );
 }
 
@@ -133,99 +125,6 @@ function mapLightsparkQuoteStatus(status: string | undefined): PaymentRampExecut
   return "pending";
 }
 
-const LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES = {
-  "OUTGOING_PAYMENT.PENDING": "awaiting_payment",
-  "OUTGOING_PAYMENT.PROCESSING": "settling",
-  "OUTGOING_PAYMENT.COMPLETED": "settled",
-  "OUTGOING_PAYMENT.FAILED": "failed",
-  "OUTGOING_PAYMENT.EXPIRED": "expired",
-  "OUTGOING_PAYMENT.REFUND_FAILED": "failed",
-} as const satisfies Record<string, RampSettlementEvent["kind"]>;
-
-type LightsparkOutgoingPaymentWebhookType = keyof typeof LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES;
-
-interface LightsparkOutgoingPaymentData {
-  id: string;
-  status: string;
-  quoteId: string;
-  failureReason?: string;
-  sentAmount?: LightsparkGridAmount;
-  receivedAmount?: LightsparkGridAmount;
-  exchangeRate?: number;
-  fees?: number;
-}
-
-function readOptionalGridAmount(
-  record: Record<string, unknown>,
-  field: string
-): LightsparkGridAmount | undefined {
-  const value = record[field];
-  if (!isGridRecord(value)) {
-    return undefined;
-  }
-  const amount = value.amount;
-  const currency = value.currency;
-  if (!Number.isInteger(amount) || typeof amount !== "number" || !isGridRecord(currency)) {
-    return undefined;
-  }
-  const decimals = currency.decimals;
-  const currencyCode = currency.code;
-  if (
-    !Number.isInteger(decimals) ||
-    typeof decimals !== "number" ||
-    typeof currencyCode !== "string"
-  ) {
-    return undefined;
-  }
-  return { amount, currencyCode: currencyCode.toUpperCase(), decimals };
-}
-
-function readOptionalGridNumber(
-  record: Record<string, unknown>,
-  field: string
-): number | undefined {
-  const value = record[field];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function isLightsparkTerminalStatus(status: string): status is LightsparkRampSettlement["status"] {
-  return (
-    status === "COMPLETED" ||
-    status === "FAILED" ||
-    status === "EXPIRED" ||
-    status === "REFUND_FAILED"
-  );
-}
-
-function buildLightsparkSettlement(
-  data: LightsparkOutgoingPaymentData
-): LightsparkRampSettlement | undefined {
-  const { status, sentAmount, receivedAmount, exchangeRate, fees, failureReason } = data;
-  if (
-    !isLightsparkTerminalStatus(status) ||
-    !sentAmount ||
-    !receivedAmount ||
-    exchangeRate === undefined ||
-    fees === undefined
-  ) {
-    return undefined;
-  }
-  return {
-    provider: "lightspark",
-    status,
-    sentAmount,
-    receivedAmount,
-    exchangeRate,
-    fees,
-    ...(failureReason ? { failureReason } : {}),
-  };
-}
-
-interface LightsparkOutgoingPaymentWebhook {
-  type: LightsparkOutgoingPaymentWebhookType;
-  data: LightsparkOutgoingPaymentData;
-}
-
 function isGridRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
@@ -240,67 +139,6 @@ function readRequiredGridString(
     throw badRequest(`${payloadName} is missing ${field}`);
   }
   return value.trim();
-}
-
-function readOptionalGridString(
-  record: Record<string, unknown>,
-  field: string
-): string | undefined {
-  const value = record[field];
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return undefined;
-  }
-  return trimmed;
-}
-
-function readRequiredGridObject(
-  record: Record<string, unknown>,
-  field: string,
-  payloadName: string
-): Record<string, unknown> {
-  const value = record[field];
-  if (!isGridRecord(value)) {
-    throw badRequest(`${payloadName} is missing ${field}`);
-  }
-  return value;
-}
-
-function isLightsparkOutgoingPaymentWebhookType(
-  value: string
-): value is LightsparkOutgoingPaymentWebhookType {
-  return Object.hasOwn(LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES, value);
-}
-
-function parseLightsparkOutgoingPaymentWebhook(
-  payload: unknown
-): LightsparkOutgoingPaymentWebhook | null {
-  if (!isGridRecord(payload)) {
-    throw badRequest("Lightspark webhook body must be an object");
-  }
-
-  const type = readRequiredGridString(payload, "type", "Lightspark webhook");
-  if (!isLightsparkOutgoingPaymentWebhookType(type)) {
-    return null;
-  }
-
-  const data = readRequiredGridObject(payload, "data", "Lightspark webhook");
-  return {
-    type,
-    data: {
-      id: readRequiredGridString(data, "id", "Lightspark outgoing payment webhook data"),
-      status: readRequiredGridString(data, "status", "Lightspark outgoing payment webhook data"),
-      quoteId: readRequiredGridString(data, "quoteId", "Lightspark outgoing payment webhook data"),
-      failureReason: readOptionalGridString(data, "failureReason"),
-      sentAmount: readOptionalGridAmount(data, "sentAmount"),
-      receivedAmount: readOptionalGridAmount(data, "receivedAmount"),
-      exchangeRate: readOptionalGridNumber(data, "exchangeRate"),
-      fees: readOptionalGridNumber(data, "fees"),
-    },
-  };
 }
 
 interface LightsparkExternalAccount {
@@ -361,101 +199,6 @@ export interface LightsparkConfig {
   tokenId: string;
   clientSecret: string;
   apiBaseUrl: string;
-}
-
-export interface LightsparkPayoutAccount {
-  accountId: string;
-  status: string;
-}
-
-export interface LightsparkPayoutAccountEntry extends LightsparkPayoutAccount {
-  /** `${fiatCurrency}:${hash(accountInfo)}` — content-addressed so distinct bank details map to distinct Grid accounts. */
-  key: string;
-  createdAt: string;
-}
-
-export function isLightsparkExternalAccountActive(status: string): boolean {
-  return status.trim().toUpperCase() === "ACTIVE";
-}
-
-/** Cache key for a payout account: same collected details always map to the same key, distinct details never collide. */
-export async function lightsparkPayoutAccountKey(
-  fiatCurrency: string,
-  collectedData: CollectedFieldData
-): Promise<string> {
-  const fields = Object.entries(collectedData)
-    .map(([key, value]) => `${key}=${value.trim()}`)
-    .sort()
-    .join("&");
-  return `${fiatCurrency}:${(await hashString(fields)).slice(0, 16)}`;
-}
-
-export function readLightsparkData(
-  providerData: CounterpartyProviderData
-): Record<string, unknown> {
-  const lightspark = providerData.lightspark;
-  return lightspark && typeof lightspark === "object"
-    ? (lightspark as Record<string, unknown>)
-    : {};
-}
-
-export function readLightsparkCustomerId(providerData: CounterpartyProviderData): string | null {
-  const customerId = readLightsparkData(providerData).customerId;
-  return typeof customerId === "string" && customerId.length > 0 ? customerId : null;
-}
-
-export function readLightsparkPayoutAccounts(
-  providerData: CounterpartyProviderData
-): Record<string, unknown> {
-  const payoutAccounts = readLightsparkData(providerData).payoutAccounts;
-  return payoutAccounts && typeof payoutAccounts === "object"
-    ? (payoutAccounts as Record<string, unknown>)
-    : {};
-}
-
-function parseLightsparkPayoutAccountEntry(
-  key: string,
-  value: unknown
-): LightsparkPayoutAccountEntry {
-  const { accountId, status, createdAt } = value as {
-    accountId?: unknown;
-    status?: unknown;
-    createdAt?: unknown;
-  };
-  if (
-    typeof accountId !== "string" ||
-    accountId.length === 0 ||
-    typeof status !== "string" ||
-    typeof createdAt !== "string"
-  ) {
-    throw new AppError(
-      "INTERNAL_ERROR",
-      `Malformed lightspark payout account entry "${key}" in provider_data`
-    );
-  }
-  return { key, accountId, status, createdAt };
-}
-
-export function readLightsparkPayoutAccountByKey(
-  providerData: CounterpartyProviderData,
-  key: string
-): LightsparkPayoutAccountEntry | null {
-  const value = readLightsparkPayoutAccounts(providerData)[key];
-  if (value === undefined) {
-    return null;
-  }
-  return parseLightsparkPayoutAccountEntry(key, value);
-}
-
-export function latestLightsparkPayoutAccount(
-  providerData: CounterpartyProviderData,
-  fiatCurrency: string
-): LightsparkPayoutAccountEntry | null {
-  const entries = Object.entries(readLightsparkPayoutAccounts(providerData))
-    .filter(([key]) => key.startsWith(`${fiatCurrency}:`))
-    .map(([key, value]) => parseLightsparkPayoutAccountEntry(key, value))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return entries[0] ?? null;
 }
 
 export type LightsparkCustomerType = "INDIVIDUAL" | "BUSINESS";
@@ -728,100 +471,6 @@ export class LightsparkRampClient implements RampProvider {
     return extractSupport(
       await readDump<LightsparkConfigDump>(RAMP_RAIL_DUMPS.lightspark.config.file)
     );
-  }
-
-  /**
-   * Verifies a Grid webhook via the `X-Grid-Signature` header: an ECDSA P-256 /
-   * SHA-256 signature over the raw request body, checked against the Grid
-   * webhook public key (PEM/SPKI). The header is JSON `{"v":1,"s":"<base64>"}`.
-   */
-  async validateWebhook({
-    env,
-    environment,
-    headers,
-    rawBody,
-  }: RampWebhookValidationContext): Promise<RampWebhookValidationResult> {
-    const publicKey = requireEnv(
-      env,
-      environment === "sandbox"
-        ? "LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY"
-        : "LIGHTSPARK_GRID_WEBHOOK_PUBLIC_KEY"
-    );
-
-    const signatureHeader = headers.get("x-grid-signature")?.trim();
-    if (!signatureHeader) {
-      throw new AppError("UNAUTHORIZED", "Lightspark webhook is missing x-grid-signature", {
-        provider: this.id,
-      });
-    }
-
-    // Grid sends `{"v":1,"s":"<base64 DER ECDSA>"}`; fall back to bare base64.
-    let signatureB64 = signatureHeader;
-    try {
-      const parsed = JSON.parse(signatureHeader) as { s?: unknown };
-      if (parsed && typeof parsed.s === "string") {
-        signatureB64 = parsed.s;
-      }
-    } catch {
-      // Not JSON — treat the header value as bare base64.
-    }
-
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(rawBody);
-    } catch {
-      throw badRequest("Lightspark webhook body must be valid JSON", {
-        provider: this.id,
-      });
-    }
-
-    const timestamp = payload.timestamp;
-    await verifyWebhookSignature({
-      provider: this.id,
-      signedPayload: rawBody,
-      signature: signatureB64,
-      algorithm: { type: "ecdsa-sha256", publicKeyPem: publicKey },
-      timestampSeconds: typeof timestamp === "string" ? Date.parse(timestamp) / 1000 : Number.NaN,
-    });
-
-    return { provider: this.id, payload };
-  }
-
-  parseSettlementEvent(payload: unknown): RampSettlementEvent {
-    const webhook = parseLightsparkOutgoingPaymentWebhook(payload);
-    if (!webhook) {
-      return { provider: this.id, kind: "ignore", reason: "unsupported_event" };
-    }
-
-    const reference = webhook.data.quoteId;
-    if (!reference) {
-      return { provider: this.id, kind: "ignore", reason: "missing_quote_id" };
-    }
-
-    const kind = LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES[webhook.type];
-    const settlement = buildLightsparkSettlement(webhook.data);
-    if (kind === "failed" || kind === "expired") {
-      return {
-        provider: this.id,
-        kind,
-        reference,
-        ...(webhook.data.failureReason ? { error: webhook.data.failureReason } : {}),
-        ...(settlement ? { settlement } : {}),
-      };
-    }
-    if (kind === "settled" && webhook.data.receivedAmount) {
-      return {
-        provider: this.id,
-        kind,
-        reference,
-        receivedAmount: formatDecimalAmount(
-          BigInt(webhook.data.receivedAmount.amount),
-          webhook.data.receivedAmount.decimals
-        ),
-        ...(settlement ? { settlement } : {}),
-      };
-    }
-    return { provider: this.id, kind, reference };
   }
 
   private async request<TResponse, TBody = never>(

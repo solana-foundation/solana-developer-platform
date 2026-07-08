@@ -7,9 +7,17 @@ const BASE_COUNTERPARTY = {
   email: "jane@example.com",
 } as const;
 
-function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+const BASE_IDENTITY = {
+  firstName: "Jane",
+  lastName: "Doe",
+  dateOfBirth: "1990-01-15",
+  phone: "+14155551234",
+  address: {
+    line1: "1 Market St",
+    city: "San Francisco",
+    countryCode: "US",
+  },
+} as const;
 
 function futureIsoDate(): string {
   const future = new Date();
@@ -21,7 +29,10 @@ describe("counterpartyIdentitySchema dateOfBirth", () => {
   it("rejects today's date", () => {
     const result = createCounterpartySchema.safeParse({
       ...BASE_COUNTERPARTY,
-      identity: { dateOfBirth: todayIsoDate() },
+      identity: {
+        ...BASE_IDENTITY,
+        dateOfBirth: new Date().toISOString().slice(0, 10),
+      },
     });
 
     expect(result.success).toBe(false);
@@ -30,7 +41,7 @@ describe("counterpartyIdentitySchema dateOfBirth", () => {
   it("rejects a future date", () => {
     const result = createCounterpartySchema.safeParse({
       ...BASE_COUNTERPARTY,
-      identity: { dateOfBirth: futureIsoDate() },
+      identity: { ...BASE_IDENTITY, dateOfBirth: futureIsoDate() },
     });
 
     expect(result.success).toBe(false);
@@ -39,19 +50,19 @@ describe("counterpartyIdentitySchema dateOfBirth", () => {
   it("accepts a past date", () => {
     const result = createCounterpartySchema.safeParse({
       ...BASE_COUNTERPARTY,
-      identity: { dateOfBirth: "1990-01-15" },
+      identity: { ...BASE_IDENTITY, dateOfBirth: "1990-01-15" },
     });
 
     expect(result.success).toBe(true);
   });
 
-  it("accepts an omitted dateOfBirth", () => {
+  it("rejects an omitted dateOfBirth", () => {
     const result = createCounterpartySchema.safeParse({
       ...BASE_COUNTERPARTY,
-      identity: {},
+      identity: { ...BASE_IDENTITY, dateOfBirth: undefined },
     });
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 });
 
@@ -59,7 +70,7 @@ describe("counterpartyIdentitySchema phone", () => {
   it("rejects a non-E.164 short number", () => {
     const result = createCounterpartySchema.safeParse({
       ...BASE_COUNTERPARTY,
-      identity: { phone: "12345" },
+      identity: { ...BASE_IDENTITY, phone: "12345" },
     });
 
     expect(result.success).toBe(false);
@@ -68,7 +79,7 @@ describe("counterpartyIdentitySchema phone", () => {
   it("accepts a valid E.164 number", () => {
     const result = createCounterpartySchema.safeParse({
       ...BASE_COUNTERPARTY,
-      identity: { phone: "+14155551234" },
+      identity: { ...BASE_IDENTITY, phone: "+14155551234" },
     });
 
     expect(result.success).toBe(true);
@@ -77,26 +88,29 @@ describe("counterpartyIdentitySchema phone", () => {
   it("rejects a number missing the leading plus", () => {
     const result = createCounterpartySchema.safeParse({
       ...BASE_COUNTERPARTY,
-      identity: { phone: "14155551234" },
+      identity: { ...BASE_IDENTITY, phone: "14155551234" },
     });
 
     expect(result.success).toBe(false);
   });
 
-  it("accepts an omitted phone", () => {
+  it("rejects an omitted phone", () => {
     const result = createCounterpartySchema.safeParse({
       ...BASE_COUNTERPARTY,
-      identity: {},
+      identity: { ...BASE_IDENTITY, phone: undefined },
     });
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 });
 
 describe("updateCounterpartyObjectSchema identity.dateOfBirth partial update", () => {
   it("rejects today's date", () => {
     const result = updateCounterpartyObjectSchema.safeParse({
-      identity: { dateOfBirth: todayIsoDate() },
+      identity: {
+        ...BASE_IDENTITY,
+        dateOfBirth: new Date().toISOString().slice(0, 10),
+      },
     });
 
     expect(result.success).toBe(false);
@@ -104,7 +118,7 @@ describe("updateCounterpartyObjectSchema identity.dateOfBirth partial update", (
 
   it("rejects a future date", () => {
     const result = updateCounterpartyObjectSchema.safeParse({
-      identity: { dateOfBirth: futureIsoDate() },
+      identity: { ...BASE_IDENTITY, dateOfBirth: futureIsoDate() },
     });
 
     expect(result.success).toBe(false);
@@ -112,25 +126,25 @@ describe("updateCounterpartyObjectSchema identity.dateOfBirth partial update", (
 
   it("accepts a past date", () => {
     const result = updateCounterpartyObjectSchema.safeParse({
-      identity: { dateOfBirth: "1990-01-15" },
+      identity: { ...BASE_IDENTITY, dateOfBirth: "1990-01-15" },
     });
 
     expect(result.success).toBe(true);
   });
 
-  it("accepts an omitted dateOfBirth", () => {
+  it("rejects an omitted dateOfBirth when identity is provided", () => {
     const result = updateCounterpartyObjectSchema.safeParse({
-      identity: {},
+      identity: { ...BASE_IDENTITY, dateOfBirth: undefined },
     });
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 });
 
 describe("updateCounterpartyObjectSchema identity.phone partial update", () => {
   it("rejects a non-E.164 short number", () => {
     const result = updateCounterpartyObjectSchema.safeParse({
-      identity: { phone: "12345" },
+      identity: { ...BASE_IDENTITY, phone: "12345" },
     });
 
     expect(result.success).toBe(false);
@@ -138,7 +152,7 @@ describe("updateCounterpartyObjectSchema identity.phone partial update", () => {
 
   it("accepts a valid E.164 number", () => {
     const result = updateCounterpartyObjectSchema.safeParse({
-      identity: { phone: "+14155551234" },
+      identity: { ...BASE_IDENTITY, phone: "+14155551234" },
     });
 
     expect(result.success).toBe(true);
@@ -146,17 +160,17 @@ describe("updateCounterpartyObjectSchema identity.phone partial update", () => {
 
   it("rejects a number missing the leading plus", () => {
     const result = updateCounterpartyObjectSchema.safeParse({
-      identity: { phone: "14155551234" },
+      identity: { ...BASE_IDENTITY, phone: "14155551234" },
     });
 
     expect(result.success).toBe(false);
   });
 
-  it("accepts an omitted phone", () => {
+  it("rejects an omitted phone when identity is provided", () => {
     const result = updateCounterpartyObjectSchema.safeParse({
-      identity: {},
+      identity: { ...BASE_IDENTITY, phone: undefined },
     });
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 });

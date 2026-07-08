@@ -17,17 +17,16 @@ async function fetchCounterpartyRequirements(
   counterpartyId: string,
   provider: RampProviderId,
   direction: RampDirection,
-  fiatCurrency: RampFiatCurrency | undefined,
-  corridor?: AdvanceRequirementsPayload
+  corridor: AdvanceRequirementsPayload
 ): Promise<CounterpartyRequirements> {
-  const params = new URLSearchParams({ provider, direction });
-  if (fiatCurrency !== undefined) {
-    params.set("fiatCurrency", fiatCurrency);
-  }
-  if (corridor) {
-    params.set("cryptoToken", corridor.cryptoToken);
+  const params = new URLSearchParams({
+    provider,
+    direction,
+    cryptoToken: corridor.cryptoToken,
+    fiatCurrency: corridor.fiatCurrency,
+  });
+  if (direction === "onramp") {
     params.set("destinationWallet", corridor.destinationWallet);
-    params.set("fiatCurrency", corridor.fiatCurrency);
   }
   const response = await fetch(
     `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/requirements?${params.toString()}`
@@ -84,12 +83,14 @@ function isOnboardingPending(status: CounterpartyRequirements["status"]): boolea
   );
 }
 
-export interface CounterpartyRequirementsParams {
+/**
+ * The corridor fields mirror {@link AdvanceRequirementsPayload}; `destinationWallet`
+ * only participates for onramp, where the fetch waits until the user has picked one.
+ */
+export interface CounterpartyRequirementsParams extends AdvanceRequirementsPayload {
   counterpartyId: string;
   provider: RampProviderId | null;
   direction: RampDirection;
-  /** Payout currency — required by lightspark offramp requirements; ignored by other providers. */
-  fiatCurrency?: RampFiatCurrency;
 }
 
 export interface CounterpartyRequirementsState {
@@ -148,22 +149,30 @@ export function useCounterpartyRequirements(
   }
 
   const key =
-    params?.provider && params.counterpartyId
+    params?.provider &&
+    params.counterpartyId &&
+    (params.direction === "offramp" || params.destinationWallet)
       ? ([
           "counterparty-requirements",
           params.counterpartyId,
           params.provider,
           params.direction,
+          params.cryptoToken,
           params.fiatCurrency,
+          params.direction === "onramp" ? params.destinationWallet : "",
         ] as const)
       : null;
-  // Requirements are deterministic for a (counterparty, provider, currency) for the
+  // Requirements are deterministic for a (counterparty, provider, corridor) for the
   // wizard's lifetime — never revalidate, so `needsCollection` (and thus the wizard's
   // step list) can't flip out from under the user mid-flow.
   const { data, error } = useSWR(
     key,
-    ([, counterpartyId, provider, direction, fiatCurrency]) =>
-      fetchCounterpartyRequirements(counterpartyId, provider, direction, fiatCurrency),
+    ([, counterpartyId, provider, direction, cryptoToken, fiatCurrency, destinationWallet]) =>
+      fetchCounterpartyRequirements(counterpartyId, provider, direction, {
+        cryptoToken,
+        fiatCurrency,
+        destinationWallet,
+      }),
     { revalidateOnFocus: false, revalidateOnReconnect: false, revalidateIfStale: false }
   );
 
@@ -207,7 +216,6 @@ export function useCounterpartyRequirements(
         params.counterpartyId,
         params.provider,
         params.direction,
-        lastAdvancePayload.fiatCurrency,
         lastAdvancePayload
       );
       setOnboarding(result);

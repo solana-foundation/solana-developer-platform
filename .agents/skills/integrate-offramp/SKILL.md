@@ -9,7 +9,7 @@ Off-ramp = a counterparty sells crypto for fiat paid to their bank account. The 
 
 `createOfframpQuote` is **required** on `RampProvider` (unlike `createOnrampQuote`, which is optional).
 
-Canonical example: `createOfframpQuote` in `lib/ramps/providers/lightspark.ts` + `routes/payments/handlers/ramps/lightspark.ts`.
+Canonical example: `createOfframpQuote` in `lib/ramps/providers/lightspark/client.ts` + `routes/payments/handlers/ramps/lightspark.ts`.
 
 ## Contract
 
@@ -44,4 +44,4 @@ Shared rules live in `integrate-ramp-provider`. Hot here:
 - No fallbacks — missing/inactive payout account or customer throws; never default them.
 - HTTP in the provider; DB (wallet resolution, payout account, transfer row) in the handler.
 - Bank details are transient — passed to the provider, never persisted to `provider_data`.
-- Verify with `tsc --noEmit` + `biome check`; mock fetch in `providers/<id>.test.ts`.
+- Verify with `tsc --noEmit` + `biome check`; mock fetch in `providers/<id>/client.test.ts`.

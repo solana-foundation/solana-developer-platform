@@ -40,6 +40,9 @@ apps/sdp-web
 packages/*
 !packages/sdp-types
 !packages/sdp-env-config
+!packages/sdp-rpc
+!packages/sdp-custody
+!packages/sdp-solana
 docs
 infra
 scripts

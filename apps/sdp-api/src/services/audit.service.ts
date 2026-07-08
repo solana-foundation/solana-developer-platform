@@ -6,6 +6,7 @@
 
 import type { Context } from "hono";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
+import { redactCredentialSecrets } from "@/lib/redaction";
 import type { Env } from "@/types/env";
 
 export type AuditAction =
@@ -33,7 +34,15 @@ export type AuditAction =
   | "submit"
   | "submit_failed"
   | "sign"
-  | "sign_requested";
+  | "sign_requested"
+  // BYO credential lifecycle actions
+  | "validate_failed"
+  | "check"
+  | "activate"
+  | "rotate"
+  | "rollback"
+  | "deactivate"
+  | "blocked_deactivation";
 
 export type ResourceType =
   | "organization"
@@ -56,7 +65,9 @@ export type ResourceType =
   | "signing_request"
   | "counterparty"
   | "counterparty_account"
-  | "asset_profile";
+  | "asset_profile"
+  | "provider_credential"
+  | "custody_connection";
 
 export interface AuditLogEntry {
   organizationId?: string;
@@ -82,6 +93,7 @@ export class AuditService {
     const id = `aud_${crypto.randomUUID()}`;
     const ipAddress = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for") || null;
     const userAgent = c.req.header("user-agent") || null;
+    const metadata = entry.metadata ? redactCredentialSecrets(entry.metadata) : null;
 
     try {
       await this.db
@@ -99,7 +111,7 @@ export class AuditService {
           entry.action,
           entry.resourceType,
           entry.resourceId || null,
-          entry.metadata ? JSON.stringify(entry.metadata) : null,
+          metadata ? JSON.stringify(metadata) : null,
           ipAddress,
           userAgent,
           requestId,
@@ -108,7 +120,7 @@ export class AuditService {
         .run();
     } catch (err) {
       // Log but don't fail the request
-      console.error("Failed to write audit log:", err);
+      console.error("Failed to write audit log:", redactCredentialSecrets(err));
     }
   }
 

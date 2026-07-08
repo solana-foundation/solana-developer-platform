@@ -112,6 +112,7 @@ export interface Env {
   | "para"
   | "turnkey"
   | "dfns"
+  | "ibm_haven"
   | "anchorage"
   | "utila";
   FEE_PAYER_PRIVATE_KEY?: string;
@@ -160,6 +161,13 @@ export interface Env {
   DFNS_PRIVATE_KEY?: string;
   DFNS_API_BASE_URL?: string;
   DFNS_WALLET_ID?: string;
+
+  // IBM Digital Asset Haven configuration (white-label Dfns; Solana)
+  IBM_HAVEN_AUTH_TOKEN?: string;
+  IBM_HAVEN_CREDENTIAL_ID?: string;
+  IBM_HAVEN_PRIVATE_KEY?: string;
+  IBM_HAVEN_API_BASE_URL?: string;
+  IBM_HAVEN_WALLET_ID?: string;
 
   // Anchorage wallet lifecycle configuration
   ANCHORAGE_API_KEY?: string;

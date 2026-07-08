@@ -145,6 +145,7 @@ export type {
   CreateWalletControlProfileInput,
   CreateWalletControlProfileRevisionInput,
   CreateWalletOperationInput,
+  ListWalletPolicyEvaluationAuditsInput,
   PolicyEvaluationRow,
   PolicyRepository,
   PolicyRepositoryContext,
@@ -153,6 +154,7 @@ export type {
   WalletControlProfileRevisionRow,
   WalletControlProfileRow,
   WalletOperationRow,
+  WalletPolicyEvaluationAuditRow,
 } from "./policy.repository";
 export { createPostgresPolicyRepository } from "./policy.repository.postgres";
 export {

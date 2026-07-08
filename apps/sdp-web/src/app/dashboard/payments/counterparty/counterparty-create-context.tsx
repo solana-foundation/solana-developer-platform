@@ -113,18 +113,23 @@ export function CounterpartyCreateProvider({
         throw new Error("Invalid form state");
       }
 
-      const identityPayload =
-        basicsResult.data.entityType === "individual"
-          ? { ...identityResult.data, address: addressResult.data }
-          : { address: addressResult.data };
-
-      const body: CreateCounterpartyRequest = {
-        entityType: basicsResult.data.entityType,
+      const commonFields = {
         displayName: basicsResult.data.displayName,
         email: basicsResult.data.email,
         externalId: basicsResult.data.externalId,
-        identity: identityPayload,
       };
+      const body: CreateCounterpartyRequest =
+        basicsResult.data.entityType === "individual"
+          ? {
+              ...commonFields,
+              entityType: "individual",
+              identity: { ...identityResult.data, address: addressResult.data },
+            }
+          : {
+              ...commonFields,
+              entityType: "business",
+              identity: { address: addressResult.data },
+            };
 
       const result = await dashboardFetch<{ data: CounterpartyResponse }>(
         "/api/dashboard/counterparty",

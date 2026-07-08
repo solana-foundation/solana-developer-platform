@@ -7,7 +7,7 @@ description: Implement a ramp provider's estimateOnramp / estimateOfframp → Pa
 
 An estimate is a rate preview: "how much USDC for 100 EUR?" It hits the provider's live rate API and nothing else — no counterparty, no wallet, no DB. That makes it the first capability to build: if `estimateOnramp` works, your `register-provider` config reader and credentials are correct.
 
-Canonical example: `estimateOnramp` / `estimateOfframp` in `lib/ramps/providers/lightspark.ts`.
+Canonical example: `estimateOnramp` / `estimateOfframp` in `lib/ramps/providers/lightspark/client.ts`.
 
 ## Contract
 
@@ -70,4 +70,4 @@ Shared rules live in `integrate-ramp-provider`. Hot here:
 - No fallbacks — non-positive/empty rate throws; never substitute a default amount or rate.
 - HTTP only; no DB, no counterparty lookups in estimate.
 - Strong typing — status/type maps are `as const satisfies Record<…>`; no `any`.
-- Verify with `tsc --noEmit` + `biome check`. Provider calls 503 when credentials aren't present in the environment, so unit-test the mapping with mocked fetch, like `providers/lightspark.test.ts`.
+- Verify with `tsc --noEmit` + `biome check`. Provider calls 503 when credentials aren't present in the environment, so unit-test the mapping with mocked fetch, like `providers/lightspark/client.test.ts`.
