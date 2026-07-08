@@ -68,6 +68,9 @@ importers:
       '@react-email/render':
         specifier: 2.0.8
         version: 2.0.8(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@sdp/custody':
+        specifier: workspace:*
+        version: link:../../packages/sdp-custody
       '@sdp/env-config':
         specifier: workspace:*
         version: link:../../packages/sdp-env-config
@@ -423,6 +426,48 @@ importers:
       vitest:
         specifier: ^4.1.8
         version: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@25.9.4)(@vitest/coverage-istanbul@4.1.8)(vite@7.3.2(@types/node@25.9.4)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/sdp-custody:
+    dependencies:
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:../sdp-types
+      '@solana/addresses':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/codecs':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/keychain-cdp':
+        specifier: 1.3.0
+        version: 1.3.0(@solana/addresses@6.8.0(typescript@6.0.3))(@solana/codecs-core@6.9.0(typescript@6.0.3))(@solana/codecs-strings@6.9.0(typescript@6.0.3))(@solana/keys@6.9.0(typescript@6.0.3))(@solana/signers@6.8.0(typescript@6.0.3))(@solana/transactions@6.8.0(typescript@6.0.3))
+      '@solana/keychain-core':
+        specifier: 1.3.0
+        version: 1.3.0(@solana/addresses@6.8.0(typescript@6.0.3))(@solana/codecs-core@6.9.0(typescript@6.0.3))(@solana/codecs-strings@6.9.0(typescript@6.0.3))(@solana/keys@6.9.0(typescript@6.0.3))(@solana/signers@6.8.0(typescript@6.0.3))(@solana/transactions@6.8.0(typescript@6.0.3))
+      '@solana/keychain-fireblocks':
+        specifier: 1.3.0
+        version: 1.3.0(@solana/addresses@6.8.0(typescript@6.0.3))(@solana/codecs-core@6.9.0(typescript@6.0.3))(@solana/codecs-strings@6.9.0(typescript@6.0.3))(@solana/keys@6.9.0(typescript@6.0.3))(@solana/signers@6.8.0(typescript@6.0.3))(@solana/transactions@6.8.0(typescript@6.0.3))
+      '@solana/keychain-para':
+        specifier: 1.3.0
+        version: 1.3.0(@solana/addresses@6.8.0(typescript@6.0.3))(@solana/codecs-core@6.9.0(typescript@6.0.3))(@solana/codecs-strings@6.9.0(typescript@6.0.3))(@solana/keys@6.9.0(typescript@6.0.3))(@solana/signers@6.8.0(typescript@6.0.3))(@solana/transactions@6.8.0(typescript@6.0.3))
+      '@solana/keychain-privy':
+        specifier: 1.3.0
+        version: 1.3.0(@solana/addresses@6.8.0(typescript@6.0.3))(@solana/codecs-core@6.9.0(typescript@6.0.3))(@solana/codecs-strings@6.9.0(typescript@6.0.3))(@solana/keys@6.9.0(typescript@6.0.3))(@solana/signers@6.8.0(typescript@6.0.3))(@solana/transactions@6.8.0(typescript@6.0.3))
+      '@solana/keychain-turnkey':
+        specifier: 1.3.0
+        version: 1.3.0(@solana/addresses@6.8.0(typescript@6.0.3))(@solana/codecs-core@6.9.0(typescript@6.0.3))(@solana/codecs-strings@6.9.0(typescript@6.0.3))(@solana/keys@6.9.0(typescript@6.0.3))(@solana/signers@6.8.0(typescript@6.0.3))(@solana/transactions@6.8.0(typescript@6.0.3))
+      '@solana/keychain-utila':
+        specifier: 1.3.0
+        version: 1.3.0(@solana/addresses@6.8.0(typescript@6.0.3))(@solana/codecs-core@6.9.0(typescript@6.0.3))(@solana/codecs-strings@6.9.0(typescript@6.0.3))(@solana/keys@6.9.0(typescript@6.0.3))(@solana/signers@6.8.0(typescript@6.0.3))(@solana/transactions@6.8.0(typescript@6.0.3))
+      '@solana/kit':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/signers':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/transactions':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
 
   packages/sdp-env-config:
     devDependencies:
