@@ -1,7 +1,7 @@
+import { SdpPaymentsError } from "@sdp/payments";
 import type { Counterparty } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { AppError } from "@/lib/errors";
 import { buildBvnkIndividualPayload, validateBvnkCounterparty } from "./counterparty";
 import { normalizeBvnkStateCode } from "./provider-data";
 
@@ -137,15 +137,15 @@ describe("normalizeBvnkStateCode", () => {
   });
 
   it("throws when the stripped remainder is not 2 characters", () => {
-    expect(() => normalizeBvnkStateCode("GB", "GB-ENG")).toThrowError(AppError);
+    expect(() => normalizeBvnkStateCode("GB", "GB-ENG")).toThrowError(SdpPaymentsError);
   });
 
   it("does not strip a prefix that does not match the country code", () => {
-    expect(() => normalizeBvnkStateCode("US", "XX-TX")).toThrowError(AppError);
+    expect(() => normalizeBvnkStateCode("US", "XX-TX")).toThrowError(SdpPaymentsError);
   });
 
   it("throws for a 1-character code", () => {
-    expect(() => normalizeBvnkStateCode("US", "X")).toThrowError(AppError);
+    expect(() => normalizeBvnkStateCode("US", "X")).toThrowError(SdpPaymentsError);
   });
 });
 

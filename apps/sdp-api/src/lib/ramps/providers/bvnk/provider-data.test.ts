@@ -1,6 +1,6 @@
+import { SdpPaymentsError } from "@sdp/payments";
 import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { AppError } from "@/lib/errors";
 import {
   buildBvnkCustomerExternalReference,
   buildBvnkOfframpWalletName,
@@ -289,6 +289,6 @@ describe("buildBvnkRuleEntity", () => {
       },
     });
 
-    expect(() => buildBvnkRuleEntity(row)).toThrowError(AppError);
+    expect(() => buildBvnkRuleEntity(row)).toThrowError(SdpPaymentsError);
   });
 });

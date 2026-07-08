@@ -1,3 +1,4 @@
+import { SdpPaymentsError } from "@sdp/payments";
 import type { PaymentRampEstimate, PaymentRampQuote, RampProviderEstimateResult } from "@sdp/types";
 import {
   OFFRAMP_SUPPORT,
@@ -348,7 +349,7 @@ async function estimateAcrossProviders(
         const estimate = await runProvider(provider, ctx);
         return { provider, status: "ok", estimate };
       } catch (error) {
-        if (error instanceof AppError && error.code === "ESTIMATE_NOT_AVAILABLE") {
+        if (error instanceof SdpPaymentsError && error.code === "ESTIMATE_NOT_AVAILABLE") {
           return { provider, status: "unsupported" };
         }
         return {

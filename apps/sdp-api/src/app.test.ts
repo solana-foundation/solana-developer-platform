@@ -1,3 +1,4 @@
+import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, type SdpPlugin } from "@/app";
@@ -10,6 +11,7 @@ import type { Env } from "@/types/env";
 const THROW_PATH = "/__internal_error_test_throw";
 const SECRET_APP_ERROR_PATH = "/__secret_app_error_test_throw";
 const SECRET_RPC_ERROR_PATH = "/__secret_rpc_error_test_throw";
+const SECRET_PAYMENTS_ERROR_PATH = "/__secret_payments_error_test_throw";
 const SECRET_SIGNING_ERROR_PATH = "/__secret_signing_error_test_throw";
 const SECRET_UNEXPECTED_ERROR_PATH = "/__secret_unexpected_error_test_throw";
 const FEE_ERROR_PATH = "/__fee_error_test_throw";
@@ -55,6 +57,12 @@ function buildApp(observability: Observability) {
     throw new SdpRpcError("SOLANA_RPC_ERROR", "Invalid apiKey=rpc-secret", {
       apiKey: "rpc-secret",
       endpoint: "https://rpc.example",
+    });
+  });
+  app.all(SECRET_PAYMENTS_ERROR_PATH, () => {
+    throw new SdpPaymentsError("PROVIDER_UNAVAILABLE", "Invalid apiKey=ramp-secret", {
+      apiKey: "ramp-secret",
+      provider: "bvnk",
     });
   });
   app.all(SECRET_SIGNING_ERROR_PATH, () => {
@@ -198,6 +206,25 @@ describe("createApp onError SENTRY_DSN guard", () => {
     expect(body.error.details).toEqual({
       apiKey: "[REDACTED]",
       endpoint: "https://rpc.example",
+    });
+  });
+
+  it("redacts payments error messages and details", async () => {
+    const { obs } = makeObservability();
+    const app = buildApp(obs);
+
+    const res = await app.request(SECRET_PAYMENTS_ERROR_PATH, {}, baseEnv);
+
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as {
+      error: { code: string; message: string; details: Record<string, unknown> };
+    };
+    expect(JSON.stringify(body)).not.toContain("ramp-secret");
+    expect(body.error.code).toBe("PROVIDER_UNAVAILABLE");
+    expect(body.error.message).toBe("Invalid apiKey=[REDACTED]");
+    expect(body.error.details).toEqual({
+      apiKey: "[REDACTED]",
+      provider: "bvnk",
     });
   });
 

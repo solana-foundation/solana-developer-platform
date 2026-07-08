@@ -74,6 +74,9 @@ importers:
       '@sdp/env-config':
         specifier: workspace:*
         version: link:../../packages/sdp-env-config
+      '@sdp/payments':
+        specifier: workspace:*
+        version: link:../../packages/sdp-payments
       '@sdp/rpc':
         specifier: workspace:*
         version: link:../../packages/sdp-rpc
@@ -127,7 +130,7 @@ importers:
         version: 6.8.0(typescript@6.0.3)
       '@solana/kora':
         specifier: 0.3.0-beta.2
-        version: 0.3.0-beta.2(@solana-program/compute-budget@0.14.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-signer@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit@6.8.0(typescript@6.0.3))
+        version: 0.3.0-beta.2(@solana-program/compute-budget@0.14.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana-program/token@0.13.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-instruction-plan@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-rpc@0.11.1(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-signer@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit@6.8.0(typescript@6.0.3))
       '@solana/mosaic-sdk':
         specifier: 'catalog:'
         version: 0.1.1(patch_hash=b814110d007b64ff76f72cf843d93ba928a9c4f39acc34dbc2ee3e27d1149689)(typescript@6.0.3)
@@ -477,6 +480,43 @@ importers:
       tsx:
         specifier: 4.22.4
         version: 4.22.4
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/sdp-payments:
+    dependencies:
+      '@coinbase/cdp-sdk':
+        specifier: 1.49.2
+        version: 1.49.2(typescript@6.0.3)
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../sdp-rpc
+      '@sdp/solana':
+        specifier: workspace:*
+        version: link:../sdp-solana
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:../sdp-types
+      '@solana/addresses':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/codecs':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/kit':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/kora':
+        specifier: 0.3.0-beta.2
+        version: 0.3.0-beta.2(@solana-program/compute-budget@0.14.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana-program/token@0.13.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-instruction-plan@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-rpc@0.11.1(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-signer@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit@6.8.0(typescript@6.0.3))
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20260609.1
+        version: 4.20260609.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -11856,10 +11896,13 @@ snapshots:
       '@solana/kit-plugin-payer': 0.6.0(@solana/kit@6.8.0(typescript@6.0.3))
       '@solana/kit-plugin-rpc': 0.11.1(@solana/kit@6.8.0(typescript@6.0.3))
 
-  '@solana/kora@0.3.0-beta.2(@solana-program/compute-budget@0.14.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-signer@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit@6.8.0(typescript@6.0.3))':
+  '@solana/kora@0.3.0-beta.2(@solana-program/compute-budget@0.14.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana-program/token@0.13.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-instruction-plan@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-rpc@0.11.1(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-signer@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit@6.8.0(typescript@6.0.3))':
     dependencies:
       '@solana-program/compute-budget': 0.14.0(@solana/kit@6.8.0(typescript@6.0.3))
+      '@solana-program/token': 0.13.0(@solana/kit@6.8.0(typescript@6.0.3))
       '@solana/kit': 6.8.0(typescript@6.0.3)
+      '@solana/kit-plugin-instruction-plan': 0.10.0(@solana/kit@6.8.0(typescript@6.0.3))
+      '@solana/kit-plugin-rpc': 0.11.1(@solana/kit@6.8.0(typescript@6.0.3))
       '@solana/kit-plugin-signer': 0.10.0(@solana/kit@6.8.0(typescript@6.0.3))
 
   '@solana/mosaic-sdk@0.1.1(patch_hash=b814110d007b64ff76f72cf843d93ba928a9c4f39acc34dbc2ee3e27d1149689)(typescript@6.0.3)':

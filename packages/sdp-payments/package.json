@@ -1,0 +1,142 @@
+{
+  "name": "@sdp/payments",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./decimal": {
+      "types": "./src/decimal.ts",
+      "import": "./src/decimal.ts",
+      "default": "./src/decimal.ts"
+    },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts",
+      "default": "./src/errors.ts"
+    },
+    "./hash": {
+      "types": "./src/hash.ts",
+      "import": "./src/hash.ts",
+      "default": "./src/hash.ts"
+    },
+    "./json": {
+      "types": "./src/json.ts",
+      "import": "./src/json.ts",
+      "default": "./src/json.ts"
+    },
+    "./fee-payment": {
+      "types": "./src/fee-payment/index.ts",
+      "import": "./src/fee-payment/index.ts",
+      "default": "./src/fee-payment/index.ts"
+    },
+    "./fee-payment/port": {
+      "types": "./src/fee-payment/port.ts",
+      "import": "./src/fee-payment/port.ts",
+      "default": "./src/fee-payment/port.ts"
+    },
+    "./fee-payment/kora": {
+      "types": "./src/fee-payment/kora.adapter.ts",
+      "import": "./src/fee-payment/kora.adapter.ts",
+      "default": "./src/fee-payment/kora.adapter.ts"
+    },
+    "./fee-payment/native": {
+      "types": "./src/fee-payment/native.adapter.ts",
+      "import": "./src/fee-payment/native.adapter.ts",
+      "default": "./src/fee-payment/native.adapter.ts"
+    },
+    "./ramps": {
+      "types": "./src/ramps/index.ts",
+      "import": "./src/ramps/index.ts",
+      "default": "./src/ramps/index.ts"
+    },
+    "./ramps/fetch": {
+      "types": "./src/ramps/fetch.ts",
+      "import": "./src/ramps/fetch.ts",
+      "default": "./src/ramps/fetch.ts"
+    },
+    "./ramps/requirements": {
+      "types": "./src/ramps/requirements.ts",
+      "import": "./src/ramps/requirements.ts",
+      "default": "./src/ramps/requirements.ts"
+    },
+    "./ramps/shared": {
+      "types": "./src/ramps/shared.ts",
+      "import": "./src/ramps/shared.ts",
+      "default": "./src/ramps/shared.ts"
+    },
+    "./ramps/types": {
+      "types": "./src/ramps/types.ts",
+      "import": "./src/ramps/types.ts",
+      "default": "./src/ramps/types.ts"
+    },
+    "./ramps/providers/bvnk/client": {
+      "types": "./src/ramps/providers/bvnk/client.ts",
+      "import": "./src/ramps/providers/bvnk/client.ts",
+      "default": "./src/ramps/providers/bvnk/client.ts"
+    },
+    "./ramps/providers/bvnk/counterparty": {
+      "types": "./src/ramps/providers/bvnk/counterparty.ts",
+      "import": "./src/ramps/providers/bvnk/counterparty.ts",
+      "default": "./src/ramps/providers/bvnk/counterparty.ts"
+    },
+    "./ramps/providers/bvnk/provider-data": {
+      "types": "./src/ramps/providers/bvnk/provider-data.ts",
+      "import": "./src/ramps/providers/bvnk/provider-data.ts",
+      "default": "./src/ramps/providers/bvnk/provider-data.ts"
+    },
+    "./ramps/providers/coinbase/client": {
+      "types": "./src/ramps/providers/coinbase/client.ts",
+      "import": "./src/ramps/providers/coinbase/client.ts",
+      "default": "./src/ramps/providers/coinbase/client.ts"
+    },
+    "./ramps/providers/lightspark/client": {
+      "types": "./src/ramps/providers/lightspark/client.ts",
+      "import": "./src/ramps/providers/lightspark/client.ts",
+      "default": "./src/ramps/providers/lightspark/client.ts"
+    },
+    "./ramps/providers/lightspark/counterparty": {
+      "types": "./src/ramps/providers/lightspark/counterparty.ts",
+      "import": "./src/ramps/providers/lightspark/counterparty.ts",
+      "default": "./src/ramps/providers/lightspark/counterparty.ts"
+    },
+    "./ramps/providers/lightspark/provider-data": {
+      "types": "./src/ramps/providers/lightspark/provider-data.ts",
+      "import": "./src/ramps/providers/lightspark/provider-data.ts",
+      "default": "./src/ramps/providers/lightspark/provider-data.ts"
+    },
+    "./ramps/providers/moneygram/client": {
+      "types": "./src/ramps/providers/moneygram/client.ts",
+      "import": "./src/ramps/providers/moneygram/client.ts",
+      "default": "./src/ramps/providers/moneygram/client.ts"
+    },
+    "./ramps/providers/moonpay/client": {
+      "types": "./src/ramps/providers/moonpay/client.ts",
+      "import": "./src/ramps/providers/moonpay/client.ts",
+      "default": "./src/ramps/providers/moonpay/client.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "@coinbase/cdp-sdk": "1.49.2",
+    "@sdp/rpc": "workspace:*",
+    "@sdp/solana": "workspace:*",
+    "@sdp/types": "workspace:*",
+    "@solana/addresses": "catalog:",
+    "@solana/codecs": "catalog:",
+    "@solana/kit": "catalog:",
+    "@solana/kora": "0.3.0-beta.2",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260609.1",
+    "typescript": "^6.0.3"
+  }
+}
