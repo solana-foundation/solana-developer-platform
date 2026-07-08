@@ -49,6 +49,9 @@ interface StoredPolicyDraft {
   updatedAt: string;
 }
 
+type PolicyAudit = NonNullable<PaymentWalletPolicy["audit"]>;
+type PolicyAuditEntry = PolicyAudit["recentEvaluations"][number];
+
 const FLOW_STEPS = [
   {
     id: "intent",
@@ -358,6 +361,28 @@ function formatFamilyLabel(family: WalletOperationFamily): string {
 
 function formatFamilyList(families: readonly WalletOperationFamily[]): string {
   return families.map(formatFamilyLabel).join(", ");
+}
+
+function formatPolicyDecision(decision: PolicyAuditEntry["decision"]): string {
+  const labels = {
+    allow: "Allowed",
+    deny: "Denied",
+    approval_required: "Approval required",
+    provider_approval_required: "Provider approval required",
+    review: "Review",
+    not_evaluated: "Not evaluated",
+  } satisfies Record<PolicyAuditEntry["decision"], string>;
+  return labels[decision];
+}
+
+function formatPolicyStatus(status: PolicyAuditEntry["status"]): string {
+  return status.replaceAll("_", " ");
+}
+
+function formatPolicyAuditOperation(entry: PolicyAuditEntry): string {
+  const operation = `${formatFamilyLabel(entry.operationFamily)} / ${entry.operationType.replaceAll("_", " ")}`;
+  const amount = [entry.amount, entry.asset].filter(Boolean).join(" ");
+  return amount ? `${operation} / ${amount}` : operation;
 }
 
 function getWalletDetailHref(pathname: string, walletId: string): string {
@@ -846,6 +871,7 @@ export function WalletPolicyStartingProfileFlow({
       ) : null}
 
       <div className="mt-6 min-h-0 flex-1 overflow-y-auto px-1 py-1">
+        <PolicyAuditPanel audit={currentPolicy.audit ?? null} />
         {!isLoaded ? <LoadingState /> : null}
         {isLoaded && currentStep.id === "intent" ? (
           <IntentStep selectedCategories={selectedCategories} onToggle={toggleCategory} />
@@ -927,6 +953,54 @@ export function WalletPolicyStartingProfileFlow({
         </div>
       </footer>
     </div>
+  );
+}
+
+function PolicyAuditPanel({ audit }: { audit: PolicyAudit | null }) {
+  const evaluations = audit?.recentEvaluations.slice(0, 5) ?? [];
+  if (evaluations.length === 0) return null;
+
+  return (
+    <section className="mb-4 rounded-lg border border-border-light bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-text-extra-high">Recent policy decisions</h2>
+          <p className="mt-1 text-xs text-text-extra-low">
+            {formatCount(evaluations.length, "evaluation")} shown for this wallet
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3 divide-y divide-border-light">
+        {evaluations.map((entry) => (
+          <div key={entry.policyEvaluationId} className="py-3 first:pt-0 last:pb-0">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-semibold text-text-extra-high">
+                {formatPolicyDecision(entry.decision)}
+              </span>
+              <span className="rounded-full bg-border-extra-light px-2 py-0.5 text-text-medium">
+                {formatPolicyStatus(entry.status)}
+              </span>
+              {entry.requiresApproval ? (
+                <span className="rounded-full bg-status-warning-bg px-2 py-0.5 text-status-warning-text">
+                  Needs approval
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-1 text-sm leading-5 text-text-medium">
+              {formatPolicyAuditOperation(entry)}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-text-medium">
+              {entry.reason ?? entry.reasonCode}
+            </p>
+            <p className="mt-1 text-xs text-text-extra-low">
+              {formatDateTime(entry.evaluatedAt)}
+              {entry.approvalRequestId ? ` / Approval ${entry.approvalRequestId}` : ""}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

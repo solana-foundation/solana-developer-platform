@@ -4,6 +4,7 @@ import type { OpenAPIObject } from "openapi3-ts/oas30";
 
 import { registerAdminPaths } from "./paths/admin";
 import { registerApiKeyPaths } from "./paths/api-keys";
+import { registerAssetProfilePaths } from "./paths/asset-profiles";
 import { registerAuthPaths } from "./paths/auth";
 import { registerCompliancePaths } from "./paths/compliance";
 import { registerCounterpartyPaths } from "./paths/counterparties";
@@ -42,6 +43,10 @@ const OPENAPI_TAG = {
     name: "Counterparties",
     description: "Counterparty (customer/beneficiary) identity records.",
   },
+  ASSET_PROFILES: {
+    name: "Asset Profiles",
+    description: "Issued-asset identity and metadata profiles, plus the public token metadata URI.",
+  },
   ADMIN: { name: "Admin", description: "Administrative allowlist management." },
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },
 } as const;
@@ -55,6 +60,7 @@ const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.PAYMENTS,
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
+  OPENAPI_TAG.ASSET_PROFILES,
 ];
 
 const OPENAPI_TAGS = [
@@ -70,6 +76,7 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.PAYMENTS,
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
+  OPENAPI_TAG.ASSET_PROFILES,
   OPENAPI_TAG.ADMIN,
   OPENAPI_TAG.ONBOARDING,
 ];
@@ -109,6 +116,7 @@ function registerPublicPaths(registry: OpenAPIRegistry) {
   registerPaymentsPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
+  registerAssetProfilePaths(registry);
 }
 
 function registerAllPaths(registry: OpenAPIRegistry) {
@@ -124,6 +132,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerPaymentsPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
+  registerAssetProfilePaths(registry);
   registerAdminPaths(registry);
   registerOnboardingPaths(registry);
 }

@@ -1,3 +1,14 @@
+export type {
+  ArchiveAssetProfileInput,
+  AssetProfileRow,
+  AssetProfilesRepository,
+  AssetProfilesRepositoryContext,
+  CreateAssetProfileInput,
+  ListAssetProfilesInput,
+  ListAssetProfilesResult,
+  UpdateAssetProfileInput,
+} from "./asset-profile.repository";
+export { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
 export type { RepositoryDbClient } from "./base";
 export type {
   ArchiveCounterpartyInput,
@@ -134,6 +145,7 @@ export type {
   CreateWalletControlProfileInput,
   CreateWalletControlProfileRevisionInput,
   CreateWalletOperationInput,
+  ListWalletPolicyEvaluationAuditsInput,
   PolicyEvaluationRow,
   PolicyRepository,
   PolicyRepositoryContext,
@@ -142,9 +154,11 @@ export type {
   WalletControlProfileRevisionRow,
   WalletControlProfileRow,
   WalletOperationRow,
+  WalletPolicyEvaluationAuditRow,
 } from "./policy.repository";
 export { createPostgresPolicyRepository } from "./policy.repository.postgres";
 export {
+  createAssetProfilesRepository,
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
   createPaymentRecurringPaymentsRepository,

@@ -3,10 +3,13 @@ import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custod
 import type { RampFiatCurrency } from "./generated/ramp-support.generated";
 import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
 import type {
+  PolicyDecision,
   PolicyDefaultAction,
   PolicyProfileStatus,
   PolicyProviderSyncStatus,
   PolicyRule,
+  WalletOperationFamily,
+  WalletOperationStatus,
 } from "./policy";
 import type { PrivateTransferRequest } from "./private-transfers";
 import type { RampProviderId } from "./provider-access";
@@ -45,6 +48,7 @@ export interface PaymentWalletPolicy {
   defaultAction?: PolicyDefaultAction;
   rules?: PolicyRule[];
   controlProfile?: PaymentWalletControlProfileSummary;
+  audit?: PaymentWalletPolicyAudit;
 }
 
 export interface PaymentWalletControlProfileSummary {
@@ -68,6 +72,29 @@ export interface PaymentWalletPolicyEnvelope {
   error?: {
     message?: string;
   };
+}
+
+export interface PaymentWalletPolicyAudit {
+  recentEvaluations: PaymentWalletPolicyAuditEntry[];
+}
+
+export interface PaymentWalletPolicyAuditEntry {
+  walletOperationId: string;
+  policyEvaluationId: string;
+  operationFamily: WalletOperationFamily;
+  operationType: string;
+  asset: string | null;
+  amount: string | null;
+  destination: string | null;
+  status: WalletOperationStatus;
+  decision: PolicyDecision;
+  reasonCode: string;
+  reason: string | null;
+  requiresApproval: boolean;
+  approvalRequestId: string | null;
+  operationCreatedAt: string;
+  operationUpdatedAt: string;
+  evaluatedAt: string;
 }
 
 export type PaymentTransferStatus =

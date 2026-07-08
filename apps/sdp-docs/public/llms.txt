@@ -16,6 +16,7 @@
 - Token issuance and lifecycle operations
 - Payments, transfers, and ramps
 - Compliance screening
+- Asset profiles and public token metadata
 
 ## Start here
 - [Introduction](https://platform.solana.com/docs/introduction): What SDP is, what it provides, and how it works.
@@ -41,6 +42,7 @@
 - [Issuance](https://platform.solana.com/docs/reference/api/issuance): Token issuance, allowlists, and lifecycle operations.
 - [Payments](https://platform.solana.com/docs/reference/api/payments): Wallet balances, transfer execution, policies, and ramps.
 - [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
+- [Asset Profiles](https://platform.solana.com/docs/reference/api/asset-profiles): Issued-asset identity and metadata profiles, plus the public token metadata URI.
 
 ## AI guide
 - [AI Consumption](https://platform.solana.com/docs/reference/ai-consumption): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.

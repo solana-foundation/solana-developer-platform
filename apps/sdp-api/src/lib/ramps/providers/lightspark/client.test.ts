@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LightsparkRampClient, lightsparkPayoutAccountKey } from "./lightspark";
+import { LightsparkRampClient } from "./client";
+import { lightsparkPayoutAccountKey } from "./provider-data";
 
 const LIGHTSPARK_GRID_API_BASE_URL = "https://api.lightspark.com/grid/2025-10-13";
 const LIGHTSPARK_CONTEXT = {

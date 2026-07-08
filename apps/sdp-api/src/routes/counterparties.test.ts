@@ -10,6 +10,26 @@ import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 
 const TEST_PROJECT_ID = "prj_counterparties_test";
 
+const BASE_IDENTITY = {
+  firstName: "Ada",
+  lastName: "Lovelace",
+  dateOfBirth: "1990-01-15",
+  phone: "+14155551234",
+  address: {
+    line1: "1 Market St",
+    city: "San Francisco",
+    countryCode: "US",
+  },
+} as const;
+
+const BASE_BUSINESS_IDENTITY = {
+  address: {
+    line1: "1 Market St",
+    city: "San Francisco",
+    countryCode: "US",
+  },
+} as const;
+
 describe("Counterparties Routes", () => {
   let apiKeyHash: string;
 
@@ -105,6 +125,23 @@ describe("Counterparties Routes", () => {
 
   const authHeader = `Bearer ${TEST_API_KEY.raw}`;
 
+  const createBusinessCounterparty = (body: Record<string, unknown> = {}) =>
+    app.request(
+      "/v1/counterparties",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: authHeader },
+        body: JSON.stringify({
+          entityType: "business",
+          displayName: "Acme Inc",
+          email: "acme@example.com",
+          identity: BASE_BUSINESS_IDENTITY,
+          ...body,
+        }),
+      },
+      env
+    );
+
   const createCounterparty = (body: Record<string, unknown> = {}) =>
     app.request(
       "/v1/counterparties",
@@ -115,6 +152,7 @@ describe("Counterparties Routes", () => {
           entityType: "individual",
           displayName: "Alice",
           email: "alice@example.com",
+          identity: BASE_IDENTITY,
           ...body,
         }),
       },
@@ -133,15 +171,15 @@ describe("Counterparties Routes", () => {
         data: {
           fields: {
             entityTypes: string[];
-            compliance: { employmentStatuses: string[]; employmentIndustrySectors: string[] };
             countries: { code: string; name: string }[];
+            usStates: { code: string; name: string }[];
           };
         };
       };
       expect(body.data.fields.entityTypes).toContain("individual");
-      expect(body.data.fields.compliance.employmentStatuses).toContain("SALARIED");
-      expect(body.data.fields.compliance.employmentIndustrySectors.length).toBeGreaterThan(40);
+      expect(body.data.fields.entityTypes).toContain("business");
       expect(body.data.fields.countries.some((c) => c.code === "US")).toBe(true);
+      expect(body.data.fields.usStates.length).toBeGreaterThan(0);
     });
   });
 
@@ -157,6 +195,8 @@ describe("Counterparties Routes", () => {
       expect(body.data.counterparty.externalId).toBe("ext_001");
       expect(body.data.counterparty.status).toBe("active");
       expect(body.data.counterparty.createdBy).toBe(TEST_USER.id);
+      expect(body.data.counterparty.identity.firstName).toBe(BASE_IDENTITY.firstName);
+      expect(body.data.counterparty.identity.dateOfBirth).toBe(BASE_IDENTITY.dateOfBirth);
     });
 
     it("returns 409 on duplicate externalId", async () => {
@@ -442,6 +482,63 @@ describe("Counterparties Routes", () => {
         env
       );
       expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when changing entityType without a matching identity", async () => {
+      const created = await createCounterparty({ externalId: "patch_entity_type_only" });
+      const cp = (await created.json()).data.counterparty;
+
+      const res = await app.request(
+        `/v1/counterparties/${cp.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({ entityType: "business" }),
+        },
+        env
+      );
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.message).toBe(
+        "Changing entityType requires a matching identity in the same request."
+      );
+    });
+
+    it("updates entityType and identity together", async () => {
+      const created = await createCounterparty({ externalId: "patch_entity_type_with_identity" });
+      const cp = (await created.json()).data.counterparty;
+
+      const res = await app.request(
+        `/v1/counterparties/${cp.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({ entityType: "business", identity: BASE_BUSINESS_IDENTITY }),
+        },
+        env
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.counterparty.entityType).toBe("business");
+      expect(body.data.counterparty.identity).toEqual(BASE_BUSINESS_IDENTITY);
+    });
+
+    it("returns 400 when identity does not match the counterparty's entityType", async () => {
+      const created = await createBusinessCounterparty({ externalId: "patch_business_identity" });
+      const cp = (await created.json()).data.counterparty;
+
+      const res = await app.request(
+        `/v1/counterparties/${cp.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({ identity: BASE_IDENTITY }),
+        },
+        env
+      );
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.message).toBe("identity does not match the counterparty's entityType.");
     });
   });
 

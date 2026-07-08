@@ -127,6 +127,7 @@ async function initializeCustodyWallet(formData: FormData) {
     | "para"
     | "turnkey"
     | "dfns"
+    | "ibm_haven"
     | "anchorage"
     | "utila";
   const walletLabel = getOptionalString(formData, "walletLabel");
@@ -204,6 +205,7 @@ async function createCustodyWalletForProvider(formData: FormData) {
     | "para"
     | "turnkey"
     | "dfns"
+    | "ibm_haven"
     | "anchorage"
     | "utila"
     | undefined;

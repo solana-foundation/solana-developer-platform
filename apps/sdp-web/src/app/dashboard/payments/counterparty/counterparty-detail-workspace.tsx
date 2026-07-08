@@ -17,10 +17,7 @@ import {
   ChevronDownIcon,
   CopyIcon,
   ExternalLinkIcon,
-  FlagIcon,
-  GlobeIcon,
   HashIcon,
-  IdCardIcon,
   MailIcon,
   MapPinIcon,
   PhoneIcon,
@@ -672,24 +669,24 @@ function FieldList({ rows }: { rows: InfoRowData[] }) {
 }
 
 function buildPersonalInfoRows(counterparty: Counterparty): InfoRowData[] {
-  const identity = counterparty.identity ?? {};
   const rows: InfoRowData[] = [];
 
-  const fullName = [
-    identity.firstName,
-    identity.middleName,
-    identity.lastName,
-    identity.secondLastName,
-  ]
-    .filter((part): part is string => Boolean(part?.trim()))
-    .join(" ");
-  if (fullName) rows.push({ label: "Full name", value: fullName, icon: <UserIcon /> });
-  if (identity.dateOfBirth) {
+  if (counterparty.entityType === "individual") {
+    const identity = counterparty.identity;
+    const fullName = [
+      identity.firstName,
+      identity.middleName,
+      identity.lastName,
+      identity.secondLastName,
+    ]
+      .filter((part): part is string => Boolean(part?.trim()))
+      .join(" ");
+    if (fullName) rows.push({ label: "Full name", value: fullName, icon: <UserIcon /> });
     rows.push({ label: "Date of birth", value: identity.dateOfBirth, icon: <CakeIcon /> });
+    rows.push({ label: "Phone", value: identity.phone, icon: <PhoneIcon /> });
   }
-  if (identity.phone) rows.push({ label: "Phone", value: identity.phone, icon: <PhoneIcon /> });
 
-  const address = identity.address;
+  const address = counterparty.identity.address;
   if (address) {
     const formatted = [
       address.line1,
@@ -702,21 +699,6 @@ function buildPersonalInfoRows(counterparty: Counterparty): InfoRowData[] {
       .filter((part): part is string => Boolean(part?.trim()))
       .join(", ");
     if (formatted) rows.push({ label: "Address", value: formatted, icon: <MapPinIcon /> });
-  }
-
-  if (identity.birthCountryCode) {
-    rows.push({ label: "Birth country", value: identity.birthCountryCode, icon: <GlobeIcon /> });
-  }
-  if (identity.citizenshipCountryCode) {
-    rows.push({ label: "Citizenship", value: identity.citizenshipCountryCode, icon: <FlagIcon /> });
-  }
-  if (identity.governmentId) {
-    rows.push({
-      label: "Government ID",
-      value: `${identity.governmentId.type} · ${identity.governmentId.number}`,
-      icon: <IdCardIcon />,
-      mono: true,
-    });
   }
 
   return rows;

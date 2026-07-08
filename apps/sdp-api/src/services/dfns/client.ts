@@ -4,6 +4,12 @@ import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 
 export const DEFAULT_DFNS_API_BASE_URL = "https://api.dfns.io";
+// IBM Digital Asset Haven is a white-label Dfns deployment fronted by IBM's host.
+export const DEFAULT_IBM_HAVEN_API_BASE_URL = "https://api.digitalassets.ibm.com";
+// Provider display labels interpolated into error messages so each white-label
+// deployment self-identifies (a Haven credential failure must not read "DFNS").
+export const DFNS_PROVIDER_LABEL = "DFNS";
+export const IBM_HAVEN_PROVIDER_LABEL = "IBM Digital Asset Haven";
 export const DEFAULT_DFNS_NETWORK = "SolanaDevnet";
 
 export type DfnsNetwork = "Solana" | "SolanaDevnet";
@@ -127,6 +133,9 @@ interface DfnsClientContext {
   credentialId: string;
   privateKey: string;
   baseUrl: string;
+  /** Provider display label for error messages ("DFNS" or the white-label name). */
+  providerLabel: string;
+  userAgent: string;
 }
 
 interface DfnsRequestOptions {
@@ -146,16 +155,17 @@ interface DfnsSignatureResult {
 }
 
 const DFNS_USER_AGENT = "sdp-api-dfns/1.0";
+const IBM_HAVEN_USER_AGENT = "sdp-api-ibm-haven/1.0";
 
 const DFNS_DEFAULT_HEADERS: Readonly<Record<string, string>> = {
   Accept: "application/json",
   "Content-Type": "application/json",
-  "User-Agent": DFNS_USER_AGENT,
 };
 
 function createDfnsCredentialSignature(
   privateKeyPem: string,
-  payload: Buffer
+  payload: Buffer,
+  providerLabel: string = DFNS_PROVIDER_LABEL
 ): DfnsSignatureResult {
   let signingKey: crypto.KeyLike = privateKeyPem;
   let keyType: string | undefined;
@@ -168,7 +178,10 @@ function createDfnsCredentialSignature(
     // If parsing fails, fall back to using the PEM directly.
   }
 
-  const attempts: Array<{ algorithm: "sha256" | "none"; digest: string | undefined }> = [];
+  const attempts: Array<{
+    algorithm: "sha256" | "none";
+    digest: string | undefined;
+  }> = [];
   if (keyType === "rsa" || keyType === "rsa-pss") {
     attempts.push(
       { algorithm: "sha256", digest: "sha256" },
@@ -201,7 +214,7 @@ function createDfnsCredentialSignature(
   }
 
   throw new SigningError(
-    `DFNS local signature creation failed: ${failures.join(" | ") || "unknown signing error"}`,
+    `${providerLabel} local signature creation failed: ${failures.join(" | ") || "unknown signing error"}`,
     "NETWORK_ERROR"
   );
 }
@@ -248,6 +261,7 @@ function createDfnsRequestHeaders(
   return {
     Authorization: `Bearer ${ctx.authToken}`,
     ...DFNS_DEFAULT_HEADERS,
+    "User-Agent": ctx.userAgent,
     ...(userActionToken ? { "x-dfns-useraction": userActionToken } : {}),
   };
 }
@@ -286,6 +300,8 @@ function resolveDfnsContext(env: Env, options?: { apiBaseUrl?: string }): DfnsCl
     credentialId,
     privateKey,
     baseUrl: options?.apiBaseUrl ?? env.DFNS_API_BASE_URL ?? DEFAULT_DFNS_API_BASE_URL,
+    providerLabel: DFNS_PROVIDER_LABEL,
+    userAgent: DFNS_USER_AGENT,
   };
 }
 
@@ -306,7 +322,7 @@ async function dfnsRequestJson<T>(
   const parsed = parseJsonSafely(rawBody);
   if (!parsed) {
     throw new SigningError(
-      `DFNS API non-JSON response (${method} ${path}): status=${response.status} contentType=${response.contentType ?? "unknown"} url=${response.url} body=${truncateForError(rawBody)}`,
+      `${ctx.providerLabel} API non-JSON response (${method} ${path}): status=${response.status} contentType=${response.contentType ?? "unknown"} url=${response.url} body=${truncateForError(rawBody)}`,
       "NETWORK_ERROR"
     );
   }
@@ -355,7 +371,7 @@ async function dfnsRequestRaw(
       }
 
       throw new SigningError(
-        `DFNS API redirect follow-up failed (${method} ${normalizedPath} -> ${followUrl}): ${follow.status} ${truncateForError(follow.rawBody)}`,
+        `${ctx.providerLabel} API redirect follow-up failed (${method} ${normalizedPath} -> ${followUrl}): ${follow.status} ${truncateForError(follow.rawBody)}`,
         "NETWORK_ERROR"
       );
     }
@@ -363,7 +379,7 @@ async function dfnsRequestRaw(
 
   if (!response.ok) {
     throw new SigningError(
-      `DFNS API error (${method} ${normalizedPath}): status=${current.status} contentType=${current.contentType ?? "unknown"} location=${location ?? "none"} url=${current.url} body=${truncateForError(current.rawBody)}`,
+      `${ctx.providerLabel} API error (${method} ${normalizedPath}): status=${current.status} contentType=${current.contentType ?? "unknown"} location=${location ?? "none"} url=${current.url} body=${truncateForError(current.rawBody)}`,
       "NETWORK_ERROR"
     );
   }
@@ -396,7 +412,7 @@ async function createDfnsUserActionToken(
 
   if (!allowedCredentialIds.includes(ctx.credentialId)) {
     throw new SigningError(
-      `DFNS credential '${ctx.credentialId}' is not allowed. Allowed: ${allowedCredentialIds.join(", ") || "none"}`,
+      `${ctx.providerLabel} credential '${ctx.credentialId}' is not allowed. Allowed: ${allowedCredentialIds.join(", ") || "none"}`,
       "PROVIDER_NOT_CONFIGURED"
     );
   }
@@ -409,12 +425,16 @@ async function createDfnsUserActionToken(
   );
   let signature: Buffer;
   try {
-    const signedChallenge = createDfnsCredentialSignature(ctx.privateKey, clientDataBytes);
+    const signedChallenge = createDfnsCredentialSignature(
+      ctx.privateKey,
+      clientDataBytes,
+      ctx.providerLabel
+    );
     signature = signedChallenge.signature;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new SigningError(
-      `DFNS local signature creation failed: ${reason}. This usually indicates runtime crypto incompatibility with DFNS private key material.`,
+      `${ctx.providerLabel} local signature creation failed: ${reason}. This usually indicates runtime crypto incompatibility with ${ctx.providerLabel} private key material.`,
       "NETWORK_ERROR",
       error instanceof Error ? error : undefined
     );
@@ -440,7 +460,7 @@ async function createDfnsUserActionToken(
 
   if (!signed.userAction) {
     throw new SigningError(
-      "DFNS user action signing failed: missing userAction token",
+      `${ctx.providerLabel} user action signing failed: missing userAction token`,
       "NETWORK_ERROR"
     );
   }
@@ -456,7 +476,10 @@ export function denormalizeDfnsWalletId(walletId: string): string {
   return walletId.startsWith("dfns_") ? walletId.slice("dfns_".length) : walletId;
 }
 
-export function resolveDfnsNetwork(value?: string): DfnsNetwork {
+export function resolveDfnsNetwork(
+  value?: string,
+  providerLabel: string = DFNS_PROVIDER_LABEL
+): DfnsNetwork {
   if (!value) {
     return DEFAULT_DFNS_NETWORK;
   }
@@ -466,17 +489,12 @@ export function resolveDfnsNetwork(value?: string): DfnsNetwork {
   }
 
   throw new SigningError(
-    "DFNS network must be one of: Solana, SolanaDevnet",
+    `${providerLabel} network must be one of: Solana, SolanaDevnet`,
     "PROVIDER_NOT_CONFIGURED"
   );
 }
 
-export async function createDfnsApiClient(
-  env: Env,
-  options?: { apiBaseUrl?: string }
-): Promise<DfnsApiClient> {
-  const ctx = resolveDfnsContext(env, options);
-
+function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
   return {
     wallets: {
       getWallet: async (request: { walletId: string }) =>
@@ -515,4 +533,44 @@ export async function createDfnsApiClient(
         ),
     },
   };
+}
+
+export async function createDfnsApiClient(
+  env: Env,
+  options?: { apiBaseUrl?: string }
+): Promise<DfnsApiClient> {
+  return buildDfnsApiClient(resolveDfnsContext(env, options));
+}
+
+// IBM Digital Asset Haven reuses the Dfns request/UAS/signing machinery with
+// IBM-hosted credentials (IBM_HAVEN_*) and base URL — same wire protocol.
+function resolveIbmHavenContext(env: Env, options?: { apiBaseUrl?: string }): DfnsClientContext {
+  const authToken = env.IBM_HAVEN_AUTH_TOKEN;
+  const credentialId = env.IBM_HAVEN_CREDENTIAL_ID;
+  const privateKey = env.IBM_HAVEN_PRIVATE_KEY
+    ? normalizePrivateKey(env.IBM_HAVEN_PRIVATE_KEY)
+    : undefined;
+
+  if (!authToken || !credentialId || !privateKey) {
+    throw new SigningError(
+      "IBM Digital Asset Haven environment variables not configured: IBM_HAVEN_AUTH_TOKEN, IBM_HAVEN_CREDENTIAL_ID, IBM_HAVEN_PRIVATE_KEY",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  return {
+    authToken,
+    credentialId,
+    privateKey,
+    baseUrl: options?.apiBaseUrl ?? env.IBM_HAVEN_API_BASE_URL ?? DEFAULT_IBM_HAVEN_API_BASE_URL,
+    providerLabel: IBM_HAVEN_PROVIDER_LABEL,
+    userAgent: IBM_HAVEN_USER_AGENT,
+  };
+}
+
+export async function createIbmHavenApiClient(
+  env: Env,
+  options?: { apiBaseUrl?: string }
+): Promise<DfnsApiClient> {
+  return buildDfnsApiClient(resolveIbmHavenContext(env, options));
 }

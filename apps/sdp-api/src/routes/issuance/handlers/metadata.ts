@@ -1,5 +1,7 @@
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { createAssetProfilesRepository } from "@/db/repositories";
+import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 
@@ -91,6 +93,21 @@ export const serveTokenMetadata = async (c: AppContext) => {
   }
   if (metadata.imageUrl) {
     body.image = metadata.imageUrl;
+  }
+
+  // Layer the Asset Profile public projection over the base token fields when
+  // the feature is enabled. The projection only ever contains registry
+  // allow-listed, namespaced fields (asset/chain/...) — never compliance or
+  // custom — and core token fields (name/symbol/...) always win on any overlap.
+  // Gated by the same flag as the Asset Profiles family, so the canonical URI
+  // already burned into deployed tokens serves the projection once it ships.
+  if (isAssetProfilesEnabled(c.env)) {
+    const publicMetadata = await createAssetProfilesRepository(c.env).getPublicMetadataByTokenId(
+      tokenId
+    );
+    if (publicMetadata) {
+      return c.json({ ...publicMetadata, ...body });
+    }
   }
 
   return c.json(body);

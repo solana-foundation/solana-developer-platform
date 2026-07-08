@@ -4,6 +4,7 @@ import {
   KeychainCoinbaseAdapter,
   KeychainDfnsAdapter,
   KeychainFireblocksAdapter,
+  KeychainIbmHavenAdapter,
   KeychainMemoryAdapter,
   KeychainParaAdapter,
   KeychainPrivyAdapter,
@@ -12,7 +13,11 @@ import {
   type SigningConfigRecord,
 } from "@/services/adapters";
 import { buildKeychainUtilaConfig } from "@/services/adapters/signing/keychain/utila-config";
-import { createDfnsApiClient, normalizeDfnsWalletId } from "@/services/dfns/client";
+import {
+  createDfnsApiClient,
+  createIbmHavenApiClient,
+  normalizeDfnsWalletId,
+} from "@/services/dfns/client";
 import { createEncryptionService } from "@/services/encryption.service";
 import {
   SigningError,
@@ -27,6 +32,7 @@ import {
   parseOptionalRequestDelayMs,
 } from "./provider-config";
 import {
+  denormalizeIbmHavenWalletId,
   normalizeParaWalletId,
   normalizePrivyWalletId,
   normalizeTurnkeyWalletId,
@@ -246,6 +252,23 @@ const providerAdapterFactories = {
       defaultWalletId,
     });
   },
+  ibm_haven: async ({ env, record, parsed }) => {
+    const defaultWalletId =
+      (record.defaultWalletId ? denormalizeIbmHavenWalletId(record.defaultWalletId) : undefined) ??
+      parsed.walletId;
+
+    if (!defaultWalletId) {
+      throw new SigningError(
+        "IBM Digital Asset Haven configuration is missing a default wallet ID",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    return new KeychainIbmHavenAdapter({
+      client: await createIbmHavenApiClient(env, { apiBaseUrl: parsed.apiBaseUrl }),
+      defaultWalletId,
+    });
+  },
   anchorage: async () => new LifecycleOnlyAdapter("anchorage"),
   utila: async ({ env, record, parsed }) => {
     return new KeychainUtilaAdapter(
@@ -270,5 +293,9 @@ export async function createAdapterFromEncryptedConfig(
 ): Promise<SigningPort> {
   const parsed = await parseConfigRecord(env, orgId, record);
   const factory = providerAdapterFactories[parsed.provider] as AdapterFactory;
-  return factory({ env, orgId, record, parsed });
+  // `return await`, not bare `return`: factories are async and can reject before
+  // their first await. workerd (unlike Node) reports the adopted, briefly
+  // handler-less promise as an unhandled rejection — dropping the await fails
+  // the workers-pool test runs and would log rejection noise in production.
+  return await factory({ env, orgId, record, parsed });
 }

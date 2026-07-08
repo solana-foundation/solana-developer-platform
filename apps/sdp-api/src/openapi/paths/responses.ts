@@ -7,6 +7,8 @@ import {
   allowlistEntrySchema,
   apiKeyDetailSchema,
   apiKeyResponseSchema,
+  assetProfileFieldOptionsResponseSchema,
+  assetProfileResponseSchema,
   counterpartyAccountResponseSchema,
   counterpartyFieldOptionsResponseSchema,
   counterpartyResponseSchema,
@@ -29,6 +31,7 @@ import {
   frozenAccountSchema,
   inviteMemberResponseSchema,
   listApiKeysResponseSchema,
+  listAssetProfilesResponseSchema,
   listCounterpartiesResponseSchema,
   listCounterpartyAccountsResponseSchema,
   listMembersResponseSchema,
@@ -80,6 +83,7 @@ import {
   tokenTemplateResponseSchema,
   tokenTransactionListItemSchema,
   tokenTransactionSchema,
+  tokenWithAssetProfileResponseSchema,
   transferBatchEstimateResponseSchema,
   transferBatchResponseSchema,
   transferBatchSchema,
@@ -101,6 +105,12 @@ export const apiKeyCreateResponse = successResponseSchema(apiKeyResponseSchema);
 export const apiKeyRotateResponse = successResponseSchema(rotateApiKeyResponseSchema);
 export const apiKeyRevokeResponse = successResponseSchema(revokeApiKeyResponseSchema);
 
+export const assetProfileResponse = successResponseSchema(assetProfileResponseSchema);
+export const assetProfileFieldOptionsResponse = successResponseSchema(
+  assetProfileFieldOptionsResponseSchema
+);
+export const listAssetProfilesResponse = successResponseSchema(listAssetProfilesResponseSchema);
+
 export const counterpartyResponse = successResponseSchema(counterpartyResponseSchema);
 export const counterpartyFieldOptionsResponse = successResponseSchema(
   counterpartyFieldOptionsResponseSchema
@@ -120,6 +130,9 @@ export const rpcProvidersResponse = successResponseSchema(rpcProvidersResponseSc
 export const rpcRelayResponse = successResponseSchema(rpcRelayResponseSchema);
 
 export const tokenResponse = successResponseSchema(tokenResponseSchema);
+export const tokenWithAssetProfileResponse = successResponseSchema(
+  tokenWithAssetProfileResponseSchema
+);
 export const tokenListResponse = paginatedResponseSchema(tokenSchema);
 export const tokenTransactionsResponse = paginatedResponseSchema(tokenTransactionSchema);
 export const issuanceTransactionsResponse = paginatedResponseSchema(tokenTransactionListItemSchema);

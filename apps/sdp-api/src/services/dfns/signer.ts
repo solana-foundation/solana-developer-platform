@@ -22,6 +22,7 @@ import type {
   DfnsSignatureStatus,
   DfnsWallet,
 } from "./client";
+import { DFNS_PROVIDER_LABEL } from "./client";
 
 const SIGNATURE_POLL_INTERVAL_MS = 600;
 const SIGNATURE_MAX_POLL_ATTEMPTS = 50;
@@ -37,6 +38,8 @@ export interface DfnsSignerConfig {
   walletId: string;
   /** Reserved for future parity with other signers */
   requestDelayMs?: number;
+  /** Provider display label for error messages; defaults to "DFNS" */
+  providerLabel?: string;
 }
 
 export class DfnsSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
@@ -45,6 +48,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
   private readonly client: DfnsApiClient;
   private readonly walletId: string;
   private readonly requestDelayMs: number;
+  private readonly providerLabel: string;
   private signingKeyId?: string;
   private walletNetwork?: string;
   private initialized = false;
@@ -59,6 +63,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     this.client = config.client;
     this.walletId = config.walletId;
     this.requestDelayMs = config.requestDelayMs ?? 0;
+    this.providerLabel = config.providerLabel ?? DFNS_PROVIDER_LABEL;
     this.validateRequestDelayMs(this.requestDelayMs);
   }
 
@@ -166,7 +171,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     } catch (error) {
       throwSignerError(SignerErrorCode.HTTP_ERROR, {
         cause: error,
-        message: `Failed to fetch DFNS wallet '${this.walletId}'`,
+        message: `Failed to fetch ${this.providerLabel} wallet '${this.walletId}'`,
       });
     }
 
@@ -188,7 +193,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
   private getWalletAddress(wallet: DfnsWallet): Address<TAddress> {
     if (!wallet?.address) {
       throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-        message: `DFNS wallet '${this.walletId}' response is missing address`,
+        message: `${this.providerLabel} wallet '${this.walletId}' response is missing address`,
       });
     }
 
@@ -204,7 +209,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
       ...buildSignatureTarget(network),
     });
     const finalized = await this.waitForSignatureResult(keyId, response);
-    return extractSignatureBytes(finalized);
+    return extractSignatureBytes(finalized, this.providerLabel);
   }
 
   private async signTransaction(
@@ -217,7 +222,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
       ...buildSignatureTarget(network),
     });
     const finalized = await this.waitForSignatureResult(keyId, response);
-    const signedTxBytes = extractSignedTransactionBytes(finalized);
+    const signedTxBytes = extractSignedTransactionBytes(finalized, this.providerLabel);
     return bytesToBase64(signedTxBytes) as Base64EncodedWireTransaction;
   }
 
@@ -228,7 +233,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
 
     if (!this.signingKeyId) {
       throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-        message: `DFNS wallet '${this.walletId}' response is missing signing key`,
+        message: `${this.providerLabel} wallet '${this.walletId}' response is missing signing key`,
       });
     }
 
@@ -250,7 +255,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     } catch (error) {
       throwSignerError(SignerErrorCode.HTTP_ERROR, {
         cause: error,
-        message: `Failed to create DFNS signature request with key '${keyId}': ${
+        message: `Failed to create ${this.providerLabel} signature request with key '${keyId}': ${
           error instanceof Error ? error.message : String(error)
         }`,
       });
@@ -269,7 +274,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     } catch (error) {
       throwSignerError(SignerErrorCode.HTTP_ERROR, {
         cause: error,
-        message: `Failed to fetch DFNS signature request '${signatureId}'`,
+        message: `Failed to fetch ${this.providerLabel} signature request '${signatureId}'`,
       });
     }
   }
@@ -289,7 +294,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
 
       if (TERMINAL_FAILURE_STATUSES.has(status)) {
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-          message: `DFNS signature request failed (${status})${
+          message: `${this.providerLabel} signature request failed (${status})${
             current.reason ? `: ${current.reason}` : ""
           }`,
         });
@@ -298,7 +303,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
       const signatureId = current.id;
       if (!signatureId) {
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-          message: `DFNS signature request is '${status}' but missing request ID`,
+          message: `${this.providerLabel} signature request is '${status}' but missing request ID`,
         });
       }
 
@@ -311,7 +316,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     }
 
     throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-      message: "Timed out while waiting for DFNS signature request to complete",
+      message: `Timed out while waiting for ${this.providerLabel} signature request to complete`,
     });
   }
 }
@@ -410,7 +415,10 @@ function isLikelyBase64(value: string): boolean {
   return /^[A-Za-z0-9+/]+={0,2}$/.test(normalized);
 }
 
-function extractSignatureBytes(request: DfnsSignatureRequest): SignatureBytes {
+function extractSignatureBytes(
+  request: DfnsSignatureRequest,
+  providerLabel: string
+): SignatureBytes {
   const compoundSignature =
     request.signature?.r && request.signature?.s
       ? `0x${normalizeHex(request.signature.r)}${normalizeHex(request.signature.s)}`
@@ -430,11 +438,14 @@ function extractSignatureBytes(request: DfnsSignatureRequest): SignatureBytes {
   }
 
   throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-    message: "DFNS response does not contain a parsable signature payload",
+    message: `${providerLabel} response does not contain a parsable signature payload`,
   });
 }
 
-function extractSignedTransactionBytes(request: DfnsSignatureRequest): Uint8Array {
+function extractSignedTransactionBytes(
+  request: DfnsSignatureRequest,
+  providerLabel: string
+): Uint8Array {
   const candidates = [
     request.signedData,
     request.signature?.encoded,
@@ -449,7 +460,7 @@ function extractSignedTransactionBytes(request: DfnsSignatureRequest): Uint8Arra
   }
 
   throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-    message: "DFNS response does not contain a parsable signed transaction payload",
+    message: `${providerLabel} response does not contain a parsable signed transaction payload`,
   });
 }
 

@@ -1417,6 +1417,64 @@ describe("Issuance Routes", () => {
         updateMetadataSpy.mockRestore();
       }
     });
+
+    it("updates requiresAllowlist while the token is undeployed", async () => {
+      const res = await app.request(
+        `/v1/issuance/tokens/${tokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ requiresAllowlist: true }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.token.requiresAllowlist).toBe(true);
+    });
+
+    it("rejects requiresAllowlist changes after deployment", async () => {
+      const db = getDb(env);
+      const deployedTokenId = "tok_allowlistlocked1";
+
+      await db
+        .prepare(
+          `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+           name, symbol, decimals, total_supply_cached, is_mintable, freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, 'Locked Token', 'LOCK', 6, '0', 1, 1, 0, 'active', '2024-01-02T00:00:00.000Z', ?)`
+        )
+        .bind(
+          deployedTokenId,
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          TEST_ACTIVE_TOKEN.mintAddress,
+          TEST_ACTIVE_TOKEN.mintAuthority,
+          TEST_ACTIVE_TOKEN.freezeAuthority,
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${deployedTokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ requiresAllowlist: true }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.message).toContain("requiresAllowlist");
+    });
   });
 
   describe("POST /v1/issuance/tokens/:tokenId/supply/refresh", () => {

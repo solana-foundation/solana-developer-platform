@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { AppError } from "@/lib/errors";
 import {
-  BvnkRampClient,
   buildBvnkCustomerExternalReference,
   buildBvnkOfframpWalletName,
   buildBvnkOnrampPaymentRuleKey,
@@ -14,13 +13,13 @@ import {
   parseBvnkOfframpWalletName,
   parseBvnkOnrampPaymentRuleKey,
   parseBvnkOnrampWalletName,
-} from "./bvnk";
+} from "./provider-data";
 
 const ONRAMP_PARAMS = {
   cryptoToken: "USDC_SOLANA",
   fiatCurrency: "USD",
   destinationWalletAddress: "dest",
-};
+} as const;
 const ONRAMP_KEY = "USD:USDC_SOLANA:dest";
 
 function providerData(
@@ -129,65 +128,6 @@ describe("bvnkOnrampStatusFromProviderData", () => {
   });
 });
 
-describe("BvnkRampClient.parseBvnkWebhookEvent", () => {
-  it("parses BVNK wallet create webhooks with walletName", () => {
-    const client = new BvnkRampClient();
-
-    expect(
-      client.parseBvnkWebhookEvent({
-        event: "bvnk:ledger:wallet:create",
-        data: {
-          id: "wallet_1",
-          status: "COMPLETED",
-          walletName: buildBvnkOnrampWalletName("counterparty_123", ONRAMP_KEY),
-          customerReference: "customer_1",
-          ledgers: [{ type: "FIAT", accountNumber: "900368997705", code: "101019644" }],
-        },
-      })
-    ).toMatchObject({
-      kind: "bvnk:ledger:wallet:create",
-      customerReference: "customer_1",
-      walletId: "wallet_1",
-      walletName: "sdp:onramp:counterparty_123:USD:USDC_SOLANA:dest",
-      walletStatus: "COMPLETED",
-      bankAccount: { accountNumber: "900368997705" },
-    });
-  });
-
-  it("parses a BVNK fiat pay-in status-change webhook", () => {
-    const client = new BvnkRampClient();
-
-    expect(
-      client.parseBvnkWebhookEvent({
-        event: "bvnk:payment:payin:status-change",
-        data: {
-          status: "COMPLETED",
-          customerReference: "customer_1",
-          amount: { value: 100, currencyCode: "USD" },
-          beneficiary: { walletId: "a:1:wallet:1" },
-        },
-      })
-    ).toMatchObject({
-      kind: "bvnk:payment:payin:status-change",
-      customerReference: "customer_1",
-      walletId: "a:1:wallet:1",
-      status: "COMPLETED",
-      amount: "100",
-    });
-  });
-
-  it("ignores an unhandled BVNK event instead of throwing", () => {
-    const client = new BvnkRampClient();
-
-    expect(
-      client.parseBvnkWebhookEvent({
-        event: "bvnk:totally:new-event",
-        data: {},
-      })
-    ).toEqual({ kind: "ignore", event: "bvnk:totally:new-event" });
-  });
-});
-
 describe("buildBvnkCustomerExternalReference", () => {
   it("builds a compact cp_ externalReference from an SDP counterparty id", () => {
     expect(
@@ -273,13 +213,10 @@ describe("BVNK on-ramp payment rule key", () => {
     });
   });
 
-  it("parses crypto networks that contain underscores", () => {
-    expect(parseBvnkOnrampPaymentRuleKey("USD:BCH_BITCOIN_CASH:dest")).toEqual({
-      fiatCurrency: "USD",
-      cryptoCurrency: "BCH",
-      cryptoNetwork: "BITCOIN_CASH",
-      destinationWalletAddress: "dest",
-    });
+  it("rejects non-Solana crypto networks", () => {
+    expect(() => parseBvnkOnrampPaymentRuleKey("USD:BCH_BITCOIN_CASH:dest")).toThrow(
+      "Malformed BVNK on-ramp payment rule key"
+    );
   });
 
   it("rejects malformed payment rule keys", () => {
@@ -289,13 +226,17 @@ describe("BVNK on-ramp payment rule key", () => {
     expect(() => parseBvnkOnrampPaymentRuleKey("USD:USDC_NOT_A_NETWORK:dest")).toThrow(
       "Malformed BVNK on-ramp payment rule key"
     );
-    expect(() => buildBvnkOnrampPaymentRuleKey("NOPE", "USDC", "SOLANA", "dest")).toThrow(
-      "Malformed BVNK on-ramp payment rule key input"
+    expect(() => parseBvnkOnrampPaymentRuleKey("NOPE:USDC_SOLANA:dest")).toThrow(
+      "Malformed BVNK on-ramp payment rule key"
     );
   });
 });
 
-function counterpartyRow(overrides?: Partial<CounterpartyRow>): CounterpartyRow {
+type IndividualCounterpartyRow = Extract<CounterpartyRow, { entity_type: "individual" }>;
+
+function counterpartyRow(
+  overrides?: Partial<IndividualCounterpartyRow>
+): IndividualCounterpartyRow {
   return {
     id: "cp_123",
     organization_id: "org_123",
@@ -307,6 +248,8 @@ function counterpartyRow(overrides?: Partial<CounterpartyRow>): CounterpartyRow 
     identity: {
       firstName: "Ada",
       lastName: "Lovelace",
+      dateOfBirth: "1990-01-15",
+      phone: "+14155551234",
       address: {
         line1: "1 Market St",
         city: "San Francisco",
@@ -335,6 +278,8 @@ describe("buildBvnkRuleEntity", () => {
       identity: {
         firstName: "Ada",
         lastName: "Lovelace",
+        dateOfBirth: "1990-01-15",
+        phone: "+14155551234",
         address: {
           line1: "1 High St",
           city: "London",

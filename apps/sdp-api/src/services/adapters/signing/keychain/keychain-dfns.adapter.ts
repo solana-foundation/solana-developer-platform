@@ -6,6 +6,7 @@
 
 import type { SolanaSigner } from "@solana/keychain-core";
 import type { Address } from "@solana/kit";
+import { DFNS_PROVIDER_LABEL } from "@/services/dfns/client";
 import { DfnsSigner } from "@/services/dfns/signer";
 import type { SignRequest, SignResult } from "@/services/ports";
 import { SigningError } from "@/services/ports";
@@ -13,7 +14,13 @@ import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainDfnsConfig } from "./types";
 
 export class KeychainDfnsAdapter extends BaseKeychainAdapter {
-  readonly providerId = "dfns";
+  // Widened from the "dfns" literal to `string` so the KeychainIbmHavenAdapter
+  // subclass can override providerId — tsc rejects the override otherwise, because
+  // the immediate parent narrows this readonly field to "dfns" (base is abstract `string`).
+  readonly providerId: string = "dfns";
+
+  /** Display label interpolated into signer error messages (overridden by white-label subclasses). */
+  protected readonly providerLabel: string = DFNS_PROVIDER_LABEL;
 
   protected signer!: SolanaSigner;
 
@@ -50,7 +57,10 @@ export class KeychainDfnsAdapter extends BaseKeychainAdapter {
   private async getDfnsSigner(walletId?: string): Promise<DfnsSigner> {
     const normalizedWalletId = walletId ?? this.config.defaultWalletId;
     if (!normalizedWalletId) {
-      throw new SigningError("DFNS wallet ID is required", "PROVIDER_NOT_CONFIGURED");
+      throw new SigningError(
+        `${this.providerLabel} wallet ID is required`,
+        "PROVIDER_NOT_CONFIGURED"
+      );
     }
 
     const cacheKey = normalizedWalletId;
@@ -63,6 +73,7 @@ export class KeychainDfnsAdapter extends BaseKeychainAdapter {
       client: this.config.client,
       walletId: normalizedWalletId,
       requestDelayMs: this.config.requestDelayMs,
+      providerLabel: this.providerLabel,
     });
     this.signerByWalletId.set(cacheKey, created);
     return created;

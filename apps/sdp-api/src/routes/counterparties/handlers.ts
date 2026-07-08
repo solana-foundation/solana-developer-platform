@@ -1,15 +1,10 @@
 import {
-  COUNTERPARTY_EMPLOYMENT_STATUSES,
   COUNTERPARTY_ENTITY_TYPES,
-  COUNTERPARTY_ID_TYPES,
-  COUNTERPARTY_INDUSTRY_SECTORS,
-  COUNTERPARTY_INTENDED_USE,
-  COUNTERPARTY_PEP_STATUSES,
-  COUNTERPARTY_SOURCE_OF_FUNDS,
-  COUNTERPARTY_YEARLY_INCOME,
   COUNTRIES,
   type Counterparty,
+  type CounterpartyEntityType,
   type CounterpartyFieldOptionsResponse,
+  type CounterpartyIdentity,
   type CounterpartyResponse,
   type ListCounterpartiesResponse,
   type ListProjectCounterpartyAccountsResponse,
@@ -29,7 +24,6 @@ import {
   notFound,
 } from "@/lib/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
-import { bvnkOnrampStatusFromProviderData } from "@/lib/ramps/providers/bvnk";
 import { created, noContent, success } from "@/lib/response";
 import {
   advanceCounterpartyRequirements,
@@ -44,6 +38,8 @@ import {
   getCounterpartyAccountsRepository,
 } from "./context";
 import {
+  counterpartyBusinessIdentitySchema,
+  counterpartyIdentitySchema,
   counterpartyIdParamsSchema,
   counterpartyRequirementsQuerySchema,
   createCounterpartySchema,
@@ -53,35 +49,27 @@ import {
 } from "./schemas";
 
 function mapToCounterparty(row: CounterpartyRow): Counterparty {
-  return {
+  const base = {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
     externalId: row.external_id,
-    entityType: row.entity_type,
     displayName: row.display_name,
     email: row.email,
-    identity: row.identity,
     status: row.status,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+  return row.entity_type === "individual"
+    ? { ...base, entityType: "individual", identity: row.identity }
+    : { ...base, entityType: "business", identity: row.identity };
 }
 
 export const getCounterpartyFieldOptions = async (c: AppContext) => {
   const response: CounterpartyFieldOptionsResponse = {
     fields: {
       entityTypes: COUNTERPARTY_ENTITY_TYPES,
-      governmentIdTypes: COUNTERPARTY_ID_TYPES,
-      compliance: {
-        employmentStatuses: COUNTERPARTY_EMPLOYMENT_STATUSES,
-        sourceOfFunds: COUNTERPARTY_SOURCE_OF_FUNDS,
-        pepStatuses: COUNTERPARTY_PEP_STATUSES,
-        intendedUseOfAccount: COUNTERPARTY_INTENDED_USE,
-        estimatedYearlyIncome: COUNTERPARTY_YEARLY_INCOME,
-        employmentIndustrySectors: COUNTERPARTY_INDUSTRY_SECTORS,
-      },
       countries: COUNTRIES,
       usStates: US_STATES,
     },
@@ -119,13 +107,6 @@ export const listCounterparties = async (c: AppContext) => {
   return success(c, response);
 };
 
-/**
- * Lists a project's counterparty accounts of the requested `type`.
- *
- * Only `crypto_account` is supported today (active Solana wallets); the `type`
- * enum will widen as other account kinds gain pickers, at which point the
- * response becomes a discriminated union by `type`.
- */
 export const listProjectCounterpartyAccounts = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -220,34 +201,24 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     throw notFound("Counterparty");
   }
 
-  if (
-    query.data.provider === "bvnk" &&
-    query.data.direction === "onramp" &&
-    query.data.cryptoToken &&
-    query.data.destinationWallet &&
-    query.data.fiatCurrency
-  ) {
-    const gate = RAMP_PROVIDER_CLIENTS.bvnk.validateCounterparty(mapToCounterparty(counterparty), {
-      direction: "onramp",
-      providerData: counterparty.provider_data,
-    });
-    if (gate.status === "collect" || gate.status === "unsupported") {
-      return success(c, gate);
-    }
+  if (query.data.direction === "onramp") {
     const scope = await resolveScope(c);
     const destinationWalletAddress = resolveWalletAddress(
       scope.wallets,
       query.data.destinationWallet,
       "destinationWallet"
     );
-    return success(
-      c,
-      bvnkOnrampStatusFromProviderData(counterparty.provider_data, {
+    const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
+      mapToCounterparty(counterparty),
+      {
+        direction: query.data.direction,
+        providerData: counterparty.provider_data,
         cryptoToken: query.data.cryptoToken,
         fiatCurrency: query.data.fiatCurrency,
         destinationWalletAddress,
-      })
+      }
     );
+    return success(c, requirements);
   }
 
   const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
@@ -255,7 +226,8 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     {
       direction: query.data.direction,
       providerData: counterparty.provider_data,
-      ...("fiatCurrency" in query.data ? { fiatCurrency: query.data.fiatCurrency } : {}),
+      cryptoToken: query.data.cryptoToken,
+      fiatCurrency: query.data.fiatCurrency,
     }
   );
   return success(c, requirements);
@@ -291,12 +263,24 @@ export const submitCounterpartyRequirements = async (c: AppContext) => {
   }
 
   const input = parsed.data;
+  let destinationWalletAddress: string | undefined;
+  if (input.provider === "bvnk" && input.direction === "onramp") {
+    const scope = await resolveScope(c);
+    destinationWalletAddress = resolveWalletAddress(
+      scope.wallets,
+      input.destinationWallet,
+      "destinationWallet",
+      scope.auth
+    );
+  }
   const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
     mapToCounterparty(counterparty),
     {
       direction: input.direction,
       providerData: counterparty.provider_data,
+      ...("cryptoToken" in input ? { cryptoToken: input.cryptoToken } : {}),
       ...("fiatCurrency" in input ? { fiatCurrency: input.fiatCurrency } : {}),
+      ...(destinationWalletAddress ? { destinationWalletAddress } : {}),
     }
   );
 
@@ -354,7 +338,7 @@ export const createCounterparty = async (c: AppContext) => {
     entityType: parsed.data.entityType,
     displayName: parsed.data.displayName,
     email: parsed.data.email,
-    identity: parsed.data.identity ?? {},
+    identity: parsed.data.identity,
     createdBy,
   });
 
@@ -379,6 +363,54 @@ export const createCounterparty = async (c: AppContext) => {
   const response: CounterpartyResponse = { counterparty: mapToCounterparty(counterparty) };
   return created(c, response);
 };
+
+/**
+ * Rejects an update whose resulting (entityType, identity) pair would violate the
+ * discriminated identity contract, loading the stored row for whichever side the
+ * request omitted. Returns the re-parsed identity when the request provided one.
+ */
+async function validateUpdatedIdentity(
+  repo: ReturnType<typeof getCounterpartiesRepository>,
+  input: {
+    counterpartyId: string;
+    organizationId: string;
+    projectId: string;
+    entityType: CounterpartyEntityType | undefined;
+    identity: CounterpartyIdentity | undefined;
+  }
+): Promise<CounterpartyIdentity | undefined> {
+  if (input.identity === undefined && input.entityType === undefined) {
+    return undefined;
+  }
+  let entityType = input.entityType;
+  let identity: unknown = input.identity;
+  if (entityType === undefined || identity === undefined) {
+    const current = await repo.getCounterpartyById(input);
+    if (!current) {
+      throw notFound("Counterparty");
+    }
+    if (entityType === undefined) {
+      entityType = current.entity_type;
+    }
+    if (identity === undefined) {
+      identity = current.identity;
+    }
+  }
+  const identitySchemaForEntityType =
+    entityType === "individual" ? counterpartyIdentitySchema : counterpartyBusinessIdentitySchema;
+  const result = identitySchemaForEntityType.safeParse(identity);
+  if (!result.success) {
+    if (input.identity === undefined) {
+      throw badRequest("Changing entityType requires a matching identity in the same request.", {
+        errors: z.treeifyError(result.error),
+      });
+    }
+    throw badRequest("identity does not match the counterparty's entityType.", {
+      errors: z.treeifyError(result.error),
+    });
+  }
+  return input.identity === undefined ? undefined : result.data;
+}
 
 export const updateCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
@@ -408,6 +440,17 @@ export const updateCounterparty = async (c: AppContext) => {
     if (existing && existing.id !== counterpartyId) {
       throw conflict("A counterparty with this external ID already exists");
     }
+  }
+
+  const validatedIdentity = await validateUpdatedIdentity(repo, {
+    counterpartyId,
+    organizationId: auth.organizationId,
+    projectId,
+    entityType: parsed.data.entityType,
+    identity: parsed.data.identity,
+  });
+  if (validatedIdentity !== undefined) {
+    parsed.data.identity = validatedIdentity;
   }
 
   const updated = await repo.updateCounterparty({

@@ -119,6 +119,91 @@ const walletControlProfileSummarySchema = z
   })
   .openapi({ description: "Wallet control profile summary." });
 
+const walletPolicyAuditEntrySchema = z
+  .object({
+    walletOperationId: z.string().openapi({
+      description: "Wallet operation record ID created before policy evaluation.",
+      example: "wop_example",
+    }),
+    policyEvaluationId: z.string().openapi({
+      description: "Policy evaluation record ID.",
+      example: "peval_example",
+    }),
+    operationFamily: z
+      .enum(["transfer", "payment", "ramp", "issuance", "raw_sign", "program", "provider_admin"])
+      .openapi({ description: "Normalized wallet operation family." }),
+    operationType: z.string().openapi({
+      description: "Normalized wallet operation type.",
+      example: "payment_transfer_execute",
+    }),
+    asset: z.string().nullable().openapi({
+      description: "Asset symbol or mint when available.",
+      example: "USDC",
+    }),
+    amount: z.string().nullable().openapi({
+      description: "Operation amount when available.",
+      example: "100.00",
+    }),
+    destination: z.string().nullable().openapi({
+      description: "Destination address or counterparty when available.",
+      example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    }),
+    status: z
+      .enum([
+        "created",
+        "evaluated",
+        "pending_approval",
+        "executing",
+        "completed",
+        "failed",
+        "canceled",
+      ])
+      .openapi({ description: "Current wallet operation status." }),
+    decision: z
+      .enum([
+        "allow",
+        "deny",
+        "approval_required",
+        "provider_approval_required",
+        "review",
+        "not_evaluated",
+      ])
+      .openapi({ description: "Policy decision for this operation." }),
+    reasonCode: z.string().openapi({
+      description: "Stable reason code explaining the decision.",
+      example: "wallet_policy_match",
+    }),
+    reason: z.string().nullable().openapi({
+      description: "Human-readable decision reason.",
+      example: "Operation family payment matched policy.",
+    }),
+    requiresApproval: z.boolean().openapi({
+      description: "Whether the decision paused execution for approval.",
+    }),
+    approvalRequestId: z.string().nullable().openapi({
+      description: "Approval request ID when the operation requires approval.",
+      example: "appr_example",
+    }),
+    operationCreatedAt: isoDateTimeSchema.openapi({
+      description: "Wallet operation creation timestamp.",
+    }),
+    operationUpdatedAt: isoDateTimeSchema.openapi({
+      description: "Wallet operation last update timestamp.",
+    }),
+    evaluatedAt: isoDateTimeSchema.openapi({
+      description: "Policy evaluation timestamp.",
+    }),
+  })
+  .openapi({ description: "Recent wallet policy evaluation audit entry." });
+
+const walletPolicyAuditSchema = z
+  .object({
+    recentEvaluations: z.array(walletPolicyAuditEntrySchema).openapi({
+      description: "Recent wallet operations and policy decisions for this wallet.",
+    }),
+  })
+  .openapi({ description: "Wallet policy audit summary." });
+
 export const walletPolicySchema = z
   .object({
     walletId: walletIdParamSchema.openapi({
@@ -148,6 +233,9 @@ export const walletPolicySchema = z
       .openapi({ description: "Active wallet control profile rules." }),
     controlProfile: walletControlProfileSummarySchema.optional().openapi({
       description: "Active wallet control profile metadata.",
+    }),
+    audit: walletPolicyAuditSchema.optional().openapi({
+      description: "Recent wallet operation policy decisions for customer/support audit review.",
     }),
     createdAt: isoDateTimeSchema.openapi({
       description: "Timestamp when the policy was created.",
