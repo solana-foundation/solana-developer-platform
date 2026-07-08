@@ -535,7 +535,12 @@ export async function bvnkOnrampQuote(
     counterparty: CounterpartyRow;
     paymentRule: BvnkOnrampRequestSpec;
   }
-): Promise<BvnkOnrampQuote> {
+): Promise<{
+  quote: BvnkOnrampQuote;
+  transferProviderData: {
+    bvnk: { ruleId: string; ruleStatus?: string; fundingWalletId?: string };
+  };
+}> {
   const { currency, network, destinationWalletAddress, fiatCurrency } = input.paymentRule;
   const providerData = input.counterparty.provider_data;
   const customer = readBvnkCustomer(providerData);
@@ -568,10 +573,19 @@ export async function bvnkOnrampQuote(
     }
   );
   return {
-    provider: "bvnk",
-    id: rampId("bvnk_onramp"),
-    status: "pending",
-    deliveryMode: "manual_instructions",
-    paymentInstructions: [instruction],
+    quote: {
+      provider: "bvnk",
+      id: rampId("bvnk_onramp"),
+      status: "pending",
+      deliveryMode: "manual_instructions",
+      paymentInstructions: [instruction],
+    },
+    transferProviderData: {
+      bvnk: {
+        ruleId: entry.ruleId,
+        ...(entry.ruleStatus ? { ruleStatus: entry.ruleStatus } : {}),
+        ...(entry.walletId ? { fundingWalletId: entry.walletId } : {}),
+      },
+    },
   };
 }

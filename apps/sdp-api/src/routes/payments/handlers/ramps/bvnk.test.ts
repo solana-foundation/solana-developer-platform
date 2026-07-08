@@ -75,13 +75,18 @@ describe("bvnkOnrampQuote", () => {
     const first = await bvnkOnrampQuote(fakeContext(), input);
     const second = await bvnkOnrampQuote(fakeContext(), input);
 
-    expect(first.id).not.toBe(ruleId);
-    expect(second.id).not.toBe(ruleId);
-    expect(second.id).not.toBe(first.id);
-    expect(first.id.startsWith("bvnk_onramp_")).toBe(true);
+    expect(first.quote.id).not.toBe(ruleId);
+    expect(second.quote.id).not.toBe(ruleId);
+    expect(second.quote.id).not.toBe(first.quote.id);
+    expect(first.quote.id.startsWith("bvnk_onramp_")).toBe(true);
 
-    const instruction = first.paymentInstructions.find((item) => item.kind === "fiat_funding");
+    const instruction = first.quote.paymentInstructions.find(
+      (item) => item.kind === "fiat_funding"
+    );
     expect(instruction?.ruleId).toBe(ruleId);
     expect(instruction?.fundingWalletId).toBe("wallet_bvnk_123");
+    expect(first.transferProviderData).toEqual({
+      bvnk: { ruleId, ruleStatus: "ACTIVE", fundingWalletId: "wallet_bvnk_123" },
+    });
   });
 });

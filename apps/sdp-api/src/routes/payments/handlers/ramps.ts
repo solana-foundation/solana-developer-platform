@@ -1,10 +1,4 @@
-import type {
-  BvnkFiatFundingInstruction,
-  BvnkPaymentRampInstruction,
-  PaymentRampEstimate,
-  PaymentRampQuote,
-  RampProviderEstimateResult,
-} from "@sdp/types";
+import type { PaymentRampEstimate, PaymentRampQuote, RampProviderEstimateResult } from "@sdp/types";
 import {
   OFFRAMP_SUPPORT,
   ONRAMP_SUPPORT,
@@ -204,29 +198,6 @@ function rampQuoteTransferStatus(quote: PaymentRampQuote): PaymentTransferStatus
     return "awaiting_payment";
   }
   return quote.status;
-}
-
-function isBvnkFiatFundingInstruction(
-  instruction: BvnkPaymentRampInstruction
-): instruction is BvnkFiatFundingInstruction {
-  return instruction.kind === "fiat_funding";
-}
-
-function bvnkOnrampTransferProviderData(quote: PaymentRampQuote): Record<string, unknown> {
-  if (quote.provider !== "bvnk" || quote.deliveryMode !== "manual_instructions") {
-    return {};
-  }
-  const instruction = quote.paymentInstructions.find(isBvnkFiatFundingInstruction);
-  if (!instruction?.ruleId) {
-    throw internalError("BVNK on-ramp quote is missing a payment rule id.");
-  }
-  return {
-    bvnk: {
-      ruleId: instruction.ruleId,
-      ...(instruction.ruleStatus ? { ruleStatus: instruction.ruleStatus } : {}),
-      ...(instruction.fundingWalletId ? { fundingWalletId: instruction.fundingWalletId } : {}),
-    },
-  };
 }
 
 async function persistRampQuoteTransfer(
@@ -530,7 +501,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     }
     case "bvnk": {
       const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
-      quote = await bvnkOnrampQuote(c, {
+      const bvnkResult = await bvnkOnrampQuote(c, {
         counterparty,
         paymentRule: {
           currency,
@@ -539,7 +510,8 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
           destinationWalletAddress,
         },
       });
-      transferProviderData = bvnkOnrampTransferProviderData(quote);
+      quote = bvnkResult.quote;
+      transferProviderData = bvnkResult.transferProviderData;
       break;
     }
     case "moneygram":
