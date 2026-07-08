@@ -9,7 +9,7 @@ On-ramp = a counterparty buys crypto with fiat, delivered to an SDP-known wallet
 
 `createOnrampQuote` is **optional** on `RampProvider` — implement it only if your provider has a lockable quote step.
 
-Canonical example: `createOnrampQuote` in `lib/ramps/providers/lightspark.ts` + the DB helpers in `routes/payments/handlers/ramps/lightspark.ts`.
+Canonical example: `createOnrampQuote` in `lib/ramps/providers/lightspark/client.ts` + the DB helpers in `routes/payments/handlers/ramps/lightspark.ts`.
 
 ## Contract
 
@@ -52,4 +52,4 @@ Shared rules live in `integrate-ramp-provider`. Hot here:
 - No fallbacks — missing customer/account/instructions throws; never default them.
 - HTTP in the provider; DB (counterparty, wallet, customer, transfer row) in the handler.
 - `deliveryMode` arms are a real discriminated union — return exactly one arm's fields; no `any`.
-- Verify with `tsc --noEmit` + `biome check`; mock fetch in `providers/<id>.test.ts` (provider calls 503 without creds in the environment).
+- Verify with `tsc --noEmit` + `biome check`; mock fetch in `providers/<id>/client.test.ts` (provider calls 503 without creds in the environment).

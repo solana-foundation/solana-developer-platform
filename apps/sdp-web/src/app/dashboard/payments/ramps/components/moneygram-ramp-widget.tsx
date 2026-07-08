@@ -174,17 +174,18 @@ function buildCustomerPrefill(counterparty: Counterparty | null): MoneygramRamps
   if (!counterparty) {
     return undefined;
   }
-  const identity = counterparty.identity;
-  const address = identity.address;
+  const address = counterparty.identity.address;
   return {
-    ...compactStrings({
-      firstName: identity.firstName,
-      middleName: identity.middleName,
-      lastName: identity.lastName,
-      secondLastName: identity.secondLastName,
-      dateOfBirth: identity.dateOfBirth,
-      phone: identity.phone,
-    }),
+    ...(counterparty.entityType === "individual"
+      ? compactStrings({
+          firstName: counterparty.identity.firstName,
+          middleName: counterparty.identity.middleName,
+          lastName: counterparty.identity.lastName,
+          secondLastName: counterparty.identity.secondLastName,
+          dateOfBirth: counterparty.identity.dateOfBirth,
+          phone: counterparty.identity.phone,
+        })
+      : {}),
     email: counterparty.email,
     ...(address
       ? {

@@ -1,11 +1,11 @@
 import type { SdpEnvironment } from "@sdp/types";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import { Webhook } from "svix";
 import { getDb } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
 import { readString } from "@/lib/json";
-import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import {
@@ -16,19 +16,30 @@ import { type ClerkUser, ClerkUsersService } from "@/services/clerk-users.servic
 import { ProjectService } from "@/services/project.service";
 import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
-import { handleBvnkRampWebhook } from "./ramps/bvnk";
-import { handleCoinbaseRampWebhook } from "./ramps/coinbase";
-import { handleLightsparkRampWebhook } from "./ramps/lightspark";
-import { handleMoonpayRampWebhook } from "./ramps/moonpay";
+import { BvnkWebhookProcessor } from "./ramps/bvnk";
+import { CoinbaseWebhookProcessor } from "./ramps/coinbase";
+import { LightsparkWebhookProcessor } from "./ramps/lightspark";
+import { MoonpayWebhookProcessor } from "./ramps/moonpay";
+import type { WebhookProcessor } from "./ramps/processor";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+const RAMP_PROVIDER_WEBHOOK_PROCESSOR = {
+  moonpay: new MoonpayWebhookProcessor(),
+  lightspark: new LightsparkWebhookProcessor(),
+  bvnk: new BvnkWebhookProcessor(),
+  coinbase: new CoinbaseWebhookProcessor(),
+} as const satisfies Record<
+  Exclude<RampProviderId, "moneygram">,
+  WebhookProcessor<unknown, unknown>
+>;
 
 type ClerkWebhookEvent = {
   type: string;
   data: Record<string, unknown>;
 };
 
-type WebhookRampProvider = keyof typeof RAMP_PROVIDER_CLIENTS;
+type WebhookRampProvider = keyof typeof RAMP_PROVIDER_WEBHOOK_PROCESSOR;
 
 type ClerkOrgData = {
   id: string | undefined;
@@ -61,7 +72,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function parseRampWebhookProvider(value: string | undefined): WebhookRampProvider {
-  if (value !== undefined && Object.hasOwn(RAMP_PROVIDER_CLIENTS, value)) {
+  if (value !== undefined && Object.hasOwn(RAMP_PROVIDER_WEBHOOK_PROCESSOR, value)) {
     return value as WebhookRampProvider;
   }
 
@@ -596,35 +607,16 @@ function requiredHeader(c: AppContext, name: string) {
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
   const provider = parseRampWebhookProvider(c.req.param("provider"));
   const rawBody = await c.req.raw.text();
+  const processor: WebhookProcessor<unknown, unknown> = RAMP_PROVIDER_WEBHOOK_PROCESSOR[provider];
 
-  const result = await RAMP_PROVIDER_CLIENTS[provider].validateWebhook({
+  const payload = await processor.verify({
     env: c.env as unknown as Record<string, string | undefined>,
     environment,
     headers: c.req.raw.headers,
     rawBody,
     requestUrl: c.req.url,
   });
-
-  const dispatch = async () => {
-    switch (result.provider) {
-      case "bvnk":
-        await handleBvnkRampWebhook(c, environment, result.payload);
-        break;
-      case "lightspark":
-        await handleLightsparkRampWebhook(c, result.payload);
-        break;
-      case "moonpay":
-        await handleMoonpayRampWebhook(c, result.payload);
-        break;
-      case "moneygram":
-        throw badRequest("MoneyGram does not deliver webhooks.");
-      case "coinbase":
-        await handleCoinbaseRampWebhook(c, result.payload);
-        break;
-      default:
-        throw badRequest(`Unsupported ramp webhook provider: ${result.provider satisfies never}`);
-    }
-  };
+  const event = processor.parse(payload);
 
   // Signature is verified, so ack with 200 immediately and settle in the background: a
   // slow DB write must not delay the 2xx the provider expects.
@@ -632,16 +624,18 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
   // path that settles a transfer. The cron will reconcile any transaction left in a
   // non-terminal state here (e.g. background processing that failed).
   c.executionCtx.waitUntil(
-    dispatch().catch((error) =>
-      console.error(
-        `[ramp webhook] background processing failed (${result.provider}): ${error instanceof Error ? error.message : String(error)}`
+    processor
+      .process(c, environment, event)
+      .catch((error) =>
+        console.error(
+          `[ramp webhook] background processing failed (${processor.provider}): ${error instanceof Error ? error.message : String(error)}`
+        )
       )
-    )
   );
 
   return success(c, {
     received: true,
-    provider: result.provider,
+    provider: processor.provider,
     environment,
   });
 };

@@ -13,7 +13,7 @@ You implement three things; the codegen (`apps/sdp-api/scripts/discover-ramp-rai
 2. `_discoverRails` — HTTP → raw response dumps
 3. `readRailSupport` — dumps → a `ProviderRampSupport`
 
-**Canonical example: `lib/ramps/providers/lightspark.ts`** (one dump, simplest). For a multi-endpoint provider, copy `bvnk.ts` (three dumps).
+**Canonical example: `lib/ramps/providers/lightspark/client.ts`** (one dump, simplest). For a multi-endpoint provider, copy `bvnk/client.ts` (three dumps).
 
 ## The data flow
 

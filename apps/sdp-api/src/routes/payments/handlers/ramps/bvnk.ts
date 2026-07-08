@@ -3,12 +3,22 @@ import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import type {
+  PaymentTransferRow,
+  PaymentTransferStatus,
+} from "@/db/repositories/payments.repository";
 import { AppError, badRequest, counterpartyNotProvisioned, internalError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
+import type { BvnkFiatWallet } from "@/lib/ramps/providers/bvnk/client";
+import {
+  buildBvnkIndividualPayload,
+  bvnkOfframpAccountType,
+  bvnkOfframpFields,
+  isBvnkOfframpCurrency,
+} from "@/lib/ramps/providers/bvnk/counterparty";
 import {
   type BvnkCustomerResolution,
-  type BvnkFiatWallet,
   type BvnkOfframpBeneficiary,
   type BvnkOfframpWallet,
   type BvnkOnrampPaymentRuleState,
@@ -26,7 +36,6 @@ import {
   isBvnkCustomerVerified,
   isBvnkWalletActive,
   latestBvnkOfframpBeneficiary,
-  normalizeBvnkCurrencyAndNetwork,
   readBvnkCustomer,
   readBvnkData,
   readBvnkOfframpBeneficiaries,
@@ -35,18 +44,87 @@ import {
   readBvnkOfframpWallets,
   readBvnkOnrampPaymentRuleState,
   readBvnkWallets,
-} from "@/lib/ramps/providers/bvnk";
+} from "@/lib/ramps/providers/bvnk/provider-data";
 import { buildRequirementSchema } from "@/lib/ramps/requirements";
 import { rampId } from "@/lib/ramps/shared";
 import type { RampRuntimeContext } from "@/lib/ramps/types";
-import {
-  buildBvnkIndividualPayload,
-  bvnkOfframpAccountType,
-  bvnkOfframpFields,
-  isBvnkOfframpCurrency,
-} from "@/lib/ramps/validation/bvnk";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
-import { type AppContext, rampRuntime, resolveSdpEnvironment } from "../../context";
+import {
+  type AppContext,
+  getPaymentsRepository,
+  rampRuntime,
+  resolveSdpEnvironment,
+} from "../../context";
+
+/** Creates the pending off-ramp transfer row that anchors a BVNK channel quote. */
+export async function createPendingBvnkOfframpTransfer(
+  c: AppContext,
+  input: {
+    organizationId: string;
+    projectId: string;
+    counterpartyId: string;
+    walletId: string;
+    walletAddress: string;
+    cryptoToken: string;
+    cryptoAmount: string;
+    fiatCurrency: RampFiatCurrency;
+  }
+): Promise<PaymentTransferRow> {
+  const apiKey = c.get("apiKey");
+  const created = await getPaymentsRepository(c).createTransfer({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    walletId: input.walletId,
+    counterpartyId: input.counterpartyId,
+    sourceAddress: input.walletAddress,
+    destinationAddress: null,
+    token: input.cryptoToken,
+    amount: input.cryptoAmount,
+    memo: null,
+    type: "offramp",
+    direction: "outbound",
+    status: "pending",
+    provider: "bvnk",
+    providerReference: null,
+    deliveryMode: null,
+    fiatCurrency: input.fiatCurrency,
+    fiatAmount: null,
+    providerData: {},
+    serializedTx: null,
+    signature: null,
+    slot: null,
+    initiatedByKeyId: apiKey ? apiKey.id : null,
+  });
+  if (!created) {
+    throw internalError("Failed to create ramp transfer record");
+  }
+  return created;
+}
+
+/** Stamps the pending BVNK off-ramp transfer with the quote's reference, delivery mode, and status. */
+export async function completePendingBvnkOfframpTransfer(
+  c: AppContext,
+  input: {
+    organizationId: string;
+    projectId: string;
+    transferId: string;
+    quote: PaymentRampQuote;
+    status: PaymentTransferStatus;
+  }
+): Promise<void> {
+  const updated = await getPaymentsRepository(c).updateTransfer({
+    transferId: input.transferId,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    status: input.status,
+    providerReference: input.quote.id,
+    deliveryMode: input.quote.deliveryMode,
+    updatedAt: new Date().toISOString(),
+  });
+  if (!updated) {
+    throw internalError("Failed to complete BVNK off-ramp transfer record");
+  }
+}
 
 type BvnkOnrampQuote = PaymentRampQuote & {
   provider: "bvnk";
@@ -455,23 +533,22 @@ export async function bvnkOnrampQuote(
   c: AppContext,
   input: {
     counterparty: CounterpartyRow;
-    cryptoToken: string;
-    fiatCurrency?: string;
-    destinationWalletAddress: string;
+    paymentRule: BvnkOnrampRequestSpec;
   }
-): Promise<BvnkOnrampQuote> {
-  if (!input.fiatCurrency) {
-    throw badRequest("fiatCurrency is required for BVNK on-ramp.");
-  }
-  const fiatCurrency = input.fiatCurrency;
+): Promise<{
+  quote: BvnkOnrampQuote;
+  transferProviderData: {
+    bvnk: { ruleId: string; ruleStatus?: string; fundingWalletId?: string };
+  };
+}> {
+  const { currency, network, destinationWalletAddress, fiatCurrency } = input.paymentRule;
   const providerData = input.counterparty.provider_data;
-  const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
   const customer = readBvnkCustomer(providerData);
   const key = buildBvnkOnrampPaymentRuleKey(
     fiatCurrency,
     currency,
     network,
-    input.destinationWalletAddress
+    destinationWalletAddress
   );
   const entry = readBvnkOnrampPaymentRuleState(providerData, key);
 
@@ -490,16 +567,25 @@ export async function bvnkOnrampQuote(
     },
     {
       network,
-      destinationWalletAddress: input.destinationWalletAddress,
+      destinationWalletAddress,
       fiatCurrency,
       mode: resolveSdpEnvironment(c),
     }
   );
   return {
-    provider: "bvnk",
-    id: rampId("bvnk_onramp"),
-    status: "pending",
-    deliveryMode: "manual_instructions",
-    paymentInstructions: [instruction],
+    quote: {
+      provider: "bvnk",
+      id: rampId("bvnk_onramp"),
+      status: "pending",
+      deliveryMode: "manual_instructions",
+      paymentInstructions: [instruction],
+    },
+    transferProviderData: {
+      bvnk: {
+        ruleId: entry.ruleId,
+        ...(entry.ruleStatus ? { ruleStatus: entry.ruleStatus } : {}),
+        ...(entry.walletId ? { fundingWalletId: entry.walletId } : {}),
+      },
+    },
   };
 }

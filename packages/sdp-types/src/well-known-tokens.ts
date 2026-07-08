@@ -62,6 +62,18 @@ export const WELL_KNOWN_TOKENS = {
       "mainnet-beta": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
     },
   },
+  USDG: {
+    symbol: "USDG",
+    decimals: 6,
+    isUsdStable: true,
+    tokenProgram: "spl-token",
+    mints: {
+      // biome-ignore lint/security/noSecrets: Devnet USDG mint address constant, not a secret.
+      devnet: "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7",
+      // biome-ignore lint/security/noSecrets: Mainnet USDG mint address constant, not a secret.
+      "mainnet-beta": "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH",
+    },
+  },
   PYUSD: {
     symbol: "PYUSD",
     decimals: 6,
