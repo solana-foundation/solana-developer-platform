@@ -150,6 +150,25 @@ export interface PolicyEvaluationRow {
   created_at: string;
 }
 
+export interface WalletPolicyEvaluationAuditRow {
+  wallet_operation_id: string;
+  policy_evaluation_id: string;
+  operation_family: WalletOperationFamily;
+  operation_type: string;
+  asset: string | null;
+  amount: string | null;
+  destination: string | null;
+  operation_status: WalletOperationStatus;
+  decision: PolicyDecision;
+  reason_code: string;
+  reason: string | null;
+  requires_approval: boolean;
+  approval_request_id: string | null;
+  operation_created_at: string;
+  operation_updated_at: string;
+  evaluated_at: string;
+}
+
 export interface ApprovalRequestRow {
   id: string;
   organization_id: string;
@@ -318,6 +337,12 @@ export interface UpdateApprovalRequestStatusInput {
   resolvedAt?: string;
 }
 
+export interface ListWalletPolicyEvaluationAuditsInput {
+  organizationId: string;
+  custodyWalletId: string;
+  limit?: number;
+}
+
 export interface PolicyRepositoryContext {
   db: RepositoryDbClient;
 }
@@ -386,6 +411,9 @@ export interface PolicyRepository {
   ): Promise<WalletOperationRow | null>;
   createPolicyEvaluation(input: CreatePolicyEvaluationInput): Promise<PolicyEvaluationRow | null>;
   listPolicyEvaluationsForOperation(walletOperationId: string): Promise<PolicyEvaluationRow[]>;
+  listWalletPolicyEvaluationAudits(
+    input: ListWalletPolicyEvaluationAuditsInput
+  ): Promise<WalletPolicyEvaluationAuditRow[]>;
   createApprovalRequest(input: CreateApprovalRequestInput): Promise<ApprovalRequestRow | null>;
   updateApprovalRequestStatus(
     input: UpdateApprovalRequestStatusInput

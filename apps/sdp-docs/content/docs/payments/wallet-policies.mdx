@@ -1,9 +1,9 @@
 ---
 title: Wallet policies
-description: Destination allowlist and transfer limits per custody wallet.
+description: Wallet controls, default-allow rollout, and policy audit visibility.
 ---
 
-Wallet policies constrain how a custody wallet can move funds. You set a destination allowlist (only these addresses can receive transfers from this wallet) and transfer limits (a per-transfer cap and a UTC-calendar-day cap). Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced at transfer time.
+Wallet policies constrain how a custody wallet can move funds. SDP starts from default allow, then applies the active wallet control profile and any payment policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before wallet operations execute.
 
 Use policies for treasury wallets, automated payout wallets, or any custody wallet where unbounded outbound flow would be a liability.
 
@@ -26,6 +26,8 @@ const { data } = await response.json();
 // data.policy.destinationAllowlist: string[]
 // data.policy.maxTransferAmount?: string
 // data.policy.maxDailyAmount?: string
+// data.policy.controlProfile?.providerMappingStatus
+// data.policy.audit?.recentEvaluations
 ```
 </Tab>
 </Tabs>
@@ -40,6 +42,50 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the policy
       "destinationAllowlist": ["7xKXz...9fGh", "5aBCd...2eFg"],
       "maxTransferAmount": "100.00",
       "maxDailyAmount": "1000.00",
+      "defaultAction": "allow",
+      "controlProfile": {
+        "id": "wcp_abc123",
+        "status": "active",
+        "activeRevisionId": "wcpr_abc123",
+        "revisionId": "wcpr_abc123",
+        "revisionNumber": 3,
+        "defaultAction": "allow",
+        "rules": [
+          {
+            "id": "approval-required",
+            "kind": "approval",
+            "families": ["payment", "ramp"],
+            "action": "approval_required",
+            "name": "Approval checks"
+          }
+        ],
+        "providerMappingStatus": "not_applicable",
+        "createdAt": "2026-05-14T08:00:00Z",
+        "updatedAt": "2026-05-14T10:15:00Z",
+        "activatedAt": "2026-05-14T10:15:00Z"
+      },
+      "audit": {
+        "recentEvaluations": [
+          {
+            "walletOperationId": "wop_abc123",
+            "policyEvaluationId": "peval_abc123",
+            "operationFamily": "payment",
+            "operationType": "payment_transfer",
+            "asset": "USDC",
+            "amount": "100.00",
+            "destination": "7xKXz...9fGh",
+            "status": "pending_approval",
+            "decision": "approval_required",
+            "reasonCode": "wallet_policy_match",
+            "reason": "Payment matched approval policy.",
+            "requiresApproval": true,
+            "approvalRequestId": "appr_abc123",
+            "operationCreatedAt": "2026-05-14T10:20:00Z",
+            "operationUpdatedAt": "2026-05-14T10:20:00Z",
+            "evaluatedAt": "2026-05-14T10:20:00Z"
+          }
+        ]
+      },
       "createdAt": "2026-05-14T08:00:00Z",
       "updatedAt": "2026-05-14T10:15:00Z"
     }
@@ -49,6 +95,27 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the policy
 ```
 
 Amount fields are **UI-unit decimal strings** (`"100.00"` means 100 tokens, regardless of the mint's decimals — matching the transfer-request convention). The configured value is a **single threshold**, but enforcement is **per token**: `maxDailyAmount` sums each token's outbound transfers separately within the day window, so a wallet with `maxDailyAmount: "1000"` can send up to 1000 USDC *and* 1000 SOL in the same UTC day — there is no aggregate cap across mints. If you need different per-token thresholds (e.g., 10,000 USDC daily but 50 SOL daily), partition into separate wallets.
+
+## Default allow and active controls
+
+Wallet policy evaluation starts from default allow. If no wallet control profile exists, supported payment and ramp operations continue to run unless another product-specific check rejects them. When you activate a control profile, SDP evaluates its rules first and returns the resulting `decision` as one of `allow`, `deny`, `approval_required`, `provider_approval_required`, `review`, or `not_evaluated`.
+
+The `controlProfile` object shows the active immutable revision. Treat `revisionId` and `revisionNumber` as audit references: a policy evaluation records which revision was active when the wallet operation was checked.
+
+## Policy evaluation and audit records
+
+Each supported wallet operation records a wallet operation row before policy evaluation and a policy evaluation row after SDP decides what should happen. `audit.recentEvaluations` exposes the most recent decisions for the wallet so support and customer operators can review:
+
+- what operation was evaluated (`walletOperationId`, `operationFamily`, `operationType`)
+- what decision SDP made (`decision`, `reasonCode`, `reason`, `requiresApproval`)
+- whether an approval request was created (`approvalRequestId`)
+- when the operation was created, updated, and evaluated
+
+Use these records to explain allow, deny, approval-required, and review outcomes. They are an operational audit summary, not the full raw provider payload.
+
+## Provider mapping status
+
+`providerMappingStatus` describes whether an SDP policy revision has also been mapped into a custody or ramp provider's native policy system. Current payment wallet controls are SDP-enforced first. A value of `not_applicable` means there is no provider-native mapping for that revision. `pending`, `partial`, or `failed` mean SDP still evaluates the operation, but you should not assume the same rule has been fully synced to the provider.
 
 ## Destination allowlist
 
