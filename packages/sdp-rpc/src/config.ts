@@ -8,7 +8,7 @@ export interface SolanaConfig {
 
 const API_KEY_TEMPLATE = ["$", "{API_KEY}"].join("");
 
-function applyApiKeyTemplate(url: string, apiKey: string): string {
+export function applyApiKeyTemplate(url: string, apiKey: string): string {
   return url
     .replaceAll(API_KEY_TEMPLATE, encodeURIComponent(apiKey))
     .replaceAll("{API_KEY}", encodeURIComponent(apiKey));

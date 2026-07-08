@@ -8,7 +8,8 @@ import {
   type ProviderAvailabilityEntry,
   resolveOrganizationProviderEntitlements,
 } from "@sdp/types";
-import { SdpRpcError as AppError } from "./errors";
+import { applyApiKeyTemplate } from "./config";
+import { SdpRpcError } from "./errors";
 import type { DatabaseClient, KVStore, KVStoreSet, RpcEnv } from "./types";
 
 export type ManagedRpcProviderId = OrganizationRpcProvider;
@@ -83,12 +84,15 @@ export interface RelayTelemetryInput {
 const ROUND_ROBIN_CURSOR_KEY = "rpc:relay:round-robin-cursor";
 const STATS_KEY_PREFIX = "rpc:relay:stats:";
 const MAX_ORIGIN_BUCKETS = 20;
-const API_KEY_TEMPLATE = ["$", "{API_KEY}"].join("");
 const SEND_TRANSACTION_METHOD = ["send", "Transaction"].join("");
 const SEND_RAW_TRANSACTION_METHOD = ["sendRaw", "Transaction"].join("");
 const TRANSACTION_METHOD_NAMES = new Set([SEND_TRANSACTION_METHOD, SEND_RAW_TRANSACTION_METHOD]);
 const MANAGED_RPC_PROVIDER_SET = new Set<string>(ORGANIZATION_RPC_PROVIDERS);
 const PROJECT_RPC_PROVIDER_SET = new Set<string>(PROJECT_RPC_PROVIDERS);
+
+type SdpDeploymentMode = "managed" | "self_hosted";
+
+const VALID_DEPLOYMENT_MODES = new Set<string>(["managed", "self_hosted"]);
 
 type OrganizationProviderRow = {
   tier: string;
@@ -129,8 +133,24 @@ function parseOrganizationSettings(raw: unknown | null): OrganizationSettings | 
   try {
     return parsePostgresJson<OrganizationSettings>(raw);
   } catch {
-    throw new AppError("INTERNAL_ERROR", "Organization settings are invalid JSON");
+    throw new SdpRpcError("INTERNAL_ERROR", "Organization settings are invalid JSON");
   }
+}
+
+function resolveDeploymentMode(value: string | undefined): SdpDeploymentMode {
+  if (value === undefined) {
+    return "managed";
+  }
+  if (!VALID_DEPLOYMENT_MODES.has(value)) {
+    throw new Error(
+      `Invalid SDP_DEPLOYMENT_MODE: "${value}". Expected "managed" or "self_hosted".`
+    );
+  }
+  return value as SdpDeploymentMode;
+}
+
+function isSelfHostedDeployment(env: Pick<RpcEnv, "SDP_DEPLOYMENT_MODE">): boolean {
+  return resolveDeploymentMode(env.SDP_DEPLOYMENT_MODE) === "self_hosted";
 }
 
 function hasEnv(env: RpcEnv, key: keyof RpcEnv): boolean {
@@ -185,12 +205,6 @@ function isManagedRpcProviderId(value: string): value is ManagedRpcProviderId {
 
 function isProjectRpcProviderId(value: string): value is ProjectRpcProvider {
   return PROJECT_RPC_PROVIDER_SET.has(value);
-}
-
-function applyApiKeyTemplate(url: string, apiKey: string): string {
-  return url
-    .replaceAll(API_KEY_TEMPLATE, encodeURIComponent(apiKey))
-    .replaceAll("{API_KEY}", encodeURIComponent(apiKey));
 }
 
 function appendQueryParam(url: string, key: string, value: string): string {
@@ -375,7 +389,7 @@ async function getOrganizationSettings(
     .first<{ settings: string | null }>();
 
   if (!row) {
-    throw new AppError("NOT_FOUND", "Organization not found");
+    throw new SdpRpcError("NOT_FOUND", "Organization not found");
   }
 
   if (!row.settings) {
@@ -400,7 +414,7 @@ async function getRpcProviderAvailability(
     .first<OrganizationProviderRow>();
 
   if (!row) {
-    throw new AppError("NOT_FOUND", "Organization not found");
+    throw new SdpRpcError("NOT_FOUND", "Organization not found");
   }
 
   const settings = parseOrganizationSettings(row.settings);
@@ -409,10 +423,9 @@ async function getRpcProviderAvailability(
     providerOverrides: settings?.providerOverrides,
   });
   const configured = buildConfiguredRpcProviders(env);
-  const entitled =
-    env.SDP_DEPLOYMENT_MODE === "self_hosted"
-      ? applySelfHostedEntitlements(resolved.providers.rpc, settings?.providerOverrides?.rpc)
-      : resolved.providers.rpc;
+  const entitled = isSelfHostedDeployment(env)
+    ? applySelfHostedEntitlements(resolved.providers.rpc, settings?.providerOverrides?.rpc)
+    : resolved.providers.rpc;
 
   return buildAvailabilityEntries(entitled, configured);
 }
@@ -434,7 +447,7 @@ async function getProjectSettings(
     .first<{ settings: string | null }>();
 
   if (!row) {
-    throw new AppError("NOT_FOUND", "Project not found");
+    throw new SdpRpcError("NOT_FOUND", "Project not found");
   }
 
   if (!row.settings) {
@@ -444,7 +457,7 @@ async function getProjectSettings(
   try {
     return parsePostgresJson<ProjectSettings>(row.settings);
   } catch {
-    throw new AppError("INTERNAL_ERROR", "Project settings are invalid JSON");
+    throw new SdpRpcError("INTERNAL_ERROR", "Project settings are invalid JSON");
   }
 }
 
@@ -456,7 +469,10 @@ function resolveProjectRpcPreference(
   | { providerType: "custom"; endpoint: string } {
   const explicitProvider = projectSettings?.rpcProvider;
   if (explicitProvider && !isProjectRpcProviderId(explicitProvider)) {
-    throw new AppError("INTERNAL_ERROR", `Project RPC provider '${explicitProvider}' is invalid`);
+    throw new SdpRpcError(
+      "INTERNAL_ERROR",
+      `Project RPC provider '${explicitProvider}' is invalid`
+    );
   }
 
   const provider = explicitProvider ?? (projectSettings?.rpcEndpoint ? "custom" : "default");
@@ -467,7 +483,7 @@ function resolveProjectRpcPreference(
   if (provider === "custom") {
     const endpoint = projectSettings?.rpcEndpoint?.trim();
     if (!endpoint) {
-      throw new AppError(
+      throw new SdpRpcError(
         "BAD_REQUEST",
         "Project RPC provider is 'custom' but rpcEndpoint is not configured"
       );
@@ -483,7 +499,7 @@ async function pickRoundRobinProvider(
   providers: ManagedRpcProvider[]
 ): Promise<ManagedRpcProvider> {
   if (providers.length === 0) {
-    throw new AppError("SOLANA_RPC_ERROR", "No managed Solana RPC providers are configured");
+    throw new SdpRpcError("SOLANA_RPC_ERROR", "No managed Solana RPC providers are configured");
   }
 
   if (providers.length === 1) {
@@ -518,7 +534,7 @@ function validateRequestedProjectScope(
   requestedProjectId: string | null
 ) {
   if (authProjectId && requestedProjectId && requestedProjectId !== authProjectId) {
-    throw new AppError(
+    throw new SdpRpcError(
       "FORBIDDEN",
       "Project-scoped API keys cannot relay requests for another project"
     );

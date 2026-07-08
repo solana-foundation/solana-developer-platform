@@ -12,7 +12,7 @@ export interface RpcEnv {
   SOLANA_RPC_QUICKNODE_URL?: string;
   SOLANA_RPC_QUICKNODE_API_KEY?: string;
   SOLANA_NETWORK?: "devnet" | "mainnet-beta";
-  SDP_DEPLOYMENT_MODE?: "managed" | "self_hosted";
+  SDP_DEPLOYMENT_MODE?: string;
 }
 
 export interface PreparedStatement {
