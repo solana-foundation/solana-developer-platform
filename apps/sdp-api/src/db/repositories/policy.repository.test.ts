@@ -583,6 +583,27 @@ describe("PolicyRepository (postgres)", () => {
       })
     ).resolves.toBeNull();
 
+    await expect(
+      repo.updateApprovalRequestStatus({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        approvalRequestId: otherRequest?.id ?? "",
+        status: "approved",
+        operationStatus: "executing",
+      })
+    ).resolves.toBeNull();
+    await expect(
+      repo.getApprovalRequestDetail({
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        approvalRequestId: otherRequest?.id ?? "",
+      })
+    ).resolves.toMatchObject({
+      approval_request_id: otherRequest?.id,
+      approval_status: "pending",
+      operation_status: "pending_approval",
+    });
+
     const orgRows = await repo.listApprovalRequestDetails({
       organizationId: TEST_ORG.id,
       projectId: null,

@@ -52,7 +52,7 @@ function mapApprovalRequest(row: ApprovalRequestDetailRow): WalletApprovalReques
       ? {
           id: row.policy_evaluation_id,
           decision: row.decision ?? "not_evaluated",
-          reasonCode: row.reason_code ?? "not_evaluated",
+          reasonCode: row.reason_code,
           reason: row.reason,
           matchedRules: row.matched_rules,
           requiresApproval: row.requires_approval ?? false,
@@ -130,7 +130,7 @@ export const approveApprovalRequest = async (c: AppContext) => {
   const repository = createPolicyRepository(c.env);
   const approvalRequest = await new WalletPolicyEnforcementService(
     repository
-  ).approveApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth));
+  ).approveApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth), auth.projectId);
 
   if (!approvalRequest) {
     throw notFound("Approval request");
@@ -147,7 +147,7 @@ export const rejectApprovalRequest = async (c: AppContext) => {
   const repository = createPolicyRepository(c.env);
   const approvalRequest = await new WalletPolicyEnforcementService(
     repository
-  ).rejectApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth));
+  ).rejectApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth), auth.projectId);
 
   if (!approvalRequest) {
     throw notFound("Approval request");
@@ -164,7 +164,7 @@ export const cancelApprovalRequest = async (c: AppContext) => {
   const repository = createPolicyRepository(c.env);
   const approvalRequest = await new WalletPolicyEnforcementService(
     repository
-  ).cancelApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth));
+  ).cancelApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth), auth.projectId);
 
   if (!approvalRequest) {
     throw notFound("Approval request");

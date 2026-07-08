@@ -1253,11 +1253,16 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
       const resolvedAt = input.resolvedAt ?? new Date().toISOString();
 
       const row = await db.transaction(async (tx) => {
+        const conditions = ["id = ?", "organization_id = ?"];
+        const params: unknown[] = [input.approvalRequestId, input.organizationId];
+        if (input.projectId) {
+          conditions.push("project_id = ?");
+          params.push(input.projectId);
+        }
+
         const current = await tx
-          .prepare(
-            "SELECT * FROM approval_requests WHERE id = ? AND organization_id = ? FOR UPDATE"
-          )
-          .bind(input.approvalRequestId, input.organizationId)
+          .prepare(`SELECT * FROM approval_requests WHERE ${conditions.join(" AND ")} FOR UPDATE`)
+          .bind(...params)
           .first<Record<string, unknown>>();
 
         if (!current) {

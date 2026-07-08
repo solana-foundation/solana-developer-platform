@@ -139,7 +139,7 @@ export interface WalletApprovalRequestOperationSummary {
 export interface WalletApprovalRequestPolicyEvaluationSummary {
   id: string;
   decision: PolicyDecision;
-  reasonCode: string;
+  reasonCode: string | null;
   reason: string | null;
   matchedRules: Record<string, unknown>[];
   requiresApproval: boolean;

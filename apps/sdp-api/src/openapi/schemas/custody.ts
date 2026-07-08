@@ -462,7 +462,7 @@ const walletApprovalRequestSchema = z
       .object({
         id: z.string().openapi({ description: "Policy evaluation ID." }),
         decision: policyDecisionSchema,
-        reasonCode: z.string().openapi({
+        reasonCode: z.string().nullable().openapi({
           description: "Stable reason code explaining the decision.",
           example: "wallet_policy_match",
         }),

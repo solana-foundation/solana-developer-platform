@@ -114,10 +114,12 @@ export class WalletPolicyEnforcementService {
   async approveApprovalRequest(
     organizationId: string,
     approvalRequestId: string,
-    resolvedBy?: string | null
+    resolvedBy?: string | null,
+    projectId?: string | null
   ) {
     const approvalRequest = await this.repository.updateApprovalRequestStatus({
       organizationId,
+      projectId,
       approvalRequestId,
       status: "approved",
       operationStatus: "executing",
@@ -130,10 +132,12 @@ export class WalletPolicyEnforcementService {
   async cancelApprovalRequest(
     organizationId: string,
     approvalRequestId: string,
-    resolvedBy?: string | null
+    resolvedBy?: string | null,
+    projectId?: string | null
   ) {
     const approvalRequest = await this.repository.updateApprovalRequestStatus({
       organizationId,
+      projectId,
       approvalRequestId,
       status: "canceled",
       operationStatus: "canceled",
@@ -146,10 +150,12 @@ export class WalletPolicyEnforcementService {
   async rejectApprovalRequest(
     organizationId: string,
     approvalRequestId: string,
-    resolvedBy?: string | null
+    resolvedBy?: string | null,
+    projectId?: string | null
   ) {
     const approvalRequest = await this.repository.updateApprovalRequestStatus({
       organizationId,
+      projectId,
       approvalRequestId,
       status: "rejected",
       operationStatus: "canceled",
