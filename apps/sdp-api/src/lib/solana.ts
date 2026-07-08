@@ -1,15 +1,9 @@
-import { getSolanaConfig, resolveDefaultSolanaRpcUrl } from "@sdp/rpc";
-import { type Address, assertIsAddress } from "@solana/addresses";
-
-export type { Address } from "@solana/addresses";
-export { assertIsAddress, isAddress } from "@solana/addresses";
-export { getSolanaConfig, resolveDefaultSolanaRpcUrl };
-
-export function assertValidAddress(value: string, fieldName = "address"): Address {
-  try {
-    assertIsAddress(value);
-    return value;
-  } catch {
-    throw new Error(`Invalid Solana address for ${fieldName}: ${value}`);
-  }
-}
+export { getSolanaConfig, resolveDefaultSolanaRpcUrl } from "@sdp/rpc";
+// Import the narrow subpath (not the package root barrel): the root barrel pulls in
+// token-2022, whose @solana/mosaic-sdk dependency fails to resolve under plain Node ESM.
+export {
+  type Address,
+  assertIsAddress,
+  assertValidAddress,
+  isAddress,
+} from "@sdp/solana/address";

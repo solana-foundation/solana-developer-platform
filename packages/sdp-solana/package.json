@@ -1,0 +1,46 @@
+{
+  "name": "@sdp/solana",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./address": {
+      "types": "./src/address.ts",
+      "import": "./src/address.ts",
+      "default": "./src/address.ts"
+    },
+    "./amount": {
+      "types": "./src/amount.ts",
+      "import": "./src/amount.ts",
+      "default": "./src/amount.ts"
+    },
+    "./token-2022": {
+      "types": "./src/token-2022.ts",
+      "import": "./src/token-2022.ts",
+      "default": "./src/token-2022.ts"
+    },
+    "./token-2022.utils": {
+      "types": "./src/token-2022.utils.ts",
+      "import": "./src/token-2022.utils.ts",
+      "default": "./src/token-2022.utils.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "@sdp/rpc": "workspace:*",
+    "@sdp/types": "workspace:*",
+    "@solana-program/token-2022": "catalog:",
+    "@solana/addresses": "catalog:",
+    "@solana/kit": "catalog:",
+    "@solana/mosaic-sdk": "catalog:",
+    "@solana/signers": "catalog:"
+  }
+}
