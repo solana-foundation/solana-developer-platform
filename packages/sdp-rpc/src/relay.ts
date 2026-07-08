@@ -1,4 +1,5 @@
 import {
+  normalizeOrganizationTier,
   ORGANIZATION_RPC_PROVIDERS,
   type OrganizationRpcProvider,
   type OrganizationSettings,
@@ -373,8 +374,9 @@ async function getRpcProviderAvailability(
   }
 
   const settings = parseOrganizationSettings(row.settings);
+  const tier = normalizeOrganizationTier(row.tier);
   const resolved = resolveOrganizationProviderEntitlements({
-    tier: row.tier,
+    tier,
     providerOverrides: settings?.providerOverrides,
   });
   const configured = buildConfiguredRpcProviders(env);
