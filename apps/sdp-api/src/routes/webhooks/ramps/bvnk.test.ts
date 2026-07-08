@@ -100,4 +100,21 @@ describe("BvnkWebhookProcessor.parse", () => {
       })
     ).toEqual({ kind: "ignore", event: "bvnk:totally:new-event" });
   });
+
+  it("ignores an unhandled BVNK event without a data object", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(processor.parse({ event: "bvnk:totally:new-event" })).toEqual({
+      kind: "ignore",
+      event: "bvnk:totally:new-event",
+    });
+  });
+
+  it("rejects a handled BVNK event missing its data object with a 400", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(() => processor.parse({ event: "bvnk:customers:status-change" })).toThrowError(
+      'BVNK webhook "bvnk:customers:status-change" is missing a data object'
+    );
+  });
 });

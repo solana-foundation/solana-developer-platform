@@ -81,6 +81,20 @@ export type BvnkWebhookEvent =
     }
   | { kind: "ignore"; event: string };
 
+const HANDLED_BVNK_EVENTS = {
+  "ledger:v2:wallet:status-change": true,
+  "bvnk:ledger:wallet:create": true,
+  "bvnk:customers:status-change": true,
+  "bvnk:platform:customer:update": true,
+  "bvnk:payment:payin:status-change": true,
+  "bvnk:payment:channel:transaction-detected": true,
+  "bvnk:payment:channel:transaction-confirmed": true,
+} as const satisfies Record<Exclude<BvnkWebhookEvent, { kind: "ignore" }>["kind"], true>;
+
+function isHandledBvnkEvent(event: string): boolean {
+  return Object.hasOwn(HANDLED_BVNK_EVENTS, event);
+}
+
 interface BvnkWebhookFiatWallet {
   id?: string;
   name?: string;
@@ -501,11 +515,16 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkWebho
     const root = readRecord(payload);
     const event = readString(root?.event);
     if (!event) {
-      throw internalError("BVNK webhook is missing an event");
+      throw badRequest("BVNK webhook is missing an event", { provider: this.provider });
     }
     const data = readRecord(root?.data);
     if (!data) {
-      throw internalError(`BVNK webhook "${event}" is missing a data object`);
+      if (!isHandledBvnkEvent(event)) {
+        return { kind: "ignore", event };
+      }
+      throw badRequest(`BVNK webhook "${event}" is missing a data object`, {
+        provider: this.provider,
+      });
     }
 
     switch (event) {
