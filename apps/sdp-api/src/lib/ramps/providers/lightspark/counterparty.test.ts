@@ -4,7 +4,10 @@ import type { CounterpartyRow } from "@/db/repositories/counterparty.repository"
 import { AppError } from "@/lib/errors";
 import { buildLightsparkAccountInfo, lightsparkCounterpartyRequirements } from "./counterparty";
 
-function counterparty(overrides?: Partial<Counterparty>): Counterparty {
+type IndividualCounterparty = Extract<Counterparty, { entityType: "individual" }>;
+type IndividualCounterpartyRow = Extract<CounterpartyRow, { entity_type: "individual" }>;
+
+function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCounterparty {
   return {
     id: "cp_123",
     organizationId: "org_123",
@@ -28,7 +31,9 @@ function counterparty(overrides?: Partial<Counterparty>): Counterparty {
   };
 }
 
-function counterpartyRow(overrides?: Partial<CounterpartyRow>): CounterpartyRow {
+function counterpartyRow(
+  overrides?: Partial<IndividualCounterpartyRow>
+): IndividualCounterpartyRow {
   return {
     id: "cp_123",
     organization_id: "org_123",
@@ -191,16 +196,26 @@ describe("buildLightsparkAccountInfo", () => {
       phoneNumber: "+221770000000",
       provider: "Orange Money",
       countries: ["SN"],
-      beneficiary: { beneficiaryType: "INDIVIDUAL", fullName: "Ada Lovelace" },
+      beneficiary: {
+        beneficiaryType: "INDIVIDUAL",
+        fullName: "Ada Lovelace",
+        birthDate: "1990-01-15",
+      },
     });
   });
 
   it("uses a business legal name for business counterparties", () => {
-    const accountInfo = buildLightsparkAccountInfo(
-      counterpartyRow({ entity_type: "business", display_name: "Acme Corp" }),
-      "GBP",
-      { sortCode: "12-34-56", accountNumber: "12345678" }
-    );
+    const individualRow = counterpartyRow();
+    const businessRow: CounterpartyRow = {
+      ...individualRow,
+      entity_type: "business",
+      display_name: "Acme Corp",
+      identity: { address: individualRow.identity.address },
+    };
+    const accountInfo = buildLightsparkAccountInfo(businessRow, "GBP", {
+      sortCode: "12-34-56",
+      accountNumber: "12345678",
+    });
 
     expect(accountInfo.beneficiary).toEqual({
       beneficiaryType: "BUSINESS",

@@ -524,7 +524,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         destinationWalletAddress,
         externalCustomerId: counterparty.id,
         email: counterparty.email,
-        phone: counterparty.identity.phone,
+        phone: counterparty.entity_type === "individual" ? counterparty.identity.phone : undefined,
         domain: input.domain,
       });
       break;

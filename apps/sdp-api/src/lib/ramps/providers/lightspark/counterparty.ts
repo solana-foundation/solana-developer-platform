@@ -420,7 +420,7 @@ export function lightsparkCounterpartyRequirements(
 }
 
 function lightsparkBeneficiary(counterparty: CounterpartyRow): Record<string, unknown> {
-  if (counterparty.entity_type === "business") {
+  if (counterparty.entity_type !== "individual") {
     return { beneficiaryType: "BUSINESS", legalName: counterparty.display_name };
   }
   const identity = counterparty.identity;

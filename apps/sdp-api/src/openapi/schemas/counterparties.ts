@@ -1,11 +1,13 @@
 import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types";
 import {
   counterpartyAddressSchema as counterpartyAddressSchemaBase,
+  counterpartyBusinessIdentitySchema as counterpartyBusinessIdentitySchemaBase,
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
   counterpartyIdentitySchema as counterpartyIdentitySchemaBase,
   counterpartyIdParamsSchema as counterpartyIdParamsSchemaBase,
   counterpartyStatusSchema as counterpartyStatusSchemaBase,
-  createCounterpartySchema as createCounterpartySchemaBase,
+  createBusinessCounterpartySchema as createBusinessCounterpartySchemaBase,
+  createIndividualCounterpartySchema as createIndividualCounterpartySchemaBase,
   listCounterpartiesQuerySchema as listCounterpartiesQuerySchemaBase,
   updateCounterpartyObjectSchema as updateCounterpartyObjectSchemaBase,
 } from "../../routes/counterparties/schemas";
@@ -113,7 +115,16 @@ export const counterpartyIdentitySchema = withOpenApi(
     address: counterpartyAddressSchema,
   }),
   {
-    description: "Identity details for the counterparty.",
+    description: "Personal identity details for an individual counterparty.",
+  }
+);
+
+export const counterpartyBusinessIdentitySchema = withOpenApi(
+  counterpartyBusinessIdentitySchemaBase.extend({
+    address: counterpartyAddressSchema,
+  }),
+  {
+    description: "Business identity details: the registered address.",
   }
 );
 
@@ -137,7 +148,10 @@ export const counterpartySchema = withOpenApi(
       description: "Primary contact email.",
       example: "jane@example.com",
     }),
-    identity: counterpartyIdentitySchema,
+    identity: withOpenApi(
+      z.union([counterpartyIdentitySchema, counterpartyBusinessIdentitySchema]),
+      { description: "Identity details; shape depends on entityType." }
+    ),
     status: counterpartyStatusSchema,
     createdBy: withOpenApi(userIdSchema.nullable(), {
       description: "User who created the counterparty. Null when created via API key.",
@@ -330,28 +344,44 @@ export const listCounterpartyAccountsQuerySchema = listCounterpartyAccountsQuery
   })
   .openapi({ description: "Counterparty account list filters." });
 
-export const createCounterpartyRequestSchema = withOpenApi(
-  createCounterpartySchemaBase.extend({
-    externalId: withOpenApi(createCounterpartySchemaBase.shape.externalId, {
-      description: "Caller-supplied identifier for cross-system reference.",
-      example: "customer_42",
-    }),
-    entityType: withOpenApi(createCounterpartySchemaBase.shape.entityType, {
-      description: "Counterparty entity type.",
-      example: "individual",
-    }),
-    displayName: withOpenApi(createCounterpartySchemaBase.shape.displayName, {
-      description: "Human-readable display name.",
-      example: "Jane Doe",
-    }),
-    email: withOpenApi(createCounterpartySchemaBase.shape.email, {
-      description: "Primary contact email.",
-      example: "jane@example.com",
-    }),
-    identity: withOpenApi(counterpartyIdentitySchema.optional(), {
-      description: "Optional identity details. Required completeness depends on downstream KYC.",
-    }),
+const createCounterpartyDocFields = {
+  externalId: withOpenApi(createIndividualCounterpartySchemaBase.shape.externalId, {
+    description: "Caller-supplied identifier for cross-system reference.",
+    example: "customer_42",
   }),
+  displayName: withOpenApi(createIndividualCounterpartySchemaBase.shape.displayName, {
+    description: "Human-readable display name.",
+    example: "Jane Doe",
+  }),
+  email: withOpenApi(createIndividualCounterpartySchemaBase.shape.email, {
+    description: "Primary contact email.",
+    example: "jane@example.com",
+  }),
+};
+
+export const createCounterpartyRequestSchema = withOpenApi(
+  z.discriminatedUnion("entityType", [
+    createIndividualCounterpartySchemaBase.extend({
+      ...createCounterpartyDocFields,
+      entityType: withOpenApi(createIndividualCounterpartySchemaBase.shape.entityType, {
+        description: "Counterparty entity type.",
+        example: "individual",
+      }),
+      identity: withOpenApi(counterpartyIdentitySchema, {
+        description: "Personal identity details, required for individual counterparties.",
+      }),
+    }),
+    createBusinessCounterpartySchemaBase.extend({
+      ...createCounterpartyDocFields,
+      entityType: withOpenApi(createBusinessCounterpartySchemaBase.shape.entityType, {
+        description: "Counterparty entity type.",
+        example: "business",
+      }),
+      identity: withOpenApi(counterpartyBusinessIdentitySchema, {
+        description: "Business identity details: the registered address.",
+      }),
+    }),
+  ]),
   { description: "Create counterparty request body." }
 );
 
@@ -402,9 +432,13 @@ export const updateCounterpartyRequestSchema = withOpenApi(
       description: "Updated contact email.",
       example: "jane.doe@example.com",
     }),
-    identity: withOpenApi(counterpartyIdentitySchema.optional(), {
-      description: "Updated identity details. Replaces the existing identity object.",
-    }),
+    identity: withOpenApi(
+      z.union([counterpartyIdentitySchema, counterpartyBusinessIdentitySchema]).optional(),
+      {
+        description:
+          "Updated identity details. Replaces the existing identity object and must match the counterparty's entityType.",
+      }
+    ),
   }),
   {
     description: "Update counterparty request body. At least one field must be provided.",

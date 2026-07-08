@@ -232,7 +232,11 @@ describe("BVNK on-ramp payment rule key", () => {
   });
 });
 
-function counterpartyRow(overrides?: Partial<CounterpartyRow>): CounterpartyRow {
+type IndividualCounterpartyRow = Extract<CounterpartyRow, { entity_type: "individual" }>;
+
+function counterpartyRow(
+  overrides?: Partial<IndividualCounterpartyRow>
+): IndividualCounterpartyRow {
   return {
     id: "cp_123",
     organization_id: "org_123",

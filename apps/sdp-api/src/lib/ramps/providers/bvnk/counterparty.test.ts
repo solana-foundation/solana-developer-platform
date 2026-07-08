@@ -25,7 +25,10 @@ const BVNK_CDD_COLLECTED_DATA = {
   "cdd.employmentIndustrySector": "INFORMATION",
 } as const;
 
-function counterparty(overrides?: Partial<Counterparty>): Counterparty {
+type IndividualCounterparty = Extract<Counterparty, { entityType: "individual" }>;
+type IndividualCounterpartyRow = Extract<CounterpartyRow, { entity_type: "individual" }>;
+
+function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCounterparty {
   return {
     id: "cp_123",
     organizationId: "org_123",
@@ -54,7 +57,9 @@ function counterparty(overrides?: Partial<Counterparty>): Counterparty {
   };
 }
 
-function counterpartyRow(overrides?: Partial<CounterpartyRow>): CounterpartyRow {
+function counterpartyRow(
+  overrides?: Partial<IndividualCounterpartyRow>
+): IndividualCounterpartyRow {
   return {
     id: "cp_123",
     organization_id: "org_123",

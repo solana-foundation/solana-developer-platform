@@ -104,7 +104,11 @@ export const COUNTERPARTY_INDUSTRY_SECTORS = [
   "WEAPONS",
 ] as const;
 
-export interface CounterpartyIdentity {
+export interface CounterpartyBusinessIdentity {
+  address: CounterpartyAddress;
+}
+
+export interface CounterpartyIndividualIdentity {
   firstName: string;
   middleName?: string;
   lastName: string;
@@ -114,32 +118,35 @@ export interface CounterpartyIdentity {
   address: CounterpartyAddress;
 }
 
+export type CounterpartyIdentity = CounterpartyIndividualIdentity | CounterpartyBusinessIdentity;
+
 export type CounterpartyStatus = "active" | "archived";
 
 export type CounterpartyProviderData = Record<string, unknown>;
 
-export interface Counterparty {
+/** entityType discriminates the identity shape: checking it narrows `identity`. */
+export type CounterpartyEntityIdentity =
+  | { entityType: "individual"; identity: CounterpartyIndividualIdentity }
+  | { entityType: "business"; identity: CounterpartyBusinessIdentity };
+
+export type Counterparty = {
   id: string;
   organizationId: string;
   projectId: string | null;
   externalId: string | null;
-  entityType: CounterpartyEntityType;
   displayName: string;
   email: string;
-  identity: CounterpartyIdentity;
   status: CounterpartyStatus;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
-}
+} & CounterpartyEntityIdentity;
 
-export interface CreateCounterpartyRequest {
+export type CreateCounterpartyRequest = {
   externalId?: string;
-  entityType: CounterpartyEntityType;
   displayName: string;
   email: string;
-  identity?: CounterpartyIdentity;
-}
+} & CounterpartyEntityIdentity;
 
 export interface UpdateCounterpartyRequest {
   externalId?: string | null;

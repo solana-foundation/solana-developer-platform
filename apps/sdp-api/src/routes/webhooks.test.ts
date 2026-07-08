@@ -571,7 +571,13 @@ describe("BVNK ramp webhook", () => {
         "individual",
         "Webhook Buyer",
         "buyer@example.com",
-        {},
+        {
+          firstName: "Webhook",
+          lastName: "Buyer",
+          dateOfBirth: "1990-01-15",
+          phone: "+14155551234",
+          address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
+        },
         {
           bvnk: {
             customer: {

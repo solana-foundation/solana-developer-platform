@@ -659,33 +659,30 @@ export async function bvnkRuleReference(
 }
 
 export function buildBvnkRuleEntity(counterparty: CounterpartyRow): BvnkRuleEntity {
-  const identity = counterparty.identity;
-  const address = identity.address;
-  const isCompany = counterparty.entity_type === "business";
+  const address = counterparty.identity.address;
 
   return {
     type: BVNK_ENTITY_TYPE[counterparty.entity_type],
     customerIdentifier: counterparty.external_id ?? counterparty.id,
     relationshipType: "SELF_OWNED",
-    ...(isCompany
-      ? { legalName: counterparty.display_name }
-      : { firstName: identity.firstName, lastName: identity.lastName }),
-    ...(identity.dateOfBirth ? { dateOfBirth: identity.dateOfBirth } : {}),
-    ...(address
+    ...(counterparty.entity_type === "individual"
       ? {
-          address: {
-            addressLine1: address.line1,
-            ...(address.line2 ? { addressLine2: address.line2 } : {}),
-            ...(address.postalCode ? { postalCode: address.postalCode } : {}),
-            city: address.city,
-            countryCode: address.countryCode,
-            country: address.countryCode,
-            ...(address.subdivisionCode
-              ? { stateCode: normalizeBvnkStateCode(address.countryCode, address.subdivisionCode) }
-              : {}),
-          },
+          firstName: counterparty.identity.firstName,
+          lastName: counterparty.identity.lastName,
+          dateOfBirth: counterparty.identity.dateOfBirth,
         }
-      : {}),
+      : { legalName: counterparty.display_name }),
+    address: {
+      addressLine1: address.line1,
+      ...(address.line2 ? { addressLine2: address.line2 } : {}),
+      ...(address.postalCode ? { postalCode: address.postalCode } : {}),
+      city: address.city,
+      countryCode: address.countryCode,
+      country: address.countryCode,
+      ...(address.subdivisionCode
+        ? { stateCode: normalizeBvnkStateCode(address.countryCode, address.subdivisionCode) }
+        : {}),
+    },
   };
 }
 
@@ -693,18 +690,20 @@ export function buildBvnkPartyDetails(
   counterparty: CounterpartyRow,
   role: "ORIGINATOR" | "BENEFICIARY"
 ): BvnkComplianceInput {
-  const identity = counterparty.identity;
-
   return {
     partyDetails: [
       {
         type: role,
         entityType: BVNK_ENTITY_TYPE[counterparty.entity_type],
         relationshipType: "SELF_OWNED",
-        firstName: identity.firstName,
-        lastName: identity.lastName,
-        ...(identity.dateOfBirth ? { dateOfBirth: identity.dateOfBirth } : {}),
-        ...(identity.address?.countryCode ? { countryCode: identity.address.countryCode } : {}),
+        ...(counterparty.entity_type === "individual"
+          ? {
+              firstName: counterparty.identity.firstName,
+              lastName: counterparty.identity.lastName,
+              dateOfBirth: counterparty.identity.dateOfBirth,
+            }
+          : {}),
+        countryCode: counterparty.identity.address.countryCode,
       },
     ],
   };

@@ -59,20 +59,37 @@ export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("directi
   }),
 ]);
 
-export const createCounterpartySchema = z.object({
+export const counterpartyBusinessIdentitySchema = z.strictObject({
+  address: counterpartyAddressSchema,
+});
+
+const createCounterpartyBaseSchema = z.object({
   externalId: z.string().min(1).max(256).optional(),
-  entityType: counterpartyEntityTypeSchema,
   displayName: z.string().min(1).max(512),
   email: z.email().max(512),
+});
+
+export const createIndividualCounterpartySchema = createCounterpartyBaseSchema.extend({
+  entityType: z.literal("individual"),
   identity: counterpartyIdentitySchema,
 });
+
+export const createBusinessCounterpartySchema = createCounterpartyBaseSchema.extend({
+  entityType: z.literal("business"),
+  identity: counterpartyBusinessIdentitySchema,
+});
+
+export const createCounterpartySchema = z.discriminatedUnion("entityType", [
+  createIndividualCounterpartySchema,
+  createBusinessCounterpartySchema,
+]);
 
 export const updateCounterpartyObjectSchema = z.object({
   externalId: z.string().min(1).max(256).nullable().optional(),
   entityType: counterpartyEntityTypeSchema.optional(),
   displayName: z.string().min(1).max(512).optional(),
   email: z.email().max(512).optional(),
-  identity: counterpartyIdentitySchema.optional(),
+  identity: z.union([counterpartyIdentitySchema, counterpartyBusinessIdentitySchema]).optional(),
 });
 
 export const updateCounterpartySchema = updateCounterpartyObjectSchema.refine(

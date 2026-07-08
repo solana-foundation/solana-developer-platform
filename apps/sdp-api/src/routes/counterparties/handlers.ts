@@ -36,6 +36,8 @@ import {
   getCounterpartyAccountsRepository,
 } from "./context";
 import {
+  counterpartyBusinessIdentitySchema,
+  counterpartyIdentitySchema,
   counterpartyIdParamsSchema,
   counterpartyRequirementsQuerySchema,
   createCounterpartySchema,
@@ -45,20 +47,21 @@ import {
 } from "./schemas";
 
 function mapToCounterparty(row: CounterpartyRow): Counterparty {
-  return {
+  const base = {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
     externalId: row.external_id,
-    entityType: row.entity_type,
     displayName: row.display_name,
     email: row.email,
-    identity: row.identity,
     status: row.status,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+  return row.entity_type === "individual"
+    ? { ...base, entityType: "individual", identity: row.identity }
+    : { ...base, entityType: "business", identity: row.identity };
 }
 
 export const getCounterpartyFieldOptions = async (c: AppContext) => {
@@ -387,6 +390,30 @@ export const updateCounterparty = async (c: AppContext) => {
     if (existing && existing.id !== counterpartyId) {
       throw conflict("A counterparty with this external ID already exists");
     }
+  }
+
+  if (parsed.data.identity) {
+    let entityType = parsed.data.entityType;
+    if (!entityType) {
+      const current = await repo.getCounterpartyById({
+        counterpartyId,
+        organizationId: auth.organizationId,
+        projectId,
+      });
+      if (!current) {
+        throw notFound("Counterparty");
+      }
+      entityType = current.entity_type;
+    }
+    const identitySchemaForEntityType =
+      entityType === "individual" ? counterpartyIdentitySchema : counterpartyBusinessIdentitySchema;
+    const identity = identitySchemaForEntityType.safeParse(parsed.data.identity);
+    if (!identity.success) {
+      throw badRequest("identity does not match the counterparty's entityType.", {
+        errors: z.treeifyError(identity.error),
+      });
+    }
+    parsed.data.identity = identity.data;
   }
 
   const updated = await repo.updateCounterparty({

@@ -1,4 +1,4 @@
-import type { Counterparty, CounterpartyIdentity } from "@sdp/types";
+import type { Counterparty, CounterpartyIndividualIdentity } from "@sdp/types";
 import {
   COUNTERPARTY_EMPLOYMENT_STATUSES,
   COUNTERPARTY_INDUSTRY_SECTORS,
@@ -36,7 +36,7 @@ import {
 
 interface BvnkOnrampField {
   descriptor: RequirementField;
-  read: (identity: CounterpartyIdentity) => string | undefined;
+  read: (identity: CounterpartyIndividualIdentity) => string | undefined;
 }
 
 const COUNTRY_OPTIONS = COUNTRIES.map((country) => ({ value: country.code, label: country.name }));
@@ -160,7 +160,7 @@ const BVNK_ONRAMP_US_FIELDS: BvnkOnrampField[] = [
   },
 ];
 
-export function bvnkOnrampFields(identity: CounterpartyIdentity): BvnkOnrampField[] {
+export function bvnkOnrampFields(identity: CounterpartyIndividualIdentity): BvnkOnrampField[] {
   return identity.address?.countryCode === "US"
     ? [...BVNK_ONRAMP_BASE_FIELDS, ...BVNK_ONRAMP_US_FIELDS]
     : BVNK_ONRAMP_BASE_FIELDS;
@@ -224,6 +224,9 @@ export function buildBvnkIndividualPayload(
   collectedData: CollectedFieldData | undefined,
   expectedVolumeCurrency: string
 ): Record<string, unknown> {
+  if (counterparty.entity_type !== "individual") {
+    throw badRequest("BVNK on-ramp requires an individual counterparty.");
+  }
   const identity = counterparty.identity;
   const fields = bvnkOnrampFields(identity);
   const missing = fields.filter((field) => field.read(identity) === undefined);
@@ -372,15 +375,15 @@ export function validateBvnkCounterparty(
     return readyCounterparty("bvnk", direction);
   }
 
-  if (counterparty.entityType === "business") {
+  if (counterparty.entityType !== "individual") {
     return unsupportedCounterparty(
       "bvnk",
       direction,
       "BVNK on-ramp supports individual counterparties only."
     );
   }
-
   const identity = counterparty.identity;
+
   if (!identity.address?.countryCode) {
     return unsupportedCounterparty(
       "bvnk",
