@@ -89,6 +89,8 @@ import {
   transferBatchSchema,
   transferResponseSchema,
   transferSchema,
+  walletApprovalRequestResponseSchema,
+  walletApprovalRequestsResponseSchema,
   walletBalancesResponseSchema,
   walletPolicyResponseSchema,
 } from "../schemas";
@@ -176,6 +178,12 @@ export const custodyDeleteWalletResponse = successResponseSchema(deleteWalletRes
 export const custodySignerCheckResponse = successResponseSchema(signerCheckResponseSchema);
 export const custodySwitchOptionsResponse = successResponseSchema(
   switchProviderOptionsResponseSchema
+);
+export const walletApprovalRequestResponse = successResponseSchema(
+  walletApprovalRequestResponseSchema
+);
+export const walletApprovalRequestsResponse = successResponseSchema(
+  walletApprovalRequestsResponseSchema
 );
 export const addressScreeningResponse = successResponseSchema(addressScreeningResponseSchema);
 

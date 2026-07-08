@@ -137,6 +137,7 @@ export type {
   ApiKeyWalletPolicyBindingResolutionRow,
   ApiKeyWalletPolicyBindingRow,
   ApiKeyWalletPolicyTargetRow,
+  ApprovalRequestDetailRow,
   ApprovalRequestRow,
   CreateApiKeyControlProfileInput,
   CreateApiKeyControlProfileRevisionInput,

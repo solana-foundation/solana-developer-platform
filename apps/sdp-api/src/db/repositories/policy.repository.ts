@@ -187,6 +187,44 @@ export interface ApprovalRequestRow {
   updated_at: string;
 }
 
+export interface ApprovalRequestDetailRow {
+  approval_request_id: string;
+  organization_id: string;
+  project_id: string | null;
+  wallet_operation_id: string;
+  approval_group_id: string | null;
+  approval_status: ApprovalRequestStatus;
+  provider: string | null;
+  provider_reference: string | null;
+  requested_by: string | null;
+  resolved_by: string | null;
+  expires_at: string | null;
+  resolved_at: string | null;
+  approval_created_at: string;
+  approval_updated_at: string;
+  custody_wallet_id: string | null;
+  wallet_id: string;
+  wallet_public_key: string | null;
+  wallet_label: string | null;
+  api_key_id: string | null;
+  source: string;
+  operation_family: WalletOperationFamily;
+  operation_type: string;
+  asset: string | null;
+  amount: string | null;
+  destination: string | null;
+  operation_status: WalletOperationStatus;
+  operation_created_at: string;
+  operation_updated_at: string;
+  policy_evaluation_id: string | null;
+  decision: PolicyDecision | null;
+  reason_code: string | null;
+  reason: string | null;
+  matched_rules: Record<string, unknown>[];
+  requires_approval: boolean | null;
+  evaluated_at: string | null;
+}
+
 export interface ActiveWalletControlProfileResult {
   profile: WalletControlProfileRow;
   revision: WalletControlProfileRevisionRow | null;
@@ -337,6 +375,19 @@ export interface UpdateApprovalRequestStatusInput {
   resolvedAt?: string;
 }
 
+export interface ListApprovalRequestDetailsInput {
+  organizationId: string;
+  projectId: string | null;
+  status?: ApprovalRequestStatus;
+  limit?: number;
+}
+
+export interface GetApprovalRequestDetailInput {
+  organizationId: string;
+  projectId: string | null;
+  approvalRequestId: string;
+}
+
 export interface ListWalletPolicyEvaluationAuditsInput {
   organizationId: string;
   custodyWalletId: string;
@@ -418,4 +469,10 @@ export interface PolicyRepository {
   updateApprovalRequestStatus(
     input: UpdateApprovalRequestStatusInput
   ): Promise<ApprovalRequestRow | null>;
+  listApprovalRequestDetails(
+    input: ListApprovalRequestDetailsInput
+  ): Promise<ApprovalRequestDetailRow[]>;
+  getApprovalRequestDetail(
+    input: GetApprovalRequestDetailInput
+  ): Promise<ApprovalRequestDetailRow | null>;
 }

@@ -190,6 +190,28 @@ export const signerCheckSchema = z.object({
 export type SignerCheckRequest = z.infer<typeof signerCheckSchema>;
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Approval Requests
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const approvalRequestStatusSchema = z.enum([
+  "pending",
+  "approved",
+  "rejected",
+  "canceled",
+  "expired",
+  "failed",
+]);
+
+export const approvalRequestListQuerySchema = z.object({
+  status: approvalRequestStatusSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+export const approvalRequestParamsSchema = z.object({
+  approvalRequestId: z.string().min(1),
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Response Types
 // ═══════════════════════════════════════════════════════════════════════════
 

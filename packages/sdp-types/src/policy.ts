@@ -120,6 +120,57 @@ export type ApprovalRequestStatus =
   | "expired"
   | "failed";
 
+export interface WalletApprovalRequestOperationSummary {
+  id: string;
+  custodyWalletId: string | null;
+  walletId: string;
+  apiKeyId: string | null;
+  source: string;
+  operationFamily: WalletOperationFamily;
+  operationType: string;
+  asset: string | null;
+  amount: string | null;
+  destination: string | null;
+  status: WalletOperationStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WalletApprovalRequestPolicyEvaluationSummary {
+  id: string;
+  decision: PolicyDecision;
+  reasonCode: string;
+  reason: string | null;
+  matchedRules: Record<string, unknown>[];
+  requiresApproval: boolean;
+  evaluatedAt: string;
+}
+
+export interface WalletApprovalRequestSummary {
+  id: string;
+  organizationId: string;
+  projectId: string | null;
+  walletOperationId: string;
+  approvalGroupId: string | null;
+  status: ApprovalRequestStatus;
+  provider: string | null;
+  providerReference: string | null;
+  requestedBy: string | null;
+  resolvedBy: string | null;
+  expiresAt: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  wallet: {
+    custodyWalletId: string;
+    walletId: string;
+    publicKey: string;
+    label: string | null;
+  } | null;
+  operation: WalletApprovalRequestOperationSummary;
+  policyEvaluation: WalletApprovalRequestPolicyEvaluationSummary | null;
+}
+
 export interface WalletControlProfile {
   id: string;
   organizationId: string;

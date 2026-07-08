@@ -142,6 +142,22 @@ export class WalletPolicyEnforcementService {
 
     return requireApprovalRequestStatus(approvalRequest, "canceled");
   }
+
+  async rejectApprovalRequest(
+    organizationId: string,
+    approvalRequestId: string,
+    resolvedBy?: string | null
+  ) {
+    const approvalRequest = await this.repository.updateApprovalRequestStatus({
+      organizationId,
+      approvalRequestId,
+      status: "rejected",
+      operationStatus: "canceled",
+      resolvedBy,
+    });
+
+    return requireApprovalRequestStatus(approvalRequest, "rejected");
+  }
 }
 
 export async function recordLegacyWalletPolicyDenial(

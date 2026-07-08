@@ -1,4 +1,5 @@
 import {
+  approvalRequestStatusSchema as approvalRequestStatusSchemaBase,
   createWalletSchema as createWalletSchemaBase,
   deleteWalletSchema as deleteWalletSchemaBase,
   initializeSigningSchema as initializeSigningSchemaBase,
@@ -369,6 +370,128 @@ export const custodyPublicKeyResponseSchema = z
     publicKey: solanaAddressSchema,
   })
   .openapi({ description: "Wallet public key response payload." });
+
+const walletOperationFamilySchema = z
+  .enum(["transfer", "payment", "ramp", "issuance", "raw_sign", "program", "provider_admin"])
+  .openapi({ description: "Normalized wallet operation family.", example: "payment" });
+
+const walletOperationStatusSchema = z
+  .enum([
+    "created",
+    "evaluated",
+    "pending_approval",
+    "executing",
+    "completed",
+    "failed",
+    "canceled",
+  ])
+  .openapi({ description: "Current wallet operation status.", example: "pending_approval" });
+
+const policyDecisionSchema = z
+  .enum([
+    "allow",
+    "deny",
+    "approval_required",
+    "provider_approval_required",
+    "review",
+    "not_evaluated",
+  ])
+  .openapi({ description: "Policy decision for this operation.", example: "approval_required" });
+
+const walletApprovalRequestSchema = z
+  .object({
+    id: z.string().openapi({ description: "Approval request ID.", example: "appr_example" }),
+    organizationId: z.string().openapi({ description: "Owning organization ID." }),
+    projectId: projectIdParamSchema
+      .nullable()
+      .openapi({ description: "Project scope for this approval request." }),
+    walletOperationId: z.string().openapi({ description: "Associated wallet operation ID." }),
+    approvalGroupId: z.string().nullable().openapi({
+      description: "Approval group used for this request, when configured.",
+    }),
+    status: withOpenApi(approvalRequestStatusSchemaBase, {
+      description: "Approval request status.",
+      example: "pending",
+    }),
+    provider: z.string().nullable().openapi({
+      description: "External approval provider, when applicable.",
+      example: "fireblocks",
+    }),
+    providerReference: z.string().nullable().openapi({
+      description: "External provider reference, when applicable.",
+      example: "fb_tx_123",
+    }),
+    requestedBy: z.string().nullable().openapi({ description: "Requester user or API key ID." }),
+    resolvedBy: z.string().nullable().openapi({ description: "Resolver user or API key ID." }),
+    expiresAt: isoDateTimeSchema.nullable(),
+    resolvedAt: isoDateTimeSchema.nullable(),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+    wallet: z
+      .object({
+        custodyWalletId: z.string().openapi({ description: "Internal custody wallet row ID." }),
+        walletId: walletIdParamSchema,
+        publicKey: solanaAddressSchema,
+        label: z.string().nullable().openapi({ description: "Wallet label." }),
+      })
+      .nullable()
+      .openapi({ description: "Wallet metadata when the custody wallet still exists." }),
+    operation: z
+      .object({
+        id: z.string().openapi({ description: "Wallet operation ID." }),
+        custodyWalletId: z.string().nullable().openapi({
+          description: "Internal custody wallet row ID used by the operation.",
+        }),
+        walletId: walletIdParamSchema,
+        apiKeyId: z.string().nullable().openapi({ description: "API key that requested it." }),
+        source: z.string().openapi({ description: "Operation source.", example: "api" }),
+        operationFamily: walletOperationFamilySchema,
+        operationType: z.string().openapi({
+          description: "Normalized wallet operation type.",
+          example: "payment_transfer",
+        }),
+        asset: z.string().nullable().openapi({ description: "Asset symbol or mint." }),
+        amount: z.string().nullable().openapi({ description: "Operation amount." }),
+        destination: z.string().nullable().openapi({ description: "Destination or counterparty." }),
+        status: walletOperationStatusSchema,
+        createdAt: isoDateTimeSchema,
+        updatedAt: isoDateTimeSchema,
+      })
+      .openapi({ description: "Wallet operation awaiting approval." }),
+    policyEvaluation: z
+      .object({
+        id: z.string().openapi({ description: "Policy evaluation ID." }),
+        decision: policyDecisionSchema,
+        reasonCode: z.string().openapi({
+          description: "Stable reason code explaining the decision.",
+          example: "wallet_policy_match",
+        }),
+        reason: z.string().nullable().openapi({ description: "Human-readable reason." }),
+        matchedRules: z
+          .array(z.record(z.string(), z.unknown()))
+          .openapi({ description: "Policy rules that matched this operation." }),
+        requiresApproval: z.boolean().openapi({
+          description: "Whether the evaluation required approval.",
+          example: true,
+        }),
+        evaluatedAt: isoDateTimeSchema,
+      })
+      .nullable()
+      .openapi({ description: "Latest policy evaluation linked to this approval request." }),
+  })
+  .openapi({ description: "Wallet approval request summary." });
+
+export const walletApprovalRequestsResponseSchema = z
+  .object({
+    approvalRequests: z.array(walletApprovalRequestSchema),
+  })
+  .openapi({ description: "Wallet approval request list response payload." });
+
+export const walletApprovalRequestResponseSchema = z
+  .object({
+    approvalRequest: walletApprovalRequestSchema,
+  })
+  .openapi({ description: "Wallet approval request response payload." });
 
 export const signerCheckResponseSchema = z
   .object({
