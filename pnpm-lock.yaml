@@ -17288,7 +17288,7 @@ snapshots:
       neo-async: 2.6.2
       schema-utils: 4.3.3
       tapable: 2.3.3
-      terser-webpack-plugin: 5.6.1(webpack@5.106.1)
+      terser-webpack-plugin: 5.6.1(lightningcss@1.32.0)(webpack@5.106.1(lightningcss@1.32.0))
       watchpack: 2.5.1
       webpack-sources: 3.5.0
     transitivePeerDependencies:
