@@ -32,7 +32,17 @@ export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
 });
 
 export const orgCustodyProviderSchema = z
-  .enum(["local", "fireblocks", "privy", "coinbase_cdp", "para", "turnkey", "dfns", "anchorage"])
+  .enum([
+    "local",
+    "fireblocks",
+    "privy",
+    "coinbase_cdp",
+    "para",
+    "turnkey",
+    "dfns",
+    "ibm_haven",
+    "anchorage",
+  ])
   .openapi({ description: "Wallet signing provider.", example: "privy" });
 
 export const createCustodyWalletRequestSchema = createWalletSchemaBase

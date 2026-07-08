@@ -27,6 +27,9 @@ const providerEnvKeys = [
   "DFNS_AUTH_TOKEN",
   "DFNS_CREDENTIAL_ID",
   "DFNS_PRIVATE_KEY",
+  "IBM_HAVEN_AUTH_TOKEN",
+  "IBM_HAVEN_CREDENTIAL_ID",
+  "IBM_HAVEN_PRIVATE_KEY",
   "ANCHORAGE_API_KEY",
   "UTILA_SERVICE_ACCOUNT_EMAIL",
   "UTILA_SERVICE_ACCOUNT_PRIVATE_KEY",
@@ -315,6 +318,11 @@ describe("provider-availability.service", () => {
       enabled: true,
     });
     expect(availability.providers.custody.dfns).toEqual({
+      entitled: true,
+      configured: false,
+      enabled: false,
+    });
+    expect(availability.providers.custody.ibm_haven).toEqual({
       entitled: true,
       configured: false,
       enabled: false,

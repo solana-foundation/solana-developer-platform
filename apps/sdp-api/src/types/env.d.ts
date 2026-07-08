@@ -55,6 +55,15 @@ export interface Env {
   // a disable-only mechanism.
   SDP_DEPLOYMENT_MODE?: "managed" | "self_hosted";
 
+  // Credential secret store selection for BYO custody credentials.
+  // Managed SDP should use GCP Secret Manager. Self-hosted deployments default
+  // to encrypted DB storage and can also resolve provider credentials directly
+  // from runtime env bindings.
+  CREDENTIAL_SECRET_STORE_BACKEND?: "gcp_secret_manager" | "encrypted_db" | "runtime_env";
+  GCP_SECRET_MANAGER_PROJECT_ID?: string;
+  GCP_SECRET_MANAGER_SECRET_PREFIX?: string;
+  GCP_SECRET_MANAGER_API_BASE_URL?: string;
+
   // Secrets (set via wrangler secret)
   API_KEY_PEPPER?: string;
   CUSTODY_ENCRYPTION_KEY?: string; // For encrypting org private keys in DB
@@ -103,6 +112,7 @@ export interface Env {
   | "para"
   | "turnkey"
   | "dfns"
+  | "ibm_haven"
   | "anchorage"
   | "utila";
   FEE_PAYER_PRIVATE_KEY?: string;
@@ -152,6 +162,13 @@ export interface Env {
   DFNS_API_BASE_URL?: string;
   DFNS_WALLET_ID?: string;
 
+  // IBM Digital Asset Haven configuration (white-label Dfns; Solana)
+  IBM_HAVEN_AUTH_TOKEN?: string;
+  IBM_HAVEN_CREDENTIAL_ID?: string;
+  IBM_HAVEN_PRIVATE_KEY?: string;
+  IBM_HAVEN_API_BASE_URL?: string;
+  IBM_HAVEN_WALLET_ID?: string;
+
   // Anchorage wallet lifecycle configuration
   ANCHORAGE_API_KEY?: string;
   ANCHORAGE_API_BASE_URL?: string;
@@ -184,6 +201,9 @@ export interface Env {
   PAYMENTS_RECURRING_COLLECTION_ENABLED?: string;
   PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE?: string;
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
+
+  // Asset Profiles backend feature flag
+  ASSET_PROFILES_ENABLED?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;

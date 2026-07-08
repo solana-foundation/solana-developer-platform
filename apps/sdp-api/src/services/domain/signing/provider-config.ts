@@ -59,6 +59,14 @@ export interface DfnsProviderConfig {
   signingKeyId?: string;
 }
 
+export interface IbmHavenProviderConfig {
+  provider: "ibm_haven";
+  apiBaseUrl?: string;
+  network?: "Solana" | "SolanaDevnet";
+  walletId?: string;
+  signingKeyId?: string;
+}
+
 export interface AnchorageProviderConfig {
   provider: "anchorage";
   apiBaseUrl?: string;
@@ -81,6 +89,7 @@ export type ProviderConfigRecord =
   | ParaProviderConfig
   | TurnkeyProviderConfig
   | DfnsProviderConfig
+  | IbmHavenProviderConfig
   | AnchorageProviderConfig
   | UtilaProviderConfig;
 

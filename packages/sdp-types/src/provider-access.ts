@@ -95,6 +95,7 @@ const ENTERPRISE_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
     "para",
     "turnkey",
     "dfns",
+    "ibm_haven",
     "anchorage",
     "utila",
   ]),

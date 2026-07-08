@@ -46,6 +46,7 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
 const PRIVY_CONFIG_ID = "cust_cfg_privy_multi";
 const PARA_CONFIG_ID = "cust_cfg_para_multi";
 const DFNS_CONFIG_ID = "cust_cfg_dfns_legacy";
+const IBM_HAVEN_CONFIG_ID = "cust_cfg_ibm_haven";
 
 let originalParaApiKey: string | undefined;
 
@@ -467,6 +468,72 @@ describe("Custody multi-provider routes", () => {
     expect(body.data.config.id).toBe(DFNS_CONFIG_ID);
     expect(body.data.config.provider).toBe("dfns");
     expect(body.data.config.publicKey).toBe("dfns_pubkey_a");
+  });
+
+  it("returns config for an ibm_haven default provider without adapter resolution", async () => {
+    // IBM Digital Asset Haven wallets are stored with an `ibmhaven_` prefix (white-label Dfns).
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          IBM_HAVEN_CONFIG_ID,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          "ibm_haven",
+          "legacy-config",
+          "sdp-custody-encryption-v1",
+          "ibmhaven_wallet_haven",
+          "active"
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "cwlt_ibm_haven",
+          IBM_HAVEN_CONFIG_ID,
+          "ibmhaven_wallet_haven",
+          "haven_pubkey",
+          "Haven Root",
+          "root",
+          "active"
+        ),
+      getDb(env)
+        .prepare(
+          `UPDATE custody_scope_defaults
+           SET default_custody_config_id = ?, updated_at = datetime('now')
+           WHERE organization_id = ? AND project_id = ?`
+        )
+        .bind(IBM_HAVEN_CONFIG_ID, TEST_ORG.id, TEST_PROJECT.id),
+    ]);
+
+    const res = await app.request(
+      "/v1/wallets/config",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        config: { id: string; provider: string; publicKey: string };
+      };
+    };
+
+    expect(body.data.config.id).toBe(IBM_HAVEN_CONFIG_ID);
+    expect(body.data.config.provider).toBe("ibm_haven");
+    expect(body.data.config.publicKey).toBe("haven_pubkey");
   });
 
   it("sets default wallet for an explicitly targeted provider", async () => {

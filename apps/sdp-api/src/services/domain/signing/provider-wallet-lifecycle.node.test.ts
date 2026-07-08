@@ -4,6 +4,7 @@ import type { Env } from "@/types/env";
 
 const createWalletMock = vi.hoisted(() => vi.fn());
 const createDfnsApiClientMock = vi.hoisted(() => vi.fn());
+const createIbmHavenApiClientMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/dfns/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/dfns/client")>();
@@ -11,6 +12,7 @@ vi.mock("@/services/dfns/client", async (importOriginal) => {
   return {
     ...actual,
     createDfnsApiClient: createDfnsApiClientMock,
+    createIbmHavenApiClient: createIbmHavenApiClientMock,
   };
 });
 
@@ -22,6 +24,11 @@ describe("createProviderWallet", () => {
       address: "DfnsNewWalletPublicKey111111111111111111111",
     });
     createDfnsApiClientMock.mockResolvedValue({
+      wallets: {
+        createWallet: createWalletMock,
+      },
+    });
+    createIbmHavenApiClientMock.mockResolvedValue({
       wallets: {
         createWallet: createWalletMock,
       },
@@ -58,6 +65,40 @@ describe("createProviderWallet", () => {
     });
     expect(wallet).toEqual({
       walletId: "dfns_wa-12345-abcde-newdfnswallet",
+      publicKey: "DfnsNewWalletPublicKey111111111111111111111",
+    });
+  });
+
+  it("creates additional IBM Digital Asset Haven wallets with the ibmhaven_ prefix", async () => {
+    const env = {} as Env;
+
+    const wallet = await createProviderWallet({
+      env,
+      orgId: "org_ibm_haven",
+      projectId: "project_ibm_haven",
+      params: {
+        label: "Haven treasury",
+      },
+      parsed: {
+        provider: "ibm_haven",
+        apiBaseUrl: "https://api.digitalassets.ibm.test",
+        network: "SolanaDevnet",
+        walletId: "wa-12345-abcde-rootwallet",
+        signingKeyId: "key-12345-abcde-rootwallet",
+      },
+    });
+
+    expect(createIbmHavenApiClientMock).toHaveBeenCalledWith(env, {
+      apiBaseUrl: "https://api.digitalassets.ibm.test",
+    });
+    expect(createWalletMock).toHaveBeenCalledWith({
+      body: {
+        network: "SolanaDevnet",
+        name: "Haven treasury",
+      },
+    });
+    expect(wallet).toEqual({
+      walletId: "ibmhaven_wa-12345-abcde-newdfnswallet",
       publicKey: "DfnsNewWalletPublicKey111111111111111111111",
     });
   });

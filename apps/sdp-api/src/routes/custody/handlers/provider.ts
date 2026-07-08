@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest } from "@/lib/errors";
+import { redactCredentialString } from "@/lib/redaction";
 import { created, success } from "@/lib/response";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { AuditService } from "@/services/audit.service";
@@ -328,6 +329,14 @@ async function initializeProviderConnection(
         signingKeyId: request.signingKeyId,
         walletLabel: request.walletLabel,
       });
+    case "ibm_haven":
+      return signingService.initializeIbmHavenSigning(organizationId, projectId, {
+        apiBaseUrl: request.apiBaseUrl,
+        network: request.network,
+        walletId: request.walletId,
+        signingKeyId: request.signingKeyId,
+        walletLabel: request.walletLabel,
+      });
     case "anchorage":
       return signingService.initializeAnchorageWalletLifecycle(organizationId, projectId, {
         apiBaseUrl: request.apiBaseUrl,
@@ -349,7 +358,11 @@ async function findScopeConfigByProvider(
   organizationId: string,
   projectId: string | undefined,
   provider: CustodyProvider
-): Promise<{ id: string; status: "active" | "inactive"; default_wallet_id: string | null } | null> {
+): Promise<{
+  id: string;
+  status: "active" | "inactive";
+  default_wallet_id: string | null;
+} | null> {
   return getDb(c.env)
     .prepare(
       projectId
@@ -363,7 +376,11 @@ async function findScopeConfigByProvider(
            LIMIT 1`
     )
     .bind(...(projectId ? [organizationId, projectId, provider] : [organizationId, provider]))
-    .first<{ id: string; status: "active" | "inactive"; default_wallet_id: string | null }>();
+    .first<{
+      id: string;
+      status: "active" | "inactive";
+      default_wallet_id: string | null;
+    }>();
 }
 
 async function findScopeProviderConfigRecord(
@@ -482,9 +499,12 @@ function toInitializeSigningResponse(
 function handleSigningInitializationError(error: unknown): never {
   if (error instanceof SigningError) {
     if (error.code === "ALREADY_INITIALIZED") {
-      throw new AppError("CONFLICT", error.message);
+      throw new AppError("CONFLICT", redactCredentialString(error.message));
     }
-    throw badRequest(error.message);
+    if (error.code === "NETWORK_ERROR" || error.code === "PROVIDER_NOT_CONFIGURED") {
+      throw badRequest("Provider setup failed. Check provider configuration and try again.");
+    }
+    throw badRequest(redactCredentialString(error.message));
   }
 
   throw error;

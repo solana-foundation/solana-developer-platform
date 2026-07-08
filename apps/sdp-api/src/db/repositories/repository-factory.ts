@@ -1,5 +1,7 @@
 import { getDb } from "@/db";
 import type { Env } from "@/types/env";
+import type { AssetProfilesRepository } from "./asset-profile.repository";
+import { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
 import type { CounterpartiesRepository } from "./counterparty.repository";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import type { CounterpartyAccountsRepository } from "./counterparty-account.repository";
@@ -55,4 +57,8 @@ export function createTokenRepository(env: Env): TokenRepository {
 
 export function createPolicyRepository(env: Env): PolicyRepository {
   return createPostgresPolicyRepository(getDb(env));
+}
+
+export function createAssetProfilesRepository(env: Env): AssetProfilesRepository {
+  return createPostgresAssetProfilesRepository(getDb(env));
 }

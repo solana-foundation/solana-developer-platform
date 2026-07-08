@@ -30,6 +30,17 @@ export function denormalizeAnchorageWalletId(walletId: string): string {
   return walletId.startsWith("anchorage_") ? walletId.slice("anchorage_".length) : walletId;
 }
 
+// IBM Digital Asset Haven wallets are Dfns-shaped (`wa-…`) but stored with an
+// `ibmhaven_` prefix so operators can distinguish them from Dfns wallets. The
+// prefix is stripped (denormalized) before the id reaches the Haven-agnostic DfnsSigner.
+export function normalizeIbmHavenWalletId(walletId: string): string {
+  return walletId.startsWith("ibmhaven_") ? walletId : `ibmhaven_${walletId}`;
+}
+
+export function denormalizeIbmHavenWalletId(walletId: string): string {
+  return walletId.startsWith("ibmhaven_") ? walletId.slice("ibmhaven_".length) : walletId;
+}
+
 export function normalizeUtilaWalletId(walletId: string): string {
   const trimmed = trimUtilaWalletResource(walletId.trim());
   return trimmed.startsWith("utila_") ? trimmed : `utila_${trimmed}`;

@@ -20,6 +20,7 @@ export { BaseKeychainAdapter } from "./base-keychain.adapter";
 export { KeychainCoinbaseAdapter } from "./keychain-coinbase.adapter";
 export { KeychainDfnsAdapter } from "./keychain-dfns.adapter";
 export { KeychainFireblocksAdapter } from "./keychain-fireblocks.adapter";
+export { KeychainIbmHavenAdapter } from "./keychain-ibm-haven.adapter";
 export { KeychainMemoryAdapter } from "./keychain-memory.adapter";
 export { KeychainParaAdapter } from "./keychain-para.adapter";
 export { KeychainPrivyAdapter } from "./keychain-privy.adapter";
