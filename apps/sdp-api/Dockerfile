@@ -20,6 +20,7 @@ COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
 COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
+COPY packages/sdp-solana/package.json ./packages/sdp-solana/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -33,6 +34,7 @@ COPY apps/sdp-api ./apps/sdp-api
 COPY packages/sdp-types ./packages/sdp-types
 COPY packages/sdp-env-config ./packages/sdp-env-config
 COPY packages/sdp-rpc ./packages/sdp-rpc
+COPY packages/sdp-solana ./packages/sdp-solana
 
 WORKDIR /repo/apps/sdp-api
 RUN node scripts/build-node.mjs
