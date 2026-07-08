@@ -107,7 +107,7 @@ function uniqueSorted<T extends string>(values: readonly T[]): T[] {
   return [...new Set(values)].sort();
 }
 
-/** Enriches BVNK compliance with the requester IP from request headers. */
+/** Throws unless the org has the ramp provider enabled for the request's environment. */
 export async function assertRampProviderAvailable(
   c: AppContext,
   providerId: RampProviderId,
