@@ -1,6 +1,15 @@
 import { isDecimalString } from "./amount";
 import { badRequest } from "./errors";
 
+// Linear-time trailing-zero strip; /0+$/ backtracks polynomially (js/polynomial-redos).
+function trimTrailingZeros(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "0") {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
 function parseDecimalParts(value: string): { whole: string; fraction: string } {
   const normalized = value.trim();
   if (!isDecimalString(normalized)) {
@@ -9,8 +18,7 @@ function parseDecimalParts(value: string): { whole: string; fraction: string } {
 
   const [wholeRaw = "", fractionRaw = ""] = normalized.split(".");
   const whole = (wholeRaw || "0").replace(/^0+(?=\d)/, "");
-  let fraction = fractionRaw ?? "";
-  fraction = fraction.replace(/0+$/, "");
+  const fraction = trimTrailingZeros(fractionRaw ?? "");
 
   return {
     whole: whole.length > 0 ? whole : "0",
@@ -60,7 +68,7 @@ export function sumDecimalAmounts(amounts: string[]): string {
 
   const digits = total.toString().padStart(scale + 1, "0");
   const whole = digits.slice(0, -scale).replace(/^0+(?=\d)/, "") || "0";
-  const fraction = digits.slice(-scale).replace(/0+$/, "");
+  const fraction = trimTrailingZeros(digits.slice(-scale));
 
   return fraction ? `${whole}.${fraction}` : whole;
 }
