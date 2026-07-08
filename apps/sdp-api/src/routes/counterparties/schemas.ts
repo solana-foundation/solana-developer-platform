@@ -1,36 +1,14 @@
 import {
   COUNTERPARTY_ACCOUNT_SUMMARY_TYPES,
-  COUNTERPARTY_EMPLOYMENT_STATUSES,
   COUNTERPARTY_ENTITY_TYPES,
-  COUNTERPARTY_ID_TYPES,
-  COUNTERPARTY_INDUSTRY_SECTORS,
-  COUNTERPARTY_INTENDED_USE,
-  COUNTERPARTY_PEP_STATUSES,
-  COUNTERPARTY_SOURCE_OF_FUNDS,
-  COUNTERPARTY_YEARLY_INCOME,
   COUNTRY_CODES,
 } from "@sdp/types";
 import { z } from "zod";
-import { LIGHTSPARK_PAYOUT_CURRENCIES } from "@/lib/ramps/validation/lightspark";
-import {
-  rampCurrencyCodeSchema,
-  rampDirectionSchema,
-  rampFiatCurrencySchema,
-} from "@/routes/payments/schemas";
+import { rampCurrencyCodeSchema, rampFiatCurrencySchema } from "@/routes/payments/schemas";
 
 const countryCodeSchema = z.enum(COUNTRY_CODES);
-const currencyCodeSchema = z.string().trim().toUpperCase().length(3);
 const subdivisionCodeSchema = z.string().min(1).max(16);
 const E164_PHONE_PATTERN = /^\+[1-9]\d{1,14}$/;
-
-/**
- * Returns the current UTC date as a `YYYY-MM-DD` string, so date-only values
- * can be compared lexicographically without timezone-boundary drift from
- * `Date` object comparisons.
- */
-function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export const counterpartyAddressSchema = z.object({
   line1: z.string().min(1).max(512),
@@ -41,114 +19,77 @@ export const counterpartyAddressSchema = z.object({
   subdivisionCode: subdivisionCodeSchema.optional(),
 });
 
-export const counterpartyIdTypeSchema = z.enum(COUNTERPARTY_ID_TYPES);
-
-export const counterpartyGovernmentIdSchema = z.object({
-  type: counterpartyIdTypeSchema,
-  number: z.string().min(1).max(128),
-  issueCountry: countryCodeSchema,
-  subdivisionCode: subdivisionCodeSchema.optional(),
-  issueDate: z.iso.date().optional(),
-  expiryDate: z.iso.date().optional(),
-});
-
-export const counterpartyMonetaryAmountSchema = z.object({
-  amount: z.string().min(1).max(32),
-  currency: currencyCodeSchema,
-});
-
-export const counterpartyComplianceCddSchema = z.object({
-  employmentStatus: z.enum(COUNTERPARTY_EMPLOYMENT_STATUSES),
-  sourceOfFunds: z.enum(COUNTERPARTY_SOURCE_OF_FUNDS),
-  pepStatus: z.enum(COUNTERPARTY_PEP_STATUSES),
-  intendedUseOfAccount: z.enum(COUNTERPARTY_INTENDED_USE),
-  expectedMonthlyVolume: counterpartyMonetaryAmountSchema,
-  estimatedYearlyIncome: z.enum(COUNTERPARTY_YEARLY_INCOME),
-  employmentIndustrySector: z.enum(COUNTERPARTY_INDUSTRY_SECTORS),
-});
-
-export const counterpartyTaxIdentificationSchema = z.object({
-  number: z.string().min(1).max(64),
-  residenceCountryCode: countryCodeSchema,
-});
-
-export const counterpartyComplianceSchema = z.object({
-  taxIdentification: counterpartyTaxIdentificationSchema.optional(),
-  nationality: countryCodeSchema.optional(),
-  birthCountryCode: countryCodeSchema.optional(),
-  cdd: counterpartyComplianceCddSchema.optional(),
-});
-
-export const counterpartyIdentitySchema = z.looseObject({
-  firstName: z.string().min(1).max(256).optional(),
+export const counterpartyIdentitySchema = z.object({
+  firstName: z.string().min(1).max(256),
   middleName: z.string().max(256).optional(),
-  lastName: z.string().min(1).max(256).optional(),
+  lastName: z.string().min(1).max(256),
   secondLastName: z.string().max(256).optional(),
-  dateOfBirth: z.iso
-    .date()
-    .refine((value) => value < todayIsoDate(), { message: "dateOfBirth must be in the past" })
-    .optional(),
-  phone: z
-    .string()
-    .regex(E164_PHONE_PATTERN, { message: "phone must be in E.164 format" })
-    .optional(),
-  address: counterpartyAddressSchema.optional(),
-  birthCountryCode: countryCodeSchema.optional(),
-  citizenshipCountryCode: countryCodeSchema.optional(),
-  governmentId: counterpartyGovernmentIdSchema.optional(),
-  compliance: counterpartyComplianceSchema.optional(),
+  dateOfBirth: z.iso.date().refine((value) => value < new Date().toISOString().slice(0, 10), {
+    message: "dateOfBirth must be in the past",
+  }),
+  phone: z.string().regex(E164_PHONE_PATTERN, { message: "phone must be in E.164 format" }),
+  address: counterpartyAddressSchema,
 });
 
 export const counterpartyEntityTypeSchema = z.enum(COUNTERPARTY_ENTITY_TYPES);
 
 export const counterpartyStatusSchema = z.enum(["active", "archived"]);
 
-export const counterpartyIdSchema = z.string().min(1);
-
 export const counterpartyIdParamsSchema = z.object({
-  counterpartyId: counterpartyIdSchema,
+  counterpartyId: z.string().min(1),
 });
 
-const lightsparkPayoutCurrencySchema = z.preprocess(
-  (value) => (typeof value === "string" ? value.trim().toUpperCase() : value),
-  z.enum(LIGHTSPARK_PAYOUT_CURRENCIES)
-);
-
-export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("provider", [
-  z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
+export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("direction", [
   z.object({
-    provider: z.literal("bvnk"),
-    direction: rampDirectionSchema,
-    cryptoToken: rampCurrencyCodeSchema.optional(),
-    fiatCurrency: rampFiatCurrencySchema.optional(),
-    destinationWallet: z.string().min(1).optional(),
-  }),
-  z.object({ provider: z.literal("moneygram"), direction: rampDirectionSchema }),
-  z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),
-  z.discriminatedUnion("direction", [
-    z.object({ provider: z.literal("lightspark"), direction: z.literal("onramp") }),
-    z.object({
-      provider: z.literal("lightspark"),
-      direction: z.literal("offramp"),
-      fiatCurrency: lightsparkPayoutCurrencySchema,
+    provider: z.enum(["moonpay", "lightspark", "bvnk", "coinbase"], {
+      error: "provider does not support onramp requirements",
     }),
-  ]),
+    direction: z.literal("onramp"),
+    cryptoToken: rampCurrencyCodeSchema,
+    fiatCurrency: rampFiatCurrencySchema,
+    destinationWallet: z.string().min(1),
+  }),
+  z.object({
+    provider: z.enum(["moonpay", "lightspark", "bvnk", "moneygram"], {
+      error: "provider does not support offramp requirements",
+    }),
+    direction: z.literal("offramp"),
+    cryptoToken: rampCurrencyCodeSchema,
+    fiatCurrency: rampFiatCurrencySchema,
+  }),
 ]);
 
-export const createCounterpartySchema = z.object({
+export const counterpartyBusinessIdentitySchema = z.strictObject({
+  address: counterpartyAddressSchema,
+});
+
+const createCounterpartyBaseSchema = z.object({
   externalId: z.string().min(1).max(256).optional(),
-  entityType: counterpartyEntityTypeSchema,
   displayName: z.string().min(1).max(512),
   email: z.email().max(512),
-  identity: counterpartyIdentitySchema.optional(),
 });
+
+export const createIndividualCounterpartySchema = createCounterpartyBaseSchema.extend({
+  entityType: z.literal("individual"),
+  identity: counterpartyIdentitySchema,
+});
+
+export const createBusinessCounterpartySchema = createCounterpartyBaseSchema.extend({
+  entityType: z.literal("business"),
+  identity: counterpartyBusinessIdentitySchema,
+});
+
+export const createCounterpartySchema = z.discriminatedUnion("entityType", [
+  createIndividualCounterpartySchema,
+  createBusinessCounterpartySchema,
+]);
 
 export const updateCounterpartyObjectSchema = z.object({
   externalId: z.string().min(1).max(256).nullable().optional(),
   entityType: counterpartyEntityTypeSchema.optional(),
   displayName: z.string().min(1).max(512).optional(),
   email: z.email().max(512).optional(),
-  identity: counterpartyIdentitySchema.optional(),
+  identity: z.union([counterpartyIdentitySchema, counterpartyBusinessIdentitySchema]).optional(),
 });
 
 export const updateCounterpartySchema = updateCounterpartyObjectSchema.refine(

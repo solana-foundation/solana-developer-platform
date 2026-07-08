@@ -9,9 +9,14 @@ import type {
 import { z } from "zod";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { AppError, badRequest, unsupportedCounterparty } from "@/lib/errors";
-import { latestLightsparkPayoutAccount } from "../providers/lightspark";
-import { buildRequirementSchema, readyCounterparty, selectField, textField } from "../requirements";
-import type { ValidateCounterpartyOptions } from "../types";
+import {
+  buildRequirementSchema,
+  readyCounterparty,
+  selectField,
+  textField,
+} from "../../requirements";
+import type { ValidateCounterpartyOptions } from "../../types";
+import { latestLightsparkPayoutAccount } from "./provider-data";
 
 const SWIFT_BIC_PATTERN = "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$";
 const INTERNATIONAL_PHONE_PATTERN = "^\\+[0-9]{6,14}$";
@@ -415,7 +420,7 @@ export function lightsparkCounterpartyRequirements(
 }
 
 function lightsparkBeneficiary(counterparty: CounterpartyRow): Record<string, unknown> {
-  if (counterparty.entity_type === "business") {
+  if (counterparty.entity_type !== "individual") {
     return { beneficiaryType: "BUSINESS", legalName: counterparty.display_name };
   }
   const identity = counterparty.identity;
@@ -423,7 +428,6 @@ function lightsparkBeneficiary(counterparty: CounterpartyRow): Record<string, un
     beneficiaryType: "INDIVIDUAL",
     fullName: counterparty.display_name,
     ...(identity.dateOfBirth ? { birthDate: identity.dateOfBirth } : {}),
-    ...(identity.compliance?.nationality ? { nationality: identity.compliance.nationality } : {}),
   };
 }
 

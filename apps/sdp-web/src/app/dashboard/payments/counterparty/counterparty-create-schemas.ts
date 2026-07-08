@@ -21,15 +21,6 @@ function optionalUppercase(max: number, min = 1) {
     .pipe(inner.optional());
 }
 
-function optionalPattern(max: number, pattern: RegExp, message: string) {
-  const inner = z.string().min(1).max(max).regex(pattern, message);
-  return z
-    .string()
-    .trim()
-    .transform((v) => (v.length > 0 ? v : undefined))
-    .pipe(inner.optional());
-}
-
 const E164_PHONE_PATTERN = /^\+[1-9]\d{1,14}$/;
 
 /**
@@ -41,17 +32,6 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-const optionalIsoDate = z
-  .string()
-  .trim()
-  .transform((v) => (v.length > 0 ? v : undefined))
-  .pipe(
-    z.iso
-      .date()
-      .refine((value) => value < todayIsoDate(), { message: "Must be in the past" })
-      .optional()
-  );
-
 export const basicsSchema = z.object({
   entityType: z.enum(COUNTERPARTY_ENTITY_TYPES),
   displayName: z.string().trim().min(1, "Required").max(512),
@@ -60,10 +40,21 @@ export const basicsSchema = z.object({
 });
 
 export const identitySchema = z.object({
-  firstName: optionalString(256),
-  lastName: optionalString(256),
-  dateOfBirth: optionalIsoDate,
-  phone: optionalPattern(64, E164_PHONE_PATTERN, "Must be in E.164 format (e.g. +14155551234)"),
+  firstName: z.string().trim().min(1, "Required").max(256),
+  lastName: z.string().trim().min(1, "Required").max(256),
+  dateOfBirth: z
+    .string()
+    .trim()
+    .pipe(
+      z.iso
+        .date("Must be a date (YYYY-MM-DD)")
+        .refine((value) => value < todayIsoDate(), { message: "Must be in the past" })
+    ),
+  phone: z
+    .string()
+    .trim()
+    .regex(E164_PHONE_PATTERN, "Must be in E.164 format (e.g. +14155551234)")
+    .max(64),
 });
 
 export const addressSchema = z

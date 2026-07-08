@@ -1,21 +1,21 @@
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
-import { BvnkRampClient } from "./providers/bvnk";
-import { CoinbaseRampClient } from "./providers/coinbase";
-import { LightsparkRampClient } from "./providers/lightspark";
-import { MoneygramRampClient } from "./providers/moneygram";
-import { MoonpayRampClient } from "./providers/moonpay";
+import { BvnkRampClient } from "./providers/bvnk/client";
+import { CoinbaseRampClient } from "./providers/coinbase/client";
+import { LightsparkRampClient } from "./providers/lightspark/client";
+import { MoneygramRampClient } from "./providers/moneygram/client";
+import { MoonpayRampClient } from "./providers/moonpay/client";
 import type {
   ProviderRampSupport,
   RampDiscoveryContext,
   RampDumpReader,
-  RampProviderClient,
+  RampProvider,
 } from "./types";
 
-export { BvnkRampClient } from "./providers/bvnk";
-export { CoinbaseRampClient } from "./providers/coinbase";
-export { LightsparkRampClient } from "./providers/lightspark";
-export { MoneygramRampClient } from "./providers/moneygram";
-export { MoonpayRampClient } from "./providers/moonpay";
+export { BvnkRampClient } from "./providers/bvnk/client";
+export { CoinbaseRampClient } from "./providers/coinbase/client";
+export { LightsparkRampClient } from "./providers/lightspark/client";
+export { MoneygramRampClient } from "./providers/moneygram/client";
+export { MoonpayRampClient } from "./providers/moonpay/client";
 export type {
   ProviderRampSupport,
   RampDiscoveryContext,
@@ -23,7 +23,7 @@ export type {
   RampDumpReader,
   RampDumpWriter,
   RampFetchJson,
-  RampProviderClient,
+  RampProvider,
   RampSettlementEvent,
 } from "./types";
 
@@ -33,28 +33,14 @@ export const RAMP_PROVIDER_CLIENTS = {
   bvnk: new BvnkRampClient(),
   moneygram: new MoneygramRampClient(),
   coinbase: new CoinbaseRampClient(),
-} as const satisfies Record<RampProviderId, RampProviderClient>;
-
-function assertRampProviderRegistryComplete(providers: Record<RampProviderId, RampProviderClient>) {
-  for (const provider of RAMP_PROVIDERS) {
-    if (!providers[provider]) {
-      throw new Error(`Missing ramp provider client: ${provider}`);
-    }
-  }
-}
+} as const satisfies Record<RampProviderId, RampProvider>;
 
 export class RampClient {
-  constructor(
-    private readonly providers: Record<RampProviderId, RampProviderClient> = RAMP_PROVIDER_CLIENTS
-  ) {
-    assertRampProviderRegistryComplete(providers);
-  }
-
   /**
    * @internal Rail discovery is only intended for the support generation script.
    */
   async _discoverProviderRails(provider: RampProviderId, context: RampDiscoveryContext) {
-    await this.providers[provider]._discoverRails(context);
+    await RAMP_PROVIDER_CLIENTS[provider]._discoverRails(context);
   }
 
   /**
@@ -72,7 +58,7 @@ export class RampClient {
     const entries = await Promise.all(
       RAMP_PROVIDERS.map(async (provider) => [
         provider,
-        await this.providers[provider].readRailSupport(readDump),
+        await RAMP_PROVIDER_CLIENTS[provider].readRailSupport(readDump),
       ])
     );
     return Object.fromEntries(entries) as Record<RampProviderId, ProviderRampSupport>;

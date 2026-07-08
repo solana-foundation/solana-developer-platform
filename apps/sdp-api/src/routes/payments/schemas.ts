@@ -600,7 +600,7 @@ export const createOnrampQuoteSchema = z.object({
   counterpartyId: z.string().min(1),
   destinationWallet: z.string().min(1),
   cryptoToken: rampCurrencyCodeSchema,
-  fiatCurrency: rampFiatCurrencySchema.optional(),
+  fiatCurrency: rampFiatCurrencySchema,
   fiatAmount: paymentAmountSchema,
   redirectUrl: z.string().url().optional(),
   // Embedding domain for Coinbase's Apple Pay payment link (browser origin host).
@@ -622,6 +622,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
     z.object({
       provider: z.literal("bvnk"),
       direction: z.literal("offramp"),
+      cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: z.record(z.string(), z.string()).optional(),
     }),
@@ -690,7 +691,7 @@ const simulateLightsparkSandboxTransferPayloadSchema = z.object({
 const simulateBvnkSandboxPayinPayloadSchema = z.object({
   counterpartyId: z.string().min(1),
   amount: z.number().positive(),
-  fiatCurrency: z.string().trim().toUpperCase().length(3),
+  fiatCurrency: rampFiatCurrencySchema,
   cryptoToken: z.string().min(1),
   destinationWallet: z.string().min(1),
 });

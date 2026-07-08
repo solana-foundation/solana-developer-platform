@@ -79,6 +79,17 @@ const TEST_API_KEY = {
   prefix: "sk_test_pay",
 };
 const TEST_KORA_FEE_PAYER = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
+const TEST_COUNTERPARTY_IDENTITY = {
+  firstName: "Ada",
+  lastName: "Lovelace",
+  dateOfBirth: "1990-01-15",
+  phone: "+14155551234",
+  address: {
+    line1: "1 Market St",
+    city: "San Francisco",
+    countryCode: "US",
+  },
+} as const;
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
@@ -4489,6 +4500,7 @@ describe("Payments routes", () => {
           entityType: "individual",
           displayName: "Archived Subscription Counterparty",
           email: "subscription-archived-counterparty@example.com",
+          identity: TEST_COUNTERPARTY_IDENTITY,
         }),
       },
       env
@@ -4564,6 +4576,7 @@ describe("Payments routes", () => {
           entityType: "individual",
           displayName: "Wallet Scope Subscription Counterparty",
           email: "subscription-wallet-scope-counterparty@example.com",
+          identity: TEST_COUNTERPARTY_IDENTITY,
         }),
       },
       env
@@ -4660,6 +4673,7 @@ describe("Payments routes", () => {
           entityType: "individual",
           displayName: "Subscription API Counterparty",
           email: "subscription-counterparty@example.com",
+          identity: TEST_COUNTERPARTY_IDENTITY,
         }),
       },
       env
