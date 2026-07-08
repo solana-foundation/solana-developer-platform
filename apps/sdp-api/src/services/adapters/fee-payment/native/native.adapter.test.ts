@@ -1,3 +1,4 @@
+import * as solanaRpc from "@sdp/rpc/solana";
 import {
   type Address,
   addSignersToTransactionMessage,
@@ -18,7 +19,6 @@ import {
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as solanaRpc from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 import { NativeAdapter } from "./native.adapter";
 
