@@ -1,6 +1,6 @@
+import { SdpRpcError } from "@sdp/rpc/errors";
 import type { Signature } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
-import { AppError } from "@/lib/errors";
 import { confirmTransaction, type SolanaRpc, sendAndConfirmTransaction } from "./rpc";
 
 const TEST_SIGNATURE = "5confirmTimeoutSig" as Signature;
@@ -45,8 +45,8 @@ describe("confirmTransaction", () => {
 
     const error = await captureRejection(confirmTransaction(rpc, TEST_SIGNATURE, { timeoutMs: 1 }));
 
-    expect(error).toBeInstanceOf(AppError);
-    const appError = error as AppError;
+    expect(error).toBeInstanceOf(SdpRpcError);
+    const appError = error as SdpRpcError;
     expect(appError.code).toBe("SOLANA_RPC_ERROR");
     expect(appError.statusCode).toBe(502);
     expect(appError.message).toBe(`Transaction ${TEST_SIGNATURE} confirmation timed out after 1ms`);
@@ -62,8 +62,8 @@ describe("sendAndConfirmTransaction", () => {
       sendAndConfirmTransaction(rpc, new Uint8Array([1, 2, 3]), { timeoutMs: 1 })
     );
 
-    expect(error).toBeInstanceOf(AppError);
-    const appError = error as AppError;
+    expect(error).toBeInstanceOf(SdpRpcError);
+    const appError = error as SdpRpcError;
     expect(appError.code).toBe("SOLANA_RPC_ERROR");
     expect(appError.statusCode).toBe(502);
     expect(appError.message).toBe(`Transaction ${TEST_SIGNATURE} confirmation timed out after 1ms`);
