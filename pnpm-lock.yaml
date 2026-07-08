@@ -71,6 +71,9 @@ importers:
       '@sdp/env-config':
         specifier: workspace:*
         version: link:../../packages/sdp-env-config
+      '@sdp/payments':
+        specifier: workspace:*
+        version: link:../../packages/sdp-payments
       '@sdp/rpc':
         specifier: workspace:*
         version: link:../../packages/sdp-rpc
@@ -121,7 +124,7 @@ importers:
         version: 6.8.0(typescript@6.0.3)
       '@solana/kora':
         specifier: 0.3.0-beta.2
-        version: 0.3.0-beta.2(@solana-program/compute-budget@0.14.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-signer@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit@6.8.0(typescript@6.0.3))
+        version: 0.3.0-beta.2(@solana-program/compute-budget@0.14.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana-program/token@0.13.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-instruction-plan@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-rpc@0.11.1(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-signer@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit@6.8.0(typescript@6.0.3))
       '@solana/mosaic-sdk':
         specifier: 'catalog:'
         version: 0.1.1(patch_hash=b814110d007b64ff76f72cf843d93ba928a9c4f39acc34dbc2ee3e27d1149689)(typescript@6.0.3)
@@ -429,6 +432,40 @@ importers:
       tsx:
         specifier: 4.22.4
         version: 4.22.4
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/sdp-payments:
+    dependencies:
+      '@coinbase/cdp-sdk':
+        specifier: 1.49.2
+        version: 1.49.2(typescript@6.0.3)
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../sdp-rpc
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:../sdp-types
+      '@solana/addresses':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/codecs':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/kit':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/kora':
+        specifier: 0.3.0-beta.2
+        version: 0.3.0-beta.2(@solana-program/compute-budget@0.14.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana-program/token@0.13.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-instruction-plan@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-rpc@0.11.1(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-signer@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit@6.8.0(typescript@6.0.3))
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20260609.1
+        version: 4.20260609.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -5824,10 +5861,6 @@ packages:
     resolution: {integrity: sha512-wE4fDO8OjJhrPFH69HUQStq5oKvGRTNXEyW+k5C/pUQLASSsTu7obd2V3GvCDgPcY9AWjhJ4jz9Kh7iRvrxhJg==}
     engines: {node: '>=10.13.0'}
 
-  enhanced-resolve@5.24.1:
-    resolution: {integrity: sha512-7DdUaTjmNwMcH2gLr1qycesKII3BK4RLy/mdAb7x10Lq7bR4aNKHt1BR1ZALSv0rPM/hF5wYF0PhGop/rJm8vw==}
-    engines: {node: '>=10.13.0'}
-
   entities@4.5.0:
     resolution: {integrity: sha512-V0hjH4dGPh9Ao5p0MoRY6BVqtwCjhz6vI5LT8AJ55H+4g9/4vbHx1I54fS0XuclLhDHArPQCiMjDxjaL8fPxhw==}
     engines: {node: '>=0.12'}
@@ -8338,8 +8371,8 @@ packages:
       jsdom:
         optional: true
 
-  watchpack@2.5.2:
-    resolution: {integrity: sha512-6i/00NBjP4yGPs+caKSyRfpTF/8Torsu0MOW3mMzIbhgISFder8i7xbqgHlLMwJrdiN8ndBV3UA1/AfzPSr+jg==}
+  watchpack@2.5.1:
+    resolution: {integrity: sha512-Zn5uXdcFNIA1+1Ei5McRd+iRzfhENPCe7LeABkJtNulSxjma+l7ltNx55BWZkRlwRnpOgHqxnjyaDgJnNXnqzg==}
     engines: {node: '>=10.13.0'}
 
   web-namespaces@2.0.1:
@@ -11788,10 +11821,13 @@ snapshots:
       '@solana/kit-plugin-payer': 0.6.0(@solana/kit@6.8.0(typescript@6.0.3))
       '@solana/kit-plugin-rpc': 0.11.1(@solana/kit@6.8.0(typescript@6.0.3))
 
-  '@solana/kora@0.3.0-beta.2(@solana-program/compute-budget@0.14.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-signer@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit@6.8.0(typescript@6.0.3))':
+  '@solana/kora@0.3.0-beta.2(@solana-program/compute-budget@0.14.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana-program/token@0.13.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-instruction-plan@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-rpc@0.11.1(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-signer@0.10.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit@6.8.0(typescript@6.0.3))':
     dependencies:
       '@solana-program/compute-budget': 0.14.0(@solana/kit@6.8.0(typescript@6.0.3))
+      '@solana-program/token': 0.13.0(@solana/kit@6.8.0(typescript@6.0.3))
       '@solana/kit': 6.8.0(typescript@6.0.3)
+      '@solana/kit-plugin-instruction-plan': 0.10.0(@solana/kit@6.8.0(typescript@6.0.3))
+      '@solana/kit-plugin-rpc': 0.11.1(@solana/kit@6.8.0(typescript@6.0.3))
       '@solana/kit-plugin-signer': 0.10.0(@solana/kit@6.8.0(typescript@6.0.3))
 
   '@solana/mosaic-sdk@0.1.1(patch_hash=b814110d007b64ff76f72cf843d93ba928a9c4f39acc34dbc2ee3e27d1149689)(typescript@6.0.3)':
@@ -13761,11 +13797,6 @@ snapshots:
       once: 1.4.0
 
   enhanced-resolve@5.21.4:
-    dependencies:
-      graceful-fs: 4.2.11
-      tapable: 2.3.3
-
-  enhanced-resolve@5.24.1:
     dependencies:
       graceful-fs: 4.2.11
       tapable: 2.3.3
@@ -17111,8 +17142,9 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
-  watchpack@2.5.2:
+  watchpack@2.5.1:
     dependencies:
+      glob-to-regexp: 0.4.1
       graceful-fs: 4.2.11
 
   web-namespaces@2.0.1: {}
@@ -17133,7 +17165,7 @@ snapshots:
       acorn-import-phases: 1.0.4(acorn@8.17.0)
       browserslist: 4.28.4
       chrome-trace-event: 1.0.4
-      enhanced-resolve: 5.24.1
+      enhanced-resolve: 5.21.4
       es-module-lexer: 2.2.0
       eslint-scope: 5.1.1
       events: 3.3.0
@@ -17146,7 +17178,7 @@ snapshots:
       schema-utils: 4.3.3
       tapable: 2.3.3
       terser-webpack-plugin: 5.6.1(webpack@5.106.1)
-      watchpack: 2.5.2
+      watchpack: 2.5.1
       webpack-sources: 3.5.0
     transitivePeerDependencies:
       - '@minify-html/node'
