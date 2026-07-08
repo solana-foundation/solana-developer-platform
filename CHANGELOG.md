@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.37.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.36.0...v0.37.0) (2026-07-08)
+
+### Features
+
+* **policy:** expose wallet evaluation audit visibility ([#604](https://github.com/solana-foundation/solana-developer-platform/pull/604)) ([5f4e854](https://github.com/solana-foundation/solana-developer-platform/commit/5f4e854df89aa1a61571bf2cc2e72a251b8e5751))
+* **api:** add credential redaction baseline ([#606](https://github.com/solana-foundation/solana-developer-platform/pull/606)) ([6ba59eb](https://github.com/solana-foundation/solana-developer-platform/commit/6ba59eb7a469f08e62bc1a3be7d3720798e93dbb))
+* **sdp-api:** HOO-661 Asset profiles API ([#465](https://github.com/solana-foundation/solana-developer-platform/pull/465)) ([cd88973](https://github.com/solana-foundation/solana-developer-platform/commit/cd88973a9913b4590b61dc4f634f6fc8d0e5c945))
+* **sdp-api:** HOO-777 Add IBM Haven as a new custody/signing provider ([#585](https://github.com/solana-foundation/solana-developer-platform/pull/585)) ([50e7463](https://github.com/solana-foundation/solana-developer-platform/commit/50e7463d13f9fa438719a8ee9de01c0288471880))
+* **api:** add credential secret store boundary (HOO-765) ([#580](https://github.com/solana-foundation/solana-developer-platform/pull/580)) ([2b2feb2](https://github.com/solana-foundation/solana-developer-platform/commit/2b2feb23362d73670a476a461221a2860dac16b7))
+
+### Bug Fixes
+
+* **sdp-api:** create the test database before running pnpm test ([#488](https://github.com/solana-foundation/solana-developer-platform/pull/488)) ([bcb43f1](https://github.com/solana-foundation/solana-developer-platform/commit/bcb43f1449bc4947a78a8279b7428e106c268572))
+
+### Refactors
+
+* move RPC internals into workspace package ([#608](https://github.com/solana-foundation/solana-developer-platform/pull/608)) ([c67284e](https://github.com/solana-foundation/solana-developer-platform/commit/c67284ea632357ad83c9a868e833dccc9cf50c4c))
+* **sdp-api:** standardize ramp providers into per-capability directories with webhook processors (PRO-1532) ([#618](https://github.com/solana-foundation/solana-developer-platform/pull/618)) ([f2740cc](https://github.com/solana-foundation/solana-developer-platform/commit/f2740ccf25caa2e1e9d096dc2ee932b418ea7d90))
+
 ## [0.36.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.35.1...v0.36.0) (2026-07-07)
 
 ### Features
