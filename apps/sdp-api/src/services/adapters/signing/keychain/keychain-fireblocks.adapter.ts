@@ -13,6 +13,7 @@
 import type { SolanaSigner } from "@solana/keychain-core";
 import { FireblocksSigner } from "@solana/keychain-fireblocks";
 import type { Address } from "@solana/kit";
+import { redactCredentialSecrets } from "@/lib/redaction";
 import type { SignRequest, SignResult } from "@/services/ports";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainFireblocksConfig } from "./types";
@@ -139,35 +140,32 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
 
     signer.request = (async <T>(method: string, uri: string, body?: unknown): Promise<T> => {
       try {
-        console.info("sdp_fireblocks_api_request", {
-          method,
-          uri,
-          body,
-        });
+        console.info("sdp_fireblocks_api_request", redactCredentialSecrets({ method, uri, body }));
 
         const response = await originalRequest<T>(method, uri, body);
 
-        console.info("sdp_fireblocks_api_response", {
-          method,
-          uri,
-          body,
-          response,
-        });
+        console.info(
+          "sdp_fireblocks_api_response",
+          redactCredentialSecrets({ method, uri, body, response })
+        );
 
         return response;
       } catch (error) {
-        console.error("sdp_fireblocks_api_error", {
-          method,
-          uri,
-          body,
-          error:
-            error instanceof Error
-              ? {
-                  message: error.message,
-                  stack: error.stack,
-                }
-              : String(error),
-        });
+        console.error(
+          "sdp_fireblocks_api_error",
+          redactCredentialSecrets({
+            method,
+            uri,
+            body,
+            error:
+              error instanceof Error
+                ? {
+                    message: error.message,
+                    stack: error.stack,
+                  }
+                : String(error),
+          })
+        );
         throw error;
       }
     }) as typeof signer.request;

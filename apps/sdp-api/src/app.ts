@@ -15,6 +15,7 @@ import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 
 import { AppError } from "@/lib/errors";
+import { redactCredentialSecrets, redactCredentialString } from "@/lib/redaction";
 import { corsMiddleware } from "@/middleware/cors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
@@ -79,21 +80,34 @@ function mapSigningError(err: SigningError): {
   code: string;
   message: string;
 } {
+  const message = getSafeSigningErrorMessage(err);
   switch (err.code) {
     case "WALLET_NOT_FOUND":
     case "NOT_FOUND":
-      return { status: 404, code: err.code, message: err.message };
+      return { status: 404, code: err.code, message };
     case "ALREADY_INITIALIZED":
-      return { status: 409, code: err.code, message: err.message };
+      return { status: 409, code: err.code, message };
     case "APPROVAL_TIMEOUT":
-      return { status: 504, code: err.code, message: err.message };
+      return { status: 504, code: err.code, message };
     case "APPROVAL_REJECTED":
-      return { status: 409, code: err.code, message: err.message };
+      return { status: 409, code: err.code, message };
     case "NETWORK_ERROR":
     case "SIGNING_FAILED":
-      return { status: 502, code: err.code, message: err.message };
+      return { status: 502, code: err.code, message };
     default:
-      return { status: 400, code: err.code, message: err.message };
+      return { status: 400, code: err.code, message };
+  }
+}
+
+function getSafeSigningErrorMessage(err: SigningError): string {
+  switch (err.code) {
+    case "NETWORK_ERROR":
+    case "SIGNING_FAILED":
+      return "The signing provider could not complete the request. Check provider status and try again.";
+    case "PROVIDER_NOT_CONFIGURED":
+      return "The signing provider is not configured. Check provider configuration and try again.";
+    default:
+      return redactCredentialString(err.message);
   }
 }
 
@@ -203,8 +217,31 @@ function captureUnexpectedError(
       scope.setUser({ id: clerk.userId });
     }
 
-    observability.captureException(err);
+    observability.captureException(redactErrorForCapture(err));
   });
+}
+
+function redactErrorForCapture(err: Error): Error {
+  const sanitized = new Error(redactCredentialString(err.message));
+  sanitized.name = err.name;
+  sanitized.stack = err.stack ? redactCredentialString(err.stack) : undefined;
+
+  const source = err as Error & {
+    context?: unknown;
+    cause?: unknown;
+  };
+  const target = sanitized as Error & {
+    context?: unknown;
+    cause?: unknown;
+  };
+  if (source.context !== undefined) {
+    target.context = redactCredentialSecrets(source.context);
+  }
+  if (source.cause !== undefined) {
+    target.cause = redactCredentialSecrets(source.cause);
+  }
+
+  return sanitized;
 }
 
 export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
@@ -315,11 +352,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
         {
-          error: {
-            code: err.code,
-            message: err.message,
-            ...(err.details && { details: err.details }),
-          },
+          error: err.toResponse().error,
           meta: { requestId },
         },
         err.statusCode as 400
@@ -378,15 +411,18 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       context?: Record<string, unknown>;
       cause?: unknown;
     };
-    console.error("Unexpected error:", {
-      requestId,
-      traceId,
-      source: requestSource,
-      error: err.message,
-      stack: err.stack,
-      context: solanaErr.context,
-      cause: solanaErr.cause,
-    });
+    console.error(
+      "Unexpected error:",
+      redactCredentialSecrets({
+        requestId,
+        traceId,
+        source: requestSource,
+        error: err.message,
+        stack: err.stack,
+        context: solanaErr.context,
+        cause: solanaErr.cause,
+      })
+    );
     // SENTRY_DSN gate is the runtime-wiring decision: app-level error handling
     // shouldn't pay the cost of building a scope when no observability backend
     // is wired up. Kept at this seam (rather than inside captureUnexpectedError)

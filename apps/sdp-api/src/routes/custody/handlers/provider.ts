@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest } from "@/lib/errors";
+import { redactCredentialString } from "@/lib/redaction";
 import { created, success } from "@/lib/response";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { AuditService } from "@/services/audit.service";
@@ -498,9 +499,12 @@ function toInitializeSigningResponse(
 function handleSigningInitializationError(error: unknown): never {
   if (error instanceof SigningError) {
     if (error.code === "ALREADY_INITIALIZED") {
-      throw new AppError("CONFLICT", error.message);
+      throw new AppError("CONFLICT", redactCredentialString(error.message));
     }
-    throw badRequest(error.message);
+    if (error.code === "NETWORK_ERROR" || error.code === "PROVIDER_NOT_CONFIGURED") {
+      throw badRequest("Provider setup failed. Check provider configuration and try again.");
+    }
+    throw badRequest(redactCredentialString(error.message));
   }
 
   throw error;

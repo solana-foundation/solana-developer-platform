@@ -41,6 +41,19 @@ describe("AppError", () => {
 
     expect(response.error.details).toEqual({ errors: ["a", "b"] });
   });
+
+  it("redacts credential-shaped response details", () => {
+    const error = new AppError("BAD_REQUEST", "Invalid", {
+      appSecret: "privy-secret",
+      tokenId: "tok_public",
+    });
+    const response = error.toResponse();
+
+    expect(response.error.details).toEqual({
+      appSecret: "[REDACTED]",
+      tokenId: "tok_public",
+    });
+  });
 });
 
 describe("error helper functions", () => {
