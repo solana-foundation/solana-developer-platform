@@ -4,7 +4,7 @@ import type {
   CounterpartyProviderData,
   CounterpartyStatus,
 } from "@sdp/types";
-import type { BvnkCustomerResolution } from "@/lib/ramps/providers/bvnk";
+import type { BvnkCustomerResolution } from "@/lib/ramps/providers/bvnk/provider-data";
 import type { RepositoryDbClient } from "./base";
 
 export function generateCounterpartyId(): string {

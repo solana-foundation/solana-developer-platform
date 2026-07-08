@@ -2,7 +2,7 @@ import type { Counterparty } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { AppError } from "@/lib/errors";
-import { buildLightsparkAccountInfo, lightsparkCounterpartyRequirements } from "./lightspark";
+import { buildLightsparkAccountInfo, lightsparkCounterpartyRequirements } from "./counterparty";
 
 function counterparty(overrides?: Partial<Counterparty>): Counterparty {
   return {
@@ -13,7 +13,13 @@ function counterparty(overrides?: Partial<Counterparty>): Counterparty {
     entityType: "individual",
     displayName: "Ada Lovelace",
     email: "ada@example.com",
-    identity: {},
+    identity: {
+      firstName: "Ada",
+      lastName: "Lovelace",
+      dateOfBirth: "1990-01-15",
+      phone: "+14155551234",
+      address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
+    },
     status: "active",
     createdBy: null,
     createdAt: "2026-06-11T00:00:00.000Z",
@@ -31,7 +37,13 @@ function counterpartyRow(overrides?: Partial<CounterpartyRow>): CounterpartyRow 
     entity_type: "individual",
     display_name: "Ada Lovelace",
     email: "ada@example.com",
-    identity: {},
+    identity: {
+      firstName: "Ada",
+      lastName: "Lovelace",
+      dateOfBirth: "1990-01-15",
+      phone: "+14155551234",
+      address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
+    },
     provider_data: {},
     status: "active",
     created_by: null,
@@ -136,7 +148,15 @@ describe("lightsparkCounterpartyRequirements", () => {
 describe("buildLightsparkAccountInfo", () => {
   it("builds USD accountInfo with the selected rail and beneficiary", () => {
     const accountInfo = buildLightsparkAccountInfo(
-      counterpartyRow({ identity: { dateOfBirth: "1990-01-15" } }),
+      counterpartyRow({
+        identity: {
+          firstName: "Ada",
+          lastName: "Lovelace",
+          dateOfBirth: "1990-01-15",
+          phone: "+14155551234",
+          address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
+        },
+      }),
       "USD",
       {
         paymentRails: "ACH",

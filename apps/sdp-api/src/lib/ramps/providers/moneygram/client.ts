@@ -5,22 +5,13 @@ import type {
   SdpEnvironment,
 } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
-import {
-  type FiatCurrencyCode,
-  getCryptoRailAssetLabel,
-  parseFiatCurrency,
-} from "@sdp/types/payment-rails";
+import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import {
-  badRequest,
-  estimateNotAvailable,
-  providerNotConfigured,
-  providerUnavailable,
-} from "@/lib/errors";
-import { providerFetchJson } from "../fetch";
-import { readyCounterparty } from "../requirements";
-import { createProviderRampSupport, RAMP_RAIL_DUMPS, requireEnv } from "../shared";
+import { estimateNotAvailable, providerNotConfigured, providerUnavailable } from "@/lib/errors";
+import { providerFetchJson } from "../../fetch";
+import { readyCounterparty } from "../../requirements";
+import { createProviderRampSupport, RAMP_RAIL_DUMPS, requireEnv } from "../../shared";
 import type {
   ProviderRampSupport,
   RampDumpReader,
@@ -29,10 +20,8 @@ import type {
   RampOfframpQuoteInput,
   RampProvider,
   RampRuntimeContext,
-  RampWebhookValidationContext,
-  RampWebhookValidationResult,
   ValidateCounterpartyOptions,
-} from "../types";
+} from "../../types";
 
 const MONEYGRAM_SANDBOX_BASE_URL = "https://playground.xramps.moneygram.com";
 
@@ -44,7 +33,7 @@ const MONEYGRAM_OFFRAMP_DESTINATION: Partial<Record<RampFiatCurrency, string>> =
 const MONEYGRAM_ORIGINATING_COUNTRY = "USA";
 
 interface MoneygramCurrencyEntry {
-  code?: FiatCurrencyCode;
+  code?: RampFiatCurrency;
   type?: string;
 }
 
@@ -130,15 +119,6 @@ export class MoneygramRampClient implements RampProvider {
       throw new Error("MoneyGram currencies dump contained no fiat currencies.");
     }
     return support;
-  }
-
-  async validateWebhook(
-    _context: RampWebhookValidationContext
-  ): Promise<RampWebhookValidationResult> {
-    throw badRequest(
-      "MoneyGram does not deliver webhooks; transfer state is reconciled from widget events and on-chain verification.",
-      { provider: this.id }
-    );
   }
 
   async estimateOnramp(

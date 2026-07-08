@@ -7,30 +7,30 @@ import type {
   SdpEnvironment,
 } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
-import type { CryptoRailId, FiatCurrencyCode } from "@sdp/types/payment-rails";
+import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
-import type { BvnkComplianceInput } from "./providers/bvnk";
+import type { BvnkComplianceInput } from "./providers/bvnk/provider-data";
 
 export type {
   BvnkComplianceInput,
   BvnkCustomerResolution,
   BvnkPaymentRuleResolution,
   BvnkRuleEntity,
-} from "./providers/bvnk";
-export type { LightsparkCustomerResolution } from "./providers/lightspark";
+} from "./providers/bvnk/provider-data";
+export type { LightsparkCustomerResolution } from "./providers/lightspark/client";
 
 export interface ProviderRampSupport {
-  onrampFiats: ReadonlySet<FiatCurrencyCode>;
+  onrampFiats: ReadonlySet<RampFiatCurrency>;
   onrampCryptos: ReadonlySet<CryptoRailId>;
-  offrampFiats: ReadonlySet<FiatCurrencyCode>;
+  offrampFiats: ReadonlySet<RampFiatCurrency>;
   offrampCryptos: ReadonlySet<CryptoRailId>;
 }
 
 export interface MutableProviderRampSupport {
-  onrampFiats: Set<FiatCurrencyCode>;
+  onrampFiats: Set<RampFiatCurrency>;
   onrampCryptos: Set<CryptoRailId>;
-  offrampFiats: Set<FiatCurrencyCode>;
+  offrampFiats: Set<RampFiatCurrency>;
   offrampCryptos: Set<CryptoRailId>;
 }
 
@@ -61,11 +61,6 @@ export interface RampWebhookValidationContext {
   headers: Headers;
   rawBody: string;
   requestUrl?: string;
-}
-
-export interface RampWebhookValidationResult {
-  provider: RampProviderId;
-  payload: unknown;
 }
 
 interface BaseRampSettlementEvent {
@@ -149,22 +144,20 @@ export interface RampOfframpQuoteInput {
 export interface ValidateCounterpartyOptions {
   direction: RampDirection;
   providerData: CounterpartyProviderData;
+  cryptoToken?: string;
   fiatCurrency?: RampFiatCurrency;
-}
-
-export interface RampProviderClient {
-  id: RampProviderId;
-  _discoverRails(context: RampDiscoveryContext): Promise<void>;
-  readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport>;
-  validateWebhook(context: RampWebhookValidationContext): Promise<RampWebhookValidationResult>;
+  destinationWalletAddress?: string;
 }
 
 /**
- * Full provider contract: rail discovery + webhook validation (codegen/webhooks)
- * plus the runtime quote/execute flow. All HTTP lives behind this; the route
- * handler owns DB interaction and passes pre-resolved inputs.
+ * Full provider contract: rail discovery plus the runtime quote/execute flow.
+ * All HTTP lives behind this; the route handler owns DB interaction and passes
+ * pre-resolved inputs.
  */
-export interface RampProvider extends RampProviderClient {
+export interface RampProvider {
+  id: RampProviderId;
+  _discoverRails(context: RampDiscoveryContext): Promise<void>;
+  readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport>;
   estimateOnramp(
     ctx: RampRuntimeContext,
     input: RampEstimateOnrampInput

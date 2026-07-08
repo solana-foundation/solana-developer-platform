@@ -117,7 +117,7 @@ describe("verifyWebhookSignature", () => {
           provider: "lightspark",
           signature: sign(BODY),
           signedPayload: BODY,
-          algorithm: { type: "ecdsa-sha256", publicKeyPem },
+          algorithm: { type: "ecdsa-sha256", publicKeyPem, encoding: "base64" },
           timestampSeconds: nowSeconds(),
         })
       ).resolves.toBeUndefined();
@@ -129,7 +129,7 @@ describe("verifyWebhookSignature", () => {
           provider: "lightspark",
           signature: sign(BODY),
           signedPayload: `${BODY} tampered`,
-          algorithm: { type: "ecdsa-sha256", publicKeyPem },
+          algorithm: { type: "ecdsa-sha256", publicKeyPem, encoding: "base64" },
           timestampSeconds: nowSeconds(),
         })
       ).rejects.toThrow(/Invalid lightspark webhook signature/);
@@ -141,7 +141,11 @@ describe("verifyWebhookSignature", () => {
           provider: "lightspark",
           signature: sign(BODY),
           signedPayload: BODY,
-          algorithm: { type: "ecdsa-sha256", publicKeyPem: publicKeyPem.replace(/\n/g, "\\n") },
+          algorithm: {
+            type: "ecdsa-sha256",
+            publicKeyPem: publicKeyPem.replace(/\n/g, "\\n"),
+            encoding: "base64",
+          },
           timestampSeconds: nowSeconds(),
         })
       ).resolves.toBeUndefined();

@@ -2,17 +2,16 @@ import { generateJwt } from "@coinbase/cdp-sdk/auth";
 import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/types";
 import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
-import { AppError, badRequest, providerNotConfigured, providerUnavailable } from "@/lib/errors";
-import { verifyWebhookSignature } from "@/lib/webhook-signature";
-import { providerFetchJson } from "../fetch";
-import { readyCounterparty } from "../requirements";
+import { badRequest, providerNotConfigured, providerUnavailable } from "@/lib/errors";
+import { providerFetchJson } from "../../fetch";
+import { readyCounterparty } from "../../requirements";
 import {
   createProviderRampSupport,
   isSolanaCryptoAsset,
   RAMP_RAIL_DUMPS,
   requireEnv,
   SOLANA_ASSET_TO_RAIL,
-} from "../shared";
+} from "../../shared";
 import type {
   ProviderRampSupport,
   RampDumpReader,
@@ -22,11 +21,8 @@ import type {
   RampOnrampQuoteInput,
   RampProvider,
   RampRuntimeContext,
-  RampSettlementEvent,
-  RampWebhookValidationContext,
-  RampWebhookValidationResult,
   ValidateCounterpartyOptions,
-} from "../types";
+} from "../../types";
 
 // v1 API (Bearer JWT): buy options, buy quote — used for rail discovery + estimates.
 const CDP_V1_API_BASE_URL = "https://api.developer.coinbase.com";
@@ -104,43 +100,6 @@ interface CoinbaseCreateOrderResponse {
   paymentLink: { url: string; paymentLinkType: string };
 }
 
-// `onramp.transaction.updated` carries a lifecycle status; terminal state may instead arrive as a
-// discrete `onramp.transaction.success` / `.failed` event. Unmapped statuses/events are ignored.
-const COINBASE_ORDER_STATUS = {
-  ONRAMP_ORDER_STATUS_PENDING_AUTH: "settling",
-  ONRAMP_ORDER_STATUS_PENDING_PAYMENT: "settling",
-  ONRAMP_ORDER_STATUS_PROCESSING: "settling",
-  ONRAMP_ORDER_STATUS_COMPLETED: "settled",
-  ONRAMP_ORDER_STATUS_FAILED: "failed",
-} as const satisfies Record<string, RampSettlementEvent["kind"]>;
-
-function coinbaseSettlementKind(
-  eventType: string,
-  status: string | undefined
-): "settling" | "settled" | "failed" | undefined {
-  switch (eventType) {
-    case "onramp.transaction.success":
-      return "settled";
-    case "onramp.transaction.failed":
-      return "failed";
-    default:
-      return status
-        ? COINBASE_ORDER_STATUS[status as keyof typeof COINBASE_ORDER_STATUS]
-        : undefined;
-  }
-}
-
-// TODO(coinbase): type against real onramp.transaction.* samples before production.
-interface CoinbaseOnrampWebhookEvent {
-  eventType: string;
-  data: {
-    orderId: string;
-    status?: string;
-    purchaseAmount?: CoinbaseAmount;
-    failureReason?: string;
-  };
-}
-
 export class CoinbaseRampClient implements RampProvider {
   readonly id = "coinbase";
 
@@ -188,94 +147,6 @@ export class CoinbaseRampClient implements RampProvider {
 
   async readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport> {
     return extractSupport(await readDump<BuyOptionsDump>(RAMP_RAIL_DUMPS.coinbase.buyOptions.file));
-  }
-
-  async validateWebhook({
-    env,
-    headers,
-    rawBody,
-  }: RampWebhookValidationContext): Promise<RampWebhookValidationResult> {
-    // Coinbase uses one webhook signing secret across environments (not mode-keyed).
-    const webhookSecret = env.COINBASE_CDP_RAMPS_WEBHOOK_SECRET?.trim();
-    if (!webhookSecret) {
-      throw providerNotConfigured(
-        "Coinbase webhook secret is not configured (COINBASE_CDP_RAMPS_WEBHOOK_SECRET)."
-      );
-    }
-
-    const signatureHeader = headers.get("x-hook0-signature")?.trim();
-    if (!signatureHeader) {
-      throw new AppError("UNAUTHORIZED", "Coinbase webhook is missing X-Hook0-Signature header", {
-        provider: this.id,
-      });
-    }
-
-    const fields = new Map(
-      signatureHeader.split(",").map((part) => {
-        const index = part.indexOf("=");
-        return [part.slice(0, index).trim(), part.slice(index + 1).trim()] as const;
-      })
-    );
-    const timestamp = fields.get("t");
-    const signature = fields.get("v0");
-    if (!timestamp || !signature) {
-      throw new AppError("UNAUTHORIZED", "Coinbase webhook signature header is malformed", {
-        provider: this.id,
-      });
-    }
-
-    await verifyWebhookSignature({
-      provider: this.id,
-      signedPayload: `${timestamp}.${rawBody}`,
-      signature,
-      algorithm: {
-        type: "hmac-sha256",
-        secret: webhookSecret,
-        encoding: "hex",
-      },
-      timestampSeconds: Number(timestamp),
-    });
-
-    let payload: unknown;
-    try {
-      payload = JSON.parse(rawBody);
-    } catch {
-      throw badRequest("Coinbase webhook body must be valid JSON", { provider: this.id });
-    }
-    return { provider: this.id, payload };
-  }
-
-  parseSettlementEvent(payload: unknown): RampSettlementEvent {
-    const { eventType, data } = payload as CoinbaseOnrampWebhookEvent;
-    if (!eventType?.startsWith("onramp.transaction.")) {
-      return { provider: this.id, kind: "ignore", reason: `unsupported_event:${eventType}` };
-    }
-    if (!data?.orderId) {
-      return { provider: this.id, kind: "ignore", reason: "missing_order_id" };
-    }
-
-    const kind = coinbaseSettlementKind(eventType, data.status);
-    if (!kind) {
-      return { provider: this.id, kind: "ignore", reason: `unhandled:${eventType}:${data.status}` };
-    }
-    const reference = data.orderId;
-    if (kind === "failed") {
-      return {
-        provider: this.id,
-        kind,
-        reference,
-        ...(data.failureReason ? { error: data.failureReason } : {}),
-      };
-    }
-    if (kind === "settled") {
-      return {
-        provider: this.id,
-        kind,
-        reference,
-        ...(data.purchaseAmount ? { receivedAmount: data.purchaseAmount.value } : {}),
-      };
-    }
-    return { provider: this.id, kind, reference };
   }
 
   async estimateOnramp(

@@ -9,7 +9,7 @@ import {
   buildBvnkOfframpReference,
   buildBvnkOnrampPaymentRuleKey,
   buildBvnkOnrampWalletName,
-} from "@/lib/ramps/providers/bvnk";
+} from "@/lib/ramps/providers/bvnk/provider-data";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 

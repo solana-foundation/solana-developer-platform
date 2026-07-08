@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { buildBvnkOnrampPaymentRuleKey } from "@/lib/ramps/providers/bvnk";
+import {
+  type BvnkOnrampRequestSpec,
+  buildBvnkOnrampPaymentRuleKey,
+} from "@/lib/ramps/providers/bvnk/provider-data";
 import type { AppContext } from "../../context";
 import { bvnkOnrampQuote } from "./bvnk";
 
@@ -27,7 +30,13 @@ function counterpartyWithBvnkRule(ruleId: string): CounterpartyRow {
     entity_type: "individual",
     display_name: "BVNK Test Counterparty",
     email: "bvnk@example.com",
-    identity: {},
+    identity: {
+      firstName: "Ada",
+      lastName: "Lovelace",
+      dateOfBirth: "1990-01-15",
+      phone: "+14155551234",
+      address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
+    },
     provider_data: {
       bvnk: {
         customer: { customerReference: "cust_bvnk_123", status: "VERIFIED" },
@@ -55,9 +64,12 @@ describe("bvnkOnrampQuote", () => {
     const counterparty = counterpartyWithBvnkRule(ruleId);
     const input = {
       counterparty,
-      cryptoToken: "USDC",
-      fiatCurrency: "USD",
-      destinationWalletAddress: "J4t4M6zJH3M6ewN9pmRUpMt2EMWXXCFPYvnrD9ck9EEi",
+      paymentRule: {
+        currency: "USDC",
+        network: "SOLANA",
+        fiatCurrency: "USD",
+        destinationWalletAddress: "J4t4M6zJH3M6ewN9pmRUpMt2EMWXXCFPYvnrD9ck9EEi",
+      } satisfies BvnkOnrampRequestSpec,
     };
 
     const first = await bvnkOnrampQuote(fakeContext(), input);

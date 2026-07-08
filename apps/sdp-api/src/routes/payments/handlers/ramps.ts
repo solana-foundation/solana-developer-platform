@@ -40,12 +40,12 @@ import {
   normalizeBvnkCurrencyAndNetwork,
   readBvnkOfframpWallet,
   readBvnkOnrampPaymentRuleState,
-} from "@/lib/ramps/providers/bvnk";
+} from "@/lib/ramps/providers/bvnk/provider-data";
 import {
   isLightsparkExternalAccountActive,
   latestLightsparkPayoutAccount,
   readLightsparkCustomerId,
-} from "@/lib/ramps/providers/lightspark";
+} from "@/lib/ramps/providers/lightspark/provider-data";
 import { readyCounterparty } from "@/lib/ramps/requirements";
 import type { RampRuntimeContext } from "@/lib/ramps/types";
 import { success } from "@/lib/response";
@@ -76,6 +76,8 @@ import {
 import { type ResolvedScope, resolveScope, resolveWalletAddress } from "../wallets";
 import {
   bvnkOnrampQuote,
+  completePendingBvnkOfframpTransfer,
+  createPendingBvnkOfframpTransfer,
   ensureBvnkCustomer,
   ensureBvnkOfframpBeneficiary,
   ensureBvnkOfframpWallet,
@@ -271,75 +273,6 @@ async function persistRampQuoteTransfer(
 
   if (!created) {
     throw new AppError("INTERNAL_ERROR", "Failed to create ramp transfer record");
-  }
-}
-
-async function createPendingBvnkOfframpTransfer(
-  c: AppContext,
-  input: {
-    scope: ResolvedScope;
-    projectId: string;
-    counterparty: CounterpartyRow;
-    wallet: ScopedRampWallet;
-    walletAddress: string;
-    cryptoToken: string;
-    cryptoAmount: string;
-    fiatCurrency: RampFiatCurrency;
-  }
-): Promise<PaymentTransferRow> {
-  const apiKey = c.get("apiKey");
-  const repository = getPaymentsRepository(c);
-  const created = await repository.createTransfer({
-    organizationId: input.scope.auth.organizationId,
-    projectId: input.projectId,
-    walletId: input.wallet.walletId,
-    counterpartyId: input.counterparty.id,
-    sourceAddress: input.walletAddress,
-    destinationAddress: null,
-    token: input.cryptoToken,
-    amount: input.cryptoAmount,
-    memo: null,
-    type: "offramp",
-    direction: "outbound",
-    status: "pending",
-    provider: "bvnk",
-    providerReference: null,
-    deliveryMode: null,
-    fiatCurrency: input.fiatCurrency,
-    fiatAmount: null,
-    providerData: {},
-    serializedTx: null,
-    signature: null,
-    slot: null,
-    initiatedByKeyId: apiKey ? apiKey.id : null,
-  });
-
-  if (!created) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create ramp transfer record");
-  }
-  return created;
-}
-
-async function completePendingBvnkOfframpTransfer(
-  c: AppContext,
-  input: {
-    scope: ResolvedScope;
-    projectId: string;
-    transferId: string;
-    quote: PaymentRampQuote;
-  }
-): Promise<void> {
-  const updated = await getPaymentsRepository(c).updateTransfer({
-    transferId: input.transferId,
-    organizationId: input.scope.auth.organizationId,
-    projectId: input.projectId,
-    status: rampQuoteTransferStatus(input.quote),
-    providerReference: input.quote.id,
-    deliveryMode: input.quote.deliveryMode,
-    updatedAt: new Date().toISOString(),
-  });
-  if (!updated) {
-    throw new AppError("INTERNAL_ERROR", "Failed to complete BVNK off-ramp transfer record");
   }
 }
 
@@ -596,11 +529,15 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       break;
     }
     case "bvnk": {
+      const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
       quote = await bvnkOnrampQuote(c, {
         counterparty,
-        cryptoToken: input.cryptoToken,
-        fiatCurrency: input.fiatCurrency,
-        destinationWalletAddress,
+        paymentRule: {
+          currency,
+          network,
+          fiatCurrency: input.fiatCurrency,
+          destinationWalletAddress,
+        },
       });
       transferProviderData = bvnkOnrampTransferProviderData(quote);
       break;
@@ -754,10 +691,10 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         throw counterpartyNotProvisioned("bvnk", "offramp");
       }
       pendingTransfer = await createPendingBvnkOfframpTransfer(c, {
-        scope,
+        organizationId: scope.auth.organizationId,
         projectId,
-        counterparty,
-        wallet: sourceWallet,
+        counterpartyId: counterparty.id,
+        walletId: sourceWallet.walletId,
         walletAddress: sourceWalletAddress,
         cryptoToken: input.cryptoToken,
         cryptoAmount: input.cryptoAmount,
@@ -810,10 +747,11 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
 
   if (pendingTransfer) {
     await completePendingBvnkOfframpTransfer(c, {
-      scope,
+      organizationId: scope.auth.organizationId,
       projectId,
       transferId: pendingTransfer.id,
       quote,
+      status: rampQuoteTransferStatus(quote),
     });
   } else {
     await persistRampQuoteTransfer(c, {
