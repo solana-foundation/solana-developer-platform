@@ -7,7 +7,7 @@ description: Implement a ramp provider's validateCounterparty → CounterpartyRe
 
 Before a quote, the platform asks your provider what a counterparty still needs — KYC, a payout account, or nothing at all. `validateCounterparty` answers that. It is **pure and synchronous**: it reads the counterparty + its `provider_data` and returns a `CounterpartyRequirements`. No HTTP, no DB — the actual provisioning happens later, in the advance flow.
 
-Canonical examples: `lib/ramps/validation/lightspark.ts` and `validation/bvnk.ts` (MoonPay just returns ready).
+Canonical examples: `lib/ramps/providers/lightspark/counterparty.ts` and `providers/bvnk/counterparty.ts` (MoonPay just returns ready, inline in `providers/moonpay/client.ts`).
 
 ## Contract
 
@@ -15,7 +15,7 @@ Canonical examples: `lib/ramps/validation/lightspark.ts` and `validation/bvnk.ts
 validateCounterparty(counterparty: Counterparty, options: ValidateCounterpartyOptions): CounterpartyRequirements
 ```
 
-`options` = `{ direction: RampDirection, providerData: CounterpartyProviderData, fiatCurrency? }`. Delegate the body to `lib/ramps/validation/<id>.ts`.
+`options` = `{ direction: RampDirection, providerData: CounterpartyProviderData, fiatCurrency? }`. Trivial bodies (`readyCounterparty(...)`, or an `unsupported` guard) stay inline in `providers/<id>/client.ts`; non-trivial decisions delegate to `providers/<id>/counterparty.ts`.
 
 `CounterpartyRequirements` is discriminated by `provider`; the `status` union (`packages/sdp-types/src/ramp-requirements.ts`):
 
@@ -29,7 +29,7 @@ validateCounterparty(counterparty: Counterparty, options: ValidateCounterpartyOp
 - `{ kind: "text"; key; label; required; pattern?; minLength?; maxLength?; placeholder?; mask? }`
 - `{ kind: "select"; key; label; required; options: { value; label }[] }`
 
-Build fields with the existing helpers in `validation/`; don't hand-roll the shape.
+Build fields with the existing helpers in `lib/ramps/requirements.ts` (`textField`, `selectField`, `readyCounterparty`); don't hand-roll the shape.
 
 ## The decision (variety)
 
@@ -56,4 +56,4 @@ Shared rules live in `integrate-ramp-provider`. Hot here:
 - `validateCounterparty` is pure — no HTTP, no DB; read only `counterparty` + `providerData`.
 - No fallbacks — `unsupported` with a reason beats a silent empty requirement; never persist collected KYC.
 - Status + field types are discriminated unions — return exactly one arm; no `any`.
-- Verify with `tsc --noEmit` + `biome check`; test the decision table like `validation/lightspark.test.ts`.
+- Verify with `tsc --noEmit` + `biome check`; test the decision table like `providers/lightspark/counterparty.test.ts`.
