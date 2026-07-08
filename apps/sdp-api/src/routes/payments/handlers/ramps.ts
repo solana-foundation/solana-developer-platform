@@ -744,11 +744,6 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
   return success(c, { quote });
 }
 
-const CANCELABLE_RAMP_TRANSFER_STATUSES: readonly PaymentTransferStatus[] = [
-  "pending",
-  "awaiting_payment",
-];
-
 export async function cancelRampTransfer(c: AppContext) {
   const body = await c.req.json();
   const parsed = cancelRampTransferSchema.safeParse(body);
@@ -773,7 +768,8 @@ export async function cancelRampTransfer(c: AppContext) {
   if (!transfer) {
     throw notFound("Transfer");
   }
-  if (!CANCELABLE_RAMP_TRANSFER_STATUSES.includes(transfer.status)) {
+  const cancelableStatuses: readonly PaymentTransferStatus[] = ["pending", "awaiting_payment"];
+  if (!cancelableStatuses.includes(transfer.status)) {
     throw badRequest(`Transfer can no longer be canceled (status: ${transfer.status}).`);
   }
 
@@ -781,7 +777,7 @@ export async function cancelRampTransfer(c: AppContext) {
     transferId: transfer.id,
     organizationId: scope.auth.organizationId,
     projectId,
-    fromStatuses: CANCELABLE_RAMP_TRANSFER_STATUSES,
+    fromStatuses: cancelableStatuses,
     toStatus: "canceled",
     updatedAt: new Date().toISOString(),
   });
