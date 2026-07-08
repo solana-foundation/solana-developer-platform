@@ -211,10 +211,6 @@ export class LightsparkWebhookProcessor implements WebhookProcessor<unknown, Ram
     }
 
     const reference = webhook.data.quoteId;
-    if (!reference) {
-      return { provider: this.provider, kind: "ignore", reason: "missing_quote_id" };
-    }
-
     const kind = LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES[webhook.type];
     const settlement = buildLightsparkSettlement(webhook.data);
     if (kind === "failed" || kind === "expired") {
