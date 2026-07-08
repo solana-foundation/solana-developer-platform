@@ -1,3 +1,4 @@
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, type SdpPlugin } from "@/app";
 import { AppError } from "@/lib/errors";
@@ -8,6 +9,7 @@ import type { Env } from "@/types/env";
 
 const THROW_PATH = "/__internal_error_test_throw";
 const SECRET_APP_ERROR_PATH = "/__secret_app_error_test_throw";
+const SECRET_RPC_ERROR_PATH = "/__secret_rpc_error_test_throw";
 const SECRET_SIGNING_ERROR_PATH = "/__secret_signing_error_test_throw";
 const SECRET_UNEXPECTED_ERROR_PATH = "/__secret_unexpected_error_test_throw";
 const FEE_ERROR_PATH = "/__fee_error_test_throw";
@@ -47,6 +49,12 @@ function buildApp(observability: Observability) {
     throw new AppError("BAD_REQUEST", "Invalid appSecret=privy-secret", {
       appSecret: "privy-secret",
       tokenId: "tok_public",
+    });
+  });
+  app.all(SECRET_RPC_ERROR_PATH, () => {
+    throw new SdpRpcError("SOLANA_RPC_ERROR", "Invalid apiKey=rpc-secret", {
+      apiKey: "rpc-secret",
+      endpoint: "https://rpc.example",
     });
   });
   app.all(SECRET_SIGNING_ERROR_PATH, () => {
@@ -172,6 +180,24 @@ describe("createApp onError SENTRY_DSN guard", () => {
     expect(body.error.details).toEqual({
       appSecret: "[REDACTED]",
       tokenId: "tok_public",
+    });
+  });
+
+  it("redacts RPC error messages and details", async () => {
+    const { obs } = makeObservability();
+    const app = buildApp(obs);
+
+    const res = await app.request(SECRET_RPC_ERROR_PATH, {}, baseEnv);
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as {
+      error: { message: string; details: Record<string, unknown> };
+    };
+    expect(JSON.stringify(body)).not.toContain("rpc-secret");
+    expect(body.error.message).toBe("Invalid apiKey=[REDACTED]");
+    expect(body.error.details).toEqual({
+      apiKey: "[REDACTED]",
+      endpoint: "https://rpc.example",
     });
   });
 

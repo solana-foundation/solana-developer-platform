@@ -379,13 +379,14 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     }
 
     if (err instanceof SdpRpcError) {
+      const details = err.details ? redactCredentialSecrets(err.details) : undefined;
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
         {
           error: {
             code: err.code,
-            message: err.message,
-            ...(err.details && { details: err.details }),
+            message: redactCredentialString(err.message),
+            ...(details && { details }),
           },
           meta: { requestId },
         },
