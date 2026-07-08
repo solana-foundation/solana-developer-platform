@@ -694,8 +694,8 @@ function FieldRow({
       </div>
       {locked ? (
         <span
-          title="Always public"
-          className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center text-[rgba(28,28,29,0.3)]"
+          title="Always public — can't be hidden"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.55)]"
         >
           <Lock className="h-3.5 w-3.5" />
         </span>
@@ -704,7 +704,13 @@ function FieldRow({
   );
 
   if (!hasToggle) {
-    return <div className="flex items-start gap-3 px-4 py-3">{body}</div>;
+    return (
+      <div
+        className={cn("flex items-start gap-3 px-4 py-3", locked && "bg-[rgba(28,28,29,0.025)]")}
+      >
+        {body}
+      </div>
+    );
   }
 
   return (
