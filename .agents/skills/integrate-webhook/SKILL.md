@@ -36,6 +36,8 @@ Signature variety across the four providers with webhooks:
 
 `(payload: Payload) → Event`, typically a `RampSettlementEvent`. Narrow the payload with `readString` / `readRecord` / `readNumber` from `@/lib/json` — never hand-rolled readers or a cast. Map the upstream event type to a `kind` via an `as const satisfies Record<string, RampSettlementEvent["kind"]>` table, and set `reference` to the id you returned from the quote — that's how `applyRampSettlementEvent` finds the transfer. Anything you don't handle → `{ provider, kind: "ignore", reason }`.
 
+`parse` runs synchronously **before** the 2xx ack, so it must be total over every payload the provider can legitimately sign: unknown event types and transactions the platform didn't create (sandbox tests, manual payments on the same account) must map to an `ignore` event or an absent reference — never a throw, which turns into a non-2xx and a provider retry loop. Reserve throws for payloads that violate the provider's own guaranteed envelope (e.g. a missing event type), where a loud deterministic failure is the point. Example: BVNK channel references not minted by SDP return `undefined` from `readBvnkOfframpReference` and get logged-and-skipped in `process`.
+
 `RampSettlementEvent` (`lib/ramps/types.ts`):
 
 ```
