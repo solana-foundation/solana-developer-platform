@@ -29,8 +29,13 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /",
       "GET /:walletId",
       "GET /aggregate",
+      "GET /approval-requests",
+      "GET /approval-requests/:approvalRequestId",
       "GET /public-key",
       "PATCH /:walletId",
+      "POST /approval-requests/:approvalRequestId/approve",
+      "POST /approval-requests/:approvalRequestId/cancel",
+      "POST /approval-requests/:approvalRequestId/reject",
       "POST /signer-check",
     ]);
   });
