@@ -1,5 +1,6 @@
 import type { MoonpayRampSettlement, SdpEnvironment } from "@sdp/types";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
+import { readRecord, readString } from "@/lib/json";
 import type { RampSettlementEvent, RampWebhookValidationContext } from "@/lib/ramps/types";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import type { AppContext, WebhookProcessor } from "./processor";
@@ -164,7 +165,11 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, RampSe
   }
 
   parse(payload: unknown): RampSettlementEvent {
-    const { type, data } = payload as MoonpayTransactionWebhook;
+    const root = readRecord(payload);
+    if (!root) {
+      throw badRequest("MoonPay webhook body must be an object", { provider: this.provider });
+    }
+    const type = readString(root.type);
     if (
       type !== "transaction_created" &&
       type !== "transaction_updated" &&
@@ -172,6 +177,14 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, RampSe
     ) {
       return { provider: this.provider, kind: "ignore", reason: `unsupported_event:${type}` };
     }
+
+    const transactionData = readRecord(root.data);
+    if (!transactionData) {
+      throw badRequest(`MoonPay "${type}" webhook is missing transaction data`, {
+        provider: this.provider,
+      });
+    }
+    const data = transactionData as MoonpayTransactionWebhook["data"];
 
     const reference = data.externalTransactionId;
     if (!reference) {
