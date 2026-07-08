@@ -9,11 +9,11 @@
  * both runtimes.
  */
 
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
-
 import { AppError } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
@@ -307,6 +307,21 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     const requestSource = c.get("requestSource");
 
     if (err instanceof AppError) {
+      c.header("X-SDP-Trace-ID", traceId);
+      return c.json(
+        {
+          error: {
+            code: err.code,
+            message: err.message,
+            ...(err.details && { details: err.details }),
+          },
+          meta: { requestId },
+        },
+        err.statusCode as 400
+      );
+    }
+
+    if (err instanceof SdpRpcError) {
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
         {

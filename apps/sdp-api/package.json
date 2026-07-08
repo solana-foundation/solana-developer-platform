@@ -43,6 +43,7 @@
     "@react-email/components": "1.0.12",
     "@react-email/render": "2.0.8",
     "@sdp/env-config": "workspace:*",
+    "@sdp/rpc": "workspace:*",
     "@sdp/types": "workspace:*",
     "@sentry/cloudflare": "^10.57.0",
     "@sentry/node": "^10.57.0",
