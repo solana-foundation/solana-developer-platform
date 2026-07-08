@@ -77,6 +77,9 @@ importers:
       '@sdp/rpc':
         specifier: workspace:*
         version: link:../../packages/sdp-rpc
+      '@sdp/solana':
+        specifier: workspace:*
+        version: link:../../packages/sdp-solana
       '@sdp/types':
         specifier: workspace:*
         version: link:../../packages/sdp-types
@@ -487,6 +490,30 @@ importers:
         specifier: 'catalog:'
         version: 6.8.0(typescript@6.0.3)
       '@solana/kit':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+
+  packages/sdp-solana:
+    dependencies:
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../sdp-rpc
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:../sdp-types
+      '@solana-program/token-2022':
+        specifier: 'catalog:'
+        version: 0.9.0(@solana/kit@6.8.0(typescript@6.0.3))(@solana/sysvars@6.8.0(typescript@6.0.3))
+      '@solana/addresses':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/kit':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/mosaic-sdk':
+        specifier: 'catalog:'
+        version: 0.1.1(patch_hash=b814110d007b64ff76f72cf843d93ba928a9c4f39acc34dbc2ee3e27d1149689)(typescript@6.0.3)
+      '@solana/signers':
         specifier: 'catalog:'
         version: 6.8.0(typescript@6.0.3)
 

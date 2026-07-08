@@ -42,6 +42,7 @@ packages/*
 !packages/sdp-env-config
 !packages/sdp-rpc
 !packages/sdp-custody
+!packages/sdp-solana
 docs
 infra
 scripts
