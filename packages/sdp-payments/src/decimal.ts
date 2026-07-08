@@ -1,4 +1,4 @@
-import { isDecimalString } from "./amount";
+import { isDecimalString } from "@sdp/solana/amount";
 import { badRequest } from "./errors";
 
 // Linear-time trailing-zero strip; /0+$/ backtracks polynomially (js/polynomial-redos).

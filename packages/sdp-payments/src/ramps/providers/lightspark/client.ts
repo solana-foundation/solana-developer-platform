@@ -1,3 +1,5 @@
+import { assertValidAddress } from "@sdp/solana/address";
+import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import {
   type Counterparty,
   type LightsparkPaymentRampInstruction,
@@ -16,8 +18,6 @@ import {
 } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { isAddress } from "@solana/addresses";
-import { assertValidAddress } from "../../../address";
-import { formatDecimalAmount, parseDecimalAmount } from "../../../amount";
 import {
   badRequest,
   providerNotConfigured,

@@ -1,4 +1,9 @@
-export { assertValidAddress } from "@sdp/payments";
 export { getSolanaConfig, resolveDefaultSolanaRpcUrl } from "@sdp/rpc";
-export type { Address } from "@solana/addresses";
-export { assertIsAddress, isAddress } from "@solana/addresses";
+// Import the narrow subpath (not the package root barrel): the root barrel pulls in
+// token-2022, whose @solana/mosaic-sdk dependency fails to resolve under plain Node ESM.
+export {
+  type Address,
+  assertIsAddress,
+  assertValidAddress,
+  isAddress,
+} from "@sdp/solana/address";

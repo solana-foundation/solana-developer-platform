@@ -1,4 +1,4 @@
-export { assertValidAddress } from "./address";
+export { assertValidAddress } from "@sdp/solana/address";
 export type { CounterpartyRow } from "./counterparty";
 export {
   badRequest,

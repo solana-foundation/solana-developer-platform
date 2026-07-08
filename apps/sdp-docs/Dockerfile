@@ -22,6 +22,7 @@ COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-custody/package.json ./packages/sdp-custody/
+COPY packages/sdp-solana/package.json ./packages/sdp-solana/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -38,6 +39,7 @@ COPY packages/sdp-env-config ./packages/sdp-env-config
 COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-custody ./packages/sdp-custody
+COPY packages/sdp-solana ./packages/sdp-solana
 
 # These are parsed as URLs at build time, so the placeholder defaults are valid
 # URLs whose origin docker/entrypoint.sh swaps for runtime env at container start.

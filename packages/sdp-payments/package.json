@@ -9,11 +9,6 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./amount": {
-      "types": "./src/amount.ts",
-      "import": "./src/amount.ts",
-      "default": "./src/amount.ts"
-    },
     "./decimal": {
       "types": "./src/decimal.ts",
       "import": "./src/decimal.ts",
@@ -132,6 +127,7 @@
   "dependencies": {
     "@coinbase/cdp-sdk": "1.49.2",
     "@sdp/rpc": "workspace:*",
+    "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana/addresses": "catalog:",
     "@solana/codecs": "catalog:",

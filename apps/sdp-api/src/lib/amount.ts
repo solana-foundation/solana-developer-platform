@@ -1,1 +1,1 @@
-export * from "@sdp/payments/amount";
+export * from "@sdp/solana/amount";

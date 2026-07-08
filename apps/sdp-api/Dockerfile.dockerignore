@@ -21,6 +21,7 @@ packages/*
 !packages/sdp-env-config
 !packages/sdp-rpc
 !packages/sdp-custody
+!packages/sdp-solana
 !packages/sdp-payments
 docs
 infra

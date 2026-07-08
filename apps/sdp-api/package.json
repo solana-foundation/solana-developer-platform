@@ -46,6 +46,7 @@
     "@sdp/env-config": "workspace:*",
     "@sdp/payments": "workspace:*",
     "@sdp/rpc": "workspace:*",
+    "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
     "@sentry/cloudflare": "^10.57.0",
     "@sentry/node": "^10.57.0",
