@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="840" viewBox="0 0 1040 840" font-family="-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aSlate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="aGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/>
+    </marker>
+    <marker id="aAmber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#d97706"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1040" height="840" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="520" y="44" text-anchor="middle" font-size="24" font-weight="700" fill="#0f172a">Asset Profile architecture</text>
+  <text x="520" y="68" text-anchor="middle" font-size="13" fill="#64748b">SDP-owned issued-asset identity · private master metadata + cached public projection</text>
+
+  <!-- Legend -->
+  <rect x="40" y="86" width="14" height="14" rx="3" fill="#fee2e2" stroke="#dc2626"/>
+  <text x="60" y="98" font-size="12" fill="#334155">private</text>
+  <rect x="120" y="86" width="14" height="14" rx="3" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="140" y="98" font-size="12" fill="#334155">public</text>
+
+  <!-- Clients -->
+  <rect x="110" y="110" width="250" height="58" rx="8" fill="#eef2f7" stroke="#64748b"/>
+  <text x="235" y="134" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">Dashboard /</text>
+  <text x="235" y="152" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">API-key caller</text>
+
+  <rect x="720" y="110" width="250" height="58" rx="8" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="845" y="134" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">Wallets /</text>
+  <text x="845" y="152" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">explorers</text>
+
+  <!-- Entry points -->
+  <rect x="110" y="210" width="250" height="66" rx="8" fill="#e0e7ff" stroke="#4f46e5"/>
+  <text x="235" y="238" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">/v1/issuance/asset-profiles</text>
+  <text x="235" y="258" text-anchor="middle" font-size="12" fill="#334155">routes · tokens:read / tokens:write</text>
+
+  <rect x="720" y="210" width="250" height="66" rx="8" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="845" y="230" text-anchor="middle" font-size="12" font-weight="700" fill="#0f172a">GET /v1/issuance/tokens/</text>
+  <text x="845" y="246" text-anchor="middle" font-size="12" font-weight="700" fill="#0f172a">:tokenId/metadata.json</text>
+  <text x="845" y="265" text-anchor="middle" font-size="10.5" fill="#334155">public · canonical URI · folds projection</text>
+
+  <!-- Handlers -->
+  <rect x="110" y="320" width="400" height="84" rx="8" fill="#eef2ff" stroke="#6366f1"/>
+  <text x="310" y="348" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">handlers.ts  +  schemas.ts (Zod)</text>
+  <text x="310" y="370" text-anchor="middle" font-size="12" fill="#334155">validate (Zod) · one profile per token</text>
+  <text x="310" y="388" text-anchor="middle" font-size="12" fill="#334155">POST → create token + profile · audit</text>
+
+  <!-- Registry -->
+  <rect x="560" y="312" width="320" height="100" rx="8" fill="#fef3c7" stroke="#d97706"/>
+  <text x="720" y="338" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">packages/sdp-types — asset-profiles.ts</text>
+  <text x="720" y="360" text-anchor="middle" font-size="12" fill="#334155">ASSET_CATEGORIES · ASSET_TYPES</text>
+  <text x="720" y="378" text-anchor="middle" font-size="12" fill="#334155">ASSET_TYPE_REGISTRY</text>
+  <text x="720" y="396" text-anchor="middle" font-size="12" fill="#334155">+ public projection rules</text>
+
+  <!-- Projection -->
+  <rect x="180" y="440" width="260" height="58" rx="8" fill="#eef2ff" stroke="#6366f1"/>
+  <text x="310" y="466" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">lib/issuance</text>
+  <text x="310" y="485" text-anchor="middle" font-size="12" fill="#334155">projectPublicMetadata()</text>
+
+  <!-- Repository -->
+  <rect x="110" y="540" width="850" height="64" rx="8" fill="#f1f5f9" stroke="#475569"/>
+  <text x="535" y="566" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">asset-profile.repository  (Postgres adapter)</text>
+  <text x="535" y="586" text-anchor="middle" font-size="12" fill="#334155">CRUD · getPublicMetadataByTokenId()</text>
+
+  <!-- Postgres -->
+  <rect x="300" y="648" width="470" height="160" rx="10" fill="#f8fafc" stroke="#334155"/>
+  <text x="318" y="672" font-size="13" font-weight="700" fill="#334155">Postgres</text>
+
+  <rect x="320" y="686" width="270" height="104" rx="8" fill="#ffffff" stroke="#475569"/>
+  <text x="330" y="704" font-size="12" font-weight="700" fill="#0f172a">asset_profiles</text>
+  <rect x="334" y="714" width="242" height="32" rx="5" fill="#fee2e2" stroke="#dc2626"/>
+  <text x="455" y="734" text-anchor="middle" font-size="11" fill="#0f172a">issuance_metadata · JSONB (private)</text>
+  <rect x="334" y="752" width="242" height="30" rx="5" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="455" y="771" text-anchor="middle" font-size="11" fill="#0f172a">public_metadata · JSONB (cached)</text>
+
+  <rect x="620" y="700" width="130" height="64" rx="8" fill="#f1f5f9" stroke="#475569"/>
+  <text x="685" y="736" text-anchor="middle" font-size="12" font-weight="600" fill="#0f172a">issued_tokens</text>
+
+  <!-- Atomic-create callout -->
+  <rect x="112" y="654" width="166" height="92" rx="8" fill="#eef2ff" stroke="#6366f1" stroke-dasharray="5 4"/>
+  <text x="195" y="678" text-anchor="middle" font-size="11.5" font-weight="700" fill="#0f172a">POST create</text>
+  <text x="195" y="697" text-anchor="middle" font-size="10.5" fill="#334155">issued_tokens +</text>
+  <text x="195" y="713" text-anchor="middle" font-size="10.5" fill="#334155">asset_profiles written</text>
+  <text x="195" y="731" text-anchor="middle" font-size="10.5" font-weight="700" fill="#4f46e5">in ONE transaction</text>
+  <line x1="279" y1="700" x2="298" y2="700" stroke="#475569" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aSlate)"/>
+
+  <!-- Arrows -->
+  <!-- C1 -> E1 -->
+  <line x1="235" y1="168" x2="235" y2="208" stroke="#475569" stroke-width="2" marker-end="url(#aSlate)"/>
+  <!-- C2 -> E2 (public) -->
+  <line x1="845" y1="168" x2="845" y2="208" stroke="#16a34a" stroke-width="2" marker-end="url(#aGreen)"/>
+  <!-- E1 -> Handlers -->
+  <line x1="235" y1="276" x2="235" y2="318" stroke="#475569" stroke-width="2" marker-end="url(#aSlate)"/>
+  <!-- Handlers -> Projection (compute public subset) -->
+  <line x1="300" y1="404" x2="300" y2="438" stroke="#16a34a" stroke-width="2" marker-end="url(#aGreen)"/>
+  <!-- Projection -> Repository (write public_metadata) -->
+  <line x1="300" y1="498" x2="300" y2="538" stroke="#16a34a" stroke-width="2" marker-end="url(#aGreen)"/>
+  <!-- Handlers -> Repository (persist issuance_metadata) -->
+  <line x1="430" y1="404" x2="430" y2="538" stroke="#475569" stroke-width="2" marker-end="url(#aSlate)"/>
+  <text x="438" y="470" font-size="11" fill="#475569">persist</text>
+  <!-- E2 -> Repository (public read) -->
+  <line x1="900" y1="276" x2="900" y2="538" stroke="#16a34a" stroke-width="2" marker-end="url(#aGreen)"/>
+  <text x="908" y="400" font-size="11" fill="#16a34a">read</text>
+  <!-- Registry -> Handlers (validate) dashed -->
+  <line x1="558" y1="360" x2="512" y2="360" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aAmber)"/>
+  <text x="535" y="352" text-anchor="middle" font-size="10.5" fill="#b45309">validate</text>
+  <!-- Registry -> Projection (rules) dashed -->
+  <line x1="575" y1="412" x2="442" y2="466" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aAmber)"/>
+  <text x="520" y="452" text-anchor="middle" font-size="10.5" fill="#b45309">projection rules</text>
+  <!-- Repository -> asset_profiles -->
+  <line x1="500" y1="604" x2="455" y2="684" stroke="#475569" stroke-width="2" marker-end="url(#aSlate)"/>
+  <text x="470" y="640" font-size="11" fill="#475569">read / write</text>
+  <!-- asset_profiles -> issued_tokens (FK) dashed -->
+  <line x1="592" y1="730" x2="618" y2="730" stroke="#475569" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aSlate)"/>
+  <text x="605" y="722" text-anchor="middle" font-size="10" fill="#475569">FK</text>
+
+  <!-- Footnote -->
+  <text x="520" y="822" text-anchor="middle" font-size="12" fill="#64748b">The canonical token metadata.json folds in only the cached public_metadata — compliance &amp; custom fields never cross into it.</text>
+  <text x="520" y="838" text-anchor="middle" font-size="11" fill="#94a3b8">Whole feature gated by ASSET_PROFILES_ENABLED (off by default).</text>
+</svg>

@@ -106,6 +106,15 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     supportsSigning: providerSupportsSigning("dfns"),
     capabilities: DEFAULT_CUSTODY_CAPABILITIES,
   },
+  ibm_haven: {
+    id: "ibm_haven",
+    label: "IBM Digital Asset Haven",
+    description: "Institutional custody on IBM Digital Asset Haven.",
+    category: "institutional",
+    supportsAdditionalWallets: providerSupportsAdditionalWallets("ibm_haven"),
+    supportsSigning: providerSupportsSigning("ibm_haven"),
+    capabilities: DEFAULT_CUSTODY_CAPABILITIES,
+  },
   anchorage: {
     id: "anchorage",
     label: "Anchorage",

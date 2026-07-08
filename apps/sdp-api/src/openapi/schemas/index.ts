@@ -1,5 +1,6 @@
 export * from "./admin";
 export * from "./api-keys";
+export * from "./asset-profiles";
 export * from "./auth";
 export * from "./base";
 export * from "./compliance";

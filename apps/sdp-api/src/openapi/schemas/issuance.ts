@@ -1,6 +1,11 @@
 import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types";
 
 import {
+  assetCategorySchema as assetCategorySchemaBase,
+  assetTypeSchema as assetTypeSchemaBase,
+  issuanceMetadataSchema as issuanceMetadataSchemaBase,
+} from "../../routes/asset-profiles/schemas";
+import {
   addAllowlistSchema as addTokenAllowlistSchemaBase,
   burnSchema as burnSchemaBase,
   confirmDeploySchema as confirmDeploySchemaBase,
@@ -14,6 +19,7 @@ import {
   updateAuthoritySchema as updateAuthoritySchemaBase,
   updateTokenSchema as updateTokenSchemaBase,
 } from "../../routes/issuance/schemas";
+import { assetProfileSchema } from "./asset-profiles";
 import {
   apiKeyIdParamSchema,
   base64Schema,
@@ -767,6 +773,41 @@ export const createTokenRequestSchema = createTokenSchemaBase
   })
   .openapi({ description: "Create token request body." });
 
+const combinedIssuanceMetadataExample = {
+  asset: { name: "Acme USD", issuerName: "Acme Financial Inc.", pegCurrency: "USD" },
+  compliance: { transferRestrictions: "reg_d" },
+  chain: { decimals: 6 },
+  custom: { customer: { internalDeskId: "FX-22" }, integration: {} },
+};
+
+export const createTokenWithAssetProfileRequestSchema = createTokenRequestSchema
+  .extend({
+    assetCategory: withOpenApi(assetCategorySchemaBase.default("generic"), {
+      description: "Asset category for the token's profile. Defaults to generic.",
+      example: "stablecoin",
+    }),
+    assetType: withOpenApi(assetTypeSchemaBase.default("generic"), {
+      description: "Asset type within the category. Must be supported for the category.",
+      example: "fiat_backed",
+    }),
+    issuanceMetadata: withOpenApi(issuanceMetadataSchemaBase.optional(), {
+      description:
+        "Optional canonical issuance metadata for the profile. Public metadata is derived from it.",
+      example: combinedIssuanceMetadataExample,
+    }),
+  })
+  .openapi({
+    description:
+      "Create token + asset profile request body: the token-create fields plus the asset profile's category, type, and issuance metadata. The token and its profile are created atomically.",
+  });
+
+export const tokenWithAssetProfileResponseSchema = z
+  .object({
+    token: tokenSchema.openapi({ description: "The created token." }),
+    assetProfile: assetProfileSchema.openapi({ description: "The created asset profile." }),
+  })
+  .openapi({ description: "Token + asset profile response payload." });
+
 export const updateTokenRequestSchema = updateTokenSchemaBase
   .extend({
     name: withOpenApi(updateTokenSchemaBase.shape.name, {
@@ -792,6 +833,11 @@ export const updateTokenRequestSchema = updateTokenSchemaBase
     status: withOpenApi(updateTokenSchemaBase.shape.status, {
       description: "Token operational status.",
       example: "active",
+    }),
+    requiresAllowlist: withOpenApi(updateTokenSchemaBase.shape.requiresAllowlist, {
+      description:
+        "Whether transfers are restricted to allowlisted accounts. Only accepted while the token is undeployed (pending, no mint address); returns 400 after deployment.",
+      example: true,
     }),
   })
   .openapi({ description: "Update token request body." });

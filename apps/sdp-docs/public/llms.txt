@@ -16,6 +16,7 @@
 - Token issuance and lifecycle operations
 - Payments, transfers, and ramps
 - Compliance screening
+- Asset profiles and public token metadata
 
 ## Start here
 - [Introduction](https://platform.solana.com/docs/introduction): What SDP is, what it provides, and how it works.
@@ -27,7 +28,7 @@
 - [Deploy a Token](https://platform.solana.com/docs/guides/deploy-a-token): Deploy a created token to the Solana blockchain.
 - [Mint and Burn Tokens](https://platform.solana.com/docs/guides/mint-and-burn): Increase or decrease token supply by minting and burning.
 - [Payments](https://platform.solana.com/docs/payments): Build payments on Solana with SDP — concepts, send, accept, ramps, and wallet operations.
-- [Basic payment](https://platform.solana.com/docs/payments/send-basic-payment): Send a single token transfer with SDP, using either Execute or Prepare mode.
+- [Basic payment](https://platform.solana.com/docs/payments/send-basic-payment): Send a single token transfer with SDP.
 - [Issuance Token Types](https://platform.solana.com/docs/reference/issuance-token-types): Supported issuance templates and default controls.
 - [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): A high-level payment flow from quote to settlement.
 - [Infrastructure Provider Onboarding](https://platform.solana.com/docs/reference/provider-onboarding): Add an infrastructure provider integration to SDP through the self-service contribution process.
@@ -41,6 +42,7 @@
 - [Issuance](https://platform.solana.com/docs/reference/api/issuance): Token issuance, allowlists, and lifecycle operations.
 - [Payments](https://platform.solana.com/docs/reference/api/payments): Wallet balances, transfer execution, policies, and ramps.
 - [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
+- [Asset Profiles](https://platform.solana.com/docs/reference/api/asset-profiles): Issued-asset identity and metadata profiles, plus the public token metadata URI.
 
 ## AI guide
 - [AI Consumption](https://platform.solana.com/docs/reference/ai-consumption): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.

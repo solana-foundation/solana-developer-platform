@@ -179,6 +179,15 @@ export const updateToken = async (c: AppContext) => {
     throw notFound("Token");
   }
 
+  // Access-control enforcement is baked into the mint at deploy; the flag only
+  // makes sense to change while the token is still an undeployed draft.
+  if (
+    parsed.data.requiresAllowlist !== undefined &&
+    (existing.mintAddress || existing.status !== "pending")
+  ) {
+    throw badRequest("requiresAllowlist cannot be changed after deployment");
+  }
+
   try {
     const metadataPatch = getOnChainMetadataPatch(parsed.data);
     const shouldUpdateMetadataOnChain =
@@ -208,7 +217,7 @@ export const updateToken = async (c: AppContext) => {
         currentAuthority: currentAuthorityRaw,
       });
 
-      const mosaic = createMosaicService(c.env, signer);
+      const mosaic = createMosaicService(c.env, signer, "sponsored");
       const result = await mosaic.updateMetadata({
         mint: assertValidAddress(existing.mintAddress as string, "mintAddress"),
         ...metadataPatch,

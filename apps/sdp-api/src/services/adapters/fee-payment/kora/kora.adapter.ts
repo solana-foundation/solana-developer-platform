@@ -24,6 +24,9 @@ export type KoraAdapterConfig = KoraClientOptions & {
 
   /** Per-user id forwarded to Kora as `user_id` (required by mainnet's free+usage-tracking config). */
   userId?: string;
+
+  /** Injectable client. */
+  client?: KoraClient;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -40,7 +43,7 @@ export class KoraAdapter implements FeePaymentPort {
 
   constructor(config: KoraAdapterConfig) {
     const { rpcUrl, apiKey, hmacSecret, userId } = config;
-    this.client = new KoraClient({ rpcUrl, apiKey, hmacSecret });
+    this.client = config.client ?? new KoraClient({ rpcUrl, apiKey, hmacSecret });
     this.userId = userId;
   }
 

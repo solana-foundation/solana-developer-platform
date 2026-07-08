@@ -307,6 +307,42 @@ class PostgresClient extends PostgresExecutor implements DatabaseClient {
   }
 }
 
+/**
+ * Adapt a transaction executor to the full DatabaseClient interface so services
+ * and repositories (which are constructed with a DatabaseClient) can run inside
+ * an existing transaction opened via `db.transaction(...)`. All calls are
+ * forwarded to the same `tx` connection, so every write shares one atomic
+ * transaction:
+ *   - `batch(...)` runs its statements sequentially on `tx` instead of opening
+ *     its own transaction (they are already prepared against `tx`).
+ *   - `transaction(cb)` runs the callback inline on `tx` — Postgres has no
+ *     nestable BEGIN, and we are already inside one.
+ */
+export function asTransactionalClient(tx: DatabaseExecutor): DatabaseClient {
+  return {
+    prepare: (query: string) => tx.prepare(query),
+    queryOne<T = Record<string, unknown>>(query: string, params?: readonly unknown[]) {
+      return tx.queryOne<T>(query, params);
+    },
+    queryMany<T = Record<string, unknown>>(query: string, params?: readonly unknown[]) {
+      return tx.queryMany<T>(query, params);
+    },
+    execute(query: string, params?: readonly unknown[]) {
+      return tx.execute(query, params);
+    },
+    async batch(statements: readonly PreparedStatement[]) {
+      const results: number[] = [];
+      for (const statement of statements) {
+        results.push(await statement.run());
+      }
+      return results;
+    },
+    transaction<T>(callback: (executor: DatabaseExecutor) => Promise<T>) {
+      return callback(tx);
+    },
+  };
+}
+
 export function getConnectionString(bindings: DatabaseBindings): string {
   const hyperdriveUrl = bindings.HYPERDRIVE?.connectionString?.trim();
   if (hyperdriveUrl) {

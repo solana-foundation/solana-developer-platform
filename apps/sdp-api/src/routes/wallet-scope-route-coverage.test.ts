@@ -90,7 +90,6 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /transfer-batches",
       "POST /transfer-batches/estimate",
       "POST /transfers",
-      "POST /transfers/prepare",
       "PUT /wallets/:walletId/policies",
     ]);
   });

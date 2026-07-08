@@ -19,6 +19,10 @@ import {
 } from "../payments-workspace.data";
 import { CounterpartyPicker } from "../ramps/components/counterparty-picker";
 import { RampWizardShell } from "../ramps/components/ramp-wizard-shell";
+import {
+  PAYMENTS_ACTION_WALLETS_KEY,
+  usePaymentsActionWallets,
+} from "../ramps/hooks/use-payments-action-wallets";
 import { walletBalanceAssetOptions } from "../ramps/wallet-options";
 import { createRecurringPayment } from "./recurring-payments.data";
 
@@ -55,7 +59,6 @@ const CREATE_STEPS = [
 ] as const satisfies readonly { id: StepId; label: string; title: string }[];
 
 const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
-const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 
 const SCHEDULE_PRESETS = [
   { value: "24", label: "Every day", description: "Collect once per day." },
@@ -191,29 +194,14 @@ export function RecurringPaymentCreateWorkspace({
     fetchAllCounterparties,
     {
       fallbackData: counterpartiesResult,
-      revalidateOnFocus: false,
-      revalidateIfStale: false,
     }
   );
   const liveCounterparties = liveCounterpartiesResult ?? counterpartiesResult;
 
-  const { data: liveWallets, error: walletsFetchError } = useSWR<PaymentsDashboardWallet[]>(
-    PAYMENTS_ACTION_WALLETS_KEY,
-    () => fetchWallets({ includeBalances: true }),
-    {
-      fallbackData: wallets.length > 0 ? wallets : undefined,
-      revalidateOnFocus: false,
-      revalidateIfStale: false,
-    }
+  const { liveWallets: availableWallets, liveWalletsError } = usePaymentsActionWallets(
+    wallets,
+    walletsError
   );
-  const availableWallets = liveWallets ?? wallets;
-  const liveWalletsError = walletsFetchError
-    ? walletsFetchError instanceof Error
-      ? walletsFetchError.message
-      : "Unable to load wallets."
-    : liveWallets === undefined
-      ? walletsError
-      : null;
 
   const {
     data: accounts,

@@ -47,6 +47,7 @@ const FEATURE_SUMMARY = [
   "Token issuance and lifecycle operations",
   "Payments, transfers, and ramps",
   "Compliance screening",
+  "Asset profiles and public token metadata",
 ];
 
 const KEY_PAGE_SLUGS = [
@@ -73,6 +74,7 @@ const KEY_PAGE_SLUGS = [
   "reference/api/issuance",
   "reference/api/payments",
   "reference/api/compliance",
+  "reference/api/asset-profiles",
 ];
 
 function stripMarkdownFormatting(value: string): string {

@@ -396,7 +396,9 @@ async function getBalancesByWalletId(
 
       const [solBalanceResult, splBalancesResult] = await Promise.allSettled([
         solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address),
-        tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address, { tokenLabelsByMint }),
+        tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address, {
+          tokenLabelsByMint,
+        }),
       ]);
       const lamports =
         solBalanceResult.status === "fulfilled" ? (solBalanceResult.value?.lamports ?? 0n) : 0n;

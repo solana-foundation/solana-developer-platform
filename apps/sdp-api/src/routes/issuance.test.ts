@@ -7,10 +7,12 @@ import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-prog
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import type { Address } from "@/lib/solana";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { createKVStoreSet } from "@/runtime/factory";
+import * as FeePaymentAdapters from "@/services/adapters/fee-payment";
 import * as Mosaic from "@/services/mosaic";
 import { MosaicService } from "@/services/mosaic";
 import * as SolanaServices from "@/services/solana";
@@ -1414,6 +1416,64 @@ describe("Issuance Routes", () => {
         resolveAuthoritySignerSpy.mockRestore();
         updateMetadataSpy.mockRestore();
       }
+    });
+
+    it("updates requiresAllowlist while the token is undeployed", async () => {
+      const res = await app.request(
+        `/v1/issuance/tokens/${tokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ requiresAllowlist: true }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.token.requiresAllowlist).toBe(true);
+    });
+
+    it("rejects requiresAllowlist changes after deployment", async () => {
+      const db = getDb(env);
+      const deployedTokenId = "tok_allowlistlocked1";
+
+      await db
+        .prepare(
+          `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+           name, symbol, decimals, total_supply_cached, is_mintable, freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, 'Locked Token', 'LOCK', 6, '0', 1, 1, 0, 'active', '2024-01-02T00:00:00.000Z', ?)`
+        )
+        .bind(
+          deployedTokenId,
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          TEST_ACTIVE_TOKEN.mintAddress,
+          TEST_ACTIVE_TOKEN.mintAuthority,
+          TEST_ACTIVE_TOKEN.freezeAuthority,
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${deployedTokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ requiresAllowlist: true }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.message).toContain("requiresAllowlist");
     });
   });
 
@@ -4299,6 +4359,134 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("rejects a wallet-paid deploy when the signing wallet cannot cover rent and fees", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_wallet_fee_broke",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getAccountInfoSpy = vi
+          .spyOn(SolanaRpc, "getAccountInfo")
+          .mockResolvedValueOnce(null as never);
+        const createTokenSpy = vi.spyOn(MosaicService.prototype, "createToken");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ feePayment: "wallet" }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+          const payload = (await res.json()) as { error: { message: string } };
+          expect(payload.error.message).toMatch(/pay deployment rent and fees/);
+          expect(createTokenSpy).not.toHaveBeenCalled();
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getAccountInfoSpy.mockRestore();
+          createTokenSpy.mockRestore();
+        }
+      });
+
+      it("deploys with wallet-paid fees when the signing wallet holds enough SOL, without touching Kora", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_wallet_fee_funded",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getAccountInfoSpy = vi
+          .spyOn(SolanaRpc, "getAccountInfo")
+          .mockResolvedValueOnce({ lamports: 20_000_000n } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockResolvedValueOnce(mockDeployResult as never);
+        const feePaymentAdapterSpy = vi.spyOn(FeePaymentAdapters, "createFeePaymentAdapter");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ feePayment: "wallet" }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(getAccountInfoSpy).toHaveBeenCalled();
+          expect(createTokenSpy).toHaveBeenCalled();
+          expect(feePaymentAdapterSpy).not.toHaveBeenCalled();
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getAccountInfoSpy.mockRestore();
+          createTokenSpy.mockRestore();
+          feePaymentAdapterSpy.mockRestore();
+        }
+      });
+
+      it("routes sponsored deploys through the Kora fee-payment adapter", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_sponsored_fee",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockResolvedValueOnce(mockDeployResult as never);
+        const feePaymentAdapterSpy = vi.spyOn(FeePaymentAdapters, "createFeePaymentAdapter");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ feePayment: "sponsored" }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(feePaymentAdapterSpy).toHaveBeenCalled();
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
+          feePaymentAdapterSpy.mockRestore();
+        }
+      });
+
       it("still surfaces the mint address when recording it fails after a metadata-URI overflow", async () => {
         const token = await seedIssuedToken({
           id: "tok_deploy_recovery_db_fail",
@@ -4425,6 +4613,88 @@ describe("Issuance Routes", () => {
           createOrgSignerSpy.mockRestore();
           createTokenSpy.mockRestore();
           updateTokenAuthoritiesSpy.mockRestore();
+        }
+      });
+
+      it("returns TRANSACTION_FAILED with the on-chain reason when the create tx fails on-chain", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_onchain_fail",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const onChainDetail = 'Transaction failed: {"InstructionError":[0,{"Custom":6001}]}';
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockRejectedValueOnce(new AppError("TRANSACTION_FAILED", onChainDetail));
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+          const payload = (await res.json()) as { error: { code: string; message: string } };
+          expect(payload.error.code).toBe("TRANSACTION_FAILED");
+          expect(payload.error.message).toBe(onChainDetail);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
+        }
+      });
+
+      it("returns SOLANA_RPC_ERROR when the create tx confirmation times out", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_timeout",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const timeoutDetail = "Transaction 5timeoutSig confirmation timed out after 60000ms";
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockRejectedValueOnce(new AppError("SOLANA_RPC_ERROR", timeoutDetail));
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(502);
+          const payload = (await res.json()) as { error: { code: string; message: string } };
+          expect(payload.error.code).toBe("SOLANA_RPC_ERROR");
+          expect(payload.error.message).toBe(timeoutDetail);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
         }
       });
     });

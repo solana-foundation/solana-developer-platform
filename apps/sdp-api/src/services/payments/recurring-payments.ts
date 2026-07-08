@@ -57,6 +57,10 @@ import * as solanaRpc from "@/services/solana/rpc";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "./counterparty-account-resolution";
+import {
+  DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
+  parsePositiveIntegerConfig,
+} from "./recurring-payment-config";
 
 const U64_MAX = 18_446_744_073_709_551_615n;
 const OPERATION_STALE_AFTER_MS = 15 * 60 * 1000;
@@ -64,6 +68,8 @@ const ACTIVATION_STALE_AFTER_MS = OPERATION_STALE_AFTER_MS;
 const COLLECTION_STALE_AFTER_MS = OPERATION_STALE_AFTER_MS;
 const LIFECYCLE_STALE_AFTER_MS = OPERATION_STALE_AFTER_MS;
 const UPDATE_STALE_AFTER_MS = OPERATION_STALE_AFTER_MS;
+
+type RecurringCollectionSource = "manual" | "automated";
 
 function assertRecurringPaymentTokenMint(token: string): string {
   const normalized = normalizePaymentToken(token);
@@ -242,6 +248,38 @@ function isStaleCollectionAttempt(row: PaymentSubscriptionCollectionAttemptRow):
   return Number.isFinite(updatedAt) && updatedAt <= Date.now() - COLLECTION_STALE_AFTER_MS;
 }
 
+function isRecurringCollectionSource(value: unknown): value is RecurringCollectionSource {
+  return value === "manual" || value === "automated";
+}
+
+function recurringCollectionMetadata(input: {
+  metadata?: Record<string, unknown>;
+  recurringPaymentId: string;
+  transferId?: string | null;
+  collectionSource?: RecurringCollectionSource;
+  initiatedByKeyId?: string | null;
+  extra?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const metadata = { ...(input.metadata ?? {}) };
+  const source =
+    input.collectionSource ??
+    (isRecurringCollectionSource(metadata.collectionSource)
+      ? metadata.collectionSource
+      : undefined);
+  const initiatedByKeyId =
+    input.initiatedByKeyId ??
+    (typeof metadata.initiatedByKeyId === "string" ? metadata.initiatedByKeyId : undefined);
+
+  return {
+    ...metadata,
+    recurringPaymentId: input.recurringPaymentId,
+    ...(input.transferId ? { transferId: input.transferId } : {}),
+    ...(source ? { collectionSource: source } : {}),
+    ...(initiatedByKeyId ? { initiatedByKeyId } : {}),
+    ...(input.extra ?? {}),
+  };
+}
+
 async function resolveDestinationTokenAccount(input: {
   env: Env;
   destinationAddress: string;
@@ -259,10 +297,14 @@ async function resolveDestinationTokenAccount(input: {
   return receiverAta;
 }
 
-function collectionRetryMetadata(error: unknown): Record<string, unknown> {
+function collectionRetryMetadata(env: Env, error: unknown): Record<string, unknown> {
+  const retryAfterMinutes = parsePositiveIntegerConfig(
+    env.PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
+    DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES
+  );
   return {
     error: activationErrorMessage(error),
-    retryAfterAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+    retryAfterAt: new Date(Date.now() + retryAfterMinutes * 60 * 1000).toISOString(),
   };
 }
 
@@ -285,12 +327,12 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
 }): Promise<void> {
   const failedAt = new Date().toISOString();
   const message = activationErrorMessage(input.error);
-  const metadata = {
-    ...input.attempt.metadata,
+  const metadata = recurringCollectionMetadata({
+    metadata: input.attempt.metadata,
     recurringPaymentId: input.recurringPaymentId,
-    ...(input.transfer ? { transferId: input.transfer.id } : {}),
-    ...collectionRetryMetadata(input.error),
-  };
+    transferId: input.transfer?.id ?? null,
+    extra: collectionRetryMetadata(input.env, input.error),
+  });
 
   await getDb(input.env).transaction(async (tx) => {
     let confirmedTransferSignature: Signature | null = null;
@@ -349,11 +391,11 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
     const attemptSignature = confirmedTransferSignature ?? input.submittedSignature;
     const attemptError = confirmedTransferSignature ? null : message;
     const attemptMetadata = confirmedTransferSignature
-      ? {
-          ...input.attempt.metadata,
+      ? recurringCollectionMetadata({
+          metadata: input.attempt.metadata,
           recurringPaymentId: input.recurringPaymentId,
-          ...(input.transfer ? { transferId: input.transfer.id } : {}),
-        }
+          transferId: input.transfer?.id ?? null,
+        })
       : metadata;
 
     const attemptRows = await tx
@@ -446,11 +488,11 @@ async function finalizeRecurringPaymentCollection(input: {
       status: "confirmed",
       signature: input.signature,
       error: null,
-      metadata: {
-        ...input.attempt.metadata,
+      metadata: recurringCollectionMetadata({
+        metadata: input.attempt.metadata,
         recurringPaymentId: input.recurringPayment.id,
         transferId: input.transfer.id,
-      },
+      }),
       updatedAt: finalizedAt,
     });
     const finalizedAttempt =
@@ -3690,6 +3732,7 @@ export async function collectRecurringPayment(input: {
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
   initiatedByKeyId: string | null;
+  collectionSource?: RecurringCollectionSource;
 }): Promise<{
   recurringPayment: PaymentRecurringPaymentRow;
   collectionAttempt: PaymentSubscriptionCollectionAttemptRow;
@@ -3780,7 +3823,11 @@ export async function collectRecurringPayment(input: {
       status: "processing",
       signature: null,
       error: null,
-      metadata: { recurringPaymentId: input.recurringPayment.id },
+      metadata: recurringCollectionMetadata({
+        recurringPaymentId: input.recurringPayment.id,
+        collectionSource: input.collectionSource,
+        initiatedByKeyId: input.initiatedByKeyId,
+      }),
       createdAt: nowIso,
       updatedAt: nowIso,
     });

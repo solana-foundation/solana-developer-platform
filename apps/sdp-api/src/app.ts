@@ -22,6 +22,7 @@ import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
+import assetProfiles from "@/routes/asset-profiles";
 import auth from "@/routes/auth";
 import compliance from "@/routes/compliance";
 import counterparties from "@/routes/counterparties";
@@ -273,6 +274,10 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/auth", auth);
   v1.route("/projects", projects);
   v1.route("/rpc", rpc);
+  // Asset profiles live under the issuance namespace, as a sibling of
+  // /issuance/tokens. The router is self-contained (own auth + feature-flag + project
+  // middleware).
+  v1.route("/issuance/asset-profiles", assetProfiles);
   v1.route("/issuance", issuance);
   v1.route("/wallets", wallets);
   v1.route("/onboarding", onboarding);

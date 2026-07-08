@@ -341,6 +341,7 @@ export const collectRecurringPayment = async (c: AppContext) => {
     sourceWallet,
     recurringPayment,
     initiatedByKeyId: auth.authType === "api_key" ? auth.id : null,
+    collectionSource: "manual",
   });
   const response: PaymentRecurringPaymentCollectionResponse = {
     recurringPayment: mapRecurringPayment(collected.recurringPayment),

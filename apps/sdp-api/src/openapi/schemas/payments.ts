@@ -29,8 +29,6 @@ import {
   prepareSubscriptionCollectionSchema as prepareSubscriptionCollectionSchemaBase,
   prepareSubscriptionLifecycleSchema as prepareSubscriptionLifecycleSchemaBase,
   prepareSubscriptionPlanCreateSchema as prepareSubscriptionPlanCreateSchemaBase,
-  prepareTransferOptionsSchema as prepareTransferOptionsSchemaBase,
-  prepareTransferSchema as prepareTransferSchemaBase,
   priorityFeeSchema as priorityFeeSchemaBase,
   recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
   simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase,
@@ -61,7 +59,7 @@ import {
   withOpenApi,
   z,
 } from "./base";
-import { preparedTransactionSchema, simulationResultSchema } from "./issuance";
+import { preparedTransactionSchema } from "./issuance";
 
 export const tokenAmountSchema = z.string().openapi({
   description: "Token amount in UI units (decimal string).",
@@ -382,64 +380,6 @@ export const priorityFeeSchema = withOpenApi(priorityFeeSchemaBase, {
   example: "auto",
 });
 
-export const prepareTransferOptionsSchema = prepareTransferOptionsSchemaBase
-  .extend({
-    priorityFee: withOpenApi(priorityFeeSchemaBase.optional(), {
-      description: "Priority fee level (default: auto).",
-      example: "auto",
-    }),
-    simulate: withOpenApi(prepareTransferOptionsSchemaBase.shape.simulate, {
-      description: "Include simulation results in the response.",
-      example: true,
-    }),
-  })
-  .openapi({ description: "Transaction preparation options." });
-
-export const prepareTransferRequestSchema = prepareTransferSchemaBase
-  .extend({
-    projectId: withOpenApi(prepareTransferSchemaBase.shape.projectId, {
-      description: "Project identifier for the transfer context.",
-      example: "prj_example",
-    }),
-    source: withOpenApi(prepareTransferSchemaBase.shape.source, {
-      description: "Source custody wallet ID from /v1/wallets.",
-      example: "wal_example",
-    }),
-    destination: withOpenApi(prepareTransferSchemaBase.shape.destination, {
-      description: "Destination wallet address.",
-      example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-    }),
-    token: withOpenApi(prepareTransferSchemaBase.shape.token, {
-      description:
-        "Token mint address. For the native token, pass `SOL` (recommended) or the canonical SOL mint `So11111111111111111111111111111111111111112` — the server normalizes both to `SOL`. SPL tokens must be specified by their on-chain mint (symbols are not resolved at request time).",
-      example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    }),
-    amount: withOpenApi(prepareTransferSchemaBase.shape.amount, {
-      description: "Token amount in UI units (decimal string).",
-      example: "100.00",
-    }),
-    memo: withOpenApi(prepareTransferSchemaBase.shape.memo, {
-      description: "Optional memo for the transfer.",
-    }),
-    referenceAddress: withOpenApi(prepareTransferSchemaBase.shape.referenceAddress, {
-      description: "Optional reference address for tracking (Solana Pay reference account).",
-      example: "RefY2HwGmCKvJsXJzhRkc7m9D4N6pQ5tT3aB8fE1uV2W",
-    }),
-    options: prepareTransferOptionsSchema.optional().openapi({
-      description:
-        "Transaction preparation options. Simulation is not supported when `privateTransfer` is present.",
-      example: { priorityFee: "auto" },
-    }),
-    privateTransfer: privateTransferRequestSchema.optional().openapi({
-      description:
-        "Private-transfer routing for provider-built transaction preparation. MagicBlock private transfers are base-balance transfers routed privately by the provider.",
-    }),
-  })
-  .openapi({
-    description:
-      "Prepare transfer request payload for a custody-managed source wallet. When privateTransfer is present, SDP asks the provider to build the unsigned transaction and returns it for client review/signing.",
-  });
-
 export const transferTypeSchema = z
   .enum(["transfer", "transfer_confidential", "transfer_batch", "onramp", "offramp"])
   .openapi({ description: "Transfer type.", example: "transfer" });
@@ -635,22 +575,6 @@ export const preparedPrivateTransferSchema = z
       .openapi({ description: "MagicBlock prepared-transfer metadata." }),
   })
   .openapi({ description: "Provider metadata returned for private-transfer preparation." });
-
-export const prepareTransferResponseSchema = z
-  .object({
-    transfer: transferSchema.openapi({ description: "Transfer transaction record." }),
-    preparedTransaction: preparedTransactionSchema.openapi({
-      description: "Prepared transaction for client-side signing.",
-    }),
-    privateTransfer: preparedPrivateTransferSchema.optional().openapi({
-      description:
-        "Provider metadata returned for private-transfer preparation. The serialized transaction remains in preparedTransaction.",
-    }),
-    simulation: simulationResultSchema
-      .optional()
-      .openapi({ description: "Optional transaction simulation result." }),
-  })
-  .openapi({ description: "Prepare transfer response payload." });
 
 export const paymentTransferBatchStatusSchema = withOpenApi(transferBatchStatusSchemaBase, {
   description: "Transfer batch status.",

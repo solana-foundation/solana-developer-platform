@@ -93,6 +93,15 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
       isConfigured: (env) =>
         hasAllEnv(env, ["DFNS_AUTH_TOKEN", "DFNS_CREDENTIAL_ID", "DFNS_PRIVATE_KEY"]),
     },
+    ibm_haven: {
+      label: "IBM Digital Asset Haven",
+      isConfigured: (env) =>
+        hasAllEnv(env, [
+          "IBM_HAVEN_AUTH_TOKEN",
+          "IBM_HAVEN_CREDENTIAL_ID",
+          "IBM_HAVEN_PRIVATE_KEY",
+        ]),
+    },
     anchorage: {
       label: "Anchorage",
       isConfigured: (env) => hasEnv(env, "ANCHORAGE_API_KEY"),
@@ -201,6 +210,12 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
         if (testMode === false) return false;
         return sandbox;
       },
+    },
+    coinbase: {
+      label: "Coinbase Onramp",
+      // Onramp uses the account-wide CDP Secret API Key (same key across environments).
+      isConfigured: (env) =>
+        hasAllEnv(env, ["COINBASE_CDP_API_KEY_ID", "COINBASE_CDP_API_KEY_SECRET"]),
     },
   },
 } as const satisfies ProviderAvailabilityDefinitions;

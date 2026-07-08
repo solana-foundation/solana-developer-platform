@@ -18,6 +18,7 @@ export const CUSTODY_PROVIDERS = [
   "para",
   "turnkey",
   "dfns",
+  "ibm_haven",
   "anchorage",
   "utila",
   "local",
