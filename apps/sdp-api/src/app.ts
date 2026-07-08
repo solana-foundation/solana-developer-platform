@@ -14,6 +14,7 @@ import { type Context, Hono } from "hono";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
@@ -72,6 +73,24 @@ const KV_FREE_PATHS = [
   "/webhooks",
   "/v1/issuance/tokens/*/metadata.json",
 ];
+
+function mapErrorStatusCode(statusCode: number): ContentfulStatusCode {
+  switch (statusCode) {
+    case 202:
+    case 400:
+    case 401:
+    case 403:
+    case 404:
+    case 409:
+    case 429:
+    case 500:
+    case 502:
+    case 503:
+      return statusCode;
+    default:
+      return 500;
+  }
+}
 
 function mapSigningError(err: SigningError): {
   status: 400 | 404 | 409 | 502 | 504;
@@ -317,7 +336,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
           },
           meta: { requestId },
         },
-        err.statusCode as 400
+        mapErrorStatusCode(err.statusCode)
       );
     }
 
@@ -332,7 +351,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
           },
           meta: { requestId },
         },
-        err.statusCode as 400
+        mapErrorStatusCode(err.statusCode)
       );
     }
 
