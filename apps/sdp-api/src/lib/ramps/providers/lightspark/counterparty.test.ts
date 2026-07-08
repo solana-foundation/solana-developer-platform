@@ -1,7 +1,7 @@
+import { SdpPaymentsError } from "@sdp/payments";
 import type { Counterparty } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { AppError } from "@/lib/errors";
 import { buildLightsparkAccountInfo, lightsparkCounterpartyRequirements } from "./counterparty";
 
 type IndividualCounterparty = Extract<Counterparty, { entityType: "individual" }>;
@@ -74,7 +74,7 @@ describe("lightsparkCounterpartyRequirements", () => {
         direction: "offramp",
         providerData: {},
       })
-    ).toThrowError(AppError);
+    ).toThrowError(SdpPaymentsError);
   });
 
   it("collects USD payout bank fields including the rail select", () => {
@@ -225,7 +225,7 @@ describe("buildLightsparkAccountInfo", () => {
 
   it("throws when collectedData is missing", () => {
     expect(() => buildLightsparkAccountInfo(counterpartyRow(), "USD", undefined)).toThrowError(
-      AppError
+      SdpPaymentsError
     );
   });
 
@@ -236,6 +236,6 @@ describe("buildLightsparkAccountInfo", () => {
         routingNumber: "not-a-routing-number",
         accountNumber: "12345678901",
       })
-    ).toThrowError(AppError);
+    ).toThrowError(SdpPaymentsError);
   });
 });

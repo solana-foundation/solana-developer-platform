@@ -44,6 +44,7 @@
     "@react-email/render": "2.0.8",
     "@sdp/custody": "workspace:*",
     "@sdp/env-config": "workspace:*",
+    "@sdp/payments": "workspace:*",
     "@sdp/rpc": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",

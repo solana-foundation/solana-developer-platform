@@ -1,34 +1,17 @@
+import type { CounterpartyRow } from "@sdp/payments";
 import type {
-  CounterpartyBusinessIdentity,
   CounterpartyEntityType,
   CounterpartyIdentity,
-  CounterpartyIndividualIdentity,
   CounterpartyProviderData,
-  CounterpartyStatus,
 } from "@sdp/types";
 import type { BvnkCustomerResolution } from "@/lib/ramps/providers/bvnk/provider-data";
 import type { RepositoryDbClient } from "./base";
 
+export type { CounterpartyRow } from "@sdp/payments";
+
 export function generateCounterpartyId(): string {
   return `counterparty_${crypto.randomUUID()}`;
 }
-
-export type CounterpartyRow = {
-  id: string;
-  organization_id: string;
-  project_id: string;
-  external_id: string | null;
-  display_name: string;
-  email: string;
-  provider_data: CounterpartyProviderData;
-  status: CounterpartyStatus;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-} & (
-  | { entity_type: "individual"; identity: CounterpartyIndividualIdentity }
-  | { entity_type: "business"; identity: CounterpartyBusinessIdentity }
-);
 
 export interface CreateCounterpartyInput {
   organizationId: string;
