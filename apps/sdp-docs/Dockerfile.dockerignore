@@ -41,6 +41,7 @@ packages/*
 !packages/sdp-types
 !packages/sdp-env-config
 !packages/sdp-rpc
+!packages/sdp-custody
 docs
 infra
 scripts

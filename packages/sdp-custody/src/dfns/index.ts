@@ -17,4 +17,5 @@ export {
   type IbmHavenEnv,
   normalizeDfnsWalletId,
   resolveDfnsNetwork,
-} from "@sdp/custody";
+} from "./client";
+export { DfnsSigner, type DfnsSignerConfig } from "./signer";
