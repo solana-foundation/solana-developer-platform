@@ -13,11 +13,11 @@ import {
   type BvnkOnrampPaymentRuleState,
   isBvnkCustomerVerified,
   isBvnkWalletActive,
-  parseBvnkOfframpReference,
   parseBvnkOfframpWalletName,
   parseBvnkOnrampWalletName,
   pendingBvnkOnrampPaymentRuleKeys,
   readBvnkCustomer,
+  readBvnkOfframpReference,
   readBvnkOnrampPaymentRuleState,
   withBvnkOfframpWalletStatus,
   withBvnkOnrampPaymentRuleState,
@@ -554,7 +554,7 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkWebho
         const reference = readString(data.reference);
         return {
           kind: event,
-          transferId: reference ? parseBvnkOfframpReference(reference) : undefined,
+          transferId: reference ? readBvnkOfframpReference(reference) : undefined,
           channelId: readString(data.channelId),
           transactionId: readString(data.uuid),
           transactionHash: readString(data.hash),

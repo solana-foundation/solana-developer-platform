@@ -214,16 +214,19 @@ export function buildBvnkOfframpReference(paymentTransferId: string): string {
  * Parses BVNK's channel transaction `data.reference` back into the SDP transfer id.
  *
  * @param reference BVNK off-ramp reference in `sdp_offramp_<transfer_id>` format.
- * @returns SDP payment transfer id, for example `xfr_<uuid>`.
+ * @returns SDP payment transfer id (for example `xfr_<uuid>`), or undefined for a
+ * channel payment SDP did not create — BVNK also delivers webhooks for foreign
+ * transactions (sandbox tests, manual payments), which must be acked and ignored
+ * rather than rejected.
  */
-export function parseBvnkOfframpReference(reference: string): string {
+export function readBvnkOfframpReference(reference: string): string | undefined {
   const prefix = "sdp_offramp_";
   if (!reference.startsWith(prefix)) {
-    throw internalError(`Malformed BVNK off-ramp reference: ${reference}`);
+    return undefined;
   }
   const transferId = reference.slice(prefix.length);
   if (!/^xfr_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(transferId)) {
-    throw internalError(`Malformed BVNK off-ramp reference: ${reference}`);
+    return undefined;
   }
   return transferId;
 }

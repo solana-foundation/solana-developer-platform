@@ -51,6 +51,45 @@ describe("BvnkWebhookProcessor.parse", () => {
     });
   });
 
+  it("parses a channel transaction SDP did not create without throwing", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(
+      processor.parse({
+        event: "bvnk:payment:channel:transaction-confirmed",
+        data: {
+          reference: "bvnk-sandbox-test-payment",
+          channelId: "channel_1",
+          uuid: "tx_1",
+          status: "completed",
+          walletCurrency: "USD",
+          walletAmount: 4.95,
+        },
+      })
+    ).toMatchObject({
+      kind: "bvnk:payment:channel:transaction-confirmed",
+      transferId: undefined,
+      channelId: "channel_1",
+    });
+  });
+
+  it("extracts the SDP transfer id from an sdp_offramp reference", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(
+      processor.parse({
+        event: "bvnk:payment:channel:transaction-confirmed",
+        data: {
+          reference: "sdp_offramp_xfr_123e4567-e89b-12d3-a456-426614174000",
+          status: "completed",
+        },
+      })
+    ).toMatchObject({
+      kind: "bvnk:payment:channel:transaction-confirmed",
+      transferId: "xfr_123e4567-e89b-12d3-a456-426614174000",
+    });
+  });
+
   it("ignores an unhandled BVNK event instead of throwing", () => {
     const processor = new BvnkWebhookProcessor();
 
