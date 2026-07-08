@@ -26,7 +26,7 @@ function appendQueryParam(url: string, key: string, value: string): string {
   }
 }
 
-function withHeliusApiKey(url: string, apiKey?: string): string {
+export function withHeliusApiKey(url: string, apiKey?: string): string {
   if (!apiKey) {
     return url;
   }
@@ -39,7 +39,7 @@ function withHeliusApiKey(url: string, apiKey?: string): string {
   return appendQueryParam(url, "api-key", apiKey);
 }
 
-function withAlchemyApiKey(url: string, apiKey?: string): string {
+export function withAlchemyApiKey(url: string, apiKey?: string): string {
   if (!apiKey) {
     return url;
   }
@@ -59,7 +59,7 @@ function withAlchemyApiKey(url: string, apiKey?: string): string {
   return appendQueryParam(url, "api_key", apiKey);
 }
 
-function withQuickNodeApiKey(url: string, apiKey?: string): string {
+export function withQuickNodeApiKey(url: string, apiKey?: string): string {
   if (!apiKey) {
     return url;
   }

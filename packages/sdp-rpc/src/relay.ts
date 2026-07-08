@@ -8,9 +8,16 @@ import {
   type ProviderAvailabilityEntry,
   resolveOrganizationProviderEntitlements,
 } from "@sdp/types";
-import { applyApiKeyTemplate } from "./config";
+import {
+  applyApiKeyTemplate,
+  withAlchemyApiKey,
+  withHeliusApiKey,
+  withQuickNodeApiKey,
+} from "./config";
 import { SdpRpcError } from "./errors";
 import type { DatabaseClient, KVStore, KVStoreSet, RpcEnv } from "./types";
+
+export { withHeliusApiKey } from "./config";
 
 export type ManagedRpcProviderId = OrganizationRpcProvider;
 export type ResolvedRpcProviderId = ManagedRpcProviderId | "custom";
@@ -205,58 +212,6 @@ function isManagedRpcProviderId(value: string): value is ManagedRpcProviderId {
 
 function isProjectRpcProviderId(value: string): value is ProjectRpcProvider {
   return PROJECT_RPC_PROVIDER_SET.has(value);
-}
-
-function appendQueryParam(url: string, key: string, value: string): string {
-  try {
-    const parsed = new URL(url);
-    if (!parsed.searchParams.has(key)) {
-      parsed.searchParams.set(key, value);
-    }
-    return parsed.toString();
-  } catch {
-    return url;
-  }
-}
-
-export function withHeliusApiKey(url: string, apiKey?: string): string {
-  if (!apiKey) {
-    return url;
-  }
-
-  const templated = applyApiKeyTemplate(url, apiKey);
-  if (templated !== url) {
-    return templated;
-  }
-
-  return appendQueryParam(url, "api-key", apiKey);
-}
-
-function withAlchemyApiKey(url: string, apiKey?: string): string {
-  if (!apiKey) {
-    return url;
-  }
-
-  const templated = applyApiKeyTemplate(url, apiKey);
-  if (templated !== url) {
-    return templated;
-  }
-
-  if (url.endsWith("/v2")) {
-    return `${url}/${encodeURIComponent(apiKey)}`;
-  }
-  if (url.endsWith("/v2/")) {
-    return `${url}${encodeURIComponent(apiKey)}`;
-  }
-
-  return appendQueryParam(url, "api_key", apiKey);
-}
-
-export function withQuickNodeApiKey(url: string, apiKey?: string): string {
-  if (!apiKey) {
-    return url;
-  }
-  return applyApiKeyTemplate(url, apiKey);
 }
 
 function maskEndpoint(url: string): string {
