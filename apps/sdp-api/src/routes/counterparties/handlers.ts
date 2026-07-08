@@ -1,12 +1,5 @@
 import {
-  COUNTERPARTY_EMPLOYMENT_STATUSES,
   COUNTERPARTY_ENTITY_TYPES,
-  COUNTERPARTY_ID_TYPES,
-  COUNTERPARTY_INDUSTRY_SECTORS,
-  COUNTERPARTY_INTENDED_USE,
-  COUNTERPARTY_PEP_STATUSES,
-  COUNTERPARTY_SOURCE_OF_FUNDS,
-  COUNTERPARTY_YEARLY_INCOME,
   COUNTRIES,
   type Counterparty,
   type CounterpartyFieldOptionsResponse,
@@ -29,7 +22,6 @@ import {
   notFound,
 } from "@/lib/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
-import { bvnkOnrampStatusFromProviderData } from "@/lib/ramps/providers/bvnk";
 import { created, noContent, success } from "@/lib/response";
 import {
   advanceCounterpartyRequirements,
@@ -73,15 +65,6 @@ export const getCounterpartyFieldOptions = async (c: AppContext) => {
   const response: CounterpartyFieldOptionsResponse = {
     fields: {
       entityTypes: COUNTERPARTY_ENTITY_TYPES,
-      governmentIdTypes: COUNTERPARTY_ID_TYPES,
-      compliance: {
-        employmentStatuses: COUNTERPARTY_EMPLOYMENT_STATUSES,
-        sourceOfFunds: COUNTERPARTY_SOURCE_OF_FUNDS,
-        pepStatuses: COUNTERPARTY_PEP_STATUSES,
-        intendedUseOfAccount: COUNTERPARTY_INTENDED_USE,
-        estimatedYearlyIncome: COUNTERPARTY_YEARLY_INCOME,
-        employmentIndustrySectors: COUNTERPARTY_INDUSTRY_SECTORS,
-      },
       countries: COUNTRIES,
       usStates: US_STATES,
     },
@@ -119,13 +102,6 @@ export const listCounterparties = async (c: AppContext) => {
   return success(c, response);
 };
 
-/**
- * Lists a project's counterparty accounts of the requested `type`.
- *
- * Only `crypto_account` is supported today (active Solana wallets); the `type`
- * enum will widen as other account kinds gain pickers, at which point the
- * response becomes a discriminated union by `type`.
- */
 export const listProjectCounterpartyAccounts = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -220,34 +196,24 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     throw notFound("Counterparty");
   }
 
-  if (
-    query.data.provider === "bvnk" &&
-    query.data.direction === "onramp" &&
-    query.data.cryptoToken &&
-    query.data.destinationWallet &&
-    query.data.fiatCurrency
-  ) {
-    const gate = RAMP_PROVIDER_CLIENTS.bvnk.validateCounterparty(mapToCounterparty(counterparty), {
-      direction: "onramp",
-      providerData: counterparty.provider_data,
-    });
-    if (gate.status === "collect" || gate.status === "unsupported") {
-      return success(c, gate);
-    }
+  if (query.data.direction === "onramp") {
     const scope = await resolveScope(c);
     const destinationWalletAddress = resolveWalletAddress(
       scope.wallets,
       query.data.destinationWallet,
       "destinationWallet"
     );
-    return success(
-      c,
-      bvnkOnrampStatusFromProviderData(counterparty.provider_data, {
+    const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
+      mapToCounterparty(counterparty),
+      {
+        direction: query.data.direction,
+        providerData: counterparty.provider_data,
         cryptoToken: query.data.cryptoToken,
         fiatCurrency: query.data.fiatCurrency,
         destinationWalletAddress,
-      })
+      }
     );
+    return success(c, requirements);
   }
 
   const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
@@ -255,7 +221,8 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     {
       direction: query.data.direction,
       providerData: counterparty.provider_data,
-      ...("fiatCurrency" in query.data ? { fiatCurrency: query.data.fiatCurrency } : {}),
+      cryptoToken: query.data.cryptoToken,
+      fiatCurrency: query.data.fiatCurrency,
     }
   );
   return success(c, requirements);
@@ -291,12 +258,24 @@ export const submitCounterpartyRequirements = async (c: AppContext) => {
   }
 
   const input = parsed.data;
+  let destinationWalletAddress: string | undefined;
+  if (input.provider === "bvnk" && input.direction === "onramp") {
+    const scope = await resolveScope(c);
+    destinationWalletAddress = resolveWalletAddress(
+      scope.wallets,
+      input.destinationWallet,
+      "destinationWallet",
+      scope.auth
+    );
+  }
   const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
     mapToCounterparty(counterparty),
     {
       direction: input.direction,
       providerData: counterparty.provider_data,
+      ...("cryptoToken" in input ? { cryptoToken: input.cryptoToken } : {}),
       ...("fiatCurrency" in input ? { fiatCurrency: input.fiatCurrency } : {}),
+      ...(destinationWalletAddress ? { destinationWalletAddress } : {}),
     }
   );
 
@@ -354,7 +333,7 @@ export const createCounterparty = async (c: AppContext) => {
     entityType: parsed.data.entityType,
     displayName: parsed.data.displayName,
     email: parsed.data.email,
-    identity: parsed.data.identity ?? {},
+    identity: parsed.data.identity,
     createdBy,
   });
 

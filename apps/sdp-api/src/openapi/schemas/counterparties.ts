@@ -1,20 +1,9 @@
-import {
-  COUNTERPARTY_EMPLOYMENT_STATUSES,
-  COUNTERPARTY_ENTITY_TYPES,
-  COUNTERPARTY_ID_TYPES,
-  COUNTERPARTY_INDUSTRY_SECTORS,
-  COUNTERPARTY_INTENDED_USE,
-  COUNTERPARTY_PEP_STATUSES,
-  COUNTERPARTY_SOURCE_OF_FUNDS,
-  COUNTERPARTY_YEARLY_INCOME,
-} from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types";
 import {
   counterpartyAddressSchema as counterpartyAddressSchemaBase,
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
-  counterpartyGovernmentIdSchema as counterpartyGovernmentIdSchemaBase,
   counterpartyIdentitySchema as counterpartyIdentitySchemaBase,
-  counterpartyIdSchema as counterpartyIdSchemaBase,
-  counterpartyIdTypeSchema as counterpartyIdTypeSchemaBase,
+  counterpartyIdParamsSchema as counterpartyIdParamsSchemaBase,
   counterpartyStatusSchema as counterpartyStatusSchemaBase,
   createCounterpartySchema as createCounterpartySchemaBase,
   listCounterpartiesQuerySchema as listCounterpartiesQuerySchemaBase,
@@ -37,10 +26,13 @@ import {
   z,
 } from "./base";
 
-export const counterpartyIdParamSchema = withOpenApi(counterpartyIdSchemaBase, {
-  description: "Counterparty identifier.",
-  example: "cp_example",
-});
+export const counterpartyIdParamSchema = withOpenApi(
+  counterpartyIdParamsSchemaBase.shape.counterpartyId,
+  {
+    description: "Counterparty identifier.",
+    example: "cp_example",
+  }
+);
 
 export const counterpartyEntityTypeSchema = withOpenApi(counterpartyEntityTypeSchemaBase, {
   description: "Counterparty entity type.",
@@ -60,12 +52,6 @@ export const counterpartyAccountKindSchema = withOpenApi(counterpartyAccountKind
 export const counterpartyAccountStatusSchema = z
   .enum(["active", "archived"])
   .openapi({ description: "Counterparty account status.", example: "active" });
-
-export const counterpartyIdTypeSchema = withOpenApi(counterpartyIdTypeSchemaBase, {
-  description:
-    "Government ID document type: PAS (passport), DRV (driver's license), STA (state/national ID), GOV (other government-issued).",
-  example: "PAS",
-});
 
 export const counterpartyAddressSchema = withOpenApi(
   counterpartyAddressSchemaBase.extend({
@@ -98,34 +84,6 @@ export const counterpartyAddressSchema = withOpenApi(
   { description: "Postal address for a counterparty." }
 );
 
-export const counterpartyGovernmentIdSchema = withOpenApi(
-  counterpartyGovernmentIdSchemaBase.extend({
-    type: counterpartyIdTypeSchema,
-    number: withOpenApi(counterpartyGovernmentIdSchemaBase.shape.number, {
-      description: "Government ID number.",
-      example: "X12345678",
-    }),
-    issueCountry: withOpenApi(counterpartyGovernmentIdSchemaBase.shape.issueCountry, {
-      description: "ISO 3166-1 country code of the issuing authority.",
-      example: "US",
-    }),
-    subdivisionCode: withOpenApi(counterpartyGovernmentIdSchemaBase.shape.subdivisionCode, {
-      description:
-        "Subdivision code of the issuing authority — bare 2-letter code (e.g. `CA`); ISO 3166-2 (`US-CA`) is also accepted, but some providers require the bare form.",
-      example: "CA",
-    }),
-    issueDate: withOpenApi(isoDateSchema.optional(), {
-      description: "Issue date (YYYY-MM-DD).",
-      example: "2018-06-01",
-    }),
-    expiryDate: withOpenApi(isoDateSchema.optional(), {
-      description: "Expiry date (YYYY-MM-DD).",
-      example: "2028-06-01",
-    }),
-  }),
-  { description: "Government-issued identity document." }
-);
-
 export const counterpartyIdentitySchema = withOpenApi(
   counterpartyIdentitySchemaBase.extend({
     firstName: withOpenApi(counterpartyIdentitySchemaBase.shape.firstName, {
@@ -144,7 +102,7 @@ export const counterpartyIdentitySchema = withOpenApi(
       description: "Second family name (used in some locales).",
       example: "Garcia",
     }),
-    dateOfBirth: withOpenApi(isoDateSchema.optional(), {
+    dateOfBirth: withOpenApi(isoDateSchema, {
       description: "Date of birth (YYYY-MM-DD).",
       example: "1990-01-15",
     }),
@@ -152,27 +110,10 @@ export const counterpartyIdentitySchema = withOpenApi(
       description: "Contact phone number in E.164 format.",
       example: "+14155551234",
     }),
-    address: counterpartyAddressSchema.optional(),
-    birthCountryCode: withOpenApi(counterpartyIdentitySchemaBase.shape.birthCountryCode, {
-      description: "ISO 3166-1 country code of birth.",
-      example: "US",
-    }),
-    citizenshipCountryCode: withOpenApi(
-      counterpartyIdentitySchemaBase.shape.citizenshipCountryCode,
-      {
-        description: "ISO 3166-1 country code of citizenship.",
-        example: "US",
-      }
-    ),
-    governmentId: counterpartyGovernmentIdSchema.optional(),
-    compliance: withOpenApi(counterpartyIdentitySchemaBase.shape.compliance, {
-      description:
-        "KYC/CDD data collected for fiat on-ramp providers (required for US individuals).",
-    }),
+    address: counterpartyAddressSchema,
   }),
   {
-    description:
-      "Identity details for the counterparty. Additional provider-specific fields are accepted and preserved.",
+    description: "Identity details for the counterparty.",
   }
 );
 
@@ -343,15 +284,6 @@ export const counterpartyFieldOptionsResponseSchema = withOpenApi(
   z.object({
     fields: z.object({
       entityTypes: z.array(z.enum(COUNTERPARTY_ENTITY_TYPES)),
-      governmentIdTypes: z.array(z.enum(COUNTERPARTY_ID_TYPES)),
-      compliance: z.object({
-        employmentStatuses: z.array(z.enum(COUNTERPARTY_EMPLOYMENT_STATUSES)),
-        sourceOfFunds: z.array(z.enum(COUNTERPARTY_SOURCE_OF_FUNDS)),
-        pepStatuses: z.array(z.enum(COUNTERPARTY_PEP_STATUSES)),
-        intendedUseOfAccount: z.array(z.enum(COUNTERPARTY_INTENDED_USE)),
-        estimatedYearlyIncome: z.array(z.enum(COUNTERPARTY_YEARLY_INCOME)),
-        employmentIndustrySectors: z.array(z.enum(COUNTERPARTY_INDUSTRY_SECTORS)),
-      }),
       countries: z.array(countrySchema),
       usStates: z.array(countrySchema),
     }),
