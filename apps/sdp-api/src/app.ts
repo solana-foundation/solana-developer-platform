@@ -9,11 +9,12 @@
  * both runtimes.
  */
 
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
-
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError } from "@/lib/errors";
 import { redactCredentialSecrets, redactCredentialString } from "@/lib/redaction";
 import { corsMiddleware } from "@/middleware/cors";
@@ -74,6 +75,24 @@ const KV_FREE_PATHS = [
   "/webhooks",
   "/v1/issuance/tokens/*/metadata.json",
 ];
+
+function mapErrorStatusCode(statusCode: number): ContentfulStatusCode {
+  switch (statusCode) {
+    case 202:
+    case 400:
+    case 401:
+    case 403:
+    case 404:
+    case 409:
+    case 429:
+    case 500:
+    case 502:
+    case 503:
+      return statusCode;
+    default:
+      return 500;
+  }
+}
 
 function mapSigningError(err: SigningError): {
   status: 400 | 404 | 409 | 502 | 504;
@@ -355,7 +374,23 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
           error: err.toResponse().error,
           meta: { requestId },
         },
-        err.statusCode as 400
+        mapErrorStatusCode(err.statusCode)
+      );
+    }
+
+    if (err instanceof SdpRpcError) {
+      const details = err.details ? redactCredentialSecrets(err.details) : undefined;
+      c.header("X-SDP-Trace-ID", traceId);
+      return c.json(
+        {
+          error: {
+            code: err.code,
+            message: redactCredentialString(err.message),
+            ...(details && { details }),
+          },
+          meta: { requestId },
+        },
+        mapErrorStatusCode(err.statusCode)
       );
     }
 

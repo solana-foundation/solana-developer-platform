@@ -28,6 +28,7 @@ type MutableRpcEnv = {
   SOLANA_RPC_ALCHEMY_API_KEY?: string;
   SOLANA_RPC_QUICKNODE_URL?: string;
   SOLANA_RPC_QUICKNODE_API_KEY?: string;
+  SDP_DEPLOYMENT_MODE?: string;
 };
 
 const rpcEnv = env as MutableRpcEnv;
@@ -105,6 +106,7 @@ describe("rpc-relay.service", () => {
     rpcEnv.SOLANA_RPC_ALCHEMY_API_KEY = undefined;
     rpcEnv.SOLANA_RPC_QUICKNODE_URL = undefined;
     rpcEnv.SOLANA_RPC_QUICKNODE_API_KEY = undefined;
+    rpcEnv.SDP_DEPLOYMENT_MODE = undefined;
   });
 
   it("identifies transaction JSON-RPC methods", () => {
@@ -216,6 +218,22 @@ describe("rpc-relay.service", () => {
     expect(second.providerId).toBe("helius");
     expect(first.selectionMode).toBe("round_robin_default");
     expect(second.selectionMode).toBe("round_robin_default");
+  });
+
+  it("rejects invalid deployment mode values", async () => {
+    rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+    rpcEnv.SDP_DEPLOYMENT_MODE = "selfhosted";
+
+    await expect(
+      resolveRpcTarget({
+        env: appEnv,
+        kv,
+        db,
+        organizationId: TEST_ORG_ID,
+        authProjectId: null,
+        requestedProjectId: null,
+      })
+    ).rejects.toThrow('Invalid SDP_DEPLOYMENT_MODE: "selfhosted"');
   });
 
   it("honors default provider ordering and exposes quicknode in provider list", async () => {

@@ -71,6 +71,9 @@ importers:
       '@sdp/env-config':
         specifier: workspace:*
         version: link:../../packages/sdp-env-config
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../../packages/sdp-rpc
       '@sdp/types':
         specifier: workspace:*
         version: link:../../packages/sdp-types
@@ -429,6 +432,18 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+
+  packages/sdp-rpc:
+    dependencies:
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:../sdp-types
+      '@solana/addresses':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/kit':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
 
   packages/sdp-types:
     dependencies:
