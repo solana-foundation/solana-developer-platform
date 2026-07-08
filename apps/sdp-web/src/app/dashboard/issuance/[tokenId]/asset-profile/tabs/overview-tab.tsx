@@ -15,6 +15,7 @@ import {
   type LucideIcon,
   RefreshCw,
   TriangleAlert,
+  Wallet,
 } from "lucide-react";
 import { cn, formatDisplayLabel } from "@/lib/utils";
 import { getCategoryPresentation, getSubTypePresentation } from "../../../create/asset-taxonomy";
@@ -54,7 +55,7 @@ export function OverviewTab({
       {/* Identity hero — same grammar as the creation flow's public preview */}
       <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
         <div className="grid gap-5 md:grid-cols-2">
-          <div className="min-w-0">
+          <div className="flex min-w-0 flex-col">
             <p
               className={
                 token.description
@@ -64,47 +65,15 @@ export function OverviewTab({
             >
               {token.description || "No description yet — add one in the Details tab."}
             </p>
-            {website ? (
-              websiteHref ? (
-                <a
-                  href={websiteHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-2.5 inline-flex items-center gap-1.5 text-[13px] font-medium text-[#1c1c1d] hover:underline"
-                >
-                  <Globe className="h-3.5 w-3.5 text-[rgba(28,28,29,0.5)]" />
-                  {website}
-                  <ArrowUpRight className="h-3 w-3 shrink-0" />
-                </a>
-              ) : (
-                <span className="mt-2.5 inline-flex items-center gap-1.5 text-[13px] font-medium text-[rgba(28,28,29,0.62)]">
-                  <Globe className="h-3.5 w-3.5 text-[rgba(28,28,29,0.5)]" />
-                  {website}
-                </span>
-              )
-            ) : null}
-            {token.mintAddress ? (
-              <div className="mt-3 flex items-center gap-2 rounded-lg border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-3 py-2">
-                <span className="min-w-0 truncate text-[13px] text-[rgba(28,28,29,0.72)]">
-                  {token.mintAddress}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void ops.handleCopy(token.mintAddress)}
-                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[rgba(28,28,29,0.5)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
-                  aria-label="Copy token address"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ) : (
-              <div className="mt-3 flex items-center gap-2 rounded-lg border border-dashed border-[rgba(28,28,29,0.14)] px-3 py-2 text-[13px] text-[rgba(28,28,29,0.5)]">
-                Not deployed yet — no on-chain address.
-              </div>
-            )}
+            <IdentityFields
+              website={website}
+              websiteHref={websiteHref}
+              mintAddress={token.mintAddress}
+              onCopy={(value) => void ops.handleCopy(value)}
+            />
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5 md:border-l md:border-[rgba(28,28,29,0.08)] md:pl-5">
+          <div className="grid grid-cols-2 gap-0 md:border-l md:border-[rgba(28,28,29,0.08)] md:pl-5">
             <StatTile icon={Activity} label="Status" value={STATUS_LABELS[token.status]} />
             <StatTile
               icon={Coins}
@@ -204,6 +173,69 @@ export function OverviewTab({
   );
 }
 
+function IdentityFields({
+  website,
+  websiteHref,
+  mintAddress,
+  onCopy,
+}: {
+  website: string;
+  websiteHref: string | undefined;
+  mintAddress: string | null;
+  onCopy: (value: string) => void;
+}) {
+  return (
+    <div className="mt-4 flex flex-col gap-3 md:mt-auto">
+      {website ? (
+        <div>
+          <div className="flex items-center gap-1.5 text-[rgba(28,28,29,0.5)]">
+            <Globe className="h-3 w-3 shrink-0" />
+            <span className="text-[11px]">Website</span>
+          </div>
+          {websiteHref ? (
+            <a
+              href={websiteHref}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-0.5 inline-flex w-fit max-w-full items-center gap-1 text-[13px] font-medium text-[#1c1c1d] hover:underline"
+            >
+              <span className="truncate">{website}</span>
+              <ArrowUpRight className="h-3 w-3 shrink-0" />
+            </a>
+          ) : (
+            <p className="mt-0.5 truncate text-[13px] font-medium text-[rgba(28,28,29,0.62)]">
+              {website}
+            </p>
+          )}
+        </div>
+      ) : null}
+      <div>
+        <div className="flex items-center gap-1.5 text-[rgba(28,28,29,0.5)]">
+          <Wallet className="h-3 w-3 shrink-0" />
+          <span className="text-[11px]">Mint address</span>
+        </div>
+        {mintAddress ? (
+          <div className="mt-0.5 flex w-fit max-w-full items-center gap-1.5">
+            <span className="min-w-0 truncate text-[13px] font-medium text-[#1c1c1d]">
+              {mintAddress}
+            </span>
+            <button
+              type="button"
+              onClick={() => onCopy(mintAddress)}
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[rgba(28,28,29,0.5)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
+              aria-label="Copy token address"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <p className="mt-0.5 text-[13px] text-[rgba(28,28,29,0.4)]">Not deployed yet</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function StatTile({
   icon: Icon,
   label,
@@ -219,12 +251,7 @@ function StatTile({
 }) {
   const hasValue = value !== null && value.trim().length > 0;
   return (
-    <div
-      className={cn(
-        "rounded-lg border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-3 py-2.5",
-        className
-      )}
-    >
+    <div className={cn("px-3 py-2.5", className)}>
       <div className="flex items-center gap-1.5 text-[rgba(28,28,29,0.5)]">
         <Icon className="h-3 w-3 shrink-0" />
         <span className="text-[11px]">{label}</span>
