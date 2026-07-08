@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { isDecimalString } from "@/lib/amount";
+import {
+  assertAssetTypeSupported,
+  assetCategorySchema,
+  assetTypeSchema,
+  issuanceMetadataSchema,
+} from "../asset-profiles/schemas";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Extension Schemas
@@ -121,12 +127,29 @@ export const createTokenSchema = z.object({
 
 export type CreateTokenInput = z.infer<typeof createTokenSchema>;
 
+// Body for POST /v1/issuance/tokens/asset-profile: the full token-create payload
+// plus the asset-profile fields, so a token and its profile are created together.
+// `superRefine` enforces the same category<->type consistency as the standalone
+// asset-profile create (public metadata is server-computed, never accepted here).
+export const createTokenWithAssetProfileSchema = createTokenSchema
+  .extend({
+    assetCategory: assetCategorySchema.default("generic"),
+    assetType: assetTypeSchema.default("generic"),
+    issuanceMetadata: issuanceMetadataSchema.optional(),
+  })
+  .superRefine(assertAssetTypeSupported);
+
+export type CreateTokenWithAssetProfileInput = z.infer<typeof createTokenWithAssetProfileSchema>;
+
 export const updateTokenSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(500).nullable().optional(),
   uri: z.string().url().nullable().optional(),
   imageUrl: z.string().url().nullable().optional(),
   status: z.enum(["active", "paused"]).optional(),
+  // Access-control enforcement input for deploy; only accepted while the token
+  // is still undeployed (the handler rejects it after deployment).
+  requiresAllowlist: z.boolean().optional(),
 });
 
 export const mintSchema = z.object({

@@ -202,6 +202,9 @@ export interface Env {
   PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE?: string;
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
 
+  // Asset Profiles backend feature flag
+  ASSET_PROFILES_ENABLED?: string;
+
   // Compliance providers
   RANGE_API_KEY?: string;
   RANGE_API_BASE_URL?: string;

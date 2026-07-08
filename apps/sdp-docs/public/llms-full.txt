@@ -4915,6 +4915,7 @@ Source: https://platform.solana.com/docs/reference/api
 - [Issuance](/docs/reference/api/issuance)
 - [Payments](/docs/reference/api/payments)
 - [Compliance](/docs/reference/api/compliance)
+- [Asset Profiles](/docs/reference/api/asset-profiles)
 
 ---
 
@@ -5088,6 +5089,22 @@ Source: https://platform.solana.com/docs/reference/api/compliance
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `POST` | `/v1/compliance/address-screenings` | Screen an address across configured compliance providers |
+
+---
+
+### Asset Profiles
+Source: https://platform.solana.com/docs/reference/api/asset-profiles
+
+> Issued-asset identity and metadata profiles, plus the public token metadata URI.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/asset-profiles` | List asset profiles |
+| `POST` | `/v1/asset-profiles` | Create asset profile |
+| `DELETE` | `/v1/asset-profiles/{profileId}` | Archive asset profile |
+| `GET` | `/v1/asset-profiles/{profileId}` | Get asset profile |
+| `PATCH` | `/v1/asset-profiles/{profileId}` | Update asset profile |
+| `GET` | `/v1/asset-profiles/metadata` | Get asset profile field options |
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.
