@@ -77,6 +77,15 @@ export const initializeDfnsSchema = z.object({
   walletLabel: z.string().max(100).optional(),
 });
 
+export const initializeIbmHavenSchema = z.object({
+  provider: z.literal("ibm_haven"),
+  apiBaseUrl: z.string().url().optional(),
+  network: z.enum(["Solana", "SolanaDevnet"]).optional(),
+  walletId: z.string().min(1).optional(),
+  signingKeyId: z.string().min(1).optional(),
+  walletLabel: z.string().max(100).optional(),
+});
+
 export const initializeAnchorageSchema = z.object({
   provider: z.literal("anchorage"),
   apiBaseUrl: z.string().url().optional(),
@@ -100,6 +109,7 @@ export const initializeSigningSchema = z.discriminatedUnion("provider", [
   initializeParaSchema,
   initializeTurnkeySchema,
   initializeDfnsSchema,
+  initializeIbmHavenSchema,
   initializeAnchorageSchema,
   initializeUtilaSchema,
 ]);
@@ -139,6 +149,7 @@ export const switchSigningSchema = z.discriminatedUnion("provider", [
   initializeParaSchema,
   initializeTurnkeySchema,
   initializeDfnsSchema,
+  initializeIbmHavenSchema,
   initializeAnchorageSchema,
   initializeUtilaSchema,
 ]);

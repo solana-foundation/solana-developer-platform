@@ -25,6 +25,7 @@ export {
   KeychainCoinbaseAdapter,
   KeychainDfnsAdapter,
   KeychainFireblocksAdapter,
+  KeychainIbmHavenAdapter,
   KeychainMemoryAdapter,
   KeychainParaAdapter,
   KeychainPrivyAdapter,

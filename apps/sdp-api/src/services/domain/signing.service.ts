@@ -27,6 +27,8 @@ import {
 } from "@/services/custody-provider-lifecycle.service";
 import {
   createDfnsApiClient,
+  createIbmHavenApiClient,
+  IBM_HAVEN_PROVIDER_LABEL,
   normalizeDfnsWalletId,
   resolveDfnsNetwork,
 } from "@/services/dfns/client";
@@ -36,6 +38,7 @@ import {
   type CoinbaseCdpProviderConfig,
   type DfnsProviderConfig,
   type FireblocksProviderConfig,
+  type IbmHavenProviderConfig,
   type LocalProviderConfig,
   type ParaProviderConfig,
   type PrivyProviderConfig,
@@ -46,6 +49,7 @@ import {
 import {
   normalizeAnchorageWalletId,
   normalizeCoinbaseCdpWalletId,
+  normalizeIbmHavenWalletId,
   normalizeParaWalletId,
   normalizePrivyWalletId,
   normalizeTurnkeyWalletId,
@@ -206,6 +210,20 @@ export interface InitTurnkeySigningOptions {
  * Options for initializing org signing with DFNS provider.
  */
 export interface InitDfnsSigningOptions {
+  apiBaseUrl?: string;
+  network?: "Solana" | "SolanaDevnet";
+  walletId?: string;
+  signingKeyId?: string;
+  walletLabel?: string;
+}
+
+/**
+ * Options for initializing org signing with IBM Digital Asset Haven.
+ *
+ * IBM Digital Asset Haven is a white-label Dfns deployment; credentials are
+ * platform-managed via IBM_HAVEN_* env bindings.
+ */
+export interface InitIbmHavenSigningOptions {
   apiBaseUrl?: string;
   network?: "Solana" | "SolanaDevnet";
   walletId?: string;
@@ -1092,6 +1110,83 @@ export class SigningService {
   }
 
   /**
+   * Initialize signing for an organization with IBM Digital Asset Haven.
+   *
+   * IBM Digital Asset Haven is a white-label Dfns deployment, so this reuses the
+   * Dfns wallet API with IBM-hosted credentials (IBM_HAVEN_* env bindings).
+   */
+  async initializeIbmHavenSigning(
+    orgId: string,
+    projectId: string | undefined,
+    options: InitIbmHavenSigningOptions
+  ): Promise<InitSigningResult> {
+    const existing = await this.configStore.findActiveByProvider(orgId, projectId, "ibm_haven");
+    if (existing) {
+      throw new SigningError(
+        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        "ALREADY_INITIALIZED"
+      );
+    }
+
+    const client = await createIbmHavenApiClient(this.env, { apiBaseUrl: options.apiBaseUrl });
+    const resolvedNetwork = resolveDfnsNetwork(options.network, IBM_HAVEN_PROVIDER_LABEL);
+
+    const wallet = options.walletId
+      ? await client.wallets.getWallet({ walletId: options.walletId })
+      : await client.wallets.createWallet({
+          body: {
+            network: resolvedNetwork,
+            ...(options.walletLabel ? { name: options.walletLabel } : {}),
+            ...(options.signingKeyId ? { signingKey: { id: options.signingKeyId } } : {}),
+          },
+        });
+
+    if (!wallet?.id || !wallet?.address) {
+      throw new SigningError(
+        "IBM Digital Asset Haven wallet provisioning failed: API returned incomplete wallet payload",
+        "NETWORK_ERROR"
+      );
+    }
+
+    const walletId = normalizeIbmHavenWalletId(wallet.id);
+    const publicKey = wallet.address as Address;
+    const walletNetwork =
+      wallet.network === "Solana" || wallet.network === "SolanaDevnet"
+        ? wallet.network
+        : resolvedNetwork;
+
+    const configJson: IbmHavenProviderConfig = {
+      provider: "ibm_haven",
+      apiBaseUrl: options.apiBaseUrl,
+      network: walletNetwork,
+      walletId: wallet.id,
+      signingKeyId: wallet.signingKey?.id ?? options.signingKeyId,
+    };
+
+    const configId = await this.configStore.upsert(orgId, projectId, {
+      provider: "ibm_haven",
+      defaultWalletId: walletId,
+    });
+    await this.ensureScopeDefaultConfig(orgId, projectId, configId, "ibm_haven");
+    await this.updateConfigJson(configId, configJson);
+
+    await this.configStore.createWallet(configId, {
+      walletId,
+      publicKey,
+      label: options.walletLabel ?? "IBM Digital Asset Haven Root Wallet",
+      purpose: "root",
+    });
+
+    this.providerCache.delete(configId);
+
+    return {
+      configId,
+      publicKey,
+      walletId,
+    };
+  }
+
+  /**
    * Initialize wallet lifecycle for an organization with Anchorage provider.
    *
    * Anchorage does not currently support transaction signing in SDP.
@@ -1480,6 +1575,7 @@ export class SigningService {
       | ParaProviderConfig
       | TurnkeyProviderConfig
       | DfnsProviderConfig
+      | IbmHavenProviderConfig
       | AnchorageProviderConfig
       | UtilaProviderConfig
   ): Promise<void> {

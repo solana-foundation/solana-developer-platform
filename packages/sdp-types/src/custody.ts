@@ -6,6 +6,7 @@ export const CUSTODY_PROVIDERS = [
   "para",
   "turnkey",
   "dfns",
+  "ibm_haven",
   "anchorage",
   "utila",
 ] as const;
@@ -19,6 +20,7 @@ export const FULL_SIGNING_CUSTODY_PROVIDERS = [
   "para",
   "turnkey",
   "dfns",
+  "ibm_haven",
   "utila",
 ] as const;
 export type FullSigningCustodyProvider = (typeof FULL_SIGNING_CUSTODY_PROVIDERS)[number];
@@ -61,6 +63,11 @@ export const CUSTODY_PROVIDER_CAPABILITIES: Record<CustodyProvider, CustodyProvi
     supportsWalletDeletion: false,
   },
   dfns: {
+    supportsSigning: true,
+    supportsAdditionalWalletCreation: true,
+    supportsWalletDeletion: false,
+  },
+  ibm_haven: {
     supportsSigning: true,
     supportsAdditionalWalletCreation: true,
     supportsWalletDeletion: false,
@@ -129,6 +136,16 @@ export interface DfnsCustodyOptions {
   signingKeyId?: string;
 }
 
+// IBM Digital Asset Haven is a white-label deployment of the Dfns WaaS API, so it
+// reuses the Dfns request/signing surface with an IBM-hosted base URL.
+export interface IbmHavenCustodyOptions {
+  provider: "ibm_haven";
+  apiBaseUrl?: string;
+  network?: DfnsCustodyNetwork;
+  walletId?: string;
+  signingKeyId?: string;
+}
+
 export interface AnchorageCustodyOptions {
   provider: "anchorage";
   apiBaseUrl?: string;
@@ -176,6 +193,11 @@ export interface InitializeDfnsSigningRequest extends DfnsCustodyOptions {
   walletLabel?: string;
 }
 
+export interface InitializeIbmHavenSigningRequest extends IbmHavenCustodyOptions {
+  projectId?: string;
+  walletLabel?: string;
+}
+
 export interface InitializeAnchorageSigningRequest extends AnchorageCustodyOptions {
   projectId?: string;
   walletLabel?: string;
@@ -194,6 +216,7 @@ export type InitializeSigningRequest =
   | InitializeParaSigningRequest
   | InitializeTurnkeySigningRequest
   | InitializeDfnsSigningRequest
+  | InitializeIbmHavenSigningRequest
   | InitializeAnchorageSigningRequest
   | InitializeUtilaSigningRequest;
 
@@ -209,6 +232,7 @@ export type SwitchSigningRequest =
   | InitializeParaSigningRequest
   | InitializeTurnkeySigningRequest
   | InitializeDfnsSigningRequest
+  | InitializeIbmHavenSigningRequest
   | InitializeAnchorageSigningRequest
   | InitializeUtilaSigningRequest;
 

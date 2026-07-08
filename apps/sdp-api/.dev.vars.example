@@ -109,6 +109,14 @@ FEE_PAYMENT_PROVIDER=kora
 # Automated Utila signer resources. Omit to default to users/$UTILA_SERVICE_ACCOUNT_EMAIL.
 # UTILA_DESIGNATED_SIGNERS=users/your-service-account@vault.utilaserviceaccount.io
 
+# IBM Digital Asset Haven platform signer (required for ibm_haven custody provider)
+# SIGNING_PROVIDER=ibm_haven
+# IBM_HAVEN_AUTH_TOKEN=YOUR_IBM_HAVEN_AUTH_TOKEN
+# IBM_HAVEN_CREDENTIAL_ID=YOUR_IBM_HAVEN_CREDENTIAL_ID
+# IBM_HAVEN_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
+# IBM_HAVEN_API_BASE_URL=https://api.digitalassets.ibm.com
+# IBM_HAVEN_WALLET_ID=YOUR_DEFAULT_IBM_HAVEN_WALLET_ID
+
 # Clerk auth + webhook
 # See docs/self-hosting/clerk-setup.md for the end-to-end walkthrough
 # (account creation, JWT template, webhook relay via Svix CLI).

@@ -13,13 +13,19 @@
  * - "para": Para hosted wallets (KeychainParaAdapter)
  * - "turnkey": Turnkey hosted wallets (KeychainTurnkeyAdapter)
  * - "dfns": DFNS hosted wallets (KeychainDfnsAdapter)
+ * - "ibm_haven": IBM Digital Asset Haven hosted wallets (KeychainIbmHavenAdapter)
  * - "utila": Utila vault wallets (KeychainUtilaAdapter)
  */
 
 import { parsePostgresJson } from "@/db/postgres-utils";
 import type { CustodyProvider } from "@/services/custody/providers";
 import { normalizePem } from "@/services/custody/provisioning.common";
-import { createDfnsApiClient, normalizeDfnsWalletId } from "@/services/dfns/client";
+import {
+  createDfnsApiClient,
+  createIbmHavenApiClient,
+  normalizeDfnsWalletId,
+} from "@/services/dfns/client";
+import { denormalizeIbmHavenWalletId } from "@/services/domain/signing/provider-wallet-ids";
 import type { SigningPort } from "@/services/ports";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
@@ -30,6 +36,7 @@ import {
   type KeychainDfnsConfig,
   KeychainFireblocksAdapter,
   type KeychainFireblocksConfig,
+  KeychainIbmHavenAdapter,
   KeychainMemoryAdapter,
   KeychainParaAdapter,
   type KeychainParaConfig,
@@ -97,6 +104,8 @@ export async function createSigningAdapterFromEnv(env: Env): Promise<SigningPort
       return createTurnkeyAdapterFromEnv(env);
     case "dfns":
       return createDfnsAdapterFromEnv(env);
+    case "ibm_haven":
+      return createIbmHavenAdapterFromEnv(env);
     case "utila":
       return createUtilaAdapterFromEnv(env);
     case "local":
@@ -150,6 +159,8 @@ export async function createSigningAdapterFromConfig(
       return createTurnkeyAdapterFromRecord(record, env);
     case "dfns":
       return createDfnsAdapterFromRecord(record, env);
+    case "ibm_haven":
+      return createIbmHavenAdapterFromRecord(record, env);
     case "utila":
       return createUtilaAdapterFromRecord(record, env);
     case "local":
@@ -232,6 +243,12 @@ interface ParaConfigJson {
 }
 
 interface DfnsConfigJson {
+  provider?: string;
+  apiBaseUrl?: string;
+  walletId?: string;
+}
+
+interface IbmHavenConfigJson {
   provider?: string;
   apiBaseUrl?: string;
   walletId?: string;
@@ -597,6 +614,53 @@ async function createDfnsAdapterFromRecord(
   return new KeychainDfnsAdapter(config);
 }
 
+async function createIbmHavenAdapterFromEnv(env: Env): Promise<KeychainIbmHavenAdapter> {
+  const walletId = env.IBM_HAVEN_WALLET_ID;
+  if (!walletId) {
+    throw new SigningError(
+      "IBM Digital Asset Haven environment variables not configured: IBM_HAVEN_WALLET_ID",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const config: KeychainDfnsConfig = {
+    client: await createIbmHavenApiClient(env),
+    defaultWalletId: denormalizeIbmHavenWalletId(walletId),
+  };
+
+  return new KeychainIbmHavenAdapter(config);
+}
+
+async function createIbmHavenAdapterFromRecord(
+  record: SigningConfigRecord,
+  env: Env
+): Promise<KeychainIbmHavenAdapter> {
+  const parsed = parseSigningConfigJson<IbmHavenConfigJson>(record, "IBM Digital Asset Haven");
+
+  if (parsed.provider && parsed.provider !== "ibm_haven") {
+    throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  const defaultWalletId =
+    (record.defaultWalletId ? denormalizeIbmHavenWalletId(record.defaultWalletId) : undefined) ??
+    parsed.walletId ??
+    (env.IBM_HAVEN_WALLET_ID ? denormalizeIbmHavenWalletId(env.IBM_HAVEN_WALLET_ID) : undefined);
+
+  if (!defaultWalletId) {
+    throw new SigningError(
+      "IBM Digital Asset Haven config missing default wallet and env is not configured",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const config: KeychainDfnsConfig = {
+    client: await createIbmHavenApiClient(env, { apiBaseUrl: parsed.apiBaseUrl }),
+    defaultWalletId,
+  };
+
+  return new KeychainIbmHavenAdapter(config);
+}
+
 function createUtilaAdapterFromRecord(record: SigningConfigRecord, env: Env): KeychainUtilaAdapter {
   const parsed = parseSigningConfigJson<UtilaConfigJson>(record, "Utila");
 
@@ -650,6 +714,7 @@ export {
   type KeychainDfnsConfig,
   KeychainFireblocksAdapter,
   type KeychainFireblocksConfig,
+  KeychainIbmHavenAdapter,
   KeychainMemoryAdapter,
   KeychainParaAdapter,
   type KeychainParaConfig,
