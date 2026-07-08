@@ -2,7 +2,9 @@ import {
   COUNTERPARTY_ENTITY_TYPES,
   COUNTRIES,
   type Counterparty,
+  type CounterpartyEntityType,
   type CounterpartyFieldOptionsResponse,
+  type CounterpartyIdentity,
   type CounterpartyResponse,
   type ListCounterpartiesResponse,
   type ListProjectCounterpartyAccountsResponse,
@@ -362,6 +364,54 @@ export const createCounterparty = async (c: AppContext) => {
   return created(c, response);
 };
 
+/**
+ * Rejects an update whose resulting (entityType, identity) pair would violate the
+ * discriminated identity contract, loading the stored row for whichever side the
+ * request omitted. Returns the re-parsed identity when the request provided one.
+ */
+async function validateUpdatedIdentity(
+  repo: ReturnType<typeof getCounterpartiesRepository>,
+  input: {
+    counterpartyId: string;
+    organizationId: string;
+    projectId: string;
+    entityType: CounterpartyEntityType | undefined;
+    identity: CounterpartyIdentity | undefined;
+  }
+): Promise<CounterpartyIdentity | undefined> {
+  if (input.identity === undefined && input.entityType === undefined) {
+    return undefined;
+  }
+  let entityType = input.entityType;
+  let identity: unknown = input.identity;
+  if (entityType === undefined || identity === undefined) {
+    const current = await repo.getCounterpartyById(input);
+    if (!current) {
+      throw notFound("Counterparty");
+    }
+    if (entityType === undefined) {
+      entityType = current.entity_type;
+    }
+    if (identity === undefined) {
+      identity = current.identity;
+    }
+  }
+  const identitySchemaForEntityType =
+    entityType === "individual" ? counterpartyIdentitySchema : counterpartyBusinessIdentitySchema;
+  const result = identitySchemaForEntityType.safeParse(identity);
+  if (!result.success) {
+    if (input.identity === undefined) {
+      throw badRequest("Changing entityType requires a matching identity in the same request.", {
+        errors: z.treeifyError(result.error),
+      });
+    }
+    throw badRequest("identity does not match the counterparty's entityType.", {
+      errors: z.treeifyError(result.error),
+    });
+  }
+  return input.identity === undefined ? undefined : result.data;
+}
+
 export const updateCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -392,28 +442,15 @@ export const updateCounterparty = async (c: AppContext) => {
     }
   }
 
-  if (parsed.data.identity) {
-    let entityType = parsed.data.entityType;
-    if (!entityType) {
-      const current = await repo.getCounterpartyById({
-        counterpartyId,
-        organizationId: auth.organizationId,
-        projectId,
-      });
-      if (!current) {
-        throw notFound("Counterparty");
-      }
-      entityType = current.entity_type;
-    }
-    const identitySchemaForEntityType =
-      entityType === "individual" ? counterpartyIdentitySchema : counterpartyBusinessIdentitySchema;
-    const identity = identitySchemaForEntityType.safeParse(parsed.data.identity);
-    if (!identity.success) {
-      throw badRequest("identity does not match the counterparty's entityType.", {
-        errors: z.treeifyError(identity.error),
-      });
-    }
-    parsed.data.identity = identity.data;
+  const validatedIdentity = await validateUpdatedIdentity(repo, {
+    counterpartyId,
+    organizationId: auth.organizationId,
+    projectId,
+    entityType: parsed.data.entityType,
+    identity: parsed.data.identity,
+  });
+  if (validatedIdentity !== undefined) {
+    parsed.data.identity = validatedIdentity;
   }
 
   const updated = await repo.updateCounterparty({
