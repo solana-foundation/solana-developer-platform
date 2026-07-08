@@ -8,6 +8,8 @@
  * Use KoraAdapter instead when you want gasless/relayed execution.
  */
 
+import { isTransientRpcError } from "@sdp/rpc";
+import * as solanaRpc from "@sdp/rpc/solana";
 import { getBase58Codec } from "@solana/codecs";
 import {
   type Address,
@@ -18,10 +20,8 @@ import {
   partiallySignTransaction,
   type Signature,
 } from "@solana/kit";
-import { isTransientRpcError } from "@/lib/rpc";
 import type { FeePaymentErrorCode, FeePaymentPort } from "@/services/ports";
 import { FeePaymentError } from "@/services/ports";
-import * as solanaRpc from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 
 const base58 = getBase58Codec();

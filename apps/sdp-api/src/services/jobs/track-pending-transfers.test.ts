@@ -1,7 +1,7 @@
+import * as solanaRpc from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import * as solanaRpc from "@/services/solana/rpc";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { trackPendingTransfers } from "./track-pending-transfers";

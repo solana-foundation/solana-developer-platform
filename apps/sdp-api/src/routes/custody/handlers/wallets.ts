@@ -1,3 +1,4 @@
+import * as solanaRpc from "@sdp/rpc/solana";
 import type {
   CustodyWalletAggregate,
   CustodyWalletSummary,
@@ -28,7 +29,6 @@ import {
 } from "@/services/helius-das.service";
 import { SigningError } from "@/services/ports";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
-import * as solanaRpc from "@/services/solana/rpc";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
 import {
   type CustodyWalletAggregateResponse,

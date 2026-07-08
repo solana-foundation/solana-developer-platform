@@ -1,6 +1,6 @@
+import { getSolanaConfig } from "@sdp/rpc";
 import type { Address } from "@solana/kit";
 import { AppError, type ErrorCode, providerUnavailable } from "@/lib/errors";
-import { getSolanaConfig } from "@/lib/solana";
 import type { Env } from "@/types/env";
 
 const MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = "https://payments.magicblock.app";

@@ -1,3 +1,5 @@
+import { resolveRpcTarget } from "@sdp/rpc/relay";
+import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
 import {
   AccountRole,
@@ -24,9 +26,7 @@ import {
   walletOperationActorFromAuth,
 } from "@/services/policy-enforcement.service";
 import { FeePaymentError, SigningError } from "@/services/ports";
-import { resolveRpcTarget } from "@/services/rpc-relay.service";
 import { createOrgSigner } from "@/services/solana";
-import { confirmTransaction, createRpc, getRecentBlockhash } from "@/services/solana/rpc";
 import type { AppContext } from "../context";
 import { type SignerCheckResponse, signerCheckSchema } from "../schemas";
 

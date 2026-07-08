@@ -6,23 +6,6 @@
 
 // Service factory (wires up Kora integration when configured)
 export { createToken2022Service } from "./factory";
-// RPC client and utilities
-export {
-  accountExists,
-  type BlockhashWithExpiry,
-  confirmTransaction,
-  createRpc,
-  createRpcSubscriptions,
-  getAccountInfo,
-  getMinimumBalanceForRentExemption,
-  getRecentBlockhash,
-  isBlockhashValid,
-  type SimulationResult,
-  sendAndConfirmTransaction,
-  sendTransaction,
-  simulateTransaction,
-  type TransactionConfirmation,
-} from "./rpc";
 // Signer service
 export {
   createOrgSigner,

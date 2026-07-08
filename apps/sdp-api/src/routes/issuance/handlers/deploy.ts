@@ -1,3 +1,12 @@
+import {
+  accountExists,
+  createRpc,
+  getAccountInfo,
+  getSignatureStatuses,
+  getTransaction,
+  type ParsedTransaction,
+  simulateTransaction,
+} from "@sdp/rpc/solana";
 import type { TokenResponse } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
@@ -15,15 +24,6 @@ import {
   PACKET_DATA_SIZE,
 } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
-import {
-  accountExists,
-  createRpc,
-  getAccountInfo,
-  getSignatureStatuses,
-  getTransaction,
-  type ParsedTransaction,
-  simulateTransaction,
-} from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
