@@ -219,14 +219,6 @@ export function DetailsTab({
             value={signerLabel}
             lockReason="Set at creation — individual operations can use a different signer."
           />
-          <TextField
-            label="Metadata URI (optional)"
-            disabled={saving}
-            value={draft.metadataUri}
-            onChange={(value) => updateDraft({ metadataUri: value })}
-            placeholder="https://…/metadata.json"
-            help="Leave blank to use SDP-hosted metadata."
-          />
         </div>
       </FormCard>
     </div>

@@ -23,6 +23,10 @@ export function SelectionCard({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
+      // Opt this card back into Enter-to-advance: re-selecting the current card
+      // is a no-op, so the wizard's global Enter handler treats a focused card as
+      // "advance" instead of skipping it like other buttons.
+      data-enter-advance
       className={cn(
         "flex flex-col rounded-3xl border p-5 text-left transition-colors",
         selected

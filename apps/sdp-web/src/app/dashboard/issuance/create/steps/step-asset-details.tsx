@@ -1,9 +1,10 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import { DEFAULT_SDP_DOCS_URL, type PaymentsDashboardWallet } from "@sdp/types";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
+import { ExternalLink } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,26 @@ const TABS = [
   { id: "operational", label: "Operational" },
   { id: "custom", label: "Custom fields" },
 ] as const;
+
+// Docs deep-links (mirrors the docsHref env pattern used in the dashboard shell).
+const DOCS_BASE =
+  process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
+  (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
+const ACCESS_CONTROL_DOCS_HREF = `${DOCS_BASE}/tokens/allowlists`;
+
+function DocsLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-xs font-medium text-[rgba(28,28,29,0.6)] underline-offset-2 transition-colors hover:text-[#1c1c1d] hover:underline"
+    >
+      {children}
+      <ExternalLink className="h-3 w-3" />
+    </a>
+  );
+}
 
 export function StepAssetDetails({
   signerWallets,
@@ -227,6 +248,11 @@ export function StepAssetDetails({
                 </Select>
               </div>
             </div>
+            <div className="mt-3">
+              <DocsLink href={ACCESS_CONTROL_DOCS_HREF}>
+                Learn how allow and block lists differ
+              </DocsLink>
+            </div>
           </FormCard>
           <AdvancedCapacities
             value={draft.capacities}
@@ -239,34 +265,25 @@ export function StepAssetDetails({
 
       {tab === "operational" ? (
         <FormCard title="Operational" description="Optional operational settings.">
-          <div className="grid gap-4">
-            <div>
-              <TokenSignerSelect
-                signerWallets={signerWallets}
-                signerWalletId={draft.signingWalletId}
-                signerUnavailableReason={signerWalletsError}
-                onSignerWalletIdChange={(value) => updateDraft({ signingWalletId: value })}
-                label="Signing wallet"
-                showSelectionSummary
-                optional
-              />
-              {/* Signer is optional at draft stage — clarify the fallback only
-                  when a choice is actually possible (more than one wallet) and
-                  none is made. The 0-wallet and single-wallet cases show their
-                  own message inside the field. */}
-              {!signerWalletsError && signerWallets.length > 1 && !draft.signingWalletId.trim() ? (
-                <p className="mt-1.5 text-xs text-[rgba(28,28,29,0.5)]">
-                  Optional — leave unselected to use the project&apos;s default signer.
-                </p>
-              ) : null}
-            </div>
-            <TextField
-              label="Metadata URI (optional)"
-              value={draft.metadataUri}
-              onChange={(value) => updateDraft({ metadataUri: value })}
-              placeholder="https://…/metadata.json"
-              help="Leave blank to use SDP-hosted metadata."
+          <div>
+            <TokenSignerSelect
+              signerWallets={signerWallets}
+              signerWalletId={draft.signingWalletId}
+              signerUnavailableReason={signerWalletsError}
+              onSignerWalletIdChange={(value) => updateDraft({ signingWalletId: value })}
+              label="Signing wallet"
+              showSelectionSummary
+              optional
             />
+            {/* Signer is optional at draft stage — clarify the fallback only
+                when a choice is actually possible (more than one wallet) and
+                none is made. The 0-wallet and single-wallet cases show their
+                own message inside the field. */}
+            {!signerWalletsError && signerWallets.length > 1 && !draft.signingWalletId.trim() ? (
+              <p className="mt-1.5 text-xs text-[rgba(28,28,29,0.5)]">
+                Optional — leave unselected to use the project&apos;s default signer.
+              </p>
+            ) : null}
           </div>
         </FormCard>
       ) : null}
