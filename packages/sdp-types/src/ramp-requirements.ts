@@ -45,4 +45,10 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "bvnk"; status: "customer_verification_failed" }
   | { provider: "bvnk"; status: "funding_account_provisioning" }
   | { provider: "bvnk"; status: "provisioning_failed" }
+  | { provider: "mural"; status: "onboarding_not_started" }
+  | { provider: "mural"; status: "terms_of_service_required"; termsOfServiceUrl: string }
+  | { provider: "mural"; status: "customer_verification_required"; verificationUrl: string }
+  | { provider: "mural"; status: "customer_verifying" }
+  | { provider: "mural"; status: "customer_verification_failed" }
+  | { provider: "mural"; status: "funding_account_provisioning" }
 );

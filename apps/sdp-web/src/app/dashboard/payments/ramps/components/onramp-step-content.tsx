@@ -1,5 +1,6 @@
 "use client";
 
+import { isMuralSandboxPayinCurrency } from "@sdp/types";
 import { DollarSignIcon } from "lucide-react";
 import { ONRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
@@ -13,6 +14,7 @@ import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
 import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
+import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
 export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   const {
@@ -100,6 +102,20 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     return <RampCompleteScreen direction="onramp" quote={quote} transfer={transferStatus} />;
   }
 
+  if (currentStepId === "PROVIDER" && quote?.provider === "stripe") {
+    return (
+      <div className="space-y-6">
+        <StripeOnrampFrame
+          clientSecret={quote.clientSecret}
+          publishableKey={quote.publishableKey}
+        />
+        <div className="border-t border-border-light pt-5">
+          <RampStatusPanel direction="onramp" transfer={transferStatus} />
+        </div>
+      </div>
+    );
+  }
+
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "hosted") {
     return (
       <div className="space-y-6">
@@ -124,7 +140,10 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
       );
     }
 
-    const labels = simulateActionLabels(quote.provider);
+    const labels =
+      quote.provider === "mural" && !isMuralSandboxPayinCurrency(selectedRampPair.fiatCurrency)
+        ? null
+        : simulateActionLabels(quote.provider);
     const simulateAction = labels
       ? {
           loading: quoteSimulationLoading,
