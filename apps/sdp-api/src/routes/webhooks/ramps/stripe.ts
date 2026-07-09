@@ -142,9 +142,12 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
     }
 
     const status = readString(session.status);
-    const kind = status
-      ? STRIPE_SESSION_STATUS[status as keyof typeof STRIPE_SESSION_STATUS]
-      : undefined;
+    if (status === undefined) {
+      throw badRequest(`Stripe "${type}" webhook is missing the session status`, {
+        provider: this.provider,
+      });
+    }
+    const kind = STRIPE_SESSION_STATUS[status as keyof typeof STRIPE_SESSION_STATUS];
     if (!kind) {
       return { provider: this.provider, kind: "ignore", reason: `unsupported_status:${status}` };
     }

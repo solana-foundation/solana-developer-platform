@@ -48,6 +48,9 @@ describe("StripeWebhookProcessor", () => {
         data: { object: { status: "rejected" } },
       })
     ).toThrow("missing the session id");
+    expect(() =>
+      processor.parse({ type: "crypto.onramp_session.updated", data: { object: { id: "cos_1" } } })
+    ).toThrow("missing the session status");
   });
 
   it("accepts a correctly signed webhook and rejects a forged one", async () => {
