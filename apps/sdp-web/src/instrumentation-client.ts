@@ -12,6 +12,7 @@ const sentryDsn =
 if (sentryDsn) {
   Sentry.init({
     dsn: sentryDsn,
+    environment: process.env.NEXT_PUBLIC_VERCEL_ENV,
 
     // Add optional integrations for additional features
     integrations: [

@@ -13,6 +13,7 @@ const sentryDsn =
 if (sentryDsn) {
   Sentry.init({
     dsn: sentryDsn,
+    environment: process.env.NEXT_PUBLIC_VERCEL_ENV,
 
     // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
     tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 1,
