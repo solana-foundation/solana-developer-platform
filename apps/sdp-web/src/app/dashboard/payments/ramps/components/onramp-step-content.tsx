@@ -14,6 +14,7 @@ import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
 import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
+import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
 export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   const {
@@ -99,6 +100,20 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
 
   if (currentStepId === "PROVIDER" && quote && transferStatus?.status === "completed") {
     return <RampCompleteScreen direction="onramp" quote={quote} transfer={transferStatus} />;
+  }
+
+  if (currentStepId === "PROVIDER" && quote?.provider === "stripe") {
+    return (
+      <div className="space-y-6">
+        <StripeOnrampFrame
+          clientSecret={quote.clientSecret}
+          publishableKey={quote.publishableKey}
+        />
+        <div className="border-t border-border-light pt-5">
+          <RampStatusPanel direction="onramp" transfer={transferStatus} />
+        </div>
+      </div>
+    );
   }
 
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "hosted") {

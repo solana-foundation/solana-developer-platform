@@ -11,6 +11,7 @@ import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import type { BvnkComplianceInput } from "./providers/bvnk/provider-data";
+import type { StripeCustomerInfo } from "./providers/stripe/client";
 
 export type {
   BvnkComplianceInput,
@@ -26,6 +27,7 @@ export type {
   MuralPayinMethod,
   MuralTosStatus,
 } from "./providers/mural/provider-data";
+export type { StripeCustomerInfo } from "./providers/stripe/client";
 
 export interface ProviderRampSupport {
   onrampFiats: ReadonlySet<RampFiatCurrency>;
@@ -129,6 +131,10 @@ export interface RampOnrampQuoteInput {
   phone?: string;
   /** Browser origin host the Coinbase Apple Pay link renders on (required for iframe embedding). */
   domain?: string;
+  /** End-user IP forwarded for the provider's geo/fraud checks (Stripe). */
+  customerIpAddress?: string;
+  /** Identity pre-fill for the embedded on-ramp widget (Stripe). */
+  stripeCustomerInfo?: StripeCustomerInfo;
 }
 
 export interface RampOfframpQuoteInput {

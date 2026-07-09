@@ -13,6 +13,19 @@ export interface ProviderResponse {
   parsed: unknown;
 }
 
+function serializeProviderBody(body: unknown): BodyInit | undefined {
+  if (body === undefined) {
+    return undefined;
+  }
+  if (typeof body === "string") {
+    return body;
+  }
+  if (body instanceof URLSearchParams) {
+    return body;
+  }
+  return JSON.stringify(body);
+}
+
 export function classifyProviderStatus(status: number): SdpPaymentsErrorCode {
   if (status === 409) return "CONFLICT";
   if (status === 429) return "RATE_LIMITED";
@@ -43,7 +56,7 @@ export async function providerFetch<TBody = never>(
     response = await fetch(url, {
       method: init.method,
       headers: { "Content-Type": "application/json", Accept: "application/json", ...init.headers },
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      body: serializeProviderBody(init.body),
     });
   } catch {
     throw new SdpPaymentsError("PROVIDER_UNAVAILABLE", `Failed to reach the ${provider} API`, {

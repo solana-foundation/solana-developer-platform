@@ -267,6 +267,9 @@ export interface Env {
   // Coinbase Onramp (headless v2) authenticates with the account-wide CDP Secret API Key
   // (COINBASE_CDP_API_KEY_ID/_SECRET above). Only the webhook signing secret is ramps-specific.
   COINBASE_CDP_RAMPS_WEBHOOK_SECRET?: string;
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_PUBLISHABLE_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
 }
 
 // Extend Hono's context with our bindings

@@ -23,6 +23,8 @@ export const RAMP_PROVIDER_SUPPORT_HASHES = {
   coinbase: "ebeabe75a50c763b1358572e3af8afd0335a979125d2affbed7e971f40a77cba",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   mural: "4d4e3ed06d2564bf3f70c304109d5521920507ddbc3ba9e3c47bda80f35fce8b",
+  // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
+  stripe: "da94a92f3fdc7980e5e3de77ebce995e5d21beec105d86230afd3e68f9dfb680",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_SUPPORT_COUNTS = {
@@ -32,6 +34,7 @@ export const RAMP_PROVIDER_SUPPORT_COUNTS = {
   moneygram: { onramp: 0, offramp: 198 },
   coinbase: { onramp: 3, offramp: 0 },
   mural: { onramp: 11, offramp: 0 },
+  stripe: { onramp: 2, offramp: 0 },
 } as const satisfies Record<RampProviderId, { onramp: number; offramp: number }>;
 
 export const RAMP_FIAT_CURRENCIES = [
@@ -527,8 +530,12 @@ export const ONRAMP_SUPPORT = [
   { source: "THB", dest: "sol.solana", providers: ["moonpay"] },
   { source: "TRY", dest: "sol.solana", providers: ["moonpay"] },
   { source: "TWD", dest: "sol.solana", providers: ["moonpay"] },
-  { source: "USD", dest: "sol.solana", providers: ["moonpay", "bvnk", "coinbase"] },
-  { source: "USD", dest: "usdc.solana", providers: ["lightspark", "bvnk", "coinbase", "mural"] },
+  { source: "USD", dest: "sol.solana", providers: ["moonpay", "bvnk", "coinbase", "stripe"] },
+  {
+    source: "USD",
+    dest: "usdc.solana",
+    providers: ["lightspark", "bvnk", "coinbase", "mural", "stripe"],
+  },
   { source: "USD", dest: "usdt.solana", providers: ["bvnk"] },
   { source: "USD", dest: "usdg.solana", providers: ["bvnk"] },
   { source: "USD", dest: "pyusd.solana", providers: ["coinbase"] },

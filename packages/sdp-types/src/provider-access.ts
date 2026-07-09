@@ -16,6 +16,7 @@ export const RAMP_PROVIDERS = [
   "moneygram",
   "coinbase",
   "mural",
+  "stripe",
 ] as const;
 export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
 
@@ -91,7 +92,7 @@ const INDIVIDUAL_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
   custody: createBooleanRecord(CUSTODY_PROVIDERS, ["privy", "coinbase_cdp", "turnkey"]),
   rpc: createBooleanRecord(ORGANIZATION_RPC_PROVIDERS, ["default", "helius", "triton"]),
   compliance: createBooleanRecord(COMPLIANCE_PROVIDERS, []),
-  ramps: createBooleanRecord(RAMP_PROVIDERS, ["moonpay", "moneygram"]),
+  ramps: createBooleanRecord(RAMP_PROVIDERS, ["moonpay", "moneygram", "stripe"]),
 };
 
 const ENTERPRISE_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
@@ -126,6 +127,7 @@ const ENTERPRISE_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
     "moneygram",
     "coinbase",
     "mural",
+    "stripe",
   ]),
 };
 

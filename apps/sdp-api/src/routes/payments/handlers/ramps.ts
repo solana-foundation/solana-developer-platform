@@ -85,6 +85,7 @@ import {
   resolveMuralOnrampAccount,
   resolveMuralRequirements,
 } from "./ramps/mural";
+import { stripeOnrampQuote } from "./ramps/stripe";
 
 type OnrampCurrencyPair = {
   source: (typeof ONRAMP_SUPPORT)[number]["source"];
@@ -335,6 +336,8 @@ export async function advanceCounterpartyRequirements(
       return resolveMuralRequirements(c, input.counterparty, input.projectId, input.direction);
     case "coinbase":
       return readyCounterparty("coinbase", input.direction);
+    case "stripe":
+      return readyCounterparty("stripe", input.direction);
     default: {
       const _exhaustive: never = input;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
@@ -549,6 +552,17 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       });
       break;
     }
+    case "stripe": {
+      quote = await stripeOnrampQuote(c, {
+        counterparty,
+        destinationWalletAddress,
+        cryptoToken: input.cryptoToken,
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        customerIpAddress: c.req.header("cf-connecting-ip"),
+      });
+      break;
+    }
     default: {
       const exhaustive: never = input.provider;
       throw new AppError(
@@ -730,6 +744,8 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       throw internalError("Mural off-ramp quote is not implemented yet.");
     case "coinbase":
       throw badRequest("Coinbase Onramp does not support off-ramp.");
+    case "stripe":
+      throw badRequest("Stripe off-ramp is not supported.");
     default: {
       const exhaustive: never = input.provider;
       throw new AppError(
