@@ -1,6 +1,7 @@
 import {
   type CoinbaseRampEvent,
   type MoneygramRampEvent,
+  MURAL_SANDBOX_PAYIN_CURRENCIES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
   type PrivateTransferRequest,
@@ -714,7 +715,7 @@ const simulateBvnkSandboxPayinPayloadSchema = z.object({
 const simulateMuralSandboxPayinPayloadSchema = z.object({
   counterpartyId: z.string().min(1),
   amount: z.number().positive(),
-  fiatCurrency: z.enum(["USD", "MXN", "BRL", "ARS"]),
+  fiatCurrency: z.enum(MURAL_SANDBOX_PAYIN_CURRENCIES),
 });
 
 export const simulateSandboxTransferSchema = z.discriminatedUnion("provider", [

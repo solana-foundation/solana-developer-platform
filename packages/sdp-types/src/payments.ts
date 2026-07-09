@@ -753,6 +753,14 @@ export interface BvnkCryptoDepositInstruction extends CryptoDepositPaymentRampIn
 
 export type BvnkPaymentRampInstruction = BvnkFiatFundingInstruction | BvnkCryptoDepositInstruction;
 
+export const MURAL_SANDBOX_PAYIN_CURRENCIES = ["USD", "MXN", "BRL", "ARS"] as const;
+export type MuralSandboxPayinCurrency = (typeof MURAL_SANDBOX_PAYIN_CURRENCIES)[number];
+
+/** Narrows a fiat currency to the corridors Mural's sandbox payin simulation supports. */
+export function isMuralSandboxPayinCurrency(value: string): value is MuralSandboxPayinCurrency {
+  return (MURAL_SANDBOX_PAYIN_CURRENCIES as readonly string[]).includes(value);
+}
+
 export interface MuralPaymentRampInstruction {
   provider: "mural";
   fiatCurrency: string;

@@ -11,6 +11,7 @@ import type {
   ListProjectCounterpartyAccountsEnvelope,
   ListProjectCounterpartyAccountsResponse,
   MoneygramRampEvent,
+  MuralSandboxPayinCurrency,
   PaymentRampEstimateEnvelope,
   PaymentsWalletAggregateEnvelope,
   PaymentTransferBatch,
@@ -658,7 +659,7 @@ type SandboxTransferSimulationInput =
       payload: {
         counterpartyId: string;
         amount: number;
-        fiatCurrency: string;
+        fiatCurrency: MuralSandboxPayinCurrency;
       };
     };
 

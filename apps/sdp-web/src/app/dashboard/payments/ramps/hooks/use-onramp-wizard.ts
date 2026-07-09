@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentTransferSummary } from "@sdp/types";
+import { isMuralSandboxPayinCurrency, type PaymentTransferSummary } from "@sdp/types";
 import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -100,12 +100,16 @@ export function useOnrampWizard(props: UseRampWizardProps) {
           payload: { quoteId: quote.id, currencyCode: "USD" },
         });
       } else if (quote.provider === "mural") {
+        const fiatCurrency = wizard.selectedRampPair.fiatCurrency;
+        if (!isMuralSandboxPayinCurrency(fiatCurrency)) {
+          throw new Error(`Mural sandbox payin does not support ${fiatCurrency}.`);
+        }
         await simulateSandboxTransfer({
           provider: "mural",
           payload: {
             counterpartyId: wizard.fields.counterpartyId,
             amount: Number(wizard.fields.amount.trim()),
-            fiatCurrency: wizard.selectedRampPair.fiatCurrency,
+            fiatCurrency,
           },
         });
       } else {
