@@ -47,7 +47,7 @@ export default async function PaymentsPayPage() {
       walletsError={null}
       issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
       enabledComplianceProviders={providerAccess?.enabledComplianceProviders ?? []}
-      enabledRampProviders={providerAccess?.enabledRampProviders ?? []}
+      rampProviderAccess={providerAccess ? providerAccess.rampProviderAccess : null}
       counterpartiesResult={counterpartiesResult}
     />
   );

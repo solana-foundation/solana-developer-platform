@@ -4,7 +4,8 @@ import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { SendIcon, WalletIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Combobox } from "@/components/ui/combobox";
-import { OFFRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ramps";
+import { hasEnabledRampProvider } from "@/lib/provider-availability";
+import { toRampCryptoToken } from "@/lib/ramps";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import { walletComboboxOptions } from "../wallet-options";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
@@ -82,7 +83,8 @@ function OfframpManualQuoteStep({
 export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const {
     currentStepId,
-    enabledRampProviders,
+    rampProviderAccess,
+    selectedCounterparty,
     liveWallets,
     walletsLoading,
     selectedWallet,
@@ -98,19 +100,11 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     requirementsBlocker,
     sourceTokenMint,
     refreshQuote,
-    liveCounterpartiesResult,
     onboarding,
     retryOnboarding,
   } = wizard;
 
   const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
-  const selectedCounterparty = useMemo(
-    () =>
-      liveCounterpartiesResult?.data.find(
-        (counterparty) => counterparty.id === fields.counterpartyId
-      ) ?? null,
-    [liveCounterpartiesResult, fields.counterpartyId]
-  );
 
   if (currentStepId === "WALLET") {
     return (
@@ -131,7 +125,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   }
 
   if (currentStepId === "WITHDRAW") {
-    if (enabledRampProviders.length === 0) {
+    if (!hasEnabledRampProvider(rampProviderAccess)) {
       return (
         <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
           No payout providers are enabled for this organization.
@@ -143,9 +137,8 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
       <div className="space-y-4">
         <RampPairProviderSelector
           direction="offramp"
-          pairs={OFFRAMP_PAIRS}
-          enabledRampProviders={enabledRampProviders}
-          providerOptions={RAMP_PROVIDER_OPTIONS}
+          rampProviderAccess={rampProviderAccess}
+          selectedCounterparty={selectedCounterparty}
           wallets={liveWallets}
           walletsLoading={walletsLoading}
           selectedWallet={selectedWallet}
