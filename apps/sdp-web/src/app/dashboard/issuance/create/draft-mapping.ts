@@ -160,6 +160,8 @@ function samePathSet(a: string[], b: string[]): boolean {
   return true;
 }
 
+const BLOCKED_PATH_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+
 export function getByPath(source: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {
     if (acc && typeof acc === "object" && key in (acc as Record<string, unknown>)) {
@@ -171,6 +173,9 @@ export function getByPath(source: unknown, path: string): unknown {
 
 function setByPath(target: Record<string, unknown>, path: string, value: unknown): void {
   const keys = path.split(".");
+  if (keys.some((key) => BLOCKED_PATH_SEGMENTS.has(key))) {
+    return;
+  }
   let node = target;
   for (let i = 0; i < keys.length - 1; i += 1) {
     const key = keys[i];
