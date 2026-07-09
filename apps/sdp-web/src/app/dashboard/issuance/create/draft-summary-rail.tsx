@@ -16,7 +16,6 @@ import {
   ShieldCheck,
   Tag,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { accessControlLabel } from "./asset-details-config";
 import { getAssetTypeLabel, getCategoryLabel } from "./asset-taxonomy";
@@ -25,10 +24,6 @@ import type { DraftState } from "./issuance-draft-wizard.types";
 
 export interface RailReviewProps {
   blockers: string[];
-  submitting: boolean;
-  primaryLabel: string;
-  disabled: boolean;
-  onSubmit: () => void;
 }
 
 interface DraftSummaryRailProps {
@@ -137,7 +132,7 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
         </div>
 
         {review ? (
-          <div className="mt-4 space-y-4">
+          <div className="mt-4">
             {review.blockers.length > 0 ? (
               <div className="rounded-xl border border-[rgba(199,31,55,0.25)] bg-[rgba(199,31,55,0.06)] p-3">
                 <div className="flex items-center gap-2 text-[#8a1f2a]">
@@ -163,14 +158,6 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
                 </div>
               </div>
             )}
-            <Button
-              type="button"
-              className="w-full"
-              onClick={review.onSubmit}
-              disabled={review.disabled}
-            >
-              {review.primaryLabel}
-            </Button>
           </div>
         ) : (
           <div className="mt-4 flex items-start gap-2 rounded-xl bg-[rgba(28,28,29,0.03)] p-3">

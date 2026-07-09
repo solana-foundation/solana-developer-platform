@@ -160,6 +160,8 @@ function samePathSet(a: string[], b: string[]): boolean {
   return true;
 }
 
+const BLOCKED_PATH_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+
 export function getByPath(source: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {
     if (acc && typeof acc === "object" && key in (acc as Record<string, unknown>)) {
@@ -167,6 +169,45 @@ export function getByPath(source: unknown, path: string): unknown {
     }
     return undefined;
   }, source);
+}
+
+function setByPath(target: Record<string, unknown>, path: string, value: unknown): void {
+  const keys = path.split(".");
+  if (keys.some((key) => BLOCKED_PATH_SEGMENTS.has(key))) {
+    return;
+  }
+  let node = target;
+  for (let i = 0; i < keys.length - 1; i += 1) {
+    const key = keys[i];
+    if (typeof node[key] !== "object" || node[key] === null) {
+      node[key] = {};
+    }
+    node = node[key] as Record<string, unknown>;
+  }
+  node[keys[keys.length - 1]] = value;
+}
+
+// Identity metadata paths that are always public — the locked rows in the
+// public-info preview. (Symbol, category, asset type, and logo live on the
+// token record / are derived, so they aren't part of IssuanceMetadata.)
+const ALWAYS_PUBLIC_METADATA_PATHS = ["asset.name", "asset.description", "chain.decimals"];
+
+// The public projection of the issuance metadata: only the dot-paths actually
+// published — the always-public identity fields plus the issuer's enabled
+// optional selections. Mirrors what the platform exposes publicly, so the
+// Public information step can show a faithful "public metadata" JSON.
+export function buildPublicMetadata(draft: DraftState): IssuanceMetadata {
+  const metadata = buildIssuanceMetadata(draft);
+  const paths = new Set<string>([...ALWAYS_PUBLIC_METADATA_PATHS, ...draft.publicFields]);
+  const projected: Record<string, unknown> = {};
+  for (const path of paths) {
+    const value = getByPath(metadata, path);
+    if (value === undefined || value === null || (typeof value === "string" && !value.trim())) {
+      continue;
+    }
+    setByPath(projected, path, value);
+  }
+  return projected as IssuanceMetadata;
 }
 
 const PATH_LABELS: Record<string, string> = {

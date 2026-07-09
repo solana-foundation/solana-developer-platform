@@ -1,7 +1,9 @@
 "use client";
 
 import type { IssuanceMetadata } from "@sdp/types";
-import { Code2 } from "lucide-react";
+import { Check, Code2, Copy } from "lucide-react";
+
+import { useCopy } from "@/lib/use-copy";
 
 // "View JSON" affordance for the Asset details step. Split into a header toggle
 // and a full-width panel so a large body / long line wraps and scrolls inside
@@ -24,9 +26,22 @@ export function MetadataJsonToggle({ open, onToggle }: { open: boolean; onToggle
 // indentation while wrapping long lines; `break-words` handles unbreakable
 // tokens (URLs); `overflow-auto` + `max-h-80` bound a large body.
 export function MetadataJsonPanel({ metadata }: { metadata: IssuanceMetadata }) {
+  const jsonString = JSON.stringify(metadata, null, 2);
+  const { copied, copy } = useCopy(1200);
+
   return (
-    <pre className="max-h-80 w-full min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] p-4 text-left font-mono text-xs leading-relaxed text-[#1c1c1d]">
-      {JSON.stringify(metadata, null, 2)}
-    </pre>
+    <div className="relative rounded-xl border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)]">
+      <button
+        type="button"
+        onClick={() => void copy(jsonString)}
+        className="absolute right-3 top-3 inline-flex items-center justify-center rounded-lg p-1.5 text-[rgba(28,28,29,0.5)] transition-all hover:bg-[rgba(28,28,29,0.1)] hover:text-[#1c1c1d]"
+        title={copied ? "Copied!" : "Copy JSON"}
+      >
+        {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+      </button>
+      <pre className="max-h-80 w-full min-w-0 overflow-auto whitespace-pre-wrap break-words p-4 text-left font-mono text-xs leading-relaxed text-[#1c1c1d]">
+        {jsonString}
+      </pre>
+    </div>
   );
 }

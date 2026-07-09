@@ -32,8 +32,14 @@ import { Button } from "@/components/ui/button";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { getAssetTypeLabel, getCategoryLabel } from "./asset-taxonomy";
-import { getDefaultPublicFields, getPublicFieldCandidates, safeLinkHref } from "./draft-mapping";
+import {
+  buildPublicMetadata,
+  getDefaultPublicFields,
+  getPublicFieldCandidates,
+  safeLinkHref,
+} from "./draft-mapping";
 import type { DraftState } from "./issuance-draft-wizard.types";
+import { MetadataJsonPanel, MetadataJsonToggle } from "./metadata-json";
 
 interface StaticField {
   key: string;
@@ -89,51 +95,64 @@ function shortAddress(address: string): string {
   return `${address.slice(0, 5)}…${address.slice(-4)}`;
 }
 
-// Exact label/path matches take precedence over the substring rules below.
-const EXACT_ICONS: Record<string, LucideIcon> = {
+// Every issuance field maps to its own icon so no two rows in a given preview
+// share a glyph. Keys are a field path's final dot-segment, lowercased with
+// non-letters stripped ("asset.reserveAsset" → "reserveasset"), so the shared
+// "asset." prefix can't leak into the match — it previously made every path
+// contain "asset" and collapse fields (offering/underlying/custodian) onto one
+// icon, and lumped "reserve" in with "backing".
+const FIELD_ICONS: Record<string, LucideIcon> = {
   name: Tag,
   symbol: Hash,
   decimals: Clock,
   category: Layers,
-  "asset type": FileText,
   type: FileText,
   logo: Image,
   image: Image,
   icon: Image,
   description: Activity,
+  issuername: User,
+  pegcurrency: DollarSign,
+  pegtarget: Target,
+  backingtype: ShieldCheck,
+  reserveasset: Banknote,
+  reservecustodian: Wallet,
+  custodian: Wallet,
+  website: Globe,
+  jurisdiction: MapPin,
+  offeringtype: Tag,
+  underlyingasset: Coins,
 };
 
-// Ordered substring rules — first match wins, so more specific keywords come
-// first (e.g. "supply" before the generic "asset").
+// Resilient fallbacks for keys not in the exact map (e.g. future fields),
+// matched as ordered substring rules — first match wins, so the more specific
+// keyword comes first ("custod" before "reserve" so a reserve custodian doesn't
+// borrow the reserve-asset icon).
 const ICON_RULES: readonly { keywords: readonly string[]; icon: LucideIcon }[] = [
   { keywords: ["website", "url"], icon: Globe },
   { keywords: ["mint", "address"], icon: KeyRound },
   { keywords: ["supply", "total"], icon: Coins },
+  { keywords: ["custod"], icon: Wallet },
+  { keywords: ["reserve"], icon: Banknote },
+  { keywords: ["backing", "collateral"], icon: ShieldCheck },
   { keywords: ["issuer", "owner", "authority"], icon: User },
   { keywords: ["jurisdiction", "country", "location"], icon: MapPin },
-  { keywords: ["backing", "reserve", "collateral"], icon: ShieldCheck },
   { keywords: ["currency", "fiat"], icon: DollarSign },
-  { keywords: ["reserve", "asset"], icon: Banknote },
+  { keywords: ["peg", "target"], icon: Target },
 ];
 
-// Peg fields prefer a distinct target icon so they don't reuse the generic
-// currency icon — except an explicit peg currency/fiat field.
-function pegIcon(key: string): LucideIcon {
-  const isTarget = key.includes("target") || key.includes("to") || key.includes("against");
-  const isCurrency = key.includes("currency") || key.includes("fiat");
-  return isCurrency && !isTarget ? DollarSign : Target;
-}
-
-// Map a fact path or label to its icon component. Exact matches win, then peg
-// fields, then the ordered substring rules; falls back to a generic check.
+// Map a fact path (or label) to its icon. The lookup key is the field's final
+// path segment, so "asset.reserveAsset" and a bare "reserveAsset" resolve the
+// same. Exact field matches win; otherwise fall back to the substring rules,
+// then a generic check.
 function iconFor(labelOrPath?: string): LucideIcon {
   if (!labelOrPath) return CircleCheck;
-  const key = labelOrPath.toLowerCase();
-  const exact = EXACT_ICONS[key];
-  if (exact) return exact;
-  if (key.includes("peg")) return pegIcon(key);
-  const rule = ICON_RULES.find((r) => r.keywords.some((k) => key.includes(k)));
-  return rule?.icon ?? CircleCheck;
+  const key = (labelOrPath.split(".").pop() ?? labelOrPath).toLowerCase().replace(/[^a-z]/g, "");
+  return (
+    FIELD_ICONS[key] ??
+    ICON_RULES.find((r) => r.keywords.some((k) => key.includes(k)))?.icon ??
+    CircleCheck
+  );
 }
 
 // Small inline classification chip used in the identity header.
@@ -172,8 +191,10 @@ export function PublicInfoPreview({
 }) {
   const [showOptional, setShowOptional] = useState(false);
   const [surface, setSurface] = useState<PreviewSurface>("token");
+  const [jsonOpen, setJsonOpen] = useState(false);
   const categoryLabel = getCategoryLabel(draft.assetCategory);
   const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType);
+  const publicMetadata = buildPublicMetadata(draft);
 
   // Core identity + classification: inherent to the token / served from the
   // token record, so always public and not toggleable.
@@ -250,27 +271,17 @@ export function PublicInfoPreview({
 
   return (
     <div className="space-y-4">
-      <div>
-        <h3 className="text-xl font-medium text-[#1c1c1d]">Public token information</h3>
-        <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
-          This is how your asset will appear to wallets, explorers, and the public.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-xl font-medium text-[#1c1c1d]">Public token information</h3>
+          <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
+            This is how your asset will appear to wallets, explorers, and the public.
+          </p>
+        </div>
+        <MetadataJsonToggle open={jsonOpen} onToggle={() => setJsonOpen((prev) => !prev)} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Preview — how the asset appears publicly, across surfaces. */}
-        <div>
-          <div className="mb-2 flex h-8 items-center justify-between gap-3">
-            <p className="text-sm font-medium text-[#1c1c1d]">Preview</p>
-            <SurfaceSwitch value={surface} onChange={setSurface} />
-          </div>
-          <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
-            {surface === "wallet" ? <WalletPreview {...previewProps} /> : null}
-            {surface === "explorer" ? <ExplorerPreview {...previewProps} /> : null}
-            {surface === "token" ? <TokenPreview {...previewProps} /> : null}
-          </div>
-        </div>
-
         {/* Checklist — public coverage + what's public, with interactive toggles. */}
         <div>
           <div className="mb-2 flex h-8 items-center justify-between gap-3">
@@ -350,6 +361,26 @@ export function PublicInfoPreview({
                   ))}
                 </div>
               ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Preview — how the asset appears publicly, across surfaces. The JSON
+            viewer sits under this column when toggled open. */}
+        <div>
+          <div className="mb-2 flex h-8 items-center justify-between gap-3">
+            <p className="text-sm font-medium text-[#1c1c1d]">Preview</p>
+            <SurfaceSwitch value={surface} onChange={setSurface} />
+          </div>
+          <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
+            {surface === "wallet" ? <WalletPreview {...previewProps} /> : null}
+            {surface === "explorer" ? <ExplorerPreview {...previewProps} /> : null}
+            {surface === "token" ? <TokenPreview {...previewProps} /> : null}
+          </div>
+
+          {jsonOpen ? (
+            <div className="mt-3">
+              <MetadataJsonPanel metadata={publicMetadata} />
             </div>
           ) : null}
         </div>
@@ -479,35 +510,32 @@ function IdentityHeader({
 }
 
 // A tinted row exposing the on-chain mint address with copy + explorer actions.
-// Falls back to a placeholder before the token is deployed.
+// Only rendered once the token is deployed and a mint address exists.
 function AddressRow({
   mintAddress,
   explorerHref,
-}: Pick<PreviewProps, "mintAddress" | "explorerHref">) {
+}: {
+  mintAddress: string;
+  explorerHref?: string | null;
+}) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-3 py-2.5">
       <div className="min-w-0">
         <p className="text-xs text-[rgba(28,28,29,0.5)]">Mint address</p>
-        {mintAddress ? (
-          <p className="mt-0.5 truncate text-sm font-medium text-[#1c1c1d]">
-            {shortAddress(mintAddress)}
-          </p>
-        ) : (
-          <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.45)]">Assigned at launch</p>
-        )}
+        <p className="mt-0.5 truncate text-sm font-medium text-[#1c1c1d]">
+          {shortAddress(mintAddress)}
+        </p>
       </div>
-      {mintAddress ? (
-        <div className="flex shrink-0 items-center gap-1">
-          <CopyIconButton value={mintAddress} label="Copy mint address" />
-          {explorerHref ? (
-            <Button asChild variant="ghost" size="icon-xs" aria-label="View on explorer">
-              <a href={explorerHref} target="_blank" rel="noreferrer">
-                <ExternalLink />
-              </a>
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+      <div className="flex shrink-0 items-center gap-1">
+        <CopyIconButton value={mintAddress} label="Copy mint address" />
+        {explorerHref ? (
+          <Button asChild variant="ghost" size="icon-xs" aria-label="View on explorer">
+            <a href={explorerHref} target="_blank" rel="noreferrer">
+              <ExternalLink />
+            </a>
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -638,11 +666,18 @@ function ExplorerPreview({
         <IdentityHeader draft={draft} categoryLabel={categoryLabel} typeLabel={typeLabel} />
       </div>
 
-      <div className="mt-4">
-        <AddressRow mintAddress={mintAddress} explorerHref={explorerHref} />
-      </div>
+      {mintAddress ? (
+        <div className="mt-4">
+          <AddressRow mintAddress={mintAddress} explorerHref={explorerHref} />
+        </div>
+      ) : null}
 
-      <div className="mt-4 flex flex-wrap gap-2 border-t border-[rgba(28,28,29,0.08)] pt-4">
+      <div
+        className={cn(
+          "mt-4 flex flex-wrap gap-2",
+          mintAddress && "border-t border-[rgba(28,28,29,0.08)] pt-4"
+        )}
+      >
         {facts.map((fact) => {
           const Icon = iconFor(fact.path);
           return (
