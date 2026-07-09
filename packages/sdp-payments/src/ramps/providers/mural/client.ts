@@ -7,7 +7,12 @@ import type {
 import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import { internalError, providerNotConfigured, providerUnavailable } from "../../../errors";
+import {
+  badRequest,
+  internalError,
+  providerNotConfigured,
+  providerUnavailable,
+} from "../../../errors";
 import { readNumber, readRecord, readString } from "../../../json";
 import { extractProviderErrorMessage, providerFetch, providerFetchJson } from "../../fetch";
 import {
@@ -296,7 +301,15 @@ function parseMuralPayoutWebhookEvent(
     statusChangeDetails === undefined ? undefined : readRecord(statusChangeDetails.currentStatus);
   const status = currentStatus === undefined ? undefined : readString(currentStatus.type);
   if (!payoutRequestId) {
-    return { kind: "ignore", reason: "payout_missing_id" };
+    throw badRequest('Mural "payout_request_status_changed" webhook is missing payoutRequestId', {
+      provider: "mural",
+    });
+  }
+  if (status === undefined) {
+    throw badRequest(
+      'Mural "payout_request_status_changed" webhook is missing the current status',
+      { provider: "mural" }
+    );
   }
   if (status === "executed") {
     return { kind: "payout_settled", organizationId, payoutRequestId };
@@ -304,31 +317,42 @@ function parseMuralPayoutWebhookEvent(
   if (status === "failed") {
     return { kind: "payout_failed", organizationId, payoutRequestId };
   }
-  const statusReason = status === undefined ? "missing" : status;
-  return { kind: "ignore", reason: `payout_status:${statusReason}` };
+  return { kind: "ignore", reason: `payout_status:${status}` };
 }
 
 function parseMuralWebhookEvent(payload: unknown): MuralWebhookEvent {
   const root = readRecord(payload);
   const body = root === undefined ? undefined : readRecord(root.payload);
   if (body === undefined) {
-    return { kind: "ignore", reason: "missing_payload" };
+    throw badRequest("Mural webhook is missing the payload envelope", { provider: "mural" });
   }
   const type = readString(body.type);
-  const eventType = type === undefined ? "unknown" : type;
+  if (
+    type !== "verification_status_changed" &&
+    type !== "tos_accepted" &&
+    type !== "account_credited" &&
+    type !== "payout_request_status_changed"
+  ) {
+    return { kind: "ignore", reason: `unhandled_event:${type === undefined ? "unknown" : type}` };
+  }
   const organizationId = readString(body.organizationId);
   if (!organizationId) {
-    return { kind: "ignore", reason: `missing_organization_id:${eventType}` };
+    throw badRequest(`Mural "${type}" webhook is missing organizationId`, { provider: "mural" });
   }
 
   switch (type) {
     case "verification_status_changed": {
-      const currentStatus = body === undefined ? undefined : readRecord(body.currentStatus);
+      const currentStatus = readRecord(body.currentStatus);
       const status = currentStatus === undefined ? undefined : readString(currentStatus.type);
+      if (status === undefined) {
+        throw badRequest(
+          'Mural "verification_status_changed" webhook is missing the current status',
+          { provider: "mural" }
+        );
+      }
       const parsedStatus = z.enum(MURAL_KYC_STATUSES).safeParse(status);
       if (!parsedStatus.success) {
-        const statusReason = status === undefined ? "missing" : status;
-        return { kind: "ignore", reason: `unknown_kyc_status:${statusReason}` };
+        return { kind: "ignore", reason: `unknown_kyc_status:${status}` };
       }
       return { kind: "kyc_status", organizationId, kycStatus: parsedStatus.data };
     }
@@ -340,14 +364,14 @@ function parseMuralWebhookEvent(payload: unknown): MuralWebhookEvent {
       const tokenAmount =
         tokenAmountRecord === undefined ? undefined : readNumber(tokenAmountRecord.tokenAmount);
       if (!accountId || tokenAmount === undefined) {
-        return { kind: "ignore", reason: "account_credited_missing_fields" };
+        throw badRequest('Mural "account_credited" webhook is missing accountId or tokenAmount', {
+          provider: "mural",
+        });
       }
       return { kind: "account_credited", organizationId, accountId, tokenAmount };
     }
     case "payout_request_status_changed":
       return parseMuralPayoutWebhookEvent(body, organizationId);
-    default:
-      return { kind: "ignore", reason: `unhandled_event:${eventType}` };
   }
 }
 

@@ -84,10 +84,28 @@ describe("MuralRampClient.parseMuralWebhookEvent", () => {
     ).toBe("ignore");
   });
 
-  it("ignores an event with no organizationId", () => {
-    expect(client.parseMuralWebhookEvent({ payload: { type: "tos_accepted" } }).kind).toBe(
-      "ignore"
+  it("throws on a known event type with a malformed envelope", () => {
+    expect(() => client.parseMuralWebhookEvent({ payload: { type: "tos_accepted" } })).toThrow(
+      "missing organizationId"
     );
+    expect(() => client.parseMuralWebhookEvent({ notPayload: true })).toThrow(
+      "missing the payload envelope"
+    );
+    expect(() =>
+      client.parseMuralWebhookEvent({
+        payload: { type: "account_credited", organizationId: "org_7", accountId: "acct_1" },
+      })
+    ).toThrow("missing accountId or tokenAmount");
+    expect(() =>
+      client.parseMuralWebhookEvent({
+        payload: { type: "verification_status_changed", organizationId: "org_8" },
+      })
+    ).toThrow("missing the current status");
+    expect(() =>
+      client.parseMuralWebhookEvent({
+        payload: { type: "payout_request_status_changed", organizationId: "org_9" },
+      })
+    ).toThrow("missing payoutRequestId");
   });
 });
 

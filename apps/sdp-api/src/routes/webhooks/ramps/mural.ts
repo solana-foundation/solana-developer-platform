@@ -79,17 +79,11 @@ async function handleAccountCredited(
     fromStatuses: ["awaiting_payment"],
     toStatus: "completed",
     updatedAt: new Date().toISOString(),
+    amount: String(event.tokenAmount),
   });
   if (!claimed) {
     return;
   }
-  await payments.updateTransfer({
-    transferId: transfer.id,
-    organizationId: transfer.organization_id,
-    projectId: transfer.project_id,
-    amount: String(event.tokenAmount),
-    updatedAt: new Date().toISOString(),
-  });
   console.log(`[mural webhook] transfer ${transfer.id} completed (payin ${event.tokenAmount})`);
 }
 
