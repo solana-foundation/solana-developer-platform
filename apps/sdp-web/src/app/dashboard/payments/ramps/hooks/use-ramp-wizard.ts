@@ -1,10 +1,11 @@
-"use client";
+import type { RampProviderAccess } from "@/lib/provider-availability";
+
+("use client");
 
 import type {
   Counterparty,
   PaymentRampQuote,
   PaymentsDashboardWallet,
-  ProviderAvailabilityEntry,
   RampProviderId,
 } from "@sdp/types";
 import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
@@ -111,7 +112,7 @@ async function createRampQuote(
 export interface UseRampWizardProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
-  rampProviderAccess: Record<RampProviderId, ProviderAvailabilityEntry> | null;
+  rampProviderAccess: RampProviderAccess | null;
   counterpartiesResult: CounterpartiesResult;
   selectedCounterparty: Counterparty | null;
   /** Counterparty chosen upstream; seeds the form and is no longer picked in-wizard. */

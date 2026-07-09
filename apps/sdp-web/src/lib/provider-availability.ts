@@ -15,7 +15,7 @@ export interface DashboardProviderAvailability extends OrganizationProviderAvail
   enabledCustodyProviders: KnownCustodyProvider[];
   enabledRpcProviders: OrganizationRpcProvider[];
   enabledComplianceProviders: ComplianceProviderId[];
-  rampProviderAccess: Record<RampProviderId, ProviderAvailabilityEntry>;
+  rampProviderAccess: RampProviderAccess;
 }
 
 /**
@@ -23,9 +23,11 @@ export interface DashboardProviderAvailability extends OrganizationProviderAvail
  * configured, and enabled. `null` (e.g. a failed provider-access fetch)
  * means none are usable.
  */
-export function hasEnabledRampProvider(
-  access: Readonly<Record<RampProviderId, ProviderAvailabilityEntry>> | null
-): boolean {
+export type RampProviderAccess = Readonly<
+  Partial<Record<RampProviderId, ProviderAvailabilityEntry>>
+>;
+
+export function hasEnabledRampProvider(access: RampProviderAccess | null): boolean {
   if (access === null) {
     return false;
   }

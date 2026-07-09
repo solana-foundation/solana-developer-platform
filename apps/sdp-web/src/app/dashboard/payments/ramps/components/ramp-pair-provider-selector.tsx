@@ -1,4 +1,6 @@
-"use client";
+import type { RampProviderAccess } from "@/lib/provider-availability";
+
+("use client");
 
 import type { Counterparty, CounterpartyEntityType, PaymentsDashboardWallet } from "@sdp/types";
 import {
@@ -36,7 +38,7 @@ import { RampSelectionProvider } from "./ramp-selection-context";
 
 interface RampPairProviderSelectorProps {
   direction: RampDirection;
-  rampProviderAccess: Readonly<Record<RampProviderId, ProviderAvailabilityEntry>> | null;
+  rampProviderAccess: RampProviderAccess | null;
   selectedCounterparty: Counterparty | null;
   wallets: readonly PaymentsDashboardWallet[];
   walletsLoading: boolean;
@@ -157,7 +159,7 @@ function amountLimitReasons(
 function buildProviderExclusion(args: {
   option: RampProviderOption;
   direction: RampDirection;
-  rampProviderAccess: Readonly<Record<RampProviderId, ProviderAvailabilityEntry>> | null;
+  rampProviderAccess: RampProviderAccess | null;
   selectedPairSupport: RampPair | null;
   selectedPair: SelectedRampPair;
   selectedCounterparty: Counterparty | null;
@@ -176,13 +178,17 @@ function buildProviderExclusion(args: {
   } = args;
   const provider = option.id;
   const reasons: string[] = [];
-  const access = rampProviderAccess ? rampProviderAccess[provider] : null;
   const support = getDirectionSupport(provider, direction);
 
-  if (access !== null) {
-    const reason = providerAccessReason(access);
-    if (reason !== null) {
-      reasons.push(reason);
+  if (rampProviderAccess !== null) {
+    const access = rampProviderAccess[provider];
+    if (access === undefined) {
+      reasons.push("Availability is not reported for this environment");
+    } else {
+      const reason = providerAccessReason(access);
+      if (reason !== null) {
+        reasons.push(reason);
+      }
     }
   }
 

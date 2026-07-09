@@ -1,12 +1,6 @@
 "use client";
 
-import type {
-  ComplianceProviderId,
-  Counterparty,
-  PaymentsDashboardWallet,
-  ProviderAvailabilityEntry,
-  RampProviderId,
-} from "@sdp/types";
+import type { ComplianceProviderId, Counterparty, PaymentsDashboardWallet } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR, { preload } from "swr";
@@ -16,7 +10,7 @@ import {
   fetchCounterpartyAccounts,
   fetchWallets,
 } from "@/app/dashboard/payments/payments-workspace.data";
-import { hasEnabledRampProvider } from "@/lib/provider-availability";
+import { hasEnabledRampProvider, type RampProviderAccess } from "@/lib/provider-availability";
 import { BatchSendRail } from "./batch-send-rail";
 import { CounterpartyPicker } from "./components/counterparty-picker";
 import { CounterpartyRecentTransfers } from "./components/counterparty-recent-transfers";
@@ -36,7 +30,7 @@ interface PaymentsActionPageProps {
   walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
   enabledComplianceProviders: ComplianceProviderId[];
-  rampProviderAccess: Record<RampProviderId, ProviderAvailabilityEntry> | null;
+  rampProviderAccess: RampProviderAccess | null;
   counterpartiesResult: CounterpartiesResult;
 }
 
@@ -48,7 +42,7 @@ export interface RailProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
-  rampProviderAccess: Record<RampProviderId, ProviderAvailabilityEntry> | null;
+  rampProviderAccess: RampProviderAccess | null;
   counterpartiesResult: CounterpartiesResult;
   selectedCounterparty: Counterparty | null;
   counterpartyId: string;
