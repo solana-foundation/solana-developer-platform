@@ -1,6 +1,5 @@
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
 import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import {
   badRequest,
@@ -10,24 +9,35 @@ import {
 } from "../../../errors";
 import { providerFetchJson } from "../../fetch";
 import { readyCounterparty } from "../../requirements";
-import { basicAuthHeader, createProviderRampSupport } from "../../shared";
+import { basicAuthHeader, UNREPORTED_COUNTRY_SUPPORT, unreportedCurrencyLimit } from "../../shared";
 import type {
-  ProviderRampSupport,
-  RampDumpReader,
+  ProviderDeclaredRailSupport,
+  ProviderRailSupportDistillation,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
+  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
 
 const STRIPE_API_BASE_URL = "https://api.stripe.com";
 const STRIPE_API_VERSION = "2026-05-27.dahlia";
-const STRIPE_ONRAMP_FIATS = ["USD"] as const satisfies readonly RampFiatCurrency[];
 const STRIPE_ONRAMP_DESTINATION_CURRENCIES = ["usdc", "sol"] as const;
 const STRIPE_ONRAMP_NETWORK = "solana";
+
+export const STRIPE_DECLARED_RAIL_SUPPORT = {
+  onramp: {
+    countrySupport: { coverage: "by-country", countries: { US: ["USD"] } },
+    entityTypes: ["individual"],
+  },
+  offramp: {
+    countrySupport: UNREPORTED_COUNTRY_SUPPORT,
+    entityTypes: [],
+  },
+} as const satisfies ProviderDeclaredRailSupport;
 
 interface StripeConfig {
   secretKey: string;
@@ -247,6 +257,7 @@ async function stripeGet<TResponse>(
 
 export class StripeRampClient implements RampProvider {
   readonly id = "stripe";
+  readonly declaredRailSupport = STRIPE_DECLARED_RAIL_SUPPORT;
 
   validateCounterparty(
     _counterparty: Counterparty,
@@ -265,14 +276,21 @@ export class StripeRampClient implements RampProvider {
 
   async _discoverRails(_context: Parameters<RampProvider["_discoverRails"]>[0]): Promise<void> {}
 
-  async readRailSupport(_readDump: RampDumpReader): Promise<ProviderRampSupport> {
-    const support = createProviderRampSupport();
-    for (const fiat of STRIPE_ONRAMP_FIATS) {
-      support.onrampFiats.add(fiat);
-    }
-    support.onrampCryptos.add("usdc.solana");
-    support.onrampCryptos.add("sol.solana");
-    return support;
+  async distillRailSupport(_readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
+    return {
+      snapshot: {
+        onramp: {
+          currencies: { USD: unreportedCurrencyLimit() },
+          cryptos: ["sol.solana", "usdc.solana"],
+        },
+        offramp: {
+          currencies: {},
+          cryptos: [],
+        },
+      },
+      droppedCurrencyCodes: [],
+      droppedCountryCodes: [],
+    };
   }
 
   async estimateOnramp(

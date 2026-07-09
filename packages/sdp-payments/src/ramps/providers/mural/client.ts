@@ -4,7 +4,7 @@ import type {
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
-import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
+import { getCryptoRailAssetLabel, type RampCurrencyLimit } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import {
@@ -16,19 +16,22 @@ import {
 import { readNumber, readRecord, readString } from "../../../json";
 import { extractProviderErrorMessage, providerFetch, providerFetchJson } from "../../fetch";
 import {
-  createProviderRampSupport,
+  isActiveIso4217CurrencyCode,
+  isIso3166Alpha2CountryCode,
   RAMP_RAIL_DUMPS,
   requireEnv,
   SOLANA_ASSET_TO_RAIL,
+  UNREPORTED_COUNTRY_SUPPORT,
+  unreportedCurrencyLimit,
 } from "../../shared";
 import type {
-  ProviderRampSupport,
-  RampDiscoveryResponseDump,
-  RampDumpReader,
+  ProviderDeclaredRailSupport,
+  ProviderRailSupportDistillation,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampProvider,
+  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
@@ -44,6 +47,14 @@ import {
 
 const MURAL_PRODUCTION_BASE_URL = "https://api.muralpay.com";
 const MURAL_SANDBOX_BASE_URL = "https://api-staging.muralpay.com";
+
+export const MURAL_DECLARED_RAIL_SUPPORT = {
+  onramp: { entityTypes: ["business"] },
+  offramp: {
+    countrySupport: UNREPORTED_COUNTRY_SUPPORT,
+    entityTypes: [],
+  },
+} as const satisfies ProviderDeclaredRailSupport;
 
 interface MuralConfig {
   apiKey: string;
@@ -109,44 +120,104 @@ const MURAL_FIAT_RAIL_CODES = [
   "usd-hong-kong",
 ] as const;
 
-const muralCountriesResponseSchema = z.object({
-  count: z.number().optional(),
-  countries: z.array(z.unknown()).optional(),
+const muralCountrySchema = z.object({
+  alpha2Code: z.string(),
+  name: z.string(),
+  subdivisions: z.array(z.object({ code: z.string(), name: z.string() })),
 });
 
-type MuralCountriesDump = Record<string, RampDiscoveryResponseDump>;
+const muralCountriesResponseSchema = z.object({
+  count: z.number().optional(),
+  countries: z.array(muralCountrySchema),
+});
 
-export function extractMuralRailSupport(dump: MuralCountriesDump): ProviderRampSupport {
-  const support = createProviderRampSupport();
-  support.onrampCryptos.add(SOLANA_ASSET_TO_RAIL.USDC);
+function muralRailCurrencyCode(railCode: string, droppedCurrencyCodes: Set<string>): string | null {
+  const currencyCodePart = railCode.split("-")[0];
+  if (currencyCodePart.length === 0) {
+    throw providerUnavailable(`Mural rail code "${railCode}" does not contain a currency prefix.`);
+  }
+  const currencyCode = currencyCodePart.toUpperCase();
+  if (!isActiveIso4217CurrencyCode(currencyCode)) {
+    droppedCurrencyCodes.add(currencyCode);
+    return null;
+  }
+  return currencyCode;
+}
+
+export function distillMuralRailSupport(raw: unknown): ProviderRailSupportDistillation {
+  const dump = z.record(z.string(), z.object({ status: z.number(), body: z.unknown() })).parse(raw);
+  const countriesByCurrency = new Map<string, Set<string>>();
+  const currenciesByCountry = new Map<string, Set<string>>();
+  const droppedCurrencyCodes = new Set<string>();
+  const droppedCountryCodes = new Set<string>();
 
   for (const [railCode, response] of Object.entries(dump)) {
     if (response.status < 200 || response.status >= 300) {
+      throw providerUnavailable(
+        `Mural countries dump for ${railCode} returned ${response.status}.`
+      );
+    }
+    const parsed = muralCountriesResponseSchema.parse(response.body);
+    if (parsed.countries.length === 0) {
       continue;
     }
-    const parsed = muralCountriesResponseSchema.safeParse(response.body);
-    if (!parsed.success) {
+    const currencyCode = muralRailCurrencyCode(railCode, droppedCurrencyCodes);
+    if (currencyCode === null) {
       continue;
     }
-    const countries = parsed.data.countries;
-    if (countries === undefined || countries.length === 0) {
-      continue;
+    let countries = countriesByCurrency.get(currencyCode);
+    if (countries === undefined) {
+      countries = new Set<string>();
+      countriesByCurrency.set(currencyCode, countries);
     }
-    const currencyCodePart = railCode.split("-")[0];
-    if (currencyCodePart === undefined || currencyCodePart.length === 0) {
-      continue;
-    }
-    const currencyCode = currencyCodePart.toUpperCase();
-    const fiatCurrency = parseFiatCurrency(currencyCode);
-    if (fiatCurrency) {
-      support.onrampFiats.add(fiatCurrency);
+    for (const country of parsed.countries) {
+      const countryCode = country.alpha2Code.trim().toUpperCase();
+      if (!isIso3166Alpha2CountryCode(countryCode)) {
+        droppedCountryCodes.add(countryCode);
+        continue;
+      }
+      countries.add(countryCode);
+      let currencies = currenciesByCountry.get(countryCode);
+      if (currencies === undefined) {
+        currencies = new Set<string>();
+        currenciesByCountry.set(countryCode, currencies);
+      }
+      currencies.add(currencyCode);
     }
   }
 
-  if (support.onrampFiats.size === 0) {
+  if (countriesByCurrency.size === 0) {
     throw providerUnavailable("Mural countries dump contained no supported fiat rails.");
   }
-  return support;
+
+  const onrampCurrencies: Record<string, RampCurrencyLimit> = {};
+  for (const currencyCode of [...countriesByCurrency.keys()].sort()) {
+    onrampCurrencies[currencyCode] = unreportedCurrencyLimit();
+  }
+  const countrySupportCountries: Record<string, readonly string[]> = {};
+  for (const countryCode of [...currenciesByCountry.keys()].sort()) {
+    const currencies = currenciesByCountry.get(countryCode);
+    if (currencies === undefined) {
+      throw providerUnavailable(`Mural country support missing currency list for ${countryCode}.`);
+    }
+    countrySupportCountries[countryCode] = [...currencies].sort();
+  }
+
+  return {
+    snapshot: {
+      onramp: {
+        currencies: onrampCurrencies,
+        cryptos: [SOLANA_ASSET_TO_RAIL.USDC],
+        countrySupport: { coverage: "by-country", countries: countrySupportCountries },
+      },
+      offramp: {
+        currencies: {},
+        cryptos: [],
+      },
+    },
+    droppedCurrencyCodes: [...droppedCurrencyCodes].sort(),
+    droppedCountryCodes: [...droppedCountryCodes].sort(),
+  };
 }
 
 interface MuralTokenToFiatRequest {
@@ -377,6 +448,7 @@ function parseMuralWebhookEvent(payload: unknown): MuralWebhookEvent {
 
 export class MuralRampClient implements RampProvider {
   readonly id = "mural";
+  readonly declaredRailSupport = MURAL_DECLARED_RAIL_SUPPORT;
 
   private async requestJson<TResponse, TBody>(
     { env, mode }: RampRuntimeContext,
@@ -632,10 +704,8 @@ export class MuralRampClient implements RampProvider {
     });
   }
 
-  async readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport> {
-    return extractMuralRailSupport(
-      await readDump<MuralCountriesDump>(RAMP_RAIL_DUMPS.mural.countries.file)
-    );
+  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
+    return distillMuralRailSupport(await readDump(RAMP_RAIL_DUMPS.mural.countries.file));
   }
 
   parseMuralWebhookEvent(payload: unknown): MuralWebhookEvent {

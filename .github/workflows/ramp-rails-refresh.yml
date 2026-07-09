@@ -53,10 +53,13 @@ jobs:
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
 
-      - name: Discover rails live and regenerate matrix
+      - name: Discover rails live
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
-        run: pnpm --filter @sdp/api rails:discover -- --strict --emit
+        run: pnpm --filter @sdp/api rails:discover
+
+      - name: Regenerate matrix from snapshots
+        run: pnpm --filter @sdp/api rails:generate
 
       - name: Summarize drift
         run: pnpm --silent --filter @sdp/api rails:drift | tee "${{ runner.temp }}/ramp-rails-drift.txt"

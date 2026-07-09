@@ -7,22 +7,30 @@ import type {
 import {
   type CryptoRailId,
   getCryptoRailAssetLabel,
-  parseFiatCurrency,
+  type RampCurrencyLimit,
 } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import { z } from "zod";
 import { providerNotConfigured, SdpPaymentsError } from "../../../errors";
 import { providerFetchJson } from "../../fetch";
 import { readyCounterparty } from "../../requirements";
-import { createProviderRampSupport, RAMP_RAIL_DUMPS, rampId, requireEnv } from "../../shared";
+import {
+  isActiveIso4217CurrencyCode,
+  isIso3166Alpha2CountryCode,
+  RAMP_RAIL_DUMPS,
+  rampId,
+  requireEnv,
+  unreportedCurrencyLimit,
+} from "../../shared";
 import type {
-  MutableProviderRampSupport,
-  ProviderRampSupport,
-  RampDumpReader,
+  ProviderDeclaredRailSupport,
+  ProviderRailSupportDistillation,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
+  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
@@ -33,6 +41,11 @@ const MOONPAY_OFFRAMP_URL = "https://sell.moonpay.com";
 const MOONPAY_SANDBOX_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 const MOONPAY_SANDBOX_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 const MOONPAY_ONRAMP_MIN_USD = 20;
+
+export const MOONPAY_DECLARED_RAIL_SUPPORT = {
+  onramp: { entityTypes: ["individual"] },
+  offramp: { entityTypes: ["individual"] },
+} as const satisfies ProviderDeclaredRailSupport;
 
 interface MoonpayConfig {
   apiKey: string;
@@ -152,61 +165,159 @@ function isMoonpayCryptoCode(value: string): value is MoonpayCryptoCode {
   return (MOONPAY_CRYPTO_CODES as readonly string[]).includes(value);
 }
 
-interface MoonpayCurrencyEntry {
-  type?: string;
-  code?: string;
-  isSuspended?: boolean;
-  isSellSupported?: boolean;
-  supportsTestMode?: boolean;
-  minBuyAmount?: number | null;
-  minSellAmount?: number | null;
-  metadata?: { networkCode?: string };
-}
+const moonpayCurrencyEntrySchema = z.object({
+  type: z.string().optional(),
+  code: z.string().optional(),
+  isSuspended: z.boolean().optional(),
+  isSellSupported: z.boolean().optional(),
+  supportsTestMode: z.boolean().optional(),
+  minBuyAmount: z.number().nullable().optional(),
+  maxBuyAmount: z.number().nullable().optional(),
+  minSellAmount: z.number().nullable().optional(),
+  metadata: z.object({ networkCode: z.string().optional() }).optional(),
+});
 
-function addFiatSupport(
+const moonpayCountriesSchema = z.array(
+  z.object({
+    alpha2: z.string(),
+    isBuyAllowed: z.boolean(),
+    isSellAllowed: z.boolean(),
+  })
+);
+
+type MoonpayCurrencyEntry = z.infer<typeof moonpayCurrencyEntrySchema>;
+
+function addMoonpayFiatSupport(
   entry: MoonpayCurrencyEntry,
-  support: Pick<MutableProviderRampSupport, "onrampFiats" | "offrampFiats">
-) {
-  if (!entry.code) return;
-  const parsed = parseFiatCurrency(entry.code);
-  if (!parsed) {
-    console.warn(`  [moonpay] unknown fiat code: ${entry.code}`);
+  onrampCurrencies: Record<string, RampCurrencyLimit>,
+  offrampCurrencies: Record<string, RampCurrencyLimit>,
+  droppedCodes: Set<string>
+): void {
+  if (entry.code === undefined) {
     return;
   }
-  if (entry.minBuyAmount != null) support.onrampFiats.add(parsed);
-  if (entry.isSellSupported === true) support.offrampFiats.add(parsed);
+  const code = entry.code.trim().toUpperCase();
+  if (!isActiveIso4217CurrencyCode(code)) {
+    droppedCodes.add(code);
+    return;
+  }
+  if (entry.minBuyAmount !== undefined && entry.minBuyAmount !== null) {
+    onrampCurrencies[code] = {
+      min: String(entry.minBuyAmount),
+      max:
+        entry.maxBuyAmount === undefined || entry.maxBuyAmount === null
+          ? null
+          : String(entry.maxBuyAmount),
+    };
+  }
+  if (entry.isSellSupported === true) {
+    offrampCurrencies[code] = unreportedCurrencyLimit();
+  }
 }
 
-function addCryptoSupport(
+function addMoonpayCryptoSupport(
   entry: MoonpayCurrencyEntry,
-  support: Pick<MutableProviderRampSupport, "onrampCryptos" | "offrampCryptos">
-) {
-  if (!entry.code) return;
-  if (entry.isSuspended === true) return;
-  if (entry.supportsTestMode !== true) return;
-  if (entry.metadata?.networkCode !== "solana") return;
-  if (!isMoonpayCryptoCode(entry.code)) return;
+  onrampCryptos: Set<CryptoRailId>,
+  offrampCryptos: Set<CryptoRailId>
+): void {
+  if (entry.code === undefined) {
+    return;
+  }
+  if (entry.isSuspended === true) {
+    return;
+  }
+  if (entry.supportsTestMode !== true) {
+    return;
+  }
+  if (entry.metadata === undefined) {
+    return;
+  }
+  if (entry.metadata.networkCode !== "solana") {
+    return;
+  }
+  if (!isMoonpayCryptoCode(entry.code)) {
+    return;
+  }
 
   const rail = MOONPAY_CRYPTO_CODE_TO_RAIL[entry.code];
-  if (entry.minBuyAmount != null) support.onrampCryptos.add(rail);
-  if (entry.isSellSupported === true && entry.minSellAmount != null) {
-    support.offrampCryptos.add(rail);
+  if (entry.minBuyAmount !== undefined && entry.minBuyAmount !== null) {
+    onrampCryptos.add(rail);
+  }
+  if (
+    entry.isSellSupported === true &&
+    entry.minSellAmount !== undefined &&
+    entry.minSellAmount !== null
+  ) {
+    offrampCryptos.add(rail);
   }
 }
 
-function extractSupport(currencies: readonly MoonpayCurrencyEntry[]): ProviderRampSupport {
-  const support = createProviderRampSupport();
+function moonpayCountryLists(countries: unknown, droppedCodes: Set<string>) {
+  const parsed = moonpayCountriesSchema.parse(countries);
+  const onrampCountries = new Set<string>();
+  const offrampCountries = new Set<string>();
+  for (const country of parsed) {
+    const code = country.alpha2.trim().toUpperCase();
+    if (!isIso3166Alpha2CountryCode(code)) {
+      droppedCodes.add(code);
+      continue;
+    }
+    if (country.isBuyAllowed) {
+      onrampCountries.add(code);
+    }
+    if (country.isSellAllowed) {
+      offrampCountries.add(code);
+    }
+  }
+  return {
+    onramp: [...onrampCountries].sort(),
+    offramp: [...offrampCountries].sort(),
+  };
+}
+
+export function distillMoonpayRailSupport(
+  currenciesRaw: unknown,
+  countriesRaw: unknown
+): ProviderRailSupportDistillation {
+  const currencies = z.array(moonpayCurrencyEntrySchema).parse(currenciesRaw);
+  const droppedCurrencyCodes = new Set<string>();
+  const droppedCountryCodes = new Set<string>();
+  const onrampCurrencies: Record<string, RampCurrencyLimit> = {};
+  const offrampCurrencies: Record<string, RampCurrencyLimit> = {};
+  const onrampCryptos = new Set<CryptoRailId>();
+  const offrampCryptos = new Set<CryptoRailId>();
 
   for (const entry of currencies) {
-    if (entry.type === "fiat") addFiatSupport(entry, support);
-    if (entry.type === "crypto") addCryptoSupport(entry, support);
+    if (entry.type === "fiat") {
+      addMoonpayFiatSupport(entry, onrampCurrencies, offrampCurrencies, droppedCurrencyCodes);
+    }
+    if (entry.type === "crypto") {
+      addMoonpayCryptoSupport(entry, onrampCryptos, offrampCryptos);
+    }
   }
 
-  return support;
+  const countryLists = moonpayCountryLists(countriesRaw, droppedCountryCodes);
+  return {
+    snapshot: {
+      onramp: {
+        currencies: onrampCurrencies,
+        cryptos: [...onrampCryptos].sort(),
+        countrySupport: { coverage: "all-currencies", countries: countryLists.onramp },
+      },
+      offramp: {
+        currencies: offrampCurrencies,
+        cryptos: [...offrampCryptos].sort(),
+        countrySupport: { coverage: "all-currencies", countries: countryLists.offramp },
+      },
+    },
+    droppedCurrencyCodes: [...droppedCurrencyCodes].sort(),
+    droppedCountryCodes: [...droppedCountryCodes].sort(),
+  };
 }
 
 export class MoonpayRampClient implements RampProvider {
   readonly id = "moonpay";
+  readonly declaredRailSupport = MOONPAY_DECLARED_RAIL_SUPPORT;
 
   validateCounterparty(
     _counterparty: Counterparty,
@@ -237,10 +348,12 @@ export class MoonpayRampClient implements RampProvider {
     );
   }
 
-  async readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport> {
-    return extractSupport(
-      await readDump<readonly MoonpayCurrencyEntry[]>(RAMP_RAIL_DUMPS.moonpay.currencies.file)
-    );
+  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
+    const [currencies, countries] = await Promise.all([
+      readDump(RAMP_RAIL_DUMPS.moonpay.currencies.file),
+      readDump(RAMP_RAIL_DUMPS.moonpay.countries.file),
+    ]);
+    return distillMoonpayRailSupport(currencies, countries);
   }
 
   async estimateOnramp(
