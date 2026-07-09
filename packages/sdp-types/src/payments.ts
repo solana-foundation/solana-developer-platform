@@ -890,6 +890,14 @@ export type PaymentRampQuote =
       sessionId: string;
       widgetUrl: string;
       sdkUrl: string;
+    })
+  | (BasePaymentRampQuote & {
+      provider: "stripe";
+      deliveryMode: "session_widget";
+      clientSecret: string;
+      sessionId: string;
+      publishableKey: string;
+      redirectUrl?: string;
     });
 
 export const RAMP_EVENT_PROVIDERS = ["moneygram", "coinbase"] as const;

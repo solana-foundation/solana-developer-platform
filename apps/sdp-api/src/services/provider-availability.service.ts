@@ -230,6 +230,11 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
         return prod || sandbox;
       },
     },
+    stripe: {
+      label: "Stripe",
+      isConfigured: (env) =>
+        hasAllEnv(env, ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"]),
+    },
   },
 } as const satisfies ProviderAvailabilityDefinitions;
 

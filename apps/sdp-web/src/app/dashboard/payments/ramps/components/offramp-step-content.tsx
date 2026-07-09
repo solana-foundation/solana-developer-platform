@@ -204,7 +204,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     );
   }
 
-  if (currentStepId === "COMPLETE" && quote?.deliveryMode === "session_widget") {
+  if (currentStepId === "COMPLETE" && quote?.provider === "moneygram") {
     if (!selectedWallet) {
       return <RampQuoteSkeleton />;
     }
