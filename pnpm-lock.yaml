@@ -74,6 +74,9 @@ importers:
       '@sdp/env-config':
         specifier: workspace:*
         version: link:../../packages/sdp-env-config
+      '@sdp/issuance':
+        specifier: workspace:*
+        version: link:../../packages/sdp-issuance
       '@sdp/payments':
         specifier: workspace:*
         version: link:../../packages/sdp-payments
@@ -495,6 +498,39 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+
+  packages/sdp-issuance:
+    dependencies:
+      '@sdp/payments':
+        specifier: workspace:*
+        version: link:../sdp-payments
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../sdp-rpc
+      '@sdp/solana':
+        specifier: workspace:*
+        version: link:../sdp-solana
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:../sdp-types
+      '@solana-program/system':
+        specifier: 'catalog:'
+        version: 0.12.2(@solana/kit@6.8.0(typescript@6.0.3))
+      '@solana-program/token-2022':
+        specifier: 'catalog:'
+        version: 0.9.0(@solana/kit@6.8.0(typescript@6.0.3))(@solana/sysvars@6.8.0(typescript@6.0.3))
+      '@solana/kit':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/mosaic-sdk':
+        specifier: 'catalog:'
+        version: 0.1.1(patch_hash=b814110d007b64ff76f72cf843d93ba928a9c4f39acc34dbc2ee3e27d1149689)(typescript@6.0.3)
+      '@solana/signers':
+        specifier: 'catalog:'
+        version: 6.8.0(typescript@6.0.3)
+      '@solana/token-acl-gate-sdk':
+        specifier: 0.2.0
+        version: 0.2.0(typescript@6.0.3)
 
   packages/sdp-payments:
     dependencies:

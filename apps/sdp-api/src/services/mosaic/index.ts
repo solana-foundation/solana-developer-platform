@@ -1,19 +1,18 @@
 /**
- * Mosaic Service
+ * Mosaic Service (compat shim)
  *
- * Template-based token issuance using @solana/mosaic-sdk.
- * Replaces manual Token-2022 transaction building with Mosaic's
- * pre-configured templates and on-chain ABL integration.
+ * Domain logic moved to `@sdp/issuance`; this shim re-exports it so existing
+ * `@/services/mosaic` imports keep working, and keeps the app-wired factory
+ * (fee-payment adapter + AppError mapping) here.
  */
 
-export { deriveAblListAddress, MosaicService, PACKET_DATA_SIZE } from "./service";
-export * from "./types";
-export { bigIntReplacer, safeStringify } from "./utils";
+export * from "@sdp/issuance/mosaic";
 
+import { MosaicService } from "@sdp/issuance/mosaic/service";
 import type { TransactionSigner } from "@solana/kit";
+import { transactionFailed } from "@/lib/errors";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import type { Env } from "@/types/env";
-import { MosaicService } from "./service";
 
 export type MosaicFeePayment = "sponsored" | "wallet";
 
@@ -37,5 +36,9 @@ export function createMosaicService(
 ): MosaicService {
   const sponsor =
     feePayment === "sponsored" && env.KORA_RPC_URL ? createFeePaymentAdapter(env) : undefined;
-  return new MosaicService(env, signer, sponsor);
+  return new MosaicService(env, signer, sponsor, {
+    // Keep on-chain failures surfacing as AppError("TRANSACTION_FAILED") so
+    // the app's error handler maps them to 400 responses.
+    transactionFailedError: transactionFailed,
+  });
 }

@@ -44,6 +44,7 @@ packages/*
 !packages/sdp-custody
 !packages/sdp-solana
 !packages/sdp-payments
+!packages/sdp-issuance
 docs
 infra
 scripts
