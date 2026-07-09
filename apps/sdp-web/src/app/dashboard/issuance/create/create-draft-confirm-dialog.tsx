@@ -31,7 +31,7 @@ export function CreateDraftConfirmDialog({
   onConfirm,
 }: CreateDraftConfirmDialogProps) {
   const name = assetName.trim();
-  const openedAtRef = useRef(0);
+  const openedAtRef = useRef(Infinity);
 
   useEffect(() => {
     if (open) {
