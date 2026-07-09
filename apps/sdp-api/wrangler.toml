@@ -73,7 +73,6 @@ id = "your_dev_sessions_kv_id"
 
 [env.dev.vars]
 ENVIRONMENT = "development"
-SENTRY_ENVIRONMENT = "staging"
 API_VERSION = "v1"
 SDP_RUNTIME = "cloudflare"
 EMAIL_FROM = "noreply@mail.solana.org"
@@ -117,7 +116,6 @@ id = "your_production_sessions_kv_id"
 
 [env.production.vars]
 ENVIRONMENT = "production"
-SENTRY_ENVIRONMENT = "production"
 API_VERSION = "v1"
 SDP_RUNTIME = "cloudflare"
 EMAIL_FROM = "noreply@mail.solana.org"

@@ -69,8 +69,6 @@ export interface Env {
   CUSTODY_ENCRYPTION_KEY?: string; // For encrypting org private keys in DB
   SENTRY_DSN?: string;
   SENTRY_TRACES_SAMPLE_RATE?: string;
-  // Deployed wrangler env sections only, never top-level — see isSentryEnabled.
-  SENTRY_ENVIRONMENT?: "staging" | "production";
 
   // Email configuration
   EMAIL_FROM?: string;

@@ -1,6 +1,6 @@
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, type SdpPlugin } from "@/app";
 import { AppError } from "@/lib/errors";
 import type { MonitorOptions, Observability, ObservabilityScope } from "@/runtime/observability";
@@ -126,16 +126,17 @@ describe("createApp plugin registration", () => {
 describe("createApp onError Sentry guard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("NODE_ENV", "production");
   });
 
-  it("calls observability.captureException when SENTRY_DSN and SENTRY_ENVIRONMENT are set", async () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("calls observability.captureException when SENTRY_DSN is set", async () => {
     const { obs, captureException, withScope } = makeObservability();
     const app = buildApp(obs);
-    const env: Env = {
-      ...baseEnv,
-      SENTRY_DSN: "https://test@sentry.example/1",
-      SENTRY_ENVIRONMENT: "staging",
-    };
+    const env: Env = { ...baseEnv, SENTRY_DSN: "https://test@sentry.example/1" };
 
     const res = await app.request(THROW_PATH, {}, env);
 
@@ -146,7 +147,8 @@ describe("createApp onError Sentry guard", () => {
     expect(captureException).toHaveBeenCalledTimes(1);
   });
 
-  it("does not invoke observability when SENTRY_ENVIRONMENT is unset (local dev)", async () => {
+  it("does not invoke observability under a development NODE_ENV (local dev)", async () => {
+    vi.stubEnv("NODE_ENV", "development");
     const { obs, captureException, withScope } = makeObservability();
     const app = buildApp(obs);
     const env: Env = { ...baseEnv, SENTRY_DSN: "https://test@sentry.example/1" };
@@ -266,7 +268,7 @@ describe("createApp onError Sentry guard", () => {
     await app.request(
       SECRET_UNEXPECTED_ERROR_PATH,
       {},
-      { ...baseEnv, SENTRY_DSN: "https://x@y/1", SENTRY_ENVIRONMENT: "staging" }
+      { ...baseEnv, SENTRY_DSN: "https://x@y/1" }
     );
 
     const logged = JSON.stringify(consoleError.mock.calls);
