@@ -113,6 +113,7 @@ const ENTERPRISE_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
     "helius",
     "quicknode",
     "triton",
+    "validationcloud",
   ]),
   compliance: createBooleanRecord(COMPLIANCE_PROVIDERS, [
     "range",

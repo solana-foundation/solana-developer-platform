@@ -163,6 +163,7 @@ const RPC_PROVIDER_LABELS: Record<OrganizationRpcProvider, string> = {
   helius: "Helius",
   quicknode: "QuickNode",
   triton: "Triton",
+  validationcloud: "Validation Cloud",
 };
 
 export function OrganizationRpcSettingsForm({

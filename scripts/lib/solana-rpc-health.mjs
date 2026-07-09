@@ -26,6 +26,11 @@ const PROVIDERS = [
     urlKey: "SOLANA_RPC_HELIUS_URL",
     apiKey: "SOLANA_RPC_HELIUS_API_KEY",
   },
+  {
+    id: "validationcloud",
+    urlKey: "SOLANA_RPC_VALIDATIONCLOUD_URL",
+    apiKey: "SOLANA_RPC_VALIDATIONCLOUD_API_KEY",
+  },
 ];
 
 export async function selectHealthySolanaRpcUrl(env, options = {}) {
