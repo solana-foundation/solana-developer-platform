@@ -1,3 +1,4 @@
+import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import type {
   EffectiveApiKeyPolicy,
   EffectiveWalletPolicy,
@@ -14,7 +15,6 @@ import type {
   WalletOperationPolicyEvaluation,
 } from "@sdp/types";
 import type { CreatePolicyEvaluationInput } from "@/db/repositories";
-import { compareDecimalAmounts, isDecimalString } from "@/lib/amount";
 
 type RuntimePolicyRule = PolicyRule | Record<string, unknown>;
 

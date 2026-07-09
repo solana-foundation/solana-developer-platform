@@ -1,9 +1,9 @@
+import { assertValidAddress } from "@sdp/solana/address";
+import { isDecimalString } from "@sdp/solana/amount";
 import { type Permission, SOL_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
-import { isDecimalString } from "@/lib/amount";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
-import { assertValidAddress } from "@/lib/solana";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 

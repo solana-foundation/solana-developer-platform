@@ -1,3 +1,4 @@
+import { assertValidAddress } from "@sdp/solana/address";
 import type { Address } from "@solana/kit";
 import {
   createCounterpartiesRepository,
@@ -6,7 +7,6 @@ import {
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import { AppError } from "@/lib/errors";
-import { assertValidAddress } from "@/lib/solana";
 import type { Env } from "@/types/env";
 
 export interface ResolvedSolanaCounterpartyAccount {

@@ -1,6 +1,8 @@
 import { getSolanaConfig } from "@sdp/rpc";
 import { withHeliusApiKey } from "@sdp/rpc/relay";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { assertValidAddress } from "@sdp/solana/address";
+import { formatDecimalAmount, MAX_SAFE_BASE_UNITS, parseDecimalAmount } from "@sdp/solana/amount";
 import { type Permission, type PrivateTransferRequest, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import {
@@ -38,11 +40,9 @@ import {
   type PaymentTransferType as TransferType,
   WALLET_TRANSFER_TYPES,
 } from "@/db/repositories/payments.repository";
-import { formatDecimalAmount, MAX_SAFE_BASE_UNITS, parseDecimalAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
-import { assertValidAddress } from "@/lib/solana";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIds,

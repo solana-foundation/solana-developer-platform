@@ -1,11 +1,11 @@
 import { withHeliusApiKey } from "@sdp/rpc/relay";
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import {
   type CustodyWalletTokenBalance,
   WELL_KNOWN_TOKEN_BY_MINT,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import { getDb } from "@/db";
-import { formatDecimalAmount } from "@/lib/amount";
 import type { Env } from "@/types/env";
 
 interface TrackedAssetDefinition {

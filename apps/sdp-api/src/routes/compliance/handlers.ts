@@ -1,3 +1,4 @@
+import { assertValidAddress } from "@sdp/solana/address";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -5,7 +6,6 @@ import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
-import { assertValidAddress } from "@/lib/solana";
 import { createComplianceService } from "@/services/compliance";
 import { getEnabledProviders } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";

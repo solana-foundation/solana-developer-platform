@@ -1,10 +1,10 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
+import { assertValidAddress } from "@sdp/solana/address";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { assertValidAddress } from "@/lib/solana";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/mosaic";

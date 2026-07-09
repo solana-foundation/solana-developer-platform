@@ -1,5 +1,5 @@
+import { formatDecimalAmount, parseDecimalAmount, toMosaicAmount } from "@sdp/solana/amount";
 import { describe, expect, it } from "vitest";
-import { formatDecimalAmount, parseDecimalAmount, toMosaicAmount } from "@/lib/amount";
 
 describe("amount helpers", () => {
   it("parses integer amounts", () => {
