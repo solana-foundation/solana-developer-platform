@@ -1,25 +1,27 @@
 import { generateJwt } from "@coinbase/cdp-sdk/auth";
 import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/types";
-import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
+import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import { z } from "zod";
 import { badRequest, providerNotConfigured, providerUnavailable } from "../../../errors";
 import { providerFetchJson } from "../../fetch";
 import { readyCounterparty } from "../../requirements";
 import {
-  createProviderRampSupport,
   isSolanaCryptoAsset,
   RAMP_RAIL_DUMPS,
   requireEnv,
   SOLANA_ASSET_TO_RAIL,
+  UNREPORTED_COUNTRY_SUPPORT,
 } from "../../shared";
 import type {
-  ProviderRampSupport,
-  RampDumpReader,
+  ProviderDeclaredRailSupport,
+  ProviderRailSupportDistillation,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
+  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
@@ -34,6 +36,17 @@ const SOLANA_NETWORK = "solana";
 const ONRAMP_PAYMENT_METHOD = "GUEST_CHECKOUT_APPLE_PAY";
 // Estimate through the same rail the order will use so the fee preview matches.
 const ESTIMATE_PAYMENT_METHOD = "APPLE_PAY";
+
+export const COINBASE_DECLARED_RAIL_SUPPORT = {
+  onramp: {
+    countrySupport: { coverage: "by-country", countries: { US: ["USD"] } },
+    entityTypes: ["individual"],
+  },
+  offramp: {
+    countrySupport: UNREPORTED_COUNTRY_SUPPORT,
+    entityTypes: [],
+  },
+} as const satisfies ProviderDeclaredRailSupport;
 
 interface CoinbaseConfig {
   apiKeyName: string;
@@ -53,34 +66,69 @@ function readCoinbaseConfig(env: Record<string, string | undefined>): CoinbaseCo
   return { apiKeyName, apiKeySecret };
 }
 
-interface BuyOptionsNetwork {
-  name: string;
-}
+const buyOptionsSchema = z.object({
+  purchase_currencies: z.array(
+    z.object({
+      symbol: z.string(),
+      networks: z.array(z.object({ name: z.string() })),
+    })
+  ),
+  payment_currencies: z.array(
+    z.object({
+      id: z.string(),
+      limits: z.array(z.object({ id: z.string(), min: z.string(), max: z.string() })),
+    })
+  ),
+});
 
-interface BuyOptionsPurchaseCurrency {
-  symbol: string;
-  networks: BuyOptionsNetwork[];
-}
+type BuyOptionsDump = z.infer<typeof buyOptionsSchema>;
 
-interface BuyOptionsDump {
-  purchase_currencies: BuyOptionsPurchaseCurrency[];
-}
-
-function extractSupport(dump: BuyOptionsDump): ProviderRampSupport {
-  const support = createProviderRampSupport();
-
-  // Headless v2 only quotes USD — don't derive fiats from payment_currencies.
-  const usd = parseFiatCurrency("USD");
-  if (usd) support.onrampFiats.add(usd);
-
-  for (const currency of dump.purchase_currencies) {
-    if (!currency.networks.some((network) => network.name === SOLANA_NETWORK)) continue;
-    const symbol = currency.symbol.toUpperCase();
-    if (!isSolanaCryptoAsset(symbol)) continue;
-    support.onrampCryptos.add(SOLANA_ASSET_TO_RAIL[symbol]);
+/**
+ * USD bounds for the payment method the headless integration actually quotes
+ * with (APPLE_PAY) — limits for methods our flow cannot use would overstate
+ * what a user can transact (FIAT_WALLET alone reaches $1M).
+ */
+function coinbaseUsdLimit(dump: BuyOptionsDump) {
+  const usd = dump.payment_currencies.find((entry) => entry.id.toUpperCase() === "USD");
+  if (usd === undefined) {
+    throw providerUnavailable("Coinbase buy options did not include USD payment limits.");
   }
+  const limit = usd.limits.find((entry) => entry.id === ESTIMATE_PAYMENT_METHOD);
+  if (limit === undefined) {
+    throw providerUnavailable(
+      `Coinbase buy options did not include USD ${ESTIMATE_PAYMENT_METHOD} limits.`
+    );
+  }
+  return { min: limit.min, max: limit.max };
+}
 
-  return support;
+export function distillCoinbaseRailSupport(raw: unknown): ProviderRailSupportDistillation {
+  const dump = buyOptionsSchema.parse(raw);
+  const cryptos = new Set<CryptoRailId>();
+  for (const currency of dump.purchase_currencies) {
+    if (!currency.networks.some((network) => network.name === SOLANA_NETWORK)) {
+      continue;
+    }
+    const symbol = currency.symbol.toUpperCase();
+    if (!isSolanaCryptoAsset(symbol)) {
+      continue;
+    }
+    cryptos.add(SOLANA_ASSET_TO_RAIL[symbol]);
+  }
+  return {
+    snapshot: {
+      onramp: {
+        currencies: { USD: coinbaseUsdLimit(dump) },
+        cryptos: [...cryptos].sort(),
+      },
+      offramp: {
+        currencies: {},
+        cryptos: [],
+      },
+    },
+    droppedCurrencyCodes: [],
+    droppedCountryCodes: [],
+  };
 }
 
 interface CoinbaseAmount {
@@ -102,6 +150,7 @@ interface CoinbaseCreateOrderResponse {
 
 export class CoinbaseRampClient implements RampProvider {
   readonly id = "coinbase";
+  readonly declaredRailSupport = COINBASE_DECLARED_RAIL_SUPPORT;
 
   validateCounterparty(
     _counterparty: Counterparty,
@@ -145,8 +194,8 @@ export class CoinbaseRampClient implements RampProvider {
     );
   }
 
-  async readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport> {
-    return extractSupport(await readDump<BuyOptionsDump>(RAMP_RAIL_DUMPS.coinbase.buyOptions.file));
+  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
+    return distillCoinbaseRailSupport(await readDump(RAMP_RAIL_DUMPS.coinbase.buyOptions.file));
   }
 
   async estimateOnramp(

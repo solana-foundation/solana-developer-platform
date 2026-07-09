@@ -1,3 +1,6 @@
+import { getSolanaConfig } from "@sdp/rpc";
+import { withHeliusApiKey } from "@sdp/rpc/relay";
+import * as solanaRpc from "@sdp/rpc/solana";
 import { type Permission, type PrivateTransferRequest, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import {
@@ -39,7 +42,7 @@ import { formatDecimalAmount, MAX_SAFE_BASE_UNITS, parseDecimalAmount } from "@/
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
-import { assertValidAddress, getSolanaConfig } from "@/lib/solana";
+import { assertValidAddress } from "@/lib/solana";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIds,
@@ -59,9 +62,7 @@ import {
   type MagicBlockUnsignedTransaction,
   prepareMagicBlockPrivateTransfer,
 } from "@/services/private-transfers";
-import { withHeliusApiKey } from "@/services/rpc-relay.service";
 import * as solanaServices from "@/services/solana";
-import * as solanaRpc from "@/services/solana/rpc";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { type AppContext, getFeePayment, getPaymentsRepository } from "../context";

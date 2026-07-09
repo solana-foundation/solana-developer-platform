@@ -1,3 +1,4 @@
+import * as solanaRpc from "@sdp/rpc/solana";
 import { type CachedApiKey, SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { address, createNoopSigner, generateKeyPairSigner } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,7 +7,6 @@ import app from "@/index";
 import { hashString } from "@/lib/hash";
 import * as feePaymentAdapters from "@/services/adapters/fee-payment";
 import * as solanaServices from "@/services/solana";
-import * as solanaRpc from "@/services/solana/rpc";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";

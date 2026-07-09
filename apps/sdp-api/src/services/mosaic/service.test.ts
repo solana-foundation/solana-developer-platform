@@ -9,6 +9,7 @@
  * tests, so this is the only place the fee-payer resolution is asserted.
  */
 
+import * as RpcModule from "@sdp/rpc/solana";
 import type { Address, Signature, TransactionSigner } from "@solana/kit";
 import * as Kit from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
@@ -18,7 +19,6 @@ import { AppError } from "@/lib/errors";
 import { MosaicService } from "@/services/mosaic";
 import type { CreateTokenOptions } from "@/services/mosaic/types";
 import type { FeePaymentPort } from "@/services/ports/fee-payment.port";
-import * as RpcModule from "@/services/solana/rpc";
 import { env } from "@/test/helpers/env";
 
 // Sentinels — the SDK template builder is stubbed, so its concrete return value

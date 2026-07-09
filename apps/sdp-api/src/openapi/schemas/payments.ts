@@ -1,4 +1,5 @@
 import {
+  COUNTERPARTY_ENTITY_TYPES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
   RAMP_FIAT_CURRENCIES,
@@ -1904,6 +1905,85 @@ const offrampCurrencyPairSchema = z
   })
   .openapi({ description: "Provider support for one crypto-to-fiat off-ramp pair." });
 
+const rampCurrencyLimitSchema = z
+  .object({
+    min: z.string().nullable().openapi({
+      description: "Minimum fiat amount supported for this provider and currency.",
+      example: "20",
+    }),
+    max: z.string().nullable().openapi({
+      description: "Maximum fiat amount supported for this provider and currency.",
+      example: "30000",
+    }),
+  })
+  .openapi({ description: "Provider amount limits for one fiat currency." });
+
+const rampCountrySupportSchema = z
+  .discriminatedUnion("coverage", [
+    z
+      .object({
+        coverage: z.literal("by-country").openapi({
+          description: "Country coverage is reported per fiat currency.",
+          example: "by-country",
+        }),
+        countries: z.record(z.string(), z.array(z.string())).openapi({
+          description: "Map of ISO 3166-1 alpha-2 country codes to supported fiat currencies.",
+          example: { US: ["USD"], PE: ["PEN", "USD"] },
+        }),
+      })
+      .openapi({ description: "Country-specific provider coverage by fiat currency." }),
+    z
+      .object({
+        coverage: z.literal("all-currencies").openapi({
+          description: "Country coverage applies to every listed provider currency.",
+          example: "all-currencies",
+        }),
+        countries: z.array(z.string()).openapi({
+          description: "ISO 3166-1 alpha-2 country codes supported for all listed currencies.",
+          example: ["AL", "US"],
+        }),
+      })
+      .openapi({ description: "Provider country coverage shared by all currencies." }),
+    z
+      .object({
+        coverage: z.literal("unreported").openapi({
+          description: "The provider has not reported country coverage.",
+          example: "unreported",
+        }),
+      })
+      .openapi({ description: "Provider country coverage is not reported." }),
+  ])
+  .openapi({ description: "Provider country coverage details." });
+
+const rampProviderDirectionSupportSchema = z
+  .object({
+    currencies: z.record(z.string(), rampCurrencyLimitSchema).openapi({
+      description: "Fiat currency support keyed by ISO 4217 currency code.",
+      example: { USD: { min: "20", max: "30000" } },
+    }),
+    countrySupport: rampCountrySupportSchema,
+    entityTypes: z.array(z.enum(COUNTERPARTY_ENTITY_TYPES)).openapi({
+      description:
+        "Counterparty entity types supported by this provider for the endpoint direction.",
+      example: ["individual"],
+    }),
+  })
+  .openapi({ description: "Provider support details for the endpoint direction." });
+
+const rampCurrencyProviderDetailsSchema = z
+  .record(z.string(), rampProviderDirectionSupportSchema)
+  .openapi({
+    description:
+      "Provider support details keyed by provider ID. Includes only providers present in the returned pairs.",
+    example: {
+      moonpay: {
+        currencies: { USD: { min: "20", max: "30000" } },
+        countrySupport: { coverage: "all-currencies", countries: ["AL", "US"] },
+        entityTypes: ["individual"],
+      },
+    },
+  });
+
 export const onrampCurrenciesResponseSchema = z
   .object({
     currencies: z
@@ -1921,6 +2001,7 @@ export const onrampCurrenciesResponseSchema = z
     pairs: z.array(onrampCurrencyPairSchema).openapi({
       description: "Supported fiat-to-crypto pairs and their providers.",
     }),
+    providerDetails: rampCurrencyProviderDetailsSchema,
     supportHash: z.string().openapi({
       description: "Deterministic hash of the generated ramp support matrix.",
       example: "sha256:example",
@@ -1945,6 +2026,7 @@ export const offrampCurrenciesResponseSchema = z
     pairs: z.array(offrampCurrencyPairSchema).openapi({
       description: "Supported crypto-to-fiat pairs and their providers.",
     }),
+    providerDetails: rampCurrencyProviderDetailsSchema,
     supportHash: z.string().openapi({
       description: "Deterministic hash of the generated ramp support matrix.",
       example: "sha256:example",

@@ -1,3 +1,4 @@
+import * as solanaRpc from "@sdp/rpc/solana";
 import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import type {
   Address,
@@ -67,7 +68,6 @@ import {
   walletOperationActorFromAuth,
 } from "@/services/policy-enforcement.service";
 import * as solanaServices from "@/services/solana";
-import * as solanaRpc from "@/services/solana/rpc";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import {
   type AppContext,

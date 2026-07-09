@@ -3,9 +3,11 @@ import type { PaymentRampEstimate, PaymentRampQuote, RampProviderEstimateResult 
 import {
   OFFRAMP_SUPPORT,
   ONRAMP_SUPPORT,
+  RAMP_PROVIDER_SUPPORT_DETAILS,
   RAMP_SUPPORT_HASH,
   type RampFiatCurrency,
 } from "@sdp/types/generated/ramp-support";
+import type { RampProviderDirectionSupport } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
@@ -113,6 +115,23 @@ function filterProviders(
 
 function uniqueSorted<T extends string>(values: readonly T[]): T[] {
   return [...new Set(values)].sort();
+}
+
+function buildProviderDetails(
+  providerIds: readonly RampProviderId[],
+  direction: "onramp" | "offramp"
+): Partial<Record<RampProviderId, RampProviderDirectionSupport>> {
+  const providerDetails: Partial<Record<RampProviderId, RampProviderDirectionSupport>> = {};
+  for (const providerId of providerIds) {
+    providerDetails[providerId] = RAMP_PROVIDER_SUPPORT_DETAILS[providerId][direction];
+  }
+  return providerDetails;
+}
+
+function providersFromPairs(
+  pairs: readonly (OnrampCurrencyPair | OfframpCurrencyPair)[]
+): RampProviderId[] {
+  return uniqueSorted(pairs.flatMap((row) => row.providers));
 }
 
 /** Throws unless the org has the ramp provider enabled for the request's environment. */
@@ -850,6 +869,7 @@ export async function listOnrampCurrencies(c: AppContext) {
       destinations: uniqueSorted(pairs.map((row) => row.dest)),
     },
     pairs,
+    providerDetails: buildProviderDetails(providersFromPairs(pairs), "onramp"),
     supportHash: RAMP_SUPPORT_HASH,
   });
 }
@@ -878,6 +898,7 @@ export async function listOfframpCurrencies(c: AppContext) {
       destinations: uniqueSorted(pairs.map((row) => row.dest)),
     },
     pairs,
+    providerDetails: buildProviderDetails(providersFromPairs(pairs), "offramp"),
     supportHash: RAMP_SUPPORT_HASH,
   });
 }

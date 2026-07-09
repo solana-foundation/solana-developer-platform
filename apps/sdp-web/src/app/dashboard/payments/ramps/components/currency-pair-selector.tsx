@@ -1,6 +1,10 @@
 "use client";
 
-import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import {
+  fiatCurrencyDisplayName,
+  fiatCurrencyFlagEmoji,
+  getCryptoRailAssetLabel,
+} from "@sdp/types/payment-rails";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
 import {
@@ -34,7 +38,15 @@ export function CurrencyPairSelector() {
   } = useRampSelection();
 
   const currencyOptions = useMemo(
-    () => fiatCurrencies.map((c) => ({ value: c, label: c })),
+    () =>
+      fiatCurrencies.map((c) => {
+        const flag = fiatCurrencyFlagEmoji(c);
+        return {
+          value: c,
+          label: flag === null ? c : `${flag} ${c}`,
+          description: fiatCurrencyDisplayName(c),
+        };
+      }),
     [fiatCurrencies]
   );
 
@@ -81,8 +93,9 @@ export function CurrencyPairSelector() {
         if (currency) onFiatCurrencyChange(currency);
       }}
       options={currencyOptions}
-      placeholder="Search currencies"
-      searchable={false}
+      placeholder="Select a currency"
+      searchPlaceholder="Search currencies"
+      variant="dialog"
     />
   );
 
@@ -102,7 +115,7 @@ export function CurrencyPairSelector() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
+      <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_200px]">
         <div className="flex flex-col gap-2">
           <Label className="text-sm font-medium text-text-low" htmlFor={`${direction}-ramp-amount`}>
             Amount
@@ -136,7 +149,7 @@ export function CurrencyPairSelector() {
         {isOfframp ? assetCombobox : fiatCombobox}
       </div>
 
-      <div className={showWallet ? "grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]" : "grid gap-4"}>
+      <div className={showWallet ? "grid gap-4 sm:grid-cols-[minmax(0,1fr)_200px]" : "grid gap-4"}>
         {showWallet ? (
           <Combobox
             label={direction === "onramp" ? "Destination wallet" : "Source wallet"}

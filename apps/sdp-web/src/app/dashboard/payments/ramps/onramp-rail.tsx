@@ -42,8 +42,9 @@ function onrampPrimaryAction(
 export function OnrampRail({
   wallets,
   walletsError,
-  enabledRampProviders,
+  rampProviderAccess,
   counterpartiesResult,
+  selectedCounterparty,
   counterpartyId,
   preSteps,
   onExit,
@@ -51,8 +52,9 @@ export function OnrampRail({
   const wizard = useOnrampWizard({
     wallets,
     walletsError,
-    enabledRampProviders,
+    rampProviderAccess,
     counterpartiesResult,
+    selectedCounterparty,
     initialCounterpartyId: counterpartyId,
     onExit,
   });

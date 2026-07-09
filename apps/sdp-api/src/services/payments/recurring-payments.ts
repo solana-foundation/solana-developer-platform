@@ -1,3 +1,4 @@
+import * as solanaRpc from "@sdp/rpc/solana";
 import type { UpdatePaymentRecurringPaymentRequest } from "@sdp/types";
 import {
   type Address,
@@ -53,7 +54,6 @@ import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { normalizePaymentToken, SOL_MINT } from "@/services/payment-operation.service";
 import { assertWalletPolicyAllowsTransferWithRepository } from "@/services/payments/wallet-policy";
 import * as solanaServices from "@/services/solana";
-import * as solanaRpc from "@/services/solana/rpc";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "./counterparty-account-resolution";

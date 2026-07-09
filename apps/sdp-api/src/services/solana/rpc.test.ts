@@ -1,9 +1,14 @@
 import type { RpcEnv } from "@sdp/rpc";
 import { isTransientRpcError } from "@sdp/rpc";
 import { SdpRpcError } from "@sdp/rpc/errors";
+import {
+  confirmTransaction,
+  createRpc,
+  type SolanaRpc,
+  sendAndConfirmTransaction,
+} from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { confirmTransaction, createRpc, type SolanaRpc, sendAndConfirmTransaction } from "./rpc";
 
 const TEST_SIGNATURE = "5confirmTimeoutSig" as Signature;
 
