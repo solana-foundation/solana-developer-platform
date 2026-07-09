@@ -5,8 +5,7 @@ on:
   pull_request:
     paths:
       - 'apps/sdp-api/scripts/discover-ramp-rails.ts'
-      - 'apps/sdp-api/scripts/check-ramp-rails-drift.ts'
-      - 'apps/sdp-api/src/lib/ramps/**'
+      - 'packages/sdp-payments/src/ramps/**'
       - 'apps/sdp-api/.ramp-rails/**'
       - 'packages/sdp-types/src/generated/ramp-support.generated.ts'
       - 'packages/sdp-types/src/payment-rails.ts'
@@ -17,8 +16,7 @@ on:
       - main
     paths:
       - 'apps/sdp-api/scripts/discover-ramp-rails.ts'
-      - 'apps/sdp-api/scripts/check-ramp-rails-drift.ts'
-      - 'apps/sdp-api/src/lib/ramps/**'
+      - 'packages/sdp-payments/src/ramps/**'
       - 'apps/sdp-api/.ramp-rails/**'
       - 'packages/sdp-types/src/generated/ramp-support.generated.ts'
       - 'packages/sdp-types/src/payment-rails.ts'
@@ -71,4 +69,4 @@ jobs:
 
       - name: Fail on drift
         if: steps.dumps.outputs.present == 'true'
-        run: pnpm --filter @sdp/api rails:drift -- --fail-on-drift
+        run: pnpm --filter @sdp/api rails:drift

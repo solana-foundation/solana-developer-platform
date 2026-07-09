@@ -3,8 +3,26 @@ import {
   CRYPTO_RAIL_ASSET_LABELS,
   type CryptoAssetSymbol,
   type CryptoRailId,
+  type RampCountrySupport,
+  type RampCurrencyLimit,
 } from "@sdp/types/payment-rails";
-import type { MutableProviderRampSupport } from "./types";
+
+let activeIso4217Currencies: Set<string> | undefined;
+let countryDisplayNames: Intl.DisplayNames | undefined;
+
+function getActiveIso4217Currencies(): Set<string> {
+  if (activeIso4217Currencies === undefined) {
+    activeIso4217Currencies = new Set(Intl.supportedValuesOf("currency"));
+  }
+  return activeIso4217Currencies;
+}
+
+function getCountryDisplayNames(): Intl.DisplayNames {
+  if (countryDisplayNames === undefined) {
+    countryDisplayNames = new Intl.DisplayNames(["en"], { type: "region" });
+  }
+  return countryDisplayNames;
+}
 
 export function isRampEventProvider(value: string | undefined): value is RampEventProvider {
   return value !== undefined && (RAMP_EVENT_PROVIDERS as readonly string[]).includes(value);
@@ -20,13 +38,26 @@ export function isSolanaCryptoAsset(value: string): value is SolanaCryptoAsset {
   return value in SOLANA_ASSET_TO_RAIL;
 }
 
-export function createProviderRampSupport(): MutableProviderRampSupport {
-  return {
-    onrampFiats: new Set(),
-    onrampCryptos: new Set(),
-    offrampFiats: new Set(),
-    offrampCryptos: new Set(),
-  };
+export function unreportedCurrencyLimit(): RampCurrencyLimit {
+  return { min: null, max: null };
+}
+
+export const UNREPORTED_COUNTRY_SUPPORT = {
+  coverage: "unreported",
+} as const satisfies RampCountrySupport;
+
+export function isActiveIso4217CurrencyCode(value: string): boolean {
+  const normalized = value.trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(normalized) && getActiveIso4217Currencies().has(normalized);
+}
+
+export function isIso3166Alpha2CountryCode(value: string): boolean {
+  const normalized = value.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(normalized)) {
+    return false;
+  }
+  const displayName = getCountryDisplayNames().of(normalized);
+  return displayName !== undefined && displayName !== normalized;
 }
 
 export function requireEnv(env: Record<string, string | undefined>, key: string): string {

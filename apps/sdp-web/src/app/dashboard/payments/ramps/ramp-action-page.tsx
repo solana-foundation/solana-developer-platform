@@ -1,11 +1,6 @@
 "use client";
 
-import type {
-  ComplianceProviderId,
-  Counterparty,
-  PaymentsDashboardWallet,
-  RampProviderId,
-} from "@sdp/types";
+import type { ComplianceProviderId, Counterparty, PaymentsDashboardWallet } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR, { preload } from "swr";
@@ -15,6 +10,7 @@ import {
   fetchCounterpartyAccounts,
   fetchWallets,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import { hasEnabledRampProvider, type RampProviderAccess } from "@/lib/provider-availability";
 import { BatchSendRail } from "./batch-send-rail";
 import { CounterpartyPicker } from "./components/counterparty-picker";
 import { CounterpartyRecentTransfers } from "./components/counterparty-recent-transfers";
@@ -34,7 +30,7 @@ interface PaymentsActionPageProps {
   walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
   enabledComplianceProviders: ComplianceProviderId[];
-  enabledRampProviders: RampProviderId[];
+  rampProviderAccess: RampProviderAccess | null;
   counterpartiesResult: CounterpartiesResult;
 }
 
@@ -46,8 +42,9 @@ export interface RailProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
-  enabledRampProviders: RampProviderId[];
+  rampProviderAccess: RampProviderAccess | null;
   counterpartiesResult: CounterpartiesResult;
+  selectedCounterparty: Counterparty | null;
   counterpartyId: string;
   counterpartyName: string;
   preSteps: WizardStep[];
@@ -57,7 +54,7 @@ export interface RailProps {
 type RampsPhase = "counterparty" | "method" | "rail";
 
 export function PaymentsActionPage(props: PaymentsActionPageProps) {
-  const { mode, enabledRampProviders } = props;
+  const { mode, rampProviderAccess } = props;
   const router = useRouter();
 
   const [phase, setPhase] = useState<RampsPhase>("counterparty");
@@ -84,7 +81,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
     void preload(["counterparty-accounts", id], () => fetchCounterpartyAccounts(id));
   };
 
-  const fiatEnabled = enabledRampProviders.length > 0;
+  const fiatEnabled = hasEnabledRampProvider(rampProviderAccess);
   const availableMethods: PaymentMethod[] = fiatEnabled ? ["onchain", "ramp"] : ["onchain"];
   const showMethodStep = availableMethods.length > 1;
 
@@ -101,8 +98,11 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   );
 
   const effectiveMethod: PaymentMethod = showMethodStep ? (method ?? "onchain") : "onchain";
-  const counterpartyName =
-    liveCounterparties.data.find((cp) => cp.id === counterpartyId)?.displayName ?? "";
+  const selectedCounterparty = useMemo(() => {
+    const found = liveCounterparties.data.find((cp) => cp.id === counterpartyId);
+    return found ? found : null;
+  }, [liveCounterparties.data, counterpartyId]);
+  const counterpartyName = selectedCounterparty ? selectedCounterparty.displayName : "";
 
   const handleCounterpartyCreated = (created: Counterparty) => {
     selectCounterparty(created.id);
@@ -133,8 +133,9 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
       wallets: props.wallets,
       walletsError: props.walletsError,
       issuedTokenSymbolsByMint: props.issuedTokenSymbolsByMint,
-      enabledRampProviders,
+      rampProviderAccess,
       counterpartiesResult: liveCounterparties,
+      selectedCounterparty,
       counterpartyId,
       counterpartyName,
       preSteps,

@@ -13,11 +13,13 @@ import {
 } from "@sdp/types";
 import {
   type CryptoAssetSymbol,
+  type CryptoRailId,
   getCryptoRailAssetLabel,
-  parseFiatCurrency,
+  type RampCurrencyLimit,
 } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { isAddress } from "@solana/addresses";
+import { z } from "zod";
 import {
   badRequest,
   providerNotConfigured,
@@ -27,26 +29,40 @@ import {
 import { type ProviderRequestInit, providerFetchJson } from "../../fetch";
 import {
   basicAuthHeader,
-  createProviderRampSupport,
+  isActiveIso4217CurrencyCode,
   isSolanaCryptoAsset,
   RAMP_RAIL_DUMPS,
   requireEnv,
   SOLANA_ASSET_TO_RAIL,
+  UNREPORTED_COUNTRY_SUPPORT,
+  unreportedCurrencyLimit,
 } from "../../shared";
 import type {
-  ProviderRampSupport,
-  RampDumpReader,
+  ProviderDeclaredRailSupport,
+  ProviderRailSupportDistillation,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
+  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
 import { lightsparkCounterpartyRequirements } from "./counterparty";
 
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
+
+export const LIGHTSPARK_DECLARED_RAIL_SUPPORT = {
+  onramp: {
+    countrySupport: UNREPORTED_COUNTRY_SUPPORT,
+    entityTypes: ["individual"],
+  },
+  offramp: {
+    countrySupport: UNREPORTED_COUNTRY_SUPPORT,
+    entityTypes: ["individual", "business"],
+  },
+} as const satisfies ProviderDeclaredRailSupport;
 
 function readLightsparkConfig(
   env: Record<string, string | undefined>,
@@ -407,45 +423,108 @@ export interface LightsparkQuote {
   expiresAt?: string;
 }
 
-interface LightsparkSupportedCurrency {
-  currencyCode?: string;
-  enabledTransactionTypes?: string[];
+const lightsparkConfigDumpSchema = z.object({
+  embeddedWalletConfig: z.object({ appName: z.string().optional() }).optional(),
+  supportedCurrencies: z.array(
+    z.object({
+      currencyCode: z.string(),
+      enabledTransactionTypes: z.array(z.string()),
+      minAmount: z.number().optional(),
+      maxAmount: z.number().optional(),
+    })
+  ),
+});
+
+type LightsparkConfigDump = z.infer<typeof lightsparkConfigDumpSchema>;
+
+function usdMinorUnitsToMajorDecimal(amount: number): string {
+  if (!Number.isInteger(amount)) {
+    throw providerUnavailable("Lightspark USD limits must be integer minor units.");
+  }
+  return formatDecimalAmount(BigInt(amount), 2);
 }
 
-interface LightsparkConfigDump {
-  embeddedWalletConfig?: { appName?: string };
-  supportedCurrencies?: readonly LightsparkSupportedCurrency[];
+function lightsparkFiatLimit(
+  currencyCode: string,
+  entry: LightsparkConfigDump["supportedCurrencies"][number]
+) {
+  const minAmount = entry.minAmount;
+  const maxAmount = entry.maxAmount;
+  const hasMin = minAmount !== undefined;
+  const hasMax = maxAmount !== undefined;
+  if (currencyCode !== "USD" && (hasMin || hasMax)) {
+    throw providerUnavailable(
+      `Lightspark returned ${currencyCode} limits, but only USD minor-unit scaling is verified.`
+    );
+  }
+  if (!hasMin && !hasMax) {
+    return unreportedCurrencyLimit();
+  }
+  if (!hasMin || !hasMax) {
+    throw providerUnavailable(`Lightspark ${currencyCode} limits must include both min and max.`);
+  }
+  return {
+    min: usdMinorUnitsToMajorDecimal(minAmount),
+    max: usdMinorUnitsToMajorDecimal(maxAmount),
+  };
 }
 
-function extractSupport(config: LightsparkConfigDump): ProviderRampSupport {
-  const support = createProviderRampSupport();
-  const platformIsSolana = config.embeddedWalletConfig?.appName === "Solana";
+export function distillLightsparkRailSupport(raw: unknown): ProviderRailSupportDistillation {
+  const config = lightsparkConfigDumpSchema.parse(raw);
+  const onrampCurrencies: Record<string, RampCurrencyLimit> = {};
+  const offrampCurrencies: Record<string, RampCurrencyLimit> = {};
+  const onrampCryptos = new Set<CryptoRailId>();
+  const offrampCryptos = new Set<CryptoRailId>();
+  const droppedCurrencyCodes = new Set<string>();
 
-  for (const entry of config.supportedCurrencies ?? []) {
-    const code = entry.currencyCode;
-    if (!code) continue;
-    const upper = code.toUpperCase();
-    const enabled = entry.enabledTransactionTypes ?? [];
-
-    if (isSolanaCryptoAsset(upper)) {
-      if (platformIsSolana && enabled.includes("OUTGOING")) {
-        support.onrampCryptos.add(SOLANA_ASSET_TO_RAIL[upper]);
-        support.offrampCryptos.add(SOLANA_ASSET_TO_RAIL[upper]);
+  for (const entry of config.supportedCurrencies) {
+    const code = entry.currencyCode.trim().toUpperCase();
+    if (isSolanaCryptoAsset(code)) {
+      const rail = SOLANA_ASSET_TO_RAIL[code];
+      if (entry.enabledTransactionTypes.includes("INCOMING")) {
+        onrampCryptos.add(rail);
+      }
+      if (entry.enabledTransactionTypes.includes("OUTGOING")) {
+        offrampCryptos.add(rail);
       }
       continue;
     }
 
-    const parsed = parseFiatCurrency(upper);
-    if (!parsed) continue;
-    if (enabled.includes("INCOMING")) support.onrampFiats.add(parsed);
-    if (enabled.includes("OUTGOING")) support.offrampFiats.add(parsed);
+    if (!/^[A-Z]{3}$/.test(code)) {
+      continue;
+    }
+    if (!isActiveIso4217CurrencyCode(code)) {
+      droppedCurrencyCodes.add(code);
+      continue;
+    }
+    const limit = lightsparkFiatLimit(code, entry);
+    if (entry.enabledTransactionTypes.includes("INCOMING")) {
+      onrampCurrencies[code] = limit;
+    }
+    if (entry.enabledTransactionTypes.includes("OUTGOING")) {
+      offrampCurrencies[code] = limit;
+    }
   }
 
-  return support;
+  return {
+    snapshot: {
+      onramp: {
+        currencies: onrampCurrencies,
+        cryptos: [...onrampCryptos].sort(),
+      },
+      offramp: {
+        currencies: offrampCurrencies,
+        cryptos: [...offrampCryptos].sort(),
+      },
+    },
+    droppedCurrencyCodes: [...droppedCurrencyCodes].sort(),
+    droppedCountryCodes: [],
+  };
 }
 
 export class LightsparkRampClient implements RampProvider {
   readonly id = "lightspark";
+  readonly declaredRailSupport = LIGHTSPARK_DECLARED_RAIL_SUPPORT;
 
   validateCounterparty(
     counterparty: Counterparty,
@@ -473,10 +552,8 @@ export class LightsparkRampClient implements RampProvider {
     );
   }
 
-  async readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport> {
-    return extractSupport(
-      await readDump<LightsparkConfigDump>(RAMP_RAIL_DUMPS.lightspark.config.file)
-    );
+  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
+    return distillLightsparkRailSupport(await readDump(RAMP_RAIL_DUMPS.lightspark.config.file));
   }
 
   private async request<TResponse, TBody = never>(

@@ -5,25 +5,43 @@ import type {
   SdpEnvironment,
 } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
-import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
+import { getCryptoRailAssetLabel, type RampCurrencyLimit } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { estimateNotAvailable, providerNotConfigured, providerUnavailable } from "../../../errors";
 import { providerFetchJson } from "../../fetch";
 import { readyCounterparty } from "../../requirements";
-import { createProviderRampSupport, RAMP_RAIL_DUMPS, requireEnv } from "../../shared";
+import {
+  isActiveIso4217CurrencyCode,
+  RAMP_RAIL_DUMPS,
+  requireEnv,
+  UNREPORTED_COUNTRY_SUPPORT,
+  unreportedCurrencyLimit,
+} from "../../shared";
 import type {
-  ProviderRampSupport,
-  RampDumpReader,
+  ProviderDeclaredRailSupport,
+  ProviderRailSupportDistillation,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampProvider,
+  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
 
 const MONEYGRAM_SANDBOX_BASE_URL = "https://playground.xramps.moneygram.com";
+
+export const MONEYGRAM_DECLARED_RAIL_SUPPORT = {
+  onramp: {
+    countrySupport: UNREPORTED_COUNTRY_SUPPORT,
+    entityTypes: [],
+  },
+  offramp: {
+    countrySupport: UNREPORTED_COUNTRY_SUPPORT,
+    entityTypes: ["individual"],
+  },
+} as const satisfies ProviderDeclaredRailSupport;
 
 const MONEYGRAM_OFFRAMP_DESTINATION: Partial<Record<RampFiatCurrency, string>> = {
   USD: "USA",
@@ -32,10 +50,10 @@ const MONEYGRAM_OFFRAMP_DESTINATION: Partial<Record<RampFiatCurrency, string>> =
 
 const MONEYGRAM_ORIGINATING_COUNTRY = "USA";
 
-interface MoneygramCurrencyEntry {
-  code?: RampFiatCurrency;
-  type?: string;
-}
+const moneygramCurrencyEntrySchema = z.object({
+  code: z.string(),
+  type: z.string(),
+});
 
 const amountDetailSchema = z.object({
   value: z.number(),
@@ -69,8 +87,43 @@ function requireMoneygramSecretKey(
   return requireEnv(env, "MONEYGRAM_SANDBOX_SECRET_KEY");
 }
 
+export function distillMoneygramRailSupport(raw: unknown): ProviderRailSupportDistillation {
+  const currencies = z.array(moneygramCurrencyEntrySchema).parse(raw);
+  const droppedCodes = new Set<string>();
+  const offrampCurrencies: Record<string, RampCurrencyLimit> = {};
+  for (const entry of currencies) {
+    if (entry.type !== "fiat") {
+      continue;
+    }
+    const code = entry.code.trim().toUpperCase();
+    if (!isActiveIso4217CurrencyCode(code)) {
+      droppedCodes.add(code);
+      continue;
+    }
+    offrampCurrencies[code] = unreportedCurrencyLimit();
+  }
+  if (Object.keys(offrampCurrencies).length === 0) {
+    throw new Error("MoneyGram currencies dump contained no fiat currencies.");
+  }
+  return {
+    snapshot: {
+      onramp: {
+        currencies: {},
+        cryptos: [],
+      },
+      offramp: {
+        currencies: offrampCurrencies,
+        cryptos: ["usdc.solana"],
+      },
+    },
+    droppedCurrencyCodes: [...droppedCodes].sort(),
+    droppedCountryCodes: [],
+  };
+}
+
 export class MoneygramRampClient implements RampProvider {
   readonly id = "moneygram";
+  readonly declaredRailSupport = MONEYGRAM_DECLARED_RAIL_SUPPORT;
 
   validateCounterparty(
     _counterparty: Counterparty,
@@ -100,25 +153,8 @@ export class MoneygramRampClient implements RampProvider {
     );
   }
 
-  async readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport> {
-    const currencies = await readDump<readonly MoneygramCurrencyEntry[]>(
-      RAMP_RAIL_DUMPS.moneygram.currencies.file
-    );
-    if (!Array.isArray(currencies)) {
-      throw new Error("MoneyGram currencies dump is not an array.");
-    }
-
-    const support = createProviderRampSupport();
-    support.offrampCryptos.add("usdc.solana");
-    for (const entry of currencies) {
-      if (entry?.type !== "fiat" || typeof entry.code !== "string") continue;
-      const fiat = parseFiatCurrency(entry.code);
-      if (fiat) support.offrampFiats.add(fiat);
-    }
-    if (support.offrampFiats.size === 0) {
-      throw new Error("MoneyGram currencies dump contained no fiat currencies.");
-    }
-    return support;
+  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
+    return distillMoneygramRailSupport(await readDump(RAMP_RAIL_DUMPS.moneygram.currencies.file));
   }
 
   async estimateOnramp(
