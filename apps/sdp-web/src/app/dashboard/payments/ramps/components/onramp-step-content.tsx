@@ -1,5 +1,6 @@
 "use client";
 
+import { isMuralSandboxPayinCurrency } from "@sdp/types";
 import { DollarSignIcon } from "lucide-react";
 import { ONRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
@@ -124,7 +125,10 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
       );
     }
 
-    const labels = simulateActionLabels(quote.provider);
+    const labels =
+      quote.provider === "mural" && !isMuralSandboxPayinCurrency(selectedRampPair.fiatCurrency)
+        ? null
+        : simulateActionLabels(quote.provider);
     const simulateAction = labels
       ? {
           loading: quoteSimulationLoading,

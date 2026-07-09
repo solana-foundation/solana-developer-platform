@@ -252,6 +252,14 @@ export interface Env {
   BVNK_SANDBOX_WALLET_ID?: string;
   BVNK_SANDBOX_WEBHOOK_SECRET?: string;
 
+  // Mural Pay ramps configuration
+  MURAL_PAY_API_KEY?: string;
+  MURAL_PAY_TRANSFER_API_KEY?: string;
+  MURAL_PAY_WEBHOOK_PUBLIC_KEY?: string;
+  MURAL_PAY_SANDBOX_API_KEY?: string;
+  MURAL_PAY_SANDBOX_TRANSFER_API_KEY?: string;
+  MURAL_PAY_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
+
   // MoneyGram ramps configuration
   MONEYGRAM_SANDBOX_PUBLIC_KEY?: string;
   MONEYGRAM_SANDBOX_SECRET_KEY?: string;

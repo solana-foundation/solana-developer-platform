@@ -1,6 +1,6 @@
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 import { Loader2Icon, ShieldCheckIcon, XCircleIcon } from "lucide-react";
-import type { OnboardingCopy, OnboardingPanelStatus, SimulateActionLabels } from "./index";
+import type { OnboardingCopy, SimulateActionLabels, StandardOnboardingPanelStatus } from "./index";
 
 export const BVNK_ONBOARDING_COPY = {
   customer_verification_required: {
@@ -43,7 +43,7 @@ export const BVNK_ONBOARDING_COPY = {
     icon: Loader2Icon,
     iconClassName: "animate-spin text-text-medium",
   },
-} as const satisfies Record<OnboardingPanelStatus, OnboardingCopy>;
+} as const satisfies Record<StandardOnboardingPanelStatus, OnboardingCopy>;
 
 export const BVNK_PROVISIONING_DETAIL = {
   onramp: "Provisioning a BVNK wallet and fiat→crypto payment rule for this quote.",

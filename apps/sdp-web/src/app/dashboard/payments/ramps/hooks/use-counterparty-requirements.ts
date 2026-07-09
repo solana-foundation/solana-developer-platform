@@ -77,6 +77,7 @@ async function advanceCounterpartyRequirements(
 
 function isOnboardingPending(status: CounterpartyRequirements["status"]): boolean {
   return (
+    status === "terms_of_service_required" ||
     status === "customer_verification_required" ||
     status === "customer_verifying" ||
     status === "funding_account_provisioning"

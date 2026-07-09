@@ -11,6 +11,7 @@ import type {
   ListProjectCounterpartyAccountsEnvelope,
   ListProjectCounterpartyAccountsResponse,
   MoneygramRampEvent,
+  MuralSandboxPayinCurrency,
   PaymentRampEstimateEnvelope,
   PaymentsWalletAggregateEnvelope,
   PaymentTransferBatch,
@@ -651,6 +652,14 @@ type SandboxTransferSimulationInput =
         fiatCurrency: string;
         cryptoToken: string;
         destinationWallet: string;
+      };
+    }
+  | {
+      provider: "mural";
+      payload: {
+        counterpartyId: string;
+        amount: number;
+        fiatCurrency: MuralSandboxPayinCurrency;
       };
     };
 

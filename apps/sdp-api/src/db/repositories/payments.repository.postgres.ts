@@ -241,14 +241,16 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
         extraValues: [input.transferId, [...input.fromStatuses]],
       });
 
+      const amountClause = input.amount === undefined ? "" : ", amount = ?";
+      const amountValues = input.amount === undefined ? [] : [input.amount];
       const row = await db
         .prepare(
           `UPDATE payment_transfers
-           SET status = ?, updated_at = ?
+           SET status = ?, updated_at = ?${amountClause}
            WHERE ${scope.where}
            RETURNING *`
         )
-        .bind(input.toStatus, input.updatedAt, ...scope.values)
+        .bind(input.toStatus, input.updatedAt, ...amountValues, ...scope.values)
         .first<Record<string, unknown>>();
 
       return row ? mapTransferRow(row) : null;
