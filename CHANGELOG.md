@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.38.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.37.0...v0.38.0) (2026-07-09)
+
+### Features
+
+* add Mural Pay ramp provider (on-ramp) ([#632](https://github.com/solana-foundation/solana-developer-platform/pull/632)) ([fa14064](https://github.com/solana-foundation/solana-developer-platform/commit/fa14064349dc5186eac6e9be426962d9109e0933))
+
+### Refactors
+
+* move payments internals into workspace package ([#625](https://github.com/solana-foundation/solana-developer-platform/pull/625)) ([9726755](https://github.com/solana-foundation/solana-developer-platform/commit/972675501b166e4e74290445b0e9f24d14ce3b9c))
+* move solana internals into workspace package ([#623](https://github.com/solana-foundation/solana-developer-platform/pull/623)) ([6a2ae8a](https://github.com/solana-foundation/solana-developer-platform/commit/6a2ae8a8d0d6995c03ce2def83f28afd79364df3))
+* move custody internals into workspace package ([#624](https://github.com/solana-foundation/solana-developer-platform/pull/624)) ([a02d305](https://github.com/solana-foundation/solana-developer-platform/commit/a02d30599ca66ef5cc5f9674b7e9798b3da9f55f))
+
 ## [0.37.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.36.0...v0.37.0) (2026-07-08)
 
 ### Features
