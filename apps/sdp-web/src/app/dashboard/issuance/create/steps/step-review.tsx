@@ -170,13 +170,6 @@ export function StepReview() {
       exit={{ opacity: 0, y: -8 }}
       className="space-y-5"
     >
-      <div>
-        <h2 className="text-2xl font-medium text-[#1c1c1d]">Review &amp; finish</h2>
-        <p className="mt-1.5 text-sm text-[rgba(28,28,29,0.62)]">
-          Please review all details below. You can edit any section before creating your draft.
-        </p>
-      </div>
-
       {sections.map((section) => (
         <ReviewSection
           key={section.title}

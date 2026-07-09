@@ -95,51 +95,64 @@ function shortAddress(address: string): string {
   return `${address.slice(0, 5)}…${address.slice(-4)}`;
 }
 
-// Exact label/path matches take precedence over the substring rules below.
-const EXACT_ICONS: Record<string, LucideIcon> = {
+// Every issuance field maps to its own icon so no two rows in a given preview
+// share a glyph. Keys are a field path's final dot-segment, lowercased with
+// non-letters stripped ("asset.reserveAsset" → "reserveasset"), so the shared
+// "asset." prefix can't leak into the match — it previously made every path
+// contain "asset" and collapse fields (offering/underlying/custodian) onto one
+// icon, and lumped "reserve" in with "backing".
+const FIELD_ICONS: Record<string, LucideIcon> = {
   name: Tag,
   symbol: Hash,
   decimals: Clock,
   category: Layers,
-  "asset type": FileText,
   type: FileText,
   logo: Image,
   image: Image,
   icon: Image,
   description: Activity,
+  issuername: User,
+  pegcurrency: DollarSign,
+  pegtarget: Target,
+  backingtype: ShieldCheck,
+  reserveasset: Banknote,
+  reservecustodian: Wallet,
+  custodian: Wallet,
+  website: Globe,
+  jurisdiction: MapPin,
+  offeringtype: Tag,
+  underlyingasset: Coins,
 };
 
-// Ordered substring rules — first match wins, so more specific keywords come
-// first (e.g. "supply" before the generic "asset").
+// Resilient fallbacks for keys not in the exact map (e.g. future fields),
+// matched as ordered substring rules — first match wins, so the more specific
+// keyword comes first ("custod" before "reserve" so a reserve custodian doesn't
+// borrow the reserve-asset icon).
 const ICON_RULES: readonly { keywords: readonly string[]; icon: LucideIcon }[] = [
   { keywords: ["website", "url"], icon: Globe },
   { keywords: ["mint", "address"], icon: KeyRound },
   { keywords: ["supply", "total"], icon: Coins },
+  { keywords: ["custod"], icon: Wallet },
+  { keywords: ["reserve"], icon: Banknote },
+  { keywords: ["backing", "collateral"], icon: ShieldCheck },
   { keywords: ["issuer", "owner", "authority"], icon: User },
   { keywords: ["jurisdiction", "country", "location"], icon: MapPin },
-  { keywords: ["backing", "reserve", "collateral"], icon: ShieldCheck },
   { keywords: ["currency", "fiat"], icon: DollarSign },
-  { keywords: ["reserve", "asset"], icon: Banknote },
+  { keywords: ["peg", "target"], icon: Target },
 ];
 
-// Peg fields prefer a distinct target icon so they don't reuse the generic
-// currency icon — except an explicit peg currency/fiat field.
-function pegIcon(key: string): LucideIcon {
-  const isTarget = key.includes("target") || key.includes("to") || key.includes("against");
-  const isCurrency = key.includes("currency") || key.includes("fiat");
-  return isCurrency && !isTarget ? DollarSign : Target;
-}
-
-// Map a fact path or label to its icon component. Exact matches win, then peg
-// fields, then the ordered substring rules; falls back to a generic check.
+// Map a fact path (or label) to its icon. The lookup key is the field's final
+// path segment, so "asset.reserveAsset" and a bare "reserveAsset" resolve the
+// same. Exact field matches win; otherwise fall back to the substring rules,
+// then a generic check.
 function iconFor(labelOrPath?: string): LucideIcon {
   if (!labelOrPath) return CircleCheck;
-  const key = labelOrPath.toLowerCase();
-  const exact = EXACT_ICONS[key];
-  if (exact) return exact;
-  if (key.includes("peg")) return pegIcon(key);
-  const rule = ICON_RULES.find((r) => r.keywords.some((k) => key.includes(k)));
-  return rule?.icon ?? CircleCheck;
+  const key = (labelOrPath.split(".").pop() ?? labelOrPath).toLowerCase().replace(/[^a-z]/g, "");
+  return (
+    FIELD_ICONS[key] ??
+    ICON_RULES.find((r) => r.keywords.some((k) => key.includes(k)))?.icon ??
+    CircleCheck
+  );
 }
 
 // Small inline classification chip used in the identity header.

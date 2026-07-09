@@ -16,12 +16,11 @@ import {
   getBlockers,
 } from "./draft-mapping";
 import { DraftSummaryRail } from "./draft-summary-rail";
-import { canAdvance, type DetailsStage, type WizardStep } from "./issuance-draft-wizard.types";
+import { canAdvance, type WizardStep } from "./issuance-draft-wizard.types";
 import { StepAssetDetails } from "./steps/step-asset-details";
 import { StepClassification } from "./steps/step-classification";
 import { StepPublicInfo } from "./steps/step-public-info";
 import { StepReview } from "./steps/step-review";
-import { StepSubAssetType } from "./steps/step-sub-asset-type";
 import { IssuanceDraftProvider, useIssuanceDraft } from "./use-issuance-draft";
 import { WizardProgress } from "./wizard-progress";
 
@@ -82,7 +81,6 @@ export function IssuanceDraftWizard({
 
 function renderStep(
   step: WizardStep,
-  detailsStage: DetailsStage,
   signerWallets: PaymentsDashboardWallet[],
   signerWalletsError: string | null,
   showErrors: boolean
@@ -91,9 +89,7 @@ function renderStep(
     case "classification":
       return <StepClassification />;
     case "asset-details":
-      return detailsStage === "select" ? (
-        <StepSubAssetType />
-      ) : (
+      return (
         <StepAssetDetails
           signerWallets={signerWallets}
           signerWalletsError={signerWalletsError}
@@ -111,7 +107,7 @@ function renderStep(
 
 function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardProps) {
   const router = useRouter();
-  const { draft, currentStep, detailsStage, updatedAt, advance, goBack, reset, clearStoredDraft } =
+  const { draft, currentStep, updatedAt, advance, goBack, reset, clearStoredDraft } =
     useIssuanceDraft();
   const [submitting, setSubmitting] = useState(false);
   // Gates the Create-draft action behind a confirmation dialog, so it never
@@ -133,21 +129,21 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
   const showRail = isClassification || showSummaryRail;
   const blockers = getBlockers(draft);
 
-  // Reset the attempt flag whenever the step or sub-stage changes, so each step
-  // starts clean and only reveals errors after its own failed Continue.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: step/sub-stage are the reset triggers, not values read in the effect.
+  // Reset the attempt flag whenever the step changes, so each step starts clean
+  // and only reveals errors after its own failed Continue.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: step is the reset trigger, not a value read in the effect.
   useEffect(() => {
     setAttemptedAdvance(false);
-  }, [currentStep, detailsStage]);
+  }, [currentStep]);
 
   // On the Asset-details form, Continue stays enabled until the user attempts to
   // advance with validation errors — then it locks (and the fields highlight)
   // until every error is resolved. Every other step keeps the coarse gate.
-  const isDetailsForm = currentStep === "asset-details" && detailsStage === "form";
+  const isDetailsForm = currentStep === "asset-details";
   const detailsErrorCount = Object.keys(getAssetDetailsErrors(draft)).length;
   const canContinue = isDetailsForm
     ? !(attemptedAdvance && detailsErrorCount > 0)
-    : canAdvance(currentStep, detailsStage, draft);
+    : canAdvance(currentStep, draft);
 
   const handleCancel = () => {
     reset();
@@ -271,16 +267,21 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6">
         <div className="mx-auto w-full max-w-6xl pb-8">
+          {/* On Review the header spans the full width above the grid so the
+              Summary rail top-aligns with the first section card, not the header. */}
+          {isReview ? (
+            <div className="mb-5">
+              <h2 className="text-2xl font-medium text-[#1c1c1d]">Review &amp; finish</h2>
+              <p className="mt-1.5 text-sm text-[rgba(28,28,29,0.62)]">
+                Please review all details below. You can edit any section before creating your
+                draft.
+              </p>
+            </div>
+          ) : null}
           <div className={showRail ? "grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]" : undefined}>
             <div className="min-w-0">
               <AnimatePresence mode="wait">
-                {renderStep(
-                  currentStep,
-                  detailsStage,
-                  signerWallets,
-                  signerWalletsError,
-                  attemptedAdvance
-                )}
+                {renderStep(currentStep, signerWallets, signerWalletsError, attemptedAdvance)}
               </AnimatePresence>
             </div>
             {isClassification ? <ClassificationInfoRail /> : null}
