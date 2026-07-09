@@ -7,6 +7,7 @@ import {
   LIGHTSPARK_PROVISIONING_DETAIL,
   LIGHTSPARK_SIMULATE_LABELS,
 } from "./lightspark";
+import { MURAL_ONBOARDING_COPY, MURAL_PROVISIONING_DETAIL, MURAL_SIMULATE_LABELS } from "./mural";
 
 export interface OnboardingCopy {
   title: string;
@@ -19,6 +20,11 @@ export type OnboardingPanelStatus = Exclude<
   CounterpartyRequirements["status"],
   "collect" | "unsupported" | "onboarding_not_started"
 >;
+export type StandardOnboardingPanelStatus = Exclude<
+  OnboardingPanelStatus,
+  "terms_of_service_required"
+>;
+export type MuralOnboardingPanelStatus = Exclude<OnboardingPanelStatus, "provisioning_failed">;
 
 export interface SimulateActionLabels {
   idle: string;
@@ -32,7 +38,7 @@ export interface SimulateActionLabels {
  * never render the onboarding panel, so callers must gate on this before rendering it.
  */
 export function hasOnboardingLifecycle(provider: RampProviderId): boolean {
-  return provider === "bvnk" || provider === "lightspark";
+  return provider === "bvnk" || provider === "lightspark" || provider === "mural";
 }
 
 export function onboardingCopy(
@@ -40,10 +46,24 @@ export function onboardingCopy(
   status: OnboardingPanelStatus
 ): OnboardingCopy {
   switch (provider) {
-    case "bvnk":
+    case "bvnk": {
+      if (status === "terms_of_service_required") {
+        throw new Error(`No onboarding copy for ramp provider/status: ${provider}/${status}`);
+      }
       return BVNK_ONBOARDING_COPY[status];
-    case "lightspark":
+    }
+    case "lightspark": {
+      if (status === "terms_of_service_required") {
+        throw new Error(`No onboarding copy for ramp provider/status: ${provider}/${status}`);
+      }
       return LIGHTSPARK_ONBOARDING_COPY[status];
+    }
+    case "mural": {
+      if (status === "provisioning_failed") {
+        throw new Error(`No onboarding copy for ramp provider/status: ${provider}/${status}`);
+      }
+      return MURAL_ONBOARDING_COPY[status];
+    }
     default:
       throw new Error(`No onboarding copy for ramp provider: ${provider}`);
   }
@@ -56,6 +76,8 @@ export function simulateActionLabels(provider: RampProviderId): SimulateActionLa
       return BVNK_SIMULATE_LABELS;
     case "lightspark":
       return LIGHTSPARK_SIMULATE_LABELS;
+    case "mural":
+      return MURAL_SIMULATE_LABELS;
     default:
       return null;
   }
@@ -68,6 +90,8 @@ export function provisioningDetail(provider: RampProviderId, direction: RampDire
       return BVNK_PROVISIONING_DETAIL[direction];
     case "lightspark":
       return LIGHTSPARK_PROVISIONING_DETAIL[direction];
+    case "mural":
+      return MURAL_PROVISIONING_DETAIL[direction];
     default:
       throw new Error(`No provisioning detail for ramp provider: ${provider}`);
   }

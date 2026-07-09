@@ -82,7 +82,11 @@ export function useOnrampWizard(props: UseRampWizardProps) {
 
   const simulateCurrentQuote = async () => {
     const quote = wizard.quote;
-    if (quote?.provider !== "lightspark" && quote?.provider !== "bvnk") {
+    if (
+      quote?.provider !== "lightspark" &&
+      quote?.provider !== "bvnk" &&
+      quote?.provider !== "mural"
+    ) {
       return;
     }
 
@@ -94,6 +98,15 @@ export function useOnrampWizard(props: UseRampWizardProps) {
         await simulateSandboxTransfer({
           provider: "lightspark",
           payload: { quoteId: quote.id, currencyCode: "USD" },
+        });
+      } else if (quote.provider === "mural") {
+        await simulateSandboxTransfer({
+          provider: "mural",
+          payload: {
+            counterpartyId: wizard.fields.counterpartyId,
+            amount: Number(wizard.fields.amount.trim()),
+            fiatCurrency: wizard.selectedRampPair.fiatCurrency,
+          },
         });
       } else {
         await simulateSandboxTransfer({

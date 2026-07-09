@@ -652,6 +652,14 @@ type SandboxTransferSimulationInput =
         cryptoToken: string;
         destinationWallet: string;
       };
+    }
+  | {
+      provider: "mural";
+      payload: {
+        counterpartyId: string;
+        amount: number;
+        fiatCurrency: string;
+      };
     };
 
 export async function simulateSandboxTransfer(input: SandboxTransferSimulationInput) {

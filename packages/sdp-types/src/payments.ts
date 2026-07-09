@@ -753,7 +753,17 @@ export interface BvnkCryptoDepositInstruction extends CryptoDepositPaymentRampIn
 
 export type BvnkPaymentRampInstruction = BvnkFiatFundingInstruction | BvnkCryptoDepositInstruction;
 
-export type PaymentRampInstruction = LightsparkPaymentRampInstruction | BvnkPaymentRampInstruction;
+export interface MuralPaymentRampInstruction {
+  provider: "mural";
+  fiatCurrency: string;
+  payinRails: string[];
+  bankDetails: Record<string, string>;
+}
+
+export type PaymentRampInstruction =
+  | LightsparkPaymentRampInstruction
+  | BvnkPaymentRampInstruction
+  | MuralPaymentRampInstruction;
 
 export type RampDirection = "onramp" | "offramp";
 
@@ -853,6 +863,11 @@ export type PaymentRampQuote =
       deliveryMode: "manual_instructions";
       /** BVNK fiat virtual-account funding instructions; fund these to receive crypto. */
       paymentInstructions: BvnkPaymentRampInstruction[];
+    })
+  | (BasePaymentRampQuote & {
+      provider: "mural";
+      deliveryMode: "manual_instructions";
+      paymentInstructions: MuralPaymentRampInstruction[];
     })
   | (BasePaymentRampQuote & {
       provider: "moonpay" | "bvnk" | "coinbase";
