@@ -21,6 +21,10 @@ export interface IbmHavenEnv {
   IBM_HAVEN_CREDENTIAL_ID?: string;
   IBM_HAVEN_PRIVATE_KEY?: string;
   IBM_HAVEN_API_BASE_URL?: string;
+  IBM_MAVEN_AUTH_TOKEN?: string;
+  IBM_MAVEN_CREDENTIAL_ID?: string;
+  IBM_MAVEN_PRIVATE_KEY?: string;
+  IBM_MAVEN_API_BASE_URL?: string;
 }
 
 export const DEFAULT_DFNS_API_BASE_URL = "https://api.dfns.io";
@@ -563,16 +567,15 @@ export async function createDfnsApiClient(
 }
 
 // IBM Digital Asset Haven reuses the Dfns request/UAS/signing machinery with
-// IBM-hosted credentials (IBM_HAVEN_*) and base URL — same wire protocol.
+// IBM-hosted credentials and base URL — same wire protocol.
 function resolveIbmHavenContext(
   env: IbmHavenEnv,
   options?: { apiBaseUrl?: string }
 ): DfnsClientContext {
-  const authToken = env.IBM_HAVEN_AUTH_TOKEN;
-  const credentialId = env.IBM_HAVEN_CREDENTIAL_ID;
-  const privateKey = env.IBM_HAVEN_PRIVATE_KEY
-    ? normalizePrivateKey(env.IBM_HAVEN_PRIVATE_KEY)
-    : undefined;
+  const authToken = env.IBM_HAVEN_AUTH_TOKEN ?? env.IBM_MAVEN_AUTH_TOKEN;
+  const credentialId = env.IBM_HAVEN_CREDENTIAL_ID ?? env.IBM_MAVEN_CREDENTIAL_ID;
+  const rawPrivateKey = env.IBM_HAVEN_PRIVATE_KEY ?? env.IBM_MAVEN_PRIVATE_KEY;
+  const privateKey = rawPrivateKey ? normalizePrivateKey(rawPrivateKey) : undefined;
 
   if (!authToken || !credentialId || !privateKey) {
     throw new SigningError(
@@ -585,7 +588,11 @@ function resolveIbmHavenContext(
     authToken,
     credentialId,
     privateKey,
-    baseUrl: options?.apiBaseUrl ?? env.IBM_HAVEN_API_BASE_URL ?? DEFAULT_IBM_HAVEN_API_BASE_URL,
+    baseUrl:
+      options?.apiBaseUrl ??
+      env.IBM_HAVEN_API_BASE_URL ??
+      env.IBM_MAVEN_API_BASE_URL ??
+      DEFAULT_IBM_HAVEN_API_BASE_URL,
     providerLabel: IBM_HAVEN_PROVIDER_LABEL,
     userAgent: IBM_HAVEN_USER_AGENT,
   };

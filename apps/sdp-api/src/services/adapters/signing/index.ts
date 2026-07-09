@@ -615,7 +615,7 @@ async function createDfnsAdapterFromRecord(
 }
 
 async function createIbmHavenAdapterFromEnv(env: Env): Promise<KeychainIbmHavenAdapter> {
-  const walletId = env.IBM_HAVEN_WALLET_ID;
+  const walletId = env.IBM_HAVEN_WALLET_ID ?? env.IBM_MAVEN_WALLET_ID;
   if (!walletId) {
     throw new SigningError(
       "IBM Digital Asset Haven environment variables not configured: IBM_HAVEN_WALLET_ID",
@@ -641,10 +641,11 @@ async function createIbmHavenAdapterFromRecord(
     throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
   }
 
+  const envWalletId = env.IBM_HAVEN_WALLET_ID ?? env.IBM_MAVEN_WALLET_ID;
   const defaultWalletId =
     (record.defaultWalletId ? denormalizeIbmHavenWalletId(record.defaultWalletId) : undefined) ??
     parsed.walletId ??
-    (env.IBM_HAVEN_WALLET_ID ? denormalizeIbmHavenWalletId(env.IBM_HAVEN_WALLET_ID) : undefined);
+    (envWalletId ? denormalizeIbmHavenWalletId(envWalletId) : undefined);
 
   if (!defaultWalletId) {
     throw new SigningError(

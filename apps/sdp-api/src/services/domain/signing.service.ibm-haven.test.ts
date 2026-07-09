@@ -29,6 +29,23 @@ describe("signing.service ibm_haven (IBM Digital Asset Haven)", () => {
     expect(adapter.providerId).toBe("ibm_haven");
   });
 
+  it("accepts IBM Maven env aliases for the Haven adapter", async () => {
+    const env = createTestEnv({
+      IBM_HAVEN_AUTH_TOKEN: undefined,
+      IBM_HAVEN_CREDENTIAL_ID: undefined,
+      IBM_HAVEN_PRIVATE_KEY: undefined,
+      IBM_MAVEN_AUTH_TOKEN: "ibm-maven-auth-token",
+      IBM_MAVEN_CREDENTIAL_ID: "ibm-maven-credential-id",
+      IBM_MAVEN_PRIVATE_KEY: "ibm-maven-test-private-key",
+    });
+    const encryptedConfig = await encryptConfig(env, JSON.stringify({ walletId: "wa_haven_1" }));
+    const record = createRecord({ config: encryptedConfig, defaultWalletId: null });
+
+    const adapter = await createAdapterFromEncryptedConfig(env, TEST_ORG_ID, record);
+
+    expect(adapter).toBeInstanceOf(KeychainIbmHavenAdapter);
+  });
+
   it("throws when no default wallet id is configured", async () => {
     const env = createTestEnv();
     const encryptedConfig = await encryptConfig(env, JSON.stringify({}));

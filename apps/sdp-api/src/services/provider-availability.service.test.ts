@@ -30,6 +30,9 @@ const providerEnvKeys = [
   "IBM_HAVEN_AUTH_TOKEN",
   "IBM_HAVEN_CREDENTIAL_ID",
   "IBM_HAVEN_PRIVATE_KEY",
+  "IBM_MAVEN_AUTH_TOKEN",
+  "IBM_MAVEN_CREDENTIAL_ID",
+  "IBM_MAVEN_PRIVATE_KEY",
   "ANCHORAGE_API_KEY",
   "UTILA_SERVICE_ACCOUNT_EMAIL",
   "UTILA_SERVICE_ACCOUNT_PRIVATE_KEY",
@@ -224,6 +227,21 @@ describe("provider-availability.service", () => {
       entitled: true,
       configured: false,
       enabled: false,
+    });
+  });
+
+  it("accepts IBM Maven env aliases for IBM Digital Asset Haven availability", async () => {
+    await setOrganizationTier("enterprise");
+    env.IBM_MAVEN_AUTH_TOKEN = "ibm-maven-auth-token";
+    env.IBM_MAVEN_CREDENTIAL_ID = "ibm-maven-credential-id";
+    env.IBM_MAVEN_PRIVATE_KEY = "ibm-maven-private-key";
+
+    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+
+    expect(availability.providers.custody.ibm_haven).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
     });
   });
 

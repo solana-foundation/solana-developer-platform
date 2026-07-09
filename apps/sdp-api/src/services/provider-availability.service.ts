@@ -100,6 +100,11 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
           "IBM_HAVEN_AUTH_TOKEN",
           "IBM_HAVEN_CREDENTIAL_ID",
           "IBM_HAVEN_PRIVATE_KEY",
+        ]) ||
+        hasAllEnv(env, [
+          "IBM_MAVEN_AUTH_TOKEN",
+          "IBM_MAVEN_CREDENTIAL_ID",
+          "IBM_MAVEN_PRIVATE_KEY",
         ]),
     },
     anchorage: {

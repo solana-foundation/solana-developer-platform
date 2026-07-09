@@ -168,6 +168,11 @@ export interface Env {
   IBM_HAVEN_PRIVATE_KEY?: string;
   IBM_HAVEN_API_BASE_URL?: string;
   IBM_HAVEN_WALLET_ID?: string;
+  IBM_MAVEN_AUTH_TOKEN?: string;
+  IBM_MAVEN_CREDENTIAL_ID?: string;
+  IBM_MAVEN_PRIVATE_KEY?: string;
+  IBM_MAVEN_API_BASE_URL?: string;
+  IBM_MAVEN_WALLET_ID?: string;
 
   // Anchorage wallet lifecycle configuration
   ANCHORAGE_API_KEY?: string;
