@@ -1,3 +1,5 @@
+import { isAddress } from "@sdp/solana/address";
+import { isDecimalString } from "@sdp/solana/amount";
 import {
   type CoinbaseRampEvent,
   type MoneygramRampEvent,
@@ -9,8 +11,6 @@ import {
 } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
 import { z } from "zod";
-import { isDecimalString } from "@/lib/amount";
-import { isAddress } from "@/lib/solana";
 import { SOL_MINT } from "@/services/payment-operation.service";
 
 // Per-field schema for any payments input that expects a base58 Solana address
