@@ -37,6 +37,19 @@ describe("StripeWebhookProcessor", () => {
     });
   });
 
+  it("throws on a known event type with a malformed envelope", () => {
+    const processor = new StripeWebhookProcessor();
+    expect(() => processor.parse({ type: "crypto.onramp_session.updated", data: {} })).toThrow(
+      "missing the session object"
+    );
+    expect(() =>
+      processor.parse({
+        type: "crypto.onramp_session.updated",
+        data: { object: { status: "rejected" } },
+      })
+    ).toThrow("missing the session id");
+  });
+
   it("accepts a correctly signed webhook and rejects a forged one", async () => {
     const processor = new StripeWebhookProcessor();
     const rawBody = JSON.stringify({ type: "crypto.onramp_session.updated", data: {} });

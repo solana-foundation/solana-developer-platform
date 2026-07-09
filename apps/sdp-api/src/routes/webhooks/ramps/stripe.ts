@@ -129,12 +129,16 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
     const data = readRecord(root.data);
     const session = data ? readRecord(data.object) : undefined;
     if (!session) {
-      return { provider: this.provider, kind: "ignore", reason: "missing_session_id" };
+      throw badRequest(`Stripe "${type}" webhook is missing the session object`, {
+        provider: this.provider,
+      });
     }
 
     const reference = readString(session.id);
     if (!reference) {
-      return { provider: this.provider, kind: "ignore", reason: "missing_session_id" };
+      throw badRequest(`Stripe "${type}" webhook is missing the session id`, {
+        provider: this.provider,
+      });
     }
 
     const status = readString(session.status);
