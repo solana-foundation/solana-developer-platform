@@ -1,4 +1,6 @@
 import * as solanaRpc from "@sdp/rpc/solana";
+import { assertValidAddress } from "@sdp/solana/address";
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { UpdatePaymentRecurringPaymentRequest } from "@sdp/types";
 import {
   type Address,
@@ -43,9 +45,7 @@ import {
   type PaymentSubscriptionsRepository,
   type PaymentTransferRow,
 } from "@/db/repositories";
-import { parseDecimalAmount } from "@/lib/amount";
 import { AppError, badRequest } from "@/lib/errors";
-import { assertValidAddress } from "@/lib/solana";
 import {
   resolveMintTokenProgram,
   resolveSourceTokenAccountOrAta,

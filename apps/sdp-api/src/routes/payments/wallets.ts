@@ -1,8 +1,8 @@
 import { badRequest } from "@sdp/payments/errors";
+import { isAddress } from "@sdp/solana/address";
 import type { Permission } from "@sdp/types";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
-import { isAddress } from "@/lib/solana";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";

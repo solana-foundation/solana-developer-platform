@@ -1,10 +1,10 @@
+import { assertValidAddress } from "@sdp/solana/address";
 import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { assertValidAddress } from "@/lib/solana";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/mosaic";
