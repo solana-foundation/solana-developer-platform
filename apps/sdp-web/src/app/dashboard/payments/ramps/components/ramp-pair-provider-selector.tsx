@@ -186,7 +186,7 @@ export function RampPairProviderSelector({
         </div>
 
         {/* Fixed height keeps the sticky footer from shifting as providers animate in/out. */}
-        <div className="-mx-1.5 h-48 overflow-y-auto px-1.5 py-1">
+        <div className="-mx-1.5 h-96 overflow-y-auto px-1.5 py-1">
           <motion.div layout className="space-y-2">
             <AnimatePresence mode="popLayout" initial={false}>
               {availableProviders.map((option) => (
