@@ -10,6 +10,7 @@
  * 3. Kora signs as fee payer and submits
  */
 
+import type { SigningPort } from "@sdp/custody/signing";
 import type { Address, Blockhash, Instruction, Signature } from "@solana/kit";
 import {
   appendTransactionMessageInstructions,
@@ -20,7 +21,7 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import type { FeePaymentPort, RpcPort, SigningPort } from "@/services/ports";
+import type { FeePaymentPort, RpcPort } from "@/services/ports";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types

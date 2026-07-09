@@ -1,9 +1,9 @@
 import { Buffer } from "node:buffer";
+import { isFullSigningPort } from "@sdp/custody/signing";
 import { describe, expect, it } from "vitest";
 import { KeychainDfnsAdapter, type SigningConfigRecord } from "@/services/adapters";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing.service";
 import { createEncryptionService } from "@/services/encryption.service";
-import { isFullSigningPort } from "@/services/ports";
 import type { Env } from "@/types/env";
 
 const TEST_ORG_ID = "org_dfns_legacy";

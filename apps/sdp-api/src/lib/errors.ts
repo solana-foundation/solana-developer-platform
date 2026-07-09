@@ -2,9 +2,9 @@
  * API Error Types and Handlers
  */
 
+import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
-import { redactCredentialSecrets, redactCredentialString } from "@/lib/redaction";
 
 export type ErrorCode =
   | "BAD_REQUEST"
