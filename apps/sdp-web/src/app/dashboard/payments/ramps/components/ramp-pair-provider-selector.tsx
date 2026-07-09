@@ -1,6 +1,4 @@
-import type { RampProviderAccess } from "@/lib/provider-availability";
-
-("use client");
+"use client";
 
 import type { Counterparty, CounterpartyEntityType, PaymentsDashboardWallet } from "@sdp/types";
 import {
@@ -19,6 +17,7 @@ import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
 import { Modal } from "@/components/ui/modal";
+import type { RampProviderAccess } from "@/lib/provider-availability";
 import {
   findRampPair,
   OFFRAMP_PAIRS,

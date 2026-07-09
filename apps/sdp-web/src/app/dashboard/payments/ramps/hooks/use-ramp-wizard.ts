@@ -1,6 +1,4 @@
-import type { RampProviderAccess } from "@/lib/provider-availability";
-
-("use client");
+"use client";
 
 import type {
   Counterparty,
@@ -20,6 +18,7 @@ import {
   fetchAllCounterparties,
   getApiError,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import type { RampProviderAccess } from "@/lib/provider-availability";
 import {
   DEFAULT_RAMP_PAIR,
   findRampPair,
