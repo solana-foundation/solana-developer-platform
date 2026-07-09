@@ -3,6 +3,7 @@
  */
 
 import * as SolanaRpc from "@sdp/rpc/solana";
+import type { Address } from "@sdp/solana/address";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +11,6 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
-import type { Address } from "@/lib/solana";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { createKVStoreSet } from "@/runtime/factory";
 import * as FeePaymentAdapters from "@/services/adapters/fee-payment";

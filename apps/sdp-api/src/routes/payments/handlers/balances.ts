@@ -1,4 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import type {
   PaymentWalletControlProfileSummary,
   PaymentWalletPolicyAuditEntry,
@@ -17,7 +18,6 @@ import {
   generateWalletControlProfileId,
   generateWalletControlProfileRevisionId,
 } from "@/db/repositories/policy.repository";
-import { formatDecimalAmount } from "@/lib/amount";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import {
