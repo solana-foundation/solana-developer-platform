@@ -1,9 +1,9 @@
+import { isDecimalString } from "@sdp/solana/amount";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import type {
   PaymentsRepository,
   PaymentWalletPolicyRow as WalletPolicyRow,
 } from "@/db/repositories/payments.repository";
-import { isDecimalString } from "@/lib/amount";
 import { AppError } from "@/lib/errors";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import {

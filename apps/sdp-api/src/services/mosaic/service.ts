@@ -13,6 +13,7 @@
  */
 
 import { confirmTransaction, createRpcForSdk } from "@sdp/rpc/solana";
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -69,7 +70,6 @@ import {
   getUpdateTokenMetadataFieldInstruction,
   TOKEN_2022_PROGRAM_ADDRESS,
 } from "@solana-program/token-2022";
-import { parseDecimalAmount } from "@/lib/amount";
 import { transactionFailed } from "@/lib/errors";
 import type { FeePaymentPort } from "@/services/ports/fee-payment.port";
 import type { Env } from "@/types/env";
@@ -1111,7 +1111,7 @@ export class MosaicService {
    * Falls back to Token2022Service for full control.
    */
   async createCustomToken(options: CreateTokenOptions): Promise<MosaicTransactionResult> {
-    const { Token2022Service } = await import("@/services/solana/token-2022");
+    const { Token2022Service } = await import("@sdp/solana/token-2022");
     const legacyService = new Token2022Service(this.env, this.signer, this.feePayment);
 
     const result = await legacyService.createMint({

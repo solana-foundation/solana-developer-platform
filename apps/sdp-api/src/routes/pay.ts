@@ -1,9 +1,9 @@
 import { getSolanaConfig } from "@sdp/rpc";
+import { assertValidAddress } from "@sdp/solana/address";
 import { encodeURL } from "@solana/pay";
 import { Hono } from "hono";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { notFound } from "@/lib/errors";
-import { assertValidAddress } from "@/lib/solana";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequestBestEffort,
