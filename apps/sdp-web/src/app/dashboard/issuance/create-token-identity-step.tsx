@@ -105,7 +105,6 @@ export function CreateTokenIdentityStep({
             </p>
           </div>
         </div>
-  
 
         <div className="mt-5 flex items-center justify-between gap-3">
           <Button type="button" variant="secondary" onClick={onBack} className="flex-1">
