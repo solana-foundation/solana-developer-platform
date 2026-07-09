@@ -3,9 +3,9 @@ import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
-import { fetchPaymentsWallets } from "../payments/payments-page.data";
-import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
-import { IssuanceWorkspace } from "./issuance-workspace";
+import { fetchPaymentsWallets } from "../../payments/payments-page.data";
+import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
+import { IssuanceWorkspace } from "../issuance-workspace";
 
 interface IssuanceTemplateView {
   id: string;
