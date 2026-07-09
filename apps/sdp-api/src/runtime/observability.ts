@@ -29,19 +29,22 @@ export interface Observability {
 export interface SentryOptions {
   dsn?: string;
   enabled: boolean;
-  environment: string;
+  environment?: string;
   tracesSampleRate: number;
   sendDefaultPii: boolean;
 }
 
 /**
  * Canonical "is Sentry configured?" check. Call this anywhere that needs to
- * branch on whether Sentry is enabled — never inline `env.SENTRY_DSN?.trim()`
- * at call-sites, since the definition may grow (e.g. an explicit
- * `SENTRY_ENABLED` flag) and inline checks would silently diverge.
+ * branch on whether Sentry is enabled — never inline the env reads at
+ * call-sites, since the definition may grow and inline checks would silently
+ * diverge. Requires both a DSN and SENTRY_ENVIRONMENT: the latter is set only
+ * in the deployed wrangler env sections (staging/production), so local dev
+ * never ships telemetry even when the Doppler-injected DSN reaches the
+ * worker env via CLOUDFLARE_INCLUDE_PROCESS_ENV.
  */
-export function isSentryEnabled(env: Pick<Env, "SENTRY_DSN">): boolean {
-  return Boolean(env.SENTRY_DSN?.trim());
+export function isSentryEnabled(env: Pick<Env, "SENTRY_DSN" | "SENTRY_ENVIRONMENT">): boolean {
+  return Boolean(env.SENTRY_DSN?.trim()) && Boolean(env.SENTRY_ENVIRONMENT);
 }
 
 function parseSentryTraceSampleRate(value: string | undefined, fallback: number): number {
@@ -59,16 +62,16 @@ function parseSentryTraceSampleRate(value: string | undefined, fallback: number)
 
 export function getSentryOptions(env: Env): SentryOptions {
   const dsn = env.SENTRY_DSN?.trim();
-  const defaultTraceSampleRate = env.ENVIRONMENT === "production" ? 0.1 : 1;
+  const environment = env.SENTRY_ENVIRONMENT;
+  const defaultTraceSampleRate = environment === "production" ? 0.1 : 1;
   const tracesSampleRate = parseSentryTraceSampleRate(
     env.SENTRY_TRACES_SAMPLE_RATE,
     defaultTraceSampleRate
   );
 
   return {
-    ...(dsn ? { dsn } : {}),
-    enabled: Boolean(dsn),
-    environment: env.ENVIRONMENT,
+    ...(dsn && environment ? { dsn, environment } : {}),
+    enabled: isSentryEnabled(env),
     tracesSampleRate,
     sendDefaultPii: false,
   };
