@@ -20,6 +20,7 @@ import { BvnkWebhookProcessor } from "./ramps/bvnk";
 import { CoinbaseWebhookProcessor } from "./ramps/coinbase";
 import { LightsparkWebhookProcessor } from "./ramps/lightspark";
 import { MoonpayWebhookProcessor } from "./ramps/moonpay";
+import { MuralWebhookProcessor } from "./ramps/mural";
 import type { WebhookProcessor } from "./ramps/processor";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -29,6 +30,7 @@ const RAMP_PROVIDER_WEBHOOK_PROCESSOR = {
   lightspark: new LightsparkWebhookProcessor(),
   bvnk: new BvnkWebhookProcessor(),
   coinbase: new CoinbaseWebhookProcessor(),
+  mural: new MuralWebhookProcessor(),
 } as const satisfies Record<
   Exclude<RampProviderId, "moneygram">,
   WebhookProcessor<unknown, unknown>

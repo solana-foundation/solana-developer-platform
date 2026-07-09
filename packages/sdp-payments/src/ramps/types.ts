@@ -19,6 +19,13 @@ export type {
   BvnkRuleEntity,
 } from "./providers/bvnk/provider-data";
 export type { LightsparkCustomerResolution } from "./providers/lightspark/client";
+export type {
+  MuralAccountResolution,
+  MuralKycStatus,
+  MuralOrganizationResolution,
+  MuralPayinMethod,
+  MuralTosStatus,
+} from "./providers/mural/provider-data";
 
 export interface ProviderRampSupport {
   onrampFiats: ReadonlySet<RampFiatCurrency>;

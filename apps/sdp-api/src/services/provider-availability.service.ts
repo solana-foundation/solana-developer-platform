@@ -217,6 +217,19 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
       isConfigured: (env) =>
         hasAllEnv(env, ["COINBASE_CDP_API_KEY_ID", "COINBASE_CDP_API_KEY_SECRET"]),
     },
+    mural: {
+      label: "Mural Pay",
+      isConfigured: (env, testMode) => {
+        const prod = hasAllEnv(env, ["MURAL_PAY_API_KEY", "MURAL_PAY_TRANSFER_API_KEY"]);
+        const sandbox = hasAllEnv(env, [
+          "MURAL_PAY_SANDBOX_API_KEY",
+          "MURAL_PAY_SANDBOX_TRANSFER_API_KEY",
+        ]);
+        if (testMode === true) return sandbox;
+        if (testMode === false) return prod;
+        return prod || sandbox;
+      },
+    },
   },
 } as const satisfies ProviderAvailabilityDefinitions;
 

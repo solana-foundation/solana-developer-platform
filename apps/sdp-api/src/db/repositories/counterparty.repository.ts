@@ -85,6 +85,11 @@ export interface CounterpartiesRepository {
   findActiveCounterpartyByBvnkCustomerReference(
     customerReference: string
   ): Promise<CounterpartyRow | null>;
+  findCounterpartyByMuralOrganizationId(organizationId: string): Promise<CounterpartyRow | null>;
   upsertBvnkCustomerProviderData(params: UpsertBvnkCustomerProviderDataInput): Promise<void>;
+  patchMuralOrganizationById(params: {
+    organizationId: string;
+    organization: Record<string, unknown>;
+  }): Promise<void>;
   listCounterparties(params: ListCounterpartiesInput): Promise<ListCounterpartiesResult>;
 }
