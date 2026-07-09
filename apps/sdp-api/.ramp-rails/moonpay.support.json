@@ -1,0 +1,501 @@
+{
+  "onramp": {
+    "currencies": {
+      "AUD": {
+        "min": "35",
+        "max": "16000"
+      },
+      "BRL": {
+        "min": "130",
+        "max": "65000"
+      },
+      "CAD": {
+        "min": "30",
+        "max": "16000"
+      },
+      "CHF": {
+        "min": "20",
+        "max": "11000"
+      },
+      "COP": {
+        "min": "100000",
+        "max": "42500000"
+      },
+      "CZK": {
+        "min": "500",
+        "max": "260000"
+      },
+      "DKK": {
+        "min": "150",
+        "max": "75000"
+      },
+      "DOP": {
+        "min": "1500",
+        "max": "680000"
+      },
+      "EGP": {
+        "min": "1000",
+        "max": "185000"
+      },
+      "EUR": {
+        "min": "20",
+        "max": "30000"
+      },
+      "GBP": {
+        "min": "20",
+        "max": "30000"
+      },
+      "HKD": {
+        "min": "175",
+        "max": "90000"
+      },
+      "IDR": {
+        "min": "400000",
+        "max": "170000000"
+      },
+      "ILS": {
+        "min": "75",
+        "max": "40000"
+      },
+      "JOD": {
+        "min": "15",
+        "max": "8000"
+      },
+      "KES": {
+        "min": "3000",
+        "max": "1250000"
+      },
+      "KWD": {
+        "min": "8",
+        "max": "3500"
+      },
+      "LKR": {
+        "min": "7000",
+        "max": "2150000"
+      },
+      "MXN": {
+        "min": "450",
+        "max": "260000"
+      },
+      "NGN": {
+        "min": "20000",
+        "max": "4500000"
+      },
+      "NOK": {
+        "min": "250",
+        "max": "110000"
+      },
+      "NZD": {
+        "min": "35",
+        "max": "18000"
+      },
+      "OMR": {
+        "min": "10",
+        "max": "4300"
+      },
+      "PEN": {
+        "min": "80",
+        "max": "40000"
+      },
+      "PLN": {
+        "min": "90",
+        "max": "45000"
+      },
+      "RON": {
+        "min": "100",
+        "max": "48000"
+      },
+      "SEK": {
+        "min": "250",
+        "max": "105000"
+      },
+      "THB": {
+        "min": "800",
+        "max": "370000"
+      },
+      "TRY": {
+        "min": "700",
+        "max": "80000"
+      },
+      "TWD": {
+        "min": "750",
+        "max": "340000"
+      },
+      "USD": {
+        "min": "20",
+        "max": "30000"
+      },
+      "VND": {
+        "min": "600000",
+        "max": "250000000"
+      },
+      "ZAR": {
+        "min": "400",
+        "max": "195000"
+      }
+    },
+    "cryptos": ["pyusd.solana", "sol.solana"],
+    "countrySupport": {
+      "coverage": "all-currencies",
+      "countries": [
+        "AD",
+        "AE",
+        "AG",
+        "AL",
+        "AM",
+        "AO",
+        "AR",
+        "AT",
+        "AU",
+        "AZ",
+        "BA",
+        "BE",
+        "BG",
+        "BH",
+        "BI",
+        "BJ",
+        "BN",
+        "BO",
+        "BR",
+        "BS",
+        "BT",
+        "BW",
+        "BZ",
+        "CA",
+        "CF",
+        "CG",
+        "CH",
+        "CL",
+        "CM",
+        "CO",
+        "CR",
+        "CV",
+        "CY",
+        "CZ",
+        "DE",
+        "DJ",
+        "DK",
+        "DM",
+        "DO",
+        "DZ",
+        "EC",
+        "EE",
+        "EG",
+        "ER",
+        "ES",
+        "ET",
+        "FI",
+        "FJ",
+        "FM",
+        "FR",
+        "GA",
+        "GB",
+        "GD",
+        "GE",
+        "GH",
+        "GI",
+        "GM",
+        "GN",
+        "GQ",
+        "GR",
+        "GT",
+        "GY",
+        "HK",
+        "HN",
+        "HR",
+        "HU",
+        "ID",
+        "IE",
+        "IL",
+        "IS",
+        "IT",
+        "JO",
+        "KE",
+        "KG",
+        "KH",
+        "KI",
+        "KM",
+        "KN",
+        "KR",
+        "KW",
+        "KY",
+        "KZ",
+        "LA",
+        "LC",
+        "LI",
+        "LK",
+        "LS",
+        "LT",
+        "LU",
+        "LV",
+        "MC",
+        "MD",
+        "ME",
+        "MH",
+        "MK",
+        "ML",
+        "MR",
+        "MT",
+        "MU",
+        "MV",
+        "MW",
+        "MX",
+        "MZ",
+        "NA",
+        "NE",
+        "NL",
+        "NO",
+        "NP",
+        "NR",
+        "NZ",
+        "OM",
+        "PA",
+        "PE",
+        "PG",
+        "PH",
+        "PL",
+        "PT",
+        "PW",
+        "PY",
+        "QA",
+        "RO",
+        "RS",
+        "RW",
+        "SA",
+        "SB",
+        "SC",
+        "SE",
+        "SG",
+        "SI",
+        "SK",
+        "SL",
+        "SM",
+        "SR",
+        "ST",
+        "SV",
+        "SZ",
+        "TD",
+        "TG",
+        "TH",
+        "TJ",
+        "TL",
+        "TM",
+        "TN",
+        "TO",
+        "TR",
+        "TT",
+        "TV",
+        "TW",
+        "TZ",
+        "US",
+        "UY",
+        "UZ",
+        "VA",
+        "VC",
+        "VN",
+        "VU",
+        "WS",
+        "ZA",
+        "ZM"
+      ]
+    }
+  },
+  "offramp": {
+    "currencies": {
+      "AUD": {
+        "min": null,
+        "max": null
+      },
+      "BRL": {
+        "min": null,
+        "max": null
+      },
+      "CHF": {
+        "min": null,
+        "max": null
+      },
+      "CZK": {
+        "min": null,
+        "max": null
+      },
+      "DKK": {
+        "min": null,
+        "max": null
+      },
+      "DOP": {
+        "min": null,
+        "max": null
+      },
+      "EGP": {
+        "min": null,
+        "max": null
+      },
+      "EUR": {
+        "min": null,
+        "max": null
+      },
+      "GBP": {
+        "min": null,
+        "max": null
+      },
+      "IDR": {
+        "min": null,
+        "max": null
+      },
+      "ILS": {
+        "min": null,
+        "max": null
+      },
+      "KES": {
+        "min": null,
+        "max": null
+      },
+      "KWD": {
+        "min": null,
+        "max": null
+      },
+      "MXN": {
+        "min": null,
+        "max": null
+      },
+      "NOK": {
+        "min": null,
+        "max": null
+      },
+      "NZD": {
+        "min": null,
+        "max": null
+      },
+      "OMR": {
+        "min": null,
+        "max": null
+      },
+      "PEN": {
+        "min": null,
+        "max": null
+      },
+      "PLN": {
+        "min": null,
+        "max": null
+      },
+      "RON": {
+        "min": null,
+        "max": null
+      },
+      "SEK": {
+        "min": null,
+        "max": null
+      },
+      "THB": {
+        "min": null,
+        "max": null
+      },
+      "TRY": {
+        "min": null,
+        "max": null
+      },
+      "USD": {
+        "min": null,
+        "max": null
+      },
+      "ZAR": {
+        "min": null,
+        "max": null
+      }
+    },
+    "cryptos": ["sol.solana"],
+    "countrySupport": {
+      "coverage": "all-currencies",
+      "countries": [
+        "AD",
+        "AE",
+        "AR",
+        "AT",
+        "AU",
+        "AZ",
+        "BA",
+        "BE",
+        "BG",
+        "BH",
+        "BN",
+        "BR",
+        "CH",
+        "CL",
+        "CR",
+        "CY",
+        "CZ",
+        "DE",
+        "DK",
+        "DM",
+        "EE",
+        "EG",
+        "ES",
+        "ET",
+        "FI",
+        "FR",
+        "GB",
+        "GE",
+        "GI",
+        "GR",
+        "GT",
+        "HN",
+        "HR",
+        "HU",
+        "ID",
+        "IE",
+        "IL",
+        "IS",
+        "IT",
+        "KE",
+        "KG",
+        "KW",
+        "KZ",
+        "LC",
+        "LI",
+        "LT",
+        "LU",
+        "LV",
+        "MC",
+        "MD",
+        "ME",
+        "MK",
+        "MT",
+        "MV",
+        "MW",
+        "MX",
+        "MZ",
+        "NA",
+        "NL",
+        "NO",
+        "NZ",
+        "OM",
+        "PA",
+        "PE",
+        "PG",
+        "PL",
+        "PT",
+        "PY",
+        "QA",
+        "RO",
+        "RS",
+        "SA",
+        "SE",
+        "SG",
+        "SI",
+        "SK",
+        "SM",
+        "SV",
+        "TH",
+        "TM",
+        "TR",
+        "TZ",
+        "US",
+        "UY",
+        "UZ",
+        "VA",
+        "ZA",
+        "ZM"
+      ]
+    }
+  }
+}

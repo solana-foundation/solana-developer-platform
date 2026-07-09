@@ -1,0 +1,623 @@
+{
+  "onramp": {
+    "currencies": {},
+    "cryptos": []
+  },
+  "offramp": {
+    "currencies": {
+      "AED": {
+        "min": null,
+        "max": null
+      },
+      "AFN": {
+        "min": null,
+        "max": null
+      },
+      "ALL": {
+        "min": null,
+        "max": null
+      },
+      "AMD": {
+        "min": null,
+        "max": null
+      },
+      "ANG": {
+        "min": null,
+        "max": null
+      },
+      "AOA": {
+        "min": null,
+        "max": null
+      },
+      "ARS": {
+        "min": null,
+        "max": null
+      },
+      "AUD": {
+        "min": null,
+        "max": null
+      },
+      "AWG": {
+        "min": null,
+        "max": null
+      },
+      "BAM": {
+        "min": null,
+        "max": null
+      },
+      "BBD": {
+        "min": null,
+        "max": null
+      },
+      "BDT": {
+        "min": null,
+        "max": null
+      },
+      "BGN": {
+        "min": null,
+        "max": null
+      },
+      "BHD": {
+        "min": null,
+        "max": null
+      },
+      "BIF": {
+        "min": null,
+        "max": null
+      },
+      "BMD": {
+        "min": null,
+        "max": null
+      },
+      "BND": {
+        "min": null,
+        "max": null
+      },
+      "BOB": {
+        "min": null,
+        "max": null
+      },
+      "BRL": {
+        "min": null,
+        "max": null
+      },
+      "BSD": {
+        "min": null,
+        "max": null
+      },
+      "BTN": {
+        "min": null,
+        "max": null
+      },
+      "BWP": {
+        "min": null,
+        "max": null
+      },
+      "BZD": {
+        "min": null,
+        "max": null
+      },
+      "CAD": {
+        "min": null,
+        "max": null
+      },
+      "CDF": {
+        "min": null,
+        "max": null
+      },
+      "CHF": {
+        "min": null,
+        "max": null
+      },
+      "CLP": {
+        "min": null,
+        "max": null
+      },
+      "CNY": {
+        "min": null,
+        "max": null
+      },
+      "COP": {
+        "min": null,
+        "max": null
+      },
+      "CRC": {
+        "min": null,
+        "max": null
+      },
+      "CUC": {
+        "min": null,
+        "max": null
+      },
+      "CUP": {
+        "min": null,
+        "max": null
+      },
+      "CVE": {
+        "min": null,
+        "max": null
+      },
+      "CZK": {
+        "min": null,
+        "max": null
+      },
+      "DJF": {
+        "min": null,
+        "max": null
+      },
+      "DKK": {
+        "min": null,
+        "max": null
+      },
+      "DOP": {
+        "min": null,
+        "max": null
+      },
+      "DZD": {
+        "min": null,
+        "max": null
+      },
+      "EGP": {
+        "min": null,
+        "max": null
+      },
+      "ERN": {
+        "min": null,
+        "max": null
+      },
+      "ETB": {
+        "min": null,
+        "max": null
+      },
+      "EUR": {
+        "min": null,
+        "max": null
+      },
+      "FJD": {
+        "min": null,
+        "max": null
+      },
+      "FKP": {
+        "min": null,
+        "max": null
+      },
+      "GBP": {
+        "min": null,
+        "max": null
+      },
+      "GEL": {
+        "min": null,
+        "max": null
+      },
+      "GHS": {
+        "min": null,
+        "max": null
+      },
+      "GIP": {
+        "min": null,
+        "max": null
+      },
+      "GMD": {
+        "min": null,
+        "max": null
+      },
+      "GNF": {
+        "min": null,
+        "max": null
+      },
+      "GTQ": {
+        "min": null,
+        "max": null
+      },
+      "GYD": {
+        "min": null,
+        "max": null
+      },
+      "HKD": {
+        "min": null,
+        "max": null
+      },
+      "HNL": {
+        "min": null,
+        "max": null
+      },
+      "HRK": {
+        "min": null,
+        "max": null
+      },
+      "HTG": {
+        "min": null,
+        "max": null
+      },
+      "HUF": {
+        "min": null,
+        "max": null
+      },
+      "IDR": {
+        "min": null,
+        "max": null
+      },
+      "ILS": {
+        "min": null,
+        "max": null
+      },
+      "INR": {
+        "min": null,
+        "max": null
+      },
+      "IQD": {
+        "min": null,
+        "max": null
+      },
+      "IRR": {
+        "min": null,
+        "max": null
+      },
+      "ISK": {
+        "min": null,
+        "max": null
+      },
+      "JMD": {
+        "min": null,
+        "max": null
+      },
+      "JOD": {
+        "min": null,
+        "max": null
+      },
+      "JPY": {
+        "min": null,
+        "max": null
+      },
+      "KES": {
+        "min": null,
+        "max": null
+      },
+      "KGS": {
+        "min": null,
+        "max": null
+      },
+      "KHR": {
+        "min": null,
+        "max": null
+      },
+      "KMF": {
+        "min": null,
+        "max": null
+      },
+      "KPW": {
+        "min": null,
+        "max": null
+      },
+      "KRW": {
+        "min": null,
+        "max": null
+      },
+      "KWD": {
+        "min": null,
+        "max": null
+      },
+      "KYD": {
+        "min": null,
+        "max": null
+      },
+      "KZT": {
+        "min": null,
+        "max": null
+      },
+      "LAK": {
+        "min": null,
+        "max": null
+      },
+      "LBP": {
+        "min": null,
+        "max": null
+      },
+      "LKR": {
+        "min": null,
+        "max": null
+      },
+      "LRD": {
+        "min": null,
+        "max": null
+      },
+      "LSL": {
+        "min": null,
+        "max": null
+      },
+      "LYD": {
+        "min": null,
+        "max": null
+      },
+      "MAD": {
+        "min": null,
+        "max": null
+      },
+      "MDL": {
+        "min": null,
+        "max": null
+      },
+      "MGA": {
+        "min": null,
+        "max": null
+      },
+      "MKD": {
+        "min": null,
+        "max": null
+      },
+      "MMK": {
+        "min": null,
+        "max": null
+      },
+      "MNT": {
+        "min": null,
+        "max": null
+      },
+      "MOP": {
+        "min": null,
+        "max": null
+      },
+      "MRU": {
+        "min": null,
+        "max": null
+      },
+      "MUR": {
+        "min": null,
+        "max": null
+      },
+      "MVR": {
+        "min": null,
+        "max": null
+      },
+      "MWK": {
+        "min": null,
+        "max": null
+      },
+      "MXN": {
+        "min": null,
+        "max": null
+      },
+      "MYR": {
+        "min": null,
+        "max": null
+      },
+      "MZN": {
+        "min": null,
+        "max": null
+      },
+      "NAD": {
+        "min": null,
+        "max": null
+      },
+      "NGN": {
+        "min": null,
+        "max": null
+      },
+      "NIO": {
+        "min": null,
+        "max": null
+      },
+      "NOK": {
+        "min": null,
+        "max": null
+      },
+      "NPR": {
+        "min": null,
+        "max": null
+      },
+      "NZD": {
+        "min": null,
+        "max": null
+      },
+      "OMR": {
+        "min": null,
+        "max": null
+      },
+      "PAB": {
+        "min": null,
+        "max": null
+      },
+      "PEN": {
+        "min": null,
+        "max": null
+      },
+      "PGK": {
+        "min": null,
+        "max": null
+      },
+      "PHP": {
+        "min": null,
+        "max": null
+      },
+      "PKR": {
+        "min": null,
+        "max": null
+      },
+      "PLN": {
+        "min": null,
+        "max": null
+      },
+      "PYG": {
+        "min": null,
+        "max": null
+      },
+      "QAR": {
+        "min": null,
+        "max": null
+      },
+      "RON": {
+        "min": null,
+        "max": null
+      },
+      "RSD": {
+        "min": null,
+        "max": null
+      },
+      "RUB": {
+        "min": null,
+        "max": null
+      },
+      "RWF": {
+        "min": null,
+        "max": null
+      },
+      "SAR": {
+        "min": null,
+        "max": null
+      },
+      "SBD": {
+        "min": null,
+        "max": null
+      },
+      "SCR": {
+        "min": null,
+        "max": null
+      },
+      "SDG": {
+        "min": null,
+        "max": null
+      },
+      "SEK": {
+        "min": null,
+        "max": null
+      },
+      "SGD": {
+        "min": null,
+        "max": null
+      },
+      "SHP": {
+        "min": null,
+        "max": null
+      },
+      "SLE": {
+        "min": null,
+        "max": null
+      },
+      "SLL": {
+        "min": null,
+        "max": null
+      },
+      "SOS": {
+        "min": null,
+        "max": null
+      },
+      "SRD": {
+        "min": null,
+        "max": null
+      },
+      "SSP": {
+        "min": null,
+        "max": null
+      },
+      "STN": {
+        "min": null,
+        "max": null
+      },
+      "SVC": {
+        "min": null,
+        "max": null
+      },
+      "SYP": {
+        "min": null,
+        "max": null
+      },
+      "SZL": {
+        "min": null,
+        "max": null
+      },
+      "THB": {
+        "min": null,
+        "max": null
+      },
+      "TJS": {
+        "min": null,
+        "max": null
+      },
+      "TND": {
+        "min": null,
+        "max": null
+      },
+      "TOP": {
+        "min": null,
+        "max": null
+      },
+      "TRY": {
+        "min": null,
+        "max": null
+      },
+      "TTD": {
+        "min": null,
+        "max": null
+      },
+      "TWD": {
+        "min": null,
+        "max": null
+      },
+      "TZS": {
+        "min": null,
+        "max": null
+      },
+      "UAH": {
+        "min": null,
+        "max": null
+      },
+      "UGX": {
+        "min": null,
+        "max": null
+      },
+      "USD": {
+        "min": null,
+        "max": null
+      },
+      "UYU": {
+        "min": null,
+        "max": null
+      },
+      "UZS": {
+        "min": null,
+        "max": null
+      },
+      "VND": {
+        "min": null,
+        "max": null
+      },
+      "VUV": {
+        "min": null,
+        "max": null
+      },
+      "WST": {
+        "min": null,
+        "max": null
+      },
+      "XAF": {
+        "min": null,
+        "max": null
+      },
+      "XCD": {
+        "min": null,
+        "max": null
+      },
+      "XOF": {
+        "min": null,
+        "max": null
+      },
+      "XPF": {
+        "min": null,
+        "max": null
+      },
+      "YER": {
+        "min": null,
+        "max": null
+      },
+      "ZAR": {
+        "min": null,
+        "max": null
+      },
+      "ZMW": {
+        "min": null,
+        "max": null
+      }
+    },
+    "cryptos": ["usdc.solana"]
+  }
+}

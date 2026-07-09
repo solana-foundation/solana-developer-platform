@@ -4,77 +4,251 @@ import path from "node:path";
 
 import {
   type CryptoRailId,
-  type FiatCurrencyCode,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
+  type RampCountrySupport,
+  type RampCurrencyLimit,
+  type RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
+import { z } from "zod";
 
 import {
-  type ProviderRampSupport,
+  type ProviderRailSupportSnapshot,
+  providerRailSupportSnapshotSchema,
+  RAMP_PROVIDER_CLIENTS,
   RampClient,
   type RampDiscoveryResponseDump,
 } from "../src/lib/ramps";
 
-const OUTPUT_DIR = path.resolve(process.cwd(), ".ramp-rails");
-const EMIT_TARGET = path.resolve(
+const RAIL_ROOT_DIR = path.resolve(process.cwd(), ".ramp-rails");
+const RAW_DUMP_DIR = path.join(RAIL_ROOT_DIR, "raw");
+const GENERATED_TARGET = path.resolve(
   process.cwd(),
   "../../packages/sdp-types/src/generated/ramp-support.generated.ts"
 );
 
-const rampClient = new RampClient();
-
-async function readDump<T>(relativePath: string): Promise<T> {
-  const file = path.join(OUTPUT_DIR, relativePath);
-  const text = await readFile(file, "utf8");
-  const parsed = JSON.parse(text) as { status?: number; body: T };
-  if (typeof parsed.status === "number" && (parsed.status < 200 || parsed.status >= 300)) {
-    throw new Error(`dump status ${parsed.status}`);
-  }
-  return parsed.body;
-}
+const rawDumpSchema = z.object({
+  status: z.number(),
+  body: z.unknown(),
+});
 
 interface OnrampRow {
-  source: FiatCurrencyCode;
+  source: string;
   dest: CryptoRailId;
   providers: RampProviderId[];
 }
 
 interface OfframpRow {
   source: CryptoRailId;
-  dest: FiatCurrencyCode;
+  dest: string;
   providers: RampProviderId[];
 }
 
-interface ProviderOnrampPair {
-  source: FiatCurrencyCode;
-  dest: CryptoRailId;
+type ProviderGenerationDirectionSupport = RampProviderDirectionSupport & {
+  cryptos: readonly CryptoRailId[];
+};
+
+interface ProviderGenerationSupport {
+  onramp: ProviderGenerationDirectionSupport;
+  offramp: ProviderGenerationDirectionSupport;
 }
 
-interface ProviderOfframpPair {
-  source: CryptoRailId;
-  dest: FiatCurrencyCode;
+type ProviderSnapshots = Record<RampProviderId, ProviderRailSupportSnapshot>;
+type ProviderGenerationSupports = Record<RampProviderId, ProviderGenerationSupport>;
+
+const SUMMARY: Partial<Record<RampProviderId, { ok: number; failed: number }>> = {};
+const rampClient = new RampClient();
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled variant: ${JSON.stringify(value)}`);
 }
 
-interface ProviderSupportSnapshot {
-  onramp: ProviderOnrampPair[];
-  offramp: ProviderOfframpPair[];
+function snapshotFile(provider: RampProviderId): string {
+  return path.join(RAIL_ROOT_DIR, `${provider}.support.json`);
 }
 
-function buildOnrampMatrix(bySupport: Record<RampProviderId, ProviderRampSupport>): OnrampRow[] {
-  const rows: OnrampRow[] = [];
-  const allFiats = new Set<FiatCurrencyCode>();
-  for (const support of Object.values(bySupport)) {
-    for (const fiat of support.onrampFiats) allFiats.add(fiat);
+function isRampProviderId(value: string): value is RampProviderId {
+  return (RAMP_PROVIDERS as readonly string[]).includes(value);
+}
+
+function parseProviderArgs(args: readonly string[]): readonly RampProviderId[] {
+  const providers: RampProviderId[] = [];
+  for (const arg of args) {
+    if (arg.startsWith("--")) {
+      continue;
+    }
+    if (!isRampProviderId(arg)) {
+      throw new Error(`Unknown ramp rail provider: ${arg}`);
+    }
+    providers.push(arg);
+  }
+  if (providers.length > 0) {
+    return providers;
+  }
+  return [...RAMP_PROVIDERS];
+}
+
+function sortCurrencyRecord(
+  currencies: Readonly<Record<string, RampCurrencyLimit>>
+): Record<string, RampCurrencyLimit> {
+  return Object.fromEntries(
+    Object.keys(currencies)
+      .sort()
+      .map((code) => [code, currencies[code]])
+  );
+}
+
+function sortCountrySupport(countrySupport: RampCountrySupport): RampCountrySupport {
+  switch (countrySupport.coverage) {
+    case "by-country": {
+      const countries: Record<string, readonly string[]> = {};
+      for (const countryCode of Object.keys(countrySupport.countries).sort()) {
+        countries[countryCode] = [...countrySupport.countries[countryCode]].sort();
+      }
+      return { coverage: "by-country", countries };
+    }
+    case "all-currencies":
+      return { coverage: "all-currencies", countries: [...countrySupport.countries].sort() };
+    case "unreported":
+      return { coverage: "unreported" };
+    default:
+      return assertNever(countrySupport);
+  }
+}
+
+function sortDirectionSnapshot(
+  direction: ProviderRailSupportSnapshot["onramp"]
+): ProviderRailSupportSnapshot["onramp"] {
+  const base = {
+    currencies: sortCurrencyRecord(direction.currencies),
+    cryptos: [...direction.cryptos].sort(),
+  };
+  if (direction.countrySupport === undefined) {
+    return base;
+  }
+  return { ...base, countrySupport: sortCountrySupport(direction.countrySupport) };
+}
+
+function sortSnapshot(snapshot: ProviderRailSupportSnapshot): ProviderRailSupportSnapshot {
+  return {
+    onramp: sortDirectionSnapshot(snapshot.onramp),
+    offramp: sortDirectionSnapshot(snapshot.offramp),
+  };
+}
+
+async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+async function readRawDump(relativePath: string): Promise<unknown> {
+  const file = path.join(RAW_DUMP_DIR, relativePath);
+  const text = await readFile(file, "utf8");
+  const parsed: unknown = JSON.parse(text);
+  const dump = rawDumpSchema.parse(parsed);
+  if (dump.status < 200 || dump.status >= 300) {
+    throw new Error(`Raw dump ${relativePath} returned status ${dump.status}.`);
+  }
+  return dump.body;
+}
+
+async function readProviderSnapshot(
+  provider: RampProviderId
+): Promise<ProviderRailSupportSnapshot> {
+  const text = await readFile(snapshotFile(provider), "utf8");
+  const parsed: unknown = JSON.parse(text);
+  return providerRailSupportSnapshotSchema.parse(parsed);
+}
+
+async function readProviderSnapshots(): Promise<ProviderSnapshots> {
+  return Object.fromEntries(
+    await Promise.all(
+      RAMP_PROVIDERS.map(
+        async (provider) => [provider, await readProviderSnapshot(provider)] as const
+      )
+    )
+  ) as ProviderSnapshots;
+}
+
+function mergeDirectionSupport(
+  provider: RampProviderId,
+  directionName: "onramp" | "offramp",
+  snapshot: ProviderRailSupportSnapshot["onramp"],
+  declared: (typeof RAMP_PROVIDER_CLIENTS)[RampProviderId]["declaredRailSupport"]["onramp"]
+): ProviderGenerationDirectionSupport {
+  const snapshotCountrySupport = snapshot.countrySupport;
+  const declaredCountrySupport = declared.countrySupport;
+  if (snapshotCountrySupport !== undefined && declaredCountrySupport !== undefined) {
+    throw new Error(
+      `${provider} ${directionName} country support is both discovered and declared.`
+    );
   }
 
-  const sortedFiats = [...allFiats].sort();
-  for (const source of sortedFiats) {
+  let countrySupport: RampCountrySupport;
+  if (snapshotCountrySupport !== undefined) {
+    countrySupport = snapshotCountrySupport;
+  } else {
+    if (declaredCountrySupport === undefined) {
+      throw new Error(
+        `${provider} ${directionName} country support is neither discovered nor declared.`
+      );
+    }
+    countrySupport = declaredCountrySupport;
+  }
+
+  const hasCurrencies = Object.keys(snapshot.currencies).length > 0;
+  const hasCryptos = snapshot.cryptos.length > 0;
+  if ((hasCurrencies || hasCryptos) && declared.entityTypes.length === 0) {
+    throw new Error(`${provider} ${directionName} has rails but no declared entity types.`);
+  }
+
+  return {
+    currencies: sortCurrencyRecord(snapshot.currencies),
+    cryptos: [...snapshot.cryptos].sort(),
+    countrySupport: sortCountrySupport(countrySupport),
+    entityTypes: [...declared.entityTypes].sort(),
+  };
+}
+
+function mergeProviderSupport(
+  provider: RampProviderId,
+  snapshot: ProviderRailSupportSnapshot
+): ProviderGenerationSupport {
+  const declared = RAMP_PROVIDER_CLIENTS[provider].declaredRailSupport;
+  return {
+    onramp: mergeDirectionSupport(provider, "onramp", snapshot.onramp, declared.onramp),
+    offramp: mergeDirectionSupport(provider, "offramp", snapshot.offramp, declared.offramp),
+  };
+}
+
+function buildProviderSupport(snapshots: ProviderSnapshots): ProviderGenerationSupports {
+  return Object.fromEntries(
+    RAMP_PROVIDERS.map((provider) => [
+      provider,
+      mergeProviderSupport(provider, snapshots[provider]),
+    ])
+  ) as ProviderGenerationSupports;
+}
+
+function buildOnrampMatrix(support: ProviderGenerationSupports): OnrampRow[] {
+  const rows: OnrampRow[] = [];
+  const allFiats = new Set<string>();
+  for (const provider of RAMP_PROVIDERS) {
+    for (const fiat of Object.keys(support[provider].onramp.currencies)) {
+      allFiats.add(fiat);
+    }
+  }
+
+  for (const source of [...allFiats].sort()) {
     for (const dest of ONRAMP_CRYPTO_RAILS) {
       const providers: RampProviderId[] = [];
       for (const provider of RAMP_PROVIDERS) {
-        const support = bySupport[provider];
-        if (support.onrampFiats.has(source) && support.onrampCryptos.has(dest)) {
+        const providerSupport = support[provider].onramp;
+        if (
+          Object.hasOwn(providerSupport.currencies, source) &&
+          providerSupport.cryptos.includes(dest)
+        ) {
           providers.push(provider);
         }
       }
@@ -86,20 +260,24 @@ function buildOnrampMatrix(bySupport: Record<RampProviderId, ProviderRampSupport
   return rows;
 }
 
-function buildOfframpMatrix(bySupport: Record<RampProviderId, ProviderRampSupport>): OfframpRow[] {
+function buildOfframpMatrix(support: ProviderGenerationSupports): OfframpRow[] {
   const rows: OfframpRow[] = [];
-  const allFiats = new Set<FiatCurrencyCode>();
-  for (const support of Object.values(bySupport)) {
-    for (const fiat of support.offrampFiats) allFiats.add(fiat);
+  const allFiats = new Set<string>();
+  for (const provider of RAMP_PROVIDERS) {
+    for (const fiat of Object.keys(support[provider].offramp.currencies)) {
+      allFiats.add(fiat);
+    }
   }
 
-  const sortedFiats = [...allFiats].sort();
   for (const source of OFFRAMP_CRYPTO_RAILS) {
-    for (const dest of sortedFiats) {
+    for (const dest of [...allFiats].sort()) {
       const providers: RampProviderId[] = [];
       for (const provider of RAMP_PROVIDERS) {
-        const support = bySupport[provider];
-        if (support.offrampCryptos.has(source) && support.offrampFiats.has(dest)) {
+        const providerSupport = support[provider].offramp;
+        if (
+          providerSupport.cryptos.includes(source) &&
+          Object.hasOwn(providerSupport.currencies, dest)
+        ) {
           providers.push(provider);
         }
       }
@@ -111,31 +289,29 @@ function buildOfframpMatrix(bySupport: Record<RampProviderId, ProviderRampSuppor
   return rows;
 }
 
-function buildProviderSupportSnapshots(
-  bySupport: Record<RampProviderId, ProviderRampSupport>
-): Record<RampProviderId, ProviderSupportSnapshot> {
-  const entries = RAMP_PROVIDERS.map((provider) => {
-    const support = bySupport[provider];
-    const onramp: ProviderOnrampPair[] = [];
-    const offramp: ProviderOfframpPair[] = [];
-
-    for (const source of [...support.onrampFiats].sort()) {
-      for (const dest of ONRAMP_CRYPTO_RAILS) {
-        if (support.onrampCryptos.has(dest)) onramp.push({ source, dest });
+function collectCountryCodes(support: ProviderGenerationSupports): string[] {
+  const countryCodes = new Set<string>();
+  for (const provider of RAMP_PROVIDERS) {
+    for (const direction of [support[provider].onramp, support[provider].offramp]) {
+      switch (direction.countrySupport.coverage) {
+        case "by-country":
+          for (const countryCode of Object.keys(direction.countrySupport.countries)) {
+            countryCodes.add(countryCode);
+          }
+          break;
+        case "all-currencies":
+          for (const countryCode of direction.countrySupport.countries) {
+            countryCodes.add(countryCode);
+          }
+          break;
+        case "unreported":
+          break;
+        default:
+          assertNever(direction.countrySupport);
       }
     }
-
-    for (const source of OFFRAMP_CRYPTO_RAILS) {
-      if (!support.offrampCryptos.has(source)) continue;
-      for (const dest of [...support.offrampFiats].sort()) {
-        offramp.push({ source, dest });
-      }
-    }
-
-    return [provider, { onramp, offramp }] as const;
-  });
-
-  return Object.fromEntries(entries) as Record<RampProviderId, ProviderSupportSnapshot>;
+  }
+  return [...countryCodes].sort();
 }
 
 function sha256Json(value: unknown): string {
@@ -144,53 +320,151 @@ function sha256Json(value: unknown): string {
 
 function renderRows(rows: readonly Array<OnrampRow | OfframpRow>): string {
   return rows
-    .map(
-      (row) =>
-        `  { source: ${JSON.stringify(row.source)}, dest: ${JSON.stringify(row.dest)}, providers: [${row.providers.map((p) => JSON.stringify(p)).join(", ")}] },`
-    )
+    .map((row) => {
+      const renderedProviders = row.providers
+        .map((provider) => JSON.stringify(provider))
+        .join(", ");
+      const inline = `  { source: ${JSON.stringify(row.source)}, dest: ${JSON.stringify(row.dest)}, providers: [${renderedProviders}] },`;
+      if (inline.length <= 100) {
+        return inline;
+      }
+      return `  {
+    source: ${JSON.stringify(row.source)},
+    dest: ${JSON.stringify(row.dest)},
+    providers: [${renderedProviders}],
+  },`;
+    })
     .join("\n");
-}
-
-function renderStringArray(values: readonly string[]): string {
-  if (values.length === 0) return "[]";
-  return `[\n${values.map((value) => `  ${JSON.stringify(value)},`).join("\n")}\n]`;
 }
 
 function renderProviderHashes(hashes: Record<RampProviderId, string>): string {
   return `{\n${RAMP_PROVIDERS.map((provider) => `  // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.\n  ${provider}: ${JSON.stringify(hashes[provider])},`).join("\n")}\n}`;
 }
 
-function renderProviderCounts(snapshots: Record<RampProviderId, ProviderSupportSnapshot>): string {
+function pairCount(direction: ProviderGenerationDirectionSupport): number {
+  return Object.keys(direction.currencies).length * direction.cryptos.length;
+}
+
+function renderProviderCounts(support: ProviderGenerationSupports): string {
   return `{\n${RAMP_PROVIDERS.map((provider) => {
-    const snapshot = snapshots[provider];
-    return `  ${provider}: { onramp: ${snapshot.onramp.length}, offramp: ${snapshot.offramp.length} },`;
+    const providerSupport = support[provider];
+    return `  ${provider}: { onramp: ${pairCount(providerSupport.onramp)}, offramp: ${pairCount(providerSupport.offramp)} },`;
+  }).join("\n")}\n}`;
+}
+
+function indent(level: number): string {
+  return " ".repeat(level);
+}
+
+function renderIndentedStringArray(values: readonly string[], level: number): string {
+  if (values.length === 0) {
+    return "[]";
+  }
+  const pad = indent(level);
+  return `[\n${values.map((value) => `${pad}  ${JSON.stringify(value)},`).join("\n")}\n${pad}]`;
+}
+
+function renderInlineStringArray(values: readonly string[]): string {
+  return `[${values.map((value) => JSON.stringify(value)).join(", ")}]`;
+}
+
+function renderCurrencyLimits(
+  currencies: Readonly<Record<string, RampCurrencyLimit>>,
+  level: number
+): string {
+  const keys = Object.keys(currencies).sort();
+  if (keys.length === 0) {
+    return "{}";
+  }
+  const pad = indent(level);
+  return `{\n${keys
+    .map((code) => {
+      const limit = currencies[code];
+      return `${pad}  ${code}: { min: ${JSON.stringify(limit.min)}, max: ${JSON.stringify(limit.max)} },`;
+    })
+    .join("\n")}\n${pad}}`;
+}
+
+function renderCountryCurrencyRecord(
+  countries: Readonly<Record<string, readonly string[]>>,
+  level: number
+): string {
+  const keys = Object.keys(countries).sort();
+  if (keys.length === 0) {
+    return "{}";
+  }
+  const pad = indent(level);
+  return `{\n${keys
+    .map((countryCode) => {
+      const currencies = [...countries[countryCode]].sort();
+      return `${pad}  ${countryCode}: ${renderInlineStringArray(currencies)},`;
+    })
+    .join("\n")}\n${pad}}`;
+}
+
+function renderCountrySupport(countrySupport: RampCountrySupport, level: number): string {
+  const pad = indent(level);
+  switch (countrySupport.coverage) {
+    case "by-country":
+      return `{\n${pad}  coverage: "by-country",\n${pad}  countries: ${renderCountryCurrencyRecord(countrySupport.countries, level + 2)},\n${pad}}`;
+    case "all-currencies":
+      return `{\n${pad}  coverage: "all-currencies",\n${pad}  countries: ${renderIndentedStringArray(countrySupport.countries, level + 2)},\n${pad}}`;
+    case "unreported":
+      return `{ coverage: "unreported" }`;
+    default:
+      return assertNever(countrySupport);
+  }
+}
+
+function renderDirectionDetails(
+  direction: ProviderGenerationDirectionSupport,
+  level: number
+): string {
+  const pad = indent(level);
+  return `{\n${pad}  currencies: ${renderCurrencyLimits(direction.currencies, level + 2)},\n${pad}  countrySupport: ${renderCountrySupport(direction.countrySupport, level + 2)},\n${pad}  entityTypes: ${renderInlineStringArray(direction.entityTypes)},\n${pad}}`;
+}
+
+function renderProviderSupportDetails(support: ProviderGenerationSupports): string {
+  return `{\n${RAMP_PROVIDERS.map((provider) => {
+    const providerSupport = support[provider];
+    return `  ${provider}: {\n    onramp: ${renderDirectionDetails(providerSupport.onramp, 4)},\n    offramp: ${renderDirectionDetails(providerSupport.offramp, 4)},\n  },`;
   }).join("\n")}\n}`;
 }
 
 function renderGeneratedFile(input: {
+  support: ProviderGenerationSupports;
   onrampRows: readonly OnrampRow[];
   offrampRows: readonly OfframpRow[];
-  providerSnapshots: Record<RampProviderId, ProviderSupportSnapshot>;
 }): string {
-  const allFiats = new Set<FiatCurrencyCode>();
-  for (const row of input.onrampRows) allFiats.add(row.source);
-  for (const row of input.offrampRows) allFiats.add(row.dest);
+  const allFiats = new Set<string>();
+  for (const row of input.onrampRows) {
+    allFiats.add(row.source);
+  }
+  for (const row of input.offrampRows) {
+    allFiats.add(row.dest);
+  }
   const fiatCurrencies = [...allFiats].sort();
   const onrampSourceCurrencies = [...new Set(input.onrampRows.map((row) => row.source))].sort();
   const offrampDestinationCurrencies = [
     ...new Set(input.offrampRows.map((row) => row.dest)),
   ].sort();
+  const countryCodes = collectCountryCodes(input.support);
   const providerHashes = Object.fromEntries(
-    RAMP_PROVIDERS.map((provider) => [provider, sha256Json(input.providerSnapshots[provider])])
+    RAMP_PROVIDERS.map((provider) => [provider, sha256Json(input.support[provider])])
   ) as Record<RampProviderId, string>;
-  const supportHash = sha256Json(input.providerSnapshots);
+  const supportHash = sha256Json(input.support);
 
   return `// AUTO-GENERATED - do not edit by hand.
-// Refresh dumps + regenerate:   pnpm --filter @sdp/api rails:discover --emit
-// Regenerate from existing dumps: pnpm --filter @sdp/api rails:generate
-// Source dumps live in apps/sdp-api/.ramp-rails/ (committed).
+// Refresh raw dumps and snapshots: pnpm --filter @sdp/api rails:discover
+// Regenerate from committed snapshots: pnpm --filter @sdp/api rails:generate
+// Raw dumps live in apps/sdp-api/.ramp-rails/raw/ (gitignored).
+// Support snapshots live in apps/sdp-api/.ramp-rails/*.support.json (committed).
 
-import type { OfframpPairSupport, OnrampPairSupport } from "../payment-rails";
+import type {
+  OfframpPairSupport,
+  OnrampPairSupport,
+  RampProviderDirectionSupport,
+} from "../payment-rails";
 import type { RampProviderId } from "../provider-access";
 
 export const RAMP_SUPPORT_HASH =
@@ -199,16 +473,27 @@ export const RAMP_SUPPORT_HASH =
 
 export const RAMP_PROVIDER_SUPPORT_HASHES = ${renderProviderHashes(providerHashes)} as const satisfies Record<RampProviderId, string>;
 
-export const RAMP_PROVIDER_SUPPORT_COUNTS = ${renderProviderCounts(input.providerSnapshots)} as const satisfies Record<RampProviderId, { onramp: number; offramp: number }>;
+export const RAMP_PROVIDER_SUPPORT_COUNTS = ${renderProviderCounts(input.support)} as const satisfies Record<RampProviderId, { onramp: number; offramp: number }>;
 
-export const RAMP_FIAT_CURRENCIES = ${renderStringArray(fiatCurrencies)} as const;
+export const RAMP_FIAT_CURRENCIES = ${renderIndentedStringArray(fiatCurrencies, 0)} as const;
 export type RampFiatCurrency = (typeof RAMP_FIAT_CURRENCIES)[number];
 
-export const ONRAMP_SOURCE_CURRENCIES = ${renderStringArray(onrampSourceCurrencies)} as const satisfies readonly RampFiatCurrency[];
+export const RAMP_COUNTRY_CODES = ${renderIndentedStringArray(countryCodes, 0)} as const;
+export type RampCountryCode = (typeof RAMP_COUNTRY_CODES)[number];
+
+export const ONRAMP_SOURCE_CURRENCIES = ${renderIndentedStringArray(onrampSourceCurrencies, 0)} as const satisfies readonly RampFiatCurrency[];
 export type OnrampSourceCurrency = (typeof ONRAMP_SOURCE_CURRENCIES)[number];
 
-export const OFFRAMP_DESTINATION_CURRENCIES = ${renderStringArray(offrampDestinationCurrencies)} as const satisfies readonly RampFiatCurrency[];
+export const OFFRAMP_DESTINATION_CURRENCIES = ${renderIndentedStringArray(offrampDestinationCurrencies, 0)} as const satisfies readonly RampFiatCurrency[];
 export type OfframpDestinationCurrency = (typeof OFFRAMP_DESTINATION_CURRENCIES)[number];
+
+export const RAMP_PROVIDER_SUPPORT_DETAILS = ${renderProviderSupportDetails(input.support)} as const satisfies Record<
+  RampProviderId,
+  {
+    onramp: RampProviderDirectionSupport;
+    offramp: RampProviderDirectionSupport;
+  }
+>;
 
 export const ONRAMP_SUPPORT = [
 ${renderRows(input.onrampRows)}
@@ -220,119 +505,182 @@ ${renderRows(input.offrampRows)}
 `;
 }
 
-async function emitRampSupport(): Promise<void> {
-  console.log("\n[emit] building ramp support matrices from .ramp-rails/ dumps");
-
-  const support = await rampClient.readRailSupport(readDump);
-  for (const provider of RAMP_PROVIDERS) {
-    const s = support[provider];
-    console.log(
-      `  [${provider}] onramp=${s.onrampFiats.size} fiats x ${s.onrampCryptos.size} cryptos; offramp=${s.offrampCryptos.size} cryptos x ${s.offrampFiats.size} fiats`
-    );
-  }
-
-  const onrampRows = buildOnrampMatrix(support);
-  const offrampRows = buildOfframpMatrix(support);
-  const providerSnapshots = buildProviderSupportSnapshots(support);
-  const rendered = renderGeneratedFile({ onrampRows, offrampRows, providerSnapshots });
-
-  await mkdir(path.dirname(EMIT_TARGET), { recursive: true });
-  await writeFile(EMIT_TARGET, rendered, "utf8");
-  console.log(
-    `\n  ✔ wrote ${onrampRows.length} onramp pairs and ${offrampRows.length} offramp pairs → ${path.relative(process.cwd(), EMIT_TARGET)}`
-  );
+async function renderGeneratedFromSnapshots(): Promise<string> {
+  const snapshots = await readProviderSnapshots();
+  const support = buildProviderSupport(snapshots);
+  return renderGeneratedFile({
+    support,
+    onrampRows: buildOnrampMatrix(support),
+    offrampRows: buildOfframpMatrix(support),
+  });
 }
 
-const SUMMARY: Record<string, { ok: number; failed: number }> = {};
+async function writeDump(name: string, payload: RampDiscoveryResponseDump): Promise<void> {
+  await writeJsonFile(path.join(RAW_DUMP_DIR, `${name}.json`), payload);
+}
 
-async function dump(name: string, payload: RampDiscoveryResponseDump): Promise<void> {
-  const file = path.join(OUTPUT_DIR, `${name}.json`);
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+function providerSummary(provider: RampProviderId): { ok: number; failed: number } {
+  const existing = SUMMARY[provider];
+  if (existing !== undefined) {
+    return existing;
+  }
+  const created = { ok: 0, failed: 0 };
+  SUMMARY[provider] = created;
+  return created;
 }
 
 async function fetchJson(
   provider: RampProviderId,
   label: string,
   url: string,
-  init: RequestInit = {}
+  init?: RequestInit
 ): Promise<RampDiscoveryResponseDump> {
-  let bucket = SUMMARY[provider];
-  if (!bucket) {
-    bucket = { ok: 0, failed: 0 };
-    SUMMARY[provider] = bucket;
-  }
-  const response = await fetch(url, init);
+  const response = init === undefined ? await fetch(url) : await fetch(url, init);
   const text = await response.text();
-  let body: unknown;
-  try {
-    body = text.length > 0 ? JSON.parse(text) : null;
-  } catch {
-    body = { _rawText: text };
-  }
+  const body: unknown = JSON.parse(text);
+  const summary = providerSummary(provider);
 
   if (response.ok) {
-    bucket.ok += 1;
-    console.log(`  ✔ ${label} (${response.status})`);
+    summary.ok += 1;
+    console.log(`  ok ${label} (${response.status})`);
   } else {
-    bucket.failed += 1;
-    console.warn(`  ✗ ${label} (${response.status})`);
+    summary.failed += 1;
+    console.warn(`  failed ${label} (${response.status})`);
   }
 
   return { status: response.status, body };
 }
 
-function isRampProviderId(value: string): value is RampProviderId {
-  return (RAMP_PROVIDERS as readonly string[]).includes(value);
+function logDroppedCurrencyCodes(provider: RampProviderId, codes: readonly string[]): void {
+  if (codes.length === 0) {
+    return;
+  }
+  console.log(`[${provider}] dropped ${codes.length} inactive ISO 4217 codes: ${codes.join(", ")}`);
+}
+
+function logDroppedCountryCodes(provider: RampProviderId, codes: readonly string[]): void {
+  if (codes.length === 0) {
+    return;
+  }
+  console.log(
+    `[${provider}] dropped ${codes.length} invalid ISO 3166-1 alpha-2 codes: ${codes.join(", ")}`
+  );
+}
+
+async function distillProvider(provider: RampProviderId): Promise<void> {
+  const distillation = await RAMP_PROVIDER_CLIENTS[provider].distillRailSupport(readRawDump);
+  const snapshot = sortSnapshot(distillation.snapshot);
+  await writeJsonFile(snapshotFile(provider), snapshot);
+  logDroppedCurrencyCodes(provider, distillation.droppedCurrencyCodes);
+  logDroppedCountryCodes(provider, distillation.droppedCountryCodes);
+  console.log(
+    `[${provider}] wrote ${path.relative(process.cwd(), snapshotFile(provider))}: onramp ${Object.keys(snapshot.onramp.currencies).length} fiat x ${snapshot.onramp.cryptos.length} crypto; offramp ${snapshot.offramp.cryptos.length} crypto x ${Object.keys(snapshot.offramp.currencies).length} fiat`
+  );
+}
+
+async function runDiscover(args: readonly string[]): Promise<void> {
+  const offline = args.includes("--offline");
+  const selectedProviders = parseProviderArgs(args);
+  await mkdir(RAW_DUMP_DIR, { recursive: true });
+
+  if (!offline) {
+    console.log(`Raw dump dir: ${path.relative(process.cwd(), RAW_DUMP_DIR)}`);
+    for (const provider of selectedProviders) {
+      console.log(`\n[${provider}] fetch`);
+      await rampClient._discoverProviderRails(provider, {
+        env: process.env,
+        fetchJson,
+        writeDump,
+      });
+    }
+
+    console.log("\nFetch summary:");
+    const failedProviders: string[] = [];
+    for (const provider of RAMP_PROVIDERS) {
+      const stats = SUMMARY[provider];
+      if (stats !== undefined) {
+        console.log(`  ${provider}: ${stats.ok} ok, ${stats.failed} failed`);
+        if (stats.failed > 0) {
+          failedProviders.push(`${provider} (${stats.failed} failed)`);
+        }
+      }
+    }
+    if (failedProviders.length > 0) {
+      throw new Error(`Ramp rail discovery had failed requests: ${failedProviders.join(", ")}.`);
+    }
+  }
+
+  console.log("\nDistilling support snapshots:");
+  for (const provider of selectedProviders) {
+    await distillProvider(provider);
+  }
+}
+
+async function runGenerate(): Promise<void> {
+  const rendered = await renderGeneratedFromSnapshots();
+  await mkdir(path.dirname(GENERATED_TARGET), { recursive: true });
+  await writeFile(GENERATED_TARGET, rendered, "utf8");
+  console.log(`Wrote ${path.relative(process.cwd(), GENERATED_TARGET)}.`);
+}
+
+function summarizeSourceDiff(expected: string, actual: string): string[] {
+  const expectedLines = expected.split("\n");
+  const actualLines = actual.split("\n");
+  const maxLines = Math.max(expectedLines.length, actualLines.length);
+  const summary: string[] = [];
+  for (let index = 0; index < maxLines; index += 1) {
+    const expectedLine = expectedLines[index];
+    const actualLine = actualLines[index];
+    if (expectedLine === actualLine) {
+      continue;
+    }
+    const lineNumber = index + 1;
+    summary.push(
+      `line ${lineNumber}: expected ${JSON.stringify(expectedLine)}; found ${JSON.stringify(actualLine)}`
+    );
+    if (summary.length === 12) {
+      break;
+    }
+  }
+  return summary;
+}
+
+async function runDrift(): Promise<void> {
+  const expected = await renderGeneratedFromSnapshots();
+  const actual = await readFile(GENERATED_TARGET, "utf8");
+  if (expected === actual) {
+    console.log("No ramp rails drift detected.");
+    return;
+  }
+
+  console.error("Ramp rails drift detected. Generated file differs from committed snapshots.");
+  for (const line of summarizeSourceDiff(expected, actual)) {
+    console.error(`  ${line}`);
+  }
+  process.exitCode = 1;
 }
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const emit = args.includes("--emit");
-  const strict = args.includes("--strict");
-  const emitOnly = args.includes("emit");
-  const targetArgs = args.filter((a) => !a.startsWith("--") && a !== "emit");
-  const invalidTarget = targetArgs.find((target) => !isRampProviderId(target));
-  if (invalidTarget) {
-    throw new Error(`Unknown ramp rail provider: ${invalidTarget}`);
+  const command = args[0];
+  if (command === undefined) {
+    throw new Error(
+      "Usage: discover-ramp-rails.ts <discover|generate|drift> [provider...] [--offline]"
+    );
   }
-  const selectedProviders = targetArgs.length
-    ? (targetArgs as RampProviderId[])
-    : [...RAMP_PROVIDERS];
-
-  if (!emitOnly) {
-    await mkdir(OUTPUT_DIR, { recursive: true });
-    console.log(`Output dir: ${path.relative(process.cwd(), OUTPUT_DIR)}`);
-
-    const failures: string[] = [];
-    for (const provider of selectedProviders) {
-      console.log(`\n[${provider}]`);
-      try {
-        await rampClient._discoverProviderRails(provider, {
-          env: process.env,
-          fetchJson,
-          writeDump: dump,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        failures.push(`${provider}: ${message}`);
-        console.error(`${provider} run failed:`, message);
-      }
-    }
-
-    console.log("\nSummary:");
-    for (const [provider, stats] of Object.entries(SUMMARY)) {
-      console.log(`  ${provider}: ${stats.ok} ok, ${stats.failed} failed`);
-    }
-    console.log(`Responses written to ${path.relative(process.cwd(), OUTPUT_DIR)}/`);
-
-    if (strict && failures.length > 0) {
-      throw new Error(`Ramp rail discovery failed:\n${failures.join("\n")}`);
-    }
-  }
-
-  if (emit || emitOnly) {
-    await emitRampSupport();
+  const commandArgs = args.slice(1);
+  switch (command) {
+    case "discover":
+      await runDiscover(commandArgs);
+      break;
+    case "generate":
+      await runGenerate();
+      break;
+    case "drift":
+      await runDrift();
+      break;
+    default:
+      throw new Error(`Unknown ramp rail command: ${command}`);
   }
 }
 
