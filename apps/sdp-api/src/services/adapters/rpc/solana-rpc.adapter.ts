@@ -4,6 +4,7 @@
  * Implements RpcPort using @solana/kit RPC client.
  */
 
+import { getSolanaConfig } from "@sdp/rpc";
 import {
   type Address,
   type Base64EncodedWireTransaction,
@@ -12,7 +13,6 @@ import {
   createSolanaRpc,
   type Signature,
 } from "@solana/kit";
-import { getSolanaConfig } from "@/lib/solana";
 import type {
   AccountInfo,
   BlockhashWithExpiry,

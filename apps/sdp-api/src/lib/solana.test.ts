@@ -1,6 +1,6 @@
+import { getSolanaConfig, resolveDefaultSolanaRpcUrl } from "@sdp/rpc";
 import { describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
-import { getSolanaConfig, resolveDefaultSolanaRpcUrl } from "./solana";
 
 describe("solana config resolution", () => {
   it("prefers the configured managed default provider over the generic RPC URL", () => {

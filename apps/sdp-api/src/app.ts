@@ -9,6 +9,7 @@
  * both runtimes.
  */
 
+import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
 import { logger } from "hono/logger";
@@ -378,7 +379,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       );
     }
 
-    if (err instanceof SdpRpcError) {
+    if (err instanceof SdpRpcError || err instanceof SdpPaymentsError) {
       const details = err.details ? redactCredentialSecrets(err.details) : undefined;
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(

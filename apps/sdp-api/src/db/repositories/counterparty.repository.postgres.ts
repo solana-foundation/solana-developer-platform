@@ -222,6 +222,19 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       return row ? mapCounterpartyRow(row) : null;
     },
 
+    async findCounterpartyByMuralOrganizationId(organizationId: string) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM counterparties
+             WHERE provider_data->'mural'->'organization'->>'id' = ?
+               AND status = 'active'
+             LIMIT 1`
+        )
+        .bind(organizationId)
+        .first<Record<string, unknown>>();
+      return row ? mapCounterpartyRow(row) : null;
+    },
+
     async upsertBvnkCustomerProviderData(params: UpsertBvnkCustomerProviderDataInput) {
       await db
         .prepare(
@@ -243,6 +256,23 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           params.organizationId,
           params.projectId
         )
+        .run();
+    },
+
+    async patchMuralOrganizationById(params) {
+      await db
+        .prepare(
+          `UPDATE counterparties
+             SET provider_data = jsonb_set(
+                   provider_data,
+                   '{mural,organization}',
+                   coalesce(provider_data->'mural'->'organization', '{}'::jsonb) || ?::jsonb,
+                   true),
+                 updated_at = sdp_iso_now()
+           WHERE provider_data->'mural'->'organization'->>'id' = ?
+             AND status = 'active'`
+        )
+        .bind(JSON.stringify(params.organization), params.organizationId)
         .run();
     },
 

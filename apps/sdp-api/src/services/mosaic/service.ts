@@ -12,6 +12,7 @@
  * - Decimal-aware amount conversion for minting
  */
 
+import { confirmTransaction, createRpcForSdk } from "@sdp/rpc/solana";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -71,7 +72,6 @@ import {
 import { parseDecimalAmount } from "@/lib/amount";
 import { transactionFailed } from "@/lib/errors";
 import type { FeePaymentPort } from "@/services/ports/fee-payment.port";
-import { confirmTransaction, createRpcForSdk } from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 import {
   type AblWalletOptions,

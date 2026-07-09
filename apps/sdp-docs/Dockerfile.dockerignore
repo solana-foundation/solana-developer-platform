@@ -43,6 +43,7 @@ packages/*
 !packages/sdp-rpc
 !packages/sdp-custody
 !packages/sdp-solana
+!packages/sdp-payments
 docs
 infra
 scripts

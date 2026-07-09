@@ -1,3 +1,4 @@
+import * as solanaRpc from "@sdp/rpc/solana";
 import type {
   PaymentWalletControlProfileSummary,
   PaymentWalletPolicyAuditEntry,
@@ -23,7 +24,6 @@ import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
-import * as solanaRpc from "@/services/solana/rpc";
 import { type AppContext, getPaymentsRepository, getPolicyRepository } from "../context";
 import {
   buildWalletPolicyPayload,

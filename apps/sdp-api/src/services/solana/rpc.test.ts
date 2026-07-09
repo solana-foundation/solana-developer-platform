@@ -1,7 +1,7 @@
 import { SdpRpcError } from "@sdp/rpc/errors";
+import { confirmTransaction, type SolanaRpc, sendAndConfirmTransaction } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
-import { confirmTransaction, type SolanaRpc, sendAndConfirmTransaction } from "./rpc";
 
 const TEST_SIGNATURE = "5confirmTimeoutSig" as Signature;
 

@@ -1,8 +1,8 @@
+import { getSolanaConfig } from "@sdp/rpc";
 import type { Address, TransactionSigner } from "@solana/kit";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
-import { getSolanaConfig } from "@/lib/solana";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { getTemplateInfo } from "@/services/issuance/templates";
 import * as solanaServices from "@/services/solana";

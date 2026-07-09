@@ -1,16 +1,16 @@
-import type { Context } from "hono";
-import { z } from "zod";
-import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
-import { success } from "@/lib/response";
 import {
   listRpcProviders,
   type ResolvedRpcTarget,
   recordRpcRelayTelemetry,
   resolveRoundRobinRpcTargets,
   resolveRpcTarget,
-} from "@/services/rpc-relay.service";
+} from "@sdp/rpc/relay";
+import type { Context } from "hono";
+import { z } from "zod";
+import { getDb } from "@/db";
+import { getAuth } from "@/lib/auth";
+import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
+import { success } from "@/lib/response";
 import type { Env } from "@/types/env";
 import { rpcProjectQuerySchema, rpcRelayPayloadSchema } from "./schemas";
 
