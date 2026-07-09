@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.39.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.38.0...v0.39.0) (2026-07-09)
+
+### Features
+
+* HOO-671 Asset profile creation UI ([#579](https://github.com/solana-foundation/solana-developer-platform/pull/579)) ([644a330](https://github.com/solana-foundation/solana-developer-platform/commit/644a330dbef0b04f20f5600bdcbf5a5d615f22d5))
+
+### Bug Fixes
+
+* sync Stripe and Mural secrets to the deployed worker ([#643](https://github.com/solana-foundation/solana-developer-platform/pull/643)) ([9fa00fa](https://github.com/solana-foundation/solana-developer-platform/commit/9fa00fa2d28947908782ae641b65b8ef78d282d9))
+
+### Refactors
+
+* **sdp-api:** drop @sdp/rpc re-export shims ([#628](https://github.com/solana-foundation/solana-developer-platform/pull/628)) ([735ff69](https://github.com/solana-foundation/solana-developer-platform/commit/735ff694adda7a1f8929ff6483ed344b45b253f0))
+
 ## [0.38.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.37.0...v0.38.0) (2026-07-09)
 
 ### Features
