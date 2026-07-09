@@ -14,11 +14,13 @@ import {
 import { cn } from "@/lib/utils";
 import { Input } from "./input";
 import { Label } from "./label";
+import { Modal } from "./modal";
 import { usePortalContainer } from "./portal-container";
 
 const DEFAULT_ICON_CLASS = "size-5 shrink-0 text-text-low";
 
 export type ComboboxSize = "md" | "lg" | "xl";
+export type ComboboxVariant = "popover" | "dialog";
 
 const SIZE_CLASSES = {
   md: "h-[var(--input-height-md)] rounded-[var(--input-radius-md)] px-[var(--input-padding-x-md)]",
@@ -50,6 +52,7 @@ interface ComboboxProps {
   icon?: ReactNode;
   trailing?: ReactNode;
   size?: ComboboxSize;
+  variant?: ComboboxVariant;
   isLoading?: boolean;
   disabled?: boolean;
   error?: string;
@@ -69,6 +72,7 @@ export function Combobox({
   icon,
   trailing,
   size = "xl",
+  variant = "popover",
   isLoading,
   disabled,
   error,
@@ -134,146 +138,168 @@ export function Combobox({
     setActiveIndex(filtered.length === 1 ? 0 : -1);
   }, [filtered]);
 
+  const trigger = (
+    <button
+      type="button"
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      aria-labelledby={labelId}
+      aria-invalid={validationError ? true : undefined}
+      aria-describedby={validationError ? `${labelId}-error` : undefined}
+      disabled={disabled}
+      onClick={variant === "dialog" ? () => handleOpenChange(!open) : undefined}
+      className={cn(
+        "flex w-full items-center gap-2 border border-border-light bg-transparent text-base transition-colors hover:border-border-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-white/50",
+        validationError && "border-status-error-border hover:border-status-error-border",
+        SIZE_CLASSES[size]
+      )}
+    >
+      {withIconClass(icon)}
+      <span className="min-w-0 flex-1 text-left">
+        {selected ? (
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-text-extra-high">{selected.label}</span>
+            {selected.description ? (
+              <span className="truncate text-sm text-text-low">{selected.description}</span>
+            ) : null}
+          </span>
+        ) : (
+          <span className="text-text-low">{placeholder}</span>
+        )}
+      </span>
+      {trailing ? <span className="shrink-0">{trailing}</span> : null}
+      <ChevronDownIcon
+        className={cn("size-5 shrink-0 text-text-low transition-transform", open && "rotate-180")}
+      />
+    </button>
+  );
+
+  const panel = (
+    <>
+      {searchable ? (
+        <div className={cn("border-b border-border-light", variant === "dialog" ? "p-3" : "p-2")}>
+          <div className="relative">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-text-low" />
+            <Input
+              autoFocus
+              aria-activedescendant={
+                activeIndex >= 0 ? `${labelId}-option-${activeIndex}` : undefined
+              }
+              value={query}
+              onChange={(e) => setQuery(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setActiveIndex((current) =>
+                    filtered.length === 0 ? -1 : Math.min(current + 1, filtered.length - 1)
+                  );
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setActiveIndex((current) =>
+                    filtered.length === 0 ? -1 : Math.max(current - 1, 0)
+                  );
+                  return;
+                }
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (!selectActive(true)) {
+                    selectOnlyMatch(true);
+                  }
+                }
+              }}
+              placeholder={searchPlaceholder}
+              className="pl-9"
+            />
+          </div>
+        </div>
+      ) : null}
+
+      <div
+        className={cn("overflow-y-auto", variant === "dialog" ? "max-h-96 p-2" : "max-h-56 p-1.5")}
+      >
+        {isLoading ? (
+          <p className="px-3 py-6 text-center text-sm text-text-low">Loading…</p>
+        ) : error ? (
+          <p className="px-3 py-6 text-center text-sm text-status-error-text">{error}</p>
+        ) : filtered.length === 0 ? (
+          <p className="px-3 py-6 text-center text-sm text-text-low">
+            {options.length === 0 ? "No options available." : "No matches for your search."}
+          </p>
+        ) : (
+          filtered.map((option, index) => {
+            const active = option.value === value;
+            const highlighted = index === activeIndex;
+            return (
+              <button
+                key={option.value}
+                id={`${labelId}-option-${index}`}
+                type="button"
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-[var(--select-item-radius)] text-left transition-colors",
+                  variant === "dialog" ? "px-3.5 py-3" : "px-3 py-2.5",
+                  highlighted
+                    ? "bg-[var(--select-item-highlight-bg)]"
+                    : "hover:bg-[var(--select-item-highlight-bg)]"
+                )}
+                onMouseEnter={() => setActiveIndex(index)}
+                onClick={() => {
+                  onChange(option.value);
+                  close();
+                }}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-text-extra-high">{option.label}</span>
+                  {option.description ? (
+                    <span className="block truncate text-sm text-text-low">
+                      {option.description}
+                    </span>
+                  ) : null}
+                </span>
+                {active ? <CheckIcon className="size-4 shrink-0 text-text-extra-high" /> : null}
+              </button>
+            );
+          })
+        )}
+      </div>
+
+      {footer ? <div className="border-t border-border-light">{footer(close)}</div> : null}
+    </>
+  );
+
   return (
     <div className="flex flex-col gap-2">
       <Label id={labelId}>{label}</Label>
-      <Popover.Root open={open} onOpenChange={handleOpenChange}>
-        <Popover.Trigger asChild>
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            aria-labelledby={labelId}
-            aria-invalid={validationError ? true : undefined}
-            aria-describedby={validationError ? `${labelId}-error` : undefined}
-            disabled={disabled}
-            className={cn(
-              "flex w-full items-center gap-2 border border-border-light bg-transparent text-base transition-colors hover:border-border-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-white/50",
-              validationError && "border-status-error-border hover:border-status-error-border",
-              SIZE_CLASSES[size]
-            )}
+      {variant === "dialog" ? (
+        <>
+          {trigger}
+          <Modal
+            isOpen={open}
+            onClose={close}
+            ariaLabel={label}
+            size="md"
+            showCloseButton={false}
+            contentClassName="overflow-hidden"
           >
-            {withIconClass(icon)}
-            <span className="min-w-0 flex-1 text-left">
-              {selected ? (
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="truncate text-text-extra-high">{selected.label}</span>
-                  {selected.description ? (
-                    <span className="truncate text-sm text-text-low">{selected.description}</span>
-                  ) : null}
-                </span>
-              ) : (
-                <span className="text-text-low">{placeholder}</span>
-              )}
-            </span>
-            {trailing ? <span className="shrink-0">{trailing}</span> : null}
-            <ChevronDownIcon
-              className={cn(
-                "size-5 shrink-0 text-text-low transition-transform",
-                open && "rotate-180"
-              )}
-            />
-          </button>
-        </Popover.Trigger>
-
-        <Popover.Portal container={portalContainer ?? undefined}>
-          <Popover.Content
-            sideOffset={8}
-            align="start"
-            style={{ width: "var(--radix-popover-trigger-width)" }}
-            className="z-50 overflow-hidden rounded-[var(--select-popup-radius)] bg-[var(--select-popup-bg)] shadow-[var(--select-popup-shadow)]"
-          >
-            {searchable ? (
-              <div className="border-b border-border-light p-2">
-                <div className="relative">
-                  <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-text-low" />
-                  <Input
-                    autoFocus
-                    aria-activedescendant={
-                      activeIndex >= 0 ? `${labelId}-option-${activeIndex}` : undefined
-                    }
-                    value={query}
-                    onChange={(e) => setQuery(e.currentTarget.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "ArrowDown") {
-                        e.preventDefault();
-                        setActiveIndex((current) =>
-                          filtered.length === 0 ? -1 : Math.min(current + 1, filtered.length - 1)
-                        );
-                        return;
-                      }
-                      if (e.key === "ArrowUp") {
-                        e.preventDefault();
-                        setActiveIndex((current) =>
-                          filtered.length === 0 ? -1 : Math.max(current - 1, 0)
-                        );
-                        return;
-                      }
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        if (!selectActive(true)) {
-                          selectOnlyMatch(true);
-                        }
-                      }
-                    }}
-                    placeholder={searchPlaceholder}
-                    className="pl-9"
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            <div className="max-h-56 overflow-y-auto p-1.5">
-              {isLoading ? (
-                <p className="px-3 py-6 text-center text-sm text-text-low">Loading…</p>
-              ) : error ? (
-                <p className="px-3 py-6 text-center text-sm text-status-error-text">{error}</p>
-              ) : filtered.length === 0 ? (
-                <p className="px-3 py-6 text-center text-sm text-text-low">
-                  {options.length === 0 ? "No options available." : "No matches for your search."}
-                </p>
-              ) : (
-                filtered.map((option, index) => {
-                  const active = option.value === value;
-                  const highlighted = index === activeIndex;
-                  return (
-                    <button
-                      key={option.value}
-                      id={`${labelId}-option-${index}`}
-                      type="button"
-                      className={cn(
-                        "flex w-full items-center gap-3 rounded-[var(--select-item-radius)] px-3 py-2.5 text-left transition-colors",
-                        highlighted
-                          ? "bg-[var(--select-item-highlight-bg)]"
-                          : "hover:bg-[var(--select-item-highlight-bg)]"
-                      )}
-                      onMouseEnter={() => setActiveIndex(index)}
-                      onClick={() => {
-                        onChange(option.value);
-                        close();
-                      }}
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-text-extra-high">{option.label}</span>
-                        {option.description ? (
-                          <span className="block truncate text-sm text-text-low">
-                            {option.description}
-                          </span>
-                        ) : null}
-                      </span>
-                      {active ? (
-                        <CheckIcon className="size-4 shrink-0 text-text-extra-high" />
-                      ) : null}
-                    </button>
-                  );
-                })
-              )}
-            </div>
-
-            {footer ? <div className="border-t border-border-light">{footer(close)}</div> : null}
-          </Popover.Content>
-        </Popover.Portal>
-      </Popover.Root>
+            {panel}
+          </Modal>
+        </>
+      ) : (
+        <Popover.Root open={open} onOpenChange={handleOpenChange}>
+          <Popover.Trigger asChild>{trigger}</Popover.Trigger>
+          <Popover.Portal container={portalContainer ?? undefined}>
+            <Popover.Content
+              sideOffset={8}
+              align="start"
+              style={{ width: "max(var(--radix-popover-trigger-width), 240px)" }}
+              className="z-50 overflow-hidden rounded-[var(--select-popup-radius)] bg-[var(--select-popup-bg)] shadow-[var(--select-popup-shadow)]"
+            >
+              {panel}
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+      )}
       {validationError ? (
         <p id={`${labelId}-error`} className="text-xs text-status-error-text">
           {validationError}

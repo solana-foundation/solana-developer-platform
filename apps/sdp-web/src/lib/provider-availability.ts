@@ -2,6 +2,7 @@ import type {
   ComplianceProviderId,
   OrganizationProviderAvailabilityResponse,
   OrganizationRpcProvider,
+  ProviderAvailabilityEntry,
   RampProviderId,
 } from "@sdp/types";
 import {
@@ -14,7 +15,21 @@ export interface DashboardProviderAvailability extends OrganizationProviderAvail
   enabledCustodyProviders: KnownCustodyProvider[];
   enabledRpcProviders: OrganizationRpcProvider[];
   enabledComplianceProviders: ComplianceProviderId[];
-  enabledRampProviders: RampProviderId[];
+  rampProviderAccess: Record<RampProviderId, ProviderAvailabilityEntry>;
+}
+
+/**
+ * Whether any ramp provider is usable by the organization — entitled,
+ * configured, and enabled. `null` (e.g. a failed provider-access fetch)
+ * means none are usable.
+ */
+export function hasEnabledRampProvider(
+  access: Readonly<Record<RampProviderId, ProviderAvailabilityEntry>> | null
+): boolean {
+  if (access === null) {
+    return false;
+  }
+  return Object.values(access).some((entry) => entry.entitled && entry.configured && entry.enabled);
 }
 
 export async function fetchProviderAvailability(
@@ -44,8 +59,6 @@ export async function fetchProviderAvailability(
     enabledComplianceProviders: Object.entries(data.providers.compliance)
       .filter(([, entry]) => entry.enabled)
       .map(([provider]) => provider as ComplianceProviderId),
-    enabledRampProviders: Object.entries(data.providers.ramps)
-      .filter(([, entry]) => entry.enabled)
-      .map(([provider]) => provider as RampProviderId),
+    rampProviderAccess: data.providers.ramps,
   };
 }

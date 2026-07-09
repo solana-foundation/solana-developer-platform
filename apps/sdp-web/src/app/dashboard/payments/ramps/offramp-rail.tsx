@@ -22,8 +22,9 @@ function offrampPrimaryLabel(wizard: OfframpWizard): string {
 export function OfframpRail({
   wallets,
   walletsError,
-  enabledRampProviders,
+  rampProviderAccess,
   counterpartiesResult,
+  selectedCounterparty,
   counterpartyId,
   preSteps,
   onExit,
@@ -31,8 +32,9 @@ export function OfframpRail({
   const wizard = useOfframpWizard({
     wallets,
     walletsError,
-    enabledRampProviders,
+    rampProviderAccess,
     counterpartiesResult,
+    selectedCounterparty,
     initialCounterpartyId: counterpartyId,
     onExit,
   });
