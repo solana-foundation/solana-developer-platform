@@ -41,7 +41,7 @@ export const counterpartyIdParamsSchema = z.object({
 
 export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("direction", [
   z.object({
-    provider: z.enum(["moonpay", "lightspark", "bvnk", "coinbase", "mural"], {
+    provider: z.enum(["moonpay", "lightspark", "bvnk", "coinbase", "mural", "stripe"], {
       error: "provider does not support onramp requirements",
     }),
     direction: z.literal("onramp"),

@@ -1513,7 +1513,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
   .extend({
     provider: withOpenApi(createOnrampQuoteSchemaBase.shape.provider, {
       description:
-        "Ramp provider identifier. MoonPay returns a hosted widget URL; Lightspark returns manual funding instructions.",
+        "Ramp provider identifier. Hosted providers return a URL, manual providers return funding instructions, and Stripe returns a session widget secret.",
       example: "moonpay",
     }),
     counterpartyId: withOpenApi(createOnrampQuoteSchemaBase.shape.counterpartyId, {
@@ -1544,7 +1544,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
   })
   .openapi({
     description:
-      "Create an on-ramp quote. The response uses `deliveryMode` to indicate whether the client should display manual instructions or open a hosted provider flow.",
+      "Create an on-ramp quote. The response uses `deliveryMode` to indicate whether the client should display manual instructions, open a hosted provider flow, or mount a provider session widget.",
     example: {
       provider: "moonpay",
       counterpartyId: "counterparty_example",
@@ -1816,9 +1816,9 @@ const onrampQuoteSchema = z
     status: z
       .enum(["pending", "processing", "completed", "failed"])
       .openapi({ description: "Quote status.", example: "pending" }),
-    deliveryMode: z.enum(["manual_instructions", "hosted"]).openapi({
+    deliveryMode: z.enum(["manual_instructions", "hosted", "session_widget"]).openapi({
       description:
-        "`hosted` means open `hostedUrl`; `manual_instructions` means display `paymentInstructions`.",
+        "`hosted` means open `hostedUrl`; `manual_instructions` means display `paymentInstructions`; `session_widget` means mount the provider SDK session.",
       example: "hosted",
     }),
     hostedUrl: z
@@ -1856,6 +1856,23 @@ const onrampQuoteSchema = z
     expiresAt: isoDateTimeSchema
       .optional()
       .openapi({ description: "Timestamp when the quote expires." }),
+    clientSecret: z
+      .string()
+      .optional()
+      .openapi({ description: "Stripe on-ramp session client secret for session widgets." }),
+    sessionId: z
+      .string()
+      .optional()
+      .openapi({ description: "Provider session identifier for session widgets." }),
+    publishableKey: z
+      .string()
+      .optional()
+      .openapi({ description: "Stripe publishable key used to initialize the on-ramp widget." }),
+    redirectUrl: z
+      .string()
+      .url()
+      .optional()
+      .openapi({ description: "Provider redirect URL associated with the widget session." }),
   })
   .openapi({ description: "On-ramp quote details." });
 

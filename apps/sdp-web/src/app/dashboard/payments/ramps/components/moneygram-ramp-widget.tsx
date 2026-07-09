@@ -224,7 +224,7 @@ function buildOfframpTransactionPrefill(
 }
 
 export interface MoneygramRampWidgetProps {
-  quote: Extract<PaymentRampQuote, { deliveryMode: "session_widget" }>;
+  quote: Extract<PaymentRampQuote, { provider: "moneygram" }>;
   counterparty: Counterparty | null;
   sourceWalletId: string;
   sourceWalletName: string;

@@ -653,6 +653,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       fiatCurrency: rampFiatCurrencySchema,
     }),
   ]),
+  z.object({ provider: z.literal("stripe"), direction: rampDirectionSchema }),
 ]);
 
 export const createOfframpQuoteSchema = z.object({
