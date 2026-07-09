@@ -1,7 +1,9 @@
+import type { RpcEnv } from "@sdp/rpc";
+import { isTransientRpcError } from "@sdp/rpc";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import type { Signature } from "@solana/kit";
-import { describe, expect, it, vi } from "vitest";
-import { confirmTransaction, type SolanaRpc, sendAndConfirmTransaction } from "./rpc";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { confirmTransaction, createRpc, type SolanaRpc, sendAndConfirmTransaction } from "./rpc";
 
 const TEST_SIGNATURE = "5confirmTimeoutSig" as Signature;
 
@@ -68,5 +70,50 @@ describe("sendAndConfirmTransaction", () => {
     expect(appError.statusCode).toBe(502);
     expect(appError.message).toBe(`Transaction ${TEST_SIGNATURE} confirmation timed out after 1ms`);
     expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createRpc request timeout", () => {
+  const TEST_ENV = { SOLANA_RPC_URL: "http://127.0.0.1:1" } as RpcEnv;
+
+  /**
+   * Fake fetch that behaves like a stalled server: the socket stays open and
+   * nothing ever comes back. It honors AbortSignal the way real fetch does.
+   */
+  function stallingFetch(): typeof fetch {
+    return vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+      });
+    }) as unknown as typeof fetch;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects a stalled request with a transient-classified SOLANA_RPC_ERROR", async () => {
+    vi.stubGlobal("fetch", stallingFetch());
+    const rpc = createRpc(TEST_ENV, { requestTimeoutMs: 25 });
+
+    const error = await captureRejection(rpc.getSlot().send());
+
+    expect(error).toBeInstanceOf(SdpRpcError);
+    const appError = error as SdpRpcError;
+    expect(appError.code).toBe("SOLANA_RPC_ERROR");
+    expect(appError.message).toBe("RPC request timed out after 25ms");
+    expect(isTransientRpcError(appError)).toBe(true);
+  });
+
+  it("defers to a caller-supplied abortSignal instead of imposing its own deadline", async () => {
+    vi.stubGlobal("fetch", stallingFetch());
+    const rpc = createRpc(TEST_ENV, { requestTimeoutMs: 60_000 });
+
+    const error = await captureRejection(
+      rpc.getSlot().send({ abortSignal: AbortSignal.timeout(25) })
+    );
+
+    // The caller's abort surfaces as-is; our transport deadline must not rewrap it.
+    expect(error).not.toBeInstanceOf(SdpRpcError);
   });
 });
