@@ -2,6 +2,7 @@
  * Issuance Routes E2E Tests
  */
 
+import * as SolanaRpc from "@sdp/rpc/solana";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +17,6 @@ import * as FeePaymentAdapters from "@/services/adapters/fee-payment";
 import * as Mosaic from "@/services/mosaic";
 import { MosaicService } from "@/services/mosaic";
 import * as SolanaServices from "@/services/solana";
-import * as SolanaRpc from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {

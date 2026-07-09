@@ -30,6 +30,8 @@ export const RAMP_PROVIDER_LOGOS = {
   bvnk: "/provider-logos/bvnk.svg",
   moneygram: "/provider-logos/moneygram.svg",
   coinbase: "/provider-logos/coinbase-cdp.png",
+  mural: "/provider-logos/muralpay.svg",
+  stripe: "/provider-logos/stripe.svg",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
@@ -38,6 +40,8 @@ export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
   { id: "bvnk", title: "BVNK" },
   { id: "moneygram", title: "MoneyGram" },
   { id: "coinbase", title: "Coinbase" },
+  { id: "mural", title: "Mural Pay" },
+  { id: "stripe", title: "Stripe" },
 ];
 
 export const ONRAMP_PAIRS: RampPair[] = ONRAMP_SUPPORT.map(({ source, dest, providers }) => ({
@@ -81,17 +85,4 @@ export function toRampCryptoToken(assetRail: SelectedRampPair["assetRail"]): str
 
 export function getRampProviderLabel(provider: RampProviderId): string {
   return RAMP_PROVIDER_OPTIONS.find((option) => option.id === provider)?.title ?? provider;
-}
-
-export function resolveDefaultRampPair(
-  pairs: readonly RampPair[],
-  preferredPair: SelectedRampPair = { fiatCurrency: "USD", assetRail: "usdc.solana" }
-): SelectedRampPair {
-  const preferred = findRampPair(pairs, preferredPair);
-  const fallback = preferred ?? pairs[0];
-
-  return {
-    fiatCurrency: fallback?.fiatCurrency ?? preferredPair.fiatCurrency,
-    assetRail: fallback?.assetRail ?? preferredPair.assetRail,
-  };
 }

@@ -6,11 +6,19 @@ import type {
   RampTransferSettlement,
   SdpEnvironment,
 } from "@sdp/types";
+import type { CounterpartyEntityType } from "@sdp/types/counterparties";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
-import type { CryptoRailId } from "@sdp/types/payment-rails";
+import {
+  type CryptoRailId,
+  type RampCountrySupport,
+  type RampCurrencyLimit,
+  SOLANA_CRYPTO_RAILS,
+} from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import { z } from "zod";
 import type { BvnkComplianceInput } from "./providers/bvnk/provider-data";
+import type { StripeCustomerInfo } from "./providers/stripe/client";
 
 export type {
   BvnkComplianceInput,
@@ -19,19 +27,68 @@ export type {
   BvnkRuleEntity,
 } from "./providers/bvnk/provider-data";
 export type { LightsparkCustomerResolution } from "./providers/lightspark/client";
+export type {
+  MuralAccountResolution,
+  MuralKycStatus,
+  MuralOrganizationResolution,
+  MuralPayinMethod,
+  MuralTosStatus,
+} from "./providers/mural/provider-data";
+export type { StripeCustomerInfo } from "./providers/stripe/client";
 
-export interface ProviderRampSupport {
-  onrampFiats: ReadonlySet<RampFiatCurrency>;
-  onrampCryptos: ReadonlySet<CryptoRailId>;
-  offrampFiats: ReadonlySet<RampFiatCurrency>;
-  offrampCryptos: ReadonlySet<CryptoRailId>;
+export interface ProviderDirectionSupportSnapshot {
+  currencies: Readonly<Record<string, RampCurrencyLimit>>;
+  cryptos: readonly CryptoRailId[];
+  countrySupport?: RampCountrySupport;
 }
 
-export interface MutableProviderRampSupport {
-  onrampFiats: Set<RampFiatCurrency>;
-  onrampCryptos: Set<CryptoRailId>;
-  offrampFiats: Set<RampFiatCurrency>;
-  offrampCryptos: Set<CryptoRailId>;
+export interface ProviderRailSupportSnapshot {
+  onramp: ProviderDirectionSupportSnapshot;
+  offramp: ProviderDirectionSupportSnapshot;
+}
+
+const rampCurrencyLimitSchema = z.object({
+  min: z.string().nullable(),
+  max: z.string().nullable(),
+}) satisfies z.ZodType<RampCurrencyLimit>;
+
+const rampCountrySupportSchema = z.discriminatedUnion("coverage", [
+  z.object({
+    coverage: z.literal("by-country"),
+    countries: z.record(z.string(), z.array(z.string())),
+  }),
+  z.object({
+    coverage: z.literal("all-currencies"),
+    countries: z.array(z.string()),
+  }),
+  z.object({ coverage: z.literal("unreported") }),
+]) satisfies z.ZodType<RampCountrySupport>;
+
+const providerDirectionSupportSnapshotSchema = z.object({
+  currencies: z.record(z.string(), rampCurrencyLimitSchema),
+  cryptos: z.array(z.enum(SOLANA_CRYPTO_RAILS)),
+  countrySupport: rampCountrySupportSchema.optional(),
+}) satisfies z.ZodType<ProviderDirectionSupportSnapshot>;
+
+export const providerRailSupportSnapshotSchema = z.object({
+  onramp: providerDirectionSupportSnapshotSchema,
+  offramp: providerDirectionSupportSnapshotSchema,
+}) satisfies z.ZodType<ProviderRailSupportSnapshot>;
+
+export interface ProviderRailSupportDistillation {
+  snapshot: ProviderRailSupportSnapshot;
+  droppedCurrencyCodes: readonly string[];
+  droppedCountryCodes: readonly string[];
+}
+
+export interface ProviderDeclaredDirectionSupport {
+  countrySupport?: RampCountrySupport;
+  entityTypes: readonly CounterpartyEntityType[];
+}
+
+export interface ProviderDeclaredRailSupport {
+  onramp: ProviderDeclaredDirectionSupport;
+  offramp: ProviderDeclaredDirectionSupport;
 }
 
 export interface RampDiscoveryResponseDump {
@@ -47,7 +104,7 @@ export type RampFetchJson = (
 ) => Promise<RampDiscoveryResponseDump>;
 
 export type RampDumpWriter = (name: string, payload: RampDiscoveryResponseDump) => Promise<void>;
-export type RampDumpReader = <T>(relativePath: string) => Promise<T>;
+export type RampRawDumpReader = (relativePath: string) => Promise<unknown>;
 
 export interface RampDiscoveryContext {
   env: Record<string, string | undefined>;
@@ -122,6 +179,10 @@ export interface RampOnrampQuoteInput {
   phone?: string;
   /** Browser origin host the Coinbase Apple Pay link renders on (required for iframe embedding). */
   domain?: string;
+  /** End-user IP forwarded for the provider's geo/fraud checks (Stripe). */
+  customerIpAddress?: string;
+  /** Identity pre-fill for the embedded on-ramp widget (Stripe). */
+  stripeCustomerInfo?: StripeCustomerInfo;
 }
 
 export interface RampOfframpQuoteInput {
@@ -156,8 +217,9 @@ export interface ValidateCounterpartyOptions {
  */
 export interface RampProvider {
   id: RampProviderId;
+  declaredRailSupport: ProviderDeclaredRailSupport;
   _discoverRails(context: RampDiscoveryContext): Promise<void>;
-  readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport>;
+  distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation>;
   estimateOnramp(
     ctx: RampRuntimeContext,
     input: RampEstimateOnrampInput

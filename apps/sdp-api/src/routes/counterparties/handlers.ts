@@ -24,11 +24,13 @@ import {
   notFound,
 } from "@/lib/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
+import { readMuralOrganization } from "@/lib/ramps/providers/mural/provider-data";
 import { created, noContent, success } from "@/lib/response";
 import {
   advanceCounterpartyRequirements,
   assertRampProviderAvailable,
 } from "@/routes/payments/handlers/ramps";
+import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural";
 import { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
 import { AuditService } from "@/services/audit.service";
@@ -199,6 +201,13 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
 
   if (!counterparty) {
     throw notFound("Counterparty");
+  }
+
+  if (query.data.provider === "mural" && readMuralOrganization(counterparty.provider_data).id) {
+    return success(
+      c,
+      await resolveMuralRequirements(c, counterparty, projectId, query.data.direction)
+    );
   }
 
   if (query.data.direction === "onramp") {

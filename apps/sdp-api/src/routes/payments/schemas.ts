@@ -1,6 +1,7 @@
 import {
   type CoinbaseRampEvent,
   type MoneygramRampEvent,
+  MURAL_SANDBOX_PAYIN_CURRENCIES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
   type PrivateTransferRequest,
@@ -637,6 +638,22 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
     }),
   ]),
   z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),
+  z.discriminatedUnion("direction", [
+    z.object({
+      provider: z.literal("mural"),
+      direction: z.literal("onramp"),
+      cryptoToken: rampCurrencyCodeSchema,
+      destinationWallet: z.string().min(1),
+      fiatCurrency: rampFiatCurrencySchema,
+    }),
+    z.object({
+      provider: z.literal("mural"),
+      direction: z.literal("offramp"),
+      cryptoToken: rampCurrencyCodeSchema,
+      fiatCurrency: rampFiatCurrencySchema,
+    }),
+  ]),
+  z.object({ provider: z.literal("stripe"), direction: rampDirectionSchema }),
 ]);
 
 export const createOfframpQuoteSchema = z.object({
@@ -696,6 +713,12 @@ const simulateBvnkSandboxPayinPayloadSchema = z.object({
   destinationWallet: z.string().min(1),
 });
 
+const simulateMuralSandboxPayinPayloadSchema = z.object({
+  counterpartyId: z.string().min(1),
+  amount: z.number().positive(),
+  fiatCurrency: z.enum(MURAL_SANDBOX_PAYIN_CURRENCIES),
+});
+
 export const simulateSandboxTransferSchema = z.discriminatedUnion("provider", [
   z.object({
     provider: z.literal("lightspark"),
@@ -704,5 +727,9 @@ export const simulateSandboxTransferSchema = z.discriminatedUnion("provider", [
   z.object({
     provider: z.literal("bvnk"),
     payload: simulateBvnkSandboxPayinPayloadSchema,
+  }),
+  z.object({
+    provider: z.literal("mural"),
+    payload: simulateMuralSandboxPayinPayloadSchema,
   }),
 ]);

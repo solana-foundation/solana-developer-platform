@@ -1,7 +1,9 @@
 "use client";
 
+import { isMuralSandboxPayinCurrency } from "@sdp/types";
 import { DollarSignIcon } from "lucide-react";
-import { ONRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ramps";
+import { hasEnabledRampProvider } from "@/lib/provider-availability";
+import { toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
@@ -13,11 +15,13 @@ import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
 import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
+import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
 export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   const {
     currentStepId,
-    enabledRampProviders,
+    rampProviderAccess,
+    selectedCounterparty,
     fields,
     setField,
     liveWallets,
@@ -39,7 +43,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   } = wizard;
 
   if (currentStepId === "DEPOSIT") {
-    if (enabledRampProviders.length === 0) {
+    if (!hasEnabledRampProvider(rampProviderAccess)) {
       return (
         <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
           No deposit providers are enabled for this organization.
@@ -51,12 +55,12 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
       <div className="space-y-4">
         <RampPairProviderSelector
           direction="onramp"
-          pairs={ONRAMP_PAIRS}
-          enabledRampProviders={enabledRampProviders}
-          providerOptions={RAMP_PROVIDER_OPTIONS}
+          rampProviderAccess={rampProviderAccess}
+          selectedCounterparty={selectedCounterparty}
           wallets={liveWallets}
           walletsLoading={walletsLoading}
           selectedWallet={selectedWallet}
+          showWallet={true}
           selectedPair={selectedRampPair}
           selectedProvider={fields.provider}
           amount={fields.amount}
@@ -100,6 +104,20 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     return <RampCompleteScreen direction="onramp" quote={quote} transfer={transferStatus} />;
   }
 
+  if (currentStepId === "PROVIDER" && quote?.provider === "stripe") {
+    return (
+      <div className="space-y-6">
+        <StripeOnrampFrame
+          clientSecret={quote.clientSecret}
+          publishableKey={quote.publishableKey}
+        />
+        <div className="border-t border-border-light pt-5">
+          <RampStatusPanel direction="onramp" transfer={transferStatus} />
+        </div>
+      </div>
+    );
+  }
+
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "hosted") {
     return (
       <div className="space-y-6">
@@ -124,7 +142,10 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
       );
     }
 
-    const labels = simulateActionLabels(quote.provider);
+    const labels =
+      quote.provider === "mural" && !isMuralSandboxPayinCurrency(selectedRampPair.fiatCurrency)
+        ? null
+        : simulateActionLabels(quote.provider);
     const simulateAction = labels
       ? {
           loading: quoteSimulationLoading,

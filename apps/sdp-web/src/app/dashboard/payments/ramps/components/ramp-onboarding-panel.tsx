@@ -19,11 +19,26 @@ export function RampOnboardingPanel({
   }
   const copy = onboardingCopy(provider, status);
   const Icon = copy.icon;
+  const hostedAction =
+    status === "terms_of_service_required"
+      ? { label: "Accept terms", url: onboarding.termsOfServiceUrl }
+      : status === "customer_verification_required"
+        ? { label: "Complete verification", url: onboarding.verificationUrl }
+        : null;
   return (
     <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
       <Icon className={`size-10 ${copy.iconClassName}`} />
       <p className="text-lg font-medium text-text-extra-high">{copy.title}</p>
       <p className="max-w-md text-sm leading-relaxed text-text-low">{copy.description}</p>
+      {hostedAction ? (
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => window.open(hostedAction.url, "_blank", "noopener")}
+        >
+          {hostedAction.label}
+        </Button>
+      ) : null}
       {status === "funding_account_provisioning" ? (
         <div className="flex items-center gap-2 rounded-full bg-border-extra-light px-3 py-1.5">
           <span className="size-2 shrink-0 animate-pulse rounded-full bg-text-medium" />

@@ -1,0 +1,113 @@
+{
+  "onramp": {
+    "currencies": {
+      "ARS": {
+        "min": null,
+        "max": null
+      },
+      "BOB": {
+        "min": null,
+        "max": null
+      },
+      "BRL": {
+        "min": null,
+        "max": null
+      },
+      "CLP": {
+        "min": null,
+        "max": null
+      },
+      "COP": {
+        "min": null,
+        "max": null
+      },
+      "CRC": {
+        "min": null,
+        "max": null
+      },
+      "EUR": {
+        "min": null,
+        "max": null
+      },
+      "MXN": {
+        "min": null,
+        "max": null
+      },
+      "PEN": {
+        "min": null,
+        "max": null
+      },
+      "USD": {
+        "min": null,
+        "max": null
+      },
+      "ZAR": {
+        "min": null,
+        "max": null
+      }
+    },
+    "cryptos": ["usdc.solana"],
+    "countrySupport": {
+      "coverage": "by-country",
+      "countries": {
+        "AD": ["EUR"],
+        "AR": ["ARS"],
+        "AT": ["EUR"],
+        "AX": ["EUR"],
+        "BE": ["EUR"],
+        "BG": ["EUR"],
+        "BO": ["BOB"],
+        "BR": ["BRL"],
+        "CH": ["EUR"],
+        "CL": ["CLP"],
+        "CN": ["USD"],
+        "CO": ["COP"],
+        "CR": ["CRC"],
+        "CY": ["EUR"],
+        "CZ": ["EUR"],
+        "DE": ["EUR"],
+        "DK": ["EUR"],
+        "EE": ["EUR"],
+        "ES": ["EUR"],
+        "FI": ["EUR"],
+        "FR": ["EUR"],
+        "GB": ["EUR"],
+        "GF": ["EUR"],
+        "GP": ["EUR"],
+        "GR": ["EUR"],
+        "HK": ["USD"],
+        "HR": ["EUR"],
+        "HU": ["EUR"],
+        "IE": ["EUR"],
+        "IS": ["EUR"],
+        "IT": ["EUR"],
+        "LI": ["EUR"],
+        "LT": ["EUR"],
+        "LU": ["EUR"],
+        "LV": ["EUR"],
+        "MF": ["EUR"],
+        "MQ": ["EUR"],
+        "MT": ["EUR"],
+        "MX": ["MXN"],
+        "NL": ["EUR"],
+        "NO": ["EUR"],
+        "PA": ["USD"],
+        "PE": ["PEN", "USD"],
+        "PL": ["EUR"],
+        "PT": ["EUR"],
+        "RE": ["EUR"],
+        "RO": ["EUR"],
+        "SE": ["EUR"],
+        "SI": ["EUR"],
+        "SK": ["EUR"],
+        "US": ["USD"],
+        "YT": ["EUR"],
+        "ZA": ["ZAR"]
+      }
+    }
+  },
+  "offramp": {
+    "currencies": {},
+    "cryptos": []
+  }
+}

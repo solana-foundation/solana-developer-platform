@@ -1,5 +1,5 @@
 import { KoraAdapter } from "@sdp/api/services/adapters";
-import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/api/services/solana/rpc";
+import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
 import {
   type Address,
   appendTransactionMessageInstructions,

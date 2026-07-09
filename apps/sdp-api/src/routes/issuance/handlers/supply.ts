@@ -1,9 +1,9 @@
+import { getSolanaConfig } from "@sdp/rpc";
 import type { TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { getSolanaConfig } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
