@@ -269,6 +269,24 @@ export async function sendTransaction(
 /**
  * Send a signed transaction and wait for confirmation
  */
+/**
+ * One signature-status poll that tolerates transient RPC failures: a stalled
+ * or timed-out request returns `null` ("not yet confirmed") so the caller's
+ * confirmation budget — not a single poll — decides the outcome.
+ * Non-transient errors propagate immediately.
+ */
+async function getSignatureStatusOrNull(rpc: SolanaRpc, signature: Signature) {
+  try {
+    const status = await rpc.getSignatureStatuses([signature]).send();
+    return status.value[0];
+  } catch (error) {
+    if (isTransientRpcError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export async function sendAndConfirmTransaction(
   rpc: SolanaRpc,
   signedTransaction: Uint8Array,
@@ -292,9 +310,7 @@ export async function sendAndConfirmTransaction(
   const startTime = Date.now();
 
   while (Date.now() - startTime < timeoutMs) {
-    const status = await rpc.getSignatureStatuses([signature]).send();
-
-    const result = status.value[0];
+    const result = await getSignatureStatusOrNull(rpc, signature);
 
     if (result) {
       // Check if confirmed to required level
@@ -346,9 +362,7 @@ export async function confirmTransaction(
   const startTime = Date.now();
 
   while (Date.now() - startTime < timeoutMs) {
-    const status = await rpc.getSignatureStatuses([signature]).send();
-
-    const result = status.value[0];
+    const result = await getSignatureStatusOrNull(rpc, signature);
 
     if (result) {
       const isConfirmed =

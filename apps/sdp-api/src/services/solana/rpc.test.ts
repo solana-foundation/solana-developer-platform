@@ -1,6 +1,6 @@
 import type { RpcEnv } from "@sdp/rpc";
 import { isTransientRpcError } from "@sdp/rpc";
-import { SdpRpcError } from "@sdp/rpc/errors";
+import { SdpRpcError, solanaRpcError } from "@sdp/rpc/errors";
 import {
   confirmTransaction,
   createRpc,
@@ -75,6 +75,48 @@ describe("sendAndConfirmTransaction", () => {
     expect(appError.statusCode).toBe(502);
     expect(appError.message).toBe(`Transaction ${TEST_SIGNATURE} confirmation timed out after 1ms`);
     expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("confirmTransaction transient poll tolerance", () => {
+  it("keeps polling through a transient poll failure and confirms", async () => {
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(solanaRpcError("RPC request timed out after 25ms"))
+      .mockResolvedValueOnce({
+        value: [{ confirmationStatus: "confirmed", slot: 42n, err: null }],
+      });
+    const rpc = { getSignatureStatuses: vi.fn().mockReturnValue({ send }) } as unknown as SolanaRpc;
+
+    const confirmation = await confirmTransaction(rpc, TEST_SIGNATURE, { timeoutMs: 10_000 });
+
+    expect(confirmation.confirmationStatus).toBe("confirmed");
+    expect(confirmation.slot).toBe(42n);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("still propagates non-transient poll errors immediately", async () => {
+    const send = vi.fn().mockRejectedValue(new Error("invalid params"));
+    const rpc = { getSignatureStatuses: vi.fn().mockReturnValue({ send }) } as unknown as SolanaRpc;
+
+    const error = await captureRejection(
+      confirmTransaction(rpc, TEST_SIGNATURE, { timeoutMs: 10_000 })
+    );
+
+    expect((error as Error).message).toBe("invalid params");
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("times out with the confirmation error when every poll fails transiently", async () => {
+    const send = vi.fn().mockRejectedValue(solanaRpcError("RPC request timed out after 25ms"));
+    const rpc = { getSignatureStatuses: vi.fn().mockReturnValue({ send }) } as unknown as SolanaRpc;
+
+    const error = await captureRejection(confirmTransaction(rpc, TEST_SIGNATURE, { timeoutMs: 1 }));
+
+    expect(error).toBeInstanceOf(SdpRpcError);
+    expect((error as SdpRpcError).message).toBe(
+      `Transaction ${TEST_SIGNATURE} confirmation timed out after 1ms`
+    );
   });
 });
 
