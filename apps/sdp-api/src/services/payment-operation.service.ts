@@ -2,7 +2,7 @@ import { type Permission, SOL_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { isDecimalString } from "@/lib/amount";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, walletNotFound } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -67,7 +67,7 @@ export function normalizePaymentToken(token: string): string {
 export function resolvePaymentWallet(wallets: CustodyWallet[], walletId: string): CustodyWallet {
   const wallet = wallets.find((entry) => entry.walletId === walletId);
   if (!wallet) {
-    throw new AppError("NOT_FOUND", "Wallet not found. Provision wallets through /v1/wallets");
+    throw walletNotFound();
   }
   return wallet;
 }

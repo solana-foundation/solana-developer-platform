@@ -198,6 +198,13 @@ export function notFound(resource?: string): AppError {
   return new AppError("NOT_FOUND", resource ? `${resource} not found` : undefined);
 }
 
+export function walletNotFound(): AppError {
+  return new AppError(
+    "NOT_FOUND",
+    "Wallet not found. Pass the `walletId` field returned by GET /v1/wallets — the wallet record `id` and the public key are not accepted."
+  );
+}
+
 export function conflict(message?: string): AppError {
   return new AppError("CONFLICT", message);
 }

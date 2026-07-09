@@ -91,7 +91,12 @@ export const signingRequestIdParamSchema = idSchema(
   "Wallet signing request identifier.",
   "sigreq_example"
 );
-export const walletIdParamSchema = idSchema("Wallet identifier.", "wal_example");
+export const WALLET_ID_INPUT_NOTE =
+  "the `walletId` field returned by GET /v1/wallets. The wallet record `id` and the public key are not accepted.";
+export const walletIdParamSchema = idSchema(
+  "Provider wallet ID — the `walletId` field returned by GET /v1/wallets.",
+  "privy_wallet_123"
+);
 export const transferIdParamSchema = idSchema(
   "Transfer identifier (SDP record ID, not the on-chain signature).",
   "xfr_example"

@@ -10,7 +10,7 @@ import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-prog
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, notFound, walletNotFound } from "@/lib/errors";
 import { paginated } from "@/lib/response";
 import { type Address, assertValidAddress } from "@/lib/solana";
 import {
@@ -97,7 +97,7 @@ async function resolveWalletFilter(
   const wallet = wallets.find((entry) => entry.walletId === walletId);
 
   if (!wallet) {
-    throw notFound("Wallet");
+    throw walletNotFound();
   }
 
   return { publicKey: wallet.publicKey };
