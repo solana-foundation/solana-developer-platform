@@ -36,12 +36,16 @@ export interface SentryOptions {
 
 /**
  * Canonical "is Sentry configured?" check. Call this anywhere that needs to
- * branch on whether Sentry is enabled — never inline `env.SENTRY_DSN?.trim()`
- * at call-sites, since the definition may grow (e.g. an explicit
- * `SENTRY_ENABLED` flag) and inline checks would silently diverge.
+ * branch on whether Sentry is enabled — never inline the env reads at
+ * call-sites, since the definition may grow and inline checks would silently
+ * diverge. Requires a DSN and a production NODE_ENV: wrangler statically
+ * replaces `process.env.NODE_ENV` at build time ("development" under
+ * `wrangler dev`, "production" on deploy), so local dev never ships telemetry
+ * even though the Doppler-injected DSN reaches the worker env. Mirrors
+ * sdp-web's NODE_ENV gate; fails closed anywhere NODE_ENV is unset.
  */
 export function isSentryEnabled(env: Pick<Env, "SENTRY_DSN">): boolean {
-  return Boolean(env.SENTRY_DSN?.trim());
+  return Boolean(env.SENTRY_DSN?.trim()) && process.env.NODE_ENV === "production";
 }
 
 function parseSentryTraceSampleRate(value: string | undefined, fallback: number): number {
@@ -67,7 +71,7 @@ export function getSentryOptions(env: Env): SentryOptions {
 
   return {
     ...(dsn ? { dsn } : {}),
-    enabled: Boolean(dsn),
+    enabled: isSentryEnabled(env),
     environment: env.ENVIRONMENT,
     tracesSampleRate,
     sendDefaultPii: false,

@@ -109,6 +109,21 @@
       "import": "./src/ramps/providers/lightspark/provider-data.ts",
       "default": "./src/ramps/providers/lightspark/provider-data.ts"
     },
+    "./ramps/providers/mural/client": {
+      "types": "./src/ramps/providers/mural/client.ts",
+      "import": "./src/ramps/providers/mural/client.ts",
+      "default": "./src/ramps/providers/mural/client.ts"
+    },
+    "./ramps/providers/mural/counterparty": {
+      "types": "./src/ramps/providers/mural/counterparty.ts",
+      "import": "./src/ramps/providers/mural/counterparty.ts",
+      "default": "./src/ramps/providers/mural/counterparty.ts"
+    },
+    "./ramps/providers/mural/provider-data": {
+      "types": "./src/ramps/providers/mural/provider-data.ts",
+      "import": "./src/ramps/providers/mural/provider-data.ts",
+      "default": "./src/ramps/providers/mural/provider-data.ts"
+    },
     "./ramps/providers/moneygram/client": {
       "types": "./src/ramps/providers/moneygram/client.ts",
       "import": "./src/ramps/providers/moneygram/client.ts",
@@ -118,6 +133,11 @@
       "types": "./src/ramps/providers/moonpay/client.ts",
       "import": "./src/ramps/providers/moonpay/client.ts",
       "default": "./src/ramps/providers/moonpay/client.ts"
+    },
+    "./ramps/providers/stripe/client": {
+      "types": "./src/ramps/providers/stripe/client.ts",
+      "import": "./src/ramps/providers/stripe/client.ts",
+      "default": "./src/ramps/providers/stripe/client.ts"
     }
   },
   "scripts": {

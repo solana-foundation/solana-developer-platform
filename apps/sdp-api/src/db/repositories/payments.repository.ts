@@ -188,6 +188,7 @@ export interface PaymentsRepository {
     fromStatuses: readonly PaymentTransferStatus[];
     toStatus: PaymentTransferStatus;
     updatedAt: string;
+    amount?: string;
   }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   getTransferById(params: {

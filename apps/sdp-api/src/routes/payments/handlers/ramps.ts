@@ -3,9 +3,11 @@ import type { PaymentRampEstimate, PaymentRampQuote, RampProviderEstimateResult 
 import {
   OFFRAMP_SUPPORT,
   ONRAMP_SUPPORT,
+  RAMP_PROVIDER_SUPPORT_DETAILS,
   RAMP_SUPPORT_HASH,
   type RampFiatCurrency,
 } from "@sdp/types/generated/ramp-support";
+import type { RampProviderDirectionSupport } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
@@ -41,6 +43,7 @@ import {
   latestLightsparkPayoutAccount,
   readLightsparkCustomerId,
 } from "@/lib/ramps/providers/lightspark/provider-data";
+import { readMuralOrganization } from "@/lib/ramps/providers/mural/provider-data";
 import { readyCounterparty } from "@/lib/ramps/requirements";
 import type { RampRuntimeContext } from "@/lib/ramps/types";
 import { success } from "@/lib/response";
@@ -79,6 +82,12 @@ import {
   ensureBvnkPaymentRule,
 } from "./ramps/bvnk";
 import { ensureLightsparkCustomer, ensureLightsparkPayoutAccount } from "./ramps/lightspark";
+import {
+  muralOnrampQuote,
+  resolveMuralOnrampAccount,
+  resolveMuralRequirements,
+} from "./ramps/mural";
+import { stripeOnrampQuote } from "./ramps/stripe";
 
 type OnrampCurrencyPair = {
   source: (typeof ONRAMP_SUPPORT)[number]["source"];
@@ -106,6 +115,23 @@ function filterProviders(
 
 function uniqueSorted<T extends string>(values: readonly T[]): T[] {
   return [...new Set(values)].sort();
+}
+
+function buildProviderDetails(
+  providerIds: readonly RampProviderId[],
+  direction: "onramp" | "offramp"
+): Partial<Record<RampProviderId, RampProviderDirectionSupport>> {
+  const providerDetails: Partial<Record<RampProviderId, RampProviderDirectionSupport>> = {};
+  for (const providerId of providerIds) {
+    providerDetails[providerId] = RAMP_PROVIDER_SUPPORT_DETAILS[providerId][direction];
+  }
+  return providerDetails;
+}
+
+function providersFromPairs(
+  pairs: readonly (OnrampCurrencyPair | OfframpCurrencyPair)[]
+): RampProviderId[] {
+  return uniqueSorted(pairs.flatMap((row) => row.providers));
 }
 
 /** Throws unless the org has the ramp provider enabled for the request's environment. */
@@ -325,8 +351,12 @@ export async function advanceCounterpartyRequirements(
       );
       return bvnkOnboardingRequirements(resolution, input.direction);
     }
+    case "mural":
+      return resolveMuralRequirements(c, input.counterparty, input.projectId, input.direction);
     case "coinbase":
       return readyCounterparty("coinbase", input.direction);
+    case "stripe":
+      return readyCounterparty("stripe", input.direction);
     default: {
       const _exhaustive: never = input;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
@@ -515,6 +545,17 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       transferProviderData = bvnkResult.transferProviderData;
       break;
     }
+    case "mural": {
+      const account = await resolveMuralOnrampAccount(
+        c,
+        readMuralOrganization(counterparty.provider_data)
+      );
+      if (!account) {
+        throw counterpartyNotProvisioned("mural", "onramp");
+      }
+      quote = muralOnrampQuote({ account, fiatCurrency: input.fiatCurrency });
+      break;
+    }
     case "moneygram":
       throw badRequest("MoneyGram on-ramp is not available.");
     case "coinbase": {
@@ -527,6 +568,17 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         email: counterparty.email,
         phone: counterparty.entity_type === "individual" ? counterparty.identity.phone : undefined,
         domain: input.domain,
+      });
+      break;
+    }
+    case "stripe": {
+      quote = await stripeOnrampQuote(c, {
+        counterparty,
+        destinationWalletAddress,
+        cryptoToken: input.cryptoToken,
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        customerIpAddress: c.req.header("cf-connecting-ip"),
       });
       break;
     }
@@ -707,8 +759,12 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       });
       break;
     }
+    case "mural":
+      throw internalError("Mural off-ramp quote is not implemented yet.");
     case "coinbase":
       throw badRequest("Coinbase Onramp does not support off-ramp.");
+    case "stripe":
+      throw badRequest("Stripe off-ramp is not supported.");
     default: {
       const exhaustive: never = input.provider;
       throw new AppError(
@@ -813,6 +869,7 @@ export async function listOnrampCurrencies(c: AppContext) {
       destinations: uniqueSorted(pairs.map((row) => row.dest)),
     },
     pairs,
+    providerDetails: buildProviderDetails(providersFromPairs(pairs), "onramp"),
     supportHash: RAMP_SUPPORT_HASH,
   });
 }
@@ -841,6 +898,7 @@ export async function listOfframpCurrencies(c: AppContext) {
       destinations: uniqueSorted(pairs.map((row) => row.dest)),
     },
     pairs,
+    providerDetails: buildProviderDetails(providersFromPairs(pairs), "offramp"),
     supportHash: RAMP_SUPPORT_HASH,
   });
 }
@@ -915,6 +973,41 @@ export async function simulateSandboxTransfer(c: AppContext) {
         currency: payload.fiatCurrency,
         originatorName: counterparty.display_name,
         remittanceInformation: entry.bankAccount?.paymentReference,
+      });
+      break;
+    }
+    case "mural": {
+      const payload = parsed.data.payload;
+      const scope = await resolveScope(c);
+      const projectId = requireProjectId(c);
+      const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
+        counterpartyId: payload.counterpartyId,
+        organizationId: scope.auth.organizationId,
+        projectId,
+      });
+      if (!counterparty) {
+        throw new AppError("NOT_FOUND", "Counterparty not found");
+      }
+      const org = readMuralOrganization(counterparty.provider_data);
+      if (!org.id) {
+        throw badRequest("Mural organization is not provisioned yet for this counterparty.");
+      }
+      const account = await resolveMuralOnrampAccount(c, org);
+      if (!account) {
+        throw badRequest("Mural account is not active yet for this counterparty.");
+      }
+      const rail = {
+        USD: "wire",
+        MXN: "spei",
+        BRL: "pix",
+        ARS: "cvu",
+      } as const satisfies Record<typeof payload.fiatCurrency, "wire" | "spei" | "pix" | "cvu">;
+      transaction = await RAMP_PROVIDER_CLIENTS.mural.simulatePayin(rampRuntime(c), {
+        organizationId: org.id,
+        destinationAccountId: account.id,
+        rail: rail[payload.fiatCurrency],
+        amountValue: String(Math.round(payload.amount * 100)),
+        currencySymbol: payload.fiatCurrency,
       });
       break;
     }

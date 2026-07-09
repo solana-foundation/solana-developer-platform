@@ -1,31 +1,33 @@
-import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import { BvnkRampClient } from "./providers/bvnk/client";
 import { CoinbaseRampClient } from "./providers/coinbase/client";
 import { LightsparkRampClient } from "./providers/lightspark/client";
 import { MoneygramRampClient } from "./providers/moneygram/client";
 import { MoonpayRampClient } from "./providers/moonpay/client";
-import type {
-  ProviderRampSupport,
-  RampDiscoveryContext,
-  RampDumpReader,
-  RampProvider,
-} from "./types";
+import { MuralRampClient } from "./providers/mural/client";
+import { StripeRampClient } from "./providers/stripe/client";
+import type { RampDiscoveryContext, RampProvider } from "./types";
 
 export { BvnkRampClient } from "./providers/bvnk/client";
 export { CoinbaseRampClient } from "./providers/coinbase/client";
 export { LightsparkRampClient } from "./providers/lightspark/client";
 export { MoneygramRampClient } from "./providers/moneygram/client";
 export { MoonpayRampClient } from "./providers/moonpay/client";
+export { MuralRampClient } from "./providers/mural/client";
+export { StripeRampClient } from "./providers/stripe/client";
 export type {
-  ProviderRampSupport,
+  ProviderDeclaredRailSupport,
+  ProviderRailSupportDistillation,
+  ProviderRailSupportSnapshot,
   RampDiscoveryContext,
   RampDiscoveryResponseDump,
-  RampDumpReader,
   RampDumpWriter,
   RampFetchJson,
   RampProvider,
+  RampRawDumpReader,
   RampSettlementEvent,
 } from "./types";
+export { providerRailSupportSnapshotSchema } from "./types";
 
 export const RAMP_PROVIDER_CLIENTS = {
   moonpay: new MoonpayRampClient(),
@@ -33,6 +35,8 @@ export const RAMP_PROVIDER_CLIENTS = {
   bvnk: new BvnkRampClient(),
   moneygram: new MoneygramRampClient(),
   coinbase: new CoinbaseRampClient(),
+  mural: new MuralRampClient(),
+  stripe: new StripeRampClient(),
 } as const satisfies Record<RampProviderId, RampProvider>;
 
 export class RampClient {
@@ -50,17 +54,5 @@ export class RampClient {
     for (const provider of providers) {
       await this._discoverProviderRails(provider, context);
     }
-  }
-
-  async readRailSupport(
-    readDump: RampDumpReader
-  ): Promise<Record<RampProviderId, ProviderRampSupport>> {
-    const entries = await Promise.all(
-      RAMP_PROVIDERS.map(async (provider) => [
-        provider,
-        await RAMP_PROVIDER_CLIENTS[provider].readRailSupport(readDump),
-      ])
-    );
-    return Object.fromEntries(entries) as Record<RampProviderId, ProviderRampSupport>;
   }
 }

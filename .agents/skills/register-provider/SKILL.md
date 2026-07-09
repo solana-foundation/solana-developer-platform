@@ -84,8 +84,9 @@ Create `lib/ramps/providers/<id>/client.ts`:
 ```ts
 export class <Id>RampClient implements RampProvider {
   readonly id = "<id>";
+  readonly declaredRailSupport = <ID>_DECLARED_RAIL_SUPPORT;
   // estimate*, createOfframpQuote, validateCounterparty, _discoverRails,
-  // readRailSupport — bodies live in the capability skills.
+  // distillRailSupport — bodies live in the capability skills.
 }
 ```
 

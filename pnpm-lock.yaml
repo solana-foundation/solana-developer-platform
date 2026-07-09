@@ -401,6 +401,9 @@ importers:
 
   packages/sdp-api-integration:
     dependencies:
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../sdp-rpc
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types

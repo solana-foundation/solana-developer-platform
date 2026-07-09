@@ -1,3 +1,4 @@
+import { withHeliusApiKey } from "@sdp/rpc/relay";
 import {
   type CustodyWalletTokenBalance,
   WELL_KNOWN_TOKEN_BY_MINT,
@@ -5,7 +6,6 @@ import {
 } from "@sdp/types";
 import { getDb } from "@/db";
 import { formatDecimalAmount } from "@/lib/amount";
-import { withHeliusApiKey } from "@/services/rpc-relay.service";
 import type { Env } from "@/types/env";
 
 interface TrackedAssetDefinition {

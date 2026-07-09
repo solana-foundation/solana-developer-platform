@@ -1,4 +1,5 @@
 import {
+  COUNTERPARTY_ENTITY_TYPES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
   RAMP_FIAT_CURRENCIES,
@@ -1513,7 +1514,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
   .extend({
     provider: withOpenApi(createOnrampQuoteSchemaBase.shape.provider, {
       description:
-        "Ramp provider identifier. MoonPay returns a hosted widget URL; Lightspark returns manual funding instructions.",
+        "Ramp provider identifier. Hosted providers return a URL, manual providers return funding instructions, and Stripe returns a session widget secret.",
       example: "moonpay",
     }),
     counterpartyId: withOpenApi(createOnrampQuoteSchemaBase.shape.counterpartyId, {
@@ -1544,7 +1545,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
   })
   .openapi({
     description:
-      "Create an on-ramp quote. The response uses `deliveryMode` to indicate whether the client should display manual instructions or open a hosted provider flow.",
+      "Create an on-ramp quote. The response uses `deliveryMode` to indicate whether the client should display manual instructions, open a hosted provider flow, or mount a provider session widget.",
     example: {
       provider: "moonpay",
       counterpartyId: "counterparty_example",
@@ -1816,9 +1817,9 @@ const onrampQuoteSchema = z
     status: z
       .enum(["pending", "processing", "completed", "failed"])
       .openapi({ description: "Quote status.", example: "pending" }),
-    deliveryMode: z.enum(["manual_instructions", "hosted"]).openapi({
+    deliveryMode: z.enum(["manual_instructions", "hosted", "session_widget"]).openapi({
       description:
-        "`hosted` means open `hostedUrl`; `manual_instructions` means display `paymentInstructions`.",
+        "`hosted` means open `hostedUrl`; `manual_instructions` means display `paymentInstructions`; `session_widget` means mount the provider SDK session.",
       example: "hosted",
     }),
     hostedUrl: z
@@ -1856,6 +1857,23 @@ const onrampQuoteSchema = z
     expiresAt: isoDateTimeSchema
       .optional()
       .openapi({ description: "Timestamp when the quote expires." }),
+    clientSecret: z
+      .string()
+      .optional()
+      .openapi({ description: "Stripe on-ramp session client secret for session widgets." }),
+    sessionId: z
+      .string()
+      .optional()
+      .openapi({ description: "Provider session identifier for session widgets." }),
+    publishableKey: z
+      .string()
+      .optional()
+      .openapi({ description: "Stripe publishable key used to initialize the on-ramp widget." }),
+    redirectUrl: z
+      .string()
+      .url()
+      .optional()
+      .openapi({ description: "Provider redirect URL associated with the widget session." }),
   })
   .openapi({ description: "On-ramp quote details." });
 
@@ -1887,6 +1905,85 @@ const offrampCurrencyPairSchema = z
   })
   .openapi({ description: "Provider support for one crypto-to-fiat off-ramp pair." });
 
+const rampCurrencyLimitSchema = z
+  .object({
+    min: z.string().nullable().openapi({
+      description: "Minimum fiat amount supported for this provider and currency.",
+      example: "20",
+    }),
+    max: z.string().nullable().openapi({
+      description: "Maximum fiat amount supported for this provider and currency.",
+      example: "30000",
+    }),
+  })
+  .openapi({ description: "Provider amount limits for one fiat currency." });
+
+const rampCountrySupportSchema = z
+  .discriminatedUnion("coverage", [
+    z
+      .object({
+        coverage: z.literal("by-country").openapi({
+          description: "Country coverage is reported per fiat currency.",
+          example: "by-country",
+        }),
+        countries: z.record(z.string(), z.array(z.string())).openapi({
+          description: "Map of ISO 3166-1 alpha-2 country codes to supported fiat currencies.",
+          example: { US: ["USD"], PE: ["PEN", "USD"] },
+        }),
+      })
+      .openapi({ description: "Country-specific provider coverage by fiat currency." }),
+    z
+      .object({
+        coverage: z.literal("all-currencies").openapi({
+          description: "Country coverage applies to every listed provider currency.",
+          example: "all-currencies",
+        }),
+        countries: z.array(z.string()).openapi({
+          description: "ISO 3166-1 alpha-2 country codes supported for all listed currencies.",
+          example: ["AL", "US"],
+        }),
+      })
+      .openapi({ description: "Provider country coverage shared by all currencies." }),
+    z
+      .object({
+        coverage: z.literal("unreported").openapi({
+          description: "The provider has not reported country coverage.",
+          example: "unreported",
+        }),
+      })
+      .openapi({ description: "Provider country coverage is not reported." }),
+  ])
+  .openapi({ description: "Provider country coverage details." });
+
+const rampProviderDirectionSupportSchema = z
+  .object({
+    currencies: z.record(z.string(), rampCurrencyLimitSchema).openapi({
+      description: "Fiat currency support keyed by ISO 4217 currency code.",
+      example: { USD: { min: "20", max: "30000" } },
+    }),
+    countrySupport: rampCountrySupportSchema,
+    entityTypes: z.array(z.enum(COUNTERPARTY_ENTITY_TYPES)).openapi({
+      description:
+        "Counterparty entity types supported by this provider for the endpoint direction.",
+      example: ["individual"],
+    }),
+  })
+  .openapi({ description: "Provider support details for the endpoint direction." });
+
+const rampCurrencyProviderDetailsSchema = z
+  .record(z.string(), rampProviderDirectionSupportSchema)
+  .openapi({
+    description:
+      "Provider support details keyed by provider ID. Includes only providers present in the returned pairs.",
+    example: {
+      moonpay: {
+        currencies: { USD: { min: "20", max: "30000" } },
+        countrySupport: { coverage: "all-currencies", countries: ["AL", "US"] },
+        entityTypes: ["individual"],
+      },
+    },
+  });
+
 export const onrampCurrenciesResponseSchema = z
   .object({
     currencies: z
@@ -1904,6 +2001,7 @@ export const onrampCurrenciesResponseSchema = z
     pairs: z.array(onrampCurrencyPairSchema).openapi({
       description: "Supported fiat-to-crypto pairs and their providers.",
     }),
+    providerDetails: rampCurrencyProviderDetailsSchema,
     supportHash: z.string().openapi({
       description: "Deterministic hash of the generated ramp support matrix.",
       example: "sha256:example",
@@ -1928,6 +2026,7 @@ export const offrampCurrenciesResponseSchema = z
     pairs: z.array(offrampCurrencyPairSchema).openapi({
       description: "Supported crypto-to-fiat pairs and their providers.",
     }),
+    providerDetails: rampCurrencyProviderDetailsSchema,
     supportHash: z.string().openapi({
       description: "Deterministic hash of the generated ramp support matrix.",
       example: "sha256:example",
