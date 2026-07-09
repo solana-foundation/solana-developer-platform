@@ -629,7 +629,7 @@
             "description": "Creates a token record that can later be deployed to Solana.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingWalletId\": \"wal_example\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true\n}",
+              "raw": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -671,7 +671,7 @@
             "description": "Updates stored token fields. For deployed tokens, metadata fields are also written on-chain through the current metadata authority.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\"\n}",
+              "raw": "{\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -740,7 +740,7 @@
             "description": "Records the mint after the client signs and submits a prepared (non-custodial) deploy transaction. Verifies the transaction landed on-chain, then marks the token deployed.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signature\": \"5x...signature\",\n  \"mint\": \"So11111111111111111111111111111111111111112\",\n  \"listAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"wal_example\"\n}",
+              "raw": "{\n  \"signature\": \"5x...signature\",\n  \"mint\": \"So11111111111111111111111111111111111111112\",\n  \"listAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -773,7 +773,7 @@
             "description": "Builds an unsigned mint transaction for client-side signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -797,7 +797,7 @@
             "description": "Mints tokens using custody signing and submission.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -821,7 +821,7 @@
             "description": "Builds an unsigned burn transaction for client-side signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -845,7 +845,7 @@
             "description": "Burns tokens using custody signing and submission.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -869,7 +869,7 @@
             "description": "Builds an unsigned force transfer transaction for client-side signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -893,7 +893,7 @@
             "description": "Forces a transfer using permanent delegate authority.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -917,7 +917,7 @@
             "description": "Builds an unsigned force burn transaction for client-side signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -941,7 +941,7 @@
             "description": "Burns tokens using permanent delegate authority.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -965,7 +965,7 @@
             "description": "Builds an unsigned authority update transaction for client-side signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -989,7 +989,7 @@
             "description": "Updates token authorities using custody signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1216,7 +1216,7 @@
             "description": "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\",\n  \"privateTransfer\": {\n    \"provider\": \"magicblock\",\n    \"magicBlock\": {\n      \"initIfMissing\": true,\n      \"initAtasIfMissing\": true,\n      \"maxDelayMs\": \"1000\"\n    }\n  }\n}",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"privy_wallet_123\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\",\n  \"privateTransfer\": {\n    \"provider\": \"magicblock\",\n    \"magicBlock\": {\n      \"initIfMissing\": true,\n      \"initAtasIfMissing\": true,\n      \"maxDelayMs\": \"1000\"\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1249,7 +1249,7 @@
             "description": "Validates a transfer batch request and estimates transaction chunking and fees. This route is scaffolded; estimation is not implemented yet.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"wal_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1282,7 +1282,7 @@
             "description": "Creates a custody-executed outbound transfer batch to counterparty crypto-wallet accounts. This route is scaffolded; execution is not implemented yet.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"wal_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1324,7 +1324,7 @@
             "description": "Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"sourceWalletId\": \"wal_source\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "raw": "{\n  \"sourceWalletId\": \"privy_wallet_123\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1357,7 +1357,7 @@
             "description": "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"sourceWalletId\": \"wal_source\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "raw": "{\n  \"sourceWalletId\": \"privy_wallet_123\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1720,7 +1720,7 @@
             "description": "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"destinationWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com/onramp/complete\"\n}",
+              "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com/onramp/complete\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1820,13 +1820,22 @@
             "description": "Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile. Requires the Asset Profiles feature to be enabled.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingWalletId\": \"wal_example\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true,\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    }\n  }\n}",
+              "raw": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true,\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
+          }
+        },
+        {
+          "name": "Get asset profile by token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/asset-profiles/by-token/{{tokenId}}",
+            "description": "Gets the active asset profile for an issued token, if one exists."
           }
         },
         {
@@ -1850,10 +1859,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/issuance/asset-profiles/{{profileId}}",
-            "description": "Updates an asset profile. At least one field must be provided. The resulting category/type pair must be supported. Public metadata is recomputed when metadata or the asset type changes.",
+            "description": "Updates an asset profile. At least one field must be provided. The resulting category/type pair must be supported. Public metadata is recomputed when metadata or the asset type changes; set issuanceMetadata.visibility.public to control which fields are exposed (asset.* and chain.decimals only).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    }\n  }\n}",
+              "raw": "{\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\",\n      \"website\": \"https://acme.example\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    },\n    \"visibility\": {\n      \"public\": [\n        \"asset.name\",\n        \"asset.issuerName\",\n        \"asset.pegCurrency\",\n        \"chain.decimals\"\n      ]\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
