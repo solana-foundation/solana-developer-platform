@@ -524,6 +524,10 @@ export class MuralRampClient implements RampProvider {
     });
   }
 
+  /**
+   * Triggers a sandbox fiat payin. `amountValue` is in the currency's minor
+   * units (cents) per Mural's `/api/sandbox/simulate/payin` amount contract.
+   */
   async simulatePayin(
     ctx: RampRuntimeContext,
     input: {
