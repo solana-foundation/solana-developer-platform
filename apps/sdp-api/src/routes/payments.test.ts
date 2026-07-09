@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import * as solanaRpc from "@sdp/rpc/solana";
 import {
   type CachedApiKey,
   type PolicyDefaultAction,
@@ -31,7 +32,6 @@ import { hashString } from "@/lib/hash";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import * as feePaymentAdapters from "@/services/adapters/fee-payment";
 import * as solanaServices from "@/services/solana";
-import * as solanaRpc from "@/services/solana/rpc";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";

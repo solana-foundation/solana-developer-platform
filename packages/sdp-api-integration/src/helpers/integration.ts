@@ -6,12 +6,6 @@ import { createSigningService } from "@sdp/api/services/domain/signing.service";
 import { createMosaicService } from "@sdp/api/services/mosaic";
 import { createToken2022Service, Token2022Service } from "@sdp/api/services/solana";
 import {
-  confirmTransaction,
-  createRpc,
-  getMinimumBalanceForRentExemption,
-  getRecentBlockhash,
-} from "@sdp/api/services/solana/rpc";
-import {
   CustodyConfigStore,
   type CustodyWallet,
 } from "@sdp/api/services/stores/custody-config.store";
@@ -22,6 +16,12 @@ import {
   TEST_PROJECT_CACHED_KEY,
 } from "@sdp/api-test/fixtures/tokens";
 import { clearTestDatabase, seedTestDatabase } from "@sdp/api-test/mocks/db";
+import {
+  confirmTransaction,
+  createRpc,
+  getMinimumBalanceForRentExemption,
+  getRecentBlockhash,
+} from "@sdp/rpc/solana";
 import {
   type Address,
   appendTransactionMessageInstructions,

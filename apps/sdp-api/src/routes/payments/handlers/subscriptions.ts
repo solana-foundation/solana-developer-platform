@@ -1,3 +1,4 @@
+import * as solanaRpc from "@sdp/rpc/solana";
 import type {
   ListPaymentSubscriptionCollectionAttemptsResponse,
   ListPaymentSubscriptionPlansResponse,
@@ -50,7 +51,6 @@ import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/e
 import { created, success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
-import * as solanaRpc from "@/services/solana/rpc";
 import {
   type AppContext,
   getPaymentSubscriptionsRepository,
