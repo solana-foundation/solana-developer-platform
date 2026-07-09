@@ -681,6 +681,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       pathname !== "/dashboard/custody/switch");
   const shouldUseWorkspaceViewport =
     pathname === "/dashboard/issuance" ||
+    pathname === "/dashboard/issuance/create" ||
     pathname === "/dashboard/payments" ||
     pathname === "/dashboard/wallets" ||
     pathname === "/dashboard/custody" ||

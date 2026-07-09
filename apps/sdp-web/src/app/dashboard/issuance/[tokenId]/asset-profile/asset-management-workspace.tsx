@@ -193,9 +193,9 @@ export function AssetManagementWorkspace({
         value={activeTab}
         onValueChange={(value) => syncActiveTabInUrl(value as AssetManagementTab)}
       >
-        <TabList>
+        <TabList className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {managementTabs.map((tab) => (
-            <Tab key={tab.id} value={tab.id}>
+            <Tab key={tab.id} value={tab.id} className="shrink-0 whitespace-nowrap">
               {tab.label}
             </Tab>
           ))}

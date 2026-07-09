@@ -11,16 +11,13 @@ interface AdvancedCapacitiesProps {
   disabled?: boolean;
 }
 
-// Collapsible "Advanced (Recommended)" panel — capacity checkboxes pre-selected
-// based on the chosen asset profile (see getRecommendedCapacities). Not a tab.
+// Collapsible "Advanced" panel — capacity checkboxes pre-selected based on the
+// chosen asset profile (see getRecommendedCapacities). Not a tab.
 export function AdvancedCapacities({ value, onChange, disabled }: AdvancedCapacitiesProps) {
   return (
     <details className="group rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-4" open>
       <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
         <span className="text-sm font-semibold text-[#1c1c1d]">Advanced</span>
-        <span className="rounded-full bg-[rgba(28,28,29,0.06)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.6)]">
-          Recommended
-        </span>
         <ChevronDown className="ml-auto h-4 w-4 text-[rgba(28,28,29,0.5)] transition-transform group-open:rotate-180" />
       </summary>
       <p className="mt-2 text-sm text-[rgba(28,28,29,0.58)]">

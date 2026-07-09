@@ -1,13 +1,10 @@
 import type { AssetCategory } from "@sdp/types";
 
-// The four top-level wizard steps (V2 issuance direction). The sub-asset-type
-// screen lives under "asset-details" together with the fuller detail form.
+// The four top-level wizard steps (V2 issuance direction). Classification owns
+// both the category and the sub-asset-type selection; "asset-details" is the
+// detail form only.
 export const WIZARD_STEPS = ["classification", "asset-details", "public-info", "review"] as const;
 export type WizardStep = (typeof WIZARD_STEPS)[number];
-
-// "asset-details" has two views, both shown under progress-step 2: first the
-// sub-asset-type selector, then the details form.
-export type DetailsStage = "select" | "form";
 
 export interface WizardStepMeta {
   id: WizardStep;
@@ -167,13 +164,11 @@ export function isValidDecimals(value: string): boolean {
 export function isStepComplete(step: WizardStep, draft: DraftState): boolean {
   switch (step) {
     case "classification":
-      return draft.assetCategory !== null && draft.name.trim().length > 0;
-    case "asset-details":
       return (
-        draft.assetType !== null &&
-        draft.symbol.trim().length > 0 &&
-        isValidDecimals(draft.decimals)
+        draft.assetCategory !== null && draft.assetType !== null && draft.name.trim().length > 0
       );
+    case "asset-details":
+      return draft.symbol.trim().length > 0 && isValidDecimals(draft.decimals);
     case "public-info":
       return true;
     case "review":
@@ -183,20 +178,15 @@ export function isStepComplete(step: WizardStep, draft: DraftState): boolean {
   }
 }
 
-// Fine-grained gate for the footer "Continue" button, aware of the asset-details
-// sub-stage.
-export function canAdvance(
-  step: WizardStep,
-  detailsStage: DetailsStage,
-  draft: DraftState
-): boolean {
+// Fine-grained gate for the footer "Continue" button.
+export function canAdvance(step: WizardStep, draft: DraftState): boolean {
   switch (step) {
     case "classification":
-      return draft.assetCategory !== null && draft.name.trim().length > 0;
+      return (
+        draft.assetCategory !== null && draft.assetType !== null && draft.name.trim().length > 0
+      );
     case "asset-details":
-      return detailsStage === "select"
-        ? draft.assetType !== null
-        : draft.symbol.trim().length > 0 && isValidDecimals(draft.decimals);
+      return draft.symbol.trim().length > 0 && isValidDecimals(draft.decimals);
     case "public-info":
       return true;
     case "review":
