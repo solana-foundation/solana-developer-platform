@@ -1,5 +1,7 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import { toNumberAmount } from "@sdp/solana/amount";
+import { SOL_MINT } from "@sdp/types";
 import {
   FindReferenceError,
   findReference,
@@ -13,9 +15,7 @@ import {
   createPaymentRequestsRepository,
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
-import { toNumberAmount } from "@sdp/solana/amount";
 import { internalError } from "@/lib/errors";
-import { SOL_MINT } from "@/services/payment-operation.service";
 import type { Env } from "@/types/env";
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
