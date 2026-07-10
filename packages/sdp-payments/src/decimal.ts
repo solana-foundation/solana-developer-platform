@@ -49,6 +49,18 @@ export function compareDecimalAmounts(left: string, right: string): number {
   return leftFraction < rightFraction ? -1 : 1;
 }
 
+function formatScaledUnits(units: bigint, scale: number): string {
+  if (scale === 0) {
+    return units.toString();
+  }
+
+  const digits = units.toString().padStart(scale + 1, "0");
+  const whole = digits.slice(0, -scale).replace(/^0+(?=\d)/, "") || "0";
+  const fraction = trimTrailingZeros(digits.slice(-scale));
+
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+
 export function sumDecimalAmounts(amounts: string[]): string {
   if (amounts.length === 0) {
     return "0";
@@ -62,15 +74,33 @@ export function sumDecimalAmounts(amounts: string[]): string {
     return acc + BigInt(combined);
   }, 0n);
 
-  if (scale === 0) {
-    return total.toString();
+  return formatScaledUnits(total, scale);
+}
+
+const DIVISION_DECIMALS = 9;
+
+/**
+ * Divides two decimal amount strings via scaled BigInt math, rounding half
+ * away from zero to 9 fractional digits. Intended for derived figures like
+ * exchange rates, where float division would leak artifacts.
+ */
+export function divideDecimalAmounts(numerator: string, denominator: string): string {
+  const num = parseDecimalParts(numerator);
+  const den = parseDecimalParts(denominator);
+
+  const denominatorUnits = BigInt(`${den.whole}${den.fraction}`);
+  if (denominatorUnits === 0n) {
+    throw badRequest("Cannot divide by a zero amount");
   }
 
-  const digits = total.toString().padStart(scale + 1, "0");
-  const whole = digits.slice(0, -scale).replace(/^0+(?=\d)/, "") || "0";
-  const fraction = trimTrailingZeros(digits.slice(-scale));
+  const numeratorUnits = BigInt(`${num.whole}${num.fraction}`);
+  const exponent = DIVISION_DECIMALS + den.fraction.length - num.fraction.length;
+  const scaledNumerator = exponent >= 0 ? numeratorUnits * 10n ** BigInt(exponent) : numeratorUnits;
+  const scaledDenominator =
+    exponent >= 0 ? denominatorUnits : denominatorUnits * 10n ** BigInt(-exponent);
 
-  return fraction ? `${whole}.${fraction}` : whole;
+  const quotient = (scaledNumerator * 2n + scaledDenominator) / (scaledDenominator * 2n);
+  return formatScaledUnits(quotient, DIVISION_DECIMALS);
 }
 
 export function addDecimalAmounts(left: string, right: string): string {

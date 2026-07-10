@@ -510,7 +510,11 @@ Yield accrues daily off-chain in your treasury accounting system. Monthly distri
 For a holder with a 1000 PTFND subscription and a published rate of 4.5% APY:
 
 ```javascript
-const monthlyYield = (1000 * 0.045 / 12).toFixed(2); // "3.75"
+// Compute in integer cents and basis points — float math on money
+// (e.g. 1000 * 0.045 / 12) accumulates rounding artifacts.
+const holderCents = 1000 * 100;
+const monthlyYieldCents = Math.floor((holderCents * 450) / 10_000 / 12); // 450 bps = 4.5% APY
+const monthlyYield = (monthlyYieldCents / 100).toFixed(2); // "3.75"
 
 const dividendKey = idempotencyKey("mint-dividend");
 const dividend = await sdp.post(

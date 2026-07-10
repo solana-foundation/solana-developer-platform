@@ -23,6 +23,7 @@ import {
   PAYMENTS_ACTION_WALLETS_KEY,
   usePaymentsActionWallets,
 } from "../ramps/hooks/use-payments-action-wallets";
+import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
 import { walletBalanceAssetOptions } from "../ramps/wallet-options";
 import { createRecurringPayment } from "./recurring-payments.data";
 
@@ -103,7 +104,7 @@ function resolveScheduleLabel(fields: RecurringPaymentCreateFields): string {
 }
 
 function amountIsValid(value: string): boolean {
-  return /^\d+(\.\d{1,9})?$/.test(value.trim()) && Number(value) > 0;
+  return ONCHAIN_AMOUNT_PATTERN.test(value.trim()) && Number(value) > 0;
 }
 
 function metadataUriIsValid(value: string): boolean {

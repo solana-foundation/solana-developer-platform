@@ -1,5 +1,11 @@
 import { assertValidAddress } from "@sdp/solana/address";
-import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
+import {
+  compareDecimalAmounts,
+  formatDecimalAmount,
+  isDecimalString,
+  parseDecimalAmount,
+  toNumberAmount,
+} from "@sdp/solana/amount";
 import type {
   BvnkBankFundingDetails,
   Counterparty,
@@ -16,6 +22,7 @@ import {
 } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
+import { divideDecimalAmounts } from "../../../decimal";
 import {
   badRequest,
   internalError,
@@ -296,12 +303,11 @@ interface BvnkRuleResponse {
   originator?: { currency?: string; walletId?: string };
 }
 
-function toPositiveAmount(value: string, fieldName: string): number {
-  const amount = Number.parseFloat(value);
-  if (!Number.isFinite(amount) || amount <= 0) {
+function assertPositiveDecimalAmount(value: string, fieldName: string): string {
+  if (!isDecimalString(value) || compareDecimalAmounts(value, "0") <= 0) {
     throw badRequest(`${fieldName} must be a positive amount`);
   }
-  return amount;
+  return value;
 }
 
 function parseBvnkEstimateFeeCurrency(value: string): PaymentRampEstimateFees["currency"] {
@@ -372,7 +378,7 @@ function formatBvnkNetExchangeRate(netFiatAmount: string, paidRequiredAmount: nu
   if (paidRequiredAmount <= 0) {
     throw new SdpPaymentsError("PROVIDER_UNAVAILABLE", "BVNK returned a non-positive paid amount");
   }
-  return String(Number(netFiatAmount) / paidRequiredAmount);
+  return divideDecimalAmounts(netFiatAmount, String(paidRequiredAmount));
 }
 
 const bvnkCurrencyEntrySchema = z.object({
@@ -907,7 +913,7 @@ export class BvnkRampClient implements RampProvider {
   ): Promise<PaymentRampEstimate> {
     const config = readBvnkConfig(env, mode);
     const { currency } = normalizeBvnkCurrencyAndNetwork(getCryptoRailAssetLabel(input.assetRail));
-    const amountIn = toPositiveAmount(input.fiatAmount, "fiatAmount");
+    const amountIn = assertPositiveDecimalAmount(input.fiatAmount, "fiatAmount");
     const quote = await this.request<BvnkQuoteEstimateResponse>(
       config,
       "/api/v1/quote?estimate=true",
@@ -918,7 +924,7 @@ export class BvnkRampClient implements RampProvider {
           to: currency,
           fromWalletLsid: config.walletId,
           toWalletLsid: config.walletId,
-          amountIn,
+          amountIn: toNumberAmount(amountIn),
           useMinimum: false,
           useMaximum: false,
           payInMethod: "wallet",
@@ -967,7 +973,7 @@ export class BvnkRampClient implements RampProvider {
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(
       getCryptoRailAssetLabel(input.assetRail)
     );
-    const paidRequiredAmount = toPositiveAmount(input.cryptoAmount, "cryptoAmount");
+    const paidRequiredAmount = assertPositiveDecimalAmount(input.cryptoAmount, "cryptoAmount");
     const estimate = await this.request<BvnkPayoutEstimateResponse>(
       config,
       "/api/v1/pay/estimate",
@@ -977,7 +983,7 @@ export class BvnkRampClient implements RampProvider {
           walletId: config.walletId,
           walletCurrency: input.fiatCurrency,
           paidCurrency: currency,
-          paidRequiredAmount,
+          paidRequiredAmount: toNumberAmount(paidRequiredAmount),
           reference: rampId("sdp_offramp_est"),
           network,
         },

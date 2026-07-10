@@ -17,6 +17,7 @@ import type {
   PaymentTransferRow,
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
+import { parseDecimalAmount } from "@/lib/amount";
 import { requireProjectId } from "@/lib/auth";
 import {
   AppError,
@@ -1006,7 +1007,7 @@ export async function simulateSandboxTransfer(c: AppContext) {
         organizationId: org.id,
         destinationAccountId: account.id,
         rail: rail[payload.fiatCurrency],
-        amountValue: String(Math.round(payload.amount * 100)),
+        amountValue: String(parseDecimalAmount(String(payload.amount), 2)),
         currencySymbol: payload.fiatCurrency,
       });
       break;

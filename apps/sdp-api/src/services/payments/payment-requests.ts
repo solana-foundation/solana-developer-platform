@@ -12,6 +12,7 @@ import {
   createPaymentRequestsRepository,
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
+import { toNumberAmount } from "@/lib/amount";
 import { internalError } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
 import { SOL_MINT } from "@/services/payment-operation.service";
@@ -53,7 +54,7 @@ export async function reconcilePaymentRequest(
   try {
     await validateTransfer(rpc, found.signature, {
       recipient: assertValidAddress(row.destination_address, "destinationAddress"),
-      amount: Number(row.amount),
+      amount: toNumberAmount(row.amount),
       reference,
       ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
     });

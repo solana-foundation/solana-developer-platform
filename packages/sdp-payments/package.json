@@ -142,6 +142,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "lint": "biome check src/"
   },
   "dependencies": {
@@ -157,6 +158,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260609.1",
+    "tsx": "4.22.4",
     "typescript": "^6.0.3"
   }
 }

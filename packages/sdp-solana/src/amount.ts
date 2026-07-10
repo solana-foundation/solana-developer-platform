@@ -117,6 +117,23 @@ export const formatDecimalAmount = (value: string | bigint, decimals: number): s
   return `${negative ? "-" : ""}${formatted}`;
 };
 
+/**
+ * Converts a decimal amount string to a JS number, throwing if the value
+ * cannot be represented exactly as a float at its own decimal scale.
+ */
+export const toNumberAmount = (value: string): number => {
+  const decimals = decimalScale(value);
+  const baseUnits = parseDecimalAmount(value, decimals);
+  const amount = Number(formatDecimalAmount(baseUnits, decimals));
+
+  const roundTrip = parseDecimalAmount(amount.toFixed(decimals), decimals);
+  if (roundTrip !== baseUnits) {
+    throw new AmountError("Amount loses precision when converted to a number");
+  }
+
+  return amount;
+};
+
 export const toMosaicAmount = (value: string, decimals: number): number => {
   const baseUnits = parseDecimalAmount(value, decimals);
 
@@ -124,17 +141,5 @@ export const toMosaicAmount = (value: string, decimals: number): number => {
     throw new AmountError("Amount is too large for Mosaic minting");
   }
 
-  const formatted = formatDecimalAmount(baseUnits, decimals);
-  const amount = Number(formatted);
-
-  if (!Number.isFinite(amount)) {
-    throw new AmountError("Amount is not a valid number");
-  }
-
-  const roundTrip = parseDecimalAmount(amount.toString(), decimals);
-  if (roundTrip !== baseUnits) {
-    throw new AmountError("Amount loses precision when converted to a number");
-  }
-
-  return amount;
+  return toNumberAmount(formatDecimalAmount(baseUnits, decimals));
 };
