@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { divideDecimalAmounts, sumDecimalAmounts } from "./decimal";
+import { decimalStringFromNumber, divideDecimalAmounts, sumDecimalAmounts } from "./decimal";
 
 describe("sumDecimalAmounts", () => {
   it("sums without float artifacts", () => {
@@ -30,5 +30,30 @@ describe("divideDecimalAmounts", () => {
   it("throws on a zero denominator", () => {
     assert.throws(() => divideDecimalAmounts("1", "0"));
     assert.throws(() => divideDecimalAmounts("1", "0.00"));
+  });
+});
+
+describe("decimalStringFromNumber", () => {
+  it("passes plain representations through unchanged", () => {
+    assert.equal(decimalStringFromNumber(0), "0");
+    assert.equal(decimalStringFromNumber(25.5), "25.5");
+    assert.equal(decimalStringFromNumber(0.000001), "0.000001");
+    assert.equal(decimalStringFromNumber(-3.25), "-3.25");
+  });
+
+  it("expands negative-exponent scientific notation", () => {
+    assert.equal(decimalStringFromNumber(1e-7), "0.0000001");
+    assert.equal(decimalStringFromNumber(2.5e-8), "0.000000025");
+    assert.equal(decimalStringFromNumber(-1.2e-7), "-0.00000012");
+  });
+
+  it("expands positive-exponent scientific notation", () => {
+    assert.equal(decimalStringFromNumber(1e21), "1000000000000000000000");
+    assert.equal(decimalStringFromNumber(1.5e22), "15000000000000000000000");
+  });
+
+  it("throws on non-finite values", () => {
+    assert.throws(() => decimalStringFromNumber(Number.NaN));
+    assert.throws(() => decimalStringFromNumber(Number.POSITIVE_INFINITY));
   });
 });

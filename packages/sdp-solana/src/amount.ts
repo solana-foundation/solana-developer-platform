@@ -43,7 +43,8 @@ const normalizeDecimalParts = (value: string): { whole: string; fraction: string
   return { whole, fraction };
 };
 
-const decimalScale = (value: string): number => normalizeDecimalParts(value.trim()).fraction.length;
+export const decimalScale = (value: string): number =>
+  normalizeDecimalParts(value.trim()).fraction.length;
 
 export const parseDecimalAmount = (value: string, decimals: number): bigint => {
   const normalized = value.trim();

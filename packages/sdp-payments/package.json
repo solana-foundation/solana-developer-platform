@@ -152,6 +152,7 @@
     "@sdp/types": "workspace:*",
     "@solana/addresses": "catalog:",
     "@solana/codecs": "catalog:",
+    "@solana/fixed-points": "7.0.0",
     "@solana/kit": "catalog:",
     "@solana/kora": "0.3.0-beta.2",
     "zod": "4.4.3"

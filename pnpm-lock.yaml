@@ -516,6 +516,9 @@ importers:
       '@solana/codecs':
         specifier: 'catalog:'
         version: 6.8.0(typescript@6.0.3)
+      '@solana/fixed-points':
+        specifier: 7.0.0
+        version: 7.0.0(typescript@6.0.3)
       '@solana/kit':
         specifier: 'catalog:'
         version: 6.8.0(typescript@6.0.3)

@@ -22,7 +22,7 @@ import {
 } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import { divideDecimalAmounts } from "../../../decimal";
+import { decimalStringFromNumber, divideDecimalAmounts } from "../../../decimal";
 import {
   badRequest,
   internalError,
@@ -340,9 +340,9 @@ function countDecimalPlaces(value: string): number {
 }
 
 function subtractBvnkEstimateFees(estimate: BvnkPayoutEstimateResponse): string {
-  const walletRequiredAmount = String(estimate.walletRequiredAmount);
-  const feePredictedAmount = String(estimate.feePredictedAmount);
-  const networkFeePredictedAmount = String(estimate.networkFeePredictedAmount);
+  const walletRequiredAmount = decimalStringFromNumber(estimate.walletRequiredAmount);
+  const feePredictedAmount = decimalStringFromNumber(estimate.feePredictedAmount);
+  const networkFeePredictedAmount = decimalStringFromNumber(estimate.networkFeePredictedAmount);
   const decimals = Math.max(
     countDecimalPlaces(walletRequiredAmount),
     countDecimalPlaces(feePredictedAmount),
@@ -362,8 +362,8 @@ function subtractBvnkEstimateFees(estimate: BvnkPayoutEstimateResponse): string 
 }
 
 function formatBvnkEstimateFeeTotal(estimate: BvnkPayoutEstimateResponse): string {
-  const feePredictedAmount = String(estimate.feePredictedAmount);
-  const networkFeePredictedAmount = String(estimate.networkFeePredictedAmount);
+  const feePredictedAmount = decimalStringFromNumber(estimate.feePredictedAmount);
+  const networkFeePredictedAmount = decimalStringFromNumber(estimate.networkFeePredictedAmount);
   const decimals = Math.max(
     countDecimalPlaces(feePredictedAmount),
     countDecimalPlaces(networkFeePredictedAmount)
@@ -378,7 +378,7 @@ function formatBvnkNetExchangeRate(netFiatAmount: string, paidRequiredAmount: nu
   if (paidRequiredAmount <= 0) {
     throw new SdpPaymentsError("PROVIDER_UNAVAILABLE", "BVNK returned a non-positive paid amount");
   }
-  return divideDecimalAmounts(netFiatAmount, String(paidRequiredAmount));
+  return divideDecimalAmounts(netFiatAmount, decimalStringFromNumber(paidRequiredAmount));
 }
 
 const bvnkCurrencyEntrySchema = z.object({
@@ -939,9 +939,9 @@ export class BvnkRampClient implements RampProvider {
     if (feeCurrency !== input.fiatCurrency) {
       throw providerUnavailable("BVNK returned on-ramp fees outside the fiat pay-in currency");
     }
-    const fiatAmount = String(quote.amountIn);
-    const service = String(quote.fees.value.service);
-    const processing = String(quote.fees.value.processing);
+    const fiatAmount = decimalStringFromNumber(quote.amountIn);
+    const service = decimalStringFromNumber(quote.fees.value.service);
+    const processing = decimalStringFromNumber(quote.fees.value.processing);
     const feeDecimals = Math.max(countDecimalPlaces(service), countDecimalPlaces(processing));
     const totalFee = formatDecimalAmount(
       parseDecimalAmount(service, feeDecimals) + parseDecimalAmount(processing, feeDecimals),
@@ -953,7 +953,7 @@ export class BvnkRampClient implements RampProvider {
       fiatCurrency: input.fiatCurrency,
       assetRail: input.assetRail,
       fiatAmount,
-      cryptoAmount: String(quote.amountOut),
+      cryptoAmount: decimalStringFromNumber(quote.amountOut),
       exchangeRate: formatBvnkNetExchangeRate(fiatAmount, quote.amountOut),
       fees: {
         currency: input.fiatCurrency,
@@ -1022,14 +1022,14 @@ export class BvnkRampClient implements RampProvider {
       fiatCurrency: input.fiatCurrency,
       assetRail: input.assetRail,
       fiatAmount: netFiatAmount,
-      cryptoAmount: String(estimate.paidRequiredAmount),
+      cryptoAmount: decimalStringFromNumber(estimate.paidRequiredAmount),
       exchangeRate: formatBvnkNetExchangeRate(netFiatAmount, estimate.paidRequiredAmount),
       fees: {
         currency: totalFeeCurrency,
         total: totalFee,
-        provider: String(estimate.feePredictedAmount),
+        provider: decimalStringFromNumber(estimate.feePredictedAmount),
         providerCurrency: feeCurrency,
-        network: String(estimate.networkFeePredictedAmount),
+        network: decimalStringFromNumber(estimate.networkFeePredictedAmount),
         networkCurrency: networkFeeCurrency,
       },
     };
