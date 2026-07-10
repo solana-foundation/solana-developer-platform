@@ -1393,14 +1393,14 @@ export function TokenManagementWorkspace({
       </div>
 
       {tokenError ? (
-        <div className="rounded-xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] px-4 py-3">
-          <p className="text-sm font-medium text-[#8a1f2a]">Token load warning</p>
-          <p className="mt-1 text-sm text-[#8a1f2a]">{tokenError}</p>
+        <div className="rounded-xl border border-[rgba(220,38,38,0.2)] bg-[rgba(220,38,38,0.08)] px-4 py-3">
+          <p className="text-sm font-medium text-[#dc2626]">Token load warning</p>
+          <p className="mt-1 text-sm text-[#dc2626]">{tokenError}</p>
         </div>
       ) : null}
 
       {token.status === "paused" ? (
-        <div className="flex flex-col gap-3 rounded-xl border border-[rgba(217,119,6,0.24)] bg-[rgba(245,158,11,0.08)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 rounded-xl border border-[rgba(234,179,8,0.2)] bg-[rgba(234,179,8,0.08)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-medium text-[#92400e]">Token is paused</p>
             <p className="mt-1 text-sm text-[#92400e]">
