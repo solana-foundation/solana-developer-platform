@@ -284,7 +284,7 @@ async function resolveBatchRequest(
   assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, requiredWalletPermissions ?? []);
 
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
-  const token = normalizePaymentToken(input.token);
+  const token = normalizePaymentToken(input.token, c.env);
   const rpc = solanaRpc.createRpc(c.env);
   const tokenContext = await resolveTokenContext(rpc, token, sourceAddress);
   const recipients = await resolveRecipients({
@@ -989,7 +989,7 @@ export async function listTransferBatches(c: AppContext) {
     projectId,
     walletId: query.data.wallet,
     walletIds: query.data.wallet ? undefined : (allowedWalletIds ?? undefined),
-    token: query.data.token ? normalizePaymentToken(query.data.token) : undefined,
+    token: query.data.token ? normalizePaymentToken(query.data.token, c.env) : undefined,
     status: query.data.status,
     externalId: query.data.externalId,
     limit: query.data.pageSize,

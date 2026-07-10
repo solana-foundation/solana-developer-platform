@@ -1,5 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
-import { type CachedApiKey, SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { type CachedApiKey, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { address, createNoopSigner, generateKeyPairSigner } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -582,9 +582,30 @@ describe("payment transfer batches", () => {
   });
 
   it.each([
-    ["legacy SPL Token", SPL_TOKEN_PROGRAMS["spl-token"]],
-    ["Token-2022", SPL_TOKEN_PROGRAMS["token-2022"]],
-  ])("creates a %s transfer batch", async (_label, tokenProgram) => {
+    {
+      label: "legacy SPL Token",
+      tokenProgram: SPL_TOKEN_PROGRAMS["spl-token"],
+      requestToken: TEST_SOLANA_ADDRESSES.mint,
+      expectedMint: TEST_SOLANA_ADDRESSES.mint,
+    },
+    {
+      label: "Token-2022",
+      tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
+      requestToken: TEST_SOLANA_ADDRESSES.mint,
+      expectedMint: TEST_SOLANA_ADDRESSES.mint,
+    },
+    {
+      label: "well-known symbol USDC",
+      tokenProgram: SPL_TOKEN_PROGRAMS["spl-token"],
+      requestToken: "USDC",
+      expectedMint: WELL_KNOWN_TOKENS.USDC.mints.devnet,
+    },
+  ])("creates a $label transfer batch", async ({
+    label,
+    tokenProgram,
+    requestToken,
+    expectedMint,
+  }) => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
@@ -593,7 +614,7 @@ describe("payment transfer batches", () => {
       owner: tokenProgram,
     } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
     mockSourceTokenAccountRpc({
-      mint: TEST_SOLANA_ADDRESSES.mint,
+      mint: expectedMint,
       tokenAccount: TEST_TOKEN_ACCOUNT,
       decimals: 6,
     });
@@ -606,7 +627,7 @@ describe("payment transfer batches", () => {
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
-    const counterpartyId = await seedCounterparty(`batch_token_counterparty_${tokenProgram}`);
+    const counterpartyId = await seedCounterparty(`batch_token_counterparty_${label}`);
     const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
       counterpartyId,
       walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
@@ -622,7 +643,7 @@ describe("payment transfer batches", () => {
         },
         body: JSON.stringify({
           source: TEST_WALLET_ID,
-          token: TEST_SOLANA_ADDRESSES.mint,
+          token: requestToken,
           recipients: [
             {
               counterpartyId,
@@ -648,7 +669,7 @@ describe("payment transfer batches", () => {
     };
     expect(body.data.batch).toMatchObject({
       status: "confirmed",
-      token: TEST_SOLANA_ADDRESSES.mint,
+      token: expectedMint,
       totalAmount: "1.25",
     });
     expect(body.data.recipients).toMatchObject([
