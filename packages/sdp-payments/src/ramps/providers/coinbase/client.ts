@@ -3,6 +3,7 @@ import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/t
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
+import { divideDecimalAmounts, sumDecimalAmounts } from "../../../decimal";
 import { badRequest, providerNotConfigured, providerUnavailable } from "../../../errors";
 import { providerFetchJson } from "../../fetch";
 import { readyCounterparty } from "../../requirements";
@@ -216,8 +217,8 @@ export class CoinbaseRampClient implements RampProvider {
       }
     );
 
-    const crypto = Number.parseFloat(quote.purchase_amount.value);
-    const subtotal = Number.parseFloat(quote.payment_subtotal.value);
+    const crypto = Number(quote.purchase_amount.value);
+    const subtotal = Number(quote.payment_subtotal.value);
     if (!Number.isFinite(crypto) || crypto === 0 || !Number.isFinite(subtotal)) {
       throw providerUnavailable("Coinbase returned an unusable buy quote.", {
         provider: this.id,
@@ -232,12 +233,10 @@ export class CoinbaseRampClient implements RampProvider {
       assetRail: input.assetRail,
       fiatAmount: quote.payment_total.value,
       cryptoAmount: quote.purchase_amount.value,
-      exchangeRate: String(subtotal / crypto),
+      exchangeRate: divideDecimalAmounts(quote.payment_subtotal.value, quote.purchase_amount.value),
       fees: {
         currency: input.fiatCurrency,
-        total: String(
-          Number.parseFloat(quote.coinbase_fee.value) + Number.parseFloat(quote.network_fee.value)
-        ),
+        total: sumDecimalAmounts([quote.coinbase_fee.value, quote.network_fee.value]),
         network: quote.network_fee.value,
         provider: quote.coinbase_fee.value,
       },

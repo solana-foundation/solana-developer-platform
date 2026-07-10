@@ -42,6 +42,7 @@ minimumReleaseAgeExclude:
   - '@solana/design-system'
   - '@solana/errors'
   - '@solana/fast-stable-stringify'
+  - '@solana/fixed-points'
   - '@solana/functional'
   - '@solana/instruction-plans'
   - '@solana/instructions'

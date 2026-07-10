@@ -20,6 +20,8 @@ function makeRampSelectionSchema(walletMessage: string, amount: z.ZodType<number
   });
 }
 
+export const ONCHAIN_AMOUNT_PATTERN = /^\d+(\.\d{1,9})?$/;
+
 // Onramp (fiat -> crypto): amount is a fiat amount, so two decimal places.
 const depositAmount = z
   .string()
@@ -33,7 +35,7 @@ const depositAmount = z
 const withdrawAmount = z
   .string()
   .trim()
-  .refine((value) => /^\d+(\.\d{1,9})?$/.test(value), "Enter a valid crypto amount.")
+  .refine((value) => ONCHAIN_AMOUNT_PATTERN.test(value), "Enter a valid crypto amount.")
   .transform(Number)
   .refine((value) => value > 0, "Enter an amount greater than 0.");
 
@@ -75,7 +77,7 @@ export type RampFields = z.input<typeof rampSelectionSchema>;
 const onchainAmount = z
   .string()
   .trim()
-  .refine((value) => /^\d+(\.\d{1,9})?$/.test(value), "Enter a valid amount.")
+  .refine((value) => ONCHAIN_AMOUNT_PATTERN.test(value), "Enter a valid amount.")
   .transform(Number)
   .refine((value) => value > 0, "Enter an amount greater than 0.");
 

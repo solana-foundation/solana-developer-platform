@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/table";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { getDevnetExplorerUrl } from "../payments-workspace.data";
+import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
 import { walletBalanceAssetOptions } from "../ramps/wallet-options";
 import {
   type RecurringPaymentAction,
@@ -187,7 +188,7 @@ function parsePeriodHours(
 }
 
 function amountIsValid(value: string): boolean {
-  return /^\d+(\.\d{1,9})?$/.test(value.trim()) && Number(value) > 0;
+  return ONCHAIN_AMOUNT_PATTERN.test(value.trim()) && Number(value) > 0;
 }
 
 function resolveTokenLabel(token: string, wallets: RecurringPaymentWalletView[]): string {
