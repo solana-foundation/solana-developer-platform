@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Anchor,
   ArrowLeftRight,
   CircleAlert,
   CircleCheck,
@@ -17,7 +18,7 @@ import {
   Tag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { accessControlLabel } from "./asset-details-config";
+import { accessControlLabel, getPegSummary } from "./asset-details-config";
 import { getAssetTypeLabel, getCategoryLabel } from "./asset-taxonomy";
 import { safeLinkHref } from "./draft-mapping";
 import type { DraftState } from "./issuance-draft-wizard.types";
@@ -95,6 +96,7 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
     draft.accessControl === "blocklist" ||
     draft.capacities.transferApprovals;
   const website = draft.website.trim();
+  const pegSummary = getPegSummary(draft);
 
   return (
     <aside className="lg:sticky lg:top-4">
@@ -107,6 +109,7 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
           <SummaryRow icon={FileText} label="Name" value={draft.name} />
           <SummaryRow icon={DollarSign} label="Symbol" value={draft.symbol} />
           <SummaryRow icon={Hash} label="Decimals" value={draft.decimals} />
+          {pegSummary ? <SummaryRow icon={Anchor} label="Pegged to" value={pegSummary} /> : null}
           <SummaryRow
             icon={ShieldCheck}
             label="Access control"

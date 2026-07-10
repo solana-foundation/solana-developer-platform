@@ -46,6 +46,8 @@ interface ComboboxProps {
   onChange: (value: string) => void;
   options: readonly ComboboxOption[];
   label: string;
+  required?: boolean;
+  className?: string;
   placeholder?: string;
   searchable?: boolean;
   searchPlaceholder?: string;
@@ -66,6 +68,8 @@ export function Combobox({
   onChange,
   options,
   label,
+  required,
+  className,
   placeholder = "Select an option",
   searchable = true,
   searchPlaceholder = "Search…",
@@ -150,8 +154,9 @@ export function Combobox({
       onClick={variant === "dialog" ? () => handleOpenChange(!open) : undefined}
       className={cn(
         "flex w-full items-center gap-2 border border-border-light bg-transparent text-base transition-colors hover:border-border-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-white/50",
-        validationError && "border-status-error-border hover:border-status-error-border",
-        SIZE_CLASSES[size]
+        SIZE_CLASSES[size],
+        className,
+        validationError && "border-status-error-border hover:border-status-error-border"
       )}
     >
       {withIconClass(icon)}
@@ -270,7 +275,17 @@ export function Combobox({
 
   return (
     <div className="flex flex-col gap-2">
-      <Label id={labelId}>{label}</Label>
+      <Label id={labelId}>
+        {label}
+        {required ? (
+          <>
+            <span aria-hidden className="text-status-error-text">
+              *
+            </span>
+            <span className="sr-only"> (required)</span>
+          </>
+        ) : null}
+      </Label>
       {variant === "dialog" ? (
         <>
           {trigger}
