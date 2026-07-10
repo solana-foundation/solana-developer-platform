@@ -1,29 +1,31 @@
 "use client";
 
 import type { AssetProfile, Token } from "@sdp/types";
-import { ArrowUpRight, Copy } from "lucide-react";
+import { ArrowUpRight, Copy, Play, Rocket } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getCategoryPresentation, getSubTypePresentation } from "../../create/asset-taxonomy";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
 
+// SDP design-system badge tokens (sdp-design-system.css): .badge-gray,
+// .badge-green, .badge-amber, .badge-red — tinted fill + semantic text, no border.
 const STATUS_BADGES: Record<Token["status"], { label: string; className: string }> = {
   pending: {
     label: "Draft",
-    className: "border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.04)] text-[rgba(28,28,29,0.66)]",
+    className: "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]",
   },
   active: {
     label: "Active",
-    className: "border-[rgba(12,128,76,0.24)] bg-[rgba(12,128,76,0.08)] text-[#0c804c]",
+    className: "bg-[rgba(0,160,102,0.08)] text-[#00a066]",
   },
   paused: {
     label: "Paused",
-    className: "border-[rgba(217,119,6,0.28)] bg-[rgba(245,158,11,0.1)] text-[#92400e]",
+    className: "bg-[rgba(234,179,8,0.08)] text-[#92400e]",
   },
   revoked: {
     label: "Revoked",
-    className: "border-[rgba(199,31,55,0.24)] bg-[rgba(199,31,55,0.06)] text-[#8a1f2a]",
+    className: "bg-[rgba(220,38,38,0.08)] text-[#dc2626]",
   },
 };
 
@@ -84,14 +86,11 @@ export function AssetProfileHeader({
             <h2 className="truncate text-[32px] leading-[1.05] font-semibold tracking-[-0.4px] text-[#1c1c1d]">
               {token.name}
             </h2>
-            <span className="rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-2.5 py-0.5 text-sm font-medium text-[rgba(28,28,29,0.7)]">
+            <span className="rounded-full bg-[rgba(28,28,29,0.08)] px-2.5 py-0.5 text-sm font-medium text-[rgba(28,28,29,0.72)]">
               {token.symbol}
             </span>
             <span
-              className={cn(
-                "rounded-full border px-2.5 py-0.5 text-sm font-medium",
-                status.className
-              )}
+              className={cn("rounded-full px-2.5 py-0.5 text-sm font-medium", status.className)}
             >
               {status.label}
             </span>
@@ -145,6 +144,7 @@ export function AssetProfileHeader({
           <TokenDisabledActionTooltip reason={isPending ? null : deployDisabledReason}>
             <Button
               type="button"
+              iconLeft={<Rocket />}
               onClick={onDeploy}
               disabled={isPending || Boolean(deployDisabledReason)}
             >
@@ -155,6 +155,7 @@ export function AssetProfileHeader({
           <TokenDisabledActionTooltip reason={isPending ? null : pauseDisabledReason}>
             <Button
               type="button"
+              iconLeft={<Play />}
               onClick={onUnpause}
               disabled={isPending || Boolean(pauseDisabledReason)}
             >
