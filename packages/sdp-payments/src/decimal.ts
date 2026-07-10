@@ -8,6 +8,12 @@ import {
 } from "@solana/fixed-points";
 import { badRequest } from "./errors";
 
+/**
+ * Bit width for provider-amount fixed points. u64 (the on-chain bound)
+ * overflows for large fiat amounts scaled to 9 decimals (~$18.4B), so
+ * these helpers use the next power-of-two width; kit range-checks every
+ * value against it and throws on overflow.
+ */
 const DECIMAL_BITS = 128;
 const DIVISION_DECIMALS = 9;
 
