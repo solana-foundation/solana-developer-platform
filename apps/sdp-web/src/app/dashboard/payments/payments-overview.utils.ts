@@ -6,6 +6,7 @@ import {
   type PaymentTransferSummary as TransferRecord,
   type PaymentsDashboardWallet as WalletRecord,
   WELL_KNOWN_TOKEN_BY_MINT,
+  WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import { toTitleCase } from "../activity-format-utils";
 
@@ -86,7 +87,7 @@ export function formatTokenAmount(value: number | string): string {
 }
 
 export function formatLamportsAsSol(lamports: bigint): string {
-  return `${formatTokenAmount(Number(lamports) / 1_000_000_000)} SOL`;
+  return `${formatTokenAmount(formatUiAmountFromRaw(lamports, WELL_KNOWN_TOKENS.SOL.decimals))} SOL`;
 }
 
 export function formatDisplayAmount(value?: string, token?: string): string {

@@ -1,3 +1,6 @@
+import * as solanaRpc from "@sdp/rpc/solana";
+import { assertValidAddress } from "@sdp/solana/address";
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { UpdatePaymentRecurringPaymentRequest } from "@sdp/types";
 import {
   type Address,
@@ -42,9 +45,7 @@ import {
   type PaymentSubscriptionsRepository,
   type PaymentTransferRow,
 } from "@/db/repositories";
-import { parseDecimalAmount } from "@/lib/amount";
 import { AppError, badRequest } from "@/lib/errors";
-import { assertValidAddress } from "@/lib/solana";
 import {
   resolveMintTokenProgram,
   resolveSourceTokenAccountOrAta,
@@ -53,7 +54,6 @@ import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { normalizePaymentToken, SOL_MINT } from "@/services/payment-operation.service";
 import { assertWalletPolicyAllowsTransferWithRepository } from "@/services/payments/wallet-policy";
 import * as solanaServices from "@/services/solana";
-import * as solanaRpc from "@/services/solana/rpc";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "./counterparty-account-resolution";

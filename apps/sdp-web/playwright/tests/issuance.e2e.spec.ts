@@ -212,6 +212,89 @@ async function waitForAllowlistCount(
   });
 }
 
+interface CreateDraftOptions {
+  name: string;
+  symbol: string;
+  decimals: string;
+  treasuryWalletId: string;
+}
+
+// Creating a draft goes through one of two UIs depending on the
+// NEXT_PUBLIC_ASSET_PROFILES_ENABLED flag: the full-page wizard (flag on) or the
+// legacy modal (flag off). Detect which one the "Create draft" button opened —
+// the wizard navigates to its own route, the modal stays on the overview — and
+// drive whichever renders, so this passes under either flag value.
+async function createTokenDraft(page: Page, options: CreateDraftOptions): Promise<void> {
+  await page.getByRole("button", { name: "Create draft" }).click();
+
+  await page.waitForURL("**/dashboard/issuance/create", { timeout: 10_000 }).catch(() => {
+    // Modal path: the URL stays on the overview, so the wait times out.
+  });
+
+  if (page.url().includes("/dashboard/issuance/create")) {
+    await createDraftViaWizard(page, options);
+  } else {
+    await createDraftViaModal(page, options);
+  }
+}
+
+// The Asset Profiles wizard: classification (name + category + the revealed asset
+// type) → asset details → public info → review → confirm. Crypto-backed has no
+// deploy-required fields, so symbol/decimals/description are all that gate it.
+async function createDraftViaWizard(page: Page, options: CreateDraftOptions): Promise<void> {
+  await page.getByLabel("Name", { exact: true }).fill(options.name);
+  await page
+    .getByRole("button", { name: /Stablecoin/i })
+    .first()
+    .click();
+  await page.getByRole("button", { name: /Crypto-backed/i }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+
+  // The details form's TextField labels aren't associated with their inputs, so
+  // target by placeholder instead of getByLabel.
+  await page.getByPlaceholder("e.g., vUSD").fill(options.symbol);
+  await page.getByPlaceholder("e.g., 6").fill(options.decimals);
+  await page
+    .getByPlaceholder("Describe what this asset represents.")
+    .fill("Created by Playwright issuance e2e.");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+
+  // Public information — defaults are fine.
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+
+  // Review — open the confirmation, then confirm. The dialog ignores activations
+  // within ~350ms of opening (a stray-Enter guard), so wait that out first.
+  await page.getByRole("button", { name: "Create draft", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Create asset draft" });
+  await expect(dialog).toBeVisible();
+  await page.waitForTimeout(400);
+  await dialog.getByRole("button", { name: "Create draft", exact: true }).click();
+}
+
+// The legacy create-token modal: template → identity → features → create.
+async function createDraftViaModal(page: Page, options: CreateDraftOptions): Promise<void> {
+  await page
+    .getByRole("button", { name: /Stablecoin/i })
+    .first()
+    .click();
+
+  // Leave the metadata URI blank: SDP hosts the metadata JSON by default, so the
+  // URI field is optional and tucked under the Advanced section.
+  await page.getByLabel("Token Name").fill(options.name);
+  await page.getByLabel("Symbol").fill(options.symbol);
+  await page.getByLabel("Decimals").fill(options.decimals);
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  await page
+    .locator("button", { hasText: "Denylist" })
+    .filter({
+      hasText: "Listed destinations are blocked before they can receive controlled actions.",
+    })
+    .click();
+  await page.getByLabel("Main Signer").selectOption(options.treasuryWalletId);
+  await page.getByRole("button", { name: "Create Stablecoin Draft" }).click();
+}
+
 test.describe
   .serial("issuance e2e", () => {
     test.setTimeout(360_000);
@@ -248,41 +331,27 @@ test.describe
       const draftSymbol = `UsD${draftSuffix}`;
 
       await gotoIssuanceDashboard(page);
-      await page.getByRole("button", { name: "Create draft" }).click();
-      await page
-        .getByRole("button", { name: /Stablecoin/i })
-        .first()
-        .click();
+      await createTokenDraft(page, {
+        name: draftName,
+        symbol: draftSymbol,
+        decimals: "7",
+        treasuryWalletId: fixtures.wallets.treasury.walletId,
+      });
 
-      // Leave the metadata URI blank: SDP hosts the metadata JSON by default,
-      // so the URI field is now optional and tucked under the Advanced section.
-      await page.getByLabel("Token Name").fill(draftName);
-      await page.getByLabel("Symbol").fill(draftSymbol);
-      await page.getByLabel("Decimals").fill("7");
-      await page.getByRole("button", { name: "Continue" }).click();
-
-      await page
-        .locator("button", { hasText: "Denylist" })
-        .filter({
-          hasText: "Listed destinations are blocked before they can receive controlled actions.",
-        })
-        .click();
-      await page.getByLabel("Main Signer").selectOption(fixtures.wallets.treasury.walletId);
-      await page.getByRole("button", { name: "Create Stablecoin Draft" }).click();
-
+      // Verify via the overview list, which is identical under either create UI
+      // (the post-create detail page differs by flag, so we assert on the list).
       await expect
-        .poll(async () => page.getByRole("heading", { name: draftName, exact: true }).count(), {
-          timeout: 120_000,
-        })
+        .poll(
+          async () => {
+            await gotoIssuanceDashboard(page);
+            await page.getByPlaceholder("Search").fill(draftName);
+            return page.getByRole("heading", { name: draftName, exact: true }).count();
+          },
+          { timeout: 120_000, intervals: [1_000, 2_000, 5_000] }
+        )
         .toBeGreaterThan(0);
       await expect(page.getByRole("heading", { name: draftName, exact: true })).toBeVisible();
       await expect(page.getByText(draftSymbol, { exact: true })).toBeVisible();
-      const draftCard = page
-        .locator("article")
-        .filter({ has: page.getByRole("heading", { name: draftName, exact: true }) })
-        .first();
-      await draftCard.getByRole("link", { name: "Manage", exact: true }).click();
-      await expect(page.getByTestId("overview-row-decimals")).toContainText("7");
     });
 
     test("3. user only sees configured extension rows on the allowlist-enabled token", async ({

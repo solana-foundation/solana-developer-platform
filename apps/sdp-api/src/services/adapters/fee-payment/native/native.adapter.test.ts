@@ -77,7 +77,7 @@ async function buildSourceSignedTransfer(feePayer: Address): Promise<{
 
 describe("NativeAdapter", () => {
   // The Workers test pool shares one module registry across files (isolate: false),
-  // so a top-level `vi.mock("@/services/solana/rpc")` doesn't reliably intercept once
+  // so a top-level `vi.mock("@sdp/rpc/solana")` doesn't reliably intercept once
   // another test file has already imported the real module.
   beforeEach(() => {
     vi.spyOn(solanaRpc, "createRpc").mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);

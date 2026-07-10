@@ -1,14 +1,14 @@
+import { createRpcForSdk } from "@sdp/rpc/solana";
+import { type Address, assertValidAddress } from "@sdp/solana/address";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { type Address, assertValidAddress } from "@/lib/solana";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner, createToken2022Service } from "@/services/solana";
-import { createRpcForSdk } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import {
   assertTokenAllowsOperation,

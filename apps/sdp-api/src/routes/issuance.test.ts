@@ -2,6 +2,8 @@
  * Issuance Routes E2E Tests
  */
 
+import * as SolanaRpc from "@sdp/rpc/solana";
+import type { Address } from "@sdp/solana/address";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,14 +11,12 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
-import type { Address } from "@/lib/solana";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { createKVStoreSet } from "@/runtime/factory";
 import * as FeePaymentAdapters from "@/services/adapters/fee-payment";
 import * as Mosaic from "@/services/mosaic";
 import { MosaicService } from "@/services/mosaic";
 import * as SolanaServices from "@/services/solana";
-import * as SolanaRpc from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
@@ -977,7 +977,7 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(404);
       const body = await res.json();
       expect(body.error.code).toBe("NOT_FOUND");
-      expect(body.error.message).toBe("Wallet not found");
+      expect(body.error.message).toMatch(/^Wallet not found\./);
     });
 
     it("enforces wallet-level tokens:read for wallet filters", async () => {

@@ -13,14 +13,14 @@
  *    getSignatureStatuses and update DB accordingly.
  */
 
+import type { SignatureStatusInfo } from "@sdp/rpc/solana";
+import * as solanaRpc from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import {
   createPaymentsRepository,
   type PaymentsRepository,
   WALLET_TRANSFER_TYPES,
 } from "@/db/repositories";
-import type { SignatureStatusInfo } from "@/services/solana/rpc";
-import * as solanaRpc from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.

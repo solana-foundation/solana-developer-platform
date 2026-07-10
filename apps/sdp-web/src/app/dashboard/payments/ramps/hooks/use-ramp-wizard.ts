@@ -18,6 +18,7 @@ import {
   fetchAllCounterparties,
   getApiError,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import type { RampProviderAccess } from "@/lib/provider-availability";
 import {
   DEFAULT_RAMP_PAIR,
   findRampPair,
@@ -110,10 +111,11 @@ async function createRampQuote(
 export interface UseRampWizardProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
-  enabledRampProviders: RampProviderId[];
+  rampProviderAccess: RampProviderAccess | null;
   counterpartiesResult: CounterpartiesResult;
+  selectedCounterparty: Counterparty | null;
   /** Counterparty chosen upstream; seeds the form and is no longer picked in-wizard. */
-  initialCounterpartyId?: string;
+  initialCounterpartyId: string;
   /** Invoked when the user goes back from the first step. */
   onExit?: () => void;
 }
@@ -122,9 +124,10 @@ export function useRampWizard<TId extends string>(
   {
     wallets,
     walletsError,
-    enabledRampProviders,
+    rampProviderAccess,
     counterpartiesResult,
-    initialCounterpartyId = "",
+    selectedCounterparty,
+    initialCounterpartyId,
     onExit,
   }: UseRampWizardProps,
   config: RampWizardConfig<TId>
@@ -163,7 +166,7 @@ export function useRampWizard<TId extends string>(
     walletsError
   );
 
-  const { data: liveCounterpartiesResult, mutate: mutateCounterparties } = useSWR(
+  const { mutate: mutateCounterparties } = useSWR(
     PAYMENTS_ACTION_COUNTERPARTIES_KEY,
     fetchAllCounterparties,
     {
@@ -414,7 +417,8 @@ export function useRampWizard<TId extends string>(
   };
 
   return {
-    enabledRampProviders,
+    rampProviderAccess,
+    selectedCounterparty,
     stepIndex,
     steps,
     currentStepId,
@@ -429,7 +433,6 @@ export function useRampWizard<TId extends string>(
     liveWallets,
     walletsLoading,
     liveWalletsError,
-    liveCounterpartiesResult,
     selectedWallet,
     selectedRampPair,
     fields,

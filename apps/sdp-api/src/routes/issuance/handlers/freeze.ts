@@ -1,3 +1,5 @@
+import { createRpcForSdk } from "@sdp/rpc/solana";
+import { type Address, assertValidAddress } from "@sdp/solana/address";
 import type { FrozenAccountResponse } from "@sdp/types";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
@@ -5,10 +7,8 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
-import { type Address, assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/mosaic";
-import { createRpcForSdk } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";

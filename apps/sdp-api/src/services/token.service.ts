@@ -5,6 +5,7 @@
  * allowlist management, and freeze/unfreeze operations.
  */
 
+import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import type {
   AllowlistEntryStatus,
   FrozenAccount,
@@ -19,7 +20,6 @@ import type {
   TokenTransactionType,
 } from "@sdp/types";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
-import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { AppError, badRequest } from "@/lib/errors";
 
 // ═══════════════════════════════════════════════════════════════════════════

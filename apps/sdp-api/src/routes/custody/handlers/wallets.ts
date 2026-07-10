@@ -1,3 +1,5 @@
+import * as solanaRpc from "@sdp/rpc/solana";
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import type {
   CustodyWalletAggregate,
   CustodyWalletSummary,
@@ -6,7 +8,6 @@ import type {
 import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { formatDecimalAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -28,7 +29,6 @@ import {
 } from "@/services/helius-das.service";
 import { SigningError } from "@/services/ports";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
-import * as solanaRpc from "@/services/solana/rpc";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
 import {
   type CustodyWalletAggregateResponse,

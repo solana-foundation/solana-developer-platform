@@ -1,7 +1,8 @@
+import { badRequest } from "@sdp/payments/errors";
+import { isAddress } from "@sdp/solana/address";
 import type { Permission } from "@sdp/types";
 import { getAuth } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
-import { assertValidAddress } from "@/lib/solana";
+import { walletNotFound } from "@/lib/errors";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -29,7 +30,7 @@ export type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
 export function resolveWallet(wallets: CustodyWallet[], walletId: string): CustodyWallet {
   const wallet = wallets.find((entry) => entry.walletId === walletId);
   if (!wallet) {
-    throw new AppError("NOT_FOUND", "Wallet not found. Provision wallets through /v1/wallets");
+    throw walletNotFound();
   }
   return wallet;
 }
@@ -50,5 +51,10 @@ export function resolveWalletAddress(
     }
     return matchingWallet.publicKey;
   }
-  return assertValidAddress(walletIdOrAddress, fieldName);
+  if (!isAddress(walletIdOrAddress)) {
+    throw badRequest(
+      `${fieldName} must be a \`walletId\` returned by GET /v1/wallets or a valid Solana address, got: ${walletIdOrAddress}`
+    );
+  }
+  return walletIdOrAddress;
 }

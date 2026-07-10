@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.39.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.38.0...v0.39.0) (2026-07-09)
+
+### Features
+
+* HOO-671 Asset profile creation UI ([#579](https://github.com/solana-foundation/solana-developer-platform/pull/579)) ([644a330](https://github.com/solana-foundation/solana-developer-platform/commit/644a330dbef0b04f20f5600bdcbf5a5d615f22d5))
+
+### Bug Fixes
+
+* sync Stripe and Mural secrets to the deployed worker ([#643](https://github.com/solana-foundation/solana-developer-platform/pull/643)) ([9fa00fa](https://github.com/solana-foundation/solana-developer-platform/commit/9fa00fa2d28947908782ae641b65b8ef78d282d9))
+
+### Refactors
+
+* **sdp-api:** drop @sdp/rpc re-export shims ([#628](https://github.com/solana-foundation/solana-developer-platform/pull/628)) ([735ff69](https://github.com/solana-foundation/solana-developer-platform/commit/735ff694adda7a1f8929ff6483ed344b45b253f0))
+
+## [0.38.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.37.0...v0.38.0) (2026-07-09)
+
+### Features
+
+* ramp support matrix revamp (ISO, countries, entities, limits) + provider availability UX ([#635](https://github.com/solana-foundation/solana-developer-platform/pull/635)) ([b137822](https://github.com/solana-foundation/solana-developer-platform/commit/b1378228e7e122ea3080f4bc91e6dc437e4bcea7))
+* add Stripe ramp provider (on-ramp session widget) ([#631](https://github.com/solana-foundation/solana-developer-platform/pull/631)) ([b6402b7](https://github.com/solana-foundation/solana-developer-platform/commit/b6402b77a48519ec148d5b8b0c214d1143ac01db))
+* add Mural Pay ramp provider (on-ramp) ([#632](https://github.com/solana-foundation/solana-developer-platform/pull/632)) ([fa14064](https://github.com/solana-foundation/solana-developer-platform/commit/fa14064349dc5186eac6e9be426962d9109e0933))
+
+### Bug Fixes
+
+* **observability:** gate Sentry to deployed environments and type invalid-address errors ([#630](https://github.com/solana-foundation/solana-developer-platform/pull/630)) ([93997d5](https://github.com/solana-foundation/solana-developer-platform/commit/93997d5db7b9caecd9ca57ceb3b1b2166a258740))
+
+### Refactors
+
+* move payments internals into workspace package ([#625](https://github.com/solana-foundation/solana-developer-platform/pull/625)) ([9726755](https://github.com/solana-foundation/solana-developer-platform/commit/972675501b166e4e74290445b0e9f24d14ce3b9c))
+* move solana internals into workspace package ([#623](https://github.com/solana-foundation/solana-developer-platform/pull/623)) ([6a2ae8a](https://github.com/solana-foundation/solana-developer-platform/commit/6a2ae8a8d0d6995c03ce2def83f28afd79364df3))
+* move custody internals into workspace package ([#624](https://github.com/solana-foundation/solana-developer-platform/pull/624)) ([a02d305](https://github.com/solana-foundation/solana-developer-platform/commit/a02d30599ca66ef5cc5f9674b7e9798b3da9f55f))
+
 ## [0.37.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.36.0...v0.37.0) (2026-07-08)
 
 ### Features

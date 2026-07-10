@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
 import { getSentryOptions, isSentryEnabled } from "./observability";
 
@@ -10,21 +10,39 @@ const envWith = (overrides: Partial<Env>): Env =>
     ...overrides,
   }) as Env;
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("isSentryEnabled", () => {
   it("returns false when SENTRY_DSN is missing", () => {
+    vi.stubEnv("NODE_ENV", "production");
     expect(isSentryEnabled(envWith({}))).toBe(false);
   });
 
   it("returns false when SENTRY_DSN is whitespace-only", () => {
+    vi.stubEnv("NODE_ENV", "production");
     expect(isSentryEnabled(envWith({ SENTRY_DSN: "   " }))).toBe(false);
   });
 
-  it("returns true when SENTRY_DSN holds a non-empty value (post-trim)", () => {
+  it("returns false under a development NODE_ENV (local dev)", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    expect(isSentryEnabled(envWith({ SENTRY_DSN: "https://example.io/1" }))).toBe(false);
+  });
+
+  it("fails closed when NODE_ENV is not production", () => {
+    vi.stubEnv("NODE_ENV", "");
+    expect(isSentryEnabled(envWith({ SENTRY_DSN: "https://example.io/1" }))).toBe(false);
+  });
+
+  it("returns true when SENTRY_DSN is set and NODE_ENV is production", () => {
+    vi.stubEnv("NODE_ENV", "production");
     expect(isSentryEnabled(envWith({ SENTRY_DSN: "https://example.io/1" }))).toBe(true);
     expect(isSentryEnabled(envWith({ SENTRY_DSN: "  https://example.io/1  " }))).toBe(true);
   });
 
   it("agrees with getSentryOptions.enabled (single source of truth)", () => {
+    vi.stubEnv("NODE_ENV", "production");
     const cases: Partial<Env>[] = [
       {},
       { SENTRY_DSN: "" },
@@ -41,18 +59,20 @@ describe("isSentryEnabled", () => {
 
 describe("getSentryOptions", () => {
   it("disables Sentry when SENTRY_DSN is missing", () => {
+    vi.stubEnv("NODE_ENV", "production");
     const opts = getSentryOptions(envWith({}));
     expect(opts.enabled).toBe(false);
     expect("dsn" in opts).toBe(false);
   });
 
-  it("disables Sentry when SENTRY_DSN is whitespace-only", () => {
-    const opts = getSentryOptions(envWith({ SENTRY_DSN: "   " }));
+  it("disables Sentry under a development NODE_ENV even with a DSN", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const opts = getSentryOptions(envWith({ SENTRY_DSN: "https://example.io/1" }));
     expect(opts.enabled).toBe(false);
-    expect("dsn" in opts).toBe(false);
   });
 
   it("enables Sentry when SENTRY_DSN is set and trims it", () => {
+    vi.stubEnv("NODE_ENV", "production");
     const opts = getSentryOptions(envWith({ SENTRY_DSN: "  https://example.io/1  " }));
     expect(opts.enabled).toBe(true);
     expect(opts.dsn).toBe("https://example.io/1");

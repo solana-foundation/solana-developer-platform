@@ -1,5 +1,11 @@
 import { assertValidAddress } from "@sdp/solana/address";
-import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
+import {
+  compareDecimalAmounts,
+  formatDecimalAmount,
+  isDecimalString,
+  parseDecimalAmount,
+  toNumberAmount,
+} from "@sdp/solana/amount";
 import type {
   BvnkBankFundingDetails,
   Counterparty,
@@ -9,9 +15,14 @@ import type {
   SdpEnvironment,
 } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
-import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
+import {
+  type CryptoRailId,
+  getCryptoRailAssetLabel,
+  type RampCurrencyLimit,
+} from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
+import { decimalStringFromNumber, divideDecimalAmounts } from "../../../decimal";
 import {
   badRequest,
   internalError,
@@ -23,19 +34,22 @@ import { hmacSha256Base64 } from "../../../hash";
 import { readRecord, readString } from "../../../json";
 import { type ProviderRequestInit, providerFetch } from "../../fetch";
 import {
-  createProviderRampSupport,
+  isActiveIso4217CurrencyCode,
   isSolanaCryptoAsset,
   RAMP_RAIL_DUMPS,
   rampId,
   SOLANA_ASSET_TO_RAIL,
+  UNREPORTED_COUNTRY_SUPPORT,
+  unreportedCurrencyLimit,
 } from "../../shared";
 import type {
-  ProviderRampSupport,
-  RampDumpReader,
+  ProviderDeclaredRailSupport,
+  ProviderRailSupportDistillation,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampProvider,
+  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
@@ -53,6 +67,17 @@ import {
 const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
 const BVNK_SANDBOX_API_URL = "https://api.sandbox.bvnk.com";
 const bvnkEstimateFiatCurrencySchema = z.enum(RAMP_FIAT_CURRENCIES);
+
+export const BVNK_DECLARED_RAIL_SUPPORT = {
+  onramp: {
+    countrySupport: UNREPORTED_COUNTRY_SUPPORT,
+    entityTypes: ["individual"],
+  },
+  offramp: {
+    countrySupport: UNREPORTED_COUNTRY_SUPPORT,
+    entityTypes: ["individual", "business"],
+  },
+} as const satisfies ProviderDeclaredRailSupport;
 
 interface BvnkSandboxBankAccount {
   accountNumber: string;
@@ -278,12 +303,11 @@ interface BvnkRuleResponse {
   originator?: { currency?: string; walletId?: string };
 }
 
-function toPositiveAmount(value: string, fieldName: string): number {
-  const amount = Number.parseFloat(value);
-  if (!Number.isFinite(amount) || amount <= 0) {
+function assertPositiveDecimalAmount(value: string, fieldName: string): string {
+  if (!isDecimalString(value) || compareDecimalAmounts(value, "0") <= 0) {
     throw badRequest(`${fieldName} must be a positive amount`);
   }
-  return amount;
+  return value;
 }
 
 function parseBvnkEstimateFeeCurrency(value: string): PaymentRampEstimateFees["currency"] {
@@ -316,9 +340,9 @@ function countDecimalPlaces(value: string): number {
 }
 
 function subtractBvnkEstimateFees(estimate: BvnkPayoutEstimateResponse): string {
-  const walletRequiredAmount = String(estimate.walletRequiredAmount);
-  const feePredictedAmount = String(estimate.feePredictedAmount);
-  const networkFeePredictedAmount = String(estimate.networkFeePredictedAmount);
+  const walletRequiredAmount = decimalStringFromNumber(estimate.walletRequiredAmount);
+  const feePredictedAmount = decimalStringFromNumber(estimate.feePredictedAmount);
+  const networkFeePredictedAmount = decimalStringFromNumber(estimate.networkFeePredictedAmount);
   const decimals = Math.max(
     countDecimalPlaces(walletRequiredAmount),
     countDecimalPlaces(feePredictedAmount),
@@ -338,8 +362,8 @@ function subtractBvnkEstimateFees(estimate: BvnkPayoutEstimateResponse): string 
 }
 
 function formatBvnkEstimateFeeTotal(estimate: BvnkPayoutEstimateResponse): string {
-  const feePredictedAmount = String(estimate.feePredictedAmount);
-  const networkFeePredictedAmount = String(estimate.networkFeePredictedAmount);
+  const feePredictedAmount = decimalStringFromNumber(estimate.feePredictedAmount);
+  const networkFeePredictedAmount = decimalStringFromNumber(estimate.networkFeePredictedAmount);
   const decimals = Math.max(
     countDecimalPlaces(feePredictedAmount),
     countDecimalPlaces(networkFeePredictedAmount)
@@ -354,53 +378,105 @@ function formatBvnkNetExchangeRate(netFiatAmount: string, paidRequiredAmount: nu
   if (paidRequiredAmount <= 0) {
     throw new SdpPaymentsError("PROVIDER_UNAVAILABLE", "BVNK returned a non-positive paid amount");
   }
-  return String(Number(netFiatAmount) / paidRequiredAmount);
+  return divideDecimalAmounts(netFiatAmount, decimalStringFromNumber(paidRequiredAmount));
 }
 
-interface BvnkCurrencyEntry {
-  code?: string;
-  fiat?: boolean;
-  supportsDeposits?: boolean;
-  supportsWithdrawals?: boolean;
-  protocols?: Array<{ networkCode?: string }>;
+const bvnkCurrencyEntrySchema = z.object({
+  code: z.string().optional(),
+  fiat: z.boolean().optional(),
+  supportsDeposits: z.boolean().optional(),
+  supportsWithdrawals: z.boolean().optional(),
+  protocols: z.array(z.object({ networkCode: z.string().optional() })).optional(),
+});
+
+function addBvnkFiatCurrency(
+  target: Record<string, RampCurrencyLimit>,
+  code: string,
+  droppedCodes: Set<string>
+): void {
+  const normalized = code.trim().toUpperCase();
+  if (!isActiveIso4217CurrencyCode(normalized)) {
+    droppedCodes.add(normalized);
+    return;
+  }
+  target[normalized] = unreportedCurrencyLimit();
 }
 
-function extractSupport(
-  depositList: readonly BvnkCurrencyEntry[],
-  fiatList: readonly BvnkCurrencyEntry[],
-  cryptoList: readonly BvnkCurrencyEntry[]
-): ProviderRampSupport {
-  const support = createProviderRampSupport();
+export function distillBvnkRailSupport(
+  depositRaw: unknown,
+  fiatRaw: unknown,
+  cryptoRaw: unknown
+): ProviderRailSupportDistillation {
+  const depositList = z.array(bvnkCurrencyEntrySchema).parse(depositRaw);
+  const fiatList = z.array(bvnkCurrencyEntrySchema).parse(fiatRaw);
+  const cryptoList = z.array(bvnkCurrencyEntrySchema).parse(cryptoRaw);
+  const droppedCodes = new Set<string>();
+  const onrampCurrencies: Record<string, RampCurrencyLimit> = {};
+  const offrampCurrencies: Record<string, RampCurrencyLimit> = {};
+  const onrampCryptos = new Set<CryptoRailId>();
+  const offrampCryptos = new Set<CryptoRailId>();
 
   for (const entry of depositList) {
-    if (entry.fiat !== true) continue;
-    if (entry.supportsDeposits !== true) continue;
-    if (!entry.code) continue;
-    const parsed = parseFiatCurrency(entry.code);
-    if (parsed) support.onrampFiats.add(parsed);
-    else console.warn(`  [bvnk] unknown fiat code: ${entry.code}`);
+    if (entry.fiat !== true) {
+      continue;
+    }
+    if (entry.supportsDeposits !== true) {
+      continue;
+    }
+    if (entry.code === undefined) {
+      continue;
+    }
+    addBvnkFiatCurrency(onrampCurrencies, entry.code, droppedCodes);
   }
 
   for (const entry of fiatList) {
-    if (entry.supportsWithdrawals !== true) continue;
-    if (!entry.code) continue;
-    const parsed = parseFiatCurrency(entry.code);
-    if (parsed) support.offrampFiats.add(parsed);
-    else console.warn(`  [bvnk] unknown fiat code: ${entry.code}`);
+    if (entry.supportsWithdrawals !== true) {
+      continue;
+    }
+    if (entry.code === undefined) {
+      continue;
+    }
+    addBvnkFiatCurrency(offrampCurrencies, entry.code, droppedCodes);
   }
 
   for (const entry of cryptoList) {
-    if (!entry.code) continue;
+    if (entry.code === undefined) {
+      continue;
+    }
     const upper = entry.code.toUpperCase();
-    if (!isSolanaCryptoAsset(upper)) continue;
-    const hasSolana = (entry.protocols ?? []).some((p) => p.networkCode === "SOLANA");
-    if (!hasSolana) continue;
+    if (!isSolanaCryptoAsset(upper)) {
+      continue;
+    }
+    if (entry.protocols === undefined) {
+      continue;
+    }
+    const hasSolana = entry.protocols.some((protocol) => protocol.networkCode === "SOLANA");
+    if (!hasSolana) {
+      continue;
+    }
     const rail = SOLANA_ASSET_TO_RAIL[upper];
-    if (entry.supportsWithdrawals === true) support.onrampCryptos.add(rail);
-    if (entry.supportsDeposits === true) support.offrampCryptos.add(rail);
+    if (entry.supportsWithdrawals === true) {
+      onrampCryptos.add(rail);
+    }
+    if (entry.supportsDeposits === true) {
+      offrampCryptos.add(rail);
+    }
   }
 
-  return support;
+  return {
+    snapshot: {
+      onramp: {
+        currencies: onrampCurrencies,
+        cryptos: [...onrampCryptos].sort(),
+      },
+      offramp: {
+        currencies: offrampCurrencies,
+        cryptos: [...offrampCryptos].sort(),
+      },
+    },
+    droppedCurrencyCodes: [...droppedCodes].sort(),
+    droppedCountryCodes: [],
+  };
 }
 
 export interface BvnkAgreement {
@@ -577,6 +653,7 @@ function parseBvnkFiatWallet(payload: unknown): BvnkFiatWallet {
 
 export class BvnkRampClient implements RampProvider {
   readonly id = "bvnk";
+  readonly declaredRailSupport = BVNK_DECLARED_RAIL_SUPPORT;
 
   private async request<T = unknown>(
     config: BvnkConfig,
@@ -661,12 +738,13 @@ export class BvnkRampClient implements RampProvider {
     }
   }
 
-  async readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport> {
-    return extractSupport(
-      await readDump<readonly BvnkCurrencyEntry[]>(RAMP_RAIL_DUMPS.bvnk.depositAnon.file),
-      await readDump<readonly BvnkCurrencyEntry[]>(RAMP_RAIL_DUMPS.bvnk.fiatAnon.file),
-      await readDump<readonly BvnkCurrencyEntry[]>(RAMP_RAIL_DUMPS.bvnk.cryptoAnon.file)
-    );
+  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
+    const [deposit, fiat, crypto] = await Promise.all([
+      readDump(RAMP_RAIL_DUMPS.bvnk.depositAnon.file),
+      readDump(RAMP_RAIL_DUMPS.bvnk.fiatAnon.file),
+      readDump(RAMP_RAIL_DUMPS.bvnk.cryptoAnon.file),
+    ]);
+    return distillBvnkRailSupport(deposit, fiat, crypto);
   }
 
   async createAgreementSession(
@@ -835,7 +913,7 @@ export class BvnkRampClient implements RampProvider {
   ): Promise<PaymentRampEstimate> {
     const config = readBvnkConfig(env, mode);
     const { currency } = normalizeBvnkCurrencyAndNetwork(getCryptoRailAssetLabel(input.assetRail));
-    const amountIn = toPositiveAmount(input.fiatAmount, "fiatAmount");
+    const amountIn = assertPositiveDecimalAmount(input.fiatAmount, "fiatAmount");
     const quote = await this.request<BvnkQuoteEstimateResponse>(
       config,
       "/api/v1/quote?estimate=true",
@@ -846,7 +924,7 @@ export class BvnkRampClient implements RampProvider {
           to: currency,
           fromWalletLsid: config.walletId,
           toWalletLsid: config.walletId,
-          amountIn,
+          amountIn: toNumberAmount(amountIn),
           useMinimum: false,
           useMaximum: false,
           payInMethod: "wallet",
@@ -861,9 +939,9 @@ export class BvnkRampClient implements RampProvider {
     if (feeCurrency !== input.fiatCurrency) {
       throw providerUnavailable("BVNK returned on-ramp fees outside the fiat pay-in currency");
     }
-    const fiatAmount = String(quote.amountIn);
-    const service = String(quote.fees.value.service);
-    const processing = String(quote.fees.value.processing);
+    const fiatAmount = decimalStringFromNumber(quote.amountIn);
+    const service = decimalStringFromNumber(quote.fees.value.service);
+    const processing = decimalStringFromNumber(quote.fees.value.processing);
     const feeDecimals = Math.max(countDecimalPlaces(service), countDecimalPlaces(processing));
     const totalFee = formatDecimalAmount(
       parseDecimalAmount(service, feeDecimals) + parseDecimalAmount(processing, feeDecimals),
@@ -875,7 +953,7 @@ export class BvnkRampClient implements RampProvider {
       fiatCurrency: input.fiatCurrency,
       assetRail: input.assetRail,
       fiatAmount,
-      cryptoAmount: String(quote.amountOut),
+      cryptoAmount: decimalStringFromNumber(quote.amountOut),
       exchangeRate: formatBvnkNetExchangeRate(fiatAmount, quote.amountOut),
       fees: {
         currency: input.fiatCurrency,
@@ -895,7 +973,7 @@ export class BvnkRampClient implements RampProvider {
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(
       getCryptoRailAssetLabel(input.assetRail)
     );
-    const paidRequiredAmount = toPositiveAmount(input.cryptoAmount, "cryptoAmount");
+    const paidRequiredAmount = assertPositiveDecimalAmount(input.cryptoAmount, "cryptoAmount");
     const estimate = await this.request<BvnkPayoutEstimateResponse>(
       config,
       "/api/v1/pay/estimate",
@@ -905,7 +983,7 @@ export class BvnkRampClient implements RampProvider {
           walletId: config.walletId,
           walletCurrency: input.fiatCurrency,
           paidCurrency: currency,
-          paidRequiredAmount,
+          paidRequiredAmount: toNumberAmount(paidRequiredAmount),
           reference: rampId("sdp_offramp_est"),
           network,
         },
@@ -944,14 +1022,14 @@ export class BvnkRampClient implements RampProvider {
       fiatCurrency: input.fiatCurrency,
       assetRail: input.assetRail,
       fiatAmount: netFiatAmount,
-      cryptoAmount: String(estimate.paidRequiredAmount),
+      cryptoAmount: decimalStringFromNumber(estimate.paidRequiredAmount),
       exchangeRate: formatBvnkNetExchangeRate(netFiatAmount, estimate.paidRequiredAmount),
       fees: {
         currency: totalFeeCurrency,
         total: totalFee,
-        provider: String(estimate.feePredictedAmount),
+        provider: decimalStringFromNumber(estimate.feePredictedAmount),
         providerCurrency: feeCurrency,
-        network: String(estimate.networkFeePredictedAmount),
+        network: decimalStringFromNumber(estimate.networkFeePredictedAmount),
         networkCurrency: networkFeeCurrency,
       },
     };

@@ -1,10 +1,10 @@
+import { type createRpc, getAccountInfo } from "@sdp/rpc/solana";
+import { assertValidAddress } from "@sdp/solana/address";
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
-import { formatDecimalAmount } from "@/lib/amount";
 import { badRequest } from "@/lib/errors";
-import { assertValidAddress } from "@/lib/solana";
-import { type createRpc, getAccountInfo } from "@/services/solana/rpc";
 
 export { SOL_MINT } from "@/services/payment-operation.service";
 
