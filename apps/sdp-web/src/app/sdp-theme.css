@@ -12,42 +12,32 @@
    ─────────────────────────────────────────────────────────────────────────── */
 
 /* ── Tier 1: primitives ──────────────────────────────────────────────────────
-   Values mirror `.agents/skills/sdp-ui-designer/sdp-design-system.css` (the SDP
-   design source of truth) — keep in sync; do not diverge. This is the only place
-   literal color values live; every tier below refers to these by var(). */
+   The color values this app actually consumes, sourced from
+   `.agents/skills/sdp-ui-designer/sdp-design-system.css` (the SDP design source
+   of truth) — keep in sync; do not diverge. The skill file remains the complete
+   palette; only tokens a tier below consumes live here (no orphans). This is the
+   only place literal color values live; every tier below refers to them by var(). */
 :root {
   /* Surfaces (sand) */
   --sand-100: #f0ede6;
   --sand-200: #e9e7de; /* app shell background — always use this */
-  --sand-300: #dedad0;
-  --sand-600: #b7aa9d; /* org avatar, muted accent fills */
   --paper: #fcfcfa; /* raised card white — app-specific, not in skill */
 
   /* Ink emphasis scale — text & icons on sand/white */
   --emph-xh: #1c1c1d; /* headings, high-contrast labels */
-  --emph-h: rgba(28, 28, 29, 0.88); /* primary body text */
   --emph-m: rgba(28, 28, 29, 0.72); /* secondary text, icons */
   --emph-l: rgba(28, 28, 29, 0.56); /* labels, placeholders */
   --emph-xl: rgba(28, 28, 29, 0.44); /* disabled, hint text */
 
-  /* Ink alpha tints — fills & overlays */
-  --t2: rgba(28, 28, 29, 0.02);
+  /* Ink alpha tints — fills */
   --t4: rgba(28, 28, 29, 0.04);
   --t8: rgba(28, 28, 29, 0.08);
   --t12: rgba(28, 28, 29, 0.12);
-  --t16: rgba(28, 28, 29, 0.16);
-  --t20: rgba(28, 28, 29, 0.2);
-  --t48: rgba(28, 28, 29, 0.48);
 
   /* Borders (ink) */
   --border-xl: rgba(28, 28, 29, 0.08); /* card edges, subtle dividers */
   --border-l: rgba(28, 28, 29, 0.12); /* table dividers, section lines */
   --border-m: rgba(28, 28, 29, 0.2); /* active inputs, stronger dividers */
-
-  /* Buttons (skill canonical; primary folds into --emph-xh below) */
-  --btn-pri: #0f0f10; /* primary CTA fill */
-  --btn-sec: rgba(28, 28, 29, 0.08); /* secondary button fill */
-  --btn-sec-h: rgba(28, 28, 29, 0.12); /* secondary button hover */
 
   /* Semantic — success / warning / error / info */
   --green-tx: #00a066;
