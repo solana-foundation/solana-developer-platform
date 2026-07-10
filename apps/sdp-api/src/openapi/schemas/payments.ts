@@ -56,6 +56,7 @@ import {
   projectIdParamSchema,
   solanaAddressSchema,
   transferIdParamSchema,
+  WALLET_ID_INPUT_NOTE,
   walletIdParamSchema,
   withOpenApi,
   z,
@@ -207,10 +208,7 @@ const walletPolicyAuditSchema = z
 
 export const walletPolicySchema = z
   .object({
-    walletId: walletIdParamSchema.openapi({
-      description: "Custody wallet ID from /v1/wallets.",
-      example: "wal_example",
-    }),
+    walletId: walletIdParamSchema,
     destinationAllowlist: z
       .array(solanaAddressSchema)
       .max(500)
@@ -255,8 +253,8 @@ export const walletPolicySchema = z
 export const paymentWalletIdParamsSchema = walletIdParamsSchemaBase
   .extend({
     walletId: withOpenApi(walletIdParamsSchemaBase.shape.walletId, {
-      description: "Custody wallet ID from /v1/wallets.",
-      example: "wal_example",
+      description: `Provider wallet ID — ${WALLET_ID_INPUT_NOTE}`,
+      example: "privy_wallet_123",
     }),
   })
   .openapi({ description: "Payment wallet path parameters." });
@@ -346,10 +344,7 @@ export const tokenBalanceSchema = z
 
 export const walletBalancesSchema = z
   .object({
-    walletId: walletIdParamSchema.openapi({
-      description: "Custody wallet ID from /v1/wallets.",
-      example: "wal_example",
-    }),
+    walletId: walletIdParamSchema,
     address: solanaAddressSchema.openapi({ description: "Wallet address." }),
     balances: z.array(tokenBalanceSchema).openapi({ description: "Token balances." }),
   })
@@ -435,8 +430,8 @@ export const createTransferRequestSchema = createTransferSchemaBase
       example: "prj_example",
     }),
     source: withOpenApi(createTransferSchemaBase.shape.source, {
-      description: "Source custody wallet ID from /v1/wallets.",
-      example: "wal_example",
+      description: `Source wallet — ${WALLET_ID_INPUT_NOTE}`,
+      example: "privy_wallet_123",
     }),
     destination: withOpenApi(createTransferSchemaBase.shape.destination, {
       description: "Destination wallet address.",
@@ -689,8 +684,8 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
       example: "payroll_2026_06_30",
     }),
     source: withOpenApi(createTransferBatchSchemaBase.shape.source, {
-      description: "Source custody wallet ID from /v1/wallets.",
-      example: "wal_example",
+      description: `Source wallet — ${WALLET_ID_INPUT_NOTE}`,
+      example: "privy_wallet_123",
     }),
     token: withOpenApi(createTransferBatchSchemaBase.shape.token, {
       description:
@@ -733,8 +728,8 @@ export const estimateTransferBatchRequestSchema = estimateTransferBatchSchemaBas
 export const paymentListTransferBatchesQuerySchema = listTransferBatchesQuerySchemaBase
   .extend({
     wallet: withOpenApi(listTransferBatchesQuerySchemaBase.shape.wallet, {
-      description: "Filter by source custody wallet ID.",
-      example: "wal_example",
+      description: "Filter by source wallet `walletId`.",
+      example: "privy_wallet_123",
     }),
     token: withOpenApi(listTransferBatchesQuerySchemaBase.shape.token, {
       description: "Filter by token symbol or mint.",
@@ -805,8 +800,7 @@ export const transferBatchSchema = z
       example: "payroll_2026_06_30",
     }),
     sourceWalletId: walletIdParamSchema.openapi({
-      description: "Source custody wallet ID.",
-      example: "wal_example",
+      description: "Source wallet provider ID (`walletId`).",
     }),
     sourceAddress: solanaAddressSchema.openapi({
       description: "Source custody wallet address.",
@@ -918,8 +912,8 @@ export const paymentSubscriptionIdParamsSchema = subscriptionIdParamsSchemaBase
 export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaBase
   .extend({
     sourceWalletId: withOpenApi(createRecurringPaymentSchemaBase.shape.sourceWalletId, {
-      description: "SDP custody wallet that will fund the recurring payment.",
-      example: "wal_source",
+      description: `SDP custody wallet that will fund the recurring payment — ${WALLET_ID_INPUT_NOTE}`,
+      example: "privy_wallet_123",
     }),
     counterpartyId: withOpenApi(createRecurringPaymentSchemaBase.shape.counterpartyId, {
       description: "Counterparty receiving the recurring payment.",
@@ -962,9 +956,8 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
 export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaBase
   .safeExtend({
     sourceWalletId: withOpenApi(updateRecurringPaymentSchemaBase.shape.sourceWalletId, {
-      description:
-        "Optional replacement SDP custody wallet. Active replacements require write access to both the old and new source wallets.",
-      example: "wal_source",
+      description: `Optional replacement SDP custody wallet — ${WALLET_ID_INPUT_NOTE} Active replacements require write access to both the old and new source wallets.`,
+      example: "privy_wallet_123",
     }),
     counterpartyId: withOpenApi(updateRecurringPaymentSchemaBase.shape.counterpartyId, {
       description:
@@ -1523,8 +1516,9 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
       example: "counterparty_example",
     }),
     destinationWallet: withOpenApi(createOnrampQuoteSchemaBase.shape.destinationWallet, {
-      description: "Destination wallet ID or Solana address for purchased crypto.",
-      example: "wal_example",
+      description:
+        "Destination wallet (`walletId` from GET /v1/wallets) or Solana address for purchased crypto.",
+      example: "privy_wallet_123",
     }),
     cryptoToken: withOpenApi(createOnrampQuoteSchemaBase.shape.cryptoToken, {
       description: "Crypto token symbol or provider currency code.",
@@ -1549,7 +1543,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
     example: {
       provider: "moonpay",
       counterpartyId: "counterparty_example",
-      destinationWallet: "wal_example",
+      destinationWallet: "privy_wallet_123",
       cryptoToken: "USDC",
       fiatCurrency: "USD",
       fiatAmount: "100.00",
@@ -1565,8 +1559,8 @@ export const simulateSandboxTransferRequestSchema = withOpenApi(simulateSandboxT
 export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
   .extend({
     wallet: withOpenApi(listTransfersQuerySchemaBase.shape.wallet, {
-      description: "Filter by wallet ID.",
-      example: "wal_example",
+      description: "Filter by wallet `walletId`.",
+      example: "privy_wallet_123",
     }),
     walletAddress: withOpenApi(listTransfersQuerySchemaBase.shape.walletAddress, {
       description: "Filter by wallet address.",

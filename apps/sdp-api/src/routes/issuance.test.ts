@@ -977,7 +977,7 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(404);
       const body = await res.json();
       expect(body.error.code).toBe("NOT_FOUND");
-      expect(body.error.message).toBe("Wallet not found");
+      expect(body.error.message).toMatch(/^Wallet not found\./);
     });
 
     it("enforces wallet-level tokens:read for wallet filters", async () => {
