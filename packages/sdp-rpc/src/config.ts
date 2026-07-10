@@ -103,6 +103,16 @@ export function resolveDefaultSolanaRpcUrl(env: RpcEnv): string | null {
     });
   }
 
+  if (env.SOLANA_RPC_VALIDATIONCLOUD_URL) {
+    providers.push({
+      id: "validationcloud",
+      url: applyApiKeyTemplate(
+        env.SOLANA_RPC_VALIDATIONCLOUD_URL,
+        env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY ?? ""
+      ),
+    });
+  }
+
   if (env.SOLANA_RPC_URL) {
     providers.push({
       id: "default",

@@ -141,8 +141,8 @@ FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
 # RPC — any single endpoint. The public devnet endpoint
 # (https://api.devnet.solana.com) returns 403 for getTokenAccountsByOwner,
 # so wallet-balance queries will log "failed to fetch SPL balances" on every
-# refresh. Use a free Helius / Triton / QuickNode key or a local
-# solana-test-validator instead.
+# refresh. Use a free Helius / Triton / QuickNode / Validation Cloud key or a
+# local solana-test-validator instead.
 SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
 ```
 

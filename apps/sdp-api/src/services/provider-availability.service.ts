@@ -137,6 +137,10 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
       label: "Triton",
       isConfigured: (env) => hasEnv(env, "SOLANA_RPC_TRITON_URL"),
     },
+    validationcloud: {
+      label: "Validation Cloud",
+      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_VALIDATIONCLOUD_URL"),
+    },
   },
   compliance: {
     range: {
