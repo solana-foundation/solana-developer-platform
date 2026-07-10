@@ -11,6 +11,8 @@ export interface RpcEnv {
   SOLANA_RPC_ALCHEMY_API_KEY?: string;
   SOLANA_RPC_QUICKNODE_URL?: string;
   SOLANA_RPC_QUICKNODE_API_KEY?: string;
+  SOLANA_RPC_VALIDATIONCLOUD_URL?: string;
+  SOLANA_RPC_VALIDATIONCLOUD_API_KEY?: string;
   SOLANA_NETWORK?: "devnet" | "mainnet-beta";
   SDP_DEPLOYMENT_MODE?: string;
 }
