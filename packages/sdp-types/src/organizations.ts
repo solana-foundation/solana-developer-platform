@@ -20,6 +20,7 @@ export const ORGANIZATION_RPC_PROVIDERS = [
   "helius",
   "quicknode",
   "triton",
+  "validationcloud",
 ] as const;
 export type OrganizationRpcProvider = (typeof ORGANIZATION_RPC_PROVIDERS)[number];
 

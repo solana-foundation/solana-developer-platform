@@ -64,7 +64,7 @@ const SURFACES: readonly {
   label: string;
   Icon: LucideIcon;
 }[] = [
-  { id: "token", label: "Token page", Icon: FileText },
+  { id: "token", label: "Token", Icon: FileText },
   { id: "explorer", label: "Explorer", Icon: Globe },
   { id: "wallet", label: "Wallet", Icon: Wallet },
 ];
