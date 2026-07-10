@@ -8,7 +8,6 @@
      3. Package retheme — point @solana/design-system's runtime vars at the same
                           primitives so its components render one palette.
 
-   Imported by globals.css AFTER "@solana/design-system/styles" so Tier 3 wins.
    ─────────────────────────────────────────────────────────────────────────── */
 
 /* ── Tier 1: primitives ──────────────────────────────────────────────────────
@@ -63,15 +62,8 @@
 }
 
 /* ── Tier 2: semantic tokens (generate the utilities) ─────────────────────────
-   Friendly names → primitives, by var() reference. `inline` makes the generated
-   utilities emit the resolved value, matching @solana/design-system's own theme
-   pattern. Unused tokens generate no CSS — Tailwind only emits utilities it sees
-   used in scanned source. */
+   Friendly names → primitives, by var() reference.  */
 @theme inline {
-  /* Ink, organized by role & usage (black + gray shades on sand/white).
-     `primary` is the darkest ink; it doubles as the primary action fill.
-     Solid buttons express hover via opacity (see the skill's `.btn-pri:hover`),
-     not a second fill token, so this shared name never yields a no-op hover. */
   --color-primary: var(--emph-xh);
   --color-secondary: var(--emph-m);
   --color-tertiary: var(--emph-l);
@@ -117,8 +109,7 @@
 
 /* ── Tier 3: retheme @solana/design-system ────────────────────────────────────
    Point the package's runtime custom properties at our primitives so package
-   components (Badge, TextInput, …) render the SDP palette. No package edits.
-   Unlayered :root here outranks the package's @layer theme tokens. */
+   components (Badge, TextInput, …) render the SDP palette. No package edits. */
 :root {
   /* Ink ladder + buttons + borders all derive from these two grays */
   --gray-1400: var(--emph-xh);
