@@ -33,7 +33,7 @@ export function CounterpartySelector({
       placeholder="Select a counterparty"
       searchPlaceholder="Search counterparties"
       variant="dialog"
-      icon={<UsersIcon className="size-5 shrink-0 text-text-low" />}
+      icon={<UsersIcon className="size-5 shrink-0 text-tertiary" />}
       error={
         counterpartiesResult.ok
           ? undefined

@@ -35,13 +35,13 @@ export function CreateTokenIdentityStep({
       className="px-6 pb-6"
     >
       <div className="space-y-5 rounded-[28px] bg-white p-5">
-        <p className="text-sm text-[rgba(28,28,29,0.62)]">Fields marked * are required.</p>
+        <p className="text-sm text-secondary">Fields marked * are required.</p>
 
         <div className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="issuance-token-name">
               Token Name{" "}
-              <span aria-hidden className="text-[#c71f37]">
+              <span aria-hidden className="text-destructive">
                 *
               </span>
               <span className="sr-only"> (required)</span>
@@ -58,7 +58,7 @@ export function CreateTokenIdentityStep({
           <div className="grid gap-2">
             <Label htmlFor="issuance-token-symbol">
               Symbol{" "}
-              <span aria-hidden className="text-[#c71f37]">
+              <span aria-hidden className="text-destructive">
                 *
               </span>
               <span className="sr-only"> (required)</span>
@@ -77,7 +77,7 @@ export function CreateTokenIdentityStep({
           <div className="grid gap-2">
             <Label htmlFor="issuance-token-decimals">
               Decimals{" "}
-              <span aria-hidden className="text-[#c71f37]">
+              <span aria-hidden className="text-destructive">
                 *
               </span>
               <span className="sr-only"> (required)</span>
@@ -96,11 +96,11 @@ export function CreateTokenIdentityStep({
               required
             />
             {draft.decimals.length > 0 && !validation.decimalsValid ? (
-              <p className="text-sm text-[#c71f37]" role="alert">
+              <p className="text-sm text-destructive" role="alert">
                 Enter a whole number between 0 and 18.
               </p>
             ) : null}
-            <p className="text-base text-[rgba(28,28,29,0.62)]">
+            <p className="text-base text-secondary">
               {getDecimalsHelperText(template)}
             </p>
           </div>

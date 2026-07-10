@@ -169,8 +169,8 @@ function mergeWalletsPreferBalances(
 
 function LoadingSection({ message }: { message: string }) {
   return (
-    <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-6 py-10">
-      <div className="flex items-center gap-3 text-sm text-[rgba(28,28,29,0.64)]">
+    <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-border-subtle bg-fill-subtle px-6 py-10">
+      <div className="flex items-center gap-3 text-sm text-secondary">
         <Loader2Icon className="size-4 animate-spin" />
         <span>{message}</span>
       </div>
@@ -1369,7 +1369,7 @@ export function TokenManagementWorkspace({
         onUnpause={() => handlePause(false)}
       />
 
-      <div className="border-b border-[rgba(28,28,29,0.12)]">
+      <div className="border-b border-border-default">
         <div className="flex flex-wrap gap-8">
           {visibleManagementTabs.map((tab) => (
             <button
@@ -1379,13 +1379,13 @@ export function TokenManagementWorkspace({
               className={[
                 "relative pb-4 text-[15px] leading-[24px] font-medium transition-colors sm:text-[16px]",
                 activeTab === tab.id
-                  ? "text-[#1c1c1d]"
-                  : "text-[rgba(28,28,29,0.54)] hover:text-[#1c1c1d]",
+                  ? "text-primary"
+                  : "text-tertiary hover:text-primary",
               ].join(" ")}
             >
               {tab.label}
               {activeTab === tab.id ? (
-                <span className="absolute right-0 bottom-[-1px] left-0 h-[2px] bg-[#1c1c1d]" />
+                <span className="absolute right-0 bottom-[-1px] left-0 h-[2px] bg-primary" />
               ) : null}
             </button>
           ))}
@@ -1393,17 +1393,17 @@ export function TokenManagementWorkspace({
       </div>
 
       {tokenError ? (
-        <div className="rounded-xl border border-[rgba(220,38,38,0.2)] bg-[rgba(220,38,38,0.08)] px-4 py-3">
-          <p className="text-sm font-medium text-[#dc2626]">Token load warning</p>
-          <p className="mt-1 text-sm text-[#dc2626]">{tokenError}</p>
+        <div className="rounded-xl border border-error-border bg-error-bg px-4 py-3">
+          <p className="text-sm font-medium text-error">Token load warning</p>
+          <p className="mt-1 text-sm text-error">{tokenError}</p>
         </div>
       ) : null}
 
       {token.status === "paused" ? (
-        <div className="flex flex-col gap-3 rounded-xl border border-[rgba(234,179,8,0.2)] bg-[rgba(234,179,8,0.08)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-[#92400e]">Token is paused</p>
-            <p className="mt-1 text-sm text-[#92400e]">
+            <p className="text-sm font-medium text-warning">Token is paused</p>
+            <p className="mt-1 text-sm text-warning">
               Minting, burning, and administrative transfer actions are disabled until the token is
               unpaused.
             </p>
@@ -1543,11 +1543,11 @@ export function TokenManagementWorkspace({
         onClose={closeFundManagementModal}
       >
         {fundManagementModalAction === "deploy" ? (
-          <div className="rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
-            <p className="pr-12 text-[20px] leading-[1.2] font-medium text-[#1c1c1d]">
+          <div className="rounded-2xl border border-border-default bg-white p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
+            <p className="pr-12 text-[20px] leading-[1.2] font-medium text-primary">
               Deploy token
             </p>
-            <p className="mt-2 text-[14px] leading-[1.45] text-[rgba(28,28,29,0.72)]">
+            <p className="mt-2 text-[14px] leading-[1.45] text-secondary">
               This will deploy the token onchain so operations can run.
             </p>
             <div className="mt-5 space-y-5">
@@ -1563,7 +1563,7 @@ export function TokenManagementWorkspace({
                   type="button"
                   onClick={closeFundManagementModal}
                   disabled={isPending}
-                  className="inline-flex h-10 items-center rounded-[12px] border border-[rgba(28,28,29,0.16)] bg-white px-4 text-sm font-medium text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.04)] disabled:pointer-events-none disabled:opacity-50"
+                  className="inline-flex h-10 items-center rounded-[12px] border border-border-default bg-white px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -1572,7 +1572,7 @@ export function TokenManagementWorkspace({
                     type="button"
                     onClick={() => deployToken("wallet")}
                     disabled={isPending || Boolean(deploySignerSelection.unavailableReason)}
-                    className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-[rgba(28,28,29,0.16)] bg-white px-4 text-sm font-medium text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.04)] disabled:pointer-events-none disabled:opacity-50"
+                    className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-border-default bg-white px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
                   >
                     <WalletIcon className="size-4" />
                     Deploy with Wallet
@@ -1581,7 +1581,7 @@ export function TokenManagementWorkspace({
                     <button
                       type="button"
                       disabled
-                      className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-[#0f0f10] px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
+                      className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
                     >
                       <SparklesIcon className="size-4" />
                       Deploy with Kora
@@ -1655,7 +1655,7 @@ export function TokenManagementWorkspace({
       />
 
       {isPending ? (
-        <div className="fixed right-4 bottom-4 z-30 inline-flex items-center gap-2 rounded-lg border border-[rgba(28,28,29,0.12)] bg-white px-3 py-2 text-sm shadow-lg">
+        <div className="fixed right-4 bottom-4 z-30 inline-flex items-center gap-2 rounded-lg border border-border-default bg-white px-3 py-2 text-sm shadow-lg">
           <Loader2Icon className="h-4 w-4 animate-spin" />
           Running action...
         </div>
@@ -1686,8 +1686,8 @@ function ActionSelector({
             className={[
               "inline-flex h-10 items-center rounded-[12px] px-4 text-sm font-medium transition-colors",
               activeAction === action.id
-                ? "bg-[#0f0f10] text-white"
-                : "bg-[rgba(28,28,29,0.08)] text-[#1c1c1d] hover:bg-[rgba(28,28,29,0.14)] disabled:pointer-events-none disabled:opacity-50",
+                ? "bg-primary text-white"
+                : "bg-fill text-primary hover:bg-fill-strong disabled:pointer-events-none disabled:opacity-50",
             ].join(" ")}
           >
             {action.label}

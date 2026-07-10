@@ -7,7 +7,7 @@ export default function DashboardMembersPage() {
         <CardHeader>
           <CardTitle>Coming soon</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-[rgba(28,28,29,0.72)]">
+        <CardContent className="text-sm text-secondary">
           Member management will be available in a future update.
         </CardContent>
       </Card>

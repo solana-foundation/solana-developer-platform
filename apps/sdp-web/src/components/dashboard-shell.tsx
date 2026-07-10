@@ -134,7 +134,7 @@ function HeaderBackAction({
   return (
     <Link
       href={href}
-      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-text-medium transition-colors hover:text-text-extra-high"
+      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary"
     >
       <ArrowLeftIcon className="h-4 w-4" />
       <span
@@ -162,7 +162,7 @@ function SidebarToggle({
       aria-label="Open navigation"
       onClick={() => setMobileSidebarOpen(true)}
       className={[
-        "inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light lg:hidden",
+        "inline-flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong lg:hidden",
         isMobileSidebarOpen ? "invisible" : "",
       ].join(" ")}
     >
@@ -183,7 +183,7 @@ function DashboardTopBar({
   const isSandbox = sdpEnvironment === "sandbox";
   const sandboxBadge = isSandbox ? (
     <>
-      <span aria-hidden="true" className="h-4 w-px bg-border-light" />
+      <span aria-hidden="true" className="h-4 w-px bg-fill-strong" />
       <Badge>Sandbox</Badge>
     </>
   ) : null;
@@ -199,7 +199,7 @@ function DashboardTopBar({
           {topBarLeadingContent}
         </div>
         <div className="flex items-start justify-center">
-          <h1 className="text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-text-extra-high">
+          <h1 className="text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
             {centeredTitle}
           </h1>
         </div>
@@ -219,7 +219,7 @@ function DashboardTopBar({
           setMobileSidebarOpen={setMobileSidebarOpen}
         />
         {hideTitle ? null : (
-          <h1 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-text-extra-high">
+          <h1 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
             {title}
           </h1>
         )}
@@ -460,8 +460,8 @@ function isItemActive(pathname: string, href: string): boolean {
 
 const navItemBase =
   "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors";
-const navItemActive = "border border-border-extra-light bg-white text-text-extra-high";
-const navItemInactive = "text-text-medium hover:bg-border-light hover:text-text-extra-high";
+const navItemActive = "border border-border-subtle bg-white text-primary";
+const navItemInactive = "text-secondary hover:bg-fill-strong hover:text-primary";
 
 function SidebarGroup({
   title,
@@ -483,14 +483,14 @@ function SidebarGroup({
       <p
         className={cn(
           "relative px-3 text-xs uppercase leading-normal tracking-wide",
-          isCollapsed ? "text-transparent" : "text-text-extra-low"
+          isCollapsed ? "text-transparent" : "text-muted"
         )}
       >
         {title}
         {isCollapsed && showTopSeparator ? (
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute top-1/2 right-3 left-3 h-px -translate-y-1/2 bg-border-medium"
+            className="pointer-events-none absolute top-1/2 right-3 left-3 h-px -translate-y-1/2 bg-border-strong"
           />
         ) : null}
       </p>
@@ -528,11 +528,11 @@ function SidebarGroup({
                             "w-0.5 shrink-0 self-stretch transition-colors",
                             isFirst && "mt-1",
                             isLast && "mb-1",
-                            childActive ? "bg-text-medium" : "bg-border-light"
+                            childActive ? "bg-secondary" : "bg-fill-strong"
                           )}
                         />
                         {child.disabled ? (
-                          <span className="flex h-9 flex-1 cursor-not-allowed items-center rounded-lg px-3 text-sm text-text-low">
+                          <span className="flex h-9 flex-1 cursor-not-allowed items-center rounded-lg px-3 text-sm text-tertiary">
                             {child.label}
                             <LockIcon className="ml-auto h-3 w-3" />
                           </span>
@@ -590,7 +590,7 @@ function DashboardSidebarContent({
                 type="button"
                 aria-label="Close navigation"
                 onClick={onClose}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong"
               >
                 <PanelLeftIcon className="h-5 w-5" />
               </button>
@@ -625,7 +625,7 @@ function DashboardSidebarContent({
               title={isCollapsed ? item.label : undefined}
               aria-label={isCollapsed ? item.label : undefined}
               className={cn(
-                "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high",
+                "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-secondary transition-colors hover:bg-fill-strong hover:text-primary",
                 isCollapsed && "justify-center"
               )}
             >
@@ -703,9 +703,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!isLoaded) {
     return (
-      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
-        <div className="mx-auto max-w-5xl border border-border-extra-light bg-white/70 p-6">
-          <p className="text-sm text-text-low">Loading dashboard...</p>
+      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
+        <div className="mx-auto max-w-5xl border border-border-subtle bg-white/70 p-6">
+          <p className="text-sm text-tertiary">Loading dashboard...</p>
         </div>
       </main>
     );
@@ -713,19 +713,19 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!isSignedIn) {
     return (
-      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
-        <div className="mx-auto max-w-3xl border border-border-extra-light bg-white/70 p-6">
+      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
+        <div className="mx-auto max-w-3xl border border-border-subtle bg-white/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             Sign in to continue
           </h1>
-          <p className="mt-3 text-sm text-text-low">
+          <p className="mt-3 text-sm text-tertiary">
             Access your organization workspace and wallet controls.
           </p>
           <div className="mt-6">
             <SignInButton mode="modal">
               <button
                 type="button"
-                className="inline-flex h-10 items-center justify-center rounded-[var(--button-radius-lg)] bg-gray-1400 px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
+                className="inline-flex h-10 items-center justify-center rounded-[var(--button-radius-lg)] bg-primary px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
               >
                 Sign in
               </button>
@@ -738,12 +738,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!orgId) {
     return (
-      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
-        <div className="mx-auto max-w-3xl border border-border-extra-light bg-white/70 p-6">
+      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
+        <div className="mx-auto max-w-3xl border border-border-subtle bg-white/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             Select an organization
           </h1>
-          <p className="mt-3 text-sm text-text-low">You need an organization to continue.</p>
+          <p className="mt-3 text-sm text-tertiary">You need an organization to continue.</p>
           <div className="mt-6">
             <OrganizationSwitcher hidePersonal />
           </div>
@@ -755,7 +755,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   return (
     <main
       className={[
-        "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high",
+        "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",
         shouldLockShellViewport ? "h-screen overflow-hidden" : "",
       ].join(" ")}
     >
@@ -787,7 +787,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
             className="group absolute top-1/2 right-0 z-10 flex h-24 w-5 -translate-y-1/2 translate-x-3/4 cursor-pointer items-center justify-center"
           >
-            <span className="block h-8 w-0.5 rounded-full bg-border-medium group-hover:bg-text-low" />
+            <span className="block h-8 w-0.5 rounded-full bg-border-strong group-hover:bg-tertiary" />
           </button>
         </aside>
 
@@ -796,10 +796,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             <button
               type="button"
               aria-label="Close navigation overlay"
-              className="absolute inset-0 bg-gray-1400/30"
+              className="absolute inset-0 bg-primary/30"
               onClick={() => setMobileSidebarOpen(false)}
             />
-            <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-light bg-[var(--sdp-shell-bg)] shadow-lg">
+            <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)] shadow-lg">
               <DashboardSidebarContent
                 bottomNavItems={bottomNavItems}
                 navSections={navSections}
@@ -815,7 +815,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
         <section
           className={[
-            "relative min-w-0 rounded-2xl border border-border-extra-light bg-white/80 lg:rounded-tl-[16px]",
+            "relative min-w-0 rounded-2xl border border-border-subtle bg-white/80 lg:rounded-tl-[16px]",
             shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "px-3 py-5 md:p-6",
           ].join(" ")}
         >
@@ -829,7 +829,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               {shouldRenderTopBarBorder ? (
                 <div
                   className={[
-                    "border-b border-border-light pb-4",
+                    "border-b border-border-default pb-4",
                     shouldLockViewportScroll
                       ? "px-3 pt-5 md:px-6 md:pt-6"
                       : "-mx-3 px-3 md:-mx-6 md:px-6",
@@ -860,7 +860,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               {shouldRenderHeaderNavRow ? (
                 <div
                   className={[
-                    "border-b border-border-light",
+                    "border-b border-border-default",
                     shouldLockViewportScroll ? "" : "-mx-3 md:-mx-6",
                   ].join(" ")}
                 >

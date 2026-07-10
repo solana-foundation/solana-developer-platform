@@ -398,17 +398,17 @@ export function RampPairProviderSelector({
 
       <div className="space-y-2.5">
         <div className="flex items-center gap-3">
-          <p className="shrink-0 text-xl font-medium text-text-extra-high">Choose a provider</p>
+          <p className="shrink-0 text-xl font-medium text-primary">Choose a provider</p>
           {providerExclusions.length > 0 ? (
             <button
               type="button"
               onClick={() => setUnavailableDialogOpen(true)}
-              className="rounded-full bg-border-extra-light px-2 py-0.5 text-xs leading-none font-medium text-text-low transition-colors hover:bg-border-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-low focus-visible:ring-offset-2"
+              className="rounded-full bg-fill-subtle px-2 py-0.5 text-xs leading-none font-medium text-tertiary transition-colors hover:bg-fill-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tertiary focus-visible:ring-offset-2"
             >
               {providerExclusions.length} unavailable
             </button>
           ) : null}
-          <div className="h-px flex-1 bg-border-light" />
+          <div className="h-px flex-1 bg-fill-strong" />
         </div>
 
         <div className="-mx-1.5 h-96 overflow-y-auto px-1.5 py-1">
@@ -431,7 +431,7 @@ export function RampPairProviderSelector({
                 layout
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="py-2 text-sm text-text-low"
+                className="py-2 text-sm text-tertiary"
               >
                 No providers are available for this selection.
               </motion.p>
@@ -447,12 +447,12 @@ export function RampPairProviderSelector({
         size="md"
       >
         <div className="px-5 py-5">
-          <h2 className="pr-10 text-lg font-medium text-text-extra-high">Unavailable providers</h2>
+          <h2 className="pr-10 text-lg font-medium text-primary">Unavailable providers</h2>
           <div className="mt-4 max-h-96 space-y-3 overflow-y-auto pr-1">
             {providerExclusions.map((exclusion) => (
               <div
                 key={exclusion.option.id}
-                className="rounded-xl border border-border-light bg-border-extra-light p-3"
+                className="rounded-xl border border-border-default bg-fill-subtle p-3"
               >
                 <div className="flex items-start gap-3">
                   <Image
@@ -463,10 +463,10 @@ export function RampPairProviderSelector({
                     className="size-8 shrink-0 rounded-lg object-contain"
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-text-extra-high">
+                    <p className="text-sm font-medium text-primary">
                       {exclusion.option.title}
                     </p>
-                    <div className="mt-2 space-y-1 text-sm text-text-low">
+                    <div className="mt-2 space-y-1 text-sm text-tertiary">
                       {exclusion.reasons.map((reason) => (
                         <p key={reason}>{reason}</p>
                       ))}

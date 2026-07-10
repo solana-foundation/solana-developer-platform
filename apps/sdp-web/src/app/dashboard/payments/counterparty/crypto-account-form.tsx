@@ -140,8 +140,8 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-2">
-        <Label className="text-sm font-medium text-text-low" htmlFor="account-label">
-          Label <span className="font-normal text-text-extra-low">(optional)</span>
+        <Label className="text-sm font-medium text-tertiary" htmlFor="account-label">
+          Label <span className="font-normal text-muted">(optional)</span>
         </Label>
         <Input
           id="account-label"
@@ -168,7 +168,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
       />
 
       <div className="flex flex-col gap-2">
-        <Label className="text-sm font-medium text-text-low" htmlFor="account-address">
+        <Label className="text-sm font-medium text-tertiary" htmlFor="account-address">
           Wallet address
         </Label>
         <Input
@@ -184,7 +184,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
         />
       </div>
 
-      {error && <p className="text-sm text-status-error-text">{error}</p>}
+      {error && <p className="text-sm text-error">{error}</p>}
 
       <AnimatePresence>
         {snapshot && (
@@ -199,7 +199,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
       <AnimatePresence>
         {phase === "ready" && hasRisk && (
           <HeightReveal key="risk-warning" durationSeconds={0.25}>
-            <p className="text-sm text-status-error-text">
+            <p className="text-sm text-error">
               {screenUnavailable
                 ? "We couldn't screen this address — compliance screening is unavailable. Add it anyway?"
                 : "One or more checks flagged this wallet or couldn't be completed. Add it anyway?"}

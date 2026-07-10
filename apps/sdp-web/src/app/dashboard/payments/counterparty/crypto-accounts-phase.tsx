@@ -15,17 +15,17 @@ export function CryptoAccountsPhase() {
 
   return (
     <div className="mx-auto flex h-[70vh] max-w-xl flex-col py-4">
-      <div className="flex items-center gap-2 text-status-success-text">
+      <div className="flex items-center gap-2 text-success">
         <CheckCircle2Icon className="size-5" />
         <span className="text-sm font-medium">{createdCounterparty.displayName} created</span>
       </div>
 
       <div className="mt-6 min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
         <div className="space-y-1">
-          <h2 className="text-2xl font-medium tracking-tight text-text-extra-high">
+          <h2 className="text-2xl font-medium tracking-tight text-primary">
             Add a crypto account
           </h2>
-          <p className="text-sm text-text-medium">
+          <p className="text-sm text-secondary">
             Optionally add a crypto wallet for this counterparty. You can skip this and add accounts
             later.
           </p>
@@ -40,8 +40,8 @@ export function CryptoAccountsPhase() {
                   key={account.id}
                   className="flex items-center justify-between rounded-xl border border-border-primary px-3 py-2 text-sm"
                 >
-                  <span className="text-text-high">{account.label ?? "Crypto wallet"}</span>
-                  <span className="truncate pl-3 font-mono text-xs text-text-medium">
+                  <span className="text-primary">{account.label ?? "Crypto wallet"}</span>
+                  <span className="truncate pl-3 font-mono text-xs text-secondary">
                     {details.network} · {details.address}
                   </span>
                 </li>

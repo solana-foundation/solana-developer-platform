@@ -28,7 +28,7 @@ function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }
   }
   const initials = name.trim().slice(0, 2).toUpperCase() || "?";
   return (
-    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-text-extra-high text-[10px] font-semibold text-white">
+    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-[10px] font-semibold text-white">
       {initials}
     </span>
   );
@@ -52,7 +52,7 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
           type="button"
           aria-label={activeOrg?.name ?? "Select organization"}
           className={cn(
-            "flex h-10 items-center rounded-[var(--button-radius-lg)] text-left transition-colors hover:bg-border-light focus:outline-none focus-visible:ring-2 focus-visible:ring-text-extra-high",
+            "flex h-10 items-center rounded-[var(--button-radius-lg)] text-left transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
             collapsed ? "w-10 justify-center" : "w-full min-w-0 gap-2 px-2"
           )}
         >
@@ -60,22 +60,22 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
           {collapsed ? null : (
             <>
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-semibold leading-tight text-text-extra-high">
+                <span className="truncate text-sm font-semibold leading-tight text-primary">
                   {activeOrg?.name ?? "Select organization"}
                 </span>
                 {activeProject ? (
-                  <span className="truncate text-xs leading-tight text-text-low">
+                  <span className="truncate text-xs leading-tight text-tertiary">
                     {activeProject.name}
                   </span>
                 ) : null}
               </span>
-              <ChevronsUpDownIcon className="size-4 shrink-0 text-text-low" />
+              <ChevronsUpDownIcon className="size-4 shrink-0 text-tertiary" />
             </>
           )}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" sideOffset={6} className="w-64">
-        <DropdownMenuLabel className="text-xs font-medium normal-case tracking-normal text-text-medium">
+        <DropdownMenuLabel className="text-xs font-medium normal-case tracking-normal text-secondary">
           Organizations
         </DropdownMenuLabel>
         {memberships.map((membership) => {
@@ -95,7 +95,7 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
               <OrgAvatar name={org.name} imageUrl={org.imageUrl} />
               <span className="min-w-0 flex-1 truncate">{org.name}</span>
               {isActive ? (
-                <span className="shrink-0 rounded-full bg-border-extra-light px-1.5 py-0.5 text-[10px] font-medium text-text-medium">
+                <span className="shrink-0 rounded-full bg-fill-subtle px-1.5 py-0.5 text-[10px] font-medium text-secondary">
                   Current
                 </span>
               ) : null}
@@ -103,16 +103,16 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
           );
         })}
         {isLoaded && memberships.length === 0 ? (
-          <p className="px-2.5 py-2 text-xs text-text-low">No organizations yet.</p>
+          <p className="px-2.5 py-2 text-xs text-tertiary">No organizations yet.</p>
         ) : null}
         {activeOrg ? (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs font-medium normal-case tracking-normal text-text-medium">
+            <DropdownMenuLabel className="text-xs font-medium normal-case tracking-normal text-secondary">
               Projects
             </DropdownMenuLabel>
             {projects.length === 0 ? (
-              <p className="px-2.5 py-2 text-xs text-text-low">No projects yet.</p>
+              <p className="px-2.5 py-2 text-xs text-tertiary">No projects yet.</p>
             ) : (
               projects.map((project) => {
                 const isActive = project.id === selectedProjectId;
@@ -129,7 +129,7 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span className="pointer-events-auto shrink-0 text-text-low">
+                            <span className="pointer-events-auto shrink-0 text-tertiary">
                               <LockIcon className="size-3.5" aria-label="Locked" />
                             </span>
                           </TooltipTrigger>
@@ -140,7 +140,7 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
                         </Tooltip>
                       </TooltipProvider>
                     ) : isActive ? (
-                      <span className="shrink-0 rounded-full bg-border-extra-light px-1.5 py-0.5 text-[10px] font-medium text-text-medium">
+                      <span className="shrink-0 rounded-full bg-fill-subtle px-1.5 py-0.5 text-[10px] font-medium text-secondary">
                         Current
                       </span>
                     ) : null}
@@ -153,7 +153,7 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={() => openCreateOrganization()}
-          className="gap-2 text-xs text-text-medium"
+          className="gap-2 text-xs text-secondary"
         >
           <PlusIcon className="size-4" />
           <span>Create organization</span>
@@ -161,7 +161,7 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
         {activeOrg ? (
           <DropdownMenuItem
             onSelect={() => openOrganizationProfile()}
-            className="gap-2 text-xs text-text-medium"
+            className="gap-2 text-xs text-secondary"
           >
             <Settings2Icon className="size-4" />
             <span>Manage organization</span>

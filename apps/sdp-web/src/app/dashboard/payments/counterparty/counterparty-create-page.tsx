@@ -61,10 +61,10 @@ export function CounterpartyCreatePage() {
             className="absolute inset-0 space-y-6 overflow-y-auto px-1 py-1"
           >
             <div className="space-y-1">
-              <h2 className="text-2xl font-medium tracking-tight text-text-extra-high">
+              <h2 className="text-2xl font-medium tracking-tight text-primary">
                 {stepMeta[currentStepId].title}
               </h2>
-              <p className="text-sm text-text-medium">{stepMeta[currentStepId].description}</p>
+              <p className="text-sm text-secondary">{stepMeta[currentStepId].description}</p>
             </div>
             <StepContent stepId={currentStepId} />
           </motion.div>

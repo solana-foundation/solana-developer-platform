@@ -43,18 +43,18 @@ export function TokenControlListsSection({
         {showControlList ? (
           <div
             data-testid="allowlist-summary-card"
-            className="rounded-xl border border-[rgba(28,28,29,0.12)] p-3"
+            className="rounded-xl border border-border-default p-3"
           >
-            <p className="text-sm font-medium text-[#1c1c1d]">{controlListSummaryTitle}</p>
+            <p className="text-sm font-medium text-primary">{controlListSummaryTitle}</p>
             {allowlistError ? (
-              <p className="mt-1 text-sm text-[#8a1f2a]">{allowlistError}</p>
+              <p className="mt-1 text-sm text-destructive-strongest">{allowlistError}</p>
             ) : (
               <>
-                <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
+                <p className="mt-1 text-sm text-secondary">
                   {(allowlistTotal ?? allowlistEntriesCount).toLocaleString("en-US")} entries
                 </p>
                 {allowlistHasMore ? (
-                  <p className="mt-1 text-xs text-[rgba(28,28,29,0.62)]">
+                  <p className="mt-1 text-xs text-secondary">
                     Showing first {allowlistEntriesCount.toLocaleString("en-US")} entries.
                   </p>
                 ) : null}
@@ -64,18 +64,18 @@ export function TokenControlListsSection({
         ) : null}
         <div
           data-testid="frozen-accounts-summary-card"
-          className="rounded-xl border border-[rgba(28,28,29,0.12)] p-3"
+          className="rounded-xl border border-border-default p-3"
         >
-          <p className="text-sm font-medium text-[#1c1c1d]">Frozen Accounts</p>
+          <p className="text-sm font-medium text-primary">Frozen Accounts</p>
           {frozenAccountsError ? (
-            <p className="mt-1 text-sm text-[#8a1f2a]">{frozenAccountsError}</p>
+            <p className="mt-1 text-sm text-destructive-strongest">{frozenAccountsError}</p>
           ) : (
             <>
-              <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
+              <p className="mt-1 text-sm text-secondary">
                 {(frozenAccountsTotal ?? frozenAccountsCount).toLocaleString("en-US")} accounts
               </p>
               {frozenAccountsHasMore ? (
-                <p className="mt-1 text-xs text-[rgba(28,28,29,0.62)]">
+                <p className="mt-1 text-xs text-secondary">
                   Showing first {frozenAccountsCount.toLocaleString("en-US")} accounts.
                 </p>
               ) : null}

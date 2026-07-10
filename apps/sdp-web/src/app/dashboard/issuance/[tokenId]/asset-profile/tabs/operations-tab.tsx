@@ -53,22 +53,22 @@ export function OperationsTab({ ops }: { ops: TokenOperations }) {
 
   return (
     <div className="space-y-5">
-      <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white">
+      <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
         {operationRows.map((row) => {
           const Icon = row.icon;
           return (
             <div
               key={row.id}
               data-testid={`fund-management-row-${row.id}`}
-              className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgba(28,28,29,0.08)] px-5 py-4 last:border-b-0"
+              className="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-5 py-4 last:border-b-0"
             >
               <div className="flex min-w-0 items-center gap-3.5">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[rgba(28,28,29,0.05)] text-[#1c1c1d]">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-primary">
                   <Icon className="h-5 w-5" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-base font-medium text-[#1c1c1d]">{row.title}</p>
-                  <p className="text-sm text-[rgba(28,28,29,0.62)]">{row.helper}</p>
+                  <p className="text-base font-medium text-primary">{row.title}</p>
+                  <p className="text-sm text-secondary">{row.helper}</p>
                 </div>
               </div>
               <TokenDisabledActionTooltip reason={row.disabledReason}>

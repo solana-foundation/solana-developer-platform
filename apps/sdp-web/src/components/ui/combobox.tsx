@@ -17,7 +17,7 @@ import { Label } from "./label";
 import { Modal } from "./modal";
 import { usePortalContainer } from "./portal-container";
 
-const DEFAULT_ICON_CLASS = "size-5 shrink-0 text-text-low";
+const DEFAULT_ICON_CLASS = "size-5 shrink-0 text-tertiary";
 
 export type ComboboxSize = "md" | "lg" | "xl";
 export type ComboboxVariant = "popover" | "dialog";
@@ -153,28 +153,28 @@ export function Combobox({
       disabled={disabled}
       onClick={variant === "dialog" ? () => handleOpenChange(!open) : undefined}
       className={cn(
-        "flex w-full items-center gap-2 border border-border-light bg-transparent text-base transition-colors hover:border-border-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-white/50",
+        "flex w-full items-center gap-2 border border-border-default bg-transparent text-base transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-white/50",
         SIZE_CLASSES[size],
         className,
-        validationError && "border-status-error-border hover:border-status-error-border"
+        validationError && "border-error-border hover:border-error-border"
       )}
     >
       {withIconClass(icon)}
       <span className="min-w-0 flex-1 text-left">
         {selected ? (
           <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-text-extra-high">{selected.label}</span>
+            <span className="truncate text-primary">{selected.label}</span>
             {selected.description ? (
-              <span className="truncate text-sm text-text-low">{selected.description}</span>
+              <span className="truncate text-sm text-tertiary">{selected.description}</span>
             ) : null}
           </span>
         ) : (
-          <span className="text-text-low">{placeholder}</span>
+          <span className="text-tertiary">{placeholder}</span>
         )}
       </span>
       {trailing ? <span className="shrink-0">{trailing}</span> : null}
       <ChevronDownIcon
-        className={cn("size-5 shrink-0 text-text-low transition-transform", open && "rotate-180")}
+        className={cn("size-5 shrink-0 text-tertiary transition-transform", open && "rotate-180")}
       />
     </button>
   );
@@ -182,9 +182,9 @@ export function Combobox({
   const panel = (
     <>
       {searchable ? (
-        <div className={cn("border-b border-border-light", variant === "dialog" ? "p-3" : "p-2")}>
+        <div className={cn("border-b border-border-default", variant === "dialog" ? "p-3" : "p-2")}>
           <div className="relative">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-text-low" />
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-tertiary" />
             <Input
               autoFocus
               aria-activedescendant={
@@ -225,11 +225,11 @@ export function Combobox({
         className={cn("overflow-y-auto", variant === "dialog" ? "max-h-96 p-2" : "max-h-56 p-1.5")}
       >
         {isLoading ? (
-          <p className="px-3 py-6 text-center text-sm text-text-low">Loading…</p>
+          <p className="px-3 py-6 text-center text-sm text-tertiary">Loading…</p>
         ) : error ? (
-          <p className="px-3 py-6 text-center text-sm text-status-error-text">{error}</p>
+          <p className="px-3 py-6 text-center text-sm text-error">{error}</p>
         ) : filtered.length === 0 ? (
-          <p className="px-3 py-6 text-center text-sm text-text-low">
+          <p className="px-3 py-6 text-center text-sm text-tertiary">
             {options.length === 0 ? "No options available." : "No matches for your search."}
           </p>
         ) : (
@@ -255,21 +255,21 @@ export function Combobox({
                 }}
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-text-extra-high">{option.label}</span>
+                  <span className="block truncate text-primary">{option.label}</span>
                   {option.description ? (
-                    <span className="block truncate text-sm text-text-low">
+                    <span className="block truncate text-sm text-tertiary">
                       {option.description}
                     </span>
                   ) : null}
                 </span>
-                {active ? <CheckIcon className="size-4 shrink-0 text-text-extra-high" /> : null}
+                {active ? <CheckIcon className="size-4 shrink-0 text-primary" /> : null}
               </button>
             );
           })
         )}
       </div>
 
-      {footer ? <div className="border-t border-border-light">{footer(close)}</div> : null}
+      {footer ? <div className="border-t border-border-default">{footer(close)}</div> : null}
     </>
   );
 
@@ -279,7 +279,7 @@ export function Combobox({
         {label}
         {required ? (
           <>
-            <span aria-hidden className="text-[#c71f37]">
+            <span aria-hidden className="text-error">
               *
             </span>
             <span className="sr-only"> (required)</span>
@@ -316,7 +316,7 @@ export function Combobox({
         </Popover.Root>
       )}
       {validationError ? (
-        <p id={`${labelId}-error`} className="text-xs text-status-error-text">
+        <p id={`${labelId}-error`} className="text-xs text-error">
           {validationError}
         </p>
       ) : null}

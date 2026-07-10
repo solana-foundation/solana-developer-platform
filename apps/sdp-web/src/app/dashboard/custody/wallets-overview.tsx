@@ -54,7 +54,7 @@ function CreateWalletTile({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="flex min-h-[340px] cursor-pointer items-center justify-center rounded-2xl border border-dashed border-[rgba(28,28,29,0.2)] bg-[#fcfcfa] text-[rgba(28,28,29,0.5)] transition-colors hover:border-[rgba(28,28,29,0.35)] hover:text-[rgba(28,28,29,0.75)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(28,28,29,0.18)] focus-visible:ring-offset-2"
+      className="flex min-h-[340px] cursor-pointer items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-border-strong hover:text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default focus-visible:ring-offset-2"
       aria-label="Create wallet"
     >
       <Plus className="h-6 w-6" />
@@ -72,23 +72,23 @@ function ProviderChoiceCard({
   provider: CustodyProviderCatalogEntry;
 }) {
   return (
-    <article className="flex min-h-[300px] flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]">
+    <article className="flex min-h-[300px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]">
       <div className="flex items-start justify-between gap-3">
         <WalletProviderMark provider={provider.id} />
       </div>
 
       <div className="mt-5 space-y-2">
-        <h3 className="text-[30px] leading-[1.1] font-medium tracking-[-0.03em] text-[#1c1c1d]">
+        <h3 className="text-[30px] leading-[1.1] font-medium tracking-[-0.03em] text-primary">
           {provider.label}
         </h3>
-        <p className="text-sm leading-6 text-[rgba(28,28,29,0.62)]">{provider.description}</p>
+        <p className="text-sm leading-6 text-secondary">{provider.description}</p>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
         {provider.capabilities.map((feature) => (
           <span
             key={feature}
-            className="rounded-full border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] px-2.5 py-1 text-[11px] font-medium text-[rgba(28,28,29,0.68)]"
+            className="rounded-full border border-border-default bg-fill-subtle px-2.5 py-1 text-[11px] font-medium text-secondary"
           >
             {feature}
           </span>
@@ -126,21 +126,21 @@ function WalletCard({
   const purposeLabel = formatPurpose(wallet.purpose);
 
   return (
-    <article className="flex min-h-[340px] flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]">
+    <article className="flex min-h-[340px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]">
       <div className="mb-4">
         {provider ? (
           <WalletProviderMark provider={provider} />
         ) : (
-          <div className="flex h-14 w-14 items-center justify-center rounded-full border border-[rgba(28,28,29,0.1)] bg-white text-lg font-semibold text-[rgba(28,28,29,0.58)]">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full border border-border-default bg-white text-lg font-semibold text-tertiary">
             {(wallet.label?.trim() || "W").slice(0, 1).toUpperCase()}
           </div>
         )}
       </div>
 
-      <p className="text-sm font-medium tracking-wide text-[rgba(28,28,29,0.58)] uppercase">
+      <p className="text-sm font-medium tracking-wide text-tertiary uppercase">
         {provider ? formatCustodyProviderName(provider) : "Wallet"}
       </p>
-      <div className="mt-1 min-w-0 text-[30px] leading-[1.1] font-medium tracking-[-0.03em] text-[#1c1c1d]">
+      <div className="mt-1 min-w-0 text-[30px] leading-[1.1] font-medium tracking-[-0.03em] text-primary">
         <div className="min-w-0">
           <WalletLabelInlineEditor
             walletId={wallet.walletId}
@@ -150,9 +150,9 @@ function WalletCard({
         </div>
       </div>
 
-      <div className="mt-6 space-y-2 rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] p-3">
+      <div className="mt-6 space-y-2 rounded-xl border border-border-subtle bg-fill-subtle p-3">
         <div className="flex items-center justify-between text-sm">
-          <span className="text-[rgba(28,28,29,0.58)]">Balance</span>
+          <span className="text-tertiary">Balance</span>
           <WalletCardBalanceValue
             walletId={wallet.walletId}
             initialBalances={wallet.balances ?? []}
@@ -160,12 +160,12 @@ function WalletCard({
         </div>
         {purposeLabel ? (
           <div className="flex items-center justify-between text-sm">
-            <span className="text-[rgba(28,28,29,0.58)]">Purpose</span>
-            <span className="font-medium text-[#1c1c1d]">{purposeLabel}</span>
+            <span className="text-tertiary">Purpose</span>
+            <span className="font-medium text-primary">{purposeLabel}</span>
           </div>
         ) : null}
         <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="text-[rgba(28,28,29,0.58)]">Address</span>
+          <span className="text-tertiary">Address</span>
           <div className="flex min-w-0 items-center gap-2">
             <WalletMetaValue
               value={wallet.publicKey}
@@ -175,7 +175,7 @@ function WalletCard({
           </div>
         </div>
         <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="text-[rgba(28,28,29,0.58)]">Wallet ID</span>
+          <span className="text-tertiary">Wallet ID</span>
           <div className="flex min-w-0 items-center gap-2">
             <WalletMetaValue
               value={wallet.walletId}
@@ -230,7 +230,7 @@ export function WalletsOverview({
 
   if (walletsError) {
     return (
-      <div className="rounded-[20px] border border-[#c71f37]/15 bg-[#c71f37]/[0.04] px-5 py-4 text-sm text-[#8a1f2a]">
+      <div className="rounded-[20px] border border-destructive/15 bg-destructive/[0.04] px-5 py-4 text-sm text-destructive-strongest">
         <p className="font-semibold">Unable to load wallets</p>
         <p className="mt-1">{walletsError}</p>
       </div>
@@ -241,17 +241,17 @@ export function WalletsOverview({
     return (
       <div className="mx-auto flex max-w-6xl flex-col gap-6 py-8">
         <div className="max-w-2xl space-y-2">
-          <h2 className="text-[32px] leading-[1.08] font-medium tracking-[-0.04em] text-[#1c1c1d]">
+          <h2 className="text-[32px] leading-[1.08] font-medium tracking-[-0.04em] text-primary">
             {canManageCustody ? "Create your first wallet" : "No wallets available"}
           </h2>
-          <p className="text-sm leading-6 text-[rgba(28,28,29,0.62)]">
+          <p className="text-sm leading-6 text-secondary">
             {canManageCustody
               ? "Choose the provider that will create and sign for the wallet."
               : "Wallet creation is limited to admins. Once a wallet is created, you can still use it across the dashboard."}
           </p>
-          {configsError ? <p className="text-sm text-[#9e2b38]">{configsError}</p> : null}
+          {configsError ? <p className="text-sm text-destructive-strong">{configsError}</p> : null}
           {canManageCustody && enabledProviderEntries.length === 0 ? (
-            <p className="text-sm text-[rgba(28,28,29,0.62)]">
+            <p className="text-sm text-secondary">
               No wallet providers are enabled for this organization tier right now.
             </p>
           ) : null}
@@ -276,7 +276,7 @@ export function WalletsOverview({
   return (
     <div className="space-y-6">
       {configsError ? (
-        <div className="rounded-[18px] border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] px-4 py-3 text-sm text-[rgba(28,28,29,0.68)]">
+        <div className="rounded-[18px] border border-border-default bg-fill-subtle px-4 py-3 text-sm text-secondary">
           {configsError}
         </div>
       ) : null}
@@ -304,7 +304,7 @@ function WalletMetaValue({ value, displayValue }: { value: string; displayValue:
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="block max-w-[18ch] truncate font-mono text-xs text-[rgba(28,28,29,0.72)]">
+        <span className="block max-w-[18ch] truncate font-mono text-xs text-secondary">
           <span aria-hidden="true">{displayValue}</span>
           <span className="sr-only">{value}</span>
         </span>

@@ -67,7 +67,7 @@ export function TokenWalletAddressField({
     <div className="space-y-2">
       <label
         htmlFor={inputId}
-        className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-[rgba(28,28,29,0.68)]"
+        className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary"
       >
         {label}
       </label>
@@ -93,7 +93,7 @@ export function TokenWalletAddressField({
               setIsOpen(true);
             }
           }}
-          className="h-11 rounded-[12px] border-[rgba(28,28,29,0.12)] bg-white pr-20 shadow-none"
+          className="h-11 rounded-[12px] border-border-default bg-white pr-20 shadow-none"
         />
         {value.trim() ? (
           <button
@@ -103,7 +103,7 @@ export function TokenWalletAddressField({
               onChange("");
               setIsOpen(false);
             }}
-            className="absolute top-1/2 right-11 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[8px] text-[rgba(28,28,29,0.5)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
+            className="absolute top-1/2 right-11 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[8px] text-tertiary transition-colors hover:bg-fill hover:text-primary"
           >
             <X className="h-4 w-4" />
           </button>
@@ -113,7 +113,7 @@ export function TokenWalletAddressField({
             type="button"
             aria-label="Select an existing wallet"
             onClick={() => setIsOpen((current) => !current)}
-            className="absolute top-1/2 right-3 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[8px] text-[rgba(28,28,29,0.62)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
+            className="absolute top-1/2 right-3 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[8px] text-secondary transition-colors hover:bg-fill hover:text-primary"
           >
             <ChevronDown
               className={["h-4 w-4 transition-transform", isOpen ? "rotate-180" : ""].join(" ")}
@@ -121,7 +121,7 @@ export function TokenWalletAddressField({
           </button>
         ) : null}
         {visibleWallets.length > 0 ? (
-          <div className="absolute z-20 mt-2 max-h-64 w-full overflow-auto rounded-[14px] border border-[rgba(28,28,29,0.12)] bg-white py-2 shadow-[0_16px_40px_rgba(28,28,29,0.12)]">
+          <div className="absolute z-20 mt-2 max-h-64 w-full overflow-auto rounded-[14px] border border-border-default bg-white py-2 shadow-[0_16px_40px_rgba(28,28,29,0.12)]">
             {visibleWallets.map((wallet) => (
               <button
                 key={wallet.id}
@@ -130,12 +130,12 @@ export function TokenWalletAddressField({
                   onChange(wallet.publicKey);
                   setIsOpen(false);
                 }}
-                className="flex w-full flex-col items-start gap-1 px-4 py-3 text-left transition-colors hover:bg-[rgba(28,28,29,0.04)]"
+                className="flex w-full flex-col items-start gap-1 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
               >
-                <span className="text-sm font-medium text-[#1c1c1d]">
+                <span className="text-sm font-medium text-primary">
                   {wallet.label?.trim() || wallet.walletId}
                 </span>
-                <span className="font-mono text-xs text-[rgba(28,28,29,0.62)]">
+                <span className="font-mono text-xs text-secondary">
                   {wallet.publicKey}
                 </span>
               </button>
@@ -144,7 +144,7 @@ export function TokenWalletAddressField({
         ) : null}
       </div>
       {availableWallets.length > 0 ? (
-        <p className="text-sm text-[rgba(28,28,29,0.64)]">
+        <p className="text-sm text-secondary">
           Type to filter existing wallets, use the dropdown, or paste any Solana address.
         </p>
       ) : null}

@@ -78,7 +78,7 @@ export function TokenAuthorityModal({
       closeDisabled={isPending}
       ariaLabel={isConfirmingNone ? noneConfirmationCopy.title : row.title}
       closeLabel="Close authority modal"
-      contentClassName="border-[rgba(28,28,29,0.12)] p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]"
+      contentClassName="border-border-default p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]"
       size="md"
     >
       {isConfirmingNone ? (
@@ -97,10 +97,10 @@ export function TokenAuthorityModal({
         />
       ) : (
         <>
-          <h4 className="pr-10 text-[24px] leading-[1.15] font-medium text-[#1c1c1d]">
+          <h4 className="pr-10 text-[24px] leading-[1.15] font-medium text-primary">
             {row.title}
           </h4>
-          <p className="mt-2 text-[15px] leading-[1.45] text-[rgba(28,28,29,0.72)]">{row.helper}</p>
+          <p className="mt-2 text-[15px] leading-[1.45] text-secondary">{row.helper}</p>
 
           <form
             className="mt-5 space-y-4"
@@ -227,7 +227,7 @@ function CurrentAuthoritySection({
 }) {
   return (
     <div className="grid gap-2">
-      <span className="text-[12px] leading-5 font-medium tracking-[0.02em] text-[rgba(28,28,29,0.68)]">
+      <span className="text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary">
         Current authority
       </span>
       <TokenWalletIdentityCard
@@ -261,17 +261,17 @@ function NoneConfirmationPanel({
   return (
     <div className="space-y-5">
       <div>
-        <h4 className="pr-10 text-[24px] leading-[1.15] font-medium text-[#1c1c1d]">
+        <h4 className="pr-10 text-[24px] leading-[1.15] font-medium text-primary">
           {copy.title}
         </h4>
-        <p className="mt-2 text-[15px] leading-[1.45] text-[rgba(28,28,29,0.72)]">
+        <p className="mt-2 text-[15px] leading-[1.45] text-secondary">
           {copy.description}
         </p>
       </div>
 
-      <div className="rounded-xl border border-[rgba(199,31,55,0.18)] bg-[rgba(199,31,55,0.04)] px-4 py-3">
-        <p className="text-sm font-medium text-[#8a1f2a]">What this means</p>
-        <p className="mt-1 text-sm leading-[1.5] text-[#8a1f2a]">{copy.impact}</p>
+      <div className="rounded-xl border border-destructive-border bg-destructive-bg px-4 py-3">
+        <p className="text-sm font-medium text-destructive-strongest">What this means</p>
+        <p className="mt-1 text-sm leading-[1.5] text-destructive-strongest">{copy.impact}</p>
       </div>
 
       <CurrentAuthoritySection
@@ -330,7 +330,7 @@ function AuthorityTargetSection({
           <Label className="grid gap-2">
             <span>New authority</span>
             <select
-              className="h-11 w-full rounded-[12px] border border-[rgba(28,28,29,0.12)] bg-white px-4 text-sm text-[#1c1c1d] shadow-none outline-none transition-[box-shadow,border-color] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)]"
+              className="h-11 w-full rounded-[12px] border border-border-default bg-white px-4 text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
               value={selectedWalletValue}
               required
               onChange={(event) => {
@@ -366,7 +366,7 @@ function AuthorityTargetSection({
         )}
 
         {isSettingNone ? (
-          <p className="text-sm text-[rgba(28,28,29,0.68)]">
+          <p className="text-sm text-secondary">
             Choosing None will clear this authority. You will confirm that change before it is
             submitted.
           </p>
@@ -379,13 +379,13 @@ function AuthorityTargetSection({
         />
 
         <div className="flex items-center justify-between gap-3 text-sm">
-          <p className="text-[rgba(28,28,29,0.68)]">
+          <p className="text-secondary">
             Controlled wallets are the recommended authority targets.
           </p>
           <Button
             type="button"
             variant="ghost"
-            className="h-auto px-0 text-[#1c1c1d]"
+            className="h-auto px-0 text-primary"
             onClick={onToggleMode}
             disabled={isPending}
           >
@@ -411,16 +411,16 @@ function AuthorityTargetSection({
       </Label>
 
       {authorityWalletsError ? (
-        <p className="text-sm text-[#8a1f2a]">{authorityWalletsError}</p>
+        <p className="text-sm text-destructive-strongest">{authorityWalletsError}</p>
       ) : (
-        <p className="text-sm text-[rgba(28,28,29,0.68)]">
+        <p className="text-sm text-secondary">
           No controlled wallets are available yet. Enter an address manually or leave it blank to
           set the authority to None.
         </p>
       )}
 
       {isSettingNone ? (
-        <p className="text-sm text-[rgba(28,28,29,0.68)]">
+        <p className="text-sm text-secondary">
           Setting this field to None will clear the authority. You will confirm that change before
           it is submitted.
         </p>

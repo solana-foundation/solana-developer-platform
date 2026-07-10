@@ -210,8 +210,8 @@ function resolveTokenLabel(token: string, wallets: RecurringPaymentWalletView[])
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-4 py-3">
-      <span className="shrink-0 text-sm text-text-medium">{label}</span>
-      <span className="min-w-0 break-all text-right text-sm font-medium text-text-extra-high">
+      <span className="shrink-0 text-sm text-secondary">{label}</span>
+      <span className="min-w-0 break-all text-right text-sm font-medium text-primary">
         {children}
       </span>
     </div>
@@ -228,13 +228,13 @@ function CopyableValue({
   empty?: string;
 }) {
   if (!value) {
-    return <span className="text-text-low">{empty}</span>;
+    return <span className="text-tertiary">{empty}</span>;
   }
 
   return (
     <span className="inline-flex max-w-full items-center justify-end gap-2">
       <span
-        className="min-w-0 truncate font-mono text-xs text-text-extra-high"
+        className="min-w-0 truncate font-mono text-xs text-primary"
         title={label ?? value}
       >
         {label ?? value}
@@ -263,7 +263,7 @@ function CollectionStatusBadge({ status }: { status: PaymentSubscriptionCollecti
 
 function ExplorerValue({ value }: { value: string | null }) {
   if (!value) {
-    return <span className="text-text-low">Not set</span>;
+    return <span className="text-tertiary">Not set</span>;
   }
 
   return (
@@ -299,18 +299,18 @@ function RecurringPaymentCollectionHistory({
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="text-sm font-medium text-text-extra-high">Collection history</h3>
+        <h3 className="text-sm font-medium text-primary">Collection history</h3>
         {attempts.length > 0 ? (
-          <span className="text-xs text-text-low">{attemptsLabel}</span>
+          <span className="text-xs text-tertiary">{attemptsLabel}</span>
         ) : null}
       </div>
-      <div className="@container/collection-history rounded-xl border border-border-light">
+      <div className="@container/collection-history rounded-xl border border-border-default">
         {error ? (
-          <div role="alert" className="p-4 text-sm text-status-error-text">
+          <div role="alert" className="p-4 text-sm text-error">
             Unable to load collection history: {error}
           </div>
         ) : attempts.length === 0 ? (
-          <div className="p-4 text-sm text-text-medium">
+          <div className="p-4 text-sm text-secondary">
             No collection attempts yet. The next scheduled collection is shown above.
           </div>
         ) : (
@@ -349,7 +349,7 @@ function RecurringPaymentCollectionHistory({
                       <span className="block truncate">{formatTimestamp(attempt.dueAt)}</span>
                     </TableCell>
                     <TableCell
-                      className={`${COLLECTION_ATTEMPTED_COLUMN_CLASS} whitespace-nowrap text-sm text-text-medium`}
+                      className={`${COLLECTION_ATTEMPTED_COLUMN_CLASS} whitespace-nowrap text-sm text-secondary`}
                     >
                       <span className="block truncate">
                         {attempt.attemptedAt ? formatTimestamp(attempt.attemptedAt) : "Not set"}
@@ -367,7 +367,7 @@ function RecurringPaymentCollectionHistory({
                       <div className="space-y-1">
                         <CollectionStatusBadge status={attempt.status} />
                         {attempt.error ? (
-                          <p className="max-w-[14rem] truncate text-xs text-status-error-text">
+                          <p className="max-w-[14rem] truncate text-xs text-error">
                             {attempt.error}
                           </p>
                         ) : null}
@@ -452,9 +452,9 @@ function ActionBand({
   children: ReactNode;
 }) {
   const styles = {
-    info: "border-border-light bg-[var(--sdp-color-info-bg)] text-[color:var(--sdp-color-info-text)]",
-    warning: "border-border-light bg-status-warning-bg text-status-warning-text",
-    danger: "border-status-error-border bg-status-error-bg text-status-error-text",
+    info: "border-border-default bg-info-bg text-info",
+    warning: "border-border-default bg-warning-bg text-warning",
+    danger: "border-error-border bg-error-bg text-error",
   }[variant];
   const Icon = variant === "danger" ? AlertCircleIcon : InfoIcon;
 
@@ -463,7 +463,7 @@ function ActionBand({
       <Icon className="size-4 shrink-0 self-center" />
       <div className="min-w-0 space-y-1">
         <p className="font-medium">{title}</p>
-        <div className="text-text-extra-high">{children}</div>
+        <div className="text-primary">{children}</div>
       </div>
     </div>
   );
@@ -604,7 +604,7 @@ function RecurringPaymentActionsMenu({
             <DropdownMenuItem
               onSelect={onCancel}
               disabled={actionsDisabled}
-              className="items-start text-status-error-text focus:text-status-error-text"
+              className="items-start text-error focus:text-error"
             >
               {pendingAction === secondaryAction.action ? (
                 <Loader2Icon className="mt-0.5 size-4 animate-spin" />
@@ -613,7 +613,7 @@ function RecurringPaymentActionsMenu({
               )}
               <span className="grid gap-0.5">
                 <span>{secondaryAction.label}</span>
-                <span className="text-xs font-normal text-status-error-text">
+                <span className="text-xs font-normal text-error">
                   Stop future collections
                 </span>
               </span>
@@ -719,19 +719,19 @@ export function RecurringPaymentsWorkspace({
           {initialError ? (
             <div
               role="alert"
-              className="border border-status-error-border bg-status-error-bg p-4 text-sm text-status-error-text"
+              className="border border-error-border bg-error-bg p-4 text-sm text-error"
             >
               <p className="font-medium">Unable to load recurring payments</p>
               <p className="mt-1">{initialError}</p>
             </div>
           ) : initialRecurringPayments.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-medium py-16 text-center">
-              <RepeatIcon className="h-10 w-10 text-text-extra-low" />
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-strong py-16 text-center">
+              <RepeatIcon className="h-10 w-10 text-muted" />
               <div className="space-y-1">
-                <p className="text-sm font-medium text-text-extra-high">
+                <p className="text-sm font-medium text-primary">
                   No recurring payments yet.
                 </p>
-                <p className="text-sm text-text-low">
+                <p className="text-sm text-tertiary">
                   Created recurring payment records will appear here.
                 </p>
               </div>
@@ -745,7 +745,7 @@ export function RecurringPaymentsWorkspace({
           ) : (
             <div className="min-h-0 flex-1 overflow-hidden">
               {lookupError ? (
-                <p className="mb-3 text-sm text-status-warning-text">{lookupError}</p>
+                <p className="mb-3 text-sm text-warning">{lookupError}</p>
               ) : null}
               <Table className="w-full [&_table]:table-fixed">
                 <TableHeader>
@@ -795,18 +795,18 @@ export function RecurringPaymentsWorkspace({
                       <TableCell className="font-medium">
                         <span className="block truncate">{getAmountLabel(recurringPayment)}</span>
                       </TableCell>
-                      <TableCell className="text-sm text-text-medium">
+                      <TableCell className="text-sm text-secondary">
                         <span className="block truncate">
                           {getCounterpartyLabel(recurringPayment)}
                         </span>
                       </TableCell>
-                      <TableCell className="hidden text-sm text-text-medium lg:table-cell">
+                      <TableCell className="hidden text-sm text-secondary lg:table-cell">
                         <span className="block truncate">{getWalletLabel(recurringPayment)}</span>
                       </TableCell>
-                      <TableCell className="hidden text-sm text-text-medium xl:table-cell">
+                      <TableCell className="hidden text-sm text-secondary xl:table-cell">
                         {formatPeriodHours(recurringPayment.periodHours)}
                       </TableCell>
-                      <TableCell className="hidden text-sm text-text-medium md:table-cell xl:hidden 2xl:table-cell">
+                      <TableCell className="hidden text-sm text-secondary md:table-cell xl:hidden 2xl:table-cell">
                         {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt)}
                       </TableCell>
                     </TableRow>
@@ -1117,10 +1117,10 @@ export function RecurringPaymentDetailWorkspace({
       <div className="mx-auto max-w-6xl space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 space-y-1">
-            <h2 className="text-3xl font-medium tracking-tight text-text-extra-high">
+            <h2 className="text-3xl font-medium tracking-tight text-primary">
               Recurring payment
             </h2>
-            <p className="truncate text-sm text-text-medium">
+            <p className="truncate text-sm text-secondary">
               {counterpartyLabel} · {amountLabel} · {scheduleLabel}
             </p>
           </div>
@@ -1149,14 +1149,14 @@ export function RecurringPaymentDetailWorkspace({
 
         <RecurringPaymentLifecycleBand status={recurringPayment.status} actionError={actionError} />
 
-        <div className="rounded-xl border border-border-light px-4">
-          <div className="divide-y divide-border-light">
+        <div className="rounded-xl border border-border-default px-4">
+          <div className="divide-y divide-border-default">
             <DetailRow label="Status">
               <RecurringPaymentStatusBadge status={recurringPayment.status} />
             </DetailRow>
             <div className="flex items-start justify-between gap-4 py-3">
-              <span className="shrink-0 text-sm text-text-medium">Amount</span>
-              <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-text-extra-high">
+              <span className="shrink-0 text-sm text-secondary">Amount</span>
+              <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
                 <span>{amountLabel}</span>
                 {isEditable ? (
                   <Button
@@ -1177,8 +1177,8 @@ export function RecurringPaymentDetailWorkspace({
               </span>
             </div>
             <div className="flex items-start justify-between gap-4 py-3">
-              <span className="shrink-0 text-sm text-text-medium">Funding wallet</span>
-              <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-text-extra-high">
+              <span className="shrink-0 text-sm text-secondary">Funding wallet</span>
+              <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
                 {wallet ? (
                   <Link
                     href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
@@ -1214,8 +1214,8 @@ export function RecurringPaymentDetailWorkspace({
               </span>
             </div>
             <div className="flex items-start justify-between gap-4 py-3">
-              <span className="shrink-0 text-sm text-text-medium">Receiving wallet</span>
-              <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-text-extra-high">
+              <span className="shrink-0 text-sm text-secondary">Receiving wallet</span>
+              <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
                 <span className="min-w-0 truncate">{receivingAccountLabel}</span>
                 {receivingAccountAddress ? (
                   <CopyableValue
@@ -1248,8 +1248,8 @@ export function RecurringPaymentDetailWorkspace({
               {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt)}
             </DetailRow>
             <div className="flex items-start justify-between gap-4 py-3">
-              <span className="shrink-0 text-sm text-text-medium">Billing interval</span>
-              <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-text-extra-high">
+              <span className="shrink-0 text-sm text-secondary">Billing interval</span>
+              <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
                 <span>{scheduleLabel}</span>
                 {isEditable ? (
                   <Button
@@ -1273,8 +1273,8 @@ export function RecurringPaymentDetailWorkspace({
               </span>
             </div>
             <div className="flex items-start justify-between gap-4 py-3">
-              <span className="shrink-0 text-sm text-text-medium">Currency</span>
-              <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-text-extra-high">
+              <span className="shrink-0 text-sm text-secondary">Currency</span>
+              <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-primary">
                 <span>{currencyLabel}</span>
                 {isEditable ? (
                   <Button
@@ -1308,7 +1308,7 @@ export function RecurringPaymentDetailWorkspace({
                   Open metadata
                 </a>
               ) : (
-                <span className="text-text-low">Not set</span>
+                <span className="text-tertiary">Not set</span>
               )}
             </DetailRow>
             <DetailRow label="Created">{formatTimestamp(recurringPayment.createdAt)}</DetailRow>
@@ -1330,10 +1330,10 @@ export function RecurringPaymentDetailWorkspace({
             }}
           >
             <div className="space-y-1">
-              <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
+              <h2 className="text-lg font-medium tracking-tight text-primary">
                 Edit funding wallet
               </h2>
-              <p className="text-sm text-text-medium">
+              <p className="text-sm text-secondary">
                 Choose the wallet used to fund this recurring payment.
               </p>
             </div>
@@ -1400,10 +1400,10 @@ export function RecurringPaymentDetailWorkspace({
             }}
           >
             <div className="space-y-1">
-              <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
+              <h2 className="text-lg font-medium tracking-tight text-primary">
                 Edit receiving wallet
               </h2>
-              <p className="text-sm text-text-medium">
+              <p className="text-sm text-secondary">
                 Choose where this recurring payment sends funds.
               </p>
             </div>
@@ -1473,10 +1473,10 @@ export function RecurringPaymentDetailWorkspace({
             }}
           >
             <div className="space-y-1">
-              <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
+              <h2 className="text-lg font-medium tracking-tight text-primary">
                 Edit amount
               </h2>
-              <p className="text-sm text-text-medium">
+              <p className="text-sm text-secondary">
                 Set the amount collected each billing period.
               </p>
             </div>
@@ -1495,9 +1495,9 @@ export function RecurringPaymentDetailWorkspace({
                 placeholder="0.00"
               />
               {amountValidationError ? (
-                <p className="text-sm text-status-error-text">{amountValidationError}</p>
+                <p className="text-sm text-error">{amountValidationError}</p>
               ) : (
-                <p className="text-sm text-text-low">{currencyLabel}</p>
+                <p className="text-sm text-tertiary">{currencyLabel}</p>
               )}
             </div>
             <div className="flex justify-end gap-2">
@@ -1540,10 +1540,10 @@ export function RecurringPaymentDetailWorkspace({
             }}
           >
             <div className="space-y-1">
-              <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
+              <h2 className="text-lg font-medium tracking-tight text-primary">
                 Edit billing interval
               </h2>
-              <p className="text-sm text-text-medium">
+              <p className="text-sm text-secondary">
                 Choose how often this recurring payment should collect.
               </p>
             </div>
@@ -1575,11 +1575,11 @@ export function RecurringPaymentDetailWorkspace({
                   placeholder="24"
                 />
                 {billingIntervalValidationError ? (
-                  <p className="text-sm text-status-error-text">{billingIntervalValidationError}</p>
+                  <p className="text-sm text-error">{billingIntervalValidationError}</p>
                 ) : null}
               </div>
             ) : billingIntervalValidationError ? (
-              <p className="text-sm text-status-error-text">{billingIntervalValidationError}</p>
+              <p className="text-sm text-error">{billingIntervalValidationError}</p>
             ) : null}
             <div className="flex justify-end gap-2">
               <Button
@@ -1621,10 +1621,10 @@ export function RecurringPaymentDetailWorkspace({
             }}
           >
             <div className="space-y-1">
-              <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
+              <h2 className="text-lg font-medium tracking-tight text-primary">
                 Edit currency
               </h2>
-              <p className="text-sm text-text-medium">
+              <p className="text-sm text-secondary">
                 Choose a token balance from the funding wallet.
               </p>
             </div>
@@ -1690,10 +1690,10 @@ export function RecurringPaymentDetailWorkspace({
         >
           <div className="space-y-5 p-6">
             <div className="space-y-1">
-              <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
+              <h2 className="text-lg font-medium tracking-tight text-primary">
                 Cancel recurring payment?
               </h2>
-              <p className="text-sm text-text-medium">
+              <p className="text-sm text-secondary">
                 This stops future collections for {counterpartyLabel}. You can resume the payment
                 later from the Actions menu.
               </p>

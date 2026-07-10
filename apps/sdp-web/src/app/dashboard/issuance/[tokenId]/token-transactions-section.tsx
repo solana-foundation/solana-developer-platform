@@ -28,14 +28,14 @@ function transactionStatusBadgeClass(status: string): string {
   switch (status) {
     case "confirmed":
     case "finalized":
-      return "bg-[rgba(0,160,102,0.08)] text-[#00a066]";
+      return "bg-success-bg text-success";
     case "pending":
     case "processing":
-      return "bg-[rgba(234,179,8,0.08)] text-[#92400e]";
+      return "bg-warning-bg text-warning";
     case "failed":
-      return "bg-[rgba(220,38,38,0.08)] text-[#dc2626]";
+      return "bg-error-bg text-error";
     default:
-      return "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]";
+      return "bg-fill text-secondary";
   }
 }
 
@@ -54,16 +54,16 @@ export function TokenTransactionsSection({
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-6 py-10">
-            <div className="flex items-center gap-3 text-sm text-[rgba(28,28,29,0.64)]">
+          <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-border-subtle bg-fill-subtle px-6 py-10">
+            <div className="flex items-center gap-3 text-sm text-secondary">
               <Loader2 className="size-4 animate-spin" />
               <span>Loading operations history…</span>
             </div>
           </div>
         ) : transactionsError ? (
-          <p className="text-sm text-[#dc2626]">{transactionsError}</p>
+          <p className="text-sm text-error">{transactionsError}</p>
         ) : transactions.length === 0 ? (
-          <p className="text-sm text-[rgba(28,28,29,0.68)]">No transactions yet.</p>
+          <p className="text-sm text-secondary">No transactions yet.</p>
         ) : (
           <div className="space-y-3">
             <Table>
@@ -97,7 +97,7 @@ export function TokenTransactionsSection({
               </TableBody>
             </Table>
             {transactionsHasMore ? (
-              <p className="text-xs text-[rgba(28,28,29,0.62)]">
+              <p className="text-xs text-secondary">
                 Showing first {transactions.length} transactions
                 {transactionsTotal ? ` of ${transactionsTotal}` : ""}. Use pagination to view older
                 records.

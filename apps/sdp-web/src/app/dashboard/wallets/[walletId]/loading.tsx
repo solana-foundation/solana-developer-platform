@@ -3,12 +3,12 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { Button } from "@/components/ui/button";
 
 function SkeletonBlock({ className }: { className: string }) {
-  return <div className={`animate-pulse rounded-[16px] bg-[rgba(28,28,29,0.1)] ${className}`} />;
+  return <div className={`animate-pulse rounded-[16px] bg-fill-strong ${className}`} />;
 }
 
 function WalletInfoCardSkeleton() {
   return (
-    <section className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+    <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
       <div className="space-y-6 p-6">
         <div className="flex items-start gap-4">
           <SkeletonBlock className="h-12 w-12 rounded-2xl" />
@@ -17,11 +17,11 @@ function WalletInfoCardSkeleton() {
             <SkeletonBlock className="h-4 w-28" />
           </div>
         </div>
-        <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)]">
+        <div className="overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
           {["public-key", "wallet-id", "status", "provider"].map((row) => (
             <div
               key={row}
-              className="flex items-center justify-between gap-4 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0"
+              className="flex items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0"
             >
               <SkeletonBlock className="h-4 w-24" />
               <SkeletonBlock className="h-4 w-44" />
@@ -35,17 +35,17 @@ function WalletInfoCardSkeleton() {
 
 function BalanceCardSkeleton() {
   return (
-    <section className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+    <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
       <div className="space-y-6 p-6">
         <div>
           <SkeletonBlock className="h-3 w-28" />
           <SkeletonBlock className="mt-3 h-10 w-36" />
         </div>
-        <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)]">
+        <div className="overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
           {["address", "provider", "purpose"].map((row) => (
             <div
               key={row}
-              className="flex items-center justify-between gap-4 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0"
+              className="flex items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0"
             >
               <SkeletonBlock className="h-4 w-20" />
               <SkeletonBlock className="h-4 w-32" />
@@ -61,11 +61,11 @@ function BalancesSectionSkeleton() {
   return (
     <section className="space-y-3">
       <SkeletonBlock className="h-10 w-36" />
-      <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+      <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
         {["balance-1", "balance-2"].map((row) => (
           <div
             key={row}
-            className="flex items-center justify-between gap-4 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0"
+            className="flex items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0"
           >
             <div className="space-y-2">
               <SkeletonBlock className="h-5 w-20" />
@@ -81,7 +81,7 @@ function BalancesSectionSkeleton() {
 
 function ActivitySectionSkeleton() {
   return (
-    <section className="rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white p-6">
+    <section className="rounded-2xl border border-border-default bg-white p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <SkeletonBlock className="h-7 w-40" />

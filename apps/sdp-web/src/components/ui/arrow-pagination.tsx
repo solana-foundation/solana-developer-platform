@@ -22,7 +22,7 @@ export function ArrowPagination({
 }: ArrowPaginationProps) {
   return (
     <div className={cn("flex items-center justify-between gap-3", className)}>
-      <span className="text-xs text-text-medium">{summary ?? `Page ${page} of ${pageCount}`}</span>
+      <span className="text-xs text-secondary">{summary ?? `Page ${page} of ${pageCount}`}</span>
       <div className="flex items-center gap-2">
         <Button
           type="button"

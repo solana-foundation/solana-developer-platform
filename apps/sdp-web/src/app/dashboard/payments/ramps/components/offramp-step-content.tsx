@@ -41,7 +41,7 @@ function OfframpManualQuoteStep({
 
   if (!quote.paymentInstructions) {
     return (
-      <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-5 py-5 text-sm text-status-error-text">
+      <div className="rounded-2xl border border-error-border bg-error-bg px-5 py-5 text-sm text-error">
         Ramp quote is missing payment instructions.
       </div>
     );
@@ -73,7 +73,7 @@ function OfframpManualQuoteStep({
         description={`Send ${fields.amount.trim()} ${cryptoToken.toUpperCase()} to the deposit address below before the quote expires. The provider converts it at the locked rate and pays out to the saved bank account automatically.`}
         action={sendAction}
       />
-      <div className="border-t border-border-light pt-5">
+      <div className="border-t border-border-default pt-5">
         <RampStatusPanel direction="offramp" transfer={transferStatus} />
       </div>
     </div>
@@ -116,7 +116,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
           options={walletOptions}
           placeholder="Select a source wallet"
           searchPlaceholder="Search wallets"
-          icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
+          icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
           isLoading={walletsLoading}
         />
         {selectedWallet ? <WalletAssetBreakdown wallet={selectedWallet} /> : null}
@@ -127,7 +127,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   if (currentStepId === "WITHDRAW") {
     if (!hasEnabledRampProvider(rampProviderAccess)) {
       return (
-        <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
+        <div className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-5 text-sm text-tertiary">
           No payout providers are enabled for this organization.
         </div>
       );
@@ -153,7 +153,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
           onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
         />
         {requirementsBlocker ? (
-          <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text">
+          <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
             {requirementsBlocker}
           </div>
         ) : null}
@@ -190,7 +190,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     return (
       <div className="space-y-6">
         <MoonpayRampFrame title={`${quote.provider} payout`} src={quote.hostedUrl} />
-        <div className="border-t border-border-light pt-5">
+        <div className="border-t border-border-default pt-5">
           <RampStatusPanel direction="offramp" transfer={transferStatus} />
         </div>
       </div>
@@ -215,7 +215,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
           fiatCurrency={selectedRampPair.fiatCurrency}
           onSessionExpiring={refreshQuote}
         />
-        <div className="border-t border-border-light pt-5">
+        <div className="border-t border-border-default pt-5">
           <RampStatusPanel direction="offramp" transfer={transferStatus} />
         </div>
       </div>

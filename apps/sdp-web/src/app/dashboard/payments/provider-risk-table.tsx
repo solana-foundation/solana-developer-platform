@@ -34,16 +34,16 @@ export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTabl
       onClose={onClose}
       ariaLabel={title}
       closeLabel={`Close ${title}`}
-      contentClassName="rounded-[24px] border-[rgba(28,28,29,0.12)] p-6"
+      contentClassName="rounded-[24px] border-border-default p-6"
       size="xl"
     >
       <div className="mb-5 pr-14">
         <div className="space-y-1">
-          <p className="text-[22px] font-medium text-[#1c1c1d]">{title}</p>
-          <p className="text-sm text-[rgba(28,28,29,0.56)]">
+          <p className="text-[22px] font-medium text-primary">{title}</p>
+          <p className="text-sm text-tertiary">
             {new Date(snapshot.checkedAt).toLocaleString()}
           </p>
-          <p className="text-sm text-[rgba(28,28,29,0.56)]">
+          <p className="text-sm text-tertiary">
             This screening checks major risk factors such as sanctions exposure and other compliance
             signals from the connected providers.
           </p>
@@ -59,10 +59,10 @@ export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTabl
         <TableBody>
           {providers.map((provider) => (
             <TableRow key={provider.provider}>
-              <TableCell className="font-medium text-[#1c1c1d]">
+              <TableCell className="font-medium text-primary">
                 {toProviderLabel(provider.provider)}
               </TableCell>
-              <TableCell className="text-[rgba(28,28,29,0.8)]">
+              <TableCell className="text-primary">
                 <span
                   className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${riskToneClassName(provider)}`}
                 >

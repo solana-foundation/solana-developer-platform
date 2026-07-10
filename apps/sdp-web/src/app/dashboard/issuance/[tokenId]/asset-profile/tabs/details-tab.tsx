@@ -77,7 +77,7 @@ export function DetailsTab({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
-        <p className="inline-flex items-center gap-1.5 text-sm text-[rgba(28,28,29,0.55)]">
+        <p className="inline-flex items-center gap-1.5 text-sm text-tertiary">
           <Lock className="h-3.5 w-3.5 shrink-0" />
           This information is private by default and won&apos;t be visible to the public unless you
           choose to include it.
@@ -114,7 +114,7 @@ export function DetailsTab({
         <div className="mt-4 grid gap-1.5">
           <Label htmlFor="asset-description">
             Description{" "}
-            <span aria-hidden className="text-[#c71f37]">
+            <span aria-hidden className="text-destructive">
               *
             </span>
             <span className="sr-only"> (required)</span>
@@ -128,14 +128,14 @@ export function DetailsTab({
             placeholder="Describe what this asset represents."
             aria-invalid={descriptionError ? true : undefined}
             className={cn(
-              "w-full rounded-[14px] border bg-white px-4 py-3 text-sm text-[#1c1c1d] outline-none transition-[box-shadow,border-color] placeholder:text-[rgba(28,28,29,0.4)]",
+              "w-full rounded-[14px] border bg-white px-4 py-3 text-sm text-primary outline-none transition-[box-shadow,border-color] placeholder:text-muted",
               descriptionError
-                ? "border-[#c71f37] focus:border-[#c71f37] focus:ring-2 focus:ring-[rgba(199,31,55,0.15)]"
-                : "border-[rgba(28,28,29,0.14)] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)]"
+                ? "border-destructive focus:border-destructive focus:ring-2 focus:ring-destructive-border"
+                : "border-border-default focus:border-border-strong focus:ring-2 focus:ring-border-default"
             )}
           />
           {descriptionError ? (
-            <p className="text-xs text-[#c71f37]" role="alert">
+            <p className="text-xs text-destructive" role="alert">
               {descriptionError}
             </p>
           ) : null}

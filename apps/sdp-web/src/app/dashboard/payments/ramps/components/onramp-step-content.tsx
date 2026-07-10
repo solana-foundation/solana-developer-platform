@@ -45,7 +45,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   if (currentStepId === "DEPOSIT") {
     if (!hasEnabledRampProvider(rampProviderAccess)) {
       return (
-        <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
+        <div className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-5 text-sm text-tertiary">
           No deposit providers are enabled for this organization.
         </div>
       );
@@ -71,7 +71,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
         />
         {requirementsBlocker ? (
-          <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text">
+          <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
             {requirementsBlocker}
           </div>
         ) : null}
@@ -111,7 +111,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           clientSecret={quote.clientSecret}
           publishableKey={quote.publishableKey}
         />
-        <div className="border-t border-border-light pt-5">
+        <div className="border-t border-border-default pt-5">
           <RampStatusPanel direction="onramp" transfer={transferStatus} />
         </div>
       </div>
@@ -126,7 +126,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         ) : (
           <MoonpayRampFrame title={`${quote.provider} deposit`} src={quote.hostedUrl} />
         )}
-        <div className="border-t border-border-light pt-5">
+        <div className="border-t border-border-default pt-5">
           <RampStatusPanel direction="onramp" transfer={transferStatus} />
         </div>
       </div>
@@ -136,7 +136,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "manual_instructions") {
     if (!quote.paymentInstructions) {
       return (
-        <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-5 py-5 text-sm text-status-error-text">
+        <div className="rounded-2xl border border-error-border bg-error-bg px-5 py-5 text-sm text-error">
           Ramp quote is missing payment instructions.
         </div>
       );
@@ -167,7 +167,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           instructions={quote.paymentInstructions}
           action={simulateAction}
         />
-        <div className="border-t border-border-light pt-5">
+        <div className="border-t border-border-default pt-5">
           <RampStatusPanel direction="onramp" transfer={transferStatus} />
         </div>
       </div>

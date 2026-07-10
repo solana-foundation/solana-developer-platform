@@ -95,7 +95,7 @@ async function OnboardingGateSection({ orgId }: { orgId: string }) {
   const organization = await getClerkOrganizationSummary(orgId);
 
   return (
-    <Card className="rounded-[24px] border-[rgba(28,28,29,0.08)] shadow-none">
+    <Card className="rounded-[24px] border-border-subtle shadow-none">
       <CardHeader>
         <CardTitle>Waiting for organization sync</CardTitle>
         <CardDescription>
@@ -103,23 +103,23 @@ async function OnboardingGateSection({ orgId }: { orgId: string }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] p-4 text-sm">
+        <div className="rounded-xl border border-border-default bg-fill-subtle p-4 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-[rgba(28,28,29,0.72)]">Organization name</span>
-            <span className="font-medium text-[#1c1c1d]">{organization.name ?? "Unavailable"}</span>
+            <span className="text-secondary">Organization name</span>
+            <span className="font-medium text-primary">{organization.name ?? "Unavailable"}</span>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-[rgba(28,28,29,0.72)]">Organization slug</span>
-            <span className="font-mono text-xs text-[#1c1c1d]">
+            <span className="text-secondary">Organization slug</span>
+            <span className="font-mono text-xs text-primary">
               {organization.slug ?? "Unavailable"}
             </span>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-[rgba(28,28,29,0.72)]">Clerk organization ID</span>
-            <span className="font-mono text-xs text-[#1c1c1d]">{organization.id}</span>
+            <span className="text-secondary">Clerk organization ID</span>
+            <span className="font-mono text-xs text-primary">{organization.id}</span>
           </div>
         </div>
-        <p className="text-sm text-[rgba(28,28,29,0.72)]">
+        <p className="text-sm text-secondary">
           Organization creation and membership sync now happen from Clerk webhooks only. Refresh in
           a moment; if this keeps showing, check the Clerk webhook delivery for this organization.
         </p>

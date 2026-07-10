@@ -55,14 +55,14 @@ function MetricCard({
   hint?: string | null;
 }) {
   return (
-    <Card className="gap-0 rounded-[18px] border-[rgba(28,28,29,0.1)] py-0 shadow-none">
+    <Card className="gap-0 rounded-[18px] border-border-default py-0 shadow-none">
       <CardContent className="space-y-2 px-6 py-6">
-        <p className="text-[15px] text-[rgba(28,28,29,0.56)]">{label}</p>
-        <p className="text-[24px] leading-none font-medium tracking-[-0.03em] text-[#1c1c1d] sm:text-[30px]">
+        <p className="text-[15px] text-tertiary">{label}</p>
+        <p className="text-[24px] leading-none font-medium tracking-[-0.03em] text-primary sm:text-[30px]">
           {error ? "Unavailable" : formatCurrencyAmount(value)}
         </p>
-        {error ? <p className="text-sm text-[#9e2b38]">{error}</p> : null}
-        {!error && hint ? <p className="text-sm text-[rgba(28,28,29,0.56)]">{hint}</p> : null}
+        {error ? <p className="text-sm text-destructive-strong">{error}</p> : null}
+        {!error && hint ? <p className="text-sm text-tertiary">{hint}</p> : null}
       </CardContent>
     </Card>
   );
@@ -170,9 +170,9 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
             </CardHeader>
             <CardContent>
               {activityError ? (
-                <p className="text-sm text-[#9e2b38]">{activityError}</p>
+                <p className="text-sm text-destructive-strong">{activityError}</p>
               ) : activityRows.length === 0 ? (
-                <p className="text-sm text-[rgba(28,28,29,0.72)]">{emptyActivityMessage}</p>
+                <p className="text-sm text-secondary">{emptyActivityMessage}</p>
               ) : (
                 <TooltipProvider>
                   <Table className="min-w-0 [&_table]:table-fixed">
@@ -194,31 +194,31 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
 
                         return (
                           <TableRow key={row.id}>
-                            <TableCell className="pl-6 text-[rgba(28,28,29,0.72)]">
+                            <TableCell className="pl-6 text-secondary">
                               {timeLabel}
                             </TableCell>
                             <TableCell className="min-w-0 md:hidden">
                               <div className="min-w-0">
                                 <div className="truncate font-medium">{row.type}</div>
-                                <div className="mt-1 truncate text-xs text-[rgba(28,28,29,0.56)]">
+                                <div className="mt-1 truncate text-xs text-tertiary">
                                   {amountLabel}
                                 </div>
                                 <TruncatedTableText
                                   value={row.address}
-                                  className="mt-1 truncate font-mono text-xs text-[rgba(28,28,29,0.56)]"
+                                  className="mt-1 truncate font-mono text-xs text-tertiary"
                                 />
                               </div>
                             </TableCell>
                             <TableCell className="hidden font-medium md:table-cell">
                               {row.type}
                             </TableCell>
-                            <TableCell className="hidden text-[rgba(28,28,29,0.78)] md:table-cell">
+                            <TableCell className="hidden text-secondary md:table-cell">
                               <TruncatedTableText value={row.token} className="truncate" />
                             </TableCell>
-                            <TableCell className="hidden text-[rgba(28,28,29,0.78)] md:table-cell">
+                            <TableCell className="hidden text-secondary md:table-cell">
                               <TruncatedTableText value={amountLabel} className="truncate" />
                             </TableCell>
-                            <TableCell className="hidden pr-6 font-mono text-xs text-[rgba(28,28,29,0.72)] md:table-cell">
+                            <TableCell className="hidden pr-6 font-mono text-xs text-secondary md:table-cell">
                               <TruncatedTableText value={row.address} className="truncate" />
                             </TableCell>
                           </TableRow>

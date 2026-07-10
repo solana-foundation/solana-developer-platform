@@ -30,26 +30,26 @@ export function SelectionCard({
       className={cn(
         "flex flex-col rounded-2xl border p-3.5 text-left transition-colors",
         selected
-          ? "border-[#1c1c1d] bg-[rgba(28,28,29,0.05)]"
-          : "border-[rgba(28,28,29,0.14)] bg-white hover:bg-[rgba(28,28,29,0.03)]"
+          ? "border-primary bg-fill-subtle"
+          : "border-border-default bg-white hover:bg-fill-subtle"
       )}
     >
       <div className="flex items-start justify-between gap-3">
-        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.05)] text-[#1c1c1d]">
+        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-fill-subtle text-primary">
           <Icon className="h-4 w-4" />
         </span>
         <span
           className={cn(
             "mt-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2",
-            selected ? "border-[#1c1c1d]" : "border-[rgba(28,28,29,0.25)]"
+            selected ? "border-primary" : "border-border-strong"
           )}
           aria-hidden
         >
-          {selected ? <span className="h-2 w-2 rounded-full bg-[#1c1c1d]" /> : null}
+          {selected ? <span className="h-2 w-2 rounded-full bg-primary" /> : null}
         </span>
       </div>
-      <p className="mt-3 text-sm font-semibold text-[#1c1c1d]">{title}</p>
-      <p className="mt-1 text-[13px] leading-snug text-[rgba(28,28,29,0.62)]">{description}</p>
+      <p className="mt-3 text-sm font-semibold text-primary">{title}</p>
+      <p className="mt-1 text-[13px] leading-snug text-secondary">{description}</p>
     </button>
   );
 }

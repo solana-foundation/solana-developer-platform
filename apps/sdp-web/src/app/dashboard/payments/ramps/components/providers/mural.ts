@@ -8,41 +8,41 @@ export const MURAL_ONBOARDING_COPY = {
     description:
       "Mural Pay requires the counterparty to accept hosted terms before identity verification can begin.",
     icon: FileSignatureIcon,
-    iconClassName: "text-text-extra-high",
+    iconClassName: "text-primary",
   },
   customer_verification_required: {
     title: "Verify your identity",
     description:
       "Mural Pay needs the counterparty to complete hosted verification before activating a funding account.",
     icon: ShieldCheckIcon,
-    iconClassName: "text-text-extra-high",
+    iconClassName: "text-primary",
   },
   customer_verifying: {
     title: "Verification in review",
     description:
       "Mural Pay is reviewing the counterparty. Funding instructions will appear once verification is approved.",
     icon: Loader2Icon,
-    iconClassName: "animate-spin text-text-medium",
+    iconClassName: "animate-spin text-secondary",
   },
   customer_verification_failed: {
     title: "Identity verification was not approved",
     description:
       "Mural Pay couldn't approve this counterparty, so a funding account can't be activated.",
     icon: XCircleIcon,
-    iconClassName: "text-status-error-text",
+    iconClassName: "text-error",
   },
   funding_account_provisioning: {
     title: "Setting up your funding account",
     description:
       "Mural Pay is activating a funding account. Bank details will appear here when it is ready.",
     icon: Loader2Icon,
-    iconClassName: "animate-spin text-text-medium",
+    iconClassName: "animate-spin text-secondary",
   },
   ready: {
     title: "Preparing your instructions",
     description: "Your Mural Pay funding account is ready. Fetching the latest details now.",
     icon: Loader2Icon,
-    iconClassName: "animate-spin text-text-medium",
+    iconClassName: "animate-spin text-secondary",
   },
 } as const satisfies Record<MuralOnboardingPanelStatus, OnboardingCopy>;
 

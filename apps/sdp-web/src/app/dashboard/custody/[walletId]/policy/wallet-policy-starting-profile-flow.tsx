@@ -855,17 +855,17 @@ export function WalletPolicyStartingProfileFlow({
       <StepIndicator stepIndex={stepIndex} />
 
       <div className="mt-6 space-y-1">
-        <h1 className="text-2xl font-medium text-text-extra-high">{currentStep.title}</h1>
-        <p className="text-sm text-text-medium">{currentStep.description}</p>
+        <h1 className="text-2xl font-medium text-primary">{currentStep.title}</h1>
+        <p className="text-sm text-secondary">{currentStep.description}</p>
         {savedDraft?.updatedAt && localStatus === "draft" ? (
-          <p className="pt-1 text-xs text-text-extra-low">
+          <p className="pt-1 text-xs text-muted">
             Draft saved {formatDateTime(savedDraft.updatedAt)}
           </p>
         ) : null}
       </div>
 
       {policyError ? (
-        <div className="mt-4 rounded-md border border-status-error-border bg-status-error-bg px-3 py-2 text-sm text-status-error-text">
+        <div className="mt-4 rounded-md border border-error-border bg-error-bg px-3 py-2 text-sm text-error">
           {policyError}
         </div>
       ) : null}
@@ -961,39 +961,39 @@ function PolicyAuditPanel({ audit }: { audit: PolicyAudit | null }) {
   if (evaluations.length === 0) return null;
 
   return (
-    <section className="mb-4 rounded-lg border border-border-light bg-white p-4">
+    <section className="mb-4 rounded-lg border border-border-default bg-white p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-text-extra-high">Recent policy decisions</h2>
-          <p className="mt-1 text-xs text-text-extra-low">
+          <h2 className="text-sm font-semibold text-primary">Recent policy decisions</h2>
+          <p className="mt-1 text-xs text-muted">
             {formatCount(evaluations.length, "evaluation")} shown for this wallet
           </p>
         </div>
       </div>
 
-      <div className="mt-3 divide-y divide-border-light">
+      <div className="mt-3 divide-y divide-border-default">
         {evaluations.map((entry) => (
           <div key={entry.policyEvaluationId} className="py-3 first:pt-0 last:pb-0">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-semibold text-text-extra-high">
+              <span className="font-semibold text-primary">
                 {formatPolicyDecision(entry.decision)}
               </span>
-              <span className="rounded-full bg-border-extra-light px-2 py-0.5 text-text-medium">
+              <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-secondary">
                 {formatPolicyStatus(entry.status)}
               </span>
               {entry.requiresApproval ? (
-                <span className="rounded-full bg-status-warning-bg px-2 py-0.5 text-status-warning-text">
+                <span className="rounded-full bg-warning-bg px-2 py-0.5 text-warning">
                   Needs approval
                 </span>
               ) : null}
             </div>
-            <p className="mt-1 text-sm leading-5 text-text-medium">
+            <p className="mt-1 text-sm leading-5 text-secondary">
               {formatPolicyAuditOperation(entry)}
             </p>
-            <p className="mt-1 text-xs leading-5 text-text-medium">
+            <p className="mt-1 text-xs leading-5 text-secondary">
               {entry.reason ?? entry.reasonCode}
             </p>
-            <p className="mt-1 text-xs text-text-extra-low">
+            <p className="mt-1 text-xs text-muted">
               {formatDateTime(entry.evaluatedAt)}
               {entry.approvalRequestId ? ` / Approval ${entry.approvalRequestId}` : ""}
             </p>
@@ -1014,15 +1014,15 @@ function StepIndicator({ stepIndex }: { stepIndex: number }) {
             className={cn(
               "h-1.5 rounded-full transition-all duration-200",
               index === stepIndex
-                ? "w-4 bg-gray-1400"
+                ? "w-4 bg-primary"
                 : index < stepIndex
-                  ? "w-1.5 bg-gray-1400"
-                  : "w-1.5 bg-border-light"
+                  ? "w-1.5 bg-primary"
+                  : "w-1.5 bg-fill-strong"
             )}
           />
         ))}
       </div>
-      <span className="text-xs text-text-extra-low">
+      <span className="text-xs text-muted">
         Step {stepIndex + 1} of {FLOW_STEPS.length}
       </span>
     </div>
@@ -1032,9 +1032,9 @@ function StepIndicator({ stepIndex }: { stepIndex: number }) {
 function LoadingState() {
   return (
     <div className="grid gap-3">
-      <div className="h-20 animate-pulse rounded-lg bg-gray-100" />
-      <div className="h-20 animate-pulse rounded-lg bg-gray-100" />
-      <div className="h-20 animate-pulse rounded-lg bg-gray-100" />
+      <div className="h-20 animate-pulse rounded-lg bg-surface-sunken" />
+      <div className="h-20 animate-pulse rounded-lg bg-surface-sunken" />
+      <div className="h-20 animate-pulse rounded-lg bg-surface-sunken" />
     </div>
   );
 }
@@ -1060,14 +1060,14 @@ function IntentStep({
             className={cn(
               "relative min-h-[150px] rounded-lg border p-4 pr-14 text-left transition-colors",
               selected
-                ? "border-[rgba(28,28,29,0.72)] bg-[rgba(28,28,29,0.04)] shadow-[inset_0_0_0_1px_rgba(28,28,29,0.72)]"
-                : "border-border-light bg-white hover:bg-gray-100"
+                ? "border-primary bg-fill-subtle shadow-[inset_0_0_0_1px_rgba(28,28,29,0.72)]"
+                : "border-border-default bg-white hover:bg-surface-sunken"
             )}
           >
-            <p className="text-base font-semibold text-text-extra-high">{category.title}</p>
-            <p className="mt-2 text-sm leading-6 text-text-medium">{category.description}</p>
+            <p className="text-base font-semibold text-primary">{category.title}</p>
+            <p className="mt-2 text-sm leading-6 text-secondary">{category.description}</p>
             {selected ? (
-              <span className="absolute right-4 bottom-4 flex size-6 items-center justify-center rounded-full bg-gray-1400 text-white">
+              <span className="absolute right-4 bottom-4 flex size-6 items-center justify-center rounded-full bg-primary text-white">
                 <Check className="size-4" />
                 <span className="sr-only">Selected</span>
               </span>
@@ -1121,7 +1121,7 @@ function DetailsStep({
   );
 
   return (
-    <div className="border-y border-border-light">
+    <div className="border-y border-border-default">
       {selected.map((category) => {
         const expanded = expandedRuleSet.has(category.id);
 
@@ -1195,7 +1195,7 @@ function RuleSection({
   children: ReactNode;
 }) {
   return (
-    <section className="border-t border-border-light first:border-t-0">
+    <section className="border-t border-border-default first:border-t-0">
       <button
         type="button"
         aria-expanded={expanded}
@@ -1203,12 +1203,12 @@ function RuleSection({
         className="flex w-full items-start justify-between gap-4 py-3.5 pr-2 text-left"
       >
         <span className="min-w-0">
-          <span className="block text-base font-semibold text-text-extra-high">
+          <span className="block text-base font-semibold text-primary">
             {category.title}
           </span>
-          <span className="mt-1 block text-sm leading-5 text-text-medium">{summary}</span>
+          <span className="mt-1 block text-sm leading-5 text-secondary">{summary}</span>
         </span>
-        <span className="flex size-6 shrink-0 items-center justify-center text-text-low">
+        <span className="flex size-6 shrink-0 items-center justify-center text-tertiary">
           <ChevronDown
             aria-hidden="true"
             className={cn("size-4 transition-transform duration-200", expanded && "rotate-180")}
@@ -1244,8 +1244,8 @@ function OptionGrid<TValue extends string>({
             className={cn(
               "min-h-11 rounded-md border px-3 py-2 text-left text-sm font-medium transition-colors",
               selected
-                ? "border-[rgba(28,28,29,0.72)] bg-[rgba(28,28,29,0.04)] text-text-extra-high"
-                : "border-border-light bg-white text-text-medium hover:bg-gray-100"
+                ? "border-primary bg-fill-subtle text-primary"
+                : "border-border-default bg-white text-secondary hover:bg-surface-sunken"
             )}
           >
             {option.label}
@@ -1265,7 +1265,7 @@ function OperationRuleEditor({
 }) {
   return (
     <div className="space-y-3">
-      <p className="text-sm leading-6 text-text-medium">
+      <p className="text-sm leading-6 text-secondary">
         Selected families are denied before signing or execution. Unselected families continue to
         use default allow unless another rule applies.
       </p>
@@ -1289,18 +1289,18 @@ function DestinationRuleEditor({
 }) {
   return (
     <div>
-      <p className="text-sm leading-6 text-text-medium">
+      <p className="text-sm leading-6 text-secondary">
         Paste Solana addresses separated by line breaks, commas, semicolons, tabs, or a CSV column.
       </p>
       <textarea
         value={destinationText}
         onChange={(event) => setDestinationText(event.target.value)}
         rows={6}
-        className="mt-2 min-h-[128px] w-full resize-y rounded-lg border border-border-light bg-white px-3 py-3 font-mono text-sm text-text-extra-high outline-none transition-colors placeholder:text-text-extra-low focus:border-gray-1400"
+        className="mt-2 min-h-[128px] w-full resize-y rounded-lg border border-border-default bg-white px-3 py-3 font-mono text-sm text-primary outline-none transition-colors placeholder:text-muted focus:border-primary"
         placeholder="address&#10;9xQeWvG816bUx9EPfuxEzHh9VY5k..."
       />
       {invalidDestinations.length > 0 ? (
-        <p className="mt-2 text-sm text-status-error-text">
+        <p className="mt-2 text-sm text-error">
           Invalid address{invalidDestinations.length === 1 ? "" : "es"}:{" "}
           {invalidDestinations.join(", ")}
         </p>
@@ -1324,7 +1324,7 @@ function LimitRuleEditor({
     <div>
       <div className="grid gap-3 md:grid-cols-2">
         <label className="space-y-2" htmlFor="wallet-policy-max-transfer-amount">
-          <span className="text-sm font-medium text-text-extra-high">Per transfer cap</span>
+          <span className="text-sm font-medium text-primary">Per transfer cap</span>
           <Input
             id="wallet-policy-max-transfer-amount"
             value={maxTransferAmount}
@@ -1333,11 +1333,11 @@ function LimitRuleEditor({
             inputMode="decimal"
           />
           {!isPositiveAmount(maxTransferAmount) ? (
-            <span className="block text-sm text-status-error-text">Enter a positive number.</span>
+            <span className="block text-sm text-error">Enter a positive number.</span>
           ) : null}
         </label>
         <label className="space-y-2" htmlFor="wallet-policy-max-daily-amount">
-          <span className="text-sm font-medium text-text-extra-high">Daily cap</span>
+          <span className="text-sm font-medium text-primary">Daily cap</span>
           <Input
             id="wallet-policy-max-daily-amount"
             value={maxDailyAmount}
@@ -1346,7 +1346,7 @@ function LimitRuleEditor({
             inputMode="decimal"
           />
           {!isPositiveAmount(maxDailyAmount) ? (
-            <span className="block text-sm text-status-error-text">Enter a positive number.</span>
+            <span className="block text-sm text-error">Enter a positive number.</span>
           ) : null}
         </label>
       </div>
@@ -1363,7 +1363,7 @@ function ApprovalRuleEditor({
 }) {
   return (
     <div className="space-y-3">
-      <p className="text-sm leading-6 text-text-medium">
+      <p className="text-sm leading-6 text-secondary">
         Selected families pause with an approval-required policy decision. Approval inbox routing is
         handled by the follow-up approval workflow.
       </p>
@@ -1385,7 +1385,7 @@ function AdvancedRuleEditor({
 }) {
   return (
     <div className="space-y-3">
-      <p className="text-sm leading-6 text-text-medium">
+      <p className="text-sm leading-6 text-secondary">
         These controls are intentionally strict because they can bypass high-level payment intent.
       </p>
       <OptionGrid
@@ -1476,22 +1476,22 @@ function ReviewStep({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-border-light bg-white p-4">
-        <p className="text-sm font-semibold text-text-extra-high">Activation outcome</p>
+      <div className="rounded-lg border border-border-default bg-white p-4">
+        <p className="text-sm font-semibold text-primary">Activation outcome</p>
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
           <div>
-            <dt className="text-text-extra-low">Default</dt>
-            <dd className="mt-1 font-medium text-text-extra-high">Allow unmatched operations</dd>
+            <dt className="text-muted">Default</dt>
+            <dd className="mt-1 font-medium text-primary">Allow unmatched operations</dd>
           </div>
           <div>
-            <dt className="text-text-extra-low">Revision</dt>
-            <dd className="mt-1 font-medium text-text-extra-high">
+            <dt className="text-muted">Revision</dt>
+            <dd className="mt-1 font-medium text-primary">
               {controlProfile?.revisionNumber ? `#${controlProfile.revisionNumber}` : "New"}
             </dd>
           </div>
           <div>
-            <dt className="text-text-extra-low">Provider mapping</dt>
-            <dd className="mt-1 font-medium text-text-extra-high">
+            <dt className="text-muted">Provider mapping</dt>
+            <dd className="mt-1 font-medium text-primary">
               {controlProfile
                 ? formatProviderMappingStatus(controlProfile.providerMappingStatus)
                 : "SDP enforced"}
@@ -1499,7 +1499,7 @@ function ReviewStep({
           </div>
         </dl>
       </div>
-      <div className="overflow-hidden rounded-lg border border-border-light bg-white">
+      <div className="overflow-hidden rounded-lg border border-border-default bg-white">
         {selected.length > 0 ? (
           selected.map((category) => (
             <ReviewCategory
@@ -1515,7 +1515,7 @@ function ReviewStep({
             />
           ))
         ) : (
-          <div className="p-4 text-sm text-text-medium">No restriction category selected.</div>
+          <div className="p-4 text-sm text-secondary">No restriction category selected.</div>
         )}
       </div>
     </div>
@@ -1577,9 +1577,9 @@ function ReviewCategory({
   }
 
   return (
-    <div className="border-t border-border-light p-4 first:border-t-0">
-      <p className="text-sm font-semibold text-text-extra-high">{category.title}</p>
-      <p className="mt-1 text-sm leading-6 text-text-medium">{value}</p>
+    <div className="border-t border-border-default p-4 first:border-t-0">
+      <p className="text-sm font-semibold text-primary">{category.title}</p>
+      <p className="mt-1 text-sm leading-6 text-secondary">{value}</p>
     </div>
   );
 }

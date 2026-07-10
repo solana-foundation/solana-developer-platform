@@ -78,7 +78,7 @@ export function Modal({
           aria-modal="true"
           aria-label={ariaLabel}
           className={cn(
-            "pointer-events-auto relative z-10 w-full rounded-2xl border border-[rgba(28,28,29,0.16)] bg-white text-[#1c1c1d] shadow-lg",
+            "pointer-events-auto relative z-10 w-full rounded-2xl border border-border-default bg-white text-primary shadow-lg",
             sizeClassNames[size],
             contentClassName
           )}

@@ -54,46 +54,46 @@ export function TokenManagementHeader({
             <img
               src={tokenImageUrl}
               alt={tokenName}
-              className="h-14 w-14 shrink-0 rounded-full border border-[rgba(28,28,29,0.12)] object-cover"
+              className="h-14 w-14 shrink-0 rounded-full border border-border-default object-cover"
             />
           ) : (
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-[rgba(28,28,29,0.14)] bg-white text-[20px] font-semibold text-[#1c1c1d]">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-border-default bg-white text-[20px] font-semibold text-primary">
               {tokenSymbol.slice(0, 1) || "T"}
             </div>
           )}
 
           <div className="min-w-0">
-            <h2 className="truncate text-[42px] leading-[1.02] font-medium tracking-[-0.5px] text-[#1c1c1d]">
+            <h2 className="truncate text-[42px] leading-[1.02] font-medium tracking-[-0.5px] text-primary">
               {tokenName}
             </h2>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-[18px] text-[rgba(28,28,29,0.68)]">
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[18px] text-secondary">
               <span className="font-mono text-[15px] tracking-[-0.1px]">{tokenAddressLabel}</span>
               {tokenAddress ? (
                 <button
                   type="button"
                   onClick={onCopyAddress}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-[rgba(28,28,29,0.12)] bg-white text-[rgba(28,28,29,0.62)] transition-colors hover:text-[#1c1c1d]"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-border-default bg-white text-secondary transition-colors hover:text-primary"
                   aria-label="Copy token address"
                 >
                   <Copy className="h-4 w-4" />
                 </button>
               ) : null}
-              <span className="rounded-full border border-[rgba(28,28,29,0.1)] bg-white px-3 py-1 text-[13px] font-medium text-[rgba(28,28,29,0.62)]">
+              <span className="rounded-full border border-border-default bg-white px-3 py-1 text-[13px] font-medium text-secondary">
                 {tokenSymbol}
               </span>
             </div>
             <div
-              className="mt-2 flex flex-wrap items-center gap-2 text-[14px] text-[rgba(28,28,29,0.68)]"
+              className="mt-2 flex flex-wrap items-center gap-2 text-[14px] text-secondary"
               data-testid="token-id-row"
             >
-              <span className="text-[13px] font-medium tracking-[-0.1px] text-[rgba(28,28,29,0.54)]">
+              <span className="text-[13px] font-medium tracking-[-0.1px] text-tertiary">
                 Token ID:
               </span>
               <span className="font-mono text-[13px] tracking-[-0.1px]">{tokenId}</span>
               <button
                 type="button"
                 onClick={onCopyTokenId}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-[10px] border border-[rgba(28,28,29,0.12)] bg-white text-[rgba(28,28,29,0.62)] transition-colors hover:text-[#1c1c1d]"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-[10px] border border-border-default bg-white text-secondary transition-colors hover:text-primary"
                 aria-label="Copy token ID"
               >
                 <Copy className="h-3.5 w-3.5" />

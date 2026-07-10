@@ -113,13 +113,13 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
             <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-[var(--select-popup-radius)] bg-[var(--select-popup-bg)] shadow-[var(--select-popup-shadow)]">
               <div className="max-h-56 overflow-y-auto p-1.5">
                 {searchError ? (
-                  <p className="px-3 py-6 text-center text-sm text-status-error-text">
+                  <p className="px-3 py-6 text-center text-sm text-error">
                     {searchError instanceof Error ? searchError.message : "Search failed"}
                   </p>
                 ) : suggestions === undefined ? (
-                  <p className="px-3 py-6 text-center text-sm text-text-low">Searching…</p>
+                  <p className="px-3 py-6 text-center text-sm text-tertiary">Searching…</p>
                 ) : suggestions.length === 0 ? (
-                  <p className="px-3 py-6 text-center text-sm text-text-low">No matches found.</p>
+                  <p className="px-3 py-6 text-center text-sm text-tertiary">No matches found.</p>
                 ) : (
                   suggestions.map((suggestion, index) => (
                     <button
@@ -134,13 +134,13 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => void pick(suggestion)}
                     >
-                      <MapPinIcon className="size-5 shrink-0 text-text-low" />
+                      <MapPinIcon className="size-5 shrink-0 text-tertiary" />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-text-extra-high">
+                        <span className="block truncate text-primary">
                           {suggestion.mainText}
                         </span>
                         {suggestion.secondaryText ? (
-                          <span className="block truncate text-sm text-text-low">
+                          <span className="block truncate text-sm text-tertiary">
                             {suggestion.secondaryText}
                           </span>
                         ) : null}
@@ -149,16 +149,16 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
                   ))
                 )}
                 {isLoading && suggestions !== undefined && (
-                  <p className="px-3 py-1.5 text-center text-xs text-text-low">Updating…</p>
+                  <p className="px-3 py-1.5 text-center text-xs text-tertiary">Updating…</p>
                 )}
               </div>
             </div>
           )}
-          {resolveError && <p className="mt-1 text-xs text-status-error-text">{resolveError}</p>}
+          {resolveError && <p className="mt-1 text-xs text-error">{resolveError}</p>}
         </div>
       </div>
 
-      <div className="h-28 overflow-hidden rounded-xl border border-border-light">
+      <div className="h-28 overflow-hidden rounded-xl border border-border-default">
         {selected ? (
           <img
             src={staticMapUrl(selected.location)}
@@ -166,7 +166,7 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
             className="h-full w-full object-cover"
           />
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-2 bg-border-extra-light text-text-low">
+          <div className="flex h-full flex-col items-center justify-center gap-2 bg-fill-subtle text-tertiary">
             <MapPinnedIcon className="size-6" />
             <p className="text-sm">Search to preview the address</p>
           </div>

@@ -21,10 +21,10 @@ export function AddExternalAccountDialog({
     <Modal isOpen={isOpen} ariaLabel="Add external account" onClose={onClose} size="md">
       <div className="space-y-5 p-6">
         <div className="space-y-1">
-          <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
+          <h2 className="text-lg font-medium tracking-tight text-primary">
             Add external account
           </h2>
-          <p className="text-sm text-text-medium">
+          <p className="text-sm text-secondary">
             Attach a crypto wallet for this counterparty. The address is screened for risk before
             it's added.
           </p>

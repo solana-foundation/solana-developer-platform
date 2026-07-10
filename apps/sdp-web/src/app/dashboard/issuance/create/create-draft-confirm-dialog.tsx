@@ -56,15 +56,15 @@ export function CreateDraftConfirmDialog({
     >
       <div className="space-y-6 p-6">
         <div className="space-y-2">
-          <p className="text-xl font-medium tracking-tight text-text-extra-high">
+          <p className="text-xl font-medium tracking-tight text-primary">
             Create this asset draft?
           </p>
-          <p className="text-sm text-text-low">
+          <p className="text-sm text-tertiary">
             This creates a draft
             {name ? (
               <>
                 {" "}
-                of <span className="font-medium text-text-high">{name}</span>
+                of <span className="font-medium text-primary">{name}</span>
               </>
             ) : null}
             . You can keep editing it and publish when you&apos;re ready.

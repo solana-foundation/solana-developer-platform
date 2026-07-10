@@ -64,8 +64,8 @@ function GeneratedApiKeyModal({
       contentClassName="p-6 text-left"
       size="md"
     >
-      <p className="pr-12 text-sm font-semibold text-[#1c1c1d]">API key generated</p>
-      <p className="mt-2 text-sm text-[rgba(28,28,29,0.72)]">{message}</p>
+      <p className="pr-12 text-sm font-semibold text-primary">API key generated</p>
+      <p className="mt-2 text-sm text-secondary">{message}</p>
 
       {keyPrefix ? (
         <div className="mt-4 space-y-2">
@@ -82,7 +82,7 @@ function GeneratedApiKeyModal({
       <div className="mt-4 space-y-2">
         <Label htmlFor="generated-key-value">Your full key (shown once)</Label>
         <GeneratedApiKeyInput value={keyValue} />
-        <p className="text-xs text-[rgba(28,28,29,0.58)]">
+        <p className="text-xs text-tertiary">
           This browser session can now use this key in the API Playground without pasting it again.
         </p>
       </div>

@@ -33,17 +33,17 @@ const COLLAPSED_CONTENT_FADE_PROPS = {
 const PANEL_RADIUS = 16;
 
 const NETWORK_DEBUG_META_ROW_CLASS =
-  "mt-1 flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 border-0 p-0 text-[11px] text-text-low";
+  "mt-1 flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 border-0 p-0 text-[11px] text-tertiary";
 
 const NETWORK_DEBUG_META_COPY_CLASS =
-  "shrink-0 text-text-low underline decoration-text-low/60 underline-offset-2 hover:text-text-extra-high hover:decoration-text-extra-high";
+  "shrink-0 text-tertiary underline decoration-tertiary/60 underline-offset-2 hover:text-primary hover:decoration-primary";
 
 const NETWORK_DEBUG_PAYLOAD_COPY_BUTTON_CLASS =
-  "absolute top-2 right-2 z-10 inline-flex w-fit shrink-0 items-center gap-1 rounded-md border border-border-light bg-white px-2 py-0.5 text-xs font-medium text-text-extra-high shadow-sm hover:bg-gray-100";
+  "absolute top-2 right-2 z-10 inline-flex w-fit shrink-0 items-center gap-1 rounded-md border border-border-default bg-white px-2 py-0.5 text-xs font-medium text-primary shadow-sm hover:bg-surface-sunken";
 
 function NetworkDebugMetaInterpunct() {
   return (
-    <span aria-hidden="true" className="pointer-events-none shrink-0 select-none text-text-low">
+    <span aria-hidden="true" className="pointer-events-none shrink-0 select-none text-tertiary">
       &middot;
     </span>
   );
@@ -68,11 +68,11 @@ function NetworkDebugPayloadBlock({
 
   return (
     <div className={cn("gap-1", fill ? "flex min-h-0 min-w-0 flex-1 flex-col" : "grid min-w-0")}>
-      <p className="text-[11px] font-medium text-text-medium">{label}</p>
+      <p className="text-[11px] font-medium text-secondary">{label}</p>
       <div className={cn("min-w-0", fill && "flex min-h-0 flex-1 flex-col")}>
         <div
           className={cn(
-            "relative min-w-0 overflow-hidden rounded-lg bg-border-extra-light",
+            "relative min-w-0 overflow-hidden rounded-lg bg-fill-subtle",
             fill && "flex min-h-0 flex-1 flex-col"
           )}
         >
@@ -90,7 +90,7 @@ function NetworkDebugPayloadBlock({
           </button>
           <pre
             className={cn(
-              "max-w-full min-h-0 wrap-break-word p-3 pr-14 font-mono text-[11px] whitespace-pre-wrap text-text-extra-high",
+              "max-w-full min-h-0 wrap-break-word p-3 pr-14 font-mono text-[11px] whitespace-pre-wrap text-primary",
               fill
                 ? "min-h-0 flex-1 overflow-y-auto overscroll-contain"
                 : "max-h-40 shrink-0 overflow-y-auto overscroll-contain"
@@ -119,16 +119,16 @@ function NetworkDebugEntryRow({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.16 }}
       className={cn(
-        "grid cursor-pointer gap-1 border-b border-border-light px-3 py-2 transition-colors last:border-b-0 hover:bg-border-extra-light",
-        isSelected && "bg-border-extra-light"
+        "grid cursor-pointer gap-1 border-b border-border-default px-3 py-2 transition-colors last:border-b-0 hover:bg-fill-subtle",
+        isSelected && "bg-fill-subtle"
       )}
     >
       <button type="button" onClick={onSelect} className="grid min-w-0 gap-1 text-left">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="rounded bg-border-extra-light px-1.5 py-0.5 font-mono text-[11px] text-text-medium">
+          <span className="rounded bg-fill-subtle px-1.5 py-0.5 font-mono text-[11px] text-secondary">
             {entry.method}
           </span>
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-extra-high">
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-primary">
             {entry.path}
           </span>
           <span
@@ -140,13 +140,13 @@ function NetworkDebugEntryRow({
             {entry.state === "pending" ? "pending" : (entry.status ?? entry.state)}
           </span>
         </div>
-        <div className="flex items-center justify-between gap-2 text-[11px] text-text-low">
+        <div className="flex items-center justify-between gap-2 text-[11px] text-tertiary">
           <span>{entry.durationMs === undefined ? "pending" : `${entry.durationMs}ms`}</span>
           <span>{new Date(entry.startedAt).toLocaleTimeString()}</span>
         </div>
       </button>
       {entry.error ? (
-        <p className="truncate text-[11px] text-status-error-text">{entry.error}</p>
+        <p className="truncate text-[11px] text-error">{entry.error}</p>
       ) : null}
     </motion.li>
   );
@@ -167,7 +167,7 @@ export function NetworkDebugToggle({ collapsed = false }: { collapsed?: boolean 
       aria-label={collapsed ? "API Debug Logs" : undefined}
       title={collapsed ? "API Debug Logs" : undefined}
       className={cn(
-        "flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high",
+        "flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-secondary transition-colors hover:bg-fill-strong hover:text-primary",
         collapsed && "justify-center"
       )}
     >
@@ -175,8 +175,8 @@ export function NetworkDebugToggle({ collapsed = false }: { collapsed?: boolean 
         className={cn(
           "relative inline-flex h-5 w-9 shrink-0 rounded-full border transition-colors",
           enabled
-            ? "border-text-extra-high bg-text-extra-high"
-            : "border-border-light bg-border-extra-light"
+            ? "border-primary bg-primary"
+            : "border-border-default bg-fill-subtle"
         )}
         aria-hidden="true"
       >
@@ -191,7 +191,7 @@ export function NetworkDebugToggle({ collapsed = false }: { collapsed?: boolean 
         <>
           <span className="min-w-0 flex-1 truncate text-left">API Debug Logs</span>
           {pendingCount > 0 ? (
-            <span className="shrink-0 rounded-full bg-border-extra-light px-1.5 py-0.5 text-[10px] text-text-medium">
+            <span className="shrink-0 rounded-full bg-fill-subtle px-1.5 py-0.5 text-[10px] text-secondary">
               {pendingCount}
             </span>
           ) : null}
@@ -227,27 +227,27 @@ function NetworkDebugExpandedPanel({
       key="network-debug-panel"
       layoutId="network-debug-shell"
       layout="position"
-      className="pointer-events-auto absolute right-0 bottom-0 flex h-full w-full overflow-hidden rounded-2xl border border-border-light bg-white shadow-lg"
+      className="pointer-events-auto absolute right-0 bottom-0 flex h-full w-full overflow-hidden rounded-2xl border border-border-default bg-white shadow-lg"
       style={{ borderRadius: PANEL_RADIUS }}
       transition={PANEL_TRANSITION}
     >
       <motion.div className="flex min-h-0 flex-1 flex-col" {...CONTENT_FADE_PROPS}>
-        <div className="flex items-start justify-between gap-3 border-b border-border-light px-4 py-3">
+        <div className="flex items-start justify-between gap-3 border-b border-border-default px-4 py-3">
           <div className="min-w-0">
-            <h2 className="text-sm font-medium text-text-extra-high">API Debug Logs</h2>
-            <p className="text-xs text-text-low">
+            <h2 className="text-sm font-medium text-primary">API Debug Logs</h2>
+            <p className="text-xs text-tertiary">
               {pendingCount} pending, {entries.length - pendingCount} completed
             </p>
           </div>
           <button
             type="button"
             onClick={() => setIsOpen(false)}
-            className="shrink-0 rounded-md px-2 py-1 text-xs text-text-medium hover:bg-border-extra-light"
+            className="shrink-0 rounded-md px-2 py-1 text-xs text-secondary hover:bg-fill-subtle"
           >
             Collapse
           </button>
         </div>
-        <div className="flex flex-wrap items-center gap-2 border-b border-border-light px-4 py-2">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border-default px-4 py-2">
           <Button
             type="button"
             onClick={() => setPaused(!paused)}
@@ -291,7 +291,7 @@ function NetworkDebugExpandedPanel({
               </AnimatePresence>
             </ul>
           ) : (
-            <div className="flex min-h-0 flex-1 items-center justify-center px-4 py-8 text-center text-sm text-text-low">
+            <div className="flex min-h-0 flex-1 items-center justify-center px-4 py-8 text-center text-sm text-tertiary">
               No requests captured yet.
             </div>
           )}
@@ -319,11 +319,11 @@ function NetworkDebugEntryDetails({
   const durationPart = entry.durationMs === undefined ? "pending" : `${entry.durationMs}ms`;
 
   return (
-    <aside className="flex h-full min-h-0 w-[320px] shrink-0 flex-col overflow-hidden border-l border-border-light p-3">
+    <aside className="flex h-full min-h-0 w-[320px] shrink-0 flex-col overflow-hidden border-l border-border-default p-3">
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         <div className="flex shrink-0 min-w-0 items-start gap-2">
           <div className="relative min-w-0 flex-1">
-            <p className="line-clamp-4 font-mono text-xs text-text-extra-high">{entry.path}</p>
+            <p className="line-clamp-4 font-mono text-xs text-primary">{entry.path}</p>
             <fieldset
               aria-label="Request method, duration, copy summary"
               className={NETWORK_DEBUG_META_ROW_CLASS}
@@ -344,7 +344,7 @@ function NetworkDebugEntryDetails({
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded-md px-2 py-1 text-xs text-text-medium hover:bg-border-extra-light"
+            className="shrink-0 rounded-md px-2 py-1 text-xs text-secondary hover:bg-fill-subtle"
           >
             Close
           </button>
@@ -354,7 +354,7 @@ function NetworkDebugEntryDetails({
           <NetworkDebugPayloadBlock label="Request body" value={entry.requestBody} />
           <NetworkDebugPayloadBlock fill label="Response" value={entry.responseBody} />
           {!entry.query && !entry.requestBody && !entry.responseBody ? (
-            <p className="text-[11px] text-text-low">
+            <p className="text-[11px] text-tertiary">
               No query, request body, or response captured.
             </p>
           ) : null}
@@ -376,7 +376,7 @@ function NetworkDebugCollapsedButton({
       asChild
       variant="outline"
       size="sm"
-      className="pointer-events-auto absolute right-0 bottom-0 cursor-pointer rounded-2xl px-3 py-2 pr-10 text-sm text-text-extra-high shadow-lg"
+      className="pointer-events-auto absolute right-0 bottom-0 cursor-pointer rounded-2xl px-3 py-2 pr-10 text-sm text-primary shadow-lg"
     >
       <motion.button
         key="network-debug-pill"
@@ -389,7 +389,7 @@ function NetworkDebugCollapsedButton({
         <motion.span {...COLLAPSED_CONTENT_FADE_PROPS}>API Debug Logs</motion.span>
         <motion.span
           {...COLLAPSED_CONTENT_FADE_PROPS}
-          className="absolute right-2 rounded-full bg-border-extra-light px-1.5 py-0.5 text-[10px] text-text-medium"
+          className="absolute right-2 rounded-full bg-fill-subtle px-1.5 py-0.5 text-[10px] text-secondary"
         >
           {requestCount}
         </motion.span>

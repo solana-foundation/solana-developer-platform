@@ -70,7 +70,7 @@ export function ApiKeyFlashSurface() {
   }
 
   return (
-    <Card className={flash.level === "error" ? "border-[#c71f37]/25" : "border-[#1c1c1d]/12"}>
+    <Card className={flash.level === "error" ? "border-destructive/25" : "border-primary/12"}>
       <CardHeader>
         <CardTitle>{flash.level === "error" ? "Action failed" : "Notice"}</CardTitle>
         <CardDescription>{flash.message}</CardDescription>

@@ -47,7 +47,7 @@ export function CounterpartyAccountSelector({
             : "Select a destination account"
       }
       searchPlaceholder="Search accounts"
-      icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
+      icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
       isLoading={isLoading}
       disabled={disabled || options.length === 0}
     />

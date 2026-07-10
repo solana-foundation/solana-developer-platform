@@ -187,28 +187,28 @@ export function StepReview() {
 function ReviewSection({ section, onEdit }: { section: Section; onEdit: () => void }) {
   const Icon = section.icon;
   return (
-    <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white">
-      <div className="flex items-start justify-between gap-4 border-b border-[rgba(28,28,29,0.07)] px-5 py-4">
+    <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
+      <div className="flex items-start justify-between gap-4 border-b border-border-subtle px-5 py-4">
         <div className="flex items-start gap-3.5">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[rgba(28,28,29,0.05)] text-[#1c1c1d]">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-primary">
             <Icon className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <p className="text-base font-medium text-[#1c1c1d]">{section.title}</p>
-            <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.55)]">{section.description}</p>
+            <p className="text-base font-medium text-primary">{section.title}</p>
+            <p className="mt-0.5 text-sm text-tertiary">{section.description}</p>
           </div>
         </div>
         <button
           type="button"
           onClick={onEdit}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[rgba(28,28,29,0.12)] px-3 py-1.5 text-sm font-medium text-[rgba(28,28,29,0.75)] transition-colors hover:bg-[rgba(28,28,29,0.04)] hover:text-[#1c1c1d]"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-default px-3 py-1.5 text-sm font-medium text-secondary transition-colors hover:bg-fill-subtle hover:text-primary"
         >
           <Pencil className="h-3.5 w-3.5" />
           Edit
         </button>
       </div>
 
-      <dl className="divide-y divide-[rgba(28,28,29,0.06)] px-5 py-1">
+      <dl className="divide-y divide-border-subtle px-5 py-1">
         {section.fields.map((field) => (
           <FieldRow key={field.label} field={field} />
         ))}
@@ -223,8 +223,8 @@ function FieldRow({ field }: { field: Field }) {
   const showPreview = hasValue && Boolean(field.preview?.trim());
   return (
     <div className="flex flex-col gap-1 py-3 sm:flex-row sm:items-start sm:gap-4">
-      <dt className="flex shrink-0 items-center gap-2 text-sm text-[rgba(28,28,29,0.52)] sm:w-52 sm:pt-0.5">
-        <Icon className="h-4 w-4 shrink-0 text-[rgba(28,28,29,0.38)]" />
+      <dt className="flex shrink-0 items-center gap-2 text-sm text-tertiary sm:w-52 sm:pt-0.5">
+        <Icon className="h-4 w-4 shrink-0 text-muted" />
         {field.label}
       </dt>
       <dd className="min-w-0 flex-1">
@@ -240,7 +240,7 @@ function FieldRow({ field }: { field: Field }) {
             href={field.href}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex min-w-0 items-center gap-1 break-all text-sm font-normal text-[#1c1c1d] hover:underline"
+            className="inline-flex min-w-0 items-center gap-1 break-all text-sm font-normal text-primary hover:underline"
           >
             {field.value}
             <ExternalLink className="h-3 w-3 shrink-0" />
@@ -249,13 +249,13 @@ function FieldRow({ field }: { field: Field }) {
           <p
             className={cn(
               "break-words text-sm font-normal",
-              hasValue ? "text-[#1c1c1d]" : "text-[rgba(28,28,29,0.4)]"
+              hasValue ? "text-primary" : "text-muted"
             )}
           >
             {hasValue ? field.value : "—"}
           </p>
         )}
-        {field.hint ? <p className="mt-1 text-xs text-[rgba(28,28,29,0.5)]">{field.hint}</p> : null}
+        {field.hint ? <p className="mt-1 text-xs text-tertiary">{field.hint}</p> : null}
       </dd>
     </div>
   );

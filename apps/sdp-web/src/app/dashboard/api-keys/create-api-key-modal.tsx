@@ -80,12 +80,12 @@ function ReviewDetail({
 }) {
   return (
     <div className="flex min-w-0 items-center gap-3 px-4 py-3.5">
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.64)]">
+      <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-fill-subtle text-secondary">
         <Icon className="size-3.5" />
       </div>
       <div className="min-w-0">
-        <p className="text-xs font-medium text-[rgba(28,28,29,0.56)]">{label}</p>
-        <div className="mt-1 text-sm text-[#1c1c1d]">{children}</div>
+        <p className="text-xs font-medium text-tertiary">{label}</p>
+        <div className="mt-1 text-sm text-primary">{children}</div>
       </div>
     </div>
   );
@@ -126,12 +126,12 @@ function WalletAccessSection({
     <div className="grid gap-3">
       <div>
         <Label>Wallet access</Label>
-        <p className="mt-1 text-xs text-[rgba(28,28,29,0.65)]">
+        <p className="mt-1 text-xs text-secondary">
           Choose whether this key can use every wallet in scope or only selected wallets.
         </p>
       </div>
 
-      <label className="flex items-start gap-3 rounded-lg border border-[rgba(28,28,29,0.14)] p-3">
+      <label className="flex items-start gap-3 rounded-lg border border-border-default p-3">
         <input
           type="radio"
           name="wallet-access"
@@ -141,12 +141,12 @@ function WalletAccessSection({
           className="mt-1"
         />
         <div className="min-w-0">
-          <p className="text-sm font-medium text-[#1c1c1d]">All wallets</p>
-          <p className="text-xs text-[rgba(28,28,29,0.65)]">
+          <p className="text-sm font-medium text-primary">All wallets</p>
+          <p className="text-xs text-secondary">
             This key can use every wallet available in its org or project scope.
           </p>
           {draft.walletScope === "all" ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[rgba(28,28,29,0.68)]">
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-secondary">
               <ShieldCheck className="size-3.5" />
               <span>Operation policy</span>
               <PolicyScopeBadge />
@@ -155,7 +155,7 @@ function WalletAccessSection({
         </div>
       </label>
 
-      <label className="flex items-start gap-3 rounded-lg border border-[rgba(28,28,29,0.14)] p-3">
+      <label className="flex items-start gap-3 rounded-lg border border-border-default p-3">
         <input
           type="radio"
           name="wallet-access"
@@ -165,17 +165,17 @@ function WalletAccessSection({
           className="mt-1"
         />
         <div className="min-w-0">
-          <p className="text-sm font-medium text-[#1c1c1d]">Selected wallets</p>
-          <p className="text-xs text-[rgba(28,28,29,0.65)]">
+          <p className="text-sm font-medium text-primary">Selected wallets</p>
+          <p className="text-xs text-secondary">
             Restrict this key to a specific wallet set and choose its default signing wallet.
           </p>
         </div>
       </label>
 
       {draft.walletScope === "selected" ? (
-        <div className="rounded-lg border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.02)] p-3">
+        <div className="rounded-lg border border-border-default bg-fill-subtle p-3">
           {wallets.length === 0 ? (
-            <p className="text-sm text-[rgba(28,28,29,0.72)]">
+            <p className="text-sm text-secondary">
               No active wallets are available for binding yet.
             </p>
           ) : (
@@ -187,7 +187,7 @@ function WalletAccessSection({
                   return (
                     <label
                       key={wallet.walletId}
-                      className="flex items-start gap-3 rounded-lg border border-[rgba(28,28,29,0.12)] bg-white px-3 py-2"
+                      className="flex items-start gap-3 rounded-lg border border-border-default bg-white px-3 py-2"
                     >
                       <input
                         type="checkbox"
@@ -196,14 +196,14 @@ function WalletAccessSection({
                         className="mt-1"
                       />
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-[#1c1c1d]">
+                        <p className="text-sm font-medium text-primary">
                           {formatWalletLabel(wallet)}
                         </p>
-                        <p className="text-xs text-[rgba(28,28,29,0.65)]">
+                        <p className="text-xs text-secondary">
                           {wallet.walletId} · {truncateAddress(wallet.publicKey)}
                         </p>
                         {checked ? (
-                          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-2 py-1.5 text-xs text-[rgba(28,28,29,0.68)]">
+                          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-border-default bg-fill-subtle px-2 py-1.5 text-xs text-secondary">
                             <ShieldCheck className="size-3.5" />
                             <span>Operation policy</span>
                             <PolicyScopeBadge />
@@ -225,7 +225,7 @@ function WalletAccessSection({
                       const defaultWalletId = event.currentTarget.value;
                       setDraft((previous) => ({ ...previous, defaultWalletId }));
                     }}
-                    className="h-10 w-full rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
+                    className="h-10 w-full rounded-lg border border-border-default bg-white px-3 text-sm text-primary"
                   >
                     {selectedWallets.map((wallet) => (
                       <option key={wallet.walletId} value={wallet.walletId}>
@@ -289,23 +289,23 @@ function CreateApiKeyDetailsStep({
             const role = event.currentTarget.value as ApiKeyRole;
             setDraft((previous) => ({ ...previous, role }));
           }}
-          className="h-10 w-full rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
+          className="h-10 w-full rounded-lg border border-border-default bg-white px-3 text-sm text-primary"
         >
           <option value="api_admin">Admin</option>
           <option value="api_developer">Developer</option>
           <option value="api_readonly">Read only</option>
         </select>
-        <p className="text-xs text-[rgba(28,28,29,0.65)]">
+        <p className="text-xs text-secondary">
           Admin includes custody and platform-level privileges. Developer excludes custody actions.
         </p>
       </div>
 
       <div className="grid gap-2">
         <Label>Environment</Label>
-        <div className="flex h-10 items-center rounded-lg border border-[rgba(28,28,29,0.16)] bg-[rgba(28,28,29,0.02)] px-3 text-sm text-[#1c1c1d]">
+        <div className="flex h-10 items-center rounded-lg border border-border-default bg-fill-subtle px-3 text-sm text-primary">
           {formatEnvironmentLabel(environment)}
         </div>
-        <p className="text-xs text-[rgba(28,28,29,0.65)]">
+        <p className="text-xs text-secondary">
           Switch the workspace environment in the sidebar to create a key in the other environment.
         </p>
       </div>
@@ -380,11 +380,11 @@ function CreateApiKeyReviewStep({
         <input type="hidden" name="signingWalletId" value={draft.defaultWalletId} />
       ) : null}
 
-      <div className="overflow-hidden rounded-lg border border-[rgba(28,28,29,0.12)] bg-white">
-        <div className="flex flex-col gap-2 border-b border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="overflow-hidden rounded-lg border border-border-default bg-white">
+        <div className="flex flex-col gap-2 border-b border-border-subtle bg-fill-subtle px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <p className="truncate text-base font-semibold text-[#1c1c1d]">{draft.name}</p>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[rgba(28,28,29,0.62)]">
+            <p className="truncate text-base font-semibold text-primary">{draft.name}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-secondary">
               <span>{formatEnvironmentLabel(environment)}</span>
               <span aria-hidden="true">·</span>
               <span>Expires {formatDisplayDate(draft.expiresAt)}</span>
@@ -392,7 +392,7 @@ function CreateApiKeyReviewStep({
           </div>
         </div>
 
-        <div className="grid divide-y divide-[rgba(28,28,29,0.08)] sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+        <div className="grid divide-y divide-border-subtle sm:grid-cols-2 sm:divide-x sm:divide-y-0">
           <ReviewDetail icon={KeyRound} label="Endpoint permissions">
             {formatRoleLabel(draft.role)}
           </ReviewDetail>
@@ -403,10 +403,10 @@ function CreateApiKeyReviewStep({
                 {draft.walletScope === "all" ? "All wallets" : `${selectedWallets.length} selected`}
               </p>
               {draft.walletScope === "selected" ? (
-                <div className="space-y-1.5 text-xs text-[rgba(28,28,29,0.62)]">
+                <div className="space-y-1.5 text-xs text-secondary">
                   <p>
                     Default:{" "}
-                    <span className="text-[#1c1c1d]">
+                    <span className="text-primary">
                       {defaultSelectedWallet ? formatWalletLabel(defaultSelectedWallet) : "None"}
                     </span>
                   </p>
@@ -414,7 +414,7 @@ function CreateApiKeyReviewStep({
                     {selectedWallets.map((wallet) => (
                       <span
                         key={wallet.walletId}
-                        className="max-w-full truncate rounded-sm bg-[rgba(28,28,29,0.06)] px-1.5 py-0.5"
+                        className="max-w-full truncate rounded-sm bg-fill px-1.5 py-0.5"
                       >
                         {formatWalletLabel(wallet)}
                       </span>
@@ -426,13 +426,13 @@ function CreateApiKeyReviewStep({
           </ReviewDetail>
         </div>
 
-        <div className="grid divide-y divide-[rgba(28,28,29,0.08)] border-t border-[rgba(28,28,29,0.08)] sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+        <div className="grid divide-y divide-border-subtle border-t border-border-subtle sm:grid-cols-2 sm:divide-x sm:divide-y-0">
           <ReviewDetail icon={ShieldCheck} label="Policy">
-            <span className="text-[rgba(28,28,29,0.74)]">No API-key policy</span>
+            <span className="text-secondary">No API-key policy</span>
           </ReviewDetail>
 
           <ReviewDetail icon={Info} label="Security note">
-            <span className="text-[rgba(28,28,29,0.74)]">
+            <span className="text-secondary">
               The full key will only be shown once after creation.
             </span>
           </ReviewDetail>
@@ -447,7 +447,7 @@ function CreateApiKeyReviewActions({ onBack }: { onBack: () => void }) {
   const { pending } = useFormStatus();
 
   return (
-    <div className="mt-4 flex items-center justify-end gap-2 border-t border-[rgba(28,28,29,0.08)] pt-4">
+    <div className="mt-4 flex items-center justify-end gap-2 border-t border-border-subtle pt-4">
       <Button type="button" variant="secondary" onClick={onBack} disabled={pending}>
         Back
       </Button>
@@ -534,10 +534,10 @@ export function CreateApiKeyModal({
         size="xl"
       >
         <div className="shrink-0 pr-12">
-          <p className="text-sm font-semibold text-[#1c1c1d]">
+          <p className="text-sm font-semibold text-primary">
             {step === 1 ? "Create API key" : "Review API key"}
           </p>
-          <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
+          <p className="mt-1 text-sm text-secondary">
             {step === 1
               ? "Define key details and wallet access, then confirm."
               : "Review the request before creating the key."}

@@ -54,7 +54,7 @@ export function TokenSignerSelect({
 
   return (
     <div className="space-y-2">
-      <span className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-[rgba(28,28,29,0.68)]">
+      <span className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary">
         {label}
       </span>
       {isLocked && selectedWallet ? (
@@ -76,7 +76,7 @@ export function TokenSignerSelect({
       <p
         className={[
           "text-sm leading-5",
-          isError ? "text-[#9e2b38]" : "text-[rgba(28,28,29,0.68)]",
+          isError ? "text-destructive-strong" : "text-secondary",
         ].join(" ")}
       >
         {message}

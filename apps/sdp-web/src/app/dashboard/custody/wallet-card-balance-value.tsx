@@ -70,7 +70,7 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
   const totalBalance = resolveTotalBalance(data ?? initialBalances);
 
   return (
-    <span className={`font-medium ${error ? "text-[rgba(28,28,29,0.4)]" : "text-[#1c1c1d]"}`}>
+    <span className={`font-medium ${error ? "text-muted" : "text-primary"}`}>
       {formatCurrencyAmount(totalBalance)}
       {error ? <span className="sr-only"> (stale)</span> : null}
     </span>

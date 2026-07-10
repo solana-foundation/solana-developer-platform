@@ -51,11 +51,11 @@ function PaymentInstructionField({
   }
 
   return (
-    <div className={cn("rounded-xl bg-border-extra-light px-4 py-3", className)}>
+    <div className={cn("rounded-xl bg-fill-subtle px-4 py-3", className)}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">{label}</p>
-          <p className="mt-1 break-all font-mono text-sm text-text-extra-high">{value}</p>
+          <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">{label}</p>
+          <p className="mt-1 break-all font-mono text-sm text-primary">{value}</p>
         </div>
         <Button
           type="button"
@@ -85,13 +85,13 @@ function QuoteSummaryField({
   }
 
   return (
-    <div className="flex items-start gap-3 rounded-xl bg-border-extra-light px-4 py-3">
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white text-text-medium">
+    <div className="flex items-start gap-3 rounded-xl bg-fill-subtle px-4 py-3">
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white text-secondary">
         {icon}
       </span>
       <div className="min-w-0">
-        <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">{label}</p>
-        <p className="mt-1 break-all text-sm font-medium text-text-extra-high">{value}</p>
+        <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">{label}</p>
+        <p className="mt-1 break-all text-sm font-medium text-primary">{value}</p>
       </div>
     </div>
   );
@@ -115,7 +115,7 @@ function QuoteExpiryTabLabel({ expiresAt }: { expiresAt?: string }) {
     <span className="inline-flex items-center gap-1.5">
       <span>Instructions</span>
       {timeRemaining ? (
-        <span className="rounded-full bg-border-extra-light px-2 py-0.5 text-[11px] font-medium text-text-medium">
+        <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-[11px] font-medium text-secondary">
           {timeRemaining}
         </span>
       ) : null}
@@ -160,8 +160,8 @@ function ManualQuoteSummary({
   return (
     <div className="space-y-4 text-left">
       <div>
-        <p className="text-sm font-medium text-text-extra-high">Quote Summary</p>
-        <p className="mt-1 text-sm text-text-low">Locked pricing for this funding instruction.</p>
+        <p className="text-sm font-medium text-primary">Quote Summary</p>
+        <p className="mt-1 text-sm text-tertiary">Locked pricing for this funding instruction.</p>
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
         <QuoteSummaryField
@@ -231,7 +231,7 @@ function InstructionBadges({ children }: { children: ReactNode }) {
 
 function InstructionBadge({ children }: { children: ReactNode }) {
   return (
-    <span className="rounded-full bg-border-extra-light px-3 py-1 text-xs font-medium text-text-medium">
+    <span className="rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-secondary">
       {children}
     </span>
   );
@@ -268,17 +268,17 @@ function LightsparkInstruction({
       </div>
       <PaymentInstructionField label="Reference" value={info.reference} />
       {info.paymentRails?.length ? (
-        <div className="rounded-xl bg-border-extra-light px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">
+        <div className="rounded-xl bg-fill-subtle px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
             Supported rails
           </p>
-          <p className="mt-1 text-sm text-text-extra-high">{info.paymentRails.join(", ")}</p>
+          <p className="mt-1 text-sm text-primary">{info.paymentRails.join(", ")}</p>
         </div>
       ) : null}
       {instruction.instructionsNotes ? (
-        <div className="rounded-xl bg-border-extra-light px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">Notes</p>
-          <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
+        <div className="rounded-xl bg-fill-subtle px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">Notes</p>
+          <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
         </div>
       ) : null}
     </div>
@@ -303,9 +303,9 @@ function BvnkCryptoDepositInstruction({
       </div>
       <PaymentInstructionField label="Deposit address" value={instruction.destinationAddress} />
       <PaymentInstructionField label="Reference" value={instruction.reference} />
-      <div className="rounded-xl bg-border-extra-light px-4 py-3">
-        <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">Notes</p>
-        <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
+      <div className="rounded-xl bg-fill-subtle px-4 py-3">
+        <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">Notes</p>
+        <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
       </div>
     </div>
   );
@@ -340,16 +340,16 @@ function BvnkInstruction({
 
       {needsVerification ? (
         <div className="flex items-start gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-border-extra-light text-text-extra-high">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-primary">
             <ShieldCheckIcon className="size-5" />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-text-extra-high">
+                <p className="text-sm font-medium text-primary">
                   Identity verification required
                 </p>
-                <p className="mt-1 text-sm leading-relaxed text-text-low">
+                <p className="mt-1 text-sm leading-relaxed text-tertiary">
                   {instruction.instructionsNotes}
                 </p>
               </div>
@@ -371,19 +371,19 @@ function BvnkInstruction({
 
       {!isReady && !needsVerification ? (
         <div className="flex items-start gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-border-extra-light text-text-medium">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
             <Clock3 className="size-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-text-extra-high">
+            <p className="text-sm font-medium text-primary">
               {isProvisioning
                 ? "BVNK is provisioning your virtual bank account"
                 : "Verification in review"}
             </p>
-            <p className="mt-1 text-sm leading-relaxed text-text-low">
+            <p className="mt-1 text-sm leading-relaxed text-tertiary">
               {instruction.instructionsNotes}
             </p>
-            <p className="mt-3 flex items-center gap-2 text-xs font-medium text-text-medium">
+            <p className="mt-3 flex items-center gap-2 text-xs font-medium text-secondary">
               <Loader2 className="size-3.5 animate-spin" />
               {isProvisioning ? "Provisioning funding account" : "Checking verification status"}
             </p>
@@ -399,9 +399,9 @@ function BvnkInstruction({
             <PaymentInstructionField label="Bank code" value={bank?.code} />
             <PaymentInstructionField label="Payment reference" value={bank?.paymentReference} />
           </div>
-          <div className="rounded-xl bg-border-extra-light px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">Notes</p>
-            <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
+          <div className="rounded-xl bg-fill-subtle px-4 py-3">
+            <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">Notes</p>
+            <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
           </div>
         </>
       ) : null}
@@ -494,12 +494,12 @@ export function ManualInstructionsQuote({
   return (
     <div className="flex flex-col">
       <div className="flex items-start gap-3">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-border-extra-light text-text-extra-high">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-primary">
           <LandmarkIcon className="size-5" />
         </span>
         <div>
-          <p className="text-sm font-medium text-text-extra-high">Manual Funding Instructions</p>
-          <p className="mt-2 text-sm text-text-low">
+          <p className="text-sm font-medium text-primary">Manual Funding Instructions</p>
+          <p className="mt-2 text-sm text-tertiary">
             {description ??
               `Send ${amount ? `$${amount}` : "the quoted amount"} using one of the supported rails. Include the reference exactly so the provider can match the deposit to this quote.`}
           </p>

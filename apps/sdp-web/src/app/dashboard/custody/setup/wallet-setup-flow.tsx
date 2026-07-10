@@ -80,29 +80,29 @@ function ProviderStep({
             type="button"
             onClick={() => onSelect(provider.id)}
             className={cn(
-              "group w-full cursor-pointer rounded-2xl border px-5 py-5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(28,28,29,0.18)] focus-visible:ring-offset-2",
+              "group w-full cursor-pointer rounded-2xl border px-5 py-5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default focus-visible:ring-offset-2",
               isSelected
-                ? "border-gray-1400 bg-border-extra-light"
-                : "border-border-light bg-white hover:bg-border-extra-light"
+                ? "border-primary bg-fill-subtle"
+                : "border-border-default bg-white hover:bg-fill-subtle"
             )}
             aria-pressed={isSelected}
           >
             <div className="flex items-start gap-4">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-border-light text-text-extra-high">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-fill-strong text-primary">
                 <WalletProviderMark provider={provider.id} size="sm" />
               </span>
               <span className="min-w-0 flex-1 space-y-1">
                 <span className="flex flex-wrap items-center gap-2">
-                  <span className="relative inline-block text-[22px] leading-none font-medium text-text-extra-high after:absolute after:left-0 after:-bottom-1 after:h-px after:w-full after:origin-left after:scale-x-0 after:bg-current after:transition-transform after:duration-200 group-hover:after:scale-x-100 group-focus-visible:after:scale-x-100 motion-reduce:after:transition-none">
+                  <span className="relative inline-block text-[22px] leading-none font-medium text-primary after:absolute after:left-0 after:-bottom-1 after:h-px after:w-full after:origin-left after:scale-x-0 after:bg-current after:transition-transform after:duration-200 group-hover:after:scale-x-100 group-focus-visible:after:scale-x-100 motion-reduce:after:transition-none">
                     {provider.label}
                   </span>
                   {isConnected ? (
-                    <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-text-medium ring-1 ring-border-extra-light">
+                    <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-secondary ring-1 ring-border-subtle">
                       Active
                     </span>
                   ) : null}
                 </span>
-                <span className="block text-sm text-text-low">{provider.description}</span>
+                <span className="block text-sm text-tertiary">{provider.description}</span>
               </span>
             </div>
           </button>
@@ -200,9 +200,9 @@ export function WalletSetupFlow({
 
   if (enabledProviderEntries.length === 0) {
     return (
-      <div className="mx-auto max-w-3xl rounded-lg border border-[rgba(28,28,29,0.1)] bg-white p-6">
-        <p className="text-lg font-medium text-[#1c1c1d]">No wallet providers enabled</p>
-        <p className="mt-2 text-sm leading-6 text-[rgba(28,28,29,0.62)]">
+      <div className="mx-auto max-w-3xl rounded-lg border border-border-default bg-white p-6">
+        <p className="text-lg font-medium text-primary">No wallet providers enabled</p>
+        <p className="mt-2 text-sm leading-6 text-secondary">
           Wallet creation is available after a custody provider is enabled for this organization.
         </p>
         <Button asChild variant="secondary" className="mt-5">
@@ -226,24 +226,24 @@ export function WalletSetupFlow({
           value={walletLabel}
           onChange={(event) => setWalletLabel(event.currentTarget.value)}
           placeholder="Treasury"
-          className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
+          className="h-12 rounded-2xl border-border-default bg-white px-4 shadow-none"
           required
         />
       </div>
       <div className="space-y-2">
         <Label>Project</Label>
-        <div className="flex h-12 items-center rounded-2xl border border-border-light bg-border-extra-light px-4 text-sm font-medium text-text-extra-high">
+        <div className="flex h-12 items-center rounded-2xl border border-border-default bg-fill-subtle px-4 text-sm font-medium text-primary">
           Default Project
         </div>
       </div>
       <div className="space-y-2">
         <Label>Environment</Label>
-        <div className="flex h-12 items-center rounded-2xl border border-border-light bg-border-extra-light px-4 text-sm font-medium text-text-extra-high">
+        <div className="flex h-12 items-center rounded-2xl border border-border-default bg-fill-subtle px-4 text-sm font-medium text-primary">
           Sandbox
         </div>
       </div>
       {!canProvisionWallet ? (
-        <div className="rounded-2xl border border-border-light bg-border-extra-light px-4 py-3 text-sm leading-6 text-text-low">
+        <div className="rounded-2xl border border-border-default bg-fill-subtle px-4 py-3 text-sm leading-6 text-tertiary">
           {selectedProviderEntry
             ? `${selectedProviderEntry.label} uses its existing configured wallet in this flow.`
             : "Choose an enabled provider to continue."}
@@ -252,7 +252,7 @@ export function WalletSetupFlow({
       {errorMessage ? (
         <div
           role="alert"
-          className="rounded-2xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text"
+          className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error"
         >
           {errorMessage}
         </div>
@@ -265,7 +265,7 @@ export function WalletSetupFlow({
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-6">
         <div className="mx-auto w-full max-w-3xl space-y-6">
           <div className="text-center">
-            <p className="text-[28px] leading-tight font-medium text-text-extra-high">{heading}</p>
+            <p className="text-[28px] leading-tight font-medium text-primary">{heading}</p>
           </div>
 
           <ProviderStep
@@ -308,7 +308,7 @@ export function WalletSetupFlow({
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-6">
         <div className="mx-auto w-full max-w-3xl space-y-6">
           <div className="text-center">
-            <p className="text-[28px] leading-tight font-medium text-text-extra-high">{heading}</p>
+            <p className="text-[28px] leading-tight font-medium text-primary">{heading}</p>
           </div>
 
           <form id="wallet-details-form" onSubmit={handleSubmit} className="grid gap-4">

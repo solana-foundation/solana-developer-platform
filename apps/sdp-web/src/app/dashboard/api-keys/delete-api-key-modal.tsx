@@ -99,7 +99,7 @@ export function DeleteApiKeyModal({
           type="button"
           variant="secondary"
           size="sm"
-          className="border-[#c71f37] text-[#c71f37] hover:bg-[#c71f37]/10"
+          className="border-destructive text-destructive hover:bg-destructive/10"
           onClick={openModal}
         >
           Delete
@@ -115,8 +115,8 @@ export function DeleteApiKeyModal({
         contentClassName="rounded-xl p-5 text-left"
         size="sm"
       >
-        <p className="pr-10 text-sm font-medium text-[#1c1c1d]">Delete API key</p>
-        <p className="mt-2 text-sm text-[rgba(28,28,29,0.72)]">
+        <p className="pr-10 text-sm font-medium text-primary">Delete API key</p>
+        <p className="mt-2 text-sm text-secondary">
           This removes the key without deleting the row.
         </p>
         <p className="mt-2 text-sm">

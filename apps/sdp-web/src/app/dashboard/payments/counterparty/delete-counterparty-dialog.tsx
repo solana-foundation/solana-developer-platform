@@ -38,10 +38,10 @@ export function DeleteCounterpartyDialog({
     >
       <div className="space-y-5 p-6">
         <div className="space-y-1">
-          <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
+          <h2 className="text-lg font-medium tracking-tight text-primary">
             Delete counterparty
           </h2>
-          <p className="text-sm text-text-medium">
+          <p className="text-sm text-secondary">
             {displayName ? (
               <>
                 Are you sure you want to delete <span className="font-medium">{displayName}</span>?

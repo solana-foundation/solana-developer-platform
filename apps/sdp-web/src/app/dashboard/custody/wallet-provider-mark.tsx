@@ -47,7 +47,7 @@ const PROVIDER_LOGOS: Partial<
   },
   anchorage: {
     src: "/provider-logos/anchorage.svg",
-    backgroundClassName: "bg-[#111111]",
+    backgroundClassName: "bg-primary",
     paddingClassName: "p-2.5",
   },
   utila: {
@@ -81,8 +81,8 @@ export function WalletProviderMark({ provider, size = "md" }: WalletProviderMark
   return (
     <div
       className={[
-        "inline-flex items-center justify-center overflow-hidden border border-[rgba(28,28,29,0.08)]",
-        logo?.backgroundClassName ?? "bg-[rgba(28,28,29,0.04)]",
+        "inline-flex items-center justify-center overflow-hidden border border-border-subtle",
+        logo?.backgroundClassName ?? "bg-fill-subtle",
         dimensionClass,
       ].join(" ")}
       title={formatCustodyProviderName(provider)}
@@ -93,7 +93,7 @@ export function WalletProviderMark({ provider, size = "md" }: WalletProviderMark
           <Image src={logo.src} alt="" fill sizes={imageSizes} className="object-contain" />
         </div>
       ) : (
-        <KeyRound size={iconSize} className="text-[rgba(28,28,29,0.72)]" />
+        <KeyRound size={iconSize} className="text-secondary" />
       )}
     </div>
   );

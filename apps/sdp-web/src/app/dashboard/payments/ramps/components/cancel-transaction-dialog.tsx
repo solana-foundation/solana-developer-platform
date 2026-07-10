@@ -18,10 +18,10 @@ export function CancelTransactionDialog({
     <Modal isOpen={open} onClose={onKeepGoing} ariaLabel="Cancel transaction" size="sm">
       <div className="space-y-6 p-6">
         <div className="space-y-2">
-          <p className="text-xl font-medium tracking-tight text-text-extra-high">
+          <p className="text-xl font-medium tracking-tight text-primary">
             Cancel this transaction?
           </p>
-          <p className="text-sm text-text-low">
+          <p className="text-sm text-tertiary">
             This transaction has already been started. If you cancel now you'll leave the flow.
           </p>
         </div>

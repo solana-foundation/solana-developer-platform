@@ -7,16 +7,16 @@ export function HomeSignedInCard() {
   const { isLoaded, orgId } = useAuth();
 
   if (!isLoaded) {
-    return <p className="text-sm text-text-medium">Loading...</p>;
+    return <p className="text-sm text-secondary">Loading...</p>;
   }
 
   if (!orgId) {
     return (
-      <div className="rounded-[var(--sdp-surface-radius)] border border-border-light bg-white p-6 shadow-sm">
-        <h2 className="text-[19px] leading-6 font-medium text-text-extra-high">
+      <div className="rounded-[var(--sdp-surface-radius)] border border-border-default bg-white p-6 shadow-sm">
+        <h2 className="text-[19px] leading-6 font-medium text-primary">
           Select your organization
         </h2>
-        <p className="mt-3 text-sm text-text-medium">
+        <p className="mt-3 text-sm text-secondary">
           Choose or create an organization to continue.
         </p>
         <div className="mt-6">
@@ -27,9 +27,9 @@ export function HomeSignedInCard() {
   }
 
   return (
-    <div className="rounded-[var(--sdp-surface-radius)] border border-border-light bg-white p-6 shadow-sm">
+    <div className="rounded-[var(--sdp-surface-radius)] border border-border-default bg-white p-6 shadow-sm">
       <AutoDashboardRedirect />
-      <p className="text-sm text-text-medium">Loading your dashboard...</p>
+      <p className="text-sm text-secondary">Loading your dashboard...</p>
     </div>
   );
 }

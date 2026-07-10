@@ -81,12 +81,12 @@ export default async function ApiKeysPage() {
         </CardHeader>
         <CardContent>
           {!dashboardAccess.capabilities.canManageApiKeys ? (
-            <div className="mb-4 rounded-[10px] border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
+            <div className="mb-4 rounded-[10px] border border-border-default bg-fill-subtle px-3 py-2 text-xs text-secondary">
               You can view API keys, but only admins can create, rotate, or delete them.
             </div>
           ) : null}
-          <div className="mb-4 rounded-[10px] border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
-            <p className="text-xs text-[rgba(28,28,29,0.72)]">
+          <div className="mb-4 rounded-[10px] border border-border-default bg-fill-subtle px-3 py-2 text-xs text-secondary">
+            <p className="text-xs text-secondary">
               Rotation hint: rotate active keys only. The dashboard uses a 24-hour grace period; use
               the API for custom grace values (0-168h). New key secrets are shown once.
             </p>

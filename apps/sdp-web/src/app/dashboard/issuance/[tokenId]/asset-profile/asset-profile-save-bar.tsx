@@ -23,8 +23,8 @@ export function AssetProfileSaveBar({
 
   return (
     <div className="sticky bottom-4 z-20">
-      <div className="mx-auto flex max-w-xl items-center justify-between gap-4 rounded-2xl border border-[rgba(28,28,29,0.14)] bg-white px-5 py-3">
-        <p className="text-sm text-[rgba(28,28,29,0.72)]">
+      <div className="mx-auto flex max-w-xl items-center justify-between gap-4 rounded-2xl border border-border-default bg-white px-5 py-3">
+        <p className="text-sm text-secondary">
           {errorCount > 0
             ? `Unsaved changes — ${errorCount} field${errorCount === 1 ? "" : "s"} need attention`
             : "You have unsaved changes"}

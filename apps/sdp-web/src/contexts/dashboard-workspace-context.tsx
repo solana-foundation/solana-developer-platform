@@ -64,9 +64,9 @@ function DashboardScopeRefreshFallback() {
   const router = useRouter();
 
   return (
-    <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
-      <div className="mx-auto max-w-5xl space-y-4 border border-border-extra-light bg-white/70 p-6">
-        <p className="text-sm text-text-low">Loading dashboard...</p>
+    <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
+      <div className="mx-auto max-w-5xl space-y-4 border border-border-subtle bg-white/70 p-6">
+        <p className="text-sm text-tertiary">Loading dashboard...</p>
         <Button type="button" variant="ghost" size="sm" onClick={() => router.refresh()}>
           Retry
         </Button>

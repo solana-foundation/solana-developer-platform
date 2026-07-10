@@ -91,9 +91,9 @@ function TransferStatusBadge({ status }: { status: string }) {
     <span
       className={cn(
         "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
-        tone === "success" && "bg-status-success-bg text-status-success-text",
-        tone === "error" && "bg-status-error-bg text-status-error-text",
-        tone === "pending" && "bg-border-light text-text-medium"
+        tone === "success" && "bg-success-bg text-success",
+        tone === "error" && "bg-error-bg text-error",
+        tone === "pending" && "bg-fill-strong text-secondary"
       )}
     >
       {toTitleCase(status)}
@@ -103,7 +103,7 @@ function TransferStatusBadge({ status }: { status: string }) {
 
 function TransferProviderCell({ provider }: { provider?: RampProviderId }) {
   if (!provider) {
-    return <span className="text-sm text-text-low">—</span>;
+    return <span className="text-sm text-tertiary">—</span>;
   }
   return (
     <div className="flex items-center gap-2">
@@ -114,7 +114,7 @@ function TransferProviderCell({ provider }: { provider?: RampProviderId }) {
         height={20}
         className="size-5 rounded"
       />
-      <span className="text-sm text-text-extra-high">{getRampProviderLabel(provider)}</span>
+      <span className="text-sm text-primary">{getRampProviderLabel(provider)}</span>
     </div>
   );
 }
@@ -142,14 +142,14 @@ function TransferTableRow({
           onSelect(transfer);
         }
       }}
-      className="cursor-pointer border-b border-border-light transition-colors last:border-b-0 hover:bg-border-extra-light"
+      className="cursor-pointer border-b border-border-default transition-colors last:border-b-0 hover:bg-fill-subtle"
     >
       <td className="whitespace-nowrap px-4 py-3">
         <div className="flex items-center gap-2.5">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-border-light text-text-medium [&_svg]:size-4">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-fill-strong text-secondary [&_svg]:size-4">
             {isInbound ? <BanknoteArrowDownIcon /> : <BanknoteArrowUpIcon />}
           </span>
-          <span className="text-sm font-medium text-text-extra-high">
+          <span className="text-sm font-medium text-primary">
             {resolveTransferTypeLabel(transfer.type)}
           </span>
         </div>
@@ -159,32 +159,32 @@ function TransferTableRow({
       </td>
       <td className="whitespace-nowrap px-4 py-3">
         {walletAddress ? (
-          <span className="font-mono text-xs text-text-medium" title={walletAddress}>
+          <span className="font-mono text-xs text-secondary" title={walletAddress}>
             {shortenAddress(walletAddress)}
           </span>
         ) : (
-          <span className="text-sm text-text-low">—</span>
+          <span className="text-sm text-tertiary">—</span>
         )}
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-right">
         {flow.send || flow.receive ? (
           <span className="inline-flex items-center justify-end gap-1.5 text-sm">
-            {flow.send ? <span className="text-text-medium">{flow.send}</span> : null}
+            {flow.send ? <span className="text-secondary">{flow.send}</span> : null}
             {flow.send && flow.receive ? (
-              <ArrowRightIcon className="size-3.5 text-text-low" />
+              <ArrowRightIcon className="size-3.5 text-tertiary" />
             ) : null}
             {flow.receive ? (
-              <span className="font-medium text-text-extra-high">{flow.receive}</span>
+              <span className="font-medium text-primary">{flow.receive}</span>
             ) : null}
           </span>
         ) : (
-          <span className="text-sm text-text-low">—</span>
+          <span className="text-sm text-tertiary">—</span>
         )}
       </td>
       <td className="whitespace-nowrap px-4 py-3">
         <TransferStatusBadge status={transfer.status} />
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-right text-xs text-text-low">
+      <td className="whitespace-nowrap px-4 py-3 text-right text-xs text-tertiary">
         {transfer.createdAt ? (
           <span title={formatTimestamp(transfer.createdAt)}>
             {formatRelativeTime(transfer.createdAt)}
@@ -211,8 +211,8 @@ function FilterChip({
       className={cn(
         "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
         active
-          ? "border-gray-1400 bg-gray-1400 text-white"
-          : "border-border-light bg-white text-text-medium hover:text-text-extra-high"
+          ? "border-primary bg-primary text-white"
+          : "border-border-default bg-white text-secondary hover:text-primary"
       )}
     >
       {children}
@@ -279,9 +279,9 @@ function CounterpartyTransactions({
   return (
     <section className="space-y-3">
       {transfers.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-medium py-10 text-center">
-          <ReceiptTextIcon className="size-7 text-text-extra-low" />
-          <p className="text-sm text-text-low">No transactions tied to this counterparty yet.</p>
+        <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong py-10 text-center">
+          <ReceiptTextIcon className="size-7 text-muted" />
+          <p className="text-sm text-tertiary">No transactions tied to this counterparty yet.</p>
         </div>
       ) : (
         <>
@@ -305,7 +305,7 @@ function CounterpartyTransactions({
               ) : null}
               {availableProviders.length > 1 ? (
                 <>
-                  <span className="mx-1 h-4 w-px bg-border-light" />
+                  <span className="mx-1 h-4 w-px bg-fill-strong" />
                   <FilterChip
                     active={providerFilter === null}
                     onClick={() => setProviderFilter(null)}
@@ -326,16 +326,16 @@ function CounterpartyTransactions({
             </div>
           ) : null}
 
-          <div className="overflow-x-auto rounded-2xl border border-border-light bg-white shadow-sm">
+          <div className="overflow-x-auto rounded-2xl border border-border-default bg-white shadow-sm">
             <table className="w-full min-w-[760px] table-fixed border-collapse">
               <thead>
-                <tr className="border-b border-border-light">
+                <tr className="border-b border-border-default">
                   {TRANSFER_TABLE_HEADERS.map((header) => (
                     <th
                       key={header.label}
                       style={{ width: header.width }}
                       className={cn(
-                        "px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-text-medium",
+                        "px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-secondary",
                         header.align === "right" ? "text-right" : "text-left"
                       )}
                     >
@@ -349,7 +349,7 @@ function CounterpartyTransactions({
                   <tr>
                     <td
                       colSpan={TRANSFER_TABLE_HEADERS.length}
-                      className="px-4 py-8 text-center text-sm text-text-low"
+                      className="px-4 py-8 text-center text-sm text-tertiary"
                     >
                       No transactions match the selected filters.
                     </td>
@@ -391,7 +391,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
         toast.success("Copied", { position: "bottom-right" });
       }}
     >
-      {copied ? <CheckIcon className="text-status-success-text" /> : <CopyIcon />}
+      {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
     </Button>
   );
 }
@@ -409,9 +409,9 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-center justify-between gap-4 py-3">
-      <span className="shrink-0 text-sm text-text-low">{label}</span>
+      <span className="shrink-0 text-sm text-tertiary">{label}</span>
       <div className="flex min-w-0 items-center gap-1.5">
-        <span className={cn("truncate text-sm text-text-extra-high", mono && "font-mono text-xs")}>
+        <span className={cn("truncate text-sm text-primary", mono && "font-mono text-xs")}>
           {value}
         </span>
         {copyValue ? <CopyButton value={copyValue} label={`Copy ${label}`} /> : null}
@@ -510,38 +510,38 @@ function TransferDetailModal({
       <div className="space-y-5 p-6">
         <div className="flex items-start justify-between gap-4 pr-8">
           <div className="space-y-1">
-            <h2 className="text-xl font-medium tracking-tight text-text-extra-high">
+            <h2 className="text-xl font-medium tracking-tight text-primary">
               {resolveTransferTypeLabel(transfer.type)}
             </h2>
             {transfer.createdAt ? (
-              <p className="text-sm text-text-medium">{formatTimestamp(transfer.createdAt)}</p>
+              <p className="text-sm text-secondary">{formatTimestamp(transfer.createdAt)}</p>
             ) : null}
           </div>
           <TransferStatusBadge status={transfer.status} />
         </div>
 
-        <div className="flex items-center justify-between gap-4 rounded-2xl bg-border-extra-light p-5">
+        <div className="flex items-center justify-between gap-4 rounded-2xl bg-fill-subtle p-5">
           <div className="min-w-0 space-y-0.5">
-            <p className="text-xs font-medium uppercase tracking-wide text-text-medium">
+            <p className="text-xs font-medium uppercase tracking-wide text-secondary">
               {isInbound ? "You deposit" : "You send"}
             </p>
-            <p className="truncate text-xl font-semibold tracking-tight text-text-extra-high">
+            <p className="truncate text-xl font-semibold tracking-tight text-primary">
               {flow.send ?? "—"}
             </p>
           </div>
-          <ArrowRightIcon className="size-5 shrink-0 text-text-low" />
+          <ArrowRightIcon className="size-5 shrink-0 text-tertiary" />
           <div className="min-w-0 space-y-0.5 text-right">
-            <p className="text-xs font-medium uppercase tracking-wide text-text-medium">
+            <p className="text-xs font-medium uppercase tracking-wide text-secondary">
               Recipient gets
             </p>
-            <p className="truncate text-xl font-semibold tracking-tight text-text-extra-high">
+            <p className="truncate text-xl font-semibold tracking-tight text-primary">
               {flow.receive ?? "—"}
             </p>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border-light px-4">
-          <div className="divide-y divide-border-light">
+        <div className="rounded-2xl border border-border-default px-4">
+          <div className="divide-y divide-border-default">
             {isInbound ? (
               <>
                 {walletRow}
@@ -645,16 +645,16 @@ function FieldList({ rows }: { rows: InfoRowData[] }) {
     <dl className="grid gap-x-6 gap-y-4 sm:grid-flow-col sm:grid-rows-3">
       {rows.map((row) => (
         <div key={row.label} className="flex min-w-0 items-start gap-3">
-          <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-border-light text-text-medium [&_svg]:size-4">
+          <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-fill-strong text-secondary [&_svg]:size-4">
             {row.icon}
           </span>
           <div className="min-w-0 space-y-1">
-            <dt className="text-xs font-medium uppercase tracking-wide text-text-medium">
+            <dt className="text-xs font-medium uppercase tracking-wide text-secondary">
               {row.label}
             </dt>
             <dd
               className={cn(
-                "truncate text-sm text-text-extra-high",
+                "truncate text-sm text-primary",
                 row.mono && "font-mono text-xs"
               )}
               title={row.value}
@@ -735,10 +735,10 @@ export function CounterpartyDetailWorkspace({
     <DashboardWorkspaceOverviewPanel className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1">
-          <h2 className="text-3xl font-medium tracking-tight text-text-extra-high">
+          <h2 className="text-3xl font-medium tracking-tight text-primary">
             {counterparty.displayName}
           </h2>
-          <p className="text-sm text-text-medium">
+          <p className="text-sm text-secondary">
             {toTitleCase(counterparty.entityType)} · Counterparty
           </p>
         </div>
@@ -750,7 +750,7 @@ export function CounterpartyDetailWorkspace({
           </DropdownMenuTrigger>
           <DropdownMenuContent>
             <DropdownMenuItem
-              className="text-status-error-text focus:text-status-error-text [&_svg]:size-4"
+              className="text-error focus:text-error [&_svg]:size-4"
               onSelect={() => setDeleteOpen(true)}
             >
               <Trash2Icon />
@@ -760,7 +760,7 @@ export function CounterpartyDetailWorkspace({
         </DropdownMenu>
       </div>
 
-      <div className="flex gap-6 border-b border-border-light">
+      <div className="flex gap-6 border-b border-border-default">
         {(["details", "transactions"] as const).map((tab) => (
           <button
             key={tab}
@@ -769,13 +769,13 @@ export function CounterpartyDetailWorkspace({
             className={cn(
               "relative pb-3 text-sm font-medium transition-colors",
               activeTab === tab
-                ? "text-text-extra-high"
-                : "text-text-medium hover:text-text-extra-high"
+                ? "text-primary"
+                : "text-secondary hover:text-primary"
             )}
           >
             {tab === "details" ? "Details" : "Transactions"}
             {activeTab === tab ? (
-              <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-gray-1400" />
+              <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-primary" />
             ) : null}
           </button>
         ))}
@@ -790,8 +790,8 @@ export function CounterpartyDetailWorkspace({
         <>
           <div className="grid gap-6 lg:grid-cols-2">
             <section className="space-y-3">
-              <h3 className="text-2xl font-medium text-text-extra-high">Identity</h3>
-              <div className="rounded-2xl border border-border-light bg-white p-5 shadow-sm">
+              <h3 className="text-2xl font-medium text-primary">Identity</h3>
+              <div className="rounded-2xl border border-border-default bg-white p-5 shadow-sm">
                 <FieldList
                   rows={[
                     { label: "Display name", value: counterparty.displayName, icon: <UserIcon /> },
@@ -826,12 +826,12 @@ export function CounterpartyDetailWorkspace({
             </section>
 
             <section className="space-y-3">
-              <h3 className="text-2xl font-medium text-text-extra-high">Personal information</h3>
-              <div className="rounded-2xl border border-border-light bg-white p-5 shadow-sm">
+              <h3 className="text-2xl font-medium text-primary">Personal information</h3>
+              <div className="rounded-2xl border border-border-default bg-white p-5 shadow-sm">
                 {personalInfoRows.length > 0 ? (
                   <FieldList rows={personalInfoRows} />
                 ) : (
-                  <p className="text-sm text-text-low">No personal information on file.</p>
+                  <p className="text-sm text-tertiary">No personal information on file.</p>
                 )}
               </div>
             </section>
@@ -839,7 +839,7 @@ export function CounterpartyDetailWorkspace({
 
           <section className="space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <h3 className="text-2xl font-medium text-text-extra-high">External accounts</h3>
+              <h3 className="text-2xl font-medium text-primary">External accounts</h3>
               <Button
                 type="button"
                 size="sm"
@@ -850,25 +850,25 @@ export function CounterpartyDetailWorkspace({
               </Button>
             </div>
             {accounts.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-medium py-10 text-center">
-                <WalletIcon className="size-7 text-text-extra-low" />
-                <p className="text-sm text-text-low">No external accounts yet.</p>
+              <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong py-10 text-center">
+                <WalletIcon className="size-7 text-muted" />
+                <p className="text-sm text-tertiary">No external accounts yet.</p>
               </div>
             ) : (
-              <div className="overflow-hidden rounded-2xl border border-border-light bg-white shadow-sm">
+              <div className="overflow-hidden rounded-2xl border border-border-default bg-white shadow-sm">
                 {accounts.map((account) => {
                   const details = account.details as { network?: string; address?: string };
                   return (
                     <div
                       key={account.id}
-                      className="flex items-center justify-between gap-4 border-b border-border-light px-4 py-2.5 last:border-b-0"
+                      className="flex items-center justify-between gap-4 border-b border-border-default px-4 py-2.5 last:border-b-0"
                     >
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-text-extra-high">
+                        <p className="truncate text-sm font-medium text-primary">
                           {account.label ?? "Crypto wallet"}
                         </p>
                         <div className="flex h-5 items-center gap-1">
-                          <p className="truncate font-mono text-xs text-text-medium">
+                          <p className="truncate font-mono text-xs text-secondary">
                             {details.address}
                           </p>
                           {details.address && (
@@ -886,7 +886,7 @@ export function CounterpartyDetailWorkspace({
                               }}
                             >
                               {copied && copiedId === account.id ? (
-                                <CheckIcon className="text-status-success-text" />
+                                <CheckIcon className="text-success" />
                               ) : (
                                 <CopyIcon />
                               )}
@@ -894,7 +894,7 @@ export function CounterpartyDetailWorkspace({
                           )}
                         </div>
                       </div>
-                      <span className="flex shrink-0 items-center gap-1.5 text-xs text-text-medium">
+                      <span className="flex shrink-0 items-center gap-1.5 text-xs text-secondary">
                         <Image
                           src="/landing/solana-logo.svg"
                           alt=""

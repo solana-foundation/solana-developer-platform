@@ -30,7 +30,7 @@ export const templateCards: Array<
     name: "Tokenized Security",
     description: "Create a compliant security token with scaled UI amounts and core controls.",
     icon: ShieldCheck,
-    iconClassName: "bg-[#d8f7e4] text-[#0f9b58]",
+    iconClassName: "bg-success-bg text-success",
     enabled: true,
     template: "tokenized-security",
   },

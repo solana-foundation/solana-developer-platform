@@ -25,10 +25,10 @@ const ROW_STAGGER_MS = 420;
 const COMPLETE_DELAY_MS = 500;
 
 const TONE_ICON = {
-  green: { Icon: ShieldCheckIcon, className: "text-[#115e3d]" },
-  yellow: { Icon: TriangleAlertIcon, className: "text-[#8a5a00]" },
-  red: { Icon: ShieldAlertIcon, className: "text-[#9e2b38]" },
-  neutral: { Icon: MinusCircleIcon, className: "text-text-medium" },
+  green: { Icon: ShieldCheckIcon, className: "text-success" },
+  yellow: { Icon: TriangleAlertIcon, className: "text-warning" },
+  red: { Icon: ShieldAlertIcon, className: "text-destructive-strong" },
+  neutral: { Icon: MinusCircleIcon, className: "text-secondary" },
 } as const satisfies Record<RiskTone, { Icon: LucideIcon; className: string }>;
 
 interface ScreeningProgressProps {
@@ -61,7 +61,7 @@ export function ScreeningProgress({ results, onComplete }: ScreeningProgressProp
   return (
     <HeightReveal>
       <div className="space-y-2">
-        <div className="text-sm font-medium text-text-medium">Compliance screening</div>
+        <div className="text-sm font-medium text-secondary">Compliance screening</div>
         <ul className="space-y-1.5">
           {results.map((result, index) => (
             <ScreeningRow
@@ -94,7 +94,7 @@ function ScreeningRow({ result, index, resolved }: ScreeningRowProps) {
       transition={{ delay: index * 0.1 }}
       className="flex items-center justify-between gap-3 rounded-xl bg-[rgba(255,255,255,0.6)] px-3 py-2 text-sm"
     >
-      <span className="flex items-center gap-2 font-medium text-text-high">
+      <span className="flex items-center gap-2 font-medium text-primary">
         {logo ? (
           <Image
             src={logo}
@@ -113,7 +113,7 @@ function ScreeningRow({ result, index, resolved }: ScreeningRowProps) {
               key="score"
               initial={{ opacity: 0, x: 4 }}
               animate={{ opacity: 1, x: 0 }}
-              className="text-xs text-text-medium"
+              className="text-xs text-secondary"
             >
               {formatRiskScore(result)}
             </motion.span>
@@ -123,7 +123,7 @@ function ScreeningRow({ result, index, resolved }: ScreeningRowProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="text-xs text-text-extra-low"
+              className="text-xs text-muted"
             >
               Checking…
             </motion.span>
@@ -141,7 +141,7 @@ function ScreeningRow({ result, index, resolved }: ScreeningRowProps) {
               <Icon className="size-4" />
             </motion.span>
           ) : (
-            <motion.span key="spinner" exit={{ opacity: 0 }} className="text-text-low">
+            <motion.span key="spinner" exit={{ opacity: 0 }} className="text-tertiary">
               <Loader2Icon className="size-4 animate-spin" />
             </motion.span>
           )}

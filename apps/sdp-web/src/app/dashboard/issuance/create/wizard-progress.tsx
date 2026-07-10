@@ -22,15 +22,15 @@ export function WizardProgress({ currentStep }: WizardProgressProps) {
             className={cn(
               "h-1.5 rounded-full transition-all duration-200",
               index === currentIdx
-                ? "w-4 bg-gray-1400"
+                ? "w-4 bg-primary"
                 : index < currentIdx
-                  ? "w-1.5 bg-gray-1400"
-                  : "w-1.5 bg-border-light"
+                  ? "w-1.5 bg-primary"
+                  : "w-1.5 bg-fill-strong"
             )}
           />
         ))}
       </div>
-      <span className="text-xs text-text-extra-low">
+      <span className="text-xs text-muted">
         Step {currentIdx + 1} of {WIZARD_STEP_META.length}
       </span>
     </div>

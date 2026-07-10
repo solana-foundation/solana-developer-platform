@@ -127,8 +127,8 @@ export function StripeOnrampFrame({
     <div className="flex min-h-[640px] flex-col items-center justify-center">
       {failed ? (
         <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
-          <p className="text-lg font-medium text-text-extra-high">Couldn't load Stripe checkout</p>
-          <p className="max-w-md text-sm leading-relaxed text-text-low">
+          <p className="text-lg font-medium text-primary">Couldn't load Stripe checkout</p>
+          <p className="max-w-md text-sm leading-relaxed text-tertiary">
             The Stripe checkout failed to load. Check your connection and try again.
           </p>
           <Button

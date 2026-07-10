@@ -203,17 +203,17 @@ export function AssetManagementWorkspace({
       </Tabs>
 
       {tokenError ? (
-        <div className="rounded-xl border border-[rgba(220,38,38,0.2)] bg-[rgba(220,38,38,0.08)] px-4 py-3">
-          <p className="text-sm font-medium text-[#dc2626]">Token load warning</p>
-          <p className="mt-1 text-sm text-[#dc2626]">{tokenError}</p>
+        <div className="rounded-xl border border-error-border bg-error-bg px-4 py-3">
+          <p className="text-sm font-medium text-error">Token load warning</p>
+          <p className="mt-1 text-sm text-error">{tokenError}</p>
         </div>
       ) : null}
 
       {token.status === "paused" ? (
-        <div className="flex flex-col gap-3 rounded-xl border border-[rgba(234,179,8,0.2)] bg-[rgba(234,179,8,0.08)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-[#92400e]">Token is paused</p>
-            <p className="mt-1 text-sm text-[#92400e]">
+            <p className="text-sm font-medium text-warning">Token is paused</p>
+            <p className="mt-1 text-sm text-warning">
               Minting, burning, and administrative transfer actions are disabled until the token is
               unpaused.
             </p>
@@ -301,11 +301,11 @@ export function AssetManagementWorkspace({
         onClose={ops.closeFundManagementModal}
       >
         {ops.fundManagementModalAction === "deploy" ? (
-          <div className="rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
-            <p className="pr-12 text-[20px] leading-[1.2] font-medium text-[#1c1c1d]">
+          <div className="rounded-2xl border border-border-default bg-white p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
+            <p className="pr-12 text-[20px] leading-[1.2] font-medium text-primary">
               Deploy token
             </p>
-            <p className="mt-2 text-[14px] leading-[1.45] text-[rgba(28,28,29,0.72)]">
+            <p className="mt-2 text-[14px] leading-[1.45] text-secondary">
               This will deploy the token on-chain so operations can run.
             </p>
             <div className="mt-5 space-y-5">
@@ -320,7 +320,7 @@ export function AssetManagementWorkspace({
                   type="button"
                   onClick={ops.closeFundManagementModal}
                   disabled={ops.isPending}
-                  className="inline-flex h-10 items-center rounded-[12px] border border-[rgba(28,28,29,0.16)] bg-white px-4 text-sm font-medium text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.04)] disabled:pointer-events-none disabled:opacity-50"
+                  className="inline-flex h-10 items-center rounded-[12px] border border-border-default bg-white px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -328,7 +328,7 @@ export function AssetManagementWorkspace({
                   type="button"
                   onClick={() => ops.submitFundManagementAction("deploy")}
                   disabled={ops.isPending || Boolean(ops.deploySignerSelection.unavailableReason)}
-                  className="inline-flex h-10 items-center rounded-[12px] bg-[#0f0f10] px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
+                  className="inline-flex h-10 items-center rounded-[12px] bg-primary px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
                 >
                   Deploy now
                 </button>
@@ -355,7 +355,7 @@ export function AssetManagementWorkspace({
       />
 
       {ops.isPending ? (
-        <div className="fixed right-4 bottom-4 z-30 inline-flex items-center gap-2 rounded-lg border border-[rgba(28,28,29,0.12)] bg-white px-3 py-2 text-sm shadow-lg">
+        <div className="fixed right-4 bottom-4 z-30 inline-flex items-center gap-2 rounded-lg border border-border-default bg-white px-3 py-2 text-sm shadow-lg">
           <Loader2 className="h-4 w-4 animate-spin" />
           Running action...
         </div>

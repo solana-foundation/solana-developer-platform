@@ -25,8 +25,8 @@ export function StepClassification() {
       className="space-y-6"
     >
       <div>
-        <h2 className="text-xl font-medium text-[#1c1c1d]">What is this asset?</h2>
-        <p className="mt-1 text-sm text-[rgba(28,28,29,0.62)]">
+        <h2 className="text-xl font-medium text-primary">What is this asset?</h2>
+        <p className="mt-1 text-sm text-secondary">
           Start by telling us what this asset represents and how it should be classified.
         </p>
       </div>
@@ -39,7 +39,7 @@ export function StepClassification() {
           onChange={(event) => updateDraft({ name: event.currentTarget.value })}
           placeholder="e.g., USD Workshop Money Market Fund"
         />
-        <p className="text-sm text-[rgba(28,28,29,0.55)]">A clear name to identify this asset.</p>
+        <p className="text-sm text-tertiary">A clear name to identify this asset.</p>
       </div>
 
       <div className="space-y-3">
@@ -49,7 +49,7 @@ export function StepClassification() {
             href="https://platform.solana.com/docs"
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 text-sm font-medium text-[#1c1c1d] hover:underline"
+            className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
           >
             Not sure what to pick
             <ArrowRight className="h-3.5 w-3.5" />

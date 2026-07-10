@@ -159,8 +159,8 @@ function iconFor(labelOrPath?: string): LucideIcon {
 function ClassificationChip({ label, path }: { label: string; path: string }) {
   const Icon = iconFor(path);
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-2 py-0.5 text-xs text-[rgba(28,28,29,0.7)]">
-      <Icon className="h-3.5 w-3.5 shrink-0 text-[rgba(28,28,29,0.5)]" />
+    <span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-fill-subtle px-2 py-0.5 text-xs text-secondary">
+      <Icon className="h-3.5 w-3.5 shrink-0 text-tertiary" />
       <span className="truncate">{label}</span>
     </span>
   );
@@ -273,8 +273,8 @@ export function PublicInfoPreview({
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-xl font-medium text-[#1c1c1d]">Public token information</h3>
-          <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
+          <h3 className="text-xl font-medium text-primary">Public token information</h3>
+          <p className="mt-0.5 text-sm text-tertiary">
             This is how your asset will appear to wallets, explorers, and the public.
           </p>
         </div>
@@ -285,26 +285,26 @@ export function PublicInfoPreview({
         {/* Checklist — public coverage + what's public, with interactive toggles. */}
         <div>
           <div className="mb-2 flex h-8 items-center justify-between gap-3">
-            <p className="text-sm font-medium text-[#1c1c1d]">Included in public view</p>
-            <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.6)]">
+            <p className="text-sm font-medium text-primary">Included in public view</p>
+            <span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-fill-subtle px-2 py-0.5 text-xs font-medium text-tertiary">
               {publicCount} public
             </span>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white">
+          <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
             {/* Coverage meter sits inside the card so its top edge aligns with the preview card. */}
-            <div className="border-b border-[rgba(28,28,29,0.08)] px-4 py-3">
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-[rgba(28,28,29,0.08)]">
+            <div className="border-b border-border-subtle px-4 py-3">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-fill">
                 <div
-                  className="h-full rounded-full bg-[#0f0f10] transition-[width]"
+                  className="h-full rounded-full bg-primary transition-[width]"
                   style={{ width: `${coveragePct}%` }}
                 />
               </div>
-              <p className="mt-1.5 text-xs text-[rgba(28,28,29,0.5)]">
+              <p className="mt-1.5 text-xs text-tertiary">
                 {publicCount} of {totalCount} fields public
               </p>
             </div>
-            <div className="divide-y divide-[rgba(28,28,29,0.06)]">
+            <div className="divide-y divide-border-subtle">
               {alwaysPublic.map((field) => (
                 <FieldRow key={field.key} label={field.label} value={field.value} checked locked />
               ))}
@@ -322,31 +322,31 @@ export function PublicInfoPreview({
           </div>
 
           {optionalInteractive.length > 0 ? (
-            <div className="mt-3 overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white">
+            <div className="mt-3 overflow-hidden rounded-2xl border border-border-default bg-white">
               <button
                 type="button"
                 onClick={() => setShowOptional((value) => !value)}
                 aria-expanded={showOptional}
-                className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[rgba(28,28,29,0.03)] focus-visible:bg-[rgba(28,28,29,0.04)] focus-visible:outline-none"
+                className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle focus-visible:bg-fill-subtle focus-visible:outline-none"
               >
                 <div className="flex items-start gap-2">
-                  <Lock className="mt-0.5 h-4 w-4 shrink-0 text-[rgba(28,28,29,0.5)]" />
+                  <Lock className="mt-0.5 h-4 w-4 shrink-0 text-tertiary" />
                   <div>
-                    <p className="text-sm font-medium text-[#1c1c1d]">Not included by default</p>
-                    <p className="text-sm text-[rgba(28,28,29,0.55)]">
+                    <p className="text-sm font-medium text-primary">Not included by default</p>
+                    <p className="text-sm text-tertiary">
                       These fields stay private unless you choose to include them.
                     </p>
                   </div>
                 </div>
                 <ChevronDown
                   className={cn(
-                    "h-4 w-4 shrink-0 text-[rgba(28,28,29,0.5)] transition-transform",
+                    "h-4 w-4 shrink-0 text-tertiary transition-transform",
                     showOptional && "rotate-180"
                   )}
                 />
               </button>
               {showOptional ? (
-                <div className="divide-y divide-[rgba(28,28,29,0.06)] border-t border-[rgba(28,28,29,0.08)]">
+                <div className="divide-y divide-border-subtle border-t border-border-subtle">
                   {optionalInteractive.map((candidate) => (
                     <FieldRow
                       key={candidate.path}
@@ -369,10 +369,10 @@ export function PublicInfoPreview({
             viewer sits under this column when toggled open. */}
         <div>
           <div className="mb-2 flex h-8 items-center justify-between gap-3">
-            <p className="text-sm font-medium text-[#1c1c1d]">Preview</p>
+            <p className="text-sm font-medium text-primary">Preview</p>
             <SurfaceSwitch value={surface} onChange={setSurface} />
           </div>
-          <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
+          <div className="rounded-2xl border border-border-default bg-white p-5">
             {surface === "wallet" ? <WalletPreview {...previewProps} /> : null}
             {surface === "explorer" ? <ExplorerPreview {...previewProps} /> : null}
             {surface === "token" ? <TokenPreview {...previewProps} /> : null}
@@ -401,7 +401,7 @@ function SurfaceSwitch({
   onChange: (next: PreviewSurface) => void;
 }) {
   return (
-    <div className="inline-flex items-center gap-0.5 rounded-full border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] p-0.5">
+    <div className="inline-flex items-center gap-0.5 rounded-full border border-border-default bg-fill-subtle p-0.5">
       {SURFACES.map(({ id, label, Icon }) => {
         const active = id === value;
         return (
@@ -413,8 +413,8 @@ function SurfaceSwitch({
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
               active
-                ? "border-[rgba(28,28,29,0.08)] bg-white text-[#1c1c1d]"
-                : "border-transparent text-[rgba(28,28,29,0.55)] hover:text-[#1c1c1d]"
+                ? "border-border-subtle bg-white text-primary"
+                : "border-transparent text-tertiary hover:text-primary"
             )}
           >
             <Icon className="h-3.5 w-3.5" />
@@ -445,13 +445,13 @@ function AssetAvatar({
   if (imageUrl.trim()) {
     return (
       <div className={cn("relative shrink-0", dim)}>
-        <span className="absolute -inset-0.5 rounded-full bg-[rgba(28,28,29,0.02)]" aria-hidden />
+        <span className="absolute -inset-0.5 rounded-full bg-fill-subtle" aria-hidden />
         {/* biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here. */}
         <img
           src={imageUrl}
           alt={`${name || "Asset"} logo`}
           className={cn(
-            "relative rounded-full border border-[rgba(28,28,29,0.1)] object-cover",
+            "relative rounded-full border border-border-default object-cover",
             dim
           )}
         />
@@ -461,10 +461,10 @@ function AssetAvatar({
 
   return (
     <div className="relative shrink-0">
-      <span className="absolute -inset-0.5 rounded-full bg-[rgba(28,28,29,0.02)]" aria-hidden />
+      <span className="absolute -inset-0.5 rounded-full bg-fill-subtle" aria-hidden />
       <div
         className={cn(
-          "flex shrink-0 items-center justify-center rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.05)] font-semibold text-[#1c1c1d]",
+          "flex shrink-0 items-center justify-center rounded-full border border-border-default bg-fill-subtle font-semibold text-primary",
           dim,
           size === "sm" ? "text-base" : "text-xl"
         )}
@@ -485,16 +485,16 @@ function IdentityHeader({
   return (
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
-        <h4 className="text-lg leading-tight font-semibold tracking-tight text-[#1c1c1d]">
+        <h4 className="text-lg leading-tight font-semibold tracking-tight text-primary">
           {draft.name.trim() || "Untitled asset"}
         </h4>
         {draft.symbol.trim() ? (
-          <span className="rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.7)]">
+          <span className="rounded-full border border-border-default bg-fill-subtle px-2 py-0.5 text-xs font-medium text-secondary">
             {draft.symbol.trim()}
           </span>
         ) : null}
-        <span className="ml-1 flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.6)]">
-          <CircleCheck className="h-3 w-3 text-[rgba(28,28,29,0.5)]" />
+        <span className="ml-1 flex items-center gap-1 rounded-full border border-border-subtle bg-fill-subtle px-2 py-0.5 text-xs font-medium text-tertiary">
+          <CircleCheck className="h-3 w-3 text-tertiary" />
           Preview
         </span>
       </div>
@@ -519,10 +519,10 @@ function AddressRow({
   explorerHref?: string | null;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-3 py-2.5">
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-border-default bg-fill-subtle px-3 py-2.5">
       <div className="min-w-0">
-        <p className="text-xs text-[rgba(28,28,29,0.5)]">Mint address</p>
-        <p className="mt-0.5 truncate text-sm font-medium text-[#1c1c1d]">
+        <p className="text-xs text-tertiary">Mint address</p>
+        <p className="mt-0.5 truncate text-sm font-medium text-primary">
           {shortAddress(mintAddress)}
         </p>
       </div>
@@ -554,7 +554,7 @@ function CopyIconButton({ value, label }: { value: string; label: string }) {
         toast.success("Copied", { position: "bottom-right" });
       }}
     >
-      {copied ? <Check className="text-status-success-text" /> : <Copy />}
+      {copied ? <Check className="text-success" /> : <Copy />}
     </Button>
   );
 }
@@ -579,23 +579,23 @@ function TokenPreview({
       <p
         className={cn(
           "mt-3 text-sm leading-relaxed",
-          draft.description.trim() ? "text-[rgba(28,28,29,0.62)]" : "text-[rgba(28,28,29,0.4)]"
+          draft.description.trim() ? "text-secondary" : "text-muted"
         )}
       >
         {draft.description.trim() || "No public description"}
       </p>
 
-      <dl className="mt-4 space-y-2 border-t border-[rgba(28,28,29,0.08)] pt-4">
+      <dl className="mt-4 space-y-2 border-t border-border-subtle pt-4">
         {facts.map((fact) => {
           const Icon = iconFor(fact.path);
           return (
             <div key={fact.label} className="flex items-center gap-3">
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.5)] [&_svg]:size-4">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-tertiary [&_svg]:size-4">
                 <Icon />
               </span>
               <div className="flex min-w-0 flex-1 items-center justify-between gap-4">
-                <dt className="shrink-0 text-sm text-[rgba(28,28,29,0.55)]">{fact.label}</dt>
-                <dd className="min-w-0 text-right text-sm font-medium text-[#1c1c1d]">
+                <dt className="shrink-0 text-sm text-tertiary">{fact.label}</dt>
+                <dd className="min-w-0 text-right text-sm font-medium text-primary">
                   {fact.href ? (
                     <a
                       href={fact.href}
@@ -617,7 +617,7 @@ function TokenPreview({
       </dl>
 
       {mintAddress ? (
-        <div className="mt-4 border-t border-[rgba(28,28,29,0.08)] pt-4">
+        <div className="mt-4 border-t border-border-subtle pt-4">
           <AddressRow mintAddress={mintAddress} explorerHref={explorerHref} />
         </div>
       ) : null}
@@ -633,14 +633,14 @@ function WalletPreview({ draft, categoryLabel, typeLabel }: PreviewProps) {
     <div className="flex items-center gap-3">
       <AssetAvatar imageUrl={draft.imageUrl} name={draft.name} symbol={draft.symbol} size="sm" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-[#1c1c1d]">
+        <p className="truncate text-sm font-medium text-primary">
           {draft.name.trim() || "Untitled asset"}
         </p>
-        <p className="mt-0.5 truncate text-xs text-[rgba(28,28,29,0.5)]">{secondary || "—"}</p>
+        <p className="mt-0.5 truncate text-xs text-tertiary">{secondary || "—"}</p>
       </div>
       <div className="shrink-0 text-right">
-        <p className="text-sm font-medium text-[#1c1c1d]">{draft.symbol.trim() || "—"}</p>
-        <p className="mt-0.5 text-xs text-[rgba(28,28,29,0.5)]">
+        <p className="text-sm font-medium text-primary">{draft.symbol.trim() || "—"}</p>
+        <p className="mt-0.5 text-xs text-tertiary">
           {draft.decimals.trim() || "—"} decimals
         </p>
       </div>
@@ -675,7 +675,7 @@ function ExplorerPreview({
       <div
         className={cn(
           "mt-4 flex flex-wrap gap-2",
-          mintAddress && "border-t border-[rgba(28,28,29,0.08)] pt-4"
+          mintAddress && "border-t border-border-subtle pt-4"
         )}
       >
         {facts.map((fact) => {
@@ -683,11 +683,11 @@ function ExplorerPreview({
           return (
             <span
               key={fact.label}
-              className="inline-flex min-w-0 items-center gap-1.5 rounded-lg border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-2.5 py-1.5"
+              className="inline-flex min-w-0 items-center gap-1.5 rounded-lg border border-border-subtle bg-fill-subtle px-2.5 py-1.5"
             >
-              <Icon className="h-3.5 w-3.5 shrink-0 text-[rgba(28,28,29,0.45)]" />
-              <span className="text-xs text-[rgba(28,28,29,0.55)]">{fact.label}</span>
-              <span className="max-w-[12rem] truncate text-xs font-medium text-[#1c1c1d]">
+              <Icon className="h-3.5 w-3.5 shrink-0 text-muted" />
+              <span className="text-xs text-tertiary">{fact.label}</span>
+              <span className="max-w-[12rem] truncate text-xs font-medium text-primary">
                 {fact.value}
               </span>
             </span>
@@ -722,15 +722,15 @@ function FieldRow({
     <>
       <RoundCheck checked={checked} interactive={hasToggle && !disabled} disabled={disabled} />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-[#1c1c1d]">{label}</p>
+        <p className="text-sm font-medium text-primary">{label}</p>
         {value ? (
-          <p className="mt-0.5 break-words text-sm text-[rgba(28,28,29,0.55)]">{value}</p>
+          <p className="mt-0.5 break-words text-sm text-tertiary">{value}</p>
         ) : null}
       </div>
       {locked ? (
         <span
           title="Always public — can't be hidden"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.55)]"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-fill text-tertiary"
         >
           <Lock className="h-3.5 w-3.5" />
         </span>
@@ -741,7 +741,7 @@ function FieldRow({
   if (!hasToggle) {
     return (
       <div
-        className={cn("flex items-start gap-3 px-4 py-3", locked && "bg-[rgba(28,28,29,0.025)]")}
+        className={cn("flex items-start gap-3 px-4 py-3", locked && "bg-fill-subtle")}
       >
         {body}
       </div>
@@ -760,7 +760,7 @@ function FieldRow({
         "group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors",
         disabled
           ? "cursor-default"
-          : "cursor-pointer hover:bg-[rgba(28,28,29,0.03)] focus-visible:bg-[rgba(28,28,29,0.04)] focus-visible:outline-none"
+          : "cursor-pointer hover:bg-fill-subtle focus-visible:bg-fill-subtle focus-visible:outline-none"
       )}
     >
       {body}
@@ -786,11 +786,11 @@ function RoundCheck({
       className={cn(
         "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors",
         checked
-          ? "border-[#0f0f10] bg-[#0f0f10] text-white"
-          : "border-[rgba(28,28,29,0.28)] bg-white text-transparent",
+          ? "border-primary bg-primary text-white"
+          : "border-border-strong bg-white text-transparent",
         interactive &&
           !checked &&
-          "group-hover:border-[#0f0f10] group-hover:bg-[rgba(28,28,29,0.06)]",
+          "group-hover:border-primary group-hover:bg-fill",
         disabled && "opacity-60"
       )}
     >

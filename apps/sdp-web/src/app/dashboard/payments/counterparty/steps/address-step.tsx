@@ -58,12 +58,12 @@ export function AddressStep() {
           value={values.line1}
           onChange={(e) => setField("line1", e.target.value)}
         />
-        {errors.line1 && <p className="mt-1 text-xs text-status-error-text">{errors.line1}</p>}
+        {errors.line1 && <p className="mt-1 text-xs text-error">{errors.line1}</p>}
       </div>
 
       <div className="space-y-2">
         <Label htmlFor="line2">
-          Line 2 <span className="font-normal text-text-extra-low">(optional)</span>
+          Line 2 <span className="font-normal text-muted">(optional)</span>
         </Label>
         <Input
           size="xl"
@@ -73,7 +73,7 @@ export function AddressStep() {
           value={values.line2}
           onChange={(e) => setField("line2", e.target.value)}
         />
-        {errors.line2 && <p className="mt-1 text-xs text-status-error-text">{errors.line2}</p>}
+        {errors.line2 && <p className="mt-1 text-xs text-error">{errors.line2}</p>}
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -87,11 +87,11 @@ export function AddressStep() {
             value={values.city}
             onChange={(e) => setField("city", e.target.value)}
           />
-          {errors.city && <p className="mt-1 text-xs text-status-error-text">{errors.city}</p>}
+          {errors.city && <p className="mt-1 text-xs text-error">{errors.city}</p>}
         </div>
         <div className="space-y-2">
           <Label htmlFor="postalCode">
-            Postal code <span className="font-normal text-text-extra-low">(optional)</span>
+            Postal code <span className="font-normal text-muted">(optional)</span>
           </Label>
           <Input
             size="xl"
@@ -102,7 +102,7 @@ export function AddressStep() {
             onChange={(e) => setField("postalCode", e.target.value)}
           />
           {errors.postalCode && (
-            <p className="mt-1 text-xs text-status-error-text">{errors.postalCode}</p>
+            <p className="mt-1 text-xs text-error">{errors.postalCode}</p>
           )}
         </div>
       </div>
@@ -121,7 +121,7 @@ export function AddressStep() {
             error={error ?? undefined}
           />
           {errors.countryCode && (
-            <p className="mt-1 text-xs text-status-error-text">{errors.countryCode}</p>
+            <p className="mt-1 text-xs text-error">{errors.countryCode}</p>
           )}
         </div>
         <div className="space-y-2">
@@ -140,7 +140,7 @@ export function AddressStep() {
           ) : (
             <>
               <Label htmlFor="subdivisionCode">
-                State / Province <span className="font-normal text-text-extra-low">(optional)</span>
+                State / Province <span className="font-normal text-muted">(optional)</span>
               </Label>
               <Input
                 size="xl"
@@ -153,7 +153,7 @@ export function AddressStep() {
             </>
           )}
           {errors.subdivisionCode && (
-            <p className="mt-1 text-xs text-status-error-text">{errors.subdivisionCode}</p>
+            <p className="mt-1 text-xs text-error">{errors.subdivisionCode}</p>
           )}
         </div>
       </div>

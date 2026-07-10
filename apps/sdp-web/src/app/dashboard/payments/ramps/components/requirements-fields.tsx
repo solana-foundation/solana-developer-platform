@@ -45,7 +45,7 @@ function RequirementFieldInput({
               )
             }
           />
-          {error ? <p className="text-sm text-status-error-text">{error}</p> : null}
+          {error ? <p className="text-sm text-error">{error}</p> : null}
         </div>
       );
     }

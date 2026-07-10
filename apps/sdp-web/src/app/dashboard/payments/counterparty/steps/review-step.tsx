@@ -75,7 +75,7 @@ export function ReviewStep() {
         ) : null}
       </div>
 
-      {submitError ? <p className="text-sm text-status-error-text">{submitError}</p> : null}
+      {submitError ? <p className="text-sm text-error">{submitError}</p> : null}
     </div>
   );
 }

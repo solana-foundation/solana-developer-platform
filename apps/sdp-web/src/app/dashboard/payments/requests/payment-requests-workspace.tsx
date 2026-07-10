@@ -137,9 +137,9 @@ function StatusBadge({ status }: { status: PaymentRequestStatus }) {
     <span
       className={cn(
         "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
-        tone === "success" && "bg-status-success-bg text-status-success-text",
-        tone === "error" && "bg-status-error-bg text-status-error-text",
-        tone === "pending" && "bg-border-light text-text-medium"
+        tone === "success" && "bg-success-bg text-success",
+        tone === "error" && "bg-error-bg text-error",
+        tone === "pending" && "bg-fill-strong text-secondary"
       )}
     >
       {STATUS_LABEL[status]}
@@ -150,8 +150,8 @@ function StatusBadge({ status }: { status: PaymentRequestStatus }) {
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-4 py-3">
-      <span className="shrink-0 text-sm text-text-medium">{label}</span>
-      <span className="min-w-0 break-all text-right text-sm font-medium text-text-extra-high">
+      <span className="shrink-0 text-sm text-secondary">{label}</span>
+      <span className="min-w-0 break-all text-right text-sm font-medium text-primary">
         {children}
       </span>
     </div>
@@ -269,10 +269,10 @@ function CreateRequestModal({
       >
         <div className="space-y-5 p-6">
           <div className="space-y-1">
-            <h2 className="text-xl font-medium tracking-tight text-text-extra-high">
+            <h2 className="text-xl font-medium tracking-tight text-primary">
               Create payment link
             </h2>
-            <p className="text-sm text-text-medium">
+            <p className="text-sm text-secondary">
               Request a fixed payment to one of your wallets.
             </p>
           </div>
@@ -295,7 +295,7 @@ function CreateRequestModal({
                 }
               />
               {form.errors.amount && (
-                <p className="mt-1 text-xs text-status-error-text">{form.errors.amount}</p>
+                <p className="mt-1 text-xs text-error">{form.errors.amount}</p>
               )}
             </div>
             <div className="space-y-2">
@@ -315,7 +315,7 @@ function CreateRequestModal({
                 ))}
               </Select>
               {form.errors.token && (
-                <p className="mt-1 text-xs text-status-error-text">{form.errors.token}</p>
+                <p className="mt-1 text-xs text-error">{form.errors.token}</p>
               )}
             </div>
           </div>
@@ -340,7 +340,7 @@ function CreateRequestModal({
               })}
             </Select>
             {form.errors.wallet && (
-              <p className="mt-1 text-xs text-status-error-text">{form.errors.wallet}</p>
+              <p className="mt-1 text-xs text-error">{form.errors.wallet}</p>
             )}
           </div>
 
@@ -363,19 +363,19 @@ function CreateRequestModal({
               ))}
             </Select>
             {selectedCounterpartyId && accountsLoading && (
-              <p className="text-xs text-text-low">Loading crypto account…</p>
+              <p className="text-xs text-tertiary">Loading crypto account…</p>
             )}
             {selectedCounterpartyId && !accountsLoading && primaryCryptoAccount && (
-              <p className="text-xs text-text-low">
+              <p className="text-xs text-tertiary">
                 Pays from{" "}
-                <span className="font-mono text-text-medium">
+                <span className="font-mono text-secondary">
                   {resolveAccountAddress(primaryCryptoAccount)}
                 </span>
               </p>
             )}
             {selectedCounterpartyId && !accountsLoading && !primaryCryptoAccount && (
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-border-medium px-3 py-2">
-                <p className="text-xs text-text-low">No crypto account on file.</p>
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-border-strong px-3 py-2">
+                <p className="text-xs text-tertiary">No crypto account on file.</p>
                 <Button
                   type="button"
                   variant="secondary"
@@ -526,15 +526,15 @@ export function PaymentRequestsWorkspace({
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col">
               {initialError ? (
-                <p className="text-sm text-status-error-text">{initialError}</p>
+                <p className="text-sm text-error">{initialError}</p>
               ) : requests.length === 0 ? (
-                <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-medium py-16 text-center">
-                  <ReceiptTextIcon className="h-10 w-10 text-text-extra-low" />
+                <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-strong py-16 text-center">
+                  <ReceiptTextIcon className="h-10 w-10 text-muted" />
                   <div className="space-y-1">
-                    <p className="text-sm font-medium text-text-extra-high">
+                    <p className="text-sm font-medium text-primary">
                       No payment requests yet
                     </p>
-                    <p className="text-sm text-text-low">
+                    <p className="text-sm text-tertiary">
                       Create a payment link to request a fixed payment.
                     </p>
                   </div>
@@ -582,17 +582,17 @@ export function PaymentRequestsWorkspace({
                                 )}
                               </span>
                             </TableCell>
-                            <TableCell className="text-sm text-text-medium">
+                            <TableCell className="text-sm text-secondary">
                               <span className="block truncate">
                                 {fromLabel(request.counterpartyId)}
                               </span>
                             </TableCell>
-                            <TableCell className="font-mono text-sm text-text-medium">
+                            <TableCell className="font-mono text-sm text-secondary">
                               <span className="block truncate">
                                 {shortenAddress(request.destinationAddress)}
                               </span>
                             </TableCell>
-                            <TableCell className="text-sm text-text-medium">
+                            <TableCell className="text-sm text-secondary">
                               {formatTimestamp(request.createdAt)}
                             </TableCell>
                           </TableRow>
@@ -626,19 +626,19 @@ export function PaymentRequestsWorkspace({
           <div className="space-y-5 p-6">
             <div className="flex items-start justify-between gap-4 pr-8">
               <div className="space-y-1">
-                <h2 className="text-xl font-medium tracking-tight text-text-extra-high">
+                <h2 className="text-xl font-medium tracking-tight text-primary">
                   Payment request
                 </h2>
-                <p className="text-sm text-text-medium">{formatTimestamp(selected.createdAt)}</p>
+                <p className="text-sm text-secondary">{formatTimestamp(selected.createdAt)}</p>
               </div>
               <StatusBadge status={selected.status} />
             </div>
 
-            <div className="rounded-2xl bg-border-extra-light p-5">
-              <p className="text-xs font-medium uppercase tracking-wide text-text-medium">
+            <div className="rounded-2xl bg-fill-subtle p-5">
+              <p className="text-xs font-medium uppercase tracking-wide text-secondary">
                 Amount requested
               </p>
-              <p className="truncate text-xl font-semibold tracking-tight text-text-extra-high">
+              <p className="truncate text-xl font-semibold tracking-tight text-primary">
                 {formatDisplayAmount(
                   selected.amount,
                   selectedTokenSymbol ? selectedTokenSymbol : shortenAddress(selected.token)
@@ -646,8 +646,8 @@ export function PaymentRequestsWorkspace({
               </p>
             </div>
 
-            <div className="flex items-center gap-2 rounded-2xl border border-border-light p-3">
-              <span className="min-w-0 flex-1 truncate font-mono text-sm text-text-medium">
+            <div className="flex items-center gap-2 rounded-2xl border border-border-default p-3">
+              <span className="min-w-0 flex-1 truncate font-mono text-sm text-secondary">
                 {payLink}
               </span>
               <Button
@@ -664,16 +664,16 @@ export function PaymentRequestsWorkspace({
               </Button>
             </div>
 
-            <div className="rounded-2xl border border-border-light px-4">
-              <div className="divide-y divide-border-light">
+            <div className="rounded-2xl border border-border-default px-4">
+              <div className="divide-y divide-border-default">
                 <DetailRow label="From">{fromLabel(selected.counterpartyId)}</DetailRow>
                 <DetailRow label="To">
                   {selectedWalletName ? (
-                    <span className="block font-medium text-text-extra-high">
+                    <span className="block font-medium text-primary">
                       {selectedWalletName}
                     </span>
                   ) : null}
-                  <span className="block font-mono text-xs font-normal text-text-medium">
+                  <span className="block font-mono text-xs font-normal text-secondary">
                     {selected.destinationAddress}
                   </span>
                 </DetailRow>

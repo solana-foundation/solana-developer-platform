@@ -43,16 +43,16 @@ interface SummaryRowProps {
 function SummaryRow({ icon: Icon, label, value, href }: SummaryRowProps) {
   const hasValue = value !== null && value.trim().length > 0;
   return (
-    <div className="flex items-start gap-2.5 border-b border-[rgba(28,28,29,0.06)] py-2.5 last:border-b-0">
-      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[rgba(28,28,29,0.4)]" />
-      <span className="shrink-0 text-sm text-[rgba(28,28,29,0.58)]">{label}</span>
+    <div className="flex items-start gap-2.5 border-b border-border-subtle py-2.5 last:border-b-0">
+      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted" />
+      <span className="shrink-0 text-sm text-tertiary">{label}</span>
       <span className="ml-auto min-w-0 max-w-[60%] text-right">
         {hasValue && href ? (
           <a
             href={href}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 break-all text-sm font-medium text-[#1c1c1d] hover:underline"
+            className="inline-flex items-center gap-1 break-all text-sm font-medium text-primary hover:underline"
           >
             {value}
             <ExternalLink className="h-3 w-3 shrink-0" />
@@ -61,7 +61,7 @@ function SummaryRow({ icon: Icon, label, value, href }: SummaryRowProps) {
           <span
             className={cn(
               "block break-words text-sm font-medium",
-              hasValue ? "text-[#1c1c1d]" : "text-[rgba(28,28,29,0.4)]"
+              hasValue ? "text-primary" : "text-muted"
             )}
           >
             {hasValue ? value : "—"}
@@ -100,8 +100,8 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
 
   return (
     <aside className="lg:sticky lg:top-4">
-      <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
-        <p className="text-base font-medium text-[#1c1c1d]">Summary</p>
+      <div className="rounded-2xl border border-border-default bg-white p-5">
+        <p className="text-base font-medium text-primary">Summary</p>
 
         <div className="mt-3">
           <SummaryRow icon={Layers} label="Asset category" value={categoryLabel} />
@@ -137,25 +137,25 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
         {review ? (
           <div className="mt-4">
             {review.blockers.length > 0 ? (
-              <div className="rounded-xl border border-[rgba(199,31,55,0.25)] bg-[rgba(199,31,55,0.06)] p-3">
-                <div className="flex items-center gap-2 text-[#8a1f2a]">
+              <div className="rounded-xl border border-destructive-border bg-destructive-bg p-3">
+                <div className="flex items-center gap-2 text-destructive-strongest">
                   <CircleAlert className="h-4 w-4 shrink-0" />
                   <p className="text-sm font-semibold">Resolve before creating</p>
                 </div>
-                <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-xs text-[#8a1f2a]">
+                <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-xs text-destructive-strongest">
                   {review.blockers.map((item) => (
                     <li key={item}>{item}</li>
                   ))}
                 </ul>
               </div>
             ) : (
-              <div className="flex items-start gap-2 rounded-xl border border-[rgba(12,128,76,0.2)] bg-[rgba(12,128,76,0.06)] p-3">
-                <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#0c804c]" />
+              <div className="flex items-start gap-2 rounded-xl border border-success-border bg-success-bg p-3">
+                <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" />
                 <div>
-                  <p className="text-sm font-semibold text-[#0c804c]">
+                  <p className="text-sm font-semibold text-success">
                     You&apos;re ready to create a draft
                   </p>
-                  <p className="mt-0.5 text-xs text-[rgba(12,128,76,0.85)]">
+                  <p className="mt-0.5 text-xs text-success">
                     You can review, edit, and publish when you&apos;re ready.
                   </p>
                 </div>
@@ -163,11 +163,11 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
             )}
           </div>
         ) : (
-          <div className="mt-4 flex items-start gap-2 rounded-xl bg-[rgba(28,28,29,0.03)] p-3">
-            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[rgba(28,28,29,0.5)]" />
+          <div className="mt-4 flex items-start gap-2 rounded-xl bg-fill-subtle p-3">
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-tertiary" />
             <div>
-              <p className="text-xs font-semibold text-[#1c1c1d]">Private by default</p>
-              <p className="mt-0.5 text-xs text-[rgba(28,28,29,0.58)]">
+              <p className="text-xs font-semibold text-primary">Private by default</p>
+              <p className="mt-0.5 text-xs text-tertiary">
                 Details you provide are private and only used to configure your asset.
               </p>
             </div>

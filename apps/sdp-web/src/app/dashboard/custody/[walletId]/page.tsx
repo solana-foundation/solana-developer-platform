@@ -239,16 +239,16 @@ export default async function WalletDetailPage({
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-        <section className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+        <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
           <div className="space-y-6 p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex items-start gap-4">
                 {provider ? <WalletProviderMark provider={provider} /> : null}
                 <div className="space-y-2">
-                  <h2 className="text-[36px] leading-[1.02] font-medium tracking-[-0.04em] text-[#1c1c1d]">
+                  <h2 className="text-[36px] leading-[1.02] font-medium tracking-[-0.04em] text-primary">
                     {wallet.label?.trim() || "Untitled wallet"}
                   </h2>
-                  <p className="text-sm text-[rgba(28,28,29,0.58)]">
+                  <p className="text-sm text-tertiary">
                     {provider ? formatCustodyProviderName(provider) : "Wallet"}
                   </p>
                 </div>
@@ -256,14 +256,14 @@ export default async function WalletDetailPage({
               <div className="flex flex-wrap items-center justify-end gap-2">
                 {category ? <WalletCategoryBadge category={category} compact /> : null}
                 {purposeLabel ? (
-                  <span className="rounded-full bg-[rgba(28,28,29,0.08)] px-3 py-1.5 text-xs font-medium text-[#1c1c1d]">
+                  <span className="rounded-full bg-fill px-3 py-1.5 text-xs font-medium text-primary">
                     {purposeLabel}
                   </span>
                 ) : null}
               </div>
             </div>
 
-            <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)]">
+            <div className="overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
               <WalletInfoRow
                 label="Public key"
                 value={wallet.publicKey}
@@ -280,18 +280,18 @@ export default async function WalletDetailPage({
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+        <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
           <div className="space-y-6 p-6">
             <div>
-              <p className="text-xs font-medium tracking-[0.14em] text-[rgba(28,28,29,0.48)] uppercase">
+              <p className="text-xs font-medium tracking-[0.14em] text-muted uppercase">
                 Total balance
               </p>
-              <p className="mt-3 text-[38px] leading-none font-medium tracking-[-0.05em] text-[#1c1c1d]">
+              <p className="mt-3 text-[38px] leading-none font-medium tracking-[-0.05em] text-primary">
                 {formatCurrencyAmount(totalBalance)}
               </p>
             </div>
 
-            <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)]">
+            <div className="overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
               <WalletInfoRow label="Address" value={truncateMiddle(wallet.publicKey)} monospace />
               <WalletInfoRow
                 label="Provider"
@@ -310,15 +310,15 @@ export default async function WalletDetailPage({
       />
 
       <section className="space-y-3">
-        <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
+        <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
           Balances
         </h3>
         {trackedBalancesResult.error ? (
-          <p className="text-sm text-[rgba(28,28,29,0.58)]">{trackedBalancesResult.error}</p>
+          <p className="text-sm text-tertiary">{trackedBalancesResult.error}</p>
         ) : null}
 
         {balances.length > 0 ? (
-          <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+          <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
             {balances.map((balance) => {
               const ownedToken =
                 balance.token === "SOL" ? null : (ownedTokensByMint.get(balance.mint) ?? null);
@@ -335,7 +335,7 @@ export default async function WalletDetailPage({
             })}
           </div>
         ) : (
-          <div className="rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white px-4 py-4 text-sm text-[rgba(28,28,29,0.62)]">
+          <div className="rounded-2xl border border-border-default bg-white px-4 py-4 text-sm text-secondary">
             No tracked balances found yet for this wallet.
           </div>
         )}
@@ -369,19 +369,19 @@ function WalletControlsPanel({
   const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+    <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
       <div className="flex flex-col gap-5 p-6 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-2xl font-medium text-[#1c1c1d]">Wallet controls</h3>
+            <h3 className="text-2xl font-medium text-primary">Wallet controls</h3>
           </div>
-          <p className="max-w-2xl text-sm leading-6 text-[rgba(28,28,29,0.62)]">
+          <p className="max-w-2xl text-sm leading-6 text-secondary">
             {hasRestrictions
               ? "This wallet has outbound payment restrictions active."
               : "This wallet starts from default allow. Add restrictions only where control is needed."}
           </p>
           {policyError ? (
-            <p className="text-sm text-status-error-text">{policyError}</p>
+            <p className="text-sm text-error">{policyError}</p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-3">
               <WalletControlMetric
@@ -413,9 +413,9 @@ function WalletControlsPanel({
 
 function WalletControlMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-lg border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-3 py-2">
-      <p className="text-xs font-medium text-[rgba(28,28,29,0.48)]">{label}</p>
-      <p className="mt-1 truncate text-sm font-medium text-[#1c1c1d]" title={value}>
+    <div className="min-w-0 rounded-lg border border-border-subtle bg-fill-subtle px-3 py-2">
+      <p className="text-xs font-medium text-muted">{label}</p>
+      <p className="mt-1 truncate text-sm font-medium text-primary" title={value}>
         {value}
       </p>
     </div>
@@ -434,12 +434,12 @@ function WalletInfoRow({
   trailing?: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0">
-      <p className="text-[15px] text-[rgba(28,28,29,0.68)]">{label}</p>
+    <div className="flex items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0">
+      <p className="text-[15px] text-secondary">{label}</p>
       <div className="flex min-w-0 items-center gap-2">
         <p
           className={[
-            "truncate text-right text-[15px] text-[#1c1c1d]",
+            "truncate text-right text-[15px] text-primary",
             monospace ? "font-mono text-xs" : "",
           ].join(" ")}
           title={value}
@@ -466,15 +466,15 @@ function WalletBalanceRow({
   const content = (
     <div
       className={[
-        "flex flex-wrap items-center justify-between gap-4 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0",
-        href ? "transition-colors hover:bg-[rgba(28,28,29,0.03)]" : "",
+        "flex flex-wrap items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0",
+        href ? "transition-colors hover:bg-fill-subtle" : "",
       ].join(" ")}
     >
       <div>
-        <p className="text-[17px] font-medium text-[#1c1c1d]">{label}</p>
-        <p className="font-mono text-xs text-[rgba(28,28,29,0.52)]">{mint}</p>
+        <p className="text-[17px] font-medium text-primary">{label}</p>
+        <p className="font-mono text-xs text-tertiary">{mint}</p>
       </div>
-      <p className="text-[15px] text-[#1c1c1d]">{value}</p>
+      <p className="text-[15px] text-primary">{value}</p>
     </div>
   );
 

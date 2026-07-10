@@ -26,20 +26,20 @@ function NoAssetsHint({ walletId, assetCount }: { walletId: string; assetCount: 
     return null;
   }
   return (
-    <p className="text-sm text-status-error-text">This wallet has no assets available to send.</p>
+    <p className="text-sm text-error">This wallet has no assets available to send.</p>
   );
 }
 
 function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
-      <span className="flex items-center gap-2.5 text-sm text-text-low">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white text-text-medium">
+      <span className="flex items-center gap-2.5 text-sm text-tertiary">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white text-secondary">
           {icon}
         </span>
         {label}
       </span>
-      <div className="min-w-0 truncate text-right text-sm font-medium text-text-extra-high">
+      <div className="min-w-0 truncate text-right text-sm font-medium text-primary">
         {value}
       </div>
     </div>
@@ -94,16 +94,16 @@ export function OnchainSendStepContent({
         <button
           type="button"
           onClick={() => setAddAccountOpen(true)}
-          className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-medium px-4 py-4 text-left transition-colors hover:bg-border-extra-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
+          className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
         >
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-border-extra-light text-text-extra-high">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary">
             <PlusIcon className="size-4" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium text-text-extra-high">
+            <span className="block text-sm font-medium text-primary">
               Add Solana address
             </span>
-            <span className="block text-sm text-text-low">
+            <span className="block text-sm text-tertiary">
               {cryptoAccounts.length === 0
                 ? `${counterpartyName || "This counterparty"} has no Solana address on file yet.`
                 : "Attach another destination address for this counterparty."}
@@ -130,12 +130,12 @@ export function OnchainSendStepContent({
           options={walletOptions}
           placeholder="Select a source wallet"
           searchPlaceholder="Search wallets"
-          icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
+          icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
           isLoading={walletsLoading}
         />
         <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
           <div className="flex flex-col gap-2">
-            <Label className="text-sm font-medium text-text-low" htmlFor="onchain-send-amount">
+            <Label className="text-sm font-medium text-tertiary" htmlFor="onchain-send-amount">
               Amount
             </Label>
             <Input
@@ -148,7 +148,7 @@ export function OnchainSendStepContent({
               onChange={(event) => setField("amount", event.currentTarget.value)}
               placeholder="1.0"
               size="xl"
-              className="h-[var(--input-height-xl)] shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:border-0 [&>span:first-child]:bg-border-extra-light"
+              className="h-[var(--input-height-xl)] shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
               action={
                 availableAmount !== null ? (
                   <AmountBalanceReadout
@@ -177,7 +177,7 @@ export function OnchainSendStepContent({
         </div>
         <NoAssetsHint walletId={fields.walletId} assetCount={assetSelectOptions.length} />
         <div className="flex flex-col gap-2">
-          <Label className="text-sm font-medium text-text-low" htmlFor="onchain-send-memo">
+          <Label className="text-sm font-medium text-tertiary" htmlFor="onchain-send-memo">
             Memo (optional)
           </Label>
           <Input
@@ -186,7 +186,7 @@ export function OnchainSendStepContent({
             onChange={(event) => setField("memo", event.currentTarget.value)}
             placeholder="Add a note for this transfer"
             size="xl"
-            className="shadow-none ring-0 [&>span:first-child]:border-0 [&>span:first-child]:bg-border-extra-light"
+            className="shadow-none ring-0 [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
           />
         </div>
       </div>
@@ -194,7 +194,7 @@ export function OnchainSendStepContent({
   }
 
   const detailRows = (
-    <div className="divide-y divide-border-light">
+    <div className="divide-y divide-border-default">
       <DetailRow
         icon={<UserRoundIcon className="size-3.5" />}
         label="To"
@@ -221,31 +221,31 @@ export function OnchainSendStepContent({
   );
 
   const amountHero = (
-    <div className="flex flex-col items-center gap-0.5 border-b border-border-light pb-4">
-      <p className="text-3xl font-semibold tracking-tight text-text-extra-high">
+    <div className="flex flex-col items-center gap-0.5 border-b border-border-default pb-4">
+      <p className="text-3xl font-semibold tracking-tight text-primary">
         {fields.amount || "0"} {selectedAsset?.label ?? fields.asset}
       </p>
-      <p className="text-sm text-text-low">to {counterpartyName || "counterparty"}</p>
+      <p className="text-sm text-tertiary">to {counterpartyName || "counterparty"}</p>
     </div>
   );
 
   if (transferResult) {
     return (
       <div className="flex flex-col items-center gap-6">
-        <div className="flex size-16 items-center justify-center rounded-full bg-status-success-bg text-status-success-text">
+        <div className="flex size-16 items-center justify-center rounded-full bg-success-bg text-success">
           <CheckCircle2Icon className="size-8" />
         </div>
         <div className="space-y-1 text-center">
-          <p className="text-2xl font-medium tracking-tight text-text-extra-high">
+          <p className="text-2xl font-medium tracking-tight text-primary">
             Transfer submitted
           </p>
-          <p className="text-sm text-text-low">
+          <p className="text-sm text-tertiary">
             {transferResult.signature
               ? "Your transfer was sent successfully."
               : `Status: ${transferResult.status}`}
           </p>
         </div>
-        <section className="w-full space-y-4 rounded-2xl bg-border-extra-light p-5">
+        <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5">
           {amountHero}
           {detailRows}
         </section>
@@ -267,7 +267,7 @@ export function OnchainSendStepContent({
   }
 
   return (
-    <section className="space-y-4 rounded-2xl bg-border-extra-light p-5">
+    <section className="space-y-4 rounded-2xl bg-fill-subtle p-5">
       {amountHero}
       {detailRows}
     </section>
