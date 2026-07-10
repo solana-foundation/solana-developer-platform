@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { createAllowlistService } from "@/services/allowlist.service";
@@ -52,7 +53,7 @@ export const addEntry = async (c: AppContext) => {
 
     return created(c, { entry });
   } catch (err) {
-    if (err instanceof Error && err.message?.includes("UNIQUE constraint")) {
+    if (isPostgresUniqueViolation(err)) {
       throw new AppError("CONFLICT", "Entry already exists in allowlist");
     }
     throw err;
