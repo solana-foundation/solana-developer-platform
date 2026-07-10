@@ -145,9 +145,7 @@ function NetworkDebugEntryRow({
           <span>{new Date(entry.startedAt).toLocaleTimeString()}</span>
         </div>
       </button>
-      {entry.error ? (
-        <p className="truncate text-[11px] text-error">{entry.error}</p>
-      ) : null}
+      {entry.error ? <p className="truncate text-[11px] text-error">{entry.error}</p> : null}
     </motion.li>
   );
 }
@@ -174,9 +172,7 @@ export function NetworkDebugToggle({ collapsed = false }: { collapsed?: boolean 
       <span
         className={cn(
           "relative inline-flex h-5 w-9 shrink-0 rounded-full border transition-colors",
-          enabled
-            ? "border-primary bg-primary"
-            : "border-border-default bg-fill-subtle"
+          enabled ? "border-primary bg-primary" : "border-border-default bg-fill-subtle"
         )}
         aria-hidden="true"
       >

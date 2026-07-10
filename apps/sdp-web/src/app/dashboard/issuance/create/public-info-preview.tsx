@@ -450,10 +450,7 @@ function AssetAvatar({
         <img
           src={imageUrl}
           alt={`${name || "Asset"} logo`}
-          className={cn(
-            "relative rounded-full border border-border-default object-cover",
-            dim
-          )}
+          className={cn("relative rounded-full border border-border-default object-cover", dim)}
         />
       </div>
     );
@@ -640,9 +637,7 @@ function WalletPreview({ draft, categoryLabel, typeLabel }: PreviewProps) {
       </div>
       <div className="shrink-0 text-right">
         <p className="text-sm font-medium text-primary">{draft.symbol.trim() || "—"}</p>
-        <p className="mt-0.5 text-xs text-tertiary">
-          {draft.decimals.trim() || "—"} decimals
-        </p>
+        <p className="mt-0.5 text-xs text-tertiary">{draft.decimals.trim() || "—"} decimals</p>
       </div>
     </div>
   );
@@ -723,9 +718,7 @@ function FieldRow({
       <RoundCheck checked={checked} interactive={hasToggle && !disabled} disabled={disabled} />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-primary">{label}</p>
-        {value ? (
-          <p className="mt-0.5 break-words text-sm text-tertiary">{value}</p>
-        ) : null}
+        {value ? <p className="mt-0.5 break-words text-sm text-tertiary">{value}</p> : null}
       </div>
       {locked ? (
         <span
@@ -740,9 +733,7 @@ function FieldRow({
 
   if (!hasToggle) {
     return (
-      <div
-        className={cn("flex items-start gap-3 px-4 py-3", locked && "bg-fill-subtle")}
-      >
+      <div className={cn("flex items-start gap-3 px-4 py-3", locked && "bg-fill-subtle")}>
         {body}
       </div>
     );
@@ -788,9 +779,7 @@ function RoundCheck({
         checked
           ? "border-primary bg-primary text-white"
           : "border-border-strong bg-white text-transparent",
-        interactive &&
-          !checked &&
-          "group-hover:border-primary group-hover:bg-fill",
+        interactive && !checked && "group-hover:border-primary group-hover:bg-fill",
         disabled && "opacity-60"
       )}
     >

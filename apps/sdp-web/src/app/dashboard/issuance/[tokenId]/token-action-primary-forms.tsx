@@ -356,9 +356,7 @@ function ActionField({
       >
         {label}
       </label>
-      {description ? (
-        <p className="text-[13px] leading-5 text-secondary">{description}</p>
-      ) : null}
+      {description ? <p className="text-[13px] leading-5 text-secondary">{description}</p> : null}
       <Input
         id={fieldId}
         type={type}

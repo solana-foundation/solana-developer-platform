@@ -1378,9 +1378,7 @@ export function TokenManagementWorkspace({
               onClick={() => handleTabChange(tab.id)}
               className={[
                 "relative pb-4 text-[15px] leading-[24px] font-medium transition-colors sm:text-[16px]",
-                activeTab === tab.id
-                  ? "text-primary"
-                  : "text-tertiary hover:text-primary",
+                activeTab === tab.id ? "text-primary" : "text-tertiary hover:text-primary",
               ].join(" ")}
             >
               {tab.label}
@@ -1544,9 +1542,7 @@ export function TokenManagementWorkspace({
       >
         {fundManagementModalAction === "deploy" ? (
           <div className="rounded-2xl border border-border-default bg-white p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
-            <p className="pr-12 text-[20px] leading-[1.2] font-medium text-primary">
-              Deploy token
-            </p>
+            <p className="pr-12 text-[20px] leading-[1.2] font-medium text-primary">Deploy token</p>
             <p className="mt-2 text-[14px] leading-[1.45] text-secondary">
               This will deploy the token onchain so operations can run.
             </p>

@@ -97,9 +97,7 @@ export function TokenAuthorityModal({
         />
       ) : (
         <>
-          <h4 className="pr-10 text-[24px] leading-[1.15] font-medium text-primary">
-            {row.title}
-          </h4>
+          <h4 className="pr-10 text-[24px] leading-[1.15] font-medium text-primary">{row.title}</h4>
           <p className="mt-2 text-[15px] leading-[1.45] text-secondary">{row.helper}</p>
 
           <form
@@ -261,12 +259,8 @@ function NoneConfirmationPanel({
   return (
     <div className="space-y-5">
       <div>
-        <h4 className="pr-10 text-[24px] leading-[1.15] font-medium text-primary">
-          {copy.title}
-        </h4>
-        <p className="mt-2 text-[15px] leading-[1.45] text-secondary">
-          {copy.description}
-        </p>
+        <h4 className="pr-10 text-[24px] leading-[1.15] font-medium text-primary">{copy.title}</h4>
+        <p className="mt-2 text-[15px] leading-[1.45] text-secondary">{copy.description}</p>
       </div>
 
       <div className="rounded-xl border border-destructive-border bg-destructive-bg px-4 py-3">

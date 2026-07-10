@@ -203,9 +203,7 @@ function IdentityFields({
               <ArrowUpRight className="h-3 w-3 shrink-0" />
             </a>
           ) : (
-            <p className="mt-0.5 truncate text-[13px] font-medium text-secondary">
-              {website}
-            </p>
+            <p className="mt-0.5 truncate text-[13px] font-medium text-secondary">{website}</p>
           )}
         </div>
       ) : null}

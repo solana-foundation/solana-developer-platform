@@ -151,15 +151,11 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
       </div>
 
       {walletId && assetOptions.length === 0 ? (
-        <p className="text-sm text-error">
-          This wallet has no assets available to send.
-        </p>
+        <p className="text-sm text-error">This wallet has no assets available to send.</p>
       ) : null}
 
       <div className="flex items-center justify-between gap-4 px-1">
-        <p className="text-xl font-medium tracking-tight text-primary">
-          Select recipient wallets
-        </p>
+        <p className="text-xl font-medium tracking-tight text-primary">Select recipient wallets</p>
         <button
           type="button"
           onClick={() => setBulkOpen(true)}
@@ -285,19 +281,12 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
         <div className="flex items-center justify-between px-1 text-sm">
           <span
             className={
-              exceedsBalance || exceedsMaxRecipients
-                ? "font-medium text-error"
-                : "text-tertiary"
+              exceedsBalance || exceedsMaxRecipients ? "font-medium text-error" : "text-tertiary"
             }
           >
             {recipientsStatusLabel(recipients.length, exceedsBalance, exceedsMaxRecipients)}
           </span>
-          <span
-            className={cn(
-              "font-medium",
-              exceedsBalance ? "text-error" : "text-primary"
-            )}
-          >
+          <span className={cn("font-medium", exceedsBalance ? "text-error" : "text-primary")}>
             Total {formatTokenAmount(totalAmount)} {displayAsset}
             {availableAmount !== null
               ? ` of ${formatTokenAmount(availableAmount)} ${displayAsset}`
@@ -443,9 +432,7 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
           return (
             <div key={recipient.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
               <div className="min-w-0">
-                {name ? (
-                  <p className="truncate text-sm font-medium text-primary">{name}</p>
-                ) : null}
+                {name ? <p className="truncate text-sm font-medium text-primary">{name}</p> : null}
                 <p className="truncate font-mono text-xs text-tertiary">
                   {formatTokenAmount(recipient.amount)} {displayAsset} ·{" "}
                   {shortenAddress(recipient.destination)}

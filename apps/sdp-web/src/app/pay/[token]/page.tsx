@@ -129,9 +129,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
           ) : statusPanel ? (
             <div className="mt-7 flex flex-col items-center gap-3 py-6 text-center">
               {statusPanel.icon}
-              <p className="text-lg font-medium tracking-tight text-primary">
-                {statusPanel.title}
-              </p>
+              <p className="text-lg font-medium tracking-tight text-primary">{statusPanel.title}</p>
               <p className="max-w-xs text-sm text-secondary">{statusPanel.body}</p>
             </div>
           ) : null}

@@ -428,9 +428,7 @@ export function TokenActionAdminForms({
               Enter the wallet address that holds this token. SDP derives the associated token
               account automatically for this mint.
             </p>
-            {freezeHint ? (
-              <p className="text-sm leading-6 text-secondary">{freezeHint}</p>
-            ) : null}
+            {freezeHint ? <p className="text-sm leading-6 text-secondary">{freezeHint}</p> : null}
             <ActionField
               label="Reason (freeze only)"
               value={freezeForm.reason}
@@ -530,9 +528,7 @@ export function TokenActionAdminForms({
                   >
                     <div className="min-w-0">
                       <p className="truncate font-mono text-xs text-primary">{entry.address}</p>
-                      <p className="text-xs text-secondary">
-                        {entry.label ?? "No label"}
-                      </p>
+                      <p className="text-xs text-secondary">{entry.label ?? "No label"}</p>
                     </div>
                     <Button
                       type="button"
@@ -593,9 +589,7 @@ function ActionField({
       >
         {label}
       </label>
-      {description ? (
-        <p className="text-[13px] leading-5 text-secondary">{description}</p>
-      ) : null}
+      {description ? <p className="text-[13px] leading-5 text-secondary">{description}</p> : null}
       <Input
         id={fieldId}
         type={type}

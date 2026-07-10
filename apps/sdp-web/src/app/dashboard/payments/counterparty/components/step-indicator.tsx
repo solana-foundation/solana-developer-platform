@@ -15,11 +15,7 @@ export function StepIndicator({ steps, step }: StepIndicatorProps) {
             key={s}
             className={cn(
               "h-1.5 rounded-full transition-all duration-200",
-              i === step
-                ? "w-4 bg-primary"
-                : i < step
-                  ? "w-1.5 bg-primary"
-                  : "w-1.5 bg-fill-strong"
+              i === step ? "w-4 bg-primary" : i < step ? "w-1.5 bg-primary" : "w-1.5 bg-fill-strong"
             )}
           />
         ))}

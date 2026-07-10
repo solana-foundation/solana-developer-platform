@@ -135,9 +135,7 @@ export function TokenWalletAddressField({
                 <span className="text-sm font-medium text-primary">
                   {wallet.label?.trim() || wallet.walletId}
                 </span>
-                <span className="font-mono text-xs text-secondary">
-                  {wallet.publicKey}
-                </span>
+                <span className="font-mono text-xs text-secondary">{wallet.publicKey}</span>
               </button>
             ))}
           </div>

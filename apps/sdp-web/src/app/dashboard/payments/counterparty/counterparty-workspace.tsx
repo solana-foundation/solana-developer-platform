@@ -176,9 +176,7 @@ export function CounterpartyWorkspace({
                 <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-strong py-16 text-center">
                   <UsersIcon className="h-10 w-10 text-muted" />
                   <div className="space-y-1">
-                    <p className="text-sm font-medium text-primary">
-                      No counterparties yet
-                    </p>
+                    <p className="text-sm font-medium text-primary">No counterparties yet</p>
                     <p className="text-sm text-tertiary">
                       Add your first individual or business to get started.
                     </p>

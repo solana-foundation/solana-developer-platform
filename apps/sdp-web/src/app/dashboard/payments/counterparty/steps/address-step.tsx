@@ -101,9 +101,7 @@ export function AddressStep() {
             value={values.postalCode}
             onChange={(e) => setField("postalCode", e.target.value)}
           />
-          {errors.postalCode && (
-            <p className="mt-1 text-xs text-error">{errors.postalCode}</p>
-          )}
+          {errors.postalCode && <p className="mt-1 text-xs text-error">{errors.postalCode}</p>}
         </div>
       </div>
 
@@ -120,9 +118,7 @@ export function AddressStep() {
             isLoading={loading}
             error={error ?? undefined}
           />
-          {errors.countryCode && (
-            <p className="mt-1 text-xs text-error">{errors.countryCode}</p>
-          )}
+          {errors.countryCode && <p className="mt-1 text-xs text-error">{errors.countryCode}</p>}
         </div>
         <div className="space-y-2">
           {isUnitedStates ? (

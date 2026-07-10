@@ -463,9 +463,7 @@ export function RampPairProviderSelector({
                     className="size-8 shrink-0 rounded-lg object-contain"
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-primary">
-                      {exclusion.option.title}
-                    </p>
+                    <p className="text-sm font-medium text-primary">{exclusion.option.title}</p>
                     <div className="mt-2 space-y-1 text-sm text-tertiary">
                       {exclusion.reasons.map((reason) => (
                         <p key={reason}>{reason}</p>

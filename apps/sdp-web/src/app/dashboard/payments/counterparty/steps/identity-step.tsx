@@ -22,9 +22,7 @@ export function IdentityStep() {
             value={values.firstName}
             onChange={(e) => setField("firstName", e.target.value)}
           />
-          {errors.firstName && (
-            <p className="mt-1 text-xs text-error">{errors.firstName}</p>
-          )}
+          {errors.firstName && <p className="mt-1 text-xs text-error">{errors.firstName}</p>}
         </div>
         <div className="space-y-2">
           <Label htmlFor="lastName">Last name</Label>
@@ -36,9 +34,7 @@ export function IdentityStep() {
             value={values.lastName}
             onChange={(e) => setField("lastName", e.target.value)}
           />
-          {errors.lastName && (
-            <p className="mt-1 text-xs text-error">{errors.lastName}</p>
-          )}
+          {errors.lastName && <p className="mt-1 text-xs text-error">{errors.lastName}</p>}
         </div>
       </div>
 
@@ -53,9 +49,7 @@ export function IdentityStep() {
             value={values.dateOfBirth}
             onChange={(e) => setField("dateOfBirth", e.target.value)}
           />
-          {errors.dateOfBirth && (
-            <p className="mt-1 text-xs text-error">{errors.dateOfBirth}</p>
-          )}
+          {errors.dateOfBirth && <p className="mt-1 text-xs text-error">{errors.dateOfBirth}</p>}
         </div>
         <div className="space-y-2">
           <Label htmlFor="phone">Phone</Label>

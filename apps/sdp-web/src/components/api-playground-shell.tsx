@@ -794,9 +794,7 @@ export function ApiPlaygroundShell({
               onClick={() => setMobileSection(value)}
               className={cn(
                 "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                mobileSection === value
-                  ? "bg-white text-primary shadow-sm"
-                  : "text-tertiary"
+                mobileSection === value ? "bg-white text-primary shadow-sm" : "text-tertiary"
               )}
             >
               {label}
@@ -823,9 +821,7 @@ export function ApiPlaygroundShell({
 
             <div className="min-h-0 flex-1 space-y-6 overflow-y-auto lg:pr-2">
               <section className="space-y-3">
-                <h2 className="text-[18px] leading-6 font-medium text-primary">
-                  Path Parameters
-                </h2>
+                <h2 className="text-[18px] leading-6 font-medium text-primary">Path Parameters</h2>
                 {activeEndpoint.pathFields.length === 0 ? (
                   <EmptyState>This endpoint does not require path parameters.</EmptyState>
                 ) : (
@@ -870,9 +866,7 @@ export function ApiPlaygroundShell({
               </section>
 
               <section className="space-y-3">
-                <h2 className="text-[18px] leading-6 font-medium text-primary">
-                  Request body
-                </h2>
+                <h2 className="text-[18px] leading-6 font-medium text-primary">Request body</h2>
                 {activeEndpoint.bodyFields.length === 0 ? (
                   <EmptyState>This endpoint does not require a JSON request body.</EmptyState>
                 ) : (
@@ -947,9 +941,7 @@ export function ApiPlaygroundShell({
                     onClick={() => setActivePanel(tab)}
                     className={cn(
                       "rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors",
-                      activePanel === tab
-                        ? "bg-white text-primary shadow-sm"
-                        : "text-tertiary"
+                      activePanel === tab ? "bg-white text-primary shadow-sm" : "text-tertiary"
                     )}
                   >
                     {tab}

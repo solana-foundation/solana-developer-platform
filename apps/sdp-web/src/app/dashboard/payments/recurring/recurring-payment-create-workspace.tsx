@@ -141,9 +141,7 @@ function ReviewSummaryCard({ rows }: { rows: Array<{ label: string; value: React
             className="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0"
           >
             <p className="text-sm text-tertiary">{row.label}</p>
-            <div className="min-w-0 text-right text-base font-medium text-primary">
-              {row.value}
-            </div>
+            <div className="min-w-0 text-right text-base font-medium text-primary">{row.value}</div>
           </div>
         ))}
       </div>
@@ -159,9 +157,7 @@ function FieldHint({
   tone?: "neutral" | "error";
 }) {
   return (
-    <p className={tone === "error" ? "text-sm text-error" : "text-sm text-tertiary"}>
-      {children}
-    </p>
+    <p className={tone === "error" ? "text-sm text-error" : "text-sm text-tertiary"}>{children}</p>
   );
 }
 
@@ -520,9 +516,7 @@ export function RecurringPaymentCreateWorkspace({
                 <PlusIcon className="size-4" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium text-primary">
-                  Add Solana address
-                </span>
+                <span className="block text-sm font-medium text-primary">Add Solana address</span>
                 <span className="block text-sm text-tertiary">
                   {cryptoAccounts.length === 0
                     ? `${selectedCounterparty?.displayName ?? "This counterparty"} has no destination wallet on file yet.`

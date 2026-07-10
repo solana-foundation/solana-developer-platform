@@ -13,12 +13,8 @@ export function HomeSignedInCard() {
   if (!orgId) {
     return (
       <div className="rounded-[var(--sdp-surface-radius)] border border-border-default bg-white p-6 shadow-sm">
-        <h2 className="text-[19px] leading-6 font-medium text-primary">
-          Select your organization
-        </h2>
-        <p className="mt-3 text-sm text-secondary">
-          Choose or create an organization to continue.
-        </p>
+        <h2 className="text-[19px] leading-6 font-medium text-primary">Select your organization</h2>
+        <p className="mt-3 text-sm text-secondary">Choose or create an organization to continue.</p>
         <div className="mt-6">
           <OrganizationSwitcher hidePersonal />
         </div>

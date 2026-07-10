@@ -92,9 +92,7 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
     <Modal isOpen={open} onClose={handleClose} ariaLabel="Bulk import recipients" size="xl">
       <div className="space-y-5 p-6">
         <div className="space-y-1">
-          <p className="text-xl font-medium tracking-tight text-primary">
-            Bulk import recipients
-          </p>
+          <p className="text-xl font-medium tracking-tight text-primary">Bulk import recipients</p>
           <p className="text-sm text-tertiary">
             Paste rows of{" "}
             <span className="font-mono">

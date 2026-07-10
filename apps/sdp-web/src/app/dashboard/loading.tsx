@@ -20,10 +20,7 @@ export default function DashboardLoading() {
 
       <div className="grid gap-4 md:grid-cols-2">
         {METRIC_SKELETON_IDS.map((id) => (
-          <div
-            key={id}
-            className="rounded-[18px] border border-border-default bg-white px-6 py-6"
-          >
+          <div key={id} className="rounded-[18px] border border-border-default bg-white px-6 py-6">
             <SkeletonBlock className="h-4 w-28 rounded-[4px]" />
             <SkeletonBlock className="mt-4 h-9 w-40 rounded-[4px]" />
           </div>

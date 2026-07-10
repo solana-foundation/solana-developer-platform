@@ -27,9 +27,7 @@ export function BasicsStep() {
           value={values.displayName}
           onChange={(e) => setField("displayName", e.target.value)}
         />
-        {errors.displayName && (
-          <p className="mt-1 text-xs text-error">{errors.displayName}</p>
-        )}
+        {errors.displayName && <p className="mt-1 text-xs text-error">{errors.displayName}</p>}
       </div>
 
       <div className="space-y-2">
@@ -58,9 +56,7 @@ export function BasicsStep() {
           value={values.externalId}
           onChange={(e) => setField("externalId", e.target.value)}
         />
-        {errors.externalId && (
-          <p className="mt-1 text-xs text-error">{errors.externalId}</p>
-        )}
+        {errors.externalId && <p className="mt-1 text-xs text-error">{errors.externalId}</p>}
       </div>
     </div>
   );

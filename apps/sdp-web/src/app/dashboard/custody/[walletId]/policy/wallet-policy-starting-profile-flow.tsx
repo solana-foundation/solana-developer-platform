@@ -1203,9 +1203,7 @@ function RuleSection({
         className="flex w-full items-start justify-between gap-4 py-3.5 pr-2 text-left"
       >
         <span className="min-w-0">
-          <span className="block text-base font-semibold text-primary">
-            {category.title}
-          </span>
+          <span className="block text-base font-semibold text-primary">{category.title}</span>
           <span className="mt-1 block text-sm leading-5 text-secondary">{summary}</span>
         </span>
         <span className="flex size-6 shrink-0 items-center justify-center text-tertiary">

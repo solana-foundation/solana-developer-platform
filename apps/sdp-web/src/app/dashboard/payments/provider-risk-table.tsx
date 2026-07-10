@@ -40,9 +40,7 @@ export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTabl
       <div className="mb-5 pr-14">
         <div className="space-y-1">
           <p className="text-[22px] font-medium text-primary">{title}</p>
-          <p className="text-sm text-tertiary">
-            {new Date(snapshot.checkedAt).toLocaleString()}
-          </p>
+          <p className="text-sm text-tertiary">{new Date(snapshot.checkedAt).toLocaleString()}</p>
           <p className="text-sm text-tertiary">
             This screening checks major risk factors such as sanctions exposure and other compliance
             signals from the connected providers.

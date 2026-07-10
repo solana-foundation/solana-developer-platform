@@ -69,10 +69,7 @@ export function CreateTokenFeaturesStep({
 
       <div className="space-y-5 rounded-[28px] p-5">
         <div className="grid gap-2">
-          <label
-            htmlFor="issuance-token-main-signer"
-            className="text-3xl font-medium text-primary"
-          >
+          <label htmlFor="issuance-token-main-signer" className="text-3xl font-medium text-primary">
             Main Signer
           </label>
           {availableSignerWallets.length > 0 ? (
@@ -189,9 +186,7 @@ function AccessControlOption({
       onClick={onSelect}
       className={[
         "rounded-3xl border p-5 text-left transition-colors",
-        isSelected
-          ? "border-primary bg-fill-subtle"
-          : "border-border-default bg-white",
+        isSelected ? "border-primary bg-fill-subtle" : "border-border-default bg-white",
         "cursor-pointer hover:bg-fill-subtle",
       ].join(" ")}
     >

@@ -136,9 +136,7 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
                     >
                       <MapPinIcon className="size-5 shrink-0 text-tertiary" />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-primary">
-                          {suggestion.mainText}
-                        </span>
+                        <span className="block truncate text-primary">{suggestion.mainText}</span>
                         {suggestion.secondaryText ? (
                           <span className="block truncate text-sm text-tertiary">
                             {suggestion.secondaryText}

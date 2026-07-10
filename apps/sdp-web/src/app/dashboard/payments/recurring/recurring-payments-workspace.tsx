@@ -233,10 +233,7 @@ function CopyableValue({
 
   return (
     <span className="inline-flex max-w-full items-center justify-end gap-2">
-      <span
-        className="min-w-0 truncate font-mono text-xs text-primary"
-        title={label ?? value}
-      >
+      <span className="min-w-0 truncate font-mono text-xs text-primary" title={label ?? value}>
         {label ?? value}
       </span>
       <Button
@@ -613,9 +610,7 @@ function RecurringPaymentActionsMenu({
               )}
               <span className="grid gap-0.5">
                 <span>{secondaryAction.label}</span>
-                <span className="text-xs font-normal text-error">
-                  Stop future collections
-                </span>
+                <span className="text-xs font-normal text-error">Stop future collections</span>
               </span>
             </DropdownMenuItem>
           </>
@@ -728,9 +723,7 @@ export function RecurringPaymentsWorkspace({
             <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-strong py-16 text-center">
               <RepeatIcon className="h-10 w-10 text-muted" />
               <div className="space-y-1">
-                <p className="text-sm font-medium text-primary">
-                  No recurring payments yet.
-                </p>
+                <p className="text-sm font-medium text-primary">No recurring payments yet.</p>
                 <p className="text-sm text-tertiary">
                   Created recurring payment records will appear here.
                 </p>
@@ -744,9 +737,7 @@ export function RecurringPaymentsWorkspace({
             </div>
           ) : (
             <div className="min-h-0 flex-1 overflow-hidden">
-              {lookupError ? (
-                <p className="mb-3 text-sm text-warning">{lookupError}</p>
-              ) : null}
+              {lookupError ? <p className="mb-3 text-sm text-warning">{lookupError}</p> : null}
               <Table className="w-full [&_table]:table-fixed">
                 <TableHeader>
                   <TableRow>
@@ -1117,9 +1108,7 @@ export function RecurringPaymentDetailWorkspace({
       <div className="mx-auto max-w-6xl space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 space-y-1">
-            <h2 className="text-3xl font-medium tracking-tight text-primary">
-              Recurring payment
-            </h2>
+            <h2 className="text-3xl font-medium tracking-tight text-primary">Recurring payment</h2>
             <p className="truncate text-sm text-secondary">
               {counterpartyLabel} · {amountLabel} · {scheduleLabel}
             </p>
@@ -1473,9 +1462,7 @@ export function RecurringPaymentDetailWorkspace({
             }}
           >
             <div className="space-y-1">
-              <h2 className="text-lg font-medium tracking-tight text-primary">
-                Edit amount
-              </h2>
+              <h2 className="text-lg font-medium tracking-tight text-primary">Edit amount</h2>
               <p className="text-sm text-secondary">
                 Set the amount collected each billing period.
               </p>
@@ -1621,9 +1608,7 @@ export function RecurringPaymentDetailWorkspace({
             }}
           >
             <div className="space-y-1">
-              <h2 className="text-lg font-medium tracking-tight text-primary">
-                Edit currency
-              </h2>
+              <h2 className="text-lg font-medium tracking-tight text-primary">Edit currency</h2>
               <p className="text-sm text-secondary">
                 Choose a token balance from the funding wallet.
               </p>

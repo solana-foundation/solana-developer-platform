@@ -237,9 +237,7 @@ export function IssuanceWorkspace({
           </div>
 
           {hasTokens && filteredTokens.length === 0 ? (
-            <p className="text-sm text-secondary">
-              No tokens match your current search.
-            </p>
+            <p className="text-sm text-secondary">No tokens match your current search.</p>
           ) : null}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -283,9 +281,7 @@ export function IssuanceWorkspace({
                     </div>
                   );
                 })()}
-                <p className="text-sm font-medium tracking-wide text-tertiary">
-                  {token.symbol}
-                </p>
+                <p className="text-sm font-medium tracking-wide text-tertiary">{token.symbol}</p>
                 <h3 className="mt-1 text-[30px] leading-[1.1] font-medium text-primary">
                   {token.name}
                 </h3>
@@ -305,9 +301,7 @@ export function IssuanceWorkspace({
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-tertiary">Created</span>
-                    <span className="font-medium text-primary">
-                      {formatDate(token.createdAt)}
-                    </span>
+                    <span className="font-medium text-primary">{formatDate(token.createdAt)}</span>
                   </div>
                 </div>
 

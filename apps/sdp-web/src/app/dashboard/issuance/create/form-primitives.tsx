@@ -45,9 +45,7 @@ export function FormCard({
         ) : null}
         <div>
           <p className="text-base font-medium text-primary">{title}</p>
-          {description ? (
-            <p className="mt-0.5 text-sm text-tertiary">{description}</p>
-          ) : null}
+          {description ? <p className="mt-0.5 text-sm text-tertiary">{description}</p> : null}
         </div>
       </div>
       <div className="mt-4">{children}</div>
@@ -183,9 +181,7 @@ export function DetailField({
             disabled={disabled}
             onChange={(next) => updateDraft({ [field.key]: next } as Partial<DraftState>)}
           />
-          <span className="text-sm text-tertiary">
-            {checked ? "Enabled" : "Disabled"}
-          </span>
+          <span className="text-sm text-tertiary">{checked ? "Enabled" : "Disabled"}</span>
         </div>
         {field.help ? <p className="mt-1 text-xs text-tertiary">{field.help}</p> : null}
       </div>

@@ -25,9 +25,7 @@ function NoAssetsHint({ walletId, assetCount }: { walletId: string; assetCount: 
   if (!walletId || assetCount > 0) {
     return null;
   }
-  return (
-    <p className="text-sm text-error">This wallet has no assets available to send.</p>
-  );
+  return <p className="text-sm text-error">This wallet has no assets available to send.</p>;
 }
 
 function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
@@ -39,9 +37,7 @@ function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; val
         </span>
         {label}
       </span>
-      <div className="min-w-0 truncate text-right text-sm font-medium text-primary">
-        {value}
-      </div>
+      <div className="min-w-0 truncate text-right text-sm font-medium text-primary">{value}</div>
     </div>
   );
 }
@@ -100,9 +96,7 @@ export function OnchainSendStepContent({
             <PlusIcon className="size-4" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium text-primary">
-              Add Solana address
-            </span>
+            <span className="block text-sm font-medium text-primary">Add Solana address</span>
             <span className="block text-sm text-tertiary">
               {cryptoAccounts.length === 0
                 ? `${counterpartyName || "This counterparty"} has no Solana address on file yet.`
@@ -236,9 +230,7 @@ export function OnchainSendStepContent({
           <CheckCircle2Icon className="size-8" />
         </div>
         <div className="space-y-1 text-center">
-          <p className="text-2xl font-medium tracking-tight text-primary">
-            Transfer submitted
-          </p>
+          <p className="text-2xl font-medium tracking-tight text-primary">Transfer submitted</p>
           <p className="text-sm text-tertiary">
             {transferResult.signature
               ? "Your transfer was sent successfully."

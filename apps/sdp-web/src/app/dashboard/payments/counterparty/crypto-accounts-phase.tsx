@@ -22,9 +22,7 @@ export function CryptoAccountsPhase() {
 
       <div className="mt-6 min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
         <div className="space-y-1">
-          <h2 className="text-2xl font-medium tracking-tight text-primary">
-            Add a crypto account
-          </h2>
+          <h2 className="text-2xl font-medium tracking-tight text-primary">Add a crypto account</h2>
           <p className="text-sm text-secondary">
             Optionally add a crypto wallet for this counterparty. You can skip this and add accounts
             later.

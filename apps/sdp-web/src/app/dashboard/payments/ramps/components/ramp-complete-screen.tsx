@@ -13,9 +13,7 @@ function TransferDetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
       <span className="shrink-0 text-sm text-tertiary">{label}</span>
-      <span className="min-w-0 break-all text-right text-sm font-medium text-primary">
-        {value}
-      </span>
+      <span className="min-w-0 break-all text-right text-sm font-medium text-primary">{value}</span>
     </div>
   );
 }
@@ -96,9 +94,7 @@ export function RampCompleteScreen({
       <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5">
         {primaryAmount ? (
           <div className="flex flex-col items-center gap-0.5 border-b border-border-default pb-4">
-            <p className="text-3xl font-semibold tracking-tight text-primary">
-              {primaryAmount}
-            </p>
+            <p className="text-3xl font-semibold tracking-tight text-primary">{primaryAmount}</p>
             {secondaryAmount ? (
               <p className="text-sm text-tertiary">
                 {onramp ? "funded with" : "from"} {secondaryAmount}

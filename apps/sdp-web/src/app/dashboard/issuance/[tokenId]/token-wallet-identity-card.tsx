@@ -65,9 +65,7 @@ function IdentityRow({
         {label}
       </p>
       <p
-        className={["mt-1 break-all text-sm text-primary", monospace ? "font-mono" : ""].join(
-          " "
-        )}
+        className={["mt-1 break-all text-sm text-primary", monospace ? "font-mono" : ""].join(" ")}
       >
         {value}
       </p>

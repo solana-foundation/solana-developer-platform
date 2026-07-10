@@ -149,9 +149,7 @@ function AccessSummary({
 
   return (
     <div className="min-w-0">
-      <p className="truncate text-sm font-medium text-primary">
-        {formatRole(apiKey.role)} access
-      </p>
+      <p className="truncate text-sm font-medium text-primary">{formatRole(apiKey.role)} access</p>
       <p
         className="mt-1 truncate text-xs text-secondary"
         title={`${walletSummary.title} · ${policySummary.title}`}

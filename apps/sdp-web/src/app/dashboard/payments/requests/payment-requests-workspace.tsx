@@ -269,9 +269,7 @@ function CreateRequestModal({
       >
         <div className="space-y-5 p-6">
           <div className="space-y-1">
-            <h2 className="text-xl font-medium tracking-tight text-primary">
-              Create payment link
-            </h2>
+            <h2 className="text-xl font-medium tracking-tight text-primary">Create payment link</h2>
             <p className="text-sm text-secondary">
               Request a fixed payment to one of your wallets.
             </p>
@@ -314,9 +312,7 @@ function CreateRequestModal({
                   </SelectItem>
                 ))}
               </Select>
-              {form.errors.token && (
-                <p className="mt-1 text-xs text-error">{form.errors.token}</p>
-              )}
+              {form.errors.token && <p className="mt-1 text-xs text-error">{form.errors.token}</p>}
             </div>
           </div>
 
@@ -339,9 +335,7 @@ function CreateRequestModal({
                 );
               })}
             </Select>
-            {form.errors.wallet && (
-              <p className="mt-1 text-xs text-error">{form.errors.wallet}</p>
-            )}
+            {form.errors.wallet && <p className="mt-1 text-xs text-error">{form.errors.wallet}</p>}
           </div>
 
           <div className="space-y-2">
@@ -531,9 +525,7 @@ export function PaymentRequestsWorkspace({
                 <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-strong py-16 text-center">
                   <ReceiptTextIcon className="h-10 w-10 text-muted" />
                   <div className="space-y-1">
-                    <p className="text-sm font-medium text-primary">
-                      No payment requests yet
-                    </p>
+                    <p className="text-sm font-medium text-primary">No payment requests yet</p>
                     <p className="text-sm text-tertiary">
                       Create a payment link to request a fixed payment.
                     </p>
@@ -626,9 +618,7 @@ export function PaymentRequestsWorkspace({
           <div className="space-y-5 p-6">
             <div className="flex items-start justify-between gap-4 pr-8">
               <div className="space-y-1">
-                <h2 className="text-xl font-medium tracking-tight text-primary">
-                  Payment request
-                </h2>
+                <h2 className="text-xl font-medium tracking-tight text-primary">Payment request</h2>
                 <p className="text-sm text-secondary">{formatTimestamp(selected.createdAt)}</p>
               </div>
               <StatusBadge status={selected.status} />
@@ -669,9 +659,7 @@ export function PaymentRequestsWorkspace({
                 <DetailRow label="From">{fromLabel(selected.counterpartyId)}</DetailRow>
                 <DetailRow label="To">
                   {selectedWalletName ? (
-                    <span className="block font-medium text-primary">
-                      {selectedWalletName}
-                    </span>
+                    <span className="block font-medium text-primary">{selectedWalletName}</span>
                   ) : null}
                   <span className="block font-mono text-xs font-normal text-secondary">
                     {selected.destinationAddress}

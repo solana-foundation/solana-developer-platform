@@ -194,9 +194,7 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
 
                         return (
                           <TableRow key={row.id}>
-                            <TableCell className="pl-6 text-secondary">
-                              {timeLabel}
-                            </TableCell>
+                            <TableCell className="pl-6 text-secondary">{timeLabel}</TableCell>
                             <TableCell className="min-w-0 md:hidden">
                               <div className="min-w-0">
                                 <div className="truncate font-medium">{row.type}</div>

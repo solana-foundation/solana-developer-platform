@@ -173,9 +173,7 @@ function TransferTableRow({
             {flow.send && flow.receive ? (
               <ArrowRightIcon className="size-3.5 text-tertiary" />
             ) : null}
-            {flow.receive ? (
-              <span className="font-medium text-primary">{flow.receive}</span>
-            ) : null}
+            {flow.receive ? <span className="font-medium text-primary">{flow.receive}</span> : null}
           </span>
         ) : (
           <span className="text-sm text-tertiary">—</span>
@@ -653,10 +651,7 @@ function FieldList({ rows }: { rows: InfoRowData[] }) {
               {row.label}
             </dt>
             <dd
-              className={cn(
-                "truncate text-sm text-primary",
-                row.mono && "font-mono text-xs"
-              )}
+              className={cn("truncate text-sm text-primary", row.mono && "font-mono text-xs")}
               title={row.value}
             >
               {row.value}
@@ -768,9 +763,7 @@ export function CounterpartyDetailWorkspace({
             onClick={() => setActiveTab(tab)}
             className={cn(
               "relative pb-3 text-sm font-medium transition-colors",
-              activeTab === tab
-                ? "text-primary"
-                : "text-secondary hover:text-primary"
+              activeTab === tab ? "text-primary" : "text-secondary hover:text-primary"
             )}
           >
             {tab === "details" ? "Details" : "Transactions"}

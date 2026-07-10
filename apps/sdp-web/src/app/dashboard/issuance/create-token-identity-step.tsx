@@ -100,9 +100,7 @@ export function CreateTokenIdentityStep({
                 Enter a whole number between 0 and 18.
               </p>
             ) : null}
-            <p className="text-base text-secondary">
-              {getDecimalsHelperText(template)}
-            </p>
+            <p className="text-base text-secondary">{getDecimalsHelperText(template)}</p>
           </div>
         </div>
 
