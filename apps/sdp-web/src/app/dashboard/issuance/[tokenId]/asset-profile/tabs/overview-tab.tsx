@@ -158,7 +158,7 @@ export function OverviewTab({
               className="group flex cursor-pointer flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-4 text-left transition-colors hover:border-[rgba(28,28,29,0.2)] hover:bg-[rgba(28,28,29,0.02)]"
             >
               <div className="flex items-center gap-2">
-                <CircleCheck className="h-4.5 w-4.5 shrink-0 text-[#0c804c]" />
+                <CircleCheck className="h-4.5 w-4.5 shrink-0 text-[#00a066]" />
                 <p className="text-[15px] font-semibold text-[#1c1c1d]">Ready for deploy</p>
                 <ArrowUpRight className="ml-auto h-4 w-4 shrink-0 text-[rgba(28,28,29,0.4)] transition-colors group-hover:text-[#1c1c1d]" />
               </div>
