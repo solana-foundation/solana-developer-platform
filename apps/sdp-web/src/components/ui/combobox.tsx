@@ -279,7 +279,7 @@ export function Combobox({
         {label}
         {required ? (
           <>
-            <span aria-hidden className="text-error">
+            <span aria-hidden className="text-destructive">
               *
             </span>
             <span className="sr-only"> (required)</span>
