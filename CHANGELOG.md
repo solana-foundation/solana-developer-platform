@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.40.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.39.0...v0.40.0) (2026-07-10)
+
+### Features
+
+* currency picker for asset profiles and fixes ([#664](https://github.com/solana-foundation/solana-developer-platform/pull/664)) ([e887870](https://github.com/solana-foundation/solana-developer-platform/commit/e887870566b295df9d1a141c49ba662a2461fa6b))
+
+### Bug Fixes
+
+* **API:** Detect Postgres unique violations by SQLSTATE, not SQLite text ([#587](https://github.com/solana-foundation/solana-developer-platform/pull/587)) ([43baaa5](https://github.com/solana-foundation/solana-developer-platform/commit/43baaa57f70f8f575cf145f2edb0ea61d2b787ae))
+* **payments:** accept well-known token symbols anywhere a token mint is accepted ([#660](https://github.com/solana-foundation/solana-developer-platform/pull/660)) ([1819486](https://github.com/solana-foundation/solana-developer-platform/commit/18194865f5e5eecbd1ab863adff8ca49de4cab3f))
+* asset profiles management ui tweaks and improvements ([#655](https://github.com/solana-foundation/solana-developer-platform/pull/655)) ([196b1f3](https://github.com/solana-foundation/solana-developer-platform/commit/196b1f3742be1b4cdb20438c6687fcd3f2b9930c))
+* eliminate unsafe float arithmetic on money amounts ([#654](https://github.com/solana-foundation/solana-developer-platform/pull/654)) ([0ecfeae](https://github.com/solana-foundation/solana-developer-platform/commit/0ecfeae61f90da205919667010b4dd08d1b4bee4))
+* **sdp-api:** document wallet inputs as the provider walletId ([#647](https://github.com/solana-foundation/solana-developer-platform/pull/647)) ([6e6bcd9](https://github.com/solana-foundation/solana-developer-platform/commit/6e6bcd9a3193522399e306456787559f0d4b0933))
+* Asset profiles UI fixes and updates ([#646](https://github.com/solana-foundation/solana-developer-platform/pull/646)) ([954afc7](https://github.com/solana-foundation/solana-developer-platform/commit/954afc73a0e5b02f146a2c7cbcb55baa4aab7b89))
+* **rpc:** add per-request transport deadline to RPC client ([#637](https://github.com/solana-foundation/solana-developer-platform/pull/637)) ([81e2ef2](https://github.com/solana-foundation/solana-developer-platform/commit/81e2ef2680bbe8a6f5971d940208caaf78ea2afa))
+
+### Refactors
+
+* **sdp-api:** drop @sdp/solana re-export shims ([#642](https://github.com/solana-foundation/solana-developer-platform/pull/642)) ([f96ba8f](https://github.com/solana-foundation/solana-developer-platform/commit/f96ba8f47bcd7d47dcf9f7ad14a3a47af7a124f9))
+
+### Other Changes
+
+* Add Validation Cloud as an RPC provider ([#657](https://github.com/solana-foundation/solana-developer-platform/pull/657)) ([5bc65d9](https://github.com/solana-foundation/solana-developer-platform/commit/5bc65d996599314fd3b274bca365fc9c9ee920b1))
+
 ## [0.39.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.38.0...v0.39.0) (2026-07-09)
 
 ### Features
