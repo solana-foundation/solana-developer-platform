@@ -1,3 +1,4 @@
+import { isAddress } from "@sdp/solana/address";
 import type { ListPaymentRequestsResponse, PaymentRequest } from "@sdp/types";
 import { z } from "zod";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
@@ -6,7 +7,6 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
-import { isAddress } from "@/lib/solana";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import {
   isPaymentRequestExpired,

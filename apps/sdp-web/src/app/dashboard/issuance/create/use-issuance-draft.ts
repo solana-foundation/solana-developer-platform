@@ -8,11 +8,11 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
 } from "react";
 import {
   createInitialDraft,
-  type DetailsStage,
   type DraftState,
   furthestReachableStep,
   stepIndex,
@@ -26,7 +26,6 @@ const STORAGE_VERSION = 1;
 interface WizardState {
   draft: DraftState;
   currentStep: WizardStep;
-  detailsStage: DetailsStage;
   maxStepReached: WizardStep;
   updatedAt: string | null;
 }
@@ -34,6 +33,7 @@ interface WizardState {
 type Action =
   | { type: "updateDraft"; patch: Partial<DraftState> }
   | { type: "goToStep"; step: WizardStep }
+  | { type: "syncFromHistory"; step: WizardStep }
   | { type: "advance" }
   | { type: "goBack" }
   | { type: "reset" }
@@ -43,7 +43,6 @@ function createInitialState(): WizardState {
   return {
     draft: createInitialDraft(),
     currentStep: "classification",
-    detailsStage: "select",
     maxStepReached: "classification",
     updatedAt: null,
   };
@@ -60,39 +59,36 @@ function reducer(state: WizardState, action: Action): WizardState {
       return { ...state, draft, updatedAt: new Date().toISOString() };
     }
     case "goToStep": {
-      // Only allow navigating to a step already reached. Jumping into
-      // asset-details (e.g. an "Edit" from Review) lands on the form view.
+      // Only allow navigating to a step already reached (e.g. an "Edit" from
+      // Review).
       const target =
         stepIndex(action.step) <= stepIndex(state.maxStepReached)
           ? action.step
           : state.maxStepReached;
-      const detailsStage = target === "asset-details" ? "form" : state.detailsStage;
-      return { ...state, currentStep: target, detailsStage };
+      return { ...state, currentStep: target };
+    }
+    case "syncFromHistory": {
+      // Mirrors goToStep's ceiling — never land past what's actually been
+      // reached — so browser back/forward can only move within visited steps.
+      const target =
+        stepIndex(action.step) <= stepIndex(state.maxStepReached)
+          ? action.step
+          : state.maxStepReached;
+      return { ...state, currentStep: target };
     }
     case "advance": {
-      // Sub-step advance inside asset-details: selector -> form.
-      if (state.currentStep === "asset-details" && state.detailsStage === "select") {
-        return { ...state, detailsStage: "form" };
-      }
       const nextIndex = Math.min(stepIndex(state.currentStep) + 1, WIZARD_STEPS.length - 1);
       const nextStep = WIZARD_STEPS[nextIndex];
-      const detailsStage = nextStep === "asset-details" ? "select" : state.detailsStage;
       return {
         ...state,
         currentStep: nextStep,
-        detailsStage,
         maxStepReached: furthestOf(state.maxStepReached, nextStep),
       };
     }
     case "goBack": {
-      // Sub-step back inside asset-details: form -> selector.
-      if (state.currentStep === "asset-details" && state.detailsStage === "form") {
-        return { ...state, detailsStage: "select" };
-      }
       const prevIndex = Math.max(stepIndex(state.currentStep) - 1, 0);
       const prevStep = WIZARD_STEPS[prevIndex];
-      const detailsStage = prevStep === "asset-details" ? "form" : state.detailsStage;
-      return { ...state, currentStep: prevStep, detailsStage };
+      return { ...state, currentStep: prevStep };
     }
     case "reset":
       return createInitialState();
@@ -107,8 +103,20 @@ function isWizardStep(value: unknown): value is WizardStep {
   return typeof value === "string" && (WIZARD_STEPS as readonly string[]).includes(value);
 }
 
-function isDetailsStage(value: unknown): value is DetailsStage {
-  return value === "select" || value === "form";
+// Tags each history entry the wizard pushes with the step it represents, so a
+// `popstate` (browser back/forward) can be told apart from any other page's
+// history entries — the URL itself never changes, only this state marker.
+interface HistoryStepState {
+  __issuanceWizardStep: true;
+  step: WizardStep;
+}
+
+function isHistoryStepState(value: unknown): value is HistoryStepState {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { __issuanceWizardStep?: unknown }).__issuanceWizardStep === true
+  );
 }
 
 // Parse + validate a persisted payload, clamping the restored step to what the
@@ -127,7 +135,6 @@ function readStoredState(): WizardState | null {
       version?: number;
       draft?: Partial<DraftState>;
       currentStep?: unknown;
-      detailsStage?: unknown;
       maxStepReached?: unknown;
       updatedAt?: unknown;
     };
@@ -146,7 +153,6 @@ function readStoredState(): WizardState | null {
     return {
       draft,
       currentStep: clamp(storedCurrent),
-      detailsStage: isDetailsStage(parsed.detailsStage) ? parsed.detailsStage : "select",
       maxStepReached: clamp(furthestOf(storedMax, storedCurrent)),
       updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : null,
     };
@@ -183,7 +189,6 @@ function clearStoredState(): void {
 export interface IssuanceDraftContextValue {
   draft: DraftState;
   currentStep: WizardStep;
-  detailsStage: DetailsStage;
   maxStepReached: WizardStep;
   updatedAt: string | null;
   updateDraft: (patch: Partial<DraftState>) => void;
@@ -204,6 +209,14 @@ export function IssuanceDraftProvider({ children }: { children: ReactNode }) {
   // `hydrated` is state (not a ref) so the persist effect below reads `false`
   // on the first commit and skips writing defaults over a stored draft.
   const [hydrated, setHydrated] = useState(false);
+  // Has the entry the page loaded on been tagged with its step yet? Gates the
+  // history effect below between "tag the current entry" (replaceState, on
+  // first run) and "push a new entry" (on every subsequent step change).
+  const didTagInitialEntryRef = useRef(false);
+  // Set right before a popstate-driven dispatch, or before reset() — tells
+  // the history effect below to skip its next push, since history already
+  // reflects the change (or we're intentionally leaving the wizard).
+  const suppressNextPushRef = useRef(false);
 
   // Hydrate once, after mount (SSR-safe — the first client render matches the
   // server's default output, then we restore from localStorage).
@@ -223,11 +236,49 @@ export function IssuanceDraftProvider({ children }: { children: ReactNode }) {
     writeStoredState(state);
   }, [state, hydrated]);
 
+  // Keep the browser history stack in sync with the wizard step, using the
+  // same URL throughout (no query string/deep-linking involved) — this is
+  // what makes the browser Back button step back through the wizard instead
+  // of leaving it outright.
+  useEffect(() => {
+    if (!hydrated || typeof window === "undefined") {
+      return;
+    }
+    const historyState: HistoryStepState = {
+      __issuanceWizardStep: true,
+      step: state.currentStep,
+    };
+    if (!didTagInitialEntryRef.current) {
+      window.history.replaceState(historyState, "");
+      didTagInitialEntryRef.current = true;
+      return;
+    }
+    if (suppressNextPushRef.current) {
+      suppressNextPushRef.current = false;
+      return;
+    }
+    window.history.pushState(historyState, "");
+  }, [state.currentStep, hydrated]);
+
+  // Follow the browser Back/Forward buttons: when they land on one of our
+  // tagged entries, sync the reducer to match instead of letting the
+  // browser navigate away from the wizard entirely.
+  useEffect(() => {
+    function handlePopState(event: PopStateEvent) {
+      if (!isHistoryStepState(event.state)) {
+        return;
+      }
+      suppressNextPushRef.current = true;
+      dispatch({ type: "syncFromHistory", step: event.state.step });
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   const value = useMemo<IssuanceDraftContextValue>(
     () => ({
       draft: state.draft,
       currentStep: state.currentStep,
-      detailsStage: state.detailsStage,
       maxStepReached: state.maxStepReached,
       updatedAt: state.updatedAt,
       updateDraft: (patch) => dispatch({ type: "updateDraft", patch }),
@@ -236,6 +287,7 @@ export function IssuanceDraftProvider({ children }: { children: ReactNode }) {
       goBack: () => dispatch({ type: "goBack" }),
       reset: () => {
         clearStoredState();
+        suppressNextPushRef.current = true;
         dispatch({ type: "reset" });
       },
       clearStoredDraft: () => clearStoredState(),

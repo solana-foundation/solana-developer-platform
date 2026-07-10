@@ -1,5 +1,5 @@
+import { isDecimalString } from "@sdp/solana/amount";
 import { z } from "zod";
-import { isDecimalString } from "@/lib/amount";
 import {
   assertAssetTypeSupported,
   assetCategorySchema,

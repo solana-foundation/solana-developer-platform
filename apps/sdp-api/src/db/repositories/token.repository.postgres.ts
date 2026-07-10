@@ -1,7 +1,7 @@
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { Token, TokenExtensionsConfig, TokenStatus, TokenTemplate } from "@sdp/types";
 import type { AppDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
-import { formatDecimalAmount } from "@/lib/amount";
 import type { ListTokensOptions, TokenRepository } from "./token.repository";
 
 function buildInClause(length: number): string {
