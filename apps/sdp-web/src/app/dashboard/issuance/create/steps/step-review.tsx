@@ -2,6 +2,7 @@
 
 import {
   AlignLeft,
+  Anchor,
   ArrowLeftRight,
   Building2,
   ClipboardList,
@@ -22,7 +23,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
-import { accessControlLabel, getCategorySections } from "../asset-details-config";
+import { accessControlLabel, getCategorySections, getPegSummary } from "../asset-details-config";
 import { getAssetTypeLabel, getCategoryLabel } from "../asset-taxonomy";
 import { safeLinkHref } from "../draft-mapping";
 import type { DraftState, WizardStep } from "../issuance-draft-wizard.types";
@@ -73,6 +74,7 @@ export function StepReview() {
   const collectsIssuerName = getCategorySections(draft.assetCategory).some((section) =>
     section.fields.some((field) => field.key === "issuerName")
   );
+  const pegSummary = getPegSummary(draft);
 
   const sections: Section[] = [
     {
@@ -103,6 +105,7 @@ export function StepReview() {
               },
             ]
           : []),
+        ...(pegSummary ? [{ icon: Anchor, label: "Pegged to", value: pegSummary }] : []),
         { icon: Hash, label: "Decimals", value: draft.decimals },
         {
           icon: Globe,

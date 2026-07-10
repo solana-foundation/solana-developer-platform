@@ -1,8 +1,11 @@
 "use client";
 
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
+import { fiatCurrencyDisplayName, fiatCurrencyFlagEmoji } from "@sdp/types/payment-rails";
 import { type LucideIcon, Plus, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
@@ -11,6 +14,15 @@ import type { FieldDescriptor } from "./asset-details-config";
 import type { CustomFieldRow, DraftState } from "./issuance-draft-wizard.types";
 
 type UpdateDraft = (patch: Partial<DraftState>) => void;
+
+const FIAT_CURRENCY_OPTIONS: readonly ComboboxOption[] = RAMP_FIAT_CURRENCIES.map((code) => {
+  const flag = fiatCurrencyFlagEmoji(code);
+  return {
+    value: code,
+    label: flag === null ? code : `${flag} ${code}`,
+    description: fiatCurrencyDisplayName(code),
+  };
+});
 
 export function FormCard({
   title,
@@ -135,8 +147,8 @@ export function ToggleSwitch({
     >
       <span
         className={cn(
-          "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform",
-          checked ? "translate-x-[22px]" : "translate-x-0.5"
+          "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform",
+          checked ? "translate-x-5" : "translate-x-0"
         )}
       />
     </button>
@@ -177,6 +189,26 @@ export function DetailField({
         </div>
         {field.help ? <p className="mt-1 text-xs text-[rgba(28,28,29,0.5)]">{field.help}</p> : null}
       </div>
+    );
+  }
+
+  if (field.control === "currency") {
+    const value = typeof raw === "string" ? raw : "";
+    return (
+      <Combobox
+        label={field.label}
+        required={required}
+        disabled={disabled}
+        value={value || null}
+        onChange={(next) => updateDraft({ [field.key]: next } as Partial<DraftState>)}
+        options={FIAT_CURRENCY_OPTIONS}
+        size="lg"
+        variant="dialog"
+        placeholder={`Select ${field.label.toLowerCase()}`}
+        searchPlaceholder="Search currencies"
+        validationError={error}
+        className="border-[length:var(--input-border-width)] border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] text-sm hover:border-[var(--input-border-hover)] hover:bg-[var(--input-bg-hover)]"
+      />
     );
   }
 

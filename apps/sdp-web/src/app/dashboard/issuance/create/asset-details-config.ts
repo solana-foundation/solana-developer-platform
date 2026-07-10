@@ -9,7 +9,7 @@ import {
 // Presentation config for the Step-2 "Asset details" form. Category-aware so
 // different assets show different fields (the sketch is stablecoin-shaped).
 
-export type FieldControl = "text" | "textarea" | "number" | "select" | "toggle";
+export type FieldControl = "text" | "textarea" | "number" | "select" | "toggle" | "currency";
 
 // DraftState keys editable through a category detail section.
 export type DetailFieldKey =
@@ -39,14 +39,6 @@ export interface DetailSection {
   description?: string;
   fields: readonly FieldDescriptor[];
 }
-
-const CURRENCY_OPTIONS = [
-  { value: "USD", label: "USD" },
-  { value: "EUR", label: "EUR" },
-  { value: "GBP", label: "GBP" },
-  { value: "JPY", label: "JPY" },
-  { value: "SGD", label: "SGD" },
-] as const;
 
 const JURISDICTION_OPTIONS = [
   { value: "us", label: "United States" },
@@ -86,7 +78,7 @@ const CATEGORY_SECTIONS: Record<AssetCategory, readonly DetailSection[]> = {
           placeholder: "e.g., Acme Financial Inc.",
         },
         { key: "backingType", label: "Backing type", control: "select", options: BACKING_OPTIONS },
-        { key: "pegCurrency", label: "Currency", control: "select", options: CURRENCY_OPTIONS },
+        { key: "pegCurrency", label: "Currency", control: "currency" },
         { key: "pegTarget", label: "Peg or target", control: "text", placeholder: "1.00 USD" },
         {
           key: "reserveAsset",
@@ -162,6 +154,27 @@ export function getCategorySections(category: AssetCategory | null): readonly De
     return [];
   }
   return CATEGORY_SECTIONS[category] ?? [];
+}
+
+// True when the category's detail form collects peg/currency fields (stablecoins
+// today). Peg values persist on the draft across category changes, so callers
+// use this to avoid surfacing a stale peg on an asset that isn't pegged.
+export function categoryCollectsPeg(category: AssetCategory | null): boolean {
+  return getCategorySections(category).some((section) =>
+    section.fields.some((field) => field.key === "pegCurrency" || field.key === "pegTarget")
+  );
+}
+
+// The concise "pegged to" descriptor for the summary/review, or null when the
+// asset has no peg. Prefers the explicit peg/target text (e.g. "1.00 USD",
+// "1 oz Gold") and falls back to the selected currency (e.g. "USD").
+export function getPegSummary(
+  draft: Pick<DraftState, "assetCategory" | "pegCurrency" | "pegTarget">
+): string | null {
+  if (!categoryCollectsPeg(draft.assetCategory)) {
+    return null;
+  }
+  return draft.pegTarget.trim() || draft.pegCurrency.trim() || null;
 }
 
 // value -> label per select-backed field, derived from every category's field

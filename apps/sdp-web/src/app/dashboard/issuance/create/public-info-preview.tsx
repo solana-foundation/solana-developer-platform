@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  Anchor,
   Banknote,
   Check,
   ChevronDown,
@@ -9,7 +10,6 @@ import {
   Clock,
   Coins,
   Copy,
-  DollarSign,
   ExternalLink,
   FileText,
   Globe,
@@ -112,7 +112,7 @@ const FIELD_ICONS: Record<string, LucideIcon> = {
   icon: Image,
   description: Activity,
   issuername: User,
-  pegcurrency: DollarSign,
+  pegcurrency: Anchor,
   pegtarget: Target,
   backingtype: ShieldCheck,
   reserveasset: Banknote,
@@ -137,7 +137,7 @@ const ICON_RULES: readonly { keywords: readonly string[]; icon: LucideIcon }[] =
   { keywords: ["backing", "collateral"], icon: ShieldCheck },
   { keywords: ["issuer", "owner", "authority"], icon: User },
   { keywords: ["jurisdiction", "country", "location"], icon: MapPin },
-  { keywords: ["currency", "fiat"], icon: DollarSign },
+  { keywords: ["currency", "fiat"], icon: Anchor },
   { keywords: ["peg", "target"], icon: Target },
 ];
 
