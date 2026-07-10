@@ -61,6 +61,7 @@
   --red-brd: rgba(220, 38, 38, 0.2); /* derived, not in skill */
   --blue-tx: #2563eb;
   --blue-bg: rgba(37, 99, 235, 0.08);
+  --blue-brd: rgba(37, 99, 235, 0.2); /* derived, not in skill */
 
   /* Destructive (delete/danger) — app-specific crimson ramp, not in skill.
      Base accent + two darker shades used for legible destructive text. */
@@ -78,7 +79,9 @@
    used in scanned source. */
 @theme inline {
   /* Ink, organized by role & usage (black + gray shades on sand/white).
-     `primary` is the darkest ink — it doubles as the primary action fill. */
+     `primary` is the darkest ink; it doubles as the primary action fill.
+     Solid buttons express hover via opacity (see the skill's `.btn-pri:hover`),
+     not a second fill token, so this shared name never yields a no-op hover. */
   --color-primary: var(--emph-xh);
   --color-secondary: var(--emph-m);
   --color-tertiary: var(--emph-l);
@@ -112,6 +115,7 @@
   --color-error-border: var(--red-brd);
   --color-info: var(--blue-tx);
   --color-info-bg: var(--blue-bg);
+  --color-info-border: var(--blue-brd);
 
   /* Destructive (delete/danger) — base + darker text shades */
   --color-destructive: var(--crimson);
@@ -142,6 +146,7 @@
   --status-warning-border: var(--amber-brd);
   --status-info-text: var(--blue-tx);
   --status-info-bg: var(--blue-bg);
+  --status-info-border: var(--blue-brd);
 
   /* Package Badge palette */
   --badge-success-bg: var(--green-bg);

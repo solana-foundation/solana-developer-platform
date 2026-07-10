@@ -22,7 +22,7 @@ export default function Home() {
             </Link>
             <Link
               href="/sign-in"
-              className="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-sm font-semibold text-white transition-colors hover:bg-black"
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-sm font-semibold text-white transition hover:opacity-90"
             >
               Dashboard
             </Link>
@@ -47,7 +47,7 @@ export default function Home() {
               href={waitlistHref}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex h-10 items-center justify-center rounded-[10px] bg-primary px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
+              className="inline-flex h-10 items-center justify-center rounded-[10px] bg-primary px-[18px] text-[15px] font-semibold leading-[15px] text-white transition hover:opacity-90"
             >
               Join the waitlist
             </Link>

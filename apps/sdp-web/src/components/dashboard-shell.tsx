@@ -725,7 +725,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             <SignInButton mode="modal">
               <button
                 type="button"
-                className="inline-flex h-10 items-center justify-center rounded-[var(--button-radius-lg)] bg-primary px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
+                className="inline-flex h-10 items-center justify-center rounded-[var(--button-radius-lg)] bg-primary px-[18px] text-[15px] font-semibold leading-[15px] text-white transition hover:opacity-90"
               >
                 Sign in
               </button>

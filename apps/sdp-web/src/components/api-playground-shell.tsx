@@ -1002,7 +1002,7 @@ export function ApiPlaygroundShell({
                 type="button"
                 onClick={handleExecute}
                 disabled={isExecuting || requiresApiKey}
-                className="h-10 rounded-[var(--button-radius-lg)] bg-primary px-4 text-white hover:bg-black max-sm:flex-1 whitespace-nowrap"
+                className="h-10 rounded-[var(--button-radius-lg)] bg-primary px-4 text-white hover:opacity-90 max-sm:flex-1 whitespace-nowrap"
                 iconLeft={
                   isExecuting ? (
                     <Loader2 className="size-4 animate-spin" />

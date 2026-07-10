@@ -1577,7 +1577,7 @@ export function TokenManagementWorkspace({
                     <button
                       type="button"
                       disabled
-                      className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
+                      className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-medium text-white transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
                     >
                       <SparklesIcon className="size-4" />
                       Deploy with Kora

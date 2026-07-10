@@ -229,7 +229,7 @@ export function IssuanceWorkspace({
             </div>
             <Button
               type="button"
-              className="h-10 rounded-[10px] bg-primary px-4 text-white hover:bg-primary"
+              className="h-10 rounded-[10px] bg-primary px-4 text-white hover:opacity-90"
               onClick={startTokenCreation}
             >
               Create draft

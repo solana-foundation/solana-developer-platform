@@ -121,7 +121,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
               <p className="text-sm text-secondary">Scan with a Solana wallet to pay</p>
               <a
                 href={payUrl}
-                className="hidden h-12 w-full items-center justify-center rounded-full bg-primary text-sm font-semibold text-white transition-colors hover:bg-black pointer-coarse:flex"
+                className="hidden h-12 w-full items-center justify-center rounded-full bg-primary text-sm font-semibold text-white transition hover:opacity-90 pointer-coarse:flex"
               >
                 Open in wallet
               </a>
