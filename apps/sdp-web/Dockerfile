@@ -36,6 +36,8 @@ WORKDIR /repo
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/sdp-web/package.json ./apps/sdp-web/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
+COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
+COPY packages/sdp-solana/package.json ./packages/sdp-solana/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -49,6 +51,8 @@ WORKDIR /repo
 COPY --from=deps /repo /repo
 COPY apps/sdp-web ./apps/sdp-web
 COPY packages/sdp-types ./packages/sdp-types
+COPY packages/sdp-rpc ./packages/sdp-rpc
+COPY packages/sdp-solana ./packages/sdp-solana
 
 # Public env (each var is also exposed via ENV so Next picks it up at build).
 # __SDP_RT_*__ defaults are placeholders swapped at container start by docker/entrypoint.sh.

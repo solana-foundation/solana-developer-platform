@@ -32,6 +32,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "lint": "biome check src/"
   },
   "dependencies": {
@@ -42,5 +43,8 @@
     "@solana/kit": "catalog:",
     "@solana/mosaic-sdk": "catalog:",
     "@solana/signers": "catalog:"
+  },
+  "devDependencies": {
+    "tsx": "4.22.4"
   }
 }

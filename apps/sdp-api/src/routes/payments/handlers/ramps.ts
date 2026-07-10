@@ -1,4 +1,5 @@
 import { SdpPaymentsError } from "@sdp/payments";
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { PaymentRampEstimate, PaymentRampQuote, RampProviderEstimateResult } from "@sdp/types";
 import {
   OFFRAMP_SUPPORT,
@@ -1006,7 +1007,7 @@ export async function simulateSandboxTransfer(c: AppContext) {
         organizationId: org.id,
         destinationAccountId: account.id,
         rail: rail[payload.fiatCurrency],
-        amountValue: String(Math.round(payload.amount * 100)),
+        amountValue: String(parseDecimalAmount(String(payload.amount), 2)),
         currencySymbol: payload.fiatCurrency,
       });
       break;

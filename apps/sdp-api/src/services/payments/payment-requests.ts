@@ -1,5 +1,7 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import { toNumberAmount } from "@sdp/solana/amount";
+import { SOL_MINT } from "@sdp/types";
 import {
   FindReferenceError,
   findReference,
@@ -14,7 +16,6 @@ import {
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
 import { internalError } from "@/lib/errors";
-import { SOL_MINT } from "@/services/payment-operation.service";
 import type { Env } from "@/types/env";
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
@@ -53,7 +54,7 @@ export async function reconcilePaymentRequest(
   try {
     await validateTransfer(rpc, found.signature, {
       recipient: assertValidAddress(row.destination_address, "destinationAddress"),
-      amount: Number(row.amount),
+      amount: toNumberAmount(row.amount),
       reference,
       ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
     });
