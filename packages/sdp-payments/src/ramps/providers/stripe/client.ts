@@ -1,6 +1,7 @@
-import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
+import { isDecimalString } from "@sdp/solana/amount";
 import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/types";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import { addDecimalAmounts, divideDecimalAmounts } from "../../../decimal";
 import {
   badRequest,
   estimateNotAvailable,
@@ -204,20 +205,11 @@ function assertSessionField(value: string | undefined, field: string): string {
   return value;
 }
 
-function stripeDecimalPlaces(value: string): number {
-  if (!isDecimalString(value)) {
+function sumStripeFees(left: string, right: string): string {
+  if (!isDecimalString(left) || !isDecimalString(right)) {
     throw providerUnavailable("Stripe returned an invalid decimal amount", { provider: "stripe" });
   }
-  const decimalIndex = value.indexOf(".");
-  return decimalIndex === -1 ? 0 : value.length - decimalIndex - 1;
-}
-
-function sumStripeFees(left: string, right: string): string {
-  const decimals = Math.max(stripeDecimalPlaces(left), stripeDecimalPlaces(right));
-  return formatDecimalAmount(
-    parseDecimalAmount(left, decimals) + parseDecimalAmount(right, decimals),
-    decimals
-  );
+  return addDecimalAmounts(left, right);
 }
 
 function stripeHeaders(secretKey: string, contentType?: string): HeadersInit {
@@ -346,7 +338,7 @@ export class StripeRampClient implements RampProvider {
       assetRail: input.assetRail,
       fiatAmount: input.fiatAmount,
       cryptoAmount: match.destination_amount,
-      exchangeRate: String(Number(input.fiatAmount) / cryptoAmount),
+      exchangeRate: divideDecimalAmounts(input.fiatAmount, match.destination_amount),
       fees: {
         currency: input.fiatCurrency,
         total: totalFee,

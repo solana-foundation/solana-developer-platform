@@ -17,9 +17,11 @@
   "dependencies": {
     "@base-ui/react": "^1.5.0",
     "@clerk/nextjs": "7.4.3",
+    "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
     "@sentry/nextjs": "^10.57.0",
     "@solana/design-system": "1.0.1",
+    "@solana/fixed-points": "7.0.0",
     "@solana/qr-code-styling": "1.6.0",
     "clsx": "2.1.1",
     "lucide-react": "1.17.0",

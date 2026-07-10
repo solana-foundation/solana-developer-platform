@@ -8,6 +8,11 @@ import {
   WELL_KNOWN_TOKEN_BY_MINT,
   wellKnownMint,
 } from "@sdp/types";
+import {
+  addDecimalFixedPoint,
+  decimalFixedPoint,
+  decimalFixedPointToString,
+} from "@solana/fixed-points";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -20,7 +25,7 @@ import {
   fetchBatchRecipients,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { BulkImportRow } from "../bulk-import";
-import { batchSendSchema, MAX_BATCH_RECIPIENTS } from "../schema";
+import { batchSendSchema, MAX_BATCH_RECIPIENTS, ONCHAIN_AMOUNT_PATTERN } from "../schema";
 import { walletBalanceAssetOptions } from "../wallet-options";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
@@ -35,6 +40,21 @@ export type BatchSendStepId = (typeof BATCH_SEND_STEPS)[number]["id"];
 export type BatchEligibleRecipient = CounterpartyAccountSummary;
 
 const RECIPIENTS_PAGE_SIZE = 6;
+
+/** u64 with 9 decimals — matches ONCHAIN_AMOUNT_PATTERN's max fractional digits. */
+const batchAmountFixedPoint = decimalFixedPoint("unsigned", 64, 9);
+
+/** Sums schema-valid amounts exactly, skipping entries still being typed. */
+export function sumBatchAmounts(amounts: string[]): string {
+  return decimalFixedPointToString(
+    amounts.reduce((sum, amount) => {
+      const trimmed = amount.trim();
+      return ONCHAIN_AMOUNT_PATTERN.test(trimmed)
+        ? addDecimalFixedPoint(sum, batchAmountFixedPoint(trimmed))
+        : sum;
+    }, batchAmountFixedPoint("0"))
+  );
+}
 
 export interface BatchRecipientDraft {
   counterpartyId: string;
@@ -221,20 +241,14 @@ export function useBatchSendWizard({
     [entries]
   );
 
-  const totalAmount = useMemo(
-    () =>
-      recipients.reduce((sum, r) => {
-        const value = Number(r.amount);
-        return sum + (Number.isFinite(value) ? value : 0);
-      }, 0),
-    [recipients]
-  );
+  const totalAmount = useMemo(() => sumBatchAmounts(recipients.map((r) => r.amount)), [recipients]);
+  const totalAmountValue = Number(totalAmount);
   let availableAmount: number | null = null;
   if (selectedWallet) {
     availableAmount = selectedAssetBalance ? Number(selectedAssetBalance.uiAmount) : 0;
   }
   const exceedsBalance =
-    totalAmount > 0 && availableAmount !== null && totalAmount > availableAmount;
+    totalAmountValue > 0 && availableAmount !== null && totalAmountValue > availableAmount;
   const exceedsMaxRecipients = recipients.length > MAX_BATCH_RECIPIENTS;
   const hasMint = !walletId || selectedAssetBalance !== null;
 

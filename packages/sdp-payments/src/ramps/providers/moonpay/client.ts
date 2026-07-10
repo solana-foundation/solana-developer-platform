@@ -11,6 +11,7 @@ import {
 } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
+import { sumDecimalAmounts } from "../../../decimal";
 import { providerNotConfigured, SdpPaymentsError } from "../../../errors";
 import { providerFetchJson } from "../../fetch";
 import { readyCounterparty } from "../../requirements";
@@ -379,7 +380,11 @@ export class MoonpayRampClient implements RampProvider {
       exchangeRate: String(quote.quoteCurrencyPrice),
       fees: {
         currency: input.fiatCurrency,
-        total: String(quote.feeAmount + quote.networkFeeAmount + quote.extraFeeAmount),
+        total: sumDecimalAmounts([
+          String(quote.feeAmount),
+          String(quote.networkFeeAmount),
+          String(quote.extraFeeAmount),
+        ]),
         network: String(quote.networkFeeAmount),
         provider: String(quote.feeAmount),
       },
@@ -409,7 +414,7 @@ export class MoonpayRampClient implements RampProvider {
       exchangeRate: String(quote.baseCurrencyPrice),
       fees: {
         currency: input.fiatCurrency,
-        total: String(quote.feeAmount + quote.extraFeeAmount),
+        total: sumDecimalAmounts([String(quote.feeAmount), String(quote.extraFeeAmount)]),
         provider: String(quote.feeAmount),
       },
     };

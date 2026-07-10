@@ -127,6 +127,9 @@ const RPC_PROVIDER_AVAILABILITY_DEFINITIONS = {
   triton: {
     isConfigured: (env) => hasEnv(env, "SOLANA_RPC_TRITON_URL"),
   },
+  validationcloud: {
+    isConfigured: (env) => hasEnv(env, "SOLANA_RPC_VALIDATIONCLOUD_URL"),
+  },
 } satisfies Record<OrganizationRpcProvider, ProviderAvailabilityDefinition>;
 
 function parsePostgresJson<T>(value: unknown): T {
@@ -215,9 +218,40 @@ function isProjectRpcProviderId(value: string): value is ProjectRpcProvider {
   return PROJECT_RPC_PROVIDER_SET.has(value);
 }
 
-function maskEndpoint(url: string): string {
+function collectRpcApiKeys(env: RpcEnv): string[] {
+  const secrets: string[] = [];
+  for (const [key, value] of Object.entries(env)) {
+    if (
+      key.startsWith("SOLANA_RPC_") &&
+      key.endsWith("_API_KEY") &&
+      typeof value === "string" &&
+      value.trim().length > 0
+    ) {
+      secrets.push(value);
+    }
+  }
+  // Longest first: replacing a shorter overlapping key before a longer one
+  // would mangle the longer key's match and leave a partial secret behind.
+  return secrets.sort((a, b) => b.length - a.length);
+}
+
+// Redact provider API keys before an endpoint is exposed to callers. The
+// query-param heuristic covers keys passed as query values (Helius) and
+// customer-supplied custom endpoints whose secret we don't know. The known-key
+// redaction covers path-segment keys (Alchemy, QuickNode, Triton, Validation
+// Cloud), which the query heuristic alone would leave in the path.
+function maskEndpoint(url: string, env: RpcEnv): string {
+  let masked = url;
+  for (const secret of collectRpcApiKeys(env)) {
+    masked = masked.replaceAll(secret, "***");
+    const encoded = encodeURIComponent(secret);
+    if (encoded !== secret) {
+      masked = masked.replaceAll(encoded, "***");
+    }
+  }
+
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(masked);
     for (const key of parsed.searchParams.keys()) {
       if (key.toLowerCase().includes("key") || key.toLowerCase().includes("token")) {
         parsed.searchParams.set(key, "***");
@@ -225,7 +259,7 @@ function maskEndpoint(url: string): string {
     }
     return parsed.toString();
   } catch {
-    return url;
+    return masked;
   }
 }
 
@@ -308,6 +342,17 @@ function resolveManagedProviders(env: RpcEnv): ManagedRpcProvider[] {
     providers.push({
       id: "quicknode",
       url: withQuickNodeApiKey(env.SOLANA_RPC_QUICKNODE_URL, env.SOLANA_RPC_QUICKNODE_API_KEY),
+      headers: {},
+    });
+  }
+
+  if (env.SOLANA_RPC_VALIDATIONCLOUD_URL) {
+    providers.push({
+      id: "validationcloud",
+      url: applyApiKeyTemplate(
+        env.SOLANA_RPC_VALIDATIONCLOUD_URL,
+        env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY ?? ""
+      ),
       headers: {},
     });
   }
@@ -531,7 +576,7 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
         providerId: "custom",
         projectId,
         endpoint: projectPreference.endpoint,
-        endpointLabel: maskEndpoint(projectPreference.endpoint),
+        endpointLabel: maskEndpoint(projectPreference.endpoint, input.env),
         headers: {},
         selectionMode: "project_custom_provider",
       };
@@ -547,7 +592,7 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
           providerId: selectedProvider.id,
           projectId,
           endpoint: selectedProvider.url,
-          endpointLabel: maskEndpoint(selectedProvider.url),
+          endpointLabel: maskEndpoint(selectedProvider.url, input.env),
           headers: selectedProvider.headers,
           selectionMode: "project_provider",
         };
@@ -568,7 +613,7 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
         providerId: selectedProvider.id,
         projectId,
         endpoint: selectedProvider.url,
-        endpointLabel: maskEndpoint(selectedProvider.url),
+        endpointLabel: maskEndpoint(selectedProvider.url, input.env),
         headers: selectedProvider.headers,
         selectionMode: "organization_provider",
       };
@@ -580,7 +625,7 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
     providerId: selectedProvider.id,
     projectId,
     endpoint: selectedProvider.url,
-    endpointLabel: maskEndpoint(selectedProvider.url),
+    endpointLabel: maskEndpoint(selectedProvider.url, input.env),
     headers: selectedProvider.headers,
     selectionMode: "round_robin_default",
   };
@@ -604,7 +649,7 @@ export async function resolveRoundRobinRpcTargets(
     providerId: provider.id,
     projectId,
     endpoint: provider.url,
-    endpointLabel: maskEndpoint(provider.url),
+    endpointLabel: maskEndpoint(provider.url, input.env),
     headers: provider.headers,
     selectionMode: "round_robin_default",
   }));
@@ -665,7 +710,7 @@ export async function listRpcProviders(input: ResolveRpcTargetInput) {
   for (const provider of enabledManagedProviders) {
     providerStatuses.push({
       id: provider.id,
-      endpoint: maskEndpoint(provider.url),
+      endpoint: maskEndpoint(provider.url, input.env),
       stats: await getProviderStats(input.kv.cache, provider.id),
     });
   }

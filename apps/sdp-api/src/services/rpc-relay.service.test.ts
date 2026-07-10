@@ -24,6 +24,8 @@ type MutableRpcEnv = {
   SOLANA_RPC_ALCHEMY_API_KEY?: string;
   SOLANA_RPC_QUICKNODE_URL?: string;
   SOLANA_RPC_QUICKNODE_API_KEY?: string;
+  SOLANA_RPC_VALIDATIONCLOUD_URL?: string;
+  SOLANA_RPC_VALIDATIONCLOUD_API_KEY?: string;
   SDP_DEPLOYMENT_MODE?: string;
 };
 
@@ -102,6 +104,8 @@ describe("rpc-relay.service", () => {
     rpcEnv.SOLANA_RPC_ALCHEMY_API_KEY = undefined;
     rpcEnv.SOLANA_RPC_QUICKNODE_URL = undefined;
     rpcEnv.SOLANA_RPC_QUICKNODE_API_KEY = undefined;
+    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_URL = undefined;
+    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = undefined;
     rpcEnv.SDP_DEPLOYMENT_MODE = undefined;
   });
 
@@ -230,6 +234,115 @@ describe("rpc-relay.service", () => {
         requestedProjectId: null,
       })
     ).rejects.toThrow('Invalid SDP_DEPLOYMENT_MODE: "selfhosted"');
+  });
+
+  it("resolves validationcloud, substitutes the path-segment key, and redacts it in the label", async () => {
+    await db
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "validationcloud" }), TEST_ORG_ID)
+      .run();
+
+    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://devnet.solana.validationcloud.io/v1/{API_KEY}";
+    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc_secret";
+
+    const target = await resolveRpcTarget({
+      env: appEnv,
+      kv,
+      db,
+      organizationId: TEST_ORG_ID,
+      authProjectId: null,
+      requestedProjectId: null,
+    });
+
+    expect(target.providerId).toBe("validationcloud");
+    expect(target.selectionMode).toBe("organization_provider");
+    // Upstream URL carries the substituted key as a path segment.
+    expect(target.endpoint).toContain("/v1/vc_secret");
+    // The caller-facing label must not leak it.
+    expect(target.endpointLabel).not.toContain("vc_secret");
+    expect(target.endpointLabel).toContain("/v1/***");
+  });
+
+  it("redacts path-segment provider keys from the provider list", async () => {
+    rpcEnv.SOLANA_RPC_ALCHEMY_URL = "https://solana-devnet.g.alchemy.com/v2/{API_KEY}";
+    rpcEnv.SOLANA_RPC_ALCHEMY_API_KEY = "alch_secret";
+    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://devnet.solana.validationcloud.io/v1/{API_KEY}";
+    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc_secret";
+
+    const providers = await listRpcProviders({
+      env: appEnv,
+      kv,
+      db,
+      organizationId: TEST_ORG_ID,
+      authProjectId: null,
+      requestedProjectId: null,
+    });
+
+    expect(providers.roundRobinOrder).toEqual(
+      expect.arrayContaining(["alchemy", "validationcloud"])
+    );
+    const allLabels = providers.providers.map((provider) => provider.endpoint).join(" ");
+    expect(allLabels).not.toContain("alch_secret");
+    expect(allLabels).not.toContain("vc_secret");
+    expect(
+      providers.providers.find((provider) => provider.id === "validationcloud")?.endpoint
+    ).toContain("/v1/***");
+  });
+
+  it("masks overlapping provider keys without leaving remnants", async () => {
+    await db
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "validationcloud" }), TEST_ORG_ID)
+      .run();
+
+    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://devnet.solana.validationcloud.io/v1/{API_KEY}";
+    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc_secret_long_123";
+    // A second configured key that is a prefix of the first — replacement
+    // order must not mangle the longer key's match and leave "_long_123".
+    rpcEnv.SOLANA_RPC_TRITON_API_KEY = "vc_secret";
+
+    const target = await resolveRpcTarget({
+      env: appEnv,
+      kv,
+      db,
+      organizationId: TEST_ORG_ID,
+      authProjectId: null,
+      requestedProjectId: null,
+    });
+
+    expect(target.providerId).toBe("validationcloud");
+    expect(target.endpointLabel).toContain("/v1/***");
+    expect(target.endpointLabel).not.toContain("long_123");
+  });
+
+  it("redacts URL-encoded keys even when the endpoint URL is unparseable", async () => {
+    await db
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "validationcloud" }), TEST_ORG_ID)
+      .run();
+
+    // Scheme-less URL: new URL() throws, so the label comes from the
+    // catch fallback — which must return the scrubbed string, not the input.
+    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_URL = "devnet.solana.validationcloud.io/v1/{API_KEY}";
+    // Key with URL-special characters: the template embeds only its
+    // encodeURIComponent form, so the encoded-variant scrub is the sole
+    // redaction path for it.
+    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc+secret/with=chars";
+
+    const target = await resolveRpcTarget({
+      env: appEnv,
+      kv,
+      db,
+      organizationId: TEST_ORG_ID,
+      authProjectId: null,
+      requestedProjectId: null,
+    });
+
+    expect(target.providerId).toBe("validationcloud");
+    expect(target.endpoint).toContain("/v1/vc%2Bsecret%2Fwith%3Dchars");
+    expect(target.endpointLabel).toContain("/v1/***");
+    expect(target.endpointLabel).not.toContain("vc+secret");
+    expect(target.endpointLabel).not.toContain("vc%2Bsecret");
   });
 
   it("honors default provider ordering and exposes quicknode in provider list", async () => {

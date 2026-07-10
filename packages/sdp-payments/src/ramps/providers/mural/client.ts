@@ -1,3 +1,4 @@
+import { toNumberAmount } from "@sdp/solana/amount";
 import type {
   Counterparty,
   PaymentRampEstimate,
@@ -728,7 +729,7 @@ export class MuralRampClient implements RampProvider {
         body: {
           fiatFeeRequests: [
             {
-              fiatAmount: Number(input.fiatAmount),
+              fiatAmount: toNumberAmount(input.fiatAmount),
               tokenSymbol,
               fiatAndRailCode: input.fiatCurrency.toLowerCase(),
             },
@@ -794,7 +795,7 @@ export class MuralRampClient implements RampProvider {
         body: {
           tokenFeeRequests: [
             {
-              amount: { tokenAmount: Number(input.cryptoAmount), tokenSymbol },
+              amount: { tokenAmount: toNumberAmount(input.cryptoAmount), tokenSymbol },
               fiatAndRailCode: input.fiatCurrency.toLowerCase(),
             },
           ],

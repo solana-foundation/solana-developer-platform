@@ -71,8 +71,8 @@ const UPDATE_STALE_AFTER_MS = OPERATION_STALE_AFTER_MS;
 
 type RecurringCollectionSource = "manual" | "automated";
 
-function assertRecurringPaymentTokenMint(token: string): string {
-  const normalized = normalizePaymentToken(token);
+function assertRecurringPaymentTokenMint(token: string, env: Env): string {
+  const normalized = normalizePaymentToken(token, env);
   if (normalized === "SOL" || normalized === SOL_MINT) {
     throw badRequest("Recurring payments require an SPL token mint");
   }
@@ -1374,7 +1374,7 @@ async function resolveRecurringPaymentUpdate(input: {
 
   const token =
     input.request.token !== undefined
-      ? assertRecurringPaymentTokenMint(input.request.token)
+      ? assertRecurringPaymentTokenMint(input.request.token, input.env)
       : input.recurringPayment.token;
   const counterpartyId = input.request.counterpartyId ?? input.recurringPayment.counterparty_id;
   const counterpartyAccountId =
@@ -2729,7 +2729,7 @@ export async function createRecurringPayment(input: {
   metadataUri?: string | null;
   createdBy: string | null;
 }): Promise<PaymentRecurringPaymentRow> {
-  const tokenMint = assertRecurringPaymentTokenMint(input.token);
+  const tokenMint = assertRecurringPaymentTokenMint(input.token, input.env);
   const destination = await resolveSolanaCounterpartyAccount({
     env: input.env,
     organizationId: input.organizationId,

@@ -108,15 +108,10 @@ export function StepAssetDetails({
 
       {jsonOpen ? <MetadataJsonPanel metadata={metadata} /> : null}
 
-      <p className="text-xs text-[rgba(28,28,29,0.55)]">
-        This information is private by default and won&apos;t be visible to the public unless you
-        choose to include it.
-      </p>
-
       <Tabs bordered value={tab} onValueChange={(value) => setTab(value)}>
-        <TabList>
+        <TabList className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {TABS.map((entry) => (
-            <Tab key={entry.id} value={entry.id}>
+            <Tab key={entry.id} value={entry.id} className="shrink-0 whitespace-nowrap">
               {entry.label}
             </Tab>
           ))}

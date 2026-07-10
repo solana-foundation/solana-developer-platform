@@ -39,6 +39,7 @@ const providerEnvKeys = [
   "SOLANA_RPC_HELIUS_URL",
   "SOLANA_RPC_QUICKNODE_URL",
   "SOLANA_RPC_TRITON_URL",
+  "SOLANA_RPC_VALIDATIONCLOUD_URL",
   "RANGE_API_KEY",
   "ELLIPTIC_API_TOKEN",
   "ELLIPTIC_API_KEY",
@@ -78,6 +79,7 @@ function setBaseProviderEnv(): void {
     SOLANA_RPC_URL: "https://rpc.default.test",
     SOLANA_RPC_HELIUS_URL: "https://rpc.helius.test",
     SOLANA_RPC_TRITON_URL: "https://rpc.triton.test",
+    SOLANA_RPC_VALIDATIONCLOUD_URL: "https://rpc.validationcloud.test/v1/{API_KEY}",
     RANGE_API_KEY: "range_test_key",
     MOONPAY_API_KEY: "moonpay_test_key",
     MOONPAY_SECRET_KEY: "moonpay_test_secret",
@@ -158,6 +160,7 @@ describe("provider-availability.service", () => {
     expect(resolved.providers.rpc.default).toBe(true);
     expect(resolved.providers.rpc.helius).toBe(true);
     expect(resolved.providers.rpc.triton).toBe(true);
+    expect(resolved.providers.rpc.validationcloud).toBe(false);
     expect(resolved.providers.compliance.range).toBe(true);
     expect(resolved.providers.ramps.moonpay).toBe(true);
     expect(resolved.providers.ramps.lightspark).toBe(false);
@@ -178,6 +181,11 @@ describe("provider-availability.service", () => {
     expect(availability.providers.rpc.default.enabled).toBe(true);
     expect(availability.providers.rpc.helius.enabled).toBe(true);
     expect(availability.providers.rpc.triton.enabled).toBe(true);
+    expect(availability.providers.rpc.validationcloud).toEqual({
+      entitled: false,
+      configured: true,
+      enabled: false,
+    });
     expect(availability.providers.compliance.range).toEqual({
       entitled: false,
       configured: true,

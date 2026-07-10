@@ -142,6 +142,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "lint": "biome check src/"
   },
   "dependencies": {
@@ -151,12 +152,14 @@
     "@sdp/types": "workspace:*",
     "@solana/addresses": "catalog:",
     "@solana/codecs": "catalog:",
+    "@solana/fixed-points": "7.0.0",
     "@solana/kit": "catalog:",
     "@solana/kora": "0.3.0-beta.2",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260609.1",
+    "tsx": "4.22.4",
     "typescript": "^6.0.3"
   }
 }

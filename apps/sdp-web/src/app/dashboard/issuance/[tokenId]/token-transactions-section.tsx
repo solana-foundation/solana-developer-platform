@@ -22,6 +22,23 @@ interface TokenTransactionsSectionProps {
   isLoading?: boolean;
 }
 
+// Transaction status → SDP design-system badge token (borderless tinted pill):
+// settled = .badge-green, in-flight = .badge-amber, failed = .badge-red.
+function transactionStatusBadgeClass(status: string): string {
+  switch (status) {
+    case "confirmed":
+    case "finalized":
+      return "bg-[rgba(0,160,102,0.08)] text-[#00a066]";
+    case "pending":
+    case "processing":
+      return "bg-[rgba(234,179,8,0.08)] text-[#92400e]";
+    case "failed":
+      return "bg-[rgba(220,38,38,0.08)] text-[#dc2626]";
+    default:
+      return "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]";
+  }
+}
+
 export function TokenTransactionsSection({
   transactions,
   transactionsError,
@@ -44,7 +61,7 @@ export function TokenTransactionsSection({
             </div>
           </div>
         ) : transactionsError ? (
-          <p className="text-sm text-[#8a1f2a]">{transactionsError}</p>
+          <p className="text-sm text-[#dc2626]">{transactionsError}</p>
         ) : transactions.length === 0 ? (
           <p className="text-sm text-[rgba(28,28,29,0.68)]">No transactions yet.</p>
         ) : (
@@ -62,7 +79,15 @@ export function TokenTransactionsSection({
                 {transactions.slice(0, 12).map((transaction) => (
                   <TableRow key={transaction.id} data-testid={`transaction-row-${transaction.id}`}>
                     <TableCell>{formatDisplayLabel(transaction.type)}</TableCell>
-                    <TableCell>{formatDisplayLabel(transaction.status)}</TableCell>
+                    <TableCell>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${transactionStatusBadgeClass(
+                          transaction.status
+                        )}`}
+                      >
+                        {formatDisplayLabel(transaction.status)}
+                      </span>
+                    </TableCell>
                     <TableCell className="max-w-[220px] truncate font-mono text-xs">
                       {transaction.signature ?? "—"}
                     </TableCell>

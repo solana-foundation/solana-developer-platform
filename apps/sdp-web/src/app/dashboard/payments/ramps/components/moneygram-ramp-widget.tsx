@@ -1,5 +1,6 @@
 "use client";
 
+import { toNumberAmount } from "@sdp/solana/amount";
 import type { Counterparty, MoneygramRampEvent, PaymentRampQuote } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
@@ -218,7 +219,7 @@ function buildOfframpTransactionPrefill(
       ? { destinationCountry, destinationSubdivision }
       : {}),
     destinationCurrency: fiatCurrency,
-    amount: Number.parseFloat(cryptoAmount),
+    amount: toNumberAmount(cryptoAmount),
     asset: cryptoAsset,
   };
 }

@@ -31,6 +31,7 @@ import {
   tokenAllowlistEntryIdSchema,
   tokenIdParamSchema,
   tokenTransactionIdSchema,
+  WALLET_ID_INPUT_NOTE,
   walletIdParamSchema,
   withOpenApi,
   z,
@@ -147,8 +148,7 @@ export const tokenSchema = z
     projectId: projectIdParamSchema,
     organizationId: orgIdParamSchema,
     signingWalletId: walletIdParamSchema.nullable().openapi({
-      description: "Preferred custody wallet ID used for token deploy/admin/write actions.",
-      example: "wal_example",
+      description: "Preferred signer wallet for token deploy/admin/write actions.",
     }),
     mintAddress: solanaAddressSchema.nullable().openapi({
       description: "Mint address once deployed.",
@@ -747,8 +747,7 @@ export const createTokenRequestSchema = createTokenSchemaBase
       example: "stablecoin",
     }),
     signingWalletId: walletIdParamSchema.optional().openapi({
-      description: "Preferred custody wallet ID for token deploy/admin/write actions.",
-      example: "wal_example",
+      description: `Preferred signer wallet for token deploy/admin/write actions — ${WALLET_ID_INPUT_NOTE}`,
     }),
     overrides: templateOverridesOpenApiSchema.optional().openapi({
       description: "Template overrides to customize defaults.",
@@ -862,8 +861,8 @@ const mintOperationSchema = mintSchemaBase.shape.mint
 export const mintRequestSchema = mintSchemaBase
   .extend({
     signingWalletId: withOpenApi(mintSchemaBase.shape.signingWalletId, {
-      description: "Optional custody wallet ID to use as the signer for this action.",
-      example: "wal_example",
+      description: `Optional signer wallet — ${WALLET_ID_INPUT_NOTE}`,
+      example: "privy_wallet_123",
     }),
     mint: mintOperationSchema,
     options: withOpenApi(mintSchemaBase.shape.options, {
@@ -891,7 +890,7 @@ export const confirmDeployRequestSchema = confirmDeploySchemaBase
     signingWalletId: withOpenApi(confirmDeploySchemaBase.shape.signingWalletId, {
       description:
         "Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/prepare (or resolved from the API key), so the authority can't be changed at confirm time.",
-      example: "wal_example",
+      example: "privy_wallet_123",
     }),
   })
   .openapi({ description: "Confirm non-custodial deploy request body." });
@@ -916,8 +915,8 @@ const burnOperationSchema = burnSchemaBase.shape.burn
 export const burnRequestSchema = burnSchemaBase
   .extend({
     signingWalletId: withOpenApi(burnSchemaBase.shape.signingWalletId, {
-      description: "Optional custody wallet ID to use as the signer for this action.",
-      example: "wal_example",
+      description: `Optional signer wallet — ${WALLET_ID_INPUT_NOTE}`,
+      example: "privy_wallet_123",
     }),
     burn: burnOperationSchema,
     options: withOpenApi(burnSchemaBase.shape.options, {
@@ -955,8 +954,8 @@ const seizeOperationSchema = seizeSchemaBase.shape.seize
 export const seizeRequestSchema = seizeSchemaBase
   .extend({
     signingWalletId: withOpenApi(seizeSchemaBase.shape.signingWalletId, {
-      description: "Optional custody wallet ID to use as the signer for this action.",
-      example: "wal_example",
+      description: `Optional signer wallet — ${WALLET_ID_INPUT_NOTE}`,
+      example: "privy_wallet_123",
     }),
     seize: seizeOperationSchema,
     options: withOpenApi(seizeSchemaBase.shape.options, {
@@ -990,8 +989,8 @@ const forceBurnOperationSchema = forceBurnSchemaBase.shape.forceBurn
 export const forceBurnRequestSchema = forceBurnSchemaBase
   .extend({
     signingWalletId: withOpenApi(forceBurnSchemaBase.shape.signingWalletId, {
-      description: "Optional custody wallet ID to use as the signer for this action.",
-      example: "wal_example",
+      description: `Optional signer wallet — ${WALLET_ID_INPUT_NOTE}`,
+      example: "privy_wallet_123",
     }),
     forceBurn: forceBurnOperationSchema,
     options: withOpenApi(forceBurnSchemaBase.shape.options, {
@@ -1004,8 +1003,8 @@ export const forceBurnRequestSchema = forceBurnSchemaBase
 export const updateAuthorityRequestSchema = updateAuthoritySchemaBase
   .extend({
     signingWalletId: withOpenApi(updateAuthoritySchemaBase.shape.signingWalletId, {
-      description: "Optional custody wallet ID to use as the signer for this action.",
-      example: "wal_example",
+      description: `Optional signer wallet — ${WALLET_ID_INPUT_NOTE}`,
+      example: "privy_wallet_123",
     }),
     authority: withOpenApi(updateAuthoritySchemaBase.shape.authority, {
       description: "Authority update details.",

@@ -20,6 +20,7 @@ import {
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { isAddress } from "@solana/addresses";
 import { z } from "zod";
+import { divideDecimalAmounts } from "../../../decimal";
 import {
   badRequest,
   providerNotConfigured,
@@ -794,7 +795,7 @@ export class LightsparkRampClient implements RampProvider {
       assetRail: input.assetRail,
       fiatAmount: input.fiatAmount,
       cryptoAmount,
-      exchangeRate: String(Number(input.fiatAmount) / Number(cryptoAmount)),
+      exchangeRate: divideDecimalAmounts(input.fiatAmount, cryptoAmount),
       fees: {
         currency: input.fiatCurrency,
         total: formatDecimalAmount(BigInt(rate.fees.fixed), rate.sourceCurrency.decimals),
@@ -850,7 +851,7 @@ export class LightsparkRampClient implements RampProvider {
       assetRail: input.assetRail,
       fiatAmount,
       cryptoAmount: input.cryptoAmount,
-      exchangeRate: String(Number(fiatAmount) / Number(input.cryptoAmount)),
+      exchangeRate: divideDecimalAmounts(fiatAmount, input.cryptoAmount),
       fees: {
         currency: getCryptoRailAssetLabel(input.assetRail),
         total: formatDecimalAmount(BigInt(rate.fees.fixed), rate.sourceCurrency.decimals),

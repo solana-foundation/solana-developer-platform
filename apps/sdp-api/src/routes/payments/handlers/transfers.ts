@@ -1433,6 +1433,7 @@ export async function createTransfer(c: AppContext) {
     destination: parsed.data.destination,
     token: parsed.data.token,
     amount: parsed.data.amount,
+    env: c.env,
     requiredWalletPermissions: ["payments:write"],
   });
 
@@ -1555,7 +1556,7 @@ export async function createTransfer(c: AppContext) {
       return success(c, { transfer: mapTransferRow(updated) });
     }
 
-    const mintAddress = assertValidAddress(parsed.data.token, "token");
+    const mintAddress = assertValidAddress(operation.token, "token");
     const result = await executeSplTransfer(
       c,
       operation.sourceWallet,
