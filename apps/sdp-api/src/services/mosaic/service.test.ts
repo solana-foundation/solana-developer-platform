@@ -15,7 +15,7 @@ import * as Kit from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import * as Signers from "@solana/signers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AppError } from "@/lib/errors";
+import { AppError, transactionFailed } from "@/lib/errors";
 import { MosaicService } from "@/services/mosaic";
 import type { CreateTokenOptions } from "@/services/mosaic/types";
 import type { FeePaymentPort } from "@/services/ports/fee-payment.port";
@@ -115,7 +115,10 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
     service = new MosaicService(
       env as ConstructorParameters<typeof MosaicService>[0],
       signer,
-      fee.port
+      fee.port,
+      // Mirror the createMosaicService factory wiring so on-chain failures
+      // surface as AppError("TRANSACTION_FAILED").
+      { transactionFailedError: transactionFailed }
     );
 
     // Stub the template builder: capture args, return a sentinel transaction.
@@ -308,7 +311,11 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       } as unknown as ReturnType<typeof RpcModule.createRpcForSdk>);
       const unsponsored = new MosaicService(
         env as ConstructorParameters<typeof MosaicService>[0],
-        signer
+        signer,
+        undefined,
+        // Mirror the createMosaicService factory wiring so on-chain failures
+        // surface as AppError("TRANSACTION_FAILED").
+        { transactionFailedError: transactionFailed }
       );
 
       vi.spyOn(Kit, "signTransactionMessageWithSigners").mockResolvedValue({
