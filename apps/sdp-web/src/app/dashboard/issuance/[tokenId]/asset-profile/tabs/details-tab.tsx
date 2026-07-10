@@ -75,8 +75,8 @@ export function DetailsTab({
     : draft.signingWalletId || "Project default signer";
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-4">
         <p className="inline-flex items-center gap-1.5 text-sm text-[rgba(28,28,29,0.55)]">
           <Lock className="h-3.5 w-3.5 shrink-0" />
           This information is private by default and won&apos;t be visible to the public unless you

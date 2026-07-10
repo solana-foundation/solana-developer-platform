@@ -172,7 +172,7 @@ export function AssetManagementWorkspace({
   const effectivePauseDisabledReason = ops.effectivePauseDisabledReason;
 
   return (
-    <div className="space-y-8 pb-8">
+    <div className="space-y-4 pb-8">
       <AssetProfileHeader
         token={token}
         assetProfile={form.assetProfile}
