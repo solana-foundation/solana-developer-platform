@@ -1,6 +1,7 @@
+import { getSolanaConfig, type RpcEnv } from "@sdp/rpc";
 import { assertValidAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
-import { type Permission, SOL_MINT } from "@sdp/types";
+import { isWellKnownTokenSymbol, type Permission, SOL_MINT, wellKnownMint } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, walletNotFound } from "@/lib/errors";
@@ -60,8 +61,26 @@ export function isNativePaymentToken(token: string): boolean {
   return normalized.toUpperCase() === "SOL" || normalized === SOL_MINT;
 }
 
-export function normalizePaymentToken(token: string): string {
-  return isNativePaymentToken(token) ? "SOL" : token;
+/**
+ * Maps native SOL aliases to "SOL" and well-known token symbols to the
+ * configured cluster's mint; anything else passes through as a mint address.
+ */
+export function normalizePaymentToken(token: string, env: RpcEnv): string {
+  if (isNativePaymentToken(token)) {
+    return "SOL";
+  }
+
+  const symbol = token.trim();
+  if (!isWellKnownTokenSymbol(symbol)) {
+    return token;
+  }
+
+  const cluster = getSolanaConfig(env).network;
+  const mint = wellKnownMint(symbol, cluster);
+  if (!mint) {
+    throw badRequest(`${symbol} is not available on ${cluster}`);
+  }
+  return mint;
 }
 
 export function resolvePaymentWallet(wallets: CustodyWallet[], walletId: string): CustodyWallet {
@@ -79,6 +98,7 @@ export function resolveOutboundPaymentOperation(input: {
   destination: string;
   token: string;
   amount: string;
+  env: RpcEnv;
   requiredWalletPermissions?: Permission[];
 }): OutboundPaymentOperation {
   const amount = assertPositivePaymentAmount(input.amount);
@@ -94,7 +114,7 @@ export function resolveOutboundPaymentOperation(input: {
     sourceWallet,
     sourceAddress: assertValidAddress(sourceWallet.publicKey, "source"),
     destinationAddress: assertValidAddress(input.destination, "destination"),
-    token: normalizePaymentToken(input.token),
+    token: normalizePaymentToken(input.token, input.env),
     amount,
   };
 }

@@ -66,11 +66,20 @@ describe("payments token schema", () => {
     });
   });
 
+  describe("accepts well-known token symbols", () => {
+    it("'USDC' parses to 'USDC'", () => {
+      expect(tokenSchema.parse("USDC")).toBe("USDC");
+    });
+
+    it("' usdc ' is trimmed and case-folded to 'USDC'", () => {
+      expect(tokenSchema.parse(" usdc ")).toBe("USDC");
+    });
+  });
+
   describe("rejects string inputs that do not match the contract", () => {
     const cases: Array<[string, string]> = [
       ["empty string", ""],
-      ["token symbol 'USDC'", "USDC"],
-      ["token symbol 'BTC'", "BTC"],
+      ["unknown token symbol 'BTC'", "BTC"],
       ["too-short non-SOL string", "x".repeat(20)],
       ["too-long string", "x".repeat(50)],
       ["right-length non-base58 string", "!".repeat(43)],

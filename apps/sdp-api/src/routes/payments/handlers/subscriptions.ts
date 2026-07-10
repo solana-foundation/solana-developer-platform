@@ -51,6 +51,7 @@ import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
+import { normalizePaymentToken } from "@/services/payment-operation.service";
 import {
   type AppContext,
   getPaymentSubscriptionsRepository,
@@ -422,7 +423,7 @@ export const createSubscriptionPlan = async (c: AppContext) => {
     projectId,
     ownerWalletId: ownerWallet.walletId,
     ownerAddress: ownerWallet.publicKey,
-    token: parsed.data.token,
+    token: normalizePaymentToken(parsed.data.token, c.env),
     amount: parsed.data.amount,
     periodHours: parsed.data.periodHours,
     programPlanId: parsed.data.programPlanId ?? generateProgramPlanId(),
@@ -1062,7 +1063,7 @@ export const createSubscriptionCollectionAttempt = async (c: AppContext) => {
     projectId,
     subscriptionId: subscription.id,
     transferId: parsed.data.transferId ?? null,
-    token: parsed.data.token ?? plan.token,
+    token: parsed.data.token ? normalizePaymentToken(parsed.data.token, c.env) : plan.token,
     amount: parsed.data.amount ?? plan.amount,
     dueAt: parsed.data.dueAt ?? subscription.next_collection_due_at ?? now,
     attemptedAt: parsed.data.attemptedAt ?? null,

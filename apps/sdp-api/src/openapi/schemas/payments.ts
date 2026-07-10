@@ -439,7 +439,7 @@ export const createTransferRequestSchema = createTransferSchemaBase
     }),
     token: withOpenApi(createTransferSchemaBase.shape.token, {
       description:
-        "Token mint address. For the native token, pass `SOL` (recommended) or the canonical SOL mint `So11111111111111111111111111111111111111112` — the server normalizes both to `SOL`. SPL tokens must be specified by their on-chain mint (symbols are not resolved at request time).",
+        "Token to transfer. Pass `SOL` for the native token, a well-known token symbol (e.g. `USDC`) resolved to the configured cluster's mint, or a base58 SPL mint address. Custom tokens must be specified by their on-chain mint.",
       example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(createTransferSchemaBase.shape.amount, {
@@ -689,7 +689,7 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
     }),
     token: withOpenApi(createTransferBatchSchemaBase.shape.token, {
       description:
-        "Token mint address. For the native token, pass `SOL` (recommended) or the canonical SOL mint `So11111111111111111111111111111111111111112` — the server normalizes both to `SOL`. SPL tokens must be specified by their on-chain mint.",
+        "Token to transfer. Pass `SOL` for the native token, a well-known token symbol (e.g. `USDC`) resolved to the configured cluster's mint, or a base58 SPL mint address. Custom tokens must be specified by their on-chain mint.",
       example: "SOL",
     }),
     recipients: withOpenApi(createTransferBatchSchemaBase.shape.recipients, {

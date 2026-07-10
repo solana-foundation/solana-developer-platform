@@ -2,6 +2,7 @@ import { isAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
 import {
   type CoinbaseRampEvent,
+  isWellKnownTokenSymbol,
   type MoneygramRampEvent,
   MURAL_SANDBOX_PAYIN_CURRENCIES,
   OFFRAMP_CRYPTO_RAILS,
@@ -27,24 +28,25 @@ function solanaAddressSchema(fieldName: string) {
   );
 }
 
-// Payments token field: native SOL keyword, the canonical SOL mint, or a base58
-// Solana mint address. Trim and case-fold the native keyword in a preprocess so
-// validation matches `normalizePaymentToken`/`isNativePaymentToken` (which both
-// accept case-insensitive "SOL" with surrounding whitespace). A single refine
-// (rather than a union with `.min(32)`) avoids generic "String must contain at
-// least 32 character(s)" errors for short inputs like `"USDC"`.
+// Payments token field: a well-known token symbol (SOL, USDC, ...) or a base58
+// Solana mint address. Trim and case-fold symbols in a preprocess so validation
+// matches `normalizePaymentToken` (which resolves well-known symbols to the
+// configured cluster's mint). A single refine (rather than a union with
+// `.min(32)`) avoids generic "String must contain at least 32 character(s)"
+// errors for short inputs like `"BTC"`.
 export const PAYMENT_TOKEN_VALIDATION_MESSAGE =
-  "token must be 'SOL' or a base58 Solana mint address";
+  "token must be a well-known token symbol (e.g. 'SOL', 'USDC') or a base58 Solana mint address";
 
 const paymentTokenSchema = z.preprocess(
   (value) => {
     if (typeof value !== "string") return value;
     const trimmed = value.trim();
-    return trimmed.toUpperCase() === "SOL" ? "SOL" : trimmed;
+    const symbol = trimmed.toUpperCase();
+    return isWellKnownTokenSymbol(symbol) ? symbol : trimmed;
   },
   z.string().refine(
     (value) => {
-      if (value === "SOL" || value === SOL_MINT) return true;
+      if (isWellKnownTokenSymbol(value) || value === SOL_MINT) return true;
       return value.length >= 32 && value.length <= 44 && isAddress(value);
     },
     { message: PAYMENT_TOKEN_VALIDATION_MESSAGE }
