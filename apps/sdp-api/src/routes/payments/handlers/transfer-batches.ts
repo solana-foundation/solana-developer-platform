@@ -1,4 +1,6 @@
 import * as solanaRpc from "@sdp/rpc/solana";
+import { assertValidAddress } from "@sdp/solana/address";
+import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import type {
   Address,
@@ -39,7 +41,6 @@ import type {
   PaymentTransferRow,
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
-import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
   badRequest,
@@ -52,7 +53,6 @@ import {
   transactionFailed,
 } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
-import { assertValidAddress } from "@/lib/solana";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIds,

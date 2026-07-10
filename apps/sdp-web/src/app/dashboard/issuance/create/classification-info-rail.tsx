@@ -43,7 +43,7 @@ export function ClassificationInfoRail() {
           {STEPS.map((step) => {
             const Icon = step.icon;
             return (
-              <li key={step.title} className="flex items-start gap-3">
+              <li key={step.title} className="flex items-center gap-3">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.7)]">
                   <Icon className="h-4 w-4" />
                 </span>

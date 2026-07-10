@@ -1,5 +1,5 @@
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { LightsparkGridAmount, LightsparkRampSettlement, SdpEnvironment } from "@sdp/types";
-import { formatDecimalAmount } from "@/lib/amount";
 import { AppError, badRequest } from "@/lib/errors";
 import { readNumber, readRecord, readString } from "@/lib/json";
 import { requireEnv } from "@/lib/ramps/shared";

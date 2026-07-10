@@ -1,4 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
+import { assertValidAddress } from "@sdp/solana/address";
 import {
   FindReferenceError,
   findReference,
@@ -14,7 +15,6 @@ import {
 } from "@/db/repositories/repository-factory";
 import { toNumberAmount } from "@/lib/amount";
 import { internalError } from "@/lib/errors";
-import { assertValidAddress } from "@/lib/solana";
 import { SOL_MINT } from "@/services/payment-operation.service";
 import type { Env } from "@/types/env";
 

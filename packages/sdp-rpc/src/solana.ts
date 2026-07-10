@@ -10,8 +10,11 @@ import {
   type Base64EncodedWireTransaction,
   type Blockhash,
   type Commitment,
-  createSolanaRpc,
+  createDefaultRpcTransport,
+  type createSolanaRpc,
+  createSolanaRpcFromTransport,
   createSolanaRpcSubscriptions,
+  type RpcTransport,
   type Signature,
 } from "@solana/kit";
 import { getSolanaConfig } from "./config";
@@ -52,7 +55,15 @@ declare const Buffer: {
 export interface RpcClientOptions {
   rpcUrl?: string;
   headers?: Readonly<Record<string, string>>;
+  /**
+   * Per-request transport deadline. A stalled HTTP request (socket open, no
+   * response) rejects after this long instead of hanging the caller forever.
+   * Callers that pass their own `abortSignal` to `.send()` keep full control.
+   */
+  requestTimeoutMs?: number;
 }
+
+export const DEFAULT_RPC_REQUEST_TIMEOUT_MS = 30_000;
 
 const DISALLOWED_RPC_HEADERS = new Set([
   "accept",
@@ -123,18 +134,52 @@ export type SolanaRpc = ReturnType<typeof createSolanaRpc>;
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
+ * Wrap a transport so every request carries a deadline. Without one, a stalled
+ * HTTP request (socket open, server never responds) hangs the awaiting caller
+ * indefinitely — deadlines like `confirmTransaction`'s `timeoutMs` are only
+ * checked between polls, so a single hung fetch defeats them.
+ */
+function withRequestTimeout(transport: RpcTransport, timeoutMs: number): RpcTransport {
+  return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
+    if (config.signal) {
+      // The caller manages cancellation; don't override it.
+      return await transport<TResponse>(config);
+    }
+    // AbortController + setTimeout (not AbortSignal.timeout) so the timer is
+    // cleared on settle and behaves consistently across runtimes (workerd/Node).
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await transport<TResponse>({ ...config, signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        // Deterministic, transient-classified message (see transient.ts).
+        throw solanaRpcError(`RPC request timed out after ${timeoutMs}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
+/**
  * Create a configured Solana RPC client from environment
  */
 export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
   const config = getSolanaConfig(env);
   const rpcUrl = options?.rpcUrl ?? config.rpcUrl;
+  const timeoutMs = options?.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
 
+  let transport: RpcTransport;
   if (options?.headers && Object.keys(options.headers).length > 0) {
     assertAllowedRpcHeaders(options.headers);
-    return createSolanaRpc(rpcUrl, { headers: options.headers });
+    transport = createDefaultRpcTransport({ headers: options.headers, url: rpcUrl });
+  } else {
+    transport = createDefaultRpcTransport({ url: rpcUrl });
   }
 
-  return createSolanaRpc(rpcUrl);
+  return createSolanaRpcFromTransport(withRequestTimeout(transport, timeoutMs));
 }
 
 export type SolanaRpcSdkBridge<TSdkRpc> = SolanaRpc & TSdkRpc;

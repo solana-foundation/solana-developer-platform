@@ -254,10 +254,7 @@ export function CustomFieldRows({
   return (
     <div className="space-y-3">
       {fields.map((field) => (
-        <div
-          key={field.id}
-          className="grid grid-cols-1 gap-2 rounded-xl border border-[rgba(28,28,29,0.1)] bg-white p-3 sm:grid-cols-[1fr_1.4fr_auto]"
-        >
+        <div key={field.id} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1.4fr_auto]">
           <Input
             placeholder="Key"
             disabled={disabled}
@@ -277,6 +274,7 @@ export function CustomFieldRows({
             disabled={disabled}
             onClick={() => remove(field.id)}
             aria-label="Remove field"
+            className="self-center text-status-error-text hover:bg-status-error-bg hover:text-status-error-text"
           >
             <Trash2 className="h-4 w-4" />
           </Button>

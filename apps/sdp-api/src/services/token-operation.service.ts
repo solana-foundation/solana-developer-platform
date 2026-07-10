@@ -1,4 +1,4 @@
-import { AmountError, parseDecimalAmount, toMosaicAmount } from "@/lib/amount";
+import { AmountError, parseDecimalAmount, toMosaicAmount } from "@sdp/solana/amount";
 import { AppError } from "@/lib/errors";
 
 type TokenWithStatus = {

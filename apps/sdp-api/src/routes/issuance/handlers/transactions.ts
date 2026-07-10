@@ -1,3 +1,4 @@
+import { type Address, assertValidAddress } from "@sdp/solana/address";
 import {
   TOKEN_TRANSACTION_STATUSES,
   TOKEN_TRANSACTION_TYPES,
@@ -12,7 +13,6 @@ import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { badRequest, notFound, walletNotFound } from "@/lib/errors";
 import { paginated } from "@/lib/response";
-import { type Address, assertValidAddress } from "@/lib/solana";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
