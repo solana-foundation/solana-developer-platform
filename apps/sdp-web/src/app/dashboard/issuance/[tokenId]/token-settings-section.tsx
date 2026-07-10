@@ -7,13 +7,11 @@ import {
   Coins,
   Copy,
   FileText,
-  KeyRound,
   LayoutTemplate,
   ListChecks,
   Lock,
   type LucideIcon,
   Percent,
-  Puzzle,
   Scaling,
   Snowflake,
   UserCog,
@@ -22,7 +20,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
-import type { ExtensionRow, PermissionRow } from "./token-management-workspace.types";
+import type {
+  ExtensionRow,
+  ExtensionRowId,
+  PermissionRow,
+  PermissionRowId,
+} from "./token-management-workspace.types";
 import { formatValue } from "./token-management-workspace.utils";
 
 interface TokenSettingsSectionProps {
@@ -36,14 +39,17 @@ interface TokenSettingsSectionProps {
 }
 
 // Maps each authority / extension row to a line icon that echoes the
-// Token-2022 feature it represents. Keyed by the stable row `id`.
-const ROW_ICONS: Record<string, LucideIcon> = {
-  // Authorities
+// Token-2022 feature it represents. Keyed by the row `id` unions, so these
+// records are exhaustive: adding or renaming a row id in the workspace layer
+// fails to compile here until the icon is supplied — no silent fallback.
+const PERMISSION_ROW_ICONS: Record<PermissionRowId, LucideIcon> = {
   "mint-authority": Coins,
   "freeze-authority": Snowflake,
   "metadata-authority": FileText,
   "permanent-delegate": UserCog,
-  // Extensions
+};
+
+const EXTENSION_ROW_ICONS: Record<ExtensionRowId, LucideIcon> = {
   template: LayoutTemplate,
   "control-list": ListChecks,
   mintable: Coins,
@@ -56,22 +62,23 @@ const ROW_ICONS: Record<string, LucideIcon> = {
   "non-transferable": Ban,
 };
 
-function iconForRow(id: string, fallback: LucideIcon): LucideIcon {
-  return ROW_ICONS[id] ?? fallback;
-}
+// Status is the only thing that carries color, using the exact SDP design-system
+// semantic tokens (sdp-design-system.css). Only the status values enumerated
+// below are colored; every other value — numeric ("0.25%", "5%"), display
+// labels, "Disabled", or any status the API adds later — is intentionally the
+// neutral gray fallback. Add a value to the relevant set to give it color.
+const POSITIVE_STATUS_VALUES = new Set(["enabled", "configured"]); // .badge-green
+const FROZEN_STATUS_VALUE = "frozen"; // .badge-amber
 
-// Status is the only thing that carries color. Values below are the exact SDP
-// design-system semantic tokens (sdp-design-system.css): enabled/configured =
-// .badge-green (--green-bg/--green-tx), frozen = .badge-amber
-// (--amber-bg/--amber-tx), everything else = .badge-gray (--t8/--emph-m).
 function extensionBadge(value: string): { className: string; showCheck: boolean } {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "enabled" || normalized === "configured") {
+  if (POSITIVE_STATUS_VALUES.has(normalized)) {
     return { className: "bg-[rgba(0,160,102,0.08)] text-[#00a066]", showCheck: true };
   }
-  if (normalized === "frozen") {
+  if (normalized === FROZEN_STATUS_VALUE) {
     return { className: "bg-[rgba(234,179,8,0.08)] text-[#92400e]", showCheck: false };
   }
+  // .badge-gray — neutral fallback for all non-status values.
   return { className: "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]", showCheck: false };
 }
 
@@ -87,7 +94,7 @@ function ExtensionItem({ row }: { row: ExtensionRow }) {
   const badge = extensionBadge(row.value);
   return (
     <>
-      <IconTile icon={iconForRow(row.id, Puzzle)} />
+      <IconTile icon={EXTENSION_ROW_ICONS[row.id]} />
       <div className="min-w-0 flex-1">
         <p className="text-[15px] font-medium text-[#1c1c1d]">{row.title}</p>
         <p className="text-[13px] text-[rgba(28,28,29,0.6)]">{row.helper}</p>
@@ -135,7 +142,7 @@ export function TokenSettingsSection({
               data-testid={`permission-row-${row.id}`}
               className="flex flex-wrap items-center gap-x-3 gap-y-3 border-b border-[rgba(28,28,29,0.08)] px-4 py-3.5 last:border-b-0"
             >
-              <IconTile icon={iconForRow(row.id, KeyRound)} />
+              <IconTile icon={PERMISSION_ROW_ICONS[row.id]} />
               <div className="min-w-0 flex-1">
                 <p className="text-[15px] font-medium text-[#1c1c1d]">{row.title}</p>
                 <p className="text-[13px] text-[rgba(28,28,29,0.6)]">{row.helper}</p>

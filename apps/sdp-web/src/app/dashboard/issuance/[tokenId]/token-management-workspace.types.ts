@@ -167,8 +167,30 @@ export interface AllowlistFormState {
   label: string;
 }
 
+// Row IDs are a closed set: `getPermissionRows` / `getExtensionRows` produce
+// them and the icon maps in token-settings-section consume them. Keeping these
+// as literal unions makes the two sides sync at the type level — adding or
+// renaming a row forces the producer, the union, and the icon map to agree.
+export type PermissionRowId =
+  | "mint-authority"
+  | "freeze-authority"
+  | "metadata-authority"
+  | "permanent-delegate";
+
+export type ExtensionRowId =
+  | "template"
+  | "control-list"
+  | "mintable"
+  | "freezable"
+  | "default-account-state"
+  | "transfer-fee"
+  | "scaled-ui"
+  | "transfer-hook"
+  | "interest-bearing"
+  | "non-transferable";
+
 export interface PermissionRow {
-  id: string;
+  id: PermissionRowId;
   title: string;
   helper: string;
   value: string | null;
@@ -177,7 +199,7 @@ export interface PermissionRow {
 }
 
 export interface ExtensionRow {
-  id: string;
+  id: ExtensionRowId;
   title: string;
   helper: string;
   value: string;
