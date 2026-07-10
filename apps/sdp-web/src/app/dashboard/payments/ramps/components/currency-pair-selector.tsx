@@ -70,7 +70,7 @@ export function CurrencyPairSelector() {
 
   const isOfframp = direction === "offramp";
 
-  const offrampBalance = useMemo<number | null>(() => {
+  const offrampBalance = useMemo<string | null>(() => {
     if (!isOfframp || !selectedWallet) {
       return null;
     }
@@ -78,11 +78,11 @@ export function CurrencyPairSelector() {
       selectedWallet,
       toRampCryptoToken(selectedPair.assetRail)
     );
-    return balance ? Number(balance.uiAmount) : 0;
+    return balance ? balance.uiAmount : "0";
   }, [isOfframp, selectedWallet, selectedPair.assetRail]);
 
   const offrampExceeds =
-    offrampBalance !== null && amount !== "" && Number(amount) > offrampBalance;
+    offrampBalance !== null && amount !== "" && Number(amount) > Number(offrampBalance);
 
   const fiatCombobox = (
     <Combobox
@@ -135,11 +135,11 @@ export function CurrencyPairSelector() {
             action={
               offrampBalance !== null ? (
                 <AmountBalanceReadout
-                  available={String(offrampBalance)}
+                  available={offrampBalance}
                   assetLabel={getCryptoRailAssetLabel(selectedPair.assetRail)}
                   exceeds={offrampExceeds}
                   onMax={
-                    offrampBalance > 0 ? () => onAmountChange(String(offrampBalance)) : undefined
+                    Number(offrampBalance) > 0 ? () => onAmountChange(offrampBalance) : undefined
                   }
                 />
               ) : undefined
