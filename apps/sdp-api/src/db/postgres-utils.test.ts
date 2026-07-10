@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { parseOptionalPostgresJson, parseOptionalPostgresJsonOr } from "./postgres-utils";
+import {
+  isPostgresUniqueViolation,
+  parseOptionalPostgresJson,
+  parseOptionalPostgresJsonOr,
+} from "./postgres-utils";
+
+describe("isPostgresUniqueViolation", () => {
+  it("matches errors carrying SQLSTATE 23505", () => {
+    const err = Object.assign(
+      new Error('duplicate key value violates unique constraint "allowlist_type_value_key"'),
+      { code: "23505" }
+    );
+    expect(isPostgresUniqueViolation(err)).toBe(true);
+  });
+
+  it("ignores SQLite-style messages without a Postgres error code", () => {
+    expect(isPostgresUniqueViolation(new Error("UNIQUE constraint failed: allowlist.value"))).toBe(
+      false
+    );
+  });
+});
 
 describe("postgres JSON helpers", () => {
   it("treats only nullish optional values as absent", () => {
