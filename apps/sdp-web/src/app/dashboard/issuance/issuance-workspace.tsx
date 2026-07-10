@@ -322,7 +322,7 @@ export function IssuanceWorkspace({
               type="button"
               onClick={startTokenCreation}
               data-testid="token-add-card"
-              className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-border-strong hover:text-secondary"
+              className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary"
               aria-label="Add new token"
             >
               <Plus className="h-6 w-6" />
