@@ -1,4 +1,5 @@
 import { SdpPaymentsError } from "@sdp/payments";
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { PaymentRampEstimate, PaymentRampQuote, RampProviderEstimateResult } from "@sdp/types";
 import {
   OFFRAMP_SUPPORT,
@@ -17,7 +18,6 @@ import type {
   PaymentTransferRow,
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
-import { parseDecimalAmount } from "@sdp/solana/amount";
 import { requireProjectId } from "@/lib/auth";
 import {
   AppError,
