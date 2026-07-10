@@ -17,7 +17,7 @@ import type {
   PaymentTransferRow,
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
-import { parseDecimalAmount } from "@/lib/amount";
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import { requireProjectId } from "@/lib/auth";
 import {
   AppError,

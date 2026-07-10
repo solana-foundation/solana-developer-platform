@@ -13,7 +13,7 @@ import {
   createPaymentRequestsRepository,
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
-import { toNumberAmount } from "@/lib/amount";
+import { toNumberAmount } from "@sdp/solana/amount";
 import { internalError } from "@/lib/errors";
 import { SOL_MINT } from "@/services/payment-operation.service";
 import type { Env } from "@/types/env";
