@@ -26,6 +26,7 @@ import PaymentsLoading from "@/app/dashboard/payments/loading";
 import WalletsLoading from "@/app/dashboard/wallets/loading";
 import { CounterpartyHeaderTabs } from "@/components/counterparty-header-tabs";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
+import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
@@ -629,6 +630,7 @@ function DashboardSidebarContent({
         ))}
       </div>
       <div className="space-y-0.5 px-3 pb-1">
+        <LanguagePicker collapsed={isCollapsed} />
         <SentryFeedbackWidget collapsed={isCollapsed} />
         {bottomNavItems.map((item) => {
           const Icon = item.icon;
