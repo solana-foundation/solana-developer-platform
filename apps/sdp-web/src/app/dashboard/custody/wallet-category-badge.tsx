@@ -1,3 +1,5 @@
+"use client";
+
 import { Shield, WalletMinimal } from "lucide-react";
 import {
   WALLET_PROVIDER_CATEGORY_DETAILS,

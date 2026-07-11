@@ -87,7 +87,7 @@ export function RampCompleteScreen({
   if (transfer.updatedAt) {
     detailRows.push({
       label: t("DashboardPayments.ramps.completed"),
-      value: formatTimestamp(transfer.updatedAt),
+      value: formatTimestamp(transfer.updatedAt, t),
     });
   }
   detailRows.push({ label: t("DashboardPayments.ramps.transferId"), value: transfer.id });

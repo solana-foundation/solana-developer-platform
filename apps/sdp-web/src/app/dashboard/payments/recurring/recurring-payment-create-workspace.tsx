@@ -245,7 +245,7 @@ export function RecurringPaymentCreateWorkspace({
     mutate: mutateAccounts,
   } = useSWR(
     fields.counterpartyId ? ["counterparty-accounts", fields.counterpartyId] : null,
-    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id),
+    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
     { revalidateOnFocus: false }
   );
 
@@ -328,9 +328,9 @@ export function RecurringPaymentCreateWorkspace({
     }));
     setFormError(null);
     if (counterpartyId) {
-      void preload(PAYMENTS_ACTION_WALLETS_KEY, () => fetchWallets({ includeBalances: true }));
+      void preload(PAYMENTS_ACTION_WALLETS_KEY, () => fetchWallets({ includeBalances: true }, t));
       void preload(["counterparty-accounts", counterpartyId], () =>
-        fetchCounterpartyAccounts(counterpartyId)
+        fetchCounterpartyAccounts(counterpartyId, t)
       );
     }
   };
@@ -442,18 +442,22 @@ export function RecurringPaymentCreateWorkspace({
       position: "bottom-right",
     });
     try {
-      const recurringPayment = await createRecurringPayment({
-        sourceWalletId: fields.walletId,
-        counterpartyId: fields.counterpartyId,
-        counterpartyAccountId: fields.counterpartyAccountId,
-        token: selectedAssetBalance.mint,
-        amount: fields.amount.trim(),
-        periodHours,
-        ...(fields.firstCollectionAt
-          ? { firstCollectionAt: new Date(fields.firstCollectionAt).toISOString() }
-          : {}),
-        ...(fields.metadataUri.trim() ? { metadataUri: fields.metadataUri.trim() } : {}),
-      });
+      const recurringPayment = await createRecurringPayment(
+        {
+          sourceWalletId: fields.walletId,
+          counterpartyId: fields.counterpartyId,
+          counterpartyAccountId: fields.counterpartyAccountId,
+          token: selectedAssetBalance.mint,
+          amount: fields.amount.trim(),
+          periodHours,
+          ...(fields.firstCollectionAt
+            ? { firstCollectionAt: new Date(fields.firstCollectionAt).toISOString() }
+            : {}),
+          ...(fields.metadataUri.trim() ? { metadataUri: fields.metadataUri.trim() } : {}),
+        },
+        undefined,
+        t
+      );
       toast.success(t("DashboardPayments.recurring.paymentCreated"), {
         id: toastId,
         description: t("DashboardPayments.recurring.pendingActivationDescription"),

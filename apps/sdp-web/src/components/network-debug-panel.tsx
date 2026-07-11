@@ -4,7 +4,7 @@ import { BanIcon, CheckIcon, CopyIcon, EraserIcon, PauseIcon, PlayIcon } from "l
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { type NetworkDebugEntry, useNetworkDebug } from "@/contexts/network-debug-context";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import {
   formatNetworkDebugMetaSummary,
   formatNetworkDebugPayloadValue,
@@ -116,6 +116,7 @@ function NetworkDebugEntryRow({
   onSelect: () => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   return (
     <motion.li
       initial={{ opacity: 0, y: -8 }}
@@ -153,7 +154,7 @@ function NetworkDebugEntryRow({
                   duration: entry.durationMs,
                 })}
           </span>
-          <span>{new Date(entry.startedAt).toLocaleTimeString()}</span>
+          <span>{new Date(entry.startedAt).toLocaleTimeString(locale)}</span>
         </div>
       </button>
       {entry.error ? (

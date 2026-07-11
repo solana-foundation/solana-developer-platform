@@ -19,7 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatDisplayAmount } from "../payments/payments-overview.utils";
 
 interface WalletActivitySectionProps {
@@ -27,7 +27,7 @@ interface WalletActivitySectionProps {
   initialActivity: WalletActivityPayload;
 }
 
-function formatTimestamp(value: string | undefined): string {
+function formatTimestamp(value: string | undefined, locale: string): string {
   if (!value) {
     return "—";
   }
@@ -37,7 +37,7 @@ function formatTimestamp(value: string | undefined): string {
     return value;
   }
 
-  return date.toLocaleString("en-US", {
+  return date.toLocaleString(locale, {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -72,6 +72,7 @@ function TruncatedText({ value, className }: { value: string; className?: string
 
 export function WalletActivitySection({ walletId, initialActivity }: WalletActivitySectionProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const {
     data: swrActivity,
     error: requestError,
@@ -86,7 +87,7 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
   const liveRows = Array.isArray(liveActivity.activityRows) ? liveActivity.activityRows : [];
   const requestErrorMessage = requestError
     ? requestError instanceof Error
-      ? requestError.message
+      ? requestError.message || t("DashboardCustody.walletActivityUnavailable")
       : t("DashboardCustody.unableToLoadWallets")
     : null;
   const liveActivityError =
@@ -156,9 +157,9 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
                   {liveRows.map((row: WalletActivityRow) => {
                     const assetLabel =
                       row.amount && row.token
-                        ? formatDisplayAmount(row.amount, row.token)
+                        ? formatDisplayAmount(row.amount, row.token, locale)
                         : (row.token ?? t("DashboardCustody.unknownAsset"));
-                    const createdLabel = formatTimestamp(row.createdAt);
+                    const createdLabel = formatTimestamp(row.createdAt, locale);
                     const address = row.address ?? t("DashboardCustody.unknown");
 
                     return (

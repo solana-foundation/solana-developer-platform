@@ -11,6 +11,9 @@ const userFacingAttributeNames = new Set([
   "alt",
   "aria-label",
   "ariaLabel",
+  "actionLabel",
+  "closeLabel",
+  "label",
   "placeholder",
   "productName",
   "searchPlaceholder",
@@ -124,6 +127,10 @@ function candidateId(filePath, sourceFile, node, value) {
   return `${path.relative(webDirectory, filePath)}:${line + 1}:${character + 1}:${value}`;
 }
 
+function stableCandidateId(candidate) {
+  return candidate.replace(/:\d+:\d+:/, ":");
+}
+
 function isToastCall(node) {
   if (ts.isIdentifier(node.expression)) return node.expression.text === "toast";
   return (
@@ -159,6 +166,30 @@ function collectPropertyCandidates(candidates, filePath, sourceFile, node) {
     return;
   }
   addLiteralCandidates(candidates, filePath, sourceFile, node, node.initializer);
+}
+
+function collectDefaultUiPropCandidates(candidates, filePath, sourceFile, node) {
+  if (!ts.isParameter(node)) return;
+
+  const isUserFacingName = (name) =>
+    userFacingAttributeNames.has(name) || userFacingPropertyNames.has(name) || name === "empty";
+
+  if (ts.isIdentifier(node.name) && node.initializer && isUserFacingName(node.name.text)) {
+    addLiteralCandidates(candidates, filePath, sourceFile, node, node.initializer);
+    return;
+  }
+
+  if (!ts.isObjectBindingPattern(node.name)) return;
+  for (const element of node.name.elements) {
+    if (
+      !ts.isIdentifier(element.name) ||
+      !element.initializer ||
+      !isUserFacingName(element.name.text)
+    ) {
+      continue;
+    }
+    addLiteralCandidates(candidates, filePath, sourceFile, element, element.initializer);
+  }
 }
 
 function collectJsxExpressionCandidates(candidates, filePath, sourceFile, node) {
@@ -198,6 +229,7 @@ function collectCandidates(filePath, source) {
     collectJsxTextCandidate(candidates, filePath, sourceFile, node);
     collectJsxAttributeCandidates(candidates, filePath, sourceFile, node);
     collectPropertyCandidates(candidates, filePath, sourceFile, node);
+    collectDefaultUiPropCandidates(candidates, filePath, sourceFile, node);
     collectJsxExpressionCandidates(candidates, filePath, sourceFile, node);
     collectToastCandidates(candidates, filePath, sourceFile, node);
 
@@ -228,7 +260,10 @@ const approvedEntries = JSON.parse(await readFile(strict ? exemptionsPath : base
 const approved = new Set(
   approvedEntries.map((entry) => (typeof entry === "string" ? entry : entry.candidate))
 );
-const unapprovedCandidates = current.filter((candidate) => !approved.has(candidate));
+const approvedStable = new Set([...approved].map(stableCandidateId));
+const unapprovedCandidates = current.filter(
+  (candidate) => !approved.has(candidate) && !approvedStable.has(stableCandidateId(candidate))
+);
 if (unapprovedCandidates.length > 0) {
   console.error(
     strict

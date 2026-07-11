@@ -119,11 +119,14 @@ export function useBatchSendWizard({
   const { data: recipientPage, isLoading: recipientsLoading } = useSWR(
     ["batch-recipients", page, trimmedSearch],
     () =>
-      fetchBatchRecipients({
-        page,
-        pageSize: RECIPIENTS_PAGE_SIZE,
-        search: trimmedSearch.length > 0 ? trimmedSearch : undefined,
-      }),
+      fetchBatchRecipients(
+        {
+          page,
+          pageSize: RECIPIENTS_PAGE_SIZE,
+          search: trimmedSearch.length > 0 ? trimmedSearch : undefined,
+        },
+        t
+      ),
     { revalidateOnFocus: false, keepPreviousData: true }
   );
   const pageRecipients = recipientPage ? recipientPage.accounts : [];
@@ -207,7 +210,7 @@ export function useBatchSendWizard({
 
   const bulkImport = async (rows: BulkImportRow[]): Promise<{ unresolved: string[] }> => {
     const ids = [...new Set(rows.map((row) => row.accountId))];
-    const resolved = await fetchBatchRecipients({ ids });
+    const resolved = await fetchBatchRecipients({ ids }, t);
     const byId = new Map(
       resolved.accounts.map((recipient) => [recipient.counterpartyAccountId, recipient])
     );
@@ -293,7 +296,7 @@ export function useBatchSendWizard({
     currentStepId === "REVIEW" && canProceed && !batchResult
       ? ["batch-estimate", JSON.stringify(request)]
       : null,
-    () => estimateTransferBatch(request),
+    () => estimateTransferBatch(request, t),
     { revalidateOnFocus: false }
   );
 
@@ -303,7 +306,7 @@ export function useBatchSendWizard({
       position: "bottom-right",
     });
     try {
-      const result = await createTransferBatch(request);
+      const result = await createTransferBatch(request, t);
       setBatchResult(result);
       const status = result.batch.status;
       if (status === "confirmed") {

@@ -84,7 +84,8 @@ async function getWalletDetail(
 
 async function getWalletTrackedBalances(
   request: SdpApiClient["request"],
-  walletId: string
+  walletId: string,
+  unavailableMessage: string
 ): Promise<WalletTrackedBalancesResult> {
   try {
     const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/balances`);
@@ -94,7 +95,7 @@ async function getWalletTrackedBalances(
     if (!response.ok) {
       return {
         balances: [],
-        error: "Tracked balances are unavailable right now. Showing wallet-reported balance.",
+        error: unavailableMessage,
       };
     }
 
@@ -103,14 +104,15 @@ async function getWalletTrackedBalances(
   } catch {
     return {
       balances: [],
-      error: "Tracked balances are unavailable right now. Showing wallet-reported balance.",
+      error: unavailableMessage,
     };
   }
 }
 
 async function getWalletPolicy(
   request: SdpApiClient["request"],
-  walletId: string
+  walletId: string,
+  unavailableMessage: string
 ): Promise<WalletPolicyResult> {
   try {
     const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/policies`);
@@ -126,7 +128,7 @@ async function getWalletPolicy(
     if (!response.ok) {
       return {
         policy: null,
-        error: "Wallet controls are unavailable right now.",
+        error: unavailableMessage,
       };
     }
 
@@ -141,7 +143,7 @@ async function getWalletPolicy(
   } catch {
     return {
       policy: null,
-      error: "Wallet controls are unavailable right now.",
+      error: unavailableMessage,
     };
   }
 }
@@ -150,7 +152,6 @@ async function getOwnedTokenRoutes(
   request: SdpApiClient["request"]
 ): Promise<Map<string, { id: string; name: string | null }>> {
   try {
-    // biome-ignore lint/security/noSecrets: Public API path with pagination query parameters.
     const response = await request("/v1/issuance/tokens?page=1&pageSize=100");
     if (!response.ok) {
       return new Map();
@@ -177,13 +178,14 @@ async function getOwnedTokenRoutes(
 
 async function getWalletActivity(
   request: SdpApiClient["request"],
-  walletId: string
+  walletId: string,
+  t: Awaited<ReturnType<typeof getTranslations>>
 ): Promise<WalletActivityPayload> {
-  const result = await loadWalletActivity(request, walletId);
+  const result = await loadWalletActivity(request, walletId, t);
   return (
     result.data ?? {
       activityRows: [],
-      activityError: result.error ?? "Wallet activity is unavailable right now.",
+      activityError: result.error ?? t("DashboardCustody.walletActivityUnavailable"),
       activityNotice: null,
     }
   );
@@ -209,10 +211,18 @@ export default async function WalletDetailPage({
   const [wallet, trackedBalancesResult, walletPolicyResult, ownedTokensByMint, walletActivity] =
     await Promise.all([
       getWalletDetail(apiClient.request, resolvedWalletId),
-      getWalletTrackedBalances(apiClient.request, resolvedWalletId),
-      getWalletPolicy(apiClient.request, resolvedWalletId),
+      getWalletTrackedBalances(
+        apiClient.request,
+        resolvedWalletId,
+        t("DashboardCustody.trackedBalancesUnavailable")
+      ),
+      getWalletPolicy(
+        apiClient.request,
+        resolvedWalletId,
+        t("DashboardCustody.walletControlsUnavailable")
+      ),
       getOwnedTokenRoutes(apiClient.request),
-      getWalletActivity(apiClient.request, resolvedWalletId),
+      getWalletActivity(apiClient.request, resolvedWalletId, t),
     ]);
 
   const provider =
@@ -224,7 +234,7 @@ export default async function WalletDetailPage({
   const balances =
     trackedBalancesResult.balances.length > 0 ? trackedBalancesResult.balances : [wallet.balance];
   const totalBalance = resolveTotalBalance(balances);
-  const purposeLabel = formatPurpose(wallet.purpose);
+  const purposeLabel = formatPurpose(wallet.purpose, t);
 
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">

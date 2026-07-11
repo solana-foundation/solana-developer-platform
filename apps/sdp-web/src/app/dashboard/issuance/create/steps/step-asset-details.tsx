@@ -66,7 +66,7 @@ export function StepAssetDetails({
   const [jsonOpen, setJsonOpen] = useState(false);
   const sections = getCategorySections(draft.assetCategory);
   const metadata = buildIssuanceMetadata(draft);
-  const errors = getAssetDetailsErrors(draft);
+  const errors = getAssetDetailsErrors(draft, t);
   const requiredKeys = getRequiredAssetDetailKeys(draft);
   const hasErrors = Object.keys(errors).length > 0;
 

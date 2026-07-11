@@ -1,3 +1,5 @@
+"use client";
+
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";

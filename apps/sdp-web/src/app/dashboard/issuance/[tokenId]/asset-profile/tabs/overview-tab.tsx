@@ -48,7 +48,7 @@ export function OverviewTab({
   };
   const category = getCategoryPresentation(assetProfile.assetCategory);
   const subType = getSubTypePresentation(assetProfile.assetCategory, assetProfile.assetType);
-  const deployBlockers = ops.canDeployToken ? Object.values(getAssetDetailsErrors(draft)) : [];
+  const deployBlockers = ops.canDeployToken ? Object.values(getAssetDetailsErrors(draft, t)) : [];
   const website = draft.website.trim();
   const websiteHref = safeLinkHref(website);
 

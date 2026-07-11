@@ -16,7 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import {
   formatCurrencyAmount,
@@ -128,6 +128,7 @@ export function PaymentsOverview({
   transfersError,
 }: PaymentsOverviewProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const searchParams = useSearchParams();
   const refreshSeed = searchParams.get("refresh") ?? "default";
   const {
@@ -137,7 +138,7 @@ export function PaymentsOverview({
     mutate: mutateAggregate,
   } = usePersistedDashboardSWR<CustodyWalletAggregate>(
     [PAYMENTS_OVERVIEW_AGGREGATE_KEY, refreshSeed],
-    () => fetchWalletAggregate(),
+    () => fetchWalletAggregate(t),
     {
       fallbackData: aggregateError || !aggregate ? undefined : aggregate,
       revalidateOnFocus: true,
@@ -155,7 +156,7 @@ export function PaymentsOverview({
     mutate: mutateTransfers,
   } = usePersistedDashboardSWR<TransferRecord[]>(
     [PAYMENTS_OVERVIEW_TRANSFERS_KEY, refreshSeed],
-    () => fetchTransfers({ pageSize: 20 }),
+    () => fetchTransfers({ pageSize: 20 }, t),
     {
       fallbackData: transfersError ? undefined : transfers,
       revalidateOnFocus: true,
@@ -205,7 +206,7 @@ export function PaymentsOverview({
                 {t("DashboardPayments.totalSdpBalance")}
               </p>
               <p className="text-[38px] leading-none font-medium tracking-[-0.05em] text-[#1c1c1d] sm:text-[54px]">
-                {formatCurrencyAmount(totalBalance)}
+                {formatCurrencyAmount(totalBalance, locale)}
               </p>
               <p className="text-sm text-[rgba(28,28,29,0.56)]">
                 {t("DashboardPayments.aggregatedAcrossWallets", {
@@ -240,9 +241,9 @@ export function PaymentsOverview({
                     </p>
                     <p
                       className="min-w-0 max-w-[40%] truncate text-right text-[18px] font-medium tracking-[0.01em] text-[#1c1c1d] sm:text-[20px]"
-                      title={formatCurrencyAmount(usdValue)}
+                      title={formatCurrencyAmount(usdValue, locale)}
                     >
-                      {formatCurrencyAmount(usdValue)}
+                      {formatCurrencyAmount(usdValue, locale)}
                     </p>
                   </div>
                 );
@@ -313,10 +314,14 @@ export function PaymentsOverview({
                   </TableHeader>
                   <TableBody>
                     {liveTransfers.map((transfer) => {
-                      const counterparty = resolveCounterparty(transfer);
-                      const assetLabel = formatDisplayAmount(transfer.amount, transfer.token);
-                      const directionLabel = formatDirection(transfer.direction);
-                      const createdLabel = formatTimestamp(transfer.createdAt);
+                      const counterparty = resolveCounterparty(transfer, t);
+                      const assetLabel = formatDisplayAmount(
+                        transfer.amount,
+                        transfer.token,
+                        locale
+                      );
+                      const directionLabel = formatDirection(transfer.direction, t);
+                      const createdLabel = formatTimestamp(transfer.createdAt, t, locale);
 
                       return (
                         <TableRow key={transfer.id}>

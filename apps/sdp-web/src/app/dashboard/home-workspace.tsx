@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { formatRelativeTime } from "./activity-format-utils";
 import { fetchHomeActivity } from "./home-workspace.data";
@@ -56,12 +56,13 @@ function MetricCard({
   hint?: string | null;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   return (
     <Card className="gap-0 rounded-[18px] border-[rgba(28,28,29,0.1)] py-0 shadow-none">
       <CardContent className="space-y-2 px-6 py-6">
         <p className="text-[15px] text-[rgba(28,28,29,0.56)]">{label}</p>
         <p className="text-[24px] leading-none font-medium tracking-[-0.03em] text-[#1c1c1d] sm:text-[30px]">
-          {error ? t("Shared.homeWorkspace.unavailable") : formatCurrencyAmount(value)}
+          {error ? t("Shared.homeWorkspace.unavailable") : formatCurrencyAmount(value, locale)}
         </p>
         {error ? <p className="text-sm text-[#9e2b38]">{error}</p> : null}
         {!error && hint ? <p className="text-sm text-[rgba(28,28,29,0.56)]">{hint}</p> : null}
@@ -70,8 +71,10 @@ function MetricCard({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Dashboard orchestration keeps related loading, empty, and populated states together.
 export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: HomeWorkspaceProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const { dashboardAccess } = useDashboardWorkspace();
   const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
     HOME_ACTIVITY_KEY,
@@ -94,13 +97,13 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
   const todaysVolume = activitySnapshot?.todaysVolume ?? null;
   const todaysVolumeError = activityRequestError
     ? activityRequestError instanceof Error
-      ? activityRequestError.message
+      ? activityRequestError.message || t("Shared.homeWorkspace.activityUnavailable")
       : t("Shared.homeWorkspace.activityUnavailable")
     : (activitySnapshot?.activityError ?? null);
   const activityRows = activitySnapshot?.activityRows ?? [];
   const activityError = activityRequestError
     ? activityRequestError instanceof Error
-      ? activityRequestError.message
+      ? activityRequestError.message || t("Shared.homeWorkspace.activityUnavailable")
       : t("Shared.homeWorkspace.activityUnavailable")
     : (activitySnapshot?.activityError ?? null);
   const activityNotice = activitySnapshot?.activityNotice ?? null;
@@ -201,9 +204,11 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
                     </TableHeader>
                     <TableBody>
                       {activityRows.map((row) => {
-                        const timeLabel = formatRelativeTime(row.createdAt);
+                        const timeLabel = formatRelativeTime(row.createdAt, locale);
                         const amountLabel =
-                          row.amount === "—" ? "—" : formatDisplayAmount(row.amount, row.token);
+                          row.amount === "—"
+                            ? "—"
+                            : formatDisplayAmount(row.amount, row.token, locale);
 
                         return (
                           <TableRow key={row.id}>

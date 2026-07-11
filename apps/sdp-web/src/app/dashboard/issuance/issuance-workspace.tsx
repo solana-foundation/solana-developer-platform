@@ -11,7 +11,7 @@ import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
@@ -67,7 +67,7 @@ interface IssuanceWorkspaceProps {
   signerWalletsError: string | null;
 }
 
-function formatDate(value: string | null | undefined): string {
+function formatDate(value: string | null | undefined, locale: string): string {
   if (!value) {
     return "—";
   }
@@ -75,7 +75,7 @@ function formatDate(value: string | null | undefined): string {
   const isoDateMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
   if (isoDateMatch) {
     const [, year, month, day] = isoDateMatch;
-    return `${month}/${day}/${year}`;
+    return new Date(`${year}-${month}-${day}T00:00:00`).toLocaleDateString(locale);
   }
 
   const date = new Date(value);
@@ -83,10 +83,10 @@ function formatDate(value: string | null | undefined): string {
     return value;
   }
 
-  return date.toLocaleDateString("en-US");
+  return date.toLocaleDateString(locale);
 }
 
-function formatSupply(value: string): string {
+function formatSupply(value: string, locale: string): string {
   const normalized = value.trim();
   if (!normalized) {
     return "0";
@@ -97,12 +97,10 @@ function formatSupply(value: string): string {
     return value;
   }
 
-  const formatted = new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(locale, {
     notation: "compact",
     maximumFractionDigits: parsed >= 100 ? 0 : 1,
   }).format(parsed);
-
-  return formatted.replace(/\.0([A-Za-z])$/, "$1");
 }
 
 function getTokenTypeLabel(
@@ -132,6 +130,7 @@ export function IssuanceWorkspace({
   signerWalletsError,
 }: IssuanceWorkspaceProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -313,7 +312,7 @@ export function IssuanceWorkspace({
                       {t("DashboardIssuance.workspace.supply")}
                     </span>
                     <span className="font-medium text-[#1c1c1d]">
-                      {formatSupply(token.totalSupply)}
+                      {formatSupply(token.totalSupply, locale)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
@@ -321,7 +320,7 @@ export function IssuanceWorkspace({
                       {t("DashboardIssuance.workspace.created")}
                     </span>
                     <span className="font-medium text-[#1c1c1d]">
-                      {formatDate(token.createdAt)}
+                      {formatDate(token.createdAt, locale)}
                     </span>
                   </div>
                 </div>

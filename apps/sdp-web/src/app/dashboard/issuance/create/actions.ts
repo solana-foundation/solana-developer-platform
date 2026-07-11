@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getTranslations } from "@/i18n/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { sdpApiRequest } from "@/lib/sdp-api";
 import type { CreateAssetDraftInput, CreateAssetDraftResult } from "./draft-mapping";
@@ -15,6 +16,7 @@ import type { CreateAssetDraftInput, CreateAssetDraftResult } from "./draft-mapp
 export async function createAssetDraftAction(
   input: CreateAssetDraftInput
 ): Promise<CreateAssetDraftResult> {
+  const t = await getTranslations();
   const { token } = input;
 
   const payload: Record<string, unknown> = {
@@ -54,8 +56,11 @@ export async function createAssetDraftAction(
       const body = await response.text();
       const message =
         response.status === 403
-          ? "Asset Profiles are not enabled for this environment."
-          : `Couldn't create the asset draft (${response.status}): ${parseErrorMessage(body)}`;
+          ? t("DashboardIssuance.errors.assetProfilesDisabled")
+          : t("DashboardIssuance.errors.assetDraftCreateFailed", {
+              status: response.status,
+              error: parseErrorMessage(body),
+            });
       return { state: "error", message, tokenId: null };
     }
 
@@ -65,11 +70,14 @@ export async function createAssetDraftAction(
     const tokenId = json?.data?.token?.id ?? null;
 
     revalidatePath("/dashboard/issuance");
-    return { state: "success", message: "Asset draft created.", tokenId };
+    return { state: "success", message: t("DashboardIssuance.errors.assetDraftCreated"), tokenId };
   } catch (error) {
     return {
       state: "error",
-      message: error instanceof Error ? error.message : "Unable to create the asset draft.",
+      message:
+        error instanceof Error
+          ? error.message
+          : t("DashboardIssuance.errors.unableToCreateAssetDraft"),
       tokenId: null,
     };
   }

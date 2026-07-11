@@ -57,9 +57,9 @@ export function useAssetProfileForm({
     setDraft((previous) => ({ ...previous, ...patch }));
   };
 
-  const errors = getAssetDetailsErrors(draft);
+  const errors = getAssetDetailsErrors(draft, t);
   if (!draft.name.trim()) {
-    errors.name = "Asset name is required.";
+    errors.name = t("DashboardIssuance.errors.assetNameRequired");
   }
   const errorCount = Object.keys(errors).length;
 

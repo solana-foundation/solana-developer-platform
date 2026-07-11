@@ -6,6 +6,9 @@ import type {
   TokenAllowlistEntry,
   TokenTransaction,
 } from "@sdp/types";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 interface SupportingDataEnvelope {
   data?: TokenManagementSupportingData;
@@ -56,6 +59,7 @@ function getApiError(body: SupportingDataEnvelope, fallback: string): string {
 
 export async function fetchTokenManagementSupportingData(
   tokenId: string,
+  t: Translate,
   options: {
     signal?: AbortSignal;
   } = {}
@@ -72,12 +76,15 @@ export async function fetchTokenManagementSupportingData(
 
   if (!response.ok) {
     throw new Error(
-      getApiError(body, `Token supporting data request failed (${response.status}).`)
+      getApiError(
+        body,
+        t("DashboardIssuance.management.supportingDataRequestFailed", { status: response.status })
+      )
     );
   }
 
   if (!body.data) {
-    throw new Error("Token supporting data response was empty.");
+    throw new Error(t("DashboardIssuance.management.supportingDataEmpty"));
   }
 
   return body.data;
@@ -85,6 +92,7 @@ export async function fetchTokenManagementSupportingData(
 
 export async function fetchTokenAuthorityWallets(
   tokenId: string,
+  t: Translate,
   options: {
     signal?: AbortSignal;
   } = {}
@@ -103,7 +111,9 @@ export async function fetchTokenAuthorityWallets(
     throw new Error(
       getApiError(
         body as SupportingDataEnvelope,
-        `Authority wallet request failed (${response.status}).`
+        t("DashboardIssuance.management.authorityWalletRequestFailed", {
+          status: response.status,
+        })
       )
     );
   }

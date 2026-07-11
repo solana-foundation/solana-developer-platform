@@ -3,7 +3,7 @@ import {
   formatTokenAmount,
   shortenAddress,
 } from "@/app/dashboard/payments/payments-overview.utils";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 export function AmountBalanceReadout({
@@ -18,10 +18,11 @@ export function AmountBalanceReadout({
   onMax?: () => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const trimmedAssetLabel = assetLabel.trim();
   const displayAssetLabel =
     WELL_KNOWN_TOKEN_BY_MINT.get(trimmedAssetLabel)?.symbol ?? shortenAddress(trimmedAssetLabel);
-  const displayAvailable = formatTokenAmount(available);
+  const displayAvailable = formatTokenAmount(available, locale);
   const fullReadout = `${available} ${assetLabel}`;
   const displayReadout = `${displayAvailable} ${displayAssetLabel}`;
 
@@ -48,3 +49,4 @@ export function AmountBalanceReadout({
     </div>
   );
 }
+("use client");

@@ -111,7 +111,7 @@ function QuoteSummaryField({
 function QuoteExpiryTabLabel({ expiresAt }: { expiresAt?: string }) {
   const t = useTranslations();
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const timeRemaining = formatRampQuoteTimeRemaining(expiresAt, nowMs);
+  const timeRemaining = formatRampQuoteTimeRemaining(expiresAt, nowMs, t);
 
   useEffect(() => {
     if (!expiresAt) {

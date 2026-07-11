@@ -67,7 +67,11 @@ import { cn } from "@/lib/utils";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
-import { deriveTokenOptions, type PaymentRequestTokenOption } from "./payment-requests-page.data";
+import {
+  deriveTokenOptions,
+  type PaymentRequestsLocalErrorCode,
+  type PaymentRequestTokenOption,
+} from "./payment-requests-page.data";
 
 const PaymentRequestsPlayground = dynamic(
   () => import("./payment-requests-playground").then((module) => module.PaymentRequestsPlayground),
@@ -219,7 +223,7 @@ function CreateRequestModal({
     selectedCounterpartyId
       ? ["payment-request-counterparty-accounts", selectedCounterpartyId]
       : null,
-    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id),
+    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
     { revalidateOnFocus: false }
   );
   const cryptoAccounts = useMemo(
@@ -444,6 +448,7 @@ function CreateRequestModal({
 interface PaymentRequestsWorkspaceProps {
   initialPaymentRequests: PaymentRequest[];
   initialError?: string;
+  initialLocalErrorCode?: PaymentRequestsLocalErrorCode;
   apiBaseUrl: string | null;
   apiKeys: DashboardPlaygroundApiKeyOption[];
   wallets: PaymentsDashboardWallet[];
@@ -453,6 +458,7 @@ interface PaymentRequestsWorkspaceProps {
 export function PaymentRequestsWorkspace({
   initialPaymentRequests,
   initialError,
+  initialLocalErrorCode,
   apiBaseUrl,
   apiKeys,
   wallets,
@@ -538,8 +544,10 @@ export function PaymentRequestsWorkspace({
               )}
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col">
-              {initialError ? (
-                <p className="text-sm text-status-error-text">{initialError}</p>
+              {initialError || initialLocalErrorCode ? (
+                <p className="text-sm text-status-error-text">
+                  {initialError ?? t("DashboardPayments.requests.loadFailed")}
+                </p>
               ) : requests.length === 0 ? (
                 <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-medium py-16 text-center">
                   <ReceiptTextIcon className="h-10 w-10 text-text-extra-low" />
@@ -614,7 +622,7 @@ export function PaymentRequestsWorkspace({
                               </span>
                             </TableCell>
                             <TableCell className="text-sm text-text-medium">
-                              {formatTimestamp(request.createdAt)}
+                              {formatTimestamp(request.createdAt, t)}
                             </TableCell>
                           </TableRow>
                         );
@@ -650,7 +658,7 @@ export function PaymentRequestsWorkspace({
                 <h2 className="text-xl font-medium tracking-tight text-text-extra-high">
                   {t("DashboardPayments.requests.paymentRequest")}
                 </h2>
-                <p className="text-sm text-text-medium">{formatTimestamp(selected.createdAt)}</p>
+                <p className="text-sm text-text-medium">{formatTimestamp(selected.createdAt, t)}</p>
               </div>
               <StatusBadge status={selected.status} />
             </div>
@@ -708,11 +716,11 @@ export function PaymentRequestsWorkspace({
                 </DetailRow>
                 <DetailRow label={t("DashboardPayments.requests.expires")}>
                   {selected.expiresAt
-                    ? formatTimestamp(selected.expiresAt)
+                    ? formatTimestamp(selected.expiresAt, t)
                     : t("DashboardPayments.requests.noExpiry")}
                 </DetailRow>
                 <DetailRow label={t("DashboardPayments.recurring.created")}>
-                  {formatTimestamp(selected.createdAt)}
+                  {formatTimestamp(selected.createdAt, t)}
                 </DetailRow>
               </div>
             </div>

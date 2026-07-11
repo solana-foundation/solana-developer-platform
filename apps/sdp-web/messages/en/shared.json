@@ -48,6 +48,7 @@
     "disable": "Disable",
     "collapse": "Collapse",
     "close": "Close",
+    "closeModal": "Close modal",
     "noRequests": "No requests captured yet.",
     "noPayload": "No query, request body, or response captured.",
     "selectApiEndpoint": "Select API endpoint",
@@ -75,7 +76,22 @@
     "loading": "Loading…",
     "noOptionsAvailable": "No options available.",
     "noSearchMatches": "No matches for your search.",
-    "required": "(required)"
+    "required": "(required)",
+    "selectAnOption": "Select an option",
+    "search": "Search…",
+    "fillBeforeSending": "fill before sending",
+    "noValue": "- none",
+    "aiInstructionIntro": "Use the {productName} API endpoint {method} {path}.",
+    "aiPathParameters": "Path parameters:",
+    "aiRequestBody": "Request body:",
+    "aiInstructionOutro": "Return the response body as formatted JSON and call out any validation or auth errors.",
+    "runRequestToInspectOutput": "Run request to inspect the live API output for this endpoint.",
+    "requestFailed": "Request failed",
+    "ready": "Ready",
+    "completeRequiredFields": "Complete required fields: {fields}",
+    "invalidApiKeyFormat": "Invalid API key format. Use a raw key value like sk_test_... or sk_live_... with a valid suffix.",
+    "playgroundExecutionFailed": "Playground execution failed.",
+    "requestExecutionFailed": "Request execution failed."
   },
   "dashboardShell": {
     "openNavigation": "Open navigation",
@@ -167,6 +183,16 @@
     "type": "Type",
     "token": "Token",
     "amount": "Amount",
-    "address": "Address"
+    "address": "Address",
+    "send": "Send",
+    "receive": "Receive",
+    "transfer": "Transfer",
+    "untitledToken": "Untitled token",
+    "unableToLoadIssuanceTokens": "Unable to load issuance tokens",
+    "someIssuanceActivityUnavailable": "Some issuance activity could not be loaded.",
+    "paymentsActivityUnavailable": "Payments activity is unavailable right now.",
+    "issuanceActivityUnavailable": "Issuance activity is unavailable right now.",
+    "failedToLoadActivity": "Failed to load dashboard activity",
+    "balanceDataUnavailable": "Balance data is unavailable right now."
   }
 }

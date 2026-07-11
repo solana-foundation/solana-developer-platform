@@ -129,7 +129,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
   const isReview = currentStep === "review";
   const showSummaryRail = currentStep === "asset-details" || isReview;
   const showRail = isClassification || showSummaryRail;
-  const blockers = getBlockers(draft);
+  const blockers = getBlockers(draft, t);
 
   // Reset the attempt flag whenever the step changes, so each step starts clean
   // and only reveals errors after its own failed Continue.
@@ -142,7 +142,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
   // advance with validation errors — then it locks (and the fields highlight)
   // until every error is resolved. Every other step keeps the coarse gate.
   const isDetailsForm = currentStep === "asset-details";
-  const detailsErrorCount = Object.keys(getAssetDetailsErrors(draft)).length;
+  const detailsErrorCount = Object.keys(getAssetDetailsErrors(draft, t)).length;
   const canContinue = isDetailsForm
     ? !(attemptedAdvance && detailsErrorCount > 0)
     : canAdvance(currentStep, draft);

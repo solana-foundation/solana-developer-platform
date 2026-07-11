@@ -401,7 +401,7 @@ export function useRampWizard<TId extends string>(
       position: "bottom-right",
     });
     try {
-      await cancelRampTransfer({ provider: quote.provider, providerReference: quote.id });
+      await cancelRampTransfer({ provider: quote.provider, providerReference: quote.id }, t);
       toast.success(t("DashboardPayments.ramps.transactionCanceled"), {
         id: toastId,
         position: "bottom-right",

@@ -213,15 +213,15 @@ export function isValidTokenDecimals(value: string): boolean {
   return parsed >= 0 && parsed <= 18;
 }
 
-export function getDecimalsHelperText(template: TemplateSelection): string {
+export function getDecimalsHelperText(template: TemplateSelection, t: Translate): string {
   switch (template) {
     case "stablecoin":
-      return "Stablecoin defaults to 6 decimals, but you can choose any value from 0 to 18.";
+      return t("DashboardIssuance.create.stablecoinDecimalsHelper");
     case "custom":
-      return "Custom tokens default to 9 decimals. Choose any value from 0 to 18.";
+      return t("DashboardIssuance.create.customDecimalsHelper");
     case "tokenized-security":
-      return "Tokenized Security defaults to 8 decimals, but you can choose any value from 0 to 18.";
+      return t("DashboardIssuance.create.tokenizedSecurityDecimalsHelper");
     default:
-      return "Choose any value from 0 to 18.";
+      return t("DashboardIssuance.create.decimalsHelper");
   }
 }

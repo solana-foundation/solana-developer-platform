@@ -87,7 +87,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
   const { data: transferStatus, isValidating: transferStatusLoading } = useSWR(
     transferStatusKey,
     ([, provider, providerReference]): Promise<PaymentTransferSummary | null> =>
-      fetchTransferByProviderReference({ provider, providerReference }),
+      fetchTransferByProviderReference({ provider, providerReference }, t),
     {
       refreshInterval: (transfer) =>
         transfer && isTerminalRampTransferStatus(transfer.status) ? 0 : 3000,
@@ -113,34 +113,47 @@ export function useOnrampWizard(props: UseRampWizardProps) {
 
     try {
       if (quote.provider === "lightspark") {
-        await simulateSandboxTransfer({
-          provider: "lightspark",
-          payload: { quoteId: quote.id, currencyCode: "USD" },
-        });
+        await simulateSandboxTransfer(
+          {
+            provider: "lightspark",
+            payload: { quoteId: quote.id, currencyCode: "USD" },
+          },
+          t
+        );
       } else if (quote.provider === "mural") {
         const fiatCurrency = wizard.selectedRampPair.fiatCurrency;
         if (!isMuralSandboxPayinCurrency(fiatCurrency)) {
-          throw new Error(`Mural sandbox payin does not support ${fiatCurrency}.`);
+          throw new Error(
+            t("DashboardPayments.ramps.muralSandboxCurrencyUnsupported", {
+              currency: fiatCurrency,
+            })
+          );
         }
-        await simulateSandboxTransfer({
-          provider: "mural",
-          payload: {
-            counterpartyId: wizard.fields.counterpartyId,
-            amount: Number(wizard.fields.amount.trim()),
-            fiatCurrency,
+        await simulateSandboxTransfer(
+          {
+            provider: "mural",
+            payload: {
+              counterpartyId: wizard.fields.counterpartyId,
+              amount: Number(wizard.fields.amount.trim()),
+              fiatCurrency,
+            },
           },
-        });
+          t
+        );
       } else {
-        await simulateSandboxTransfer({
-          provider: "bvnk",
-          payload: {
-            counterpartyId: wizard.fields.counterpartyId,
-            amount: Number(wizard.fields.amount.trim()),
-            fiatCurrency: wizard.selectedRampPair.fiatCurrency,
-            cryptoToken: toRampCryptoToken(wizard.selectedRampPair.assetRail),
-            destinationWallet: wizard.fields.walletId,
+        await simulateSandboxTransfer(
+          {
+            provider: "bvnk",
+            payload: {
+              counterpartyId: wizard.fields.counterpartyId,
+              amount: Number(wizard.fields.amount.trim()),
+              fiatCurrency: wizard.selectedRampPair.fiatCurrency,
+              cryptoToken: toRampCryptoToken(wizard.selectedRampPair.assetRail),
+              destinationWallet: wizard.fields.walletId,
+            },
           },
-        });
+          t
+        );
       }
       setQuoteSimulationSucceeded(true);
       toast.success(t("DashboardPayments.ramps.quoteFundingSimulated"), {

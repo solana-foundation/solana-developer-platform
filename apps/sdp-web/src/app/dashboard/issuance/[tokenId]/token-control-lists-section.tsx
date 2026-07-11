@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 
 interface TokenControlListsSectionProps {
   showControlList: boolean;
@@ -29,6 +29,7 @@ export function TokenControlListsSection({
   frozenAccountsHasMore,
 }: TokenControlListsSectionProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const controlListSummaryTitle = controlListLabel
     ? t("DashboardIssuance.controlLists.entriesTitle", { label: controlListLabel })
     : t("DashboardIssuance.controlLists.controlList");
@@ -56,13 +57,13 @@ export function TokenControlListsSection({
               <>
                 <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
                   {t("DashboardIssuance.controlLists.entriesCount", {
-                    count: (allowlistTotal ?? allowlistEntriesCount).toLocaleString(),
+                    count: (allowlistTotal ?? allowlistEntriesCount).toLocaleString(locale),
                   })}
                 </p>
                 {allowlistHasMore ? (
                   <p className="mt-1 text-xs text-[rgba(28,28,29,0.62)]">
                     {t("DashboardIssuance.controlLists.showingEntries", {
-                      count: allowlistEntriesCount.toLocaleString(),
+                      count: allowlistEntriesCount.toLocaleString(locale),
                     })}
                   </p>
                 ) : null}
@@ -83,13 +84,13 @@ export function TokenControlListsSection({
             <>
               <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
                 {t("DashboardIssuance.controlLists.accountsCount", {
-                  count: (frozenAccountsTotal ?? frozenAccountsCount).toLocaleString(),
+                  count: (frozenAccountsTotal ?? frozenAccountsCount).toLocaleString(locale),
                 })}
               </p>
               {frozenAccountsHasMore ? (
                 <p className="mt-1 text-xs text-[rgba(28,28,29,0.62)]">
                   {t("DashboardIssuance.controlLists.showingAccounts", {
-                    count: frozenAccountsCount.toLocaleString(),
+                    count: frozenAccountsCount.toLocaleString(locale),
                   })}
                 </p>
               ) : null}

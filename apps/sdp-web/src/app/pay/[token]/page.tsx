@@ -2,7 +2,7 @@ import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types";
 import { CheckCircle2Icon, ClockIcon, XCircleIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { getTranslations } from "@/i18n/server";
+import { getRequestLocale, getTranslations } from "@/i18n/server";
 import {
   formatDisplayAmount,
   formatTimestamp,
@@ -62,6 +62,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 
 export default async function PayPage({ params }: { params: Promise<{ token: string }> }) {
   const t = await getTranslations();
+  const locale = await getRequestLocale();
   const { token } = await params;
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
   if (!apiBaseUrl) {
@@ -113,7 +114,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
               </span>
             </div>
             <p className="text-5xl font-medium tracking-tight text-text-extra-high">
-              {formatDisplayAmount(request.amount)}{" "}
+              {formatDisplayAmount(request.amount, undefined, locale)}{" "}
               <span className="text-2xl text-text-medium">{request.tokenSymbol}</span>
             </p>
           </div>
@@ -147,7 +148,9 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
             <DetailRow
               label={t("Shared.pay.expires")}
               value={
-                request.expiresAt ? formatTimestamp(request.expiresAt) : t("Shared.pay.noExpiry")
+                request.expiresAt
+                  ? formatTimestamp(request.expiresAt, t, locale)
+                  : t("Shared.pay.noExpiry")
               }
             />
           </div>

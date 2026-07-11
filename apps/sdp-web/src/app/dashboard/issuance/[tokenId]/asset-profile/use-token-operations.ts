@@ -157,7 +157,7 @@ export function useTokenOperations({
     mutate: mutateAuthorityWallets,
   } = usePersistedDashboardSWR(
     shouldLoadAuthorityWallets ? ["token-management-authority-wallets", token.id] : null,
-    ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId),
+    ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId, t),
     {
       refreshInterval: 60_000,
       revalidateOnFocus: true,
@@ -174,7 +174,7 @@ export function useTokenOperations({
     mutate: mutateSupportingData,
   } = usePersistedDashboardSWR(
     shouldLoadSupportingData ? ["token-management-supporting-data", token.id] : null,
-    ([, tokenId]: readonly [string, string]) => fetchTokenManagementSupportingData(tokenId),
+    ([, tokenId]: readonly [string, string]) => fetchTokenManagementSupportingData(tokenId, t),
     {
       refreshInterval: 60_000,
       revalidateOnFocus: true,

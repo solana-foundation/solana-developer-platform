@@ -38,6 +38,7 @@ export default async function PaymentRequestsPage() {
         <PaymentRequestsWorkspace
           initialPaymentRequests={result.data}
           initialError={result.error}
+          initialLocalErrorCode={result.localErrorCode}
           apiBaseUrl={apiBaseUrl}
           apiKeys={apiKeysResult.ok && apiKeysResult.data ? apiKeysResult.data : []}
           wallets={wallets}

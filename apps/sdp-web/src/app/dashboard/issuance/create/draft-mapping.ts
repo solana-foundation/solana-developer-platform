@@ -1,8 +1,10 @@
 import { type AssetCategory, getAssetTypeRegistryEntry, type IssuanceMetadata } from "@sdp/types";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { detailFieldOptionLabel } from "./asset-details-config";
 import { CAPACITY_KEYS, type DraftState, isValidDecimals } from "./issuance-draft-wizard.types";
 
 const SYMBOL_RE = /^[A-Za-z0-9.]{1,10}$/;
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 // Asset category -> deploy-time Token-2022 template (token creation still needs
 // a template; asset type describes the product, not the token config).
@@ -210,46 +212,42 @@ export function buildPublicMetadata(draft: DraftState): IssuanceMetadata {
   return projected as IssuanceMetadata;
 }
 
-const PATH_LABELS: Record<string, string> = {
-  "asset.name": "Name",
-  "asset.description": "Description",
-  "asset.issuerName": "Issuer name",
-  "asset.pegCurrency": "Peg currency",
-  "asset.pegTarget": "Peg target",
-  "asset.backingType": "Backing type",
-  "asset.reserveAsset": "Reserve asset",
-  "asset.reserveCustodian": "Reserve custodian",
-  "asset.website": "Website",
-  "asset.jurisdiction": "Jurisdiction",
-  "asset.offeringType": "Offering type",
-  "asset.underlyingAsset": "Underlying asset",
-  "asset.custodian": "Custodian",
-  "chain.decimals": "Decimals",
+const PATH_LABEL_KEYS: Record<string, MessageKey> = {
+  "asset.name": "DashboardIssuance.forms.name",
+  "asset.description": "DashboardIssuance.forms.description",
+  "asset.issuerName": "DashboardIssuance.config.issuerName",
+  "asset.pegCurrency": "DashboardIssuance.config.currency",
+  "asset.pegTarget": "DashboardIssuance.config.pegTarget",
+  "asset.backingType": "DashboardIssuance.config.backingType",
+  "asset.reserveAsset": "DashboardIssuance.config.reserveAsset",
+  "asset.reserveCustodian": "DashboardIssuance.config.reserveCustodian",
+  "asset.website": "DashboardIssuance.review.website",
+  "asset.jurisdiction": "DashboardIssuance.config.jurisdiction",
+  "asset.offeringType": "DashboardIssuance.config.offeringType",
+  "asset.underlyingAsset": "DashboardIssuance.config.underlyingAsset",
+  "asset.custodian": "DashboardIssuance.config.custodian",
+  "chain.decimals": "DashboardIssuance.create.decimals",
 };
 
 // The asset.* metadata fields the issuer may expose or keep private on the
 // Public information step. Token identity (name/symbol/decimals/description/logo)
 // and classification are inherently public and are NOT part of this pool.
-export const PUBLIC_FIELD_POOL: readonly { path: string; label: string }[] = [
-  { path: "asset.issuerName", label: PATH_LABELS["asset.issuerName"] },
-  { path: "asset.pegCurrency", label: PATH_LABELS["asset.pegCurrency"] },
-  { path: "asset.pegTarget", label: PATH_LABELS["asset.pegTarget"] },
-  { path: "asset.backingType", label: PATH_LABELS["asset.backingType"] },
-  { path: "asset.reserveAsset", label: PATH_LABELS["asset.reserveAsset"] },
-  { path: "asset.reserveCustodian", label: PATH_LABELS["asset.reserveCustodian"] },
-  { path: "asset.website", label: PATH_LABELS["asset.website"] },
-  { path: "asset.jurisdiction", label: PATH_LABELS["asset.jurisdiction"] },
-  { path: "asset.offeringType", label: PATH_LABELS["asset.offeringType"] },
-  { path: "asset.underlyingAsset", label: PATH_LABELS["asset.underlyingAsset"] },
-  { path: "asset.custodian", label: PATH_LABELS["asset.custodian"] },
+export const PUBLIC_FIELD_POOL: readonly { path: string; labelKey: MessageKey }[] = [
+  { path: "asset.issuerName", labelKey: PATH_LABEL_KEYS["asset.issuerName"] },
+  { path: "asset.pegCurrency", labelKey: PATH_LABEL_KEYS["asset.pegCurrency"] },
+  { path: "asset.pegTarget", labelKey: PATH_LABEL_KEYS["asset.pegTarget"] },
+  { path: "asset.backingType", labelKey: PATH_LABEL_KEYS["asset.backingType"] },
+  { path: "asset.reserveAsset", labelKey: PATH_LABEL_KEYS["asset.reserveAsset"] },
+  { path: "asset.reserveCustodian", labelKey: PATH_LABEL_KEYS["asset.reserveCustodian"] },
+  { path: "asset.website", labelKey: PATH_LABEL_KEYS["asset.website"] },
+  { path: "asset.jurisdiction", labelKey: PATH_LABEL_KEYS["asset.jurisdiction"] },
+  { path: "asset.offeringType", labelKey: PATH_LABEL_KEYS["asset.offeringType"] },
+  { path: "asset.underlyingAsset", labelKey: PATH_LABEL_KEYS["asset.underlyingAsset"] },
+  { path: "asset.custodian", labelKey: PATH_LABEL_KEYS["asset.custodian"] },
 ];
 
-export function pathLabel(path: string): string {
-  if (PATH_LABELS[path]) {
-    return PATH_LABELS[path];
-  }
-  const last = path.split(".").pop() ?? path;
-  return last.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
+export function pathLabel(path: string, t: Translate): string {
+  return t(PATH_LABEL_KEYS[path] ?? "DashboardIssuance.errors.field");
 }
 
 // The per-type default public selection (the preselect). The registry's
@@ -269,10 +267,10 @@ export interface PublicFieldCandidate {
 // The toggleable public fields that currently have a value, each with its
 // public on/off state. Drives the interactive public-info UI: identity and
 // classification are inherently public and never appear here.
-export function getPublicFieldCandidates(draft: DraftState): PublicFieldCandidate[] {
+export function getPublicFieldCandidates(draft: DraftState, t: Translate): PublicFieldCandidate[] {
   const metadata = buildIssuanceMetadata(draft);
   const enabled = new Set(draft.publicFields);
-  return PUBLIC_FIELD_POOL.flatMap(({ path, label }) => {
+  return PUBLIC_FIELD_POOL.flatMap(({ path, labelKey }) => {
     const raw = getByPath(metadata, path);
     const rawValue = typeof raw === "string" ? raw.trim() : raw == null ? "" : String(raw);
     if (!rawValue) {
@@ -282,8 +280,8 @@ export function getPublicFieldCandidates(draft: DraftState): PublicFieldCandidat
     // their system value (e.g. "fiat"); show the human label wherever one is
     // defined, falling back to the raw value for free-text fields.
     const key = path.split(".").pop() ?? path;
-    const value = detailFieldOptionLabel(key, rawValue) ?? rawValue;
-    return [{ path, label, value, enabled: enabled.has(path) }];
+    const value = detailFieldOptionLabel(key, rawValue, t) ?? rawValue;
+    return [{ path, label: t(labelKey), value, enabled: enabled.has(path) }];
   });
 }
 
@@ -348,32 +346,33 @@ export function getRequiredAssetDetailKeys(draft: DraftState): Set<keyof DraftSt
 // formatted entries map to a user-facing message, keyed by draft field. Drives
 // the form's inline errors, the Continue gate, and the review blockers.
 export function getAssetDetailsErrors(
-  draft: DraftState
+  draft: DraftState,
+  t: Translate
 ): Partial<Record<keyof DraftState, string>> {
   const errors: Partial<Record<keyof DraftState, string>> = {};
 
   const symbol = draft.symbol.trim();
   if (!symbol) {
-    errors.symbol = "Symbol is required.";
+    errors.symbol = t("DashboardIssuance.errors.symbolRequired");
   } else if (!SYMBOL_RE.test(symbol)) {
-    errors.symbol = "Use 1–10 letters, numbers, or periods.";
+    errors.symbol = t("DashboardIssuance.errors.symbolCharacters");
   }
 
   if (!isValidDecimals(draft.decimals)) {
-    errors.decimals = "Enter a whole number between 0 and 18.";
+    errors.decimals = t("DashboardIssuance.errors.decimalsWholeNumber");
   }
 
   if (!draft.description.trim()) {
-    errors.description = "Description is required.";
+    errors.description = t("DashboardIssuance.errors.descriptionRequired");
   }
 
   // Website and logo are optional, but must be valid URLs when provided.
   if (draft.website.trim() && !isValidUrl(draft.website)) {
-    errors.website = "Enter a valid URL (https://…).";
+    errors.website = t("DashboardIssuance.errors.validUrl");
   }
 
   if (draft.imageUrl.trim() && !isValidUrl(draft.imageUrl)) {
-    errors.imageUrl = "Enter a valid URL (https://…).";
+    errors.imageUrl = t("DashboardIssuance.errors.validUrl");
   }
 
   // Deploy-required registry fields for the selected type (e.g. issuer name,
@@ -386,7 +385,7 @@ export function getAssetDetailsErrors(
         continue;
       }
       if (!String(draft[field] ?? "").trim()) {
-        errors[field] = `${pathLabel(path)} is required.`;
+        errors[field] = t("DashboardIssuance.errors.fieldRequired", { field: pathLabel(path, t) });
       }
     }
   }
@@ -395,15 +394,15 @@ export function getAssetDetailsErrors(
 }
 
 // Hard blockers that prevent creating the draft at all.
-export function getBlockers(draft: DraftState): string[] {
+export function getBlockers(draft: DraftState, t: Translate): string[] {
   const blockers: string[] = [];
   if (!draft.assetCategory || !draft.assetType) {
-    blockers.push("Choose a classification and sub asset type.");
+    blockers.push(t("DashboardIssuance.errors.classificationRequired"));
   }
   if (!draft.name.trim()) {
-    blockers.push("Asset name is required.");
+    blockers.push(t("DashboardIssuance.errors.assetNameRequired"));
   }
-  for (const message of Object.values(getAssetDetailsErrors(draft))) {
+  for (const message of Object.values(getAssetDetailsErrors(draft, t))) {
     blockers.push(message);
   }
   return blockers;

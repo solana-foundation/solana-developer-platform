@@ -74,7 +74,7 @@ export function CreateIssuanceTokenModal({
   const hasServerWalletSnapshot = signerWallets.length > 0 || signerWalletsError !== null;
   const { data: liveSignerWalletsData, error: liveSignerWalletsError } = useSWR(
     shouldLoadSignerWallets ? "issuance-create-token-signer-wallets" : null,
-    () => fetchWallets(),
+    () => fetchWallets({}, t),
     {
       fallbackData: hasServerWalletSnapshot ? signerWallets : undefined,
       revalidateOnFocus: false,

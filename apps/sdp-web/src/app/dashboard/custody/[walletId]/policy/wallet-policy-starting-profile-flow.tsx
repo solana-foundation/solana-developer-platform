@@ -14,7 +14,7 @@ import { updateWalletPolicy } from "@/app/dashboard/payments/payments-workspace.
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { MessageKey } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 type FlowStep = "intent" | "details" | "review";
@@ -283,10 +283,14 @@ function isPositiveAmount(value: string): boolean {
   return trimmedValue === "" || (/^\d+(\.\d+)?$/.test(trimmedValue) && Number(trimmedValue) > 0);
 }
 
-function formatDateTime(value: string, t?: ReturnType<typeof useTranslations>): string {
+function formatDateTime(
+  value: string,
+  locale: string,
+  t: ReturnType<typeof useTranslations>
+): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return t?.("DashboardCustody.savedDraft") ?? "Saved draft";
-  return new Intl.DateTimeFormat(undefined, {
+  if (Number.isNaN(date.getTime())) return t("DashboardCustody.savedDraft");
+  return new Intl.DateTimeFormat(locale, {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -382,10 +386,7 @@ function formatPolicyDecision(
   return t(labels[decision]);
 }
 
-function formatPolicyStatus(
-  status: PolicyAuditEntry["status"],
-  t: ReturnType<typeof useTranslations>
-): string {
+function formatPolicyStatus(status: PolicyAuditEntry["status"]): string {
   return status.replaceAll("_", " ");
 }
 
@@ -551,6 +552,7 @@ export function WalletPolicyStartingProfileFlow({
   policyError,
 }: WalletPolicyStartingProfileFlowProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
   const [currentPolicy, setCurrentPolicy] = useState(initialPolicy);
@@ -758,28 +760,32 @@ export function WalletPolicyStartingProfileFlow({
       position: "bottom-right",
     });
     try {
-      const updated = await updateWalletPolicy(wallet.walletId, {
-        walletId: wallet.walletId,
-        destinationAllowlist: selectedCategorySet.has("destinations")
-          ? destinationParse.addresses
-          : [],
-        ...(selectedCategorySet.has("limits") && maxTransferAmount.trim()
-          ? { maxTransferAmount: maxTransferAmount.trim() }
-          : {}),
-        ...(selectedCategorySet.has("limits") && maxDailyAmount.trim()
-          ? { maxDailyAmount: maxDailyAmount.trim() }
-          : {}),
-        defaultAction: DEFAULT_POLICY_ACTION,
-        rules: buildPolicyRules({
-          selectedCategorySet,
-          blockedOperationFamilies,
-          destinationAllowlist: destinationParse.addresses,
-          maxTransferAmount: maxTransferAmount.trim(),
-          approvalFamilies,
-          advancedDeniedFamilies,
-          t,
-        }),
-      });
+      const updated = await updateWalletPolicy(
+        wallet.walletId,
+        {
+          walletId: wallet.walletId,
+          destinationAllowlist: selectedCategorySet.has("destinations")
+            ? destinationParse.addresses
+            : [],
+          ...(selectedCategorySet.has("limits") && maxTransferAmount.trim()
+            ? { maxTransferAmount: maxTransferAmount.trim() }
+            : {}),
+          ...(selectedCategorySet.has("limits") && maxDailyAmount.trim()
+            ? { maxDailyAmount: maxDailyAmount.trim() }
+            : {}),
+          defaultAction: DEFAULT_POLICY_ACTION,
+          rules: buildPolicyRules({
+            selectedCategorySet,
+            blockedOperationFamilies,
+            destinationAllowlist: destinationParse.addresses,
+            maxTransferAmount: maxTransferAmount.trim(),
+            approvalFamilies,
+            advancedDeniedFamilies,
+            t,
+          }),
+        },
+        t
+      );
 
       setCurrentPolicy(updated);
       clearDraft();
@@ -811,12 +817,16 @@ export function WalletPolicyStartingProfileFlow({
       position: "bottom-right",
     });
     try {
-      const updated = await updateWalletPolicy(wallet.walletId, {
-        walletId: wallet.walletId,
-        destinationAllowlist: [],
-        defaultAction: DEFAULT_POLICY_ACTION,
-        rules: [],
-      });
+      const updated = await updateWalletPolicy(
+        wallet.walletId,
+        {
+          walletId: wallet.walletId,
+          destinationAllowlist: [],
+          defaultAction: DEFAULT_POLICY_ACTION,
+          rules: [],
+        },
+        t
+      );
 
       const disabledDraft: StoredPolicyDraft = {
         status: "disabled",
@@ -878,7 +888,8 @@ export function WalletPolicyStartingProfileFlow({
         <p className="text-sm text-text-medium">{t(currentStep.descriptionKey)}</p>
         {savedDraft?.updatedAt && localStatus === "draft" ? (
           <p className="pt-1 text-xs text-text-extra-low">
-            {t("DashboardCustody.policyDraftSaved")} {formatDateTime(savedDraft.updatedAt, t)}
+            {t("DashboardCustody.policyDraftSaved")}{" "}
+            {formatDateTime(savedDraft.updatedAt, locale, t)}
           </p>
         ) : null}
       </div>
@@ -979,6 +990,7 @@ export function WalletPolicyStartingProfileFlow({
 
 function PolicyAuditPanel({ audit }: { audit: PolicyAudit | null }) {
   const t = useTranslations();
+  const locale = useLocale();
   const evaluations = audit?.recentEvaluations.slice(0, 5) ?? [];
   if (evaluations.length === 0) return null;
 
@@ -1003,7 +1015,7 @@ function PolicyAuditPanel({ audit }: { audit: PolicyAudit | null }) {
                 {formatPolicyDecision(entry.decision, t)}
               </span>
               <span className="rounded-full bg-border-extra-light px-2 py-0.5 text-text-medium">
-                {formatPolicyStatus(entry.status, t)}
+                {formatPolicyStatus(entry.status)}
               </span>
               {entry.requiresApproval ? (
                 <span className="rounded-full bg-status-warning-bg px-2 py-0.5 text-status-warning-text">
@@ -1018,7 +1030,7 @@ function PolicyAuditPanel({ audit }: { audit: PolicyAudit | null }) {
               {entry.reason ?? entry.reasonCode}
             </p>
             <p className="mt-1 text-xs text-text-extra-low">
-              {formatDateTime(entry.evaluatedAt, t)}
+              {formatDateTime(entry.evaluatedAt, locale, t)}
               {entry.approvalRequestId
                 ? t("DashboardCustody.policyApprovalRequest", { id: entry.approvalRequestId })
                 : ""}

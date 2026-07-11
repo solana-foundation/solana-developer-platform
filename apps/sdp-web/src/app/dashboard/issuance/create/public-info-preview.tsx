@@ -241,7 +241,7 @@ export function PublicInfoPreview({
   ].filter((field): field is StaticField => Boolean(field));
 
   // Optional asset.* fields whose public/private state the issuer controls.
-  const candidates = getPublicFieldCandidates(draft);
+  const candidates = getPublicFieldCandidates(draft, t);
   const enabledCandidates = candidates.filter((candidate) => candidate.enabled);
   const defaultPaths = new Set(
     draft.assetCategory && draft.assetType

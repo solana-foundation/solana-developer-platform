@@ -6,7 +6,7 @@ import {
   localeCookieName,
   supportedLocales,
 } from "@/i18n/config";
-import { getMessages, type TranslationValues, translate } from "@/i18n/messages";
+import { getMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
 
 function localeFromAcceptLanguage(value: string | null): AppLocale | undefined {
   if (!value) return undefined;
@@ -38,6 +38,5 @@ export async function getI18nRequest() {
 
 export async function getTranslations() {
   const { messages } = await getI18nRequest();
-  return (key: Parameters<typeof translate>[1], values?: TranslationValues) =>
-    translate(messages, key, values);
+  return (key: MessageKey, values?: TranslationValues) => translate(messages, key, values);
 }

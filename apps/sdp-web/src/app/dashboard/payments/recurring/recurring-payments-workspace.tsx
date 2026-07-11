@@ -131,7 +131,7 @@ function RecurringPaymentStatusBadge({ status }: { status: PaymentRecurringPayme
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 function formatOptionalTimestamp(value: string | null | undefined, t: Translate): string {
-  return value ? formatTimestamp(value) : t("DashboardPayments.recurring.notSet");
+  return value ? formatTimestamp(value, t) : t("DashboardPayments.recurring.notSet");
 }
 
 function formatPeriodHours(periodHours: number, t: Translate): string {
@@ -234,7 +234,7 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 function CopyableValue({
   value,
   label,
-  empty = "Not set",
+  empty,
 }: {
   value: string | null;
   label?: string;
@@ -242,7 +242,9 @@ function CopyableValue({
 }) {
   const t = useTranslations();
   if (!value) {
-    return <span className="text-text-low">{empty}</span>;
+    return (
+      <span className="text-text-low">{empty ?? t("DashboardPayments.recurring.notSet")}</span>
+    );
   }
 
   return (
@@ -372,14 +374,14 @@ function RecurringPaymentCollectionHistory({
                 {attempts.map((attempt) => (
                   <TableRow key={attempt.id}>
                     <TableCell className="whitespace-nowrap text-sm">
-                      <span className="block truncate">{formatTimestamp(attempt.dueAt)}</span>
+                      <span className="block truncate">{formatTimestamp(attempt.dueAt, t)}</span>
                     </TableCell>
                     <TableCell
                       className={`${COLLECTION_ATTEMPTED_COLUMN_CLASS} whitespace-nowrap text-sm text-text-medium`}
                     >
                       <span className="block truncate">
                         {attempt.attemptedAt
-                          ? formatTimestamp(attempt.attemptedAt)
+                          ? formatTimestamp(attempt.attemptedAt, t)
                           : t("DashboardPayments.recurring.notSet")}
                       </span>
                     </TableCell>
@@ -959,7 +961,7 @@ export function RecurringPaymentDetailWorkspace({
       position: "bottom-right",
     });
     try {
-      await runRecurringPaymentAction(recurringPayment.id, action);
+      await runRecurringPaymentAction(recurringPayment.id, action, undefined, t);
       toast.success(actionSuccessLabel(action, t), { id: toastId, position: "bottom-right" });
       router.refresh();
     } catch (error) {
@@ -997,7 +999,7 @@ export function RecurringPaymentDetailWorkspace({
       position: "bottom-right",
     });
     try {
-      await updateRecurringPayment(recurringPayment.id, { sourceWalletId: walletId });
+      await updateRecurringPayment(recurringPayment.id, { sourceWalletId: walletId }, undefined, t);
       toast.success(t("DashboardPayments.recurring.fundingWalletUpdated"), {
         id: toastId,
         position: "bottom-right",
@@ -1045,7 +1047,12 @@ export function RecurringPaymentDetailWorkspace({
       position: "bottom-right",
     });
     try {
-      await updateRecurringPayment(recurringPayment.id, { counterpartyAccountId: accountId });
+      await updateRecurringPayment(
+        recurringPayment.id,
+        { counterpartyAccountId: accountId },
+        undefined,
+        t
+      );
       toast.success(t("DashboardPayments.recurring.receivingWalletUpdated"), {
         id: toastId,
         position: "bottom-right",
@@ -1094,7 +1101,7 @@ export function RecurringPaymentDetailWorkspace({
       position: "bottom-right",
     });
     try {
-      await updateRecurringPayment(recurringPayment.id, { periodHours });
+      await updateRecurringPayment(recurringPayment.id, { periodHours }, undefined, t);
       toast.success(t("DashboardPayments.recurring.billingIntervalUpdated"), {
         id: toastId,
         position: "bottom-right",
@@ -1145,7 +1152,7 @@ export function RecurringPaymentDetailWorkspace({
       position: "bottom-right",
     });
     try {
-      await updateRecurringPayment(recurringPayment.id, { token });
+      await updateRecurringPayment(recurringPayment.id, { token }, undefined, t);
       toast.success(t("DashboardPayments.recurring.currencyUpdated"), {
         id: toastId,
         position: "bottom-right",
@@ -1192,7 +1199,7 @@ export function RecurringPaymentDetailWorkspace({
       position: "bottom-right",
     });
     try {
-      await updateRecurringPayment(recurringPayment.id, { amount });
+      await updateRecurringPayment(recurringPayment.id, { amount }, undefined, t);
       toast.success(t("DashboardPayments.recurring.amountUpdated"), {
         id: toastId,
         position: "bottom-right",
@@ -1429,10 +1436,10 @@ export function RecurringPaymentDetailWorkspace({
               )}
             </DetailRow>
             <DetailRow label={t("DashboardPayments.recurring.created")}>
-              {formatTimestamp(recurringPayment.createdAt)}
+              {formatTimestamp(recurringPayment.createdAt, t)}
             </DetailRow>
             <DetailRow label={t("DashboardPayments.recurring.updated")}>
-              {formatTimestamp(recurringPayment.updatedAt)}
+              {formatTimestamp(recurringPayment.updatedAt, t)}
             </DetailRow>
           </div>
         </div>

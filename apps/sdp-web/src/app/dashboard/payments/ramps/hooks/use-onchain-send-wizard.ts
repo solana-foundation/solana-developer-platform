@@ -93,7 +93,7 @@ export function useOnchainSendWizard({
     mutate: mutateAccounts,
   } = useSWR(
     counterpartyId ? ["counterparty-accounts", counterpartyId] : null,
-    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id),
+    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
     { revalidateOnFocus: false }
   );
   const cryptoAccounts = useMemo(
@@ -184,13 +184,16 @@ export function useOnchainSendWizard({
       position: "bottom-right",
     });
     try {
-      const transfer = await createTransfer({
-        source: fields.walletId,
-        destination: destinationAddress,
-        token: selectedAssetBalance.mint,
-        amount: fields.amount,
-        ...(fields.memo.trim() ? { memo: fields.memo.trim() } : {}),
-      });
+      const transfer = await createTransfer(
+        {
+          source: fields.walletId,
+          destination: destinationAddress,
+          token: selectedAssetBalance.mint,
+          amount: fields.amount,
+          ...(fields.memo.trim() ? { memo: fields.memo.trim() } : {}),
+        },
+        t
+      );
       setTransferResult(transfer);
       toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
         id: toastId,

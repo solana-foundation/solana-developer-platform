@@ -2,6 +2,7 @@
 
 import type { Token } from "@sdp/types";
 import { useState } from "react";
+import { useTranslations } from "@/i18n/provider";
 import { TokenActionForms } from "../../token-action-forms";
 import type { AdminAction } from "../../token-management-workspace.types";
 import { createInitialMetadataForm } from "../../token-management-workspace.utils";
@@ -29,6 +30,7 @@ export function OpsActionForms({
   onMint?: () => void;
   onBurn?: () => void;
 }) {
+  const t = useTranslations();
   const [metadataForm, setMetadataForm] = useState(() => createInitialMetadataForm(token));
   const signerProps = ops.getActionSignerProps(activeAction);
 
@@ -57,8 +59,12 @@ export function OpsActionForms({
       allowlistError={ops.allowlistError}
       controlListLabel={ops.controlListCopy?.label ?? null}
       controlListDescription={ops.controlListCopy?.description ?? null}
-      controlListAddActionLabel={ops.controlListCopy?.addActionLabel ?? "Add allowlist entry"}
-      controlListEmptyState={ops.controlListCopy?.emptyState ?? "No allowlist entries yet."}
+      controlListAddActionLabel={
+        ops.controlListCopy?.addActionLabel ?? t("DashboardIssuance.management.addAllowlistEntry")
+      }
+      controlListEmptyState={
+        ops.controlListCopy?.emptyState ?? t("DashboardIssuance.management.noAllowlistEntries")
+      }
       freezeHint={ops.controlListCopy?.freezeHint ?? null}
       signerWallets={signerProps.signerWallets}
       defaultSignerWalletId={signerProps.defaultSignerWalletId}

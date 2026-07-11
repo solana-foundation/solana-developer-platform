@@ -67,7 +67,7 @@ export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTabl
                 <span
                   className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${riskToneClassName(provider)}`}
                 >
-                  {formatRiskScore(provider)}
+                  {formatRiskScore(provider, t)}
                 </span>
               </TableCell>
             </TableRow>

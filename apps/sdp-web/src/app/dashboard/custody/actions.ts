@@ -3,6 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
 const DEVNET_FAUCET_LAMPORTS = 1_000_000_000;
@@ -21,11 +22,11 @@ function extractErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
-  return "Unknown error";
+  return "";
 }
 
 function getApiErrorMessageFromText(body: string): string {
-  if (!body) return "Request failed";
+  if (!body) return "";
 
   try {
     const json = JSON.parse(body) as unknown;
@@ -47,18 +48,24 @@ function getApiErrorMessageFromText(body: string): string {
   return body;
 }
 
-function toApiActionErrorMessage(error: unknown): string {
+function toApiActionErrorMessage(
+  error: unknown,
+  t: Awaited<ReturnType<typeof getTranslations>>
+): string {
   const raw = extractErrorMessage(error).trim();
 
   // Format thrown by SdpApiClient.request/fetch: "SDP API request failed (XXX): <body>"
   const match = /^SDP API request failed \((\d+)\):\s*([\s\S]*)$/.exec(raw);
   if (!match) {
-    return raw || "Unknown error";
+    return raw || t("DashboardCustody.unknownError");
   }
 
   const status = match[1];
   const body = match[2] ?? "";
-  return `${getApiErrorMessageFromText(body)} (HTTP ${status})`;
+  return t("DashboardCustody.httpRequestFailed", {
+    error: getApiErrorMessageFromText(body) || t("DashboardCustody.requestFailed"),
+    status,
+  });
 }
 
 function parseApiActionError(error: unknown): { status: number; message: string } | null {
@@ -230,6 +237,7 @@ export type WalletSetupActionResult =
 export async function initializeCustodySetupAction(
   formData: FormData
 ): Promise<WalletSetupActionResult> {
+  const t = await getTranslations();
   try {
     await initializeCustodyWallet(formData);
     revalidateWalletPaths();
@@ -237,7 +245,7 @@ export async function initializeCustodySetupAction(
   } catch (error) {
     return {
       status: "error",
-      message: toApiActionErrorMessage(error),
+      message: toApiActionErrorMessage(error, t),
     };
   }
 }
@@ -245,6 +253,7 @@ export async function initializeCustodySetupAction(
 export async function createCustodySetupWalletAction(
   formData: FormData
 ): Promise<WalletSetupActionResult> {
+  const t = await getTranslations();
   try {
     await createCustodyWalletForProvider(formData);
     revalidateWalletPaths();
@@ -252,7 +261,7 @@ export async function createCustodySetupWalletAction(
   } catch (error) {
     return {
       status: "error",
-      message: toApiActionErrorMessage(error),
+      message: toApiActionErrorMessage(error, t),
     };
   }
 }
@@ -271,9 +280,10 @@ export async function updateWalletLabelAction(
   walletId: string,
   label: string
 ): Promise<UpdateWalletLabelActionResult> {
+  const t = await getTranslations();
   const resolvedWalletId = walletId.trim();
   if (!resolvedWalletId) {
-    return { status: "error", message: "walletId is required" };
+    return { status: "error", message: t("DashboardCustody.walletIdRequired") };
   }
 
   const nextLabel = label.trim();
@@ -297,7 +307,7 @@ export async function updateWalletLabelAction(
   } catch (error) {
     return {
       status: "error",
-      message: toApiActionErrorMessage(error),
+      message: toApiActionErrorMessage(error, t),
     };
   }
 }
@@ -364,9 +374,10 @@ export type WalletFaucetActionResult =
 export async function checkWalletSignerMemoAction(
   walletId: string
 ): Promise<WalletSignerCheckActionResult> {
+  const t = await getTranslations();
   const resolvedWalletId = walletId.trim();
   if (!resolvedWalletId) {
-    return { status: "error", message: "walletId is required" };
+    return { status: "error", message: t("DashboardCustody.walletIdRequired") };
   }
 
   const now = Date.now();
@@ -416,7 +427,7 @@ export async function checkWalletSignerMemoAction(
   } catch (error) {
     return {
       status: "error",
-      message: toApiActionErrorMessage(error),
+      message: toApiActionErrorMessage(error, t),
     };
   }
 }
@@ -425,19 +436,20 @@ export async function requestDevnetSolanaFaucetAction(
   walletId: string,
   walletAddress: string
 ): Promise<WalletFaucetActionResult> {
+  const t = await getTranslations();
   const resolvedWalletId = walletId.trim();
   const resolvedWalletAddress = walletAddress.trim();
   if (!resolvedWalletId) {
-    return { status: "error", message: "walletId is required" };
+    return { status: "error", message: t("DashboardCustody.walletIdRequired") };
   }
   if (!SOLANA_ADDRESS_PATTERN.test(resolvedWalletAddress)) {
-    return { status: "error", message: "A valid wallet address is required" };
+    return { status: "error", message: t("DashboardCustody.validWalletAddressRequired") };
   }
 
   try {
     const { orgId, userId } = await auth();
     if (!userId || !orgId) {
-      return { status: "error", message: "Sign in to request devnet SOL." };
+      return { status: "error", message: t("DashboardCustody.signInToRequestDevnetSol") };
     }
 
     const client = await createSdpApiClient();
@@ -454,13 +466,16 @@ export async function requestDevnetSolanaFaucetAction(
     if (!relay.upstream.ok) {
       return {
         status: "error",
-        message: `Devnet faucet RPC provider ${relay.provider.id} returned HTTP ${relay.upstream.status}.`,
+        message: t("DashboardCustody.devnetFaucetHttpError", {
+          provider: relay.provider.id,
+          status: relay.upstream.status,
+        }),
       };
     }
 
     const payload = relay.response;
     if (!payload) {
-      return { status: "error", message: "Devnet faucet returned an empty RPC response." };
+      return { status: "error", message: t("DashboardCustody.devnetFaucetEmptyResponse") };
     }
 
     if (payload.error) {
@@ -469,12 +484,17 @@ export async function requestDevnetSolanaFaucetAction(
         status: "error",
         message:
           rpcMessage && rpcMessage.length > 0
-            ? `Devnet faucet RPC provider ${relay.provider.id} returned: ${rpcMessage}`
-            : `Devnet faucet RPC provider ${relay.provider.id} returned an error.`,
+            ? t("DashboardCustody.devnetFaucetProviderError", {
+                provider: relay.provider.id,
+                error: rpcMessage,
+              })
+            : t("DashboardCustody.devnetFaucetProviderGenericError", {
+                provider: relay.provider.id,
+              }),
       };
     }
     if (!payload.result) {
-      return { status: "error", message: "Devnet faucet returned no transaction signature." };
+      return { status: "error", message: t("DashboardCustody.devnetFaucetNoSignature") };
     }
 
     revalidatePath("/dashboard/custody");
@@ -491,7 +511,7 @@ export async function requestDevnetSolanaFaucetAction(
   } catch (error) {
     return {
       status: "error",
-      message: toApiActionErrorMessage(error),
+      message: toApiActionErrorMessage(error, t),
     };
   }
 }

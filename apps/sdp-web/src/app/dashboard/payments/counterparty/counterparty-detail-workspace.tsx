@@ -43,7 +43,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Modal } from "@/components/ui/modal";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
@@ -127,6 +127,7 @@ function TransferTableRow({
   transfer: PaymentTransferSummary;
   onSelect: (transfer: PaymentTransferSummary) => void;
 }) {
+  const t = useTranslations();
   const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
   const walletAddress = isInbound ? transfer.destination : transfer.source;
   const flow = resolveTransferFlow(transfer);
@@ -151,7 +152,7 @@ function TransferTableRow({
             {isInbound ? <BanknoteArrowDownIcon /> : <BanknoteArrowUpIcon />}
           </span>
           <span className="text-sm font-medium text-text-extra-high">
-            {resolveTransferTypeLabel(transfer.type)}
+            {resolveTransferTypeLabel(transfer.type, t)}
           </span>
         </div>
       </td>
@@ -187,7 +188,7 @@ function TransferTableRow({
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-right text-xs text-text-low">
         {transfer.createdAt ? (
-          <span title={formatTimestamp(transfer.createdAt)}>
+          <span title={formatTimestamp(transfer.createdAt, t)}>
             {formatRelativeTime(transfer.createdAt)}
           </span>
         ) : null}
@@ -325,7 +326,7 @@ function CounterpartyTransactions({
                       active={typeFilter === type}
                       onClick={() => setTypeFilter(type)}
                     >
-                      {resolveTransferTypeLabel(type)}
+                      {resolveTransferTypeLabel(type, t)}
                     </FilterChip>
                   ))}
                 </>
@@ -435,6 +436,7 @@ function DetailRow({
   mono?: boolean;
   copyValue?: string;
 }) {
+  const t = useTranslations();
   return (
     <div className="flex items-center justify-between gap-4 py-3">
       <span className="shrink-0 text-sm text-text-low">{label}</span>
@@ -442,13 +444,19 @@ function DetailRow({
         <span className={cn("truncate text-sm text-text-extra-high", mono && "font-mono text-xs")}>
           {value}
         </span>
-        {copyValue ? <CopyButton value={copyValue} label={`Copy ${label}`} /> : null}
+        {copyValue ? (
+          <CopyButton
+            value={copyValue}
+            label={t("DashboardPayments.transferDetails.copy", { label })}
+          />
+        ) : null}
       </div>
     </div>
   );
 }
 
 function RampSettlementRows({ settlement }: { settlement: RampTransferSettlement }) {
+  const t = useTranslations();
   if (settlement.provider === "moonpay") {
     const rate =
       settlement.quoteCurrencyAmount > 0
@@ -457,12 +465,12 @@ function RampSettlementRows({ settlement }: { settlement: RampTransferSettlement
     return (
       <>
         <DetailRow
-          label="Provider fee"
+          label={t("DashboardPayments.transferDetails.providerFee")}
           value={formatDisplayAmount(String(settlement.feeAmount), settlement.baseCurrencyCode)}
         />
         {settlement.networkFeeAmount > 0 ? (
           <DetailRow
-            label="Network fee"
+            label={t("DashboardPayments.transferDetails.networkFee")}
             value={formatDisplayAmount(
               String(settlement.networkFeeAmount),
               settlement.baseCurrencyCode
@@ -471,7 +479,7 @@ function RampSettlementRows({ settlement }: { settlement: RampTransferSettlement
         ) : null}
         {rate !== null ? (
           <DetailRow
-            label="Exchange rate"
+            label={t("DashboardPayments.transferDetails.exchangeRate")}
             value={`1 ${settlement.quoteCurrencyCode} = ${formatDisplayAmount(rate.toFixed(2), settlement.baseCurrencyCode)}`}
           />
         ) : null}
@@ -490,10 +498,10 @@ function RampSettlementRows({ settlement }: { settlement: RampTransferSettlement
   );
   return (
     <>
-      {fees ? <DetailRow label="Fees" value={fees} /> : null}
+      {fees ? <DetailRow label={t("DashboardPayments.transferDetails.fees")} value={fees} /> : null}
       {rate !== null ? (
         <DetailRow
-          label="Exchange rate"
+          label={t("DashboardPayments.transferDetails.exchangeRate")}
           value={`1 ${settlement.receivedAmount.currencyCode} = ${rate.toFixed(4)} ${settlement.sentAmount.currencyCode}`}
         />
       ) : null}
@@ -550,10 +558,10 @@ function TransferDetailModal({
         <div className="flex items-start justify-between gap-4 pr-8">
           <div className="space-y-1">
             <h2 className="text-xl font-medium tracking-tight text-text-extra-high">
-              {resolveTransferTypeLabel(transfer.type)}
+              {resolveTransferTypeLabel(transfer.type, t)}
             </h2>
             {transfer.createdAt ? (
-              <p className="text-sm text-text-medium">{formatTimestamp(transfer.createdAt)}</p>
+              <p className="text-sm text-text-medium">{formatTimestamp(transfer.createdAt, t)}</p>
             ) : null}
           </div>
           <TransferStatusBadge status={transfer.status} />
@@ -596,24 +604,34 @@ function TransferDetailModal({
             )}
             {transfer.provider ? (
               <DetailRow
-                label="Provider"
+                label={t("DashboardPayments.transferDetails.provider")}
                 value={<TransferProviderCell provider={transfer.provider} />}
               />
             ) : null}
-            <DetailRow label="Transaction ID" value={transfer.id} mono copyValue={transfer.id} />
+            <DetailRow
+              label={t("DashboardPayments.transferDetails.transactionId")}
+              value={transfer.id}
+              mono
+              copyValue={transfer.id}
+            />
             {transfer.providerReference ? (
               <DetailRow
-                label="Provider Reference"
+                label={t("DashboardPayments.transferDetails.providerReference")}
                 value={transfer.providerReference}
                 mono
                 copyValue={transfer.providerReference}
               />
             ) : null}
-            {transfer.memo ? <DetailRow label="Memo" value={transfer.memo} /> : null}
+            {transfer.memo ? (
+              <DetailRow
+                label={t("DashboardPayments.transferDetails.memo")}
+                value={transfer.memo}
+              />
+            ) : null}
             {transfer.settlement ? <RampSettlementRows settlement={transfer.settlement} /> : null}
             {moneygram?.referenceNumber ? (
               <DetailRow
-                label="Cash pickup code"
+                label={t("DashboardPayments.transferDetails.cashPickupCode")}
                 value={moneygram.referenceNumber}
                 mono
                 copyValue={moneygram.referenceNumber}
@@ -621,24 +639,27 @@ function TransferDetailModal({
             ) : null}
             {moneygram?.transactionId ? (
               <DetailRow
-                label="MoneyGram transaction ID"
+                label={t("DashboardPayments.transferDetails.moneygramTransactionId")}
                 value={moneygram.transactionId}
                 mono
                 copyValue={moneygram.transactionId}
               />
             ) : null}
             {moneygram?.payoutStatus ? (
-              <DetailRow label="Payout status" value={toTitleCase(moneygram.payoutStatus)} />
+              <DetailRow
+                label={t("DashboardPayments.transferDetails.payoutStatus")}
+                value={toTitleCase(moneygram.payoutStatus)}
+              />
             ) : null}
             {moneygram?.payoutAmount !== undefined && transfer.fiatCurrency ? (
               <DetailRow
-                label="Payout amount"
+                label={t("DashboardPayments.transferDetails.payoutAmount")}
                 value={formatDisplayAmount(String(moneygram.payoutAmount), transfer.fiatCurrency)}
               />
             ) : null}
             {moneygram?.cryptoTransferId ? (
               <DetailRow
-                label="Crypto transfer ID"
+                label={t("DashboardPayments.transferDetails.cryptoTransferId")}
                 value={moneygram.cryptoTransferId}
                 mono
                 copyValue={moneygram.cryptoTransferId}
@@ -646,17 +667,23 @@ function TransferDetailModal({
             ) : null}
             {moneygram?.solanaTxSignature ? (
               <DetailRow
-                label="Solana signature"
+                label={t("DashboardPayments.transferDetails.solanaSignature")}
                 value={shortenAddress(moneygram.solanaTxSignature)}
                 mono
                 copyValue={moneygram.solanaTxSignature}
               />
             ) : null}
             {moneygram?.lastWidgetError ? (
-              <DetailRow label="MoneyGram error" value={moneygram.lastWidgetError} />
+              <DetailRow
+                label={t("DashboardPayments.transferDetails.moneygramError")}
+                value={moneygram.lastWidgetError}
+              />
             ) : null}
             {transfer.updatedAt ? (
-              <DetailRow label="Last updated" value={formatTimestamp(transfer.updatedAt)} />
+              <DetailRow
+                label={t("DashboardPayments.transferDetails.lastUpdated")}
+                value={formatTimestamp(transfer.updatedAt, t)}
+              />
             ) : null}
           </div>
         </div>
@@ -772,6 +799,7 @@ export function CounterpartyDetailWorkspace({
   initialTransfers,
 }: CounterpartyDetailWorkspaceProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const router = useRouter();
   const { copy, copied } = useCopy(1200);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -890,7 +918,7 @@ export function CounterpartyDetailWorkspace({
                     },
                     {
                       label: t("DashboardPayments.counterparty.createdLabel"),
-                      value: new Date(counterparty.createdAt).toLocaleDateString("en-US", {
+                      value: new Date(counterparty.createdAt).toLocaleDateString(locale, {
                         month: "short",
                         day: "2-digit",
                         year: "numeric",

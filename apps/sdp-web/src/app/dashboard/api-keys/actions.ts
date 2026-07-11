@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getTranslations } from "@/i18n/server";
+import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { API_KEY_FLASH_COOKIE, API_KEYS_PAGE_PATH, type ApiKeyFlash } from "./api-key-flash";
 
@@ -206,6 +206,7 @@ export async function createApiKeyAction(formData: FormData) {
 
 export async function rotateApiKeyAction(formData: FormData) {
   const t = await getTranslations();
+  const locale = await getRequestLocale();
   const keyId = String(formData.get("keyId") ?? "").trim();
   const gracePeriodHours = Math.min(168, Math.max(0, parsePositiveInt(formData.get("grace"), 24)));
 
@@ -238,7 +239,7 @@ export async function rotateApiKeyAction(formData: FormData) {
     await setFlash({
       level: "success",
       message: t("DashboardCustody.apiKeyRotated", {
-        deadline: new Date(response.previousKey.rotationDeadline).toLocaleString(),
+        deadline: new Date(response.previousKey.rotationDeadline).toLocaleString(locale),
       }),
       key: response.apiKey.key,
       apiKeyId: response.apiKey.id,

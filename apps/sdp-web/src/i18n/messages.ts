@@ -15,15 +15,15 @@ const enMessages = {
 
 export type Messages = typeof enMessages;
 
-type LeafMessageKeys<TValue> = TValue extends string
+export type MessageKeyFor<TValue> = TValue extends string
   ? ""
   : {
       [TKey in Extract<keyof TValue, string>]: TValue[TKey] extends string
         ? TKey
-        : `${TKey}.${LeafMessageKeys<TValue[TKey]>}`;
+        : `${TKey}.${MessageKeyFor<TValue[TKey]>}`;
     }[Extract<keyof TValue, string>];
 
-export type MessageKey = LeafMessageKeys<Messages>;
+export type MessageKey = MessageKeyFor<Messages>;
 export type TranslationValues = Record<string, string | number>;
 
 const messagesByLocale: Record<AppLocale, Messages> = { en: enMessages };
@@ -32,7 +32,11 @@ export function getMessages(locale: AppLocale): Messages {
   return messagesByLocale[locale];
 }
 
-export function translate(messages: unknown, key: MessageKey, values?: TranslationValues): string {
+export function translate<TMessages>(
+  messages: TMessages,
+  key: MessageKeyFor<TMessages> & string,
+  values?: TranslationValues
+): string {
   const message = key.split(".").reduce<unknown>((value, segment) => {
     return value && typeof value === "object"
       ? (value as Record<string, unknown>)[segment]
@@ -43,5 +47,11 @@ export function translate(messages: unknown, key: MessageKey, values?: Translati
     throw new Error(`Missing translation for ${key}`);
   }
 
-  return message.replace(/\{(\w+)\}/g, (_, name: string) => String(values?.[name] ?? `{${name}}`));
+  return message.replace(/\{(\w+)\}/g, (_, name: string) => {
+    const value = values?.[name];
+    if (value === undefined) {
+      throw new Error(`Missing interpolation value ${name} for ${key}`);
+    }
+    return String(value);
+  });
 }

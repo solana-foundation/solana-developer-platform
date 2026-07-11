@@ -193,7 +193,9 @@ export function AssetManagementWorkspace({
         pauseDisabledReason={ops.pauseDisabledReason}
         canManageTokenAdmin={canManageTokenAdmin}
         onCopyAddress={() => void ops.handleCopy(token.mintAddress)}
-        onCopyTokenId={() => void ops.handleCopy(token.id, "Token ID copied")}
+        onCopyTokenId={() =>
+          void ops.handleCopy(token.id, t("DashboardIssuance.management.tokenIdCopied"))
+        }
         onDeploy={handleDeploy}
         onUnpause={() => ops.handlePause(false)}
       />

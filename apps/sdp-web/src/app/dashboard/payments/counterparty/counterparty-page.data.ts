@@ -4,6 +4,7 @@ import type {
   ListCounterpartiesResponse,
   PaginatedResponse,
 } from "@sdp/types";
+import { getTranslations } from "@/i18n/server";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const COUNTERPARTY_PAGE_SIZE = 10;
@@ -14,6 +15,7 @@ export async function fetchCounterparties(
 ): Promise<PaginatedResponse<Counterparty>> {
   const page = options.page ?? 1;
   const pageSize = options.pageSize ?? COUNTERPARTY_PAGE_SIZE;
+  const t = await getTranslations();
 
   try {
     const response = await request(
@@ -37,7 +39,8 @@ export async function fetchCounterparties(
       ok: false,
       data: [],
       total: 0,
-      error: error instanceof Error ? error.message : "Unable to load counterparties",
+      error:
+        error instanceof Error ? error.message : t("DashboardPayments.counterparty.loadFailed"),
     };
   }
 }

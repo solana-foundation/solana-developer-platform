@@ -90,6 +90,7 @@ interface ScreeningRowProps {
 }
 
 function ScreeningRow({ result, index, resolved, checkingLabel }: ScreeningRowProps) {
+  const t = useTranslations();
   const { Icon, className } = TONE_ICON[resolveRiskTone(result)];
   const logo = COMPLIANCE_PROVIDER_LOGOS[result.provider];
 
@@ -121,7 +122,7 @@ function ScreeningRow({ result, index, resolved, checkingLabel }: ScreeningRowPr
               animate={{ opacity: 1, x: 0 }}
               className="text-xs text-text-medium"
             >
-              {formatRiskScore(result)}
+              {formatRiskScore(result, t)}
             </motion.span>
           ) : (
             <motion.span

@@ -24,6 +24,7 @@ import {
   type IdentityClean,
   type IdentityData,
   identitySchema,
+  resolveCounterpartyValidationMessage,
   type StepId,
 } from "./counterparty-create-schemas";
 
@@ -64,9 +65,13 @@ export function CounterpartyCreateProvider({
   const router = useRouter();
   const t = useTranslations();
 
-  const basics = useZodForm(basicsSchema, defaultBasics);
-  const identity = useZodForm(identitySchema, defaultIdentity);
-  const address = useZodForm(addressSchema, defaultAddress);
+  const resolveValidationMessage = useMemo(
+    () => (code: string) => resolveCounterpartyValidationMessage(t, code),
+    [t]
+  );
+  const basics = useZodForm(basicsSchema, defaultBasics, resolveValidationMessage);
+  const identity = useZodForm(identitySchema, defaultIdentity, resolveValidationMessage);
+  const address = useZodForm(addressSchema, defaultAddress, resolveValidationMessage);
 
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);

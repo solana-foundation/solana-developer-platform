@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { createApiKeyAction } from "./actions";
 
 type ApiKeyRole = "api_admin" | "api_developer" | "api_readonly";
@@ -45,11 +45,15 @@ function formatEnvironmentLabel(
     : t("DashboardCustody.sandbox");
 }
 
-function formatDisplayDate(value: string, t: ReturnType<typeof useTranslations>): string {
+function formatDisplayDate(
+  value: string,
+  locale: string,
+  t: ReturnType<typeof useTranslations>
+): string {
   if (!value) return t("DashboardCustody.none");
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return t("DashboardCustody.invalidDate");
-  return date.toLocaleString();
+  return date.toLocaleString(locale);
 }
 
 function formatWalletLabel(wallet: PaymentsDashboardWallet): string {
@@ -369,6 +373,7 @@ function CreateApiKeyReviewStep({
   onBack: () => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const defaultSelectedWallet = resolveDefaultSelectedWallet(
     selectedWallets,
     draft.defaultWalletId
@@ -402,7 +407,9 @@ function CreateApiKeyReviewStep({
               <span>{formatEnvironmentLabel(environment, t)}</span>
               <span aria-hidden="true">·</span>
               <span>
-                {t("DashboardCustody.expiresOn", { date: formatDisplayDate(draft.expiresAt, t) })}
+                {t("DashboardCustody.expiresOn", {
+                  date: formatDisplayDate(draft.expiresAt, locale, t),
+                })}
               </span>
             </div>
           </div>

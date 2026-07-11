@@ -88,15 +88,15 @@
     "reason": "Ramp provider brand name"
   },
   {
-    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:829:9:details",
+    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:832:9:details",
     "reason": "Internal counterparty tab identifier"
   },
   {
-    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:829:9:transactions",
+    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:832:9:transactions",
     "reason": "Internal counterparty tab identifier"
   },
   {
-    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:992:25:Solana",
+    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:995:25:Solana",
     "reason": "Solana product brand name"
   },
   {
@@ -164,23 +164,23 @@
     "reason": "Intl.DateTimeFormat option value"
   },
   {
-    "candidate": "src/components/api-playground-shell.tsx:787:11:output",
+    "candidate": "src/components/api-playground-shell.tsx:801:11:output",
     "reason": "Internal mobile-panel state identifier; its display label is translated"
   },
   {
-    "candidate": "src/components/api-playground-shell.tsx:787:11:request",
+    "candidate": "src/components/api-playground-shell.tsx:801:11:request",
     "reason": "Internal mobile-panel state identifier; its display label is translated"
   },
   {
-    "candidate": "src/components/api-playground-shell.tsx:949:17:code",
+    "candidate": "src/components/api-playground-shell.tsx:963:17:code",
     "reason": "Internal API-playground panel identifier; its display label is translated"
   },
   {
-    "candidate": "src/components/api-playground-shell.tsx:949:17:example",
+    "candidate": "src/components/api-playground-shell.tsx:963:17:example",
     "reason": "Internal API-playground panel identifier; its display label is translated"
   },
   {
-    "candidate": "src/components/api-playground-shell.tsx:949:17:response",
+    "candidate": "src/components/api-playground-shell.tsx:963:17:response",
     "reason": "Internal API-playground panel identifier; its display label is translated"
   },
   {

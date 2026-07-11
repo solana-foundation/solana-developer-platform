@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { ApiKeyActionsMenu } from "./api-key-actions-menu";
 
 const PREFIX_COLUMN_CLASS = "hidden @4xl/api-keys-table:table-cell";
@@ -44,11 +44,15 @@ export interface ApiKeyRecord {
   createdAt: string;
 }
 
-function formatDate(value: string | null, t: ReturnType<typeof useTranslations>): string {
+function formatDate(
+  value: string | null,
+  locale: string,
+  t: ReturnType<typeof useTranslations>
+): string {
   if (!value) return t("DashboardCustody.never");
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("en-US", {
+  return date.toLocaleDateString(locale, {
     month: "short",
     day: "2-digit",
     year: "numeric",
@@ -193,6 +197,7 @@ export function ApiKeysTableClient({
   wallets: PaymentsDashboardWallet[];
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const [apiKeys, setApiKeys] = useState(initialApiKeys);
 
   useEffect(() => {
@@ -269,13 +274,13 @@ export function ApiKeysTableClient({
                 <span className="block truncate">{key.status}</span>
               </TableCell>
               <TableCell className={`${LAST_USED_COLUMN_CLASS} text-xs text-[rgba(28,28,29,0.72)]`}>
-                {formatDate(key.lastUsedAt, t)}
+                {formatDate(key.lastUsedAt, locale, t)}
               </TableCell>
               <TableCell className={`${EXPIRES_COLUMN_CLASS} text-xs text-[rgba(28,28,29,0.72)]`}>
-                {formatDate(key.expiresAt, t)}
+                {formatDate(key.expiresAt, locale, t)}
               </TableCell>
               <TableCell className={`${CREATED_COLUMN_CLASS} text-xs text-[rgba(28,28,29,0.72)]`}>
-                {formatDate(key.createdAt, t)}
+                {formatDate(key.createdAt, locale, t)}
               </TableCell>
               <TableCell>
                 {canManageApiKeys ? (

@@ -189,7 +189,7 @@ export function DetailField({
           <span className="text-sm text-[rgba(28,28,29,0.6)]">
             {checked
               ? t("DashboardIssuance.summary.enabled")
-              : t("DashboardIssuance.status.revoked")}
+              : t("DashboardIssuance.management.disabled")}
           </span>
         </div>
         {field.helpKey ? (

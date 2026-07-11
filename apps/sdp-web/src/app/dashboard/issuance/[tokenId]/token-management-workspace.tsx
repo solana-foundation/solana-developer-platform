@@ -247,12 +247,8 @@ export function TokenManagementWorkspace({
     },
   ];
   const showControlList = hasAccessControlList(accessControlMode);
-  const visibleManagementTabs = useMemo(
-    () =>
-      managementTabs.filter(
-        (tab) => tab.id !== "compliance" || showControlList || canManageTokenAdmin
-      ),
-    [canManageTokenAdmin, showControlList]
+  const visibleManagementTabs = managementTabs.filter(
+    (tab) => tab.id !== "compliance" || showControlList || canManageTokenAdmin
   );
   const requestedTabParam = searchParams.get("tab");
   const requestedTab = isTokenManagementTab(requestedTabParam) ? requestedTabParam : null;
@@ -311,7 +307,7 @@ export function TokenManagementWorkspace({
     mutate: mutateAuthorityWallets,
   } = usePersistedDashboardSWR(
     shouldLoadAuthorityWallets ? ["token-management-authority-wallets", token.id] : null,
-    ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId),
+    ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId, t),
     {
       fallbackData:
         initialAuthorityWallets.length > 0 || initialAuthorityWalletsError !== null
@@ -335,7 +331,7 @@ export function TokenManagementWorkspace({
     mutate: mutateSupportingData,
   } = usePersistedDashboardSWR(
     shouldLoadSupportingData ? ["token-management-supporting-data", token.id] : null,
-    ([, tokenId]: readonly [string, string]) => fetchTokenManagementSupportingData(tokenId),
+    ([, tokenId]: readonly [string, string]) => fetchTokenManagementSupportingData(tokenId, t),
     {
       fallbackData: hasInitialSupportingData ? initialSupportingData : undefined,
       refreshInterval: 60_000,

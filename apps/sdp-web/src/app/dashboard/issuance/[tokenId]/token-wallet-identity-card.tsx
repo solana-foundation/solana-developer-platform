@@ -13,7 +13,7 @@ interface TokenWalletIdentityCardProps {
 export function TokenWalletIdentityCard({
   wallet,
   publicKey,
-  emptyLabel = "None",
+  emptyLabel,
   emptyDescription,
 }: TokenWalletIdentityCardProps) {
   const t = useTranslations();

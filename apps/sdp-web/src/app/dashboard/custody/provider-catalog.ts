@@ -5,7 +5,15 @@ import {
 } from "@sdp/types";
 import type { MessageKey } from "@/i18n/messages";
 
-const DEFAULT_CUSTODY_CAPABILITIES = ["Issuance", "Transfers", "Compliance"] as const;
+export const CUSTODY_CAPABILITY_LABEL_KEYS = {
+  issuance: "DashboardCustody.issuance",
+  transfers: "DashboardCustody.transfers",
+  compliance: "DashboardCustody.compliance",
+} as const satisfies Record<string, MessageKey>;
+
+type CustodyCapability = keyof typeof CUSTODY_CAPABILITY_LABEL_KEYS;
+
+const DEFAULT_CUSTODY_CAPABILITIES = ["issuance", "transfers", "compliance"] as const;
 
 export const WALLET_PROVIDER_CATEGORIES = ["server", "institutional"] as const;
 export type WalletProviderCategory = (typeof WALLET_PROVIDER_CATEGORIES)[number];
@@ -36,7 +44,7 @@ export interface CustodyProviderCatalogEntry {
   category: WalletProviderCategory;
   supportsAdditionalWallets: boolean;
   supportsSigning: boolean;
-  capabilities: readonly string[];
+  capabilities: readonly CustodyCapability[];
 }
 
 type CustodyProviderCatalogById = {
@@ -51,7 +59,7 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     category: "server",
     supportsAdditionalWallets: providerSupportsAdditionalWallets("local"),
     supportsSigning: providerSupportsSigning("local"),
-    capabilities: ["Issuance", "Transfers"],
+    capabilities: ["issuance", "transfers"],
   },
   privy: {
     id: "privy",
@@ -121,7 +129,7 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Anchorage",
     descriptionKey: "DashboardCustody.providerAnchorageDescription",
     category: "institutional",
-    capabilities: ["Transfers", "Compliance"],
+    capabilities: ["transfers", "compliance"],
     supportsAdditionalWallets: providerSupportsAdditionalWallets("anchorage"),
     supportsSigning: providerSupportsSigning("anchorage"),
   },

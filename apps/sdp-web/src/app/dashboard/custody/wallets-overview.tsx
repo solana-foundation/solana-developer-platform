@@ -5,6 +5,7 @@ import { Plus } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import {
+  CUSTODY_CAPABILITY_LABEL_KEYS,
   CUSTODY_PROVIDER_CATALOG,
   type CustodyProviderCatalogEntry,
   formatCustodyProviderName,
@@ -93,7 +94,7 @@ function ProviderChoiceCard({
             key={feature}
             className="rounded-full border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] px-2.5 py-1 text-[11px] font-medium text-[rgba(28,28,29,0.68)]"
           >
-            {feature}
+            {t(CUSTODY_CAPABILITY_LABEL_KEYS[feature])}
           </span>
         ))}
       </div>
@@ -129,7 +130,7 @@ function WalletCard({
 }) {
   const t = useTranslations();
   const { wallet, provider } = item;
-  const purposeLabel = formatPurpose(wallet.purpose);
+  const purposeLabel = formatPurpose(wallet.purpose, t);
 
   return (
     <article className="flex min-h-[340px] flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]">

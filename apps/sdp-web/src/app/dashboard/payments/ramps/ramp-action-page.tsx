@@ -26,7 +26,6 @@ import { OnrampRail } from "./onramp-rail";
 
 interface PaymentsActionPageProps {
   mode: "send" | "receive";
-  actionLabel?: string;
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
@@ -79,8 +78,8 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
     if (!id) {
       return;
     }
-    void preload(PAYMENTS_ACTION_WALLETS_KEY, () => fetchWallets({ includeBalances: true }));
-    void preload(["counterparty-accounts", id], () => fetchCounterpartyAccounts(id));
+    void preload(PAYMENTS_ACTION_WALLETS_KEY, () => fetchWallets({ includeBalances: true }, t));
+    void preload(["counterparty-accounts", id], () => fetchCounterpartyAccounts(id, t));
   };
 
   const fiatEnabled = hasEnabledRampProvider(rampProviderAccess);

@@ -105,7 +105,7 @@ export function CreateTokenIdentityStep({
               </p>
             ) : null}
             <p className="text-base text-[rgba(28,28,29,0.62)]">
-              {getDecimalsHelperText(template)}
+              {getDecimalsHelperText(template, t)}
             </p>
           </div>
         </div>

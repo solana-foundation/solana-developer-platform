@@ -147,7 +147,6 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     if (quoteExpiresAt && Date.parse(quoteExpiresAt) <= Date.now()) {
       setQuoteExpired(true);
       toast.error(t("DashboardPayments.ramps.quoteExpired"), {
-        // biome-ignore lint/security/noSecrets: typed translation catalog key
         description: t("DashboardPayments.ramps.status.quoteExpiredPayoutDescription"),
         position: "bottom-right",
       });
@@ -160,12 +159,15 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     });
 
     try {
-      const transfer = await createTransfer({
-        source: wizard.fields.walletId,
-        destination: cryptoDepositInstruction.destinationAddress,
-        token: sourceTokenMint,
-        amount: wizard.fields.amount.trim(),
-      });
+      const transfer = await createTransfer(
+        {
+          source: wizard.fields.walletId,
+          destination: cryptoDepositInstruction.destinationAddress,
+          token: sourceTokenMint,
+          amount: wizard.fields.amount.trim(),
+        },
+        t
+      );
       setOnchainSendResult(transfer);
       toast.success(t("DashboardPayments.ramps.transferSubmitted"), {
         id: toastId,
@@ -192,7 +194,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
   const { data: transferStatus, isValidating: transferStatusLoading } = useSWR(
     transferStatusKey,
     ([, provider, providerReference]): Promise<PaymentTransferSummary | null> =>
-      fetchTransferByProviderReference({ provider, providerReference }),
+      fetchTransferByProviderReference({ provider, providerReference }, t),
     {
       refreshInterval: (transfer) =>
         transfer && isTerminalRampTransferStatus(transfer.status) ? 0 : 3000,

@@ -15,7 +15,8 @@ export interface ZodFormApi<TInput, TOutput> {
 
 export function useZodForm<TSchema extends z.ZodTypeAny>(
   schema: TSchema,
-  initialValues: z.input<TSchema>
+  initialValues: z.input<TSchema>,
+  resolveIssueMessage: (message: string) => string = (message) => message
 ): ZodFormApi<z.input<TSchema>, z.output<TSchema>> {
   type TInput = z.input<TSchema>;
   type TOutput = z.output<TSchema>;
@@ -40,14 +41,14 @@ export function useZodForm<TSchema extends z.ZodTypeAny>(
       const fieldErrors: FieldErrors<TInput> = {};
       for (const issue of result.error.issues) {
         const key = issue.path[0] as keyof TInput | undefined;
-        if (key && !fieldErrors[key]) fieldErrors[key] = issue.message;
+        if (key && !fieldErrors[key]) fieldErrors[key] = resolveIssueMessage(issue.message);
       }
       setErrors(fieldErrors);
       return { ok: false as const };
     }
     setErrors({});
     return { ok: true as const, data: result.data as TOutput };
-  }, [values, schema]);
+  }, [values, schema, resolveIssueMessage]);
 
   const reset = useCallback(() => {
     setValues(initialValuesRef.current);

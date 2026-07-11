@@ -11,4 +11,10 @@ describe("i18n messages", () => {
   it("resolves typed catalog entries", () => {
     expect(translate(getMessages("en"), "Home.joinWaitlist")).toBe("Join the waitlist");
   });
+
+  it("rejects missing interpolation values", () => {
+    expect(() => translate(getMessages("en"), "DashboardCustody.rotateKey")).toThrow(
+      "Missing interpolation value hours for DashboardCustody.rotateKey"
+    );
+  });
 });

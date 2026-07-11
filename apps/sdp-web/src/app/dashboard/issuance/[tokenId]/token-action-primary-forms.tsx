@@ -215,7 +215,7 @@ export function TokenActionPrimaryForms({
               <TokenValidationMessage
                 message={
                   !isPending && mintDisabledReason
-                    ? `Mint unavailable — ${mintDisabledReason}`
+                    ? t("DashboardIssuance.errors.mintUnavailable", { reason: mintDisabledReason })
                     : null
                 }
                 reserveSpace={false}
@@ -301,7 +301,7 @@ export function TokenActionPrimaryForms({
               <TokenValidationMessage
                 message={
                   !isPending && burnDisabledReason
-                    ? `Burn unavailable — ${burnDisabledReason}`
+                    ? t("DashboardIssuance.errors.burnUnavailable", { reason: burnDisabledReason })
                     : null
                 }
                 reserveSpace={false}

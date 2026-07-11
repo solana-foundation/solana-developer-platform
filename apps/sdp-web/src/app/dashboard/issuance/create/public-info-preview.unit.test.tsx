@@ -1,5 +1,8 @@
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { getMessages } from "@/i18n/messages";
+import { I18nProvider } from "@/i18n/provider";
 import { createInitialDraft } from "./issuance-draft-wizard.types";
 import { PublicInfoPreview } from "./public-info-preview";
 
@@ -12,9 +15,17 @@ function stablecoinDraft() {
   return draft;
 }
 
+function renderWithI18n(children: ReactNode) {
+  return renderToStaticMarkup(
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      {children}
+    </I18nProvider>
+  );
+}
+
 describe("PublicInfoPreview", () => {
   it("renders public-field toggles as disabled while saving", () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithI18n(
       <PublicInfoPreview draft={stablecoinDraft()} onToggleField={() => undefined} disabled />
     );
 
@@ -22,7 +33,7 @@ describe("PublicInfoPreview", () => {
   });
 
   it("summarizes public-field coverage", () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithI18n(
       <PublicInfoPreview draft={stablecoinDraft()} onToggleField={() => undefined} />
     );
 
@@ -31,7 +42,7 @@ describe("PublicInfoPreview", () => {
   });
 
   it("makes each toggleable field row a full-width button", () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithI18n(
       <PublicInfoPreview draft={stablecoinDraft()} onToggleField={() => undefined} />
     );
 
@@ -40,7 +51,7 @@ describe("PublicInfoPreview", () => {
   });
 
   it("hides the mint address until the token is deployed", () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithI18n(
       <PublicInfoPreview draft={stablecoinDraft()} onToggleField={() => undefined} />
     );
 
@@ -49,7 +60,7 @@ describe("PublicInfoPreview", () => {
   });
 
   it("shows the truncated mint address once deployed", () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithI18n(
       <PublicInfoPreview
         draft={stablecoinDraft()}
         onToggleField={() => undefined}

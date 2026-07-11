@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
 import {
   buildIssuanceMetadata,
   getDefaultPublicFields,
@@ -15,6 +16,9 @@ function draftWith(overrides: Partial<DraftState>): DraftState {
     ...overrides,
   };
 }
+
+const t = (key: MessageKey, values?: TranslationValues) =>
+  translate(getMessages("en"), key, values);
 
 describe("getDefaultPublicFields", () => {
   it("returns the registry projection for a known type", () => {
@@ -52,7 +56,7 @@ describe("getPublicFieldCandidates", () => {
       pegCurrency: "USD",
       publicFields: ["asset.issuerName"],
     });
-    const candidates = getPublicFieldCandidates(draft);
+    const candidates = getPublicFieldCandidates(draft, t);
 
     // Pool order: issuerName before pegCurrency; website (empty) is omitted.
     expect(candidates.map((candidate) => candidate.path)).toEqual([
@@ -67,6 +71,9 @@ describe("getPublicFieldCandidates", () => {
     );
     expect(candidates.find((candidate) => candidate.path === "asset.issuerName")?.value).toBe(
       "Acme Inc"
+    );
+    expect(candidates.find((candidate) => candidate.path === "asset.issuerName")?.label).toBe(
+      "Issuer name"
     );
   });
 });

@@ -64,6 +64,7 @@ interface ComboboxProps {
   footer?: (close: () => void) => ReactNode;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Accessible combobox behavior is clearer when keyboard, filtering, and selection state remain co-located.
 export function Combobox({
   value,
   onChange,
@@ -71,9 +72,9 @@ export function Combobox({
   label,
   required,
   className,
-  placeholder = "Select an option",
+  placeholder,
   searchable = true,
-  searchPlaceholder = "Search…",
+  searchPlaceholder,
   icon,
   trailing,
   size = "xl",
@@ -86,6 +87,8 @@ export function Combobox({
   footer,
 }: ComboboxProps) {
   const t = useTranslations();
+  const resolvedPlaceholder = placeholder ?? t("Shared.SharedComponents.selectAnOption");
+  const resolvedSearchPlaceholder = searchPlaceholder ?? t("Shared.SharedComponents.search");
   const labelId = useId();
   const portalContainer = usePortalContainer();
   const [open, setOpen] = useState(false);
@@ -171,7 +174,7 @@ export function Combobox({
             ) : null}
           </span>
         ) : (
-          <span className="text-text-low">{placeholder}</span>
+          <span className="text-text-low">{resolvedPlaceholder}</span>
         )}
       </span>
       {trailing ? <span className="shrink-0">{trailing}</span> : null}
@@ -216,7 +219,7 @@ export function Combobox({
                   }
                 }
               }}
-              placeholder={searchPlaceholder}
+              placeholder={resolvedSearchPlaceholder}
               className="pl-9"
             />
           </div>

@@ -57,7 +57,7 @@ function parseCoinbaseFrameEvent(raw: unknown): CoinbaseFrameEvent | null {
 }
 
 function reportRampEvent(event: CoinbaseRampEvent, t: Translate): void {
-  postCoinbaseRampEvent(event).catch((error) => {
+  postCoinbaseRampEvent(event, t).catch((error) => {
     toast.error(t("DashboardPayments.ramps.coinbaseEventFailed"), {
       description:
         error instanceof Error ? error.message : t("DashboardPayments.ramps.eventRequestFailed"),

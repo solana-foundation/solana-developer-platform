@@ -24,11 +24,14 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
   const { data, error } = useSWR(
     ["counterparty-recent-transfers", counterpartyId],
     () =>
-      fetchTransfers({
-        pageSize: RECENT_TRANSFERS_MAX_ROWS,
-        counterpartyId,
-        statuses: SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
-      }),
+      fetchTransfers(
+        {
+          pageSize: RECENT_TRANSFERS_MAX_ROWS,
+          counterpartyId,
+          statuses: SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
+        },
+        t
+      ),
     { revalidateOnFocus: false, revalidateIfStale: false, keepPreviousData: false }
   );
 
@@ -102,7 +105,7 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
                 </>
               ) : null}
               <span className="min-w-0 flex-1 truncate text-sm text-text-medium">
-                {resolveTransferTypeLabel(transfer.type)}
+                {resolveTransferTypeLabel(transfer.type, t)}
               </span>
               {flow.send || flow.receive ? (
                 <span className="flex shrink-0 items-center gap-1.5 text-sm">

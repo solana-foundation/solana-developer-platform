@@ -281,7 +281,7 @@ export function MoneygramRampWidget({
     let handle: MoneygramRampsHandle | null = null;
 
     const post = (event: MoneygramRampEvent) => {
-      postMoneygramRampEvent(event).catch((error) => {
+      postMoneygramRampEvent(event, t).catch((error) => {
         toast.error(t("DashboardPayments.ramps.moneygramEventFailed"), {
           description:
             error instanceof Error
@@ -318,27 +318,42 @@ export function MoneygramRampWidget({
           ),
           onSignTransaction: async (tx) => {
             if (tx.chain !== "solana" || tx.asset !== cryptoAsset) {
-              throw new Error(`Unsupported transaction: ${tx.asset} on ${tx.chain}.`);
+              throw new Error(
+                t("DashboardPayments.ramps.unsupportedMoneygramTransaction", {
+                  asset: tx.asset,
+                  chain: tx.chain,
+                })
+              );
             }
             if (!sourceTokenMint) {
-              throw new Error("Source wallet has no USDC balance to send.");
+              throw new Error(t("DashboardPayments.ramps.sourceWalletNoUsdc"));
             }
-            const transfer = await createTransfer({
-              source: sourceWalletId,
-              destination: tx.to,
-              token: sourceTokenMint,
-              amount: tx.amount,
-              ...(tx.memo ? { memo: tx.memo } : {}),
-            });
+            const transfer = await createTransfer(
+              {
+                source: sourceWalletId,
+                destination: tx.to,
+                token: sourceTokenMint,
+                amount: tx.amount,
+                ...(tx.memo ? { memo: tx.memo } : {}),
+              },
+              t
+            );
             if (!transfer.signature) {
-              throw new Error(`Transfer did not return a signature (status: ${transfer.status}).`);
+              throw new Error(
+                t("DashboardPayments.ramps.transferSignatureMissing", {
+                  status: transfer.status,
+                })
+              );
             }
             signedTransferIdRef.current = transfer.id;
-            await postMoneygramRampEvent({
-              kind: "signed",
-              sessionId,
-              cryptoTransferId: transfer.id,
-            });
+            await postMoneygramRampEvent(
+              {
+                kind: "signed",
+                sessionId,
+                cryptoTransferId: transfer.id,
+              },
+              t
+            );
             return transfer.signature;
           },
           onComplete: (transaction) => {
