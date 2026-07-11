@@ -1,3 +1,5 @@
+"use client";
+
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import {
   formatTokenAmount,
@@ -49,4 +51,3 @@ export function AmountBalanceReadout({
     </div>
   );
 }
-("use client");
