@@ -724,13 +724,13 @@ function FieldRow({
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-[#1c1c1d]">{label}</p>
         {value ? (
-          <p className="mt-0.5 break-words text-sm text-[rgba(28,28,29,0.55)]">{value}</p>
+          <p className="mt-0.5 wrap-anywhere text-sm text-[rgba(28,28,29,0.55)]">{value}</p>
         ) : null}
       </div>
       {locked ? (
         <span
           title="Always public — can't be hidden"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.55)]"
+          className="flex h-7 w-7 shrink-0 items-center justify-center self-center rounded-full bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.55)]"
         >
           <Lock className="h-3.5 w-3.5" />
         </span>
