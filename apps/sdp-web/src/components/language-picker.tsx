@@ -62,7 +62,11 @@ export function LanguagePicker({ variant = "topbar" }: { variant?: "topbar" | "l
         </DropdownMenuLabel>
         <DropdownMenuRadioGroup value={locale} onValueChange={selectLocale}>
           {supportedLocales.map((supportedLocale) => (
-            <DropdownMenuRadioItem key={supportedLocale} value={supportedLocale}>
+            <DropdownMenuRadioItem
+              key={supportedLocale}
+              value={supportedLocale}
+              className="pl-2.5 data-[state=checked]:bg-border-light data-[state=checked]:font-semibold [&>span:first-child]:hidden"
+            >
               <span>{localeDisplayName(supportedLocale, supportedLocale)}</span>
               <span className="ml-auto text-xs font-normal tracking-wide text-text-extra-low uppercase">
                 {supportedLocale}
