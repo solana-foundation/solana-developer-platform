@@ -212,6 +212,7 @@ function DashboardTopBar({
           </h1>
         </div>
         <div className="flex items-center justify-end gap-2">
+          <LanguagePicker />
           <UserButton />
           {sandboxBadge}
         </div>
@@ -234,6 +235,7 @@ function DashboardTopBar({
       </div>
 
       <div className="flex items-center gap-2">
+        <LanguagePicker />
         <UserButton />
         {sandboxBadge}
       </div>
@@ -630,7 +632,6 @@ function DashboardSidebarContent({
         ))}
       </div>
       <div className="space-y-0.5 px-3 pb-1">
-        <LanguagePicker collapsed={isCollapsed} />
         <SentryFeedbackWidget collapsed={isCollapsed} />
         {bottomNavItems.map((item) => {
           const Icon = item.icon;

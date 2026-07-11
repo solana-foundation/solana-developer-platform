@@ -21,11 +21,11 @@ function localeDisplayName(locale: AppLocale, displayLocale: AppLocale): string 
   return new Intl.DisplayNames([displayLocale], { type: "language" }).of(locale) ?? locale;
 }
 
-export function LanguagePicker({ collapsed = false }: { collapsed?: boolean }) {
+export function LanguagePicker({ variant = "topbar" }: { variant?: "topbar" | "landing" }) {
   const locale = useLocale();
   const t = useTranslations();
   const router = useRouter();
-  const currentLocaleName = localeDisplayName(locale, locale);
+  const isLanding = variant === "landing";
 
   const selectLocale = (value: string) => {
     if (!isAppLocale(value) || value === locale) return;
@@ -41,25 +41,22 @@ export function LanguagePicker({ collapsed = false }: { collapsed?: boolean }) {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          title={collapsed ? t("Shared.dashboardShell.language") : undefined}
-          aria-label={collapsed ? t("Shared.dashboardShell.language") : undefined}
+          title={t("Shared.dashboardShell.language")}
+          aria-label={t("Shared.dashboardShell.language")}
           className={cn(
-            "group flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-text-medium outline-none transition-colors hover:bg-border-light hover:text-text-extra-high focus-visible:ring-2 focus-visible:ring-border-medium",
-            collapsed && "justify-center"
+            "flex items-center justify-center outline-none transition-colors focus-visible:ring-2",
+            isLanding
+              ? "h-9 w-9 justify-center rounded-lg text-[rgba(28,28,29,0.6)] hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d] focus-visible:ring-[rgba(28,28,29,0.18)]"
+              : "h-8 w-8 rounded-lg text-text-medium hover:bg-border-light hover:text-text-extra-high focus-visible:ring-border-medium"
           )}
         >
-          <LanguagesIcon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
-          {collapsed ? null : (
-            <>
-              <span className="whitespace-nowrap">{t("Shared.dashboardShell.language")}</span>
-              <span className="ml-auto max-w-28 truncate text-xs text-text-extra-low transition-colors group-hover:text-text-low">
-                {currentLocaleName}
-              </span>
-            </>
-          )}
+          <LanguagesIcon
+            className={cn("shrink-0", isLanding ? "h-4 w-4" : "h-5 w-5")}
+            strokeWidth={1.9}
+          />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-64 p-2">
+      <DropdownMenuContent align="end" side="bottom" sideOffset={8} className="w-64 p-2">
         <DropdownMenuLabel className="px-2 py-1">
           {t("Shared.dashboardShell.chooseLanguage")}
         </DropdownMenuLabel>
