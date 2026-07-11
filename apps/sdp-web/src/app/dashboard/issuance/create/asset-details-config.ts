@@ -1,5 +1,5 @@
 import type { AssetCategory } from "@sdp/types";
-import type { MessageKey } from "@/i18n/messages";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {
   type AccessControlMode,
   type CapacityKey,
@@ -11,6 +11,7 @@ import {
 // different assets show different fields (the sketch is stablecoin-shaped).
 
 export type FieldControl = "text" | "textarea" | "number" | "select" | "toggle" | "currency";
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 // DraftState keys editable through a category detail section.
 export type DetailFieldKey =
@@ -283,14 +284,14 @@ export function getRecommendedCapacities(
 }
 
 // Human label for an access-control mode (used in summary/review).
-export function accessControlLabel(mode: DraftState["accessControl"]): string | null {
+export function accessControlLabel(mode: DraftState["accessControl"], t: Translate): string | null {
   switch (mode) {
     case "allowlist":
-      return "Allow list";
+      return t("DashboardIssuance.config.allowList");
     case "blocklist":
-      return "Block list";
+      return t("DashboardIssuance.config.blockList");
     case "disabled":
-      return "None";
+      return t("DashboardIssuance.wallet.none");
     default:
       return null;
   }

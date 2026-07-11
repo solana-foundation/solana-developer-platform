@@ -4,8 +4,8 @@ import type { Token } from "@sdp/types";
 import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { Label } from "@/components/ui/label";
-import { useTranslations } from "@/i18n/provider";
 import { Select, SelectItem } from "@/components/ui/select";
+import { useTranslations } from "@/i18n/provider";
 import { AdvancedCapacities } from "../../../create/advanced-capacities";
 import { ACCESS_CONTROL_OPTIONS, accessControlLabel } from "../../../create/asset-details-config";
 import { FormCard, ReadOnlyField } from "../../../create/form-primitives";
@@ -60,7 +60,10 @@ export function ComplianceTab({
           {isDeployed ? (
             <ReadOnlyField
               label={t("DashboardIssuance.compliance.accessControl")}
-              value={accessControlLabel(draft.accessControl) ?? t("DashboardIssuance.compliance.notSet")}
+              value={
+                accessControlLabel(draft.accessControl, t) ??
+                t("DashboardIssuance.compliance.notSet")
+              }
               lockReason={t("DashboardIssuance.compliance.lockReason")}
             />
           ) : (
@@ -103,7 +106,9 @@ export function ComplianceTab({
       {availableActions.length > 0 ? (
         <div className="space-y-4 pt-2">
           <div>
-            <p className="text-base font-medium text-[#1c1c1d]">{t("DashboardIssuance.compliance.controls")}</p>
+            <p className="text-base font-medium text-[#1c1c1d]">
+              {t("DashboardIssuance.compliance.controls")}
+            </p>
             <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
               {t("DashboardIssuance.compliance.controlsDescription")}
             </p>

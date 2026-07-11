@@ -554,6 +554,8 @@
       "issuerNamePlaceholder": "e.g., Acme Financial Inc.",
       "backingType": "Backing type",
       "currency": "Currency",
+      "selectField": "Select {field}",
+      "searchCurrencies": "Search currencies",
       "pegTarget": "Peg or target",
       "pegTargetPlaceholder": "1.00 USD",
       "reserveAsset": "Reserve asset",

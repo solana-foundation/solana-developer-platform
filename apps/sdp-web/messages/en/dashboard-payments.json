@@ -503,6 +503,8 @@
       "type": "Type",
       "manageCounterparty": "Manage Counterparty",
       "counterpartyActions": "Counterparty actions",
+      "transactionDetails": "Transaction details",
+      "playgroundProductName": "Counterparty",
       "counterpartyIdPathPlaceholder": "{counterpartyId}",
       "playgroundCounterpartyIdPlaceholder": "Counterparty ID (e.g. cpty_abc123)",
       "listCounterparties": "List Counterparties",

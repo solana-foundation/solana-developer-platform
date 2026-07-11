@@ -74,7 +74,8 @@
     "nextPage": "Next page",
     "loading": "Loading…",
     "noOptionsAvailable": "No options available.",
-    "noSearchMatches": "No matches for your search."
+    "noSearchMatches": "No matches for your search.",
+    "required": "(required)"
   },
   "dashboardShell": {
     "openNavigation": "Open navigation",

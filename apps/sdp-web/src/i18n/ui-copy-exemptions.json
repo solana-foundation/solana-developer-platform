@@ -88,15 +88,15 @@
     "reason": "Ramp provider brand name"
   },
   {
-    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:819:9:details",
+    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:829:9:details",
     "reason": "Internal counterparty tab identifier"
   },
   {
-    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:819:9:transactions",
+    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:829:9:transactions",
     "reason": "Internal counterparty tab identifier"
   },
   {
-    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:982:25:Solana",
+    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:992:25:Solana",
     "reason": "Solana product brand name"
   },
   {

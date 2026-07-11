@@ -146,7 +146,7 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
           <SummaryRow
             icon={ShieldCheck}
             label={t("DashboardIssuance.summary.accessControl")}
-            value={accessControlLabel(draft.accessControl)}
+            value={accessControlLabel(draft.accessControl, t)}
           />
           <SummaryRow
             icon={ArrowLeftRight}

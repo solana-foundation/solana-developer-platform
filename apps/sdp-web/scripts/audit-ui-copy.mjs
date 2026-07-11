@@ -7,7 +7,15 @@ const webDirectory = path.resolve(scriptDirectory, "..");
 const sourceDirectory = path.join(webDirectory, "src");
 const baselinePath = path.join(webDirectory, "src/i18n/ui-copy-baseline.json");
 const exemptionsPath = path.join(webDirectory, "src/i18n/ui-copy-exemptions.json");
-const userFacingAttributeNames = new Set(["alt", "aria-label", "placeholder", "title"]);
+const userFacingAttributeNames = new Set([
+  "alt",
+  "aria-label",
+  "ariaLabel",
+  "placeholder",
+  "productName",
+  "searchPlaceholder",
+  "title",
+]);
 const userFacingPropertyNames = new Set(["description", "label", "placeholder", "title"]);
 const nonCopyPropertyNames = new Set(["className", "href", "id", "key", "value"]);
 const sourceExtensions = new Set([".ts", ".tsx"]);

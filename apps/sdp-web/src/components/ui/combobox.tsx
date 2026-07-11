@@ -288,7 +288,7 @@ export function Combobox({
             <span aria-hidden className="text-[#c71f37]">
               *
             </span>
-            <span className="sr-only"> (required)</span>
+            <span className="sr-only"> {t("Shared.SharedComponents.required")}</span>
           </>
         ) : null}
       </Label>

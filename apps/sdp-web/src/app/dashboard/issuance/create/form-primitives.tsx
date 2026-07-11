@@ -201,9 +201,10 @@ export function DetailField({
 
   if (field.control === "currency") {
     const value = typeof raw === "string" ? raw : "";
+    const fieldLabel = t(field.labelKey);
     return (
       <Combobox
-        label={field.label}
+        label={fieldLabel}
         required={required}
         disabled={disabled}
         value={value || null}
@@ -211,8 +212,10 @@ export function DetailField({
         options={FIAT_CURRENCY_OPTIONS}
         size="lg"
         variant="dialog"
-        placeholder={`Select ${field.label.toLowerCase()}`}
-        searchPlaceholder="Search currencies"
+        placeholder={t("DashboardIssuance.config.selectField", {
+          field: fieldLabel.toLowerCase(),
+        })}
+        searchPlaceholder={t("DashboardIssuance.config.searchCurrencies")}
         validationError={error}
         className="border-[length:var(--input-border-width)] border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] text-sm hover:border-[var(--input-border-hover)] hover:bg-[var(--input-bg-hover)]"
       />

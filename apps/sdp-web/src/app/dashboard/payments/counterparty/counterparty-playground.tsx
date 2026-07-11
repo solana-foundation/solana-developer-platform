@@ -30,7 +30,7 @@ export function CounterpartyPlayground({
 
   return (
     <ApiPlaygroundShell
-      productName="Counterparty"
+      productName={t("DashboardPayments.counterparty.playgroundProductName")}
       endpoints={endpoints}
       defaultEndpointId="list-counterparties"
       apiBaseUrl={apiBaseUrl}

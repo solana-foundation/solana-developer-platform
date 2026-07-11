@@ -526,16 +526,26 @@ function TransferDetailModal({
 
   const walletRow = walletAddress ? (
     <DetailRow
-      label={isInbound ? "To" : "From"}
+      label={isInbound ? t("DashboardPayments.requests.to") : t("DashboardPayments.requests.from")}
       value={shortenAddress(walletAddress)}
       mono
       copyValue={walletAddress}
     />
   ) : null;
-  const counterpartyRow = <DetailRow label={isInbound ? "From" : "To"} value={counterpartyParty} />;
+  const counterpartyRow = (
+    <DetailRow
+      label={isInbound ? t("DashboardPayments.requests.from") : t("DashboardPayments.requests.to")}
+      value={counterpartyParty}
+    />
+  );
 
   return (
-    <Modal isOpen ariaLabel="Transaction details" onClose={onClose} size="lg">
+    <Modal
+      isOpen
+      ariaLabel={t("DashboardPayments.counterparty.transactionDetails")}
+      onClose={onClose}
+      size="lg"
+    >
       <div className="space-y-5 p-6">
         <div className="flex items-start justify-between gap-4 pr-8">
           <div className="space-y-1">
