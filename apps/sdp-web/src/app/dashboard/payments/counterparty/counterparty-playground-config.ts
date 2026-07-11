@@ -3,35 +3,39 @@ import type {
   ApiPlaygroundEndpointConfig,
   ApiPlaygroundFieldConfig,
 } from "@/components/api-playground-shell";
-import { toTitleCase } from "../../activity-format-utils";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 
 export interface CounterpartyPlaygroundView {
   id: string;
   displayName: string;
 }
 
-const entityTypeOptions = COUNTERPARTY_ENTITY_TYPES.map((value) => ({
-  label: toTitleCase(value),
-  value,
-}));
-
 const exampleCounterpartyId = "cpty_abc123";
 const exampleDisplayName = "Acme Corp";
 const exampleEmail = "contact@acme.com";
 
-function buildCounterpartyIdField(): ApiPlaygroundFieldConfig {
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+function buildCounterpartyIdField(t: Translate): ApiPlaygroundFieldConfig {
   return {
     key: "counterpartyId",
-    // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
-    label: "{counterpartyId}",
-    placeholder: "Counterparty ID (e.g. cpty_abc123)",
+    label: t("DashboardPayments.counterparty.counterpartyIdPathPlaceholder"),
+    placeholder: t("DashboardPayments.counterparty.playgroundCounterpartyIdPlaceholder"),
     required: true,
   };
 }
 
 export function buildCounterpartyPlaygroundEndpointConfigs(
-  counterparties: CounterpartyPlaygroundView[]
+  counterparties: CounterpartyPlaygroundView[],
+  t: Translate
 ): ApiPlaygroundEndpointConfig[] {
+  const entityTypeOptions = COUNTERPARTY_ENTITY_TYPES.map((value) => ({
+    label:
+      value === "individual"
+        ? t("DashboardPayments.counterparty.individual")
+        : t("DashboardPayments.counterparty.business"),
+    value,
+  }));
   const counterpartyOptions = counterparties.map((cp) => ({
     value: cp.id,
     label: cp.displayName,
@@ -41,15 +45,14 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
     counterpartyOptions.length > 0
       ? {
           key: "counterpartyId",
-          // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
-          label: "{counterpartyId}",
-          placeholder: "Counterparty ID (e.g. cpty_abc123)",
+          label: t("DashboardPayments.counterparty.counterpartyIdPathPlaceholder"),
+          placeholder: t("DashboardPayments.counterparty.playgroundCounterpartyIdPlaceholder"),
           kind: "select",
           options: counterpartyOptions,
           defaultValue: counterpartyOptions[0]?.value ?? "",
           required: true,
         }
-      : buildCounterpartyIdField();
+      : buildCounterpartyIdField(t);
 
   const firstId = counterparties[0]?.id ?? exampleCounterpartyId;
   const firstName = counterparties[0]?.displayName ?? exampleDisplayName;
@@ -57,7 +60,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
   return [
     {
       id: "list-counterparties",
-      title: "List Counterparties",
+      title: t("DashboardPayments.counterparty.listCounterparties"),
       method: "GET",
       path: "/v1/counterparties",
       pathFields: [],
@@ -74,7 +77,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
     },
     {
       id: "get-counterparty",
-      title: "Get Counterparty",
+      title: t("DashboardPayments.counterparty.getCounterparty"),
       method: "GET",
       // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
       path: "/v1/counterparties/{counterpartyId}",
@@ -92,7 +95,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
     },
     {
       id: "create-counterparty",
-      title: "Create Counterparty",
+      title: t("DashboardPayments.counterparty.createCounterparty"),
       method: "POST",
       path: "/v1/counterparties",
       pathFields: [],
@@ -100,21 +103,21 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
         {
           key: "displayName",
           label: "displayName",
-          placeholder: "Acme Corp",
+          placeholder: t("DashboardPayments.counterparty.businessNamePlaceholder"),
           defaultValue: exampleDisplayName,
           required: true,
         },
         {
           key: "email",
           label: "email",
-          placeholder: "contact@acme.com",
+          placeholder: t("DashboardPayments.counterparty.playgroundEmailPlaceholder"),
           defaultValue: exampleEmail,
           required: true,
         },
         {
           key: "entityType",
           label: "entityType",
-          placeholder: "Select entity type",
+          placeholder: t("DashboardPayments.counterparty.selectEntityType"),
           kind: "select",
           options: entityTypeOptions,
           defaultValue: "business",
@@ -123,7 +126,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
         {
           key: "externalId",
           label: "externalId",
-          placeholder: "Your internal reference ID",
+          placeholder: t("DashboardPayments.counterparty.externalIdPlaceholder"),
         },
       ],
       expectedResponse: {
@@ -139,7 +142,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
     },
     {
       id: "update-counterparty",
-      title: "Update Counterparty",
+      title: t("DashboardPayments.counterparty.updateCounterparty"),
       method: "PATCH",
       // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
       path: "/v1/counterparties/{counterpartyId}",
@@ -148,24 +151,24 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
         {
           key: "displayName",
           label: "displayName",
-          placeholder: "Updated display name",
+          placeholder: t("DashboardPayments.counterparty.updatedDisplayNamePlaceholder"),
         },
         {
           key: "email",
           label: "email",
-          placeholder: "updated@example.com",
+          placeholder: t("DashboardPayments.counterparty.updatedEmailPlaceholder"),
         },
         {
           key: "entityType",
           label: "entityType",
-          placeholder: "Select entity type",
+          placeholder: t("DashboardPayments.counterparty.selectEntityType"),
           kind: "select",
           options: entityTypeOptions,
         },
         {
           key: "externalId",
           label: "externalId",
-          placeholder: "Your internal reference ID",
+          placeholder: t("DashboardPayments.counterparty.externalIdPlaceholder"),
         },
       ],
       expectedResponse: {
@@ -180,7 +183,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
     },
     {
       id: "delete-counterparty",
-      title: "Delete Counterparty",
+      title: t("DashboardPayments.counterparty.deleteCounterparty"),
       method: "DELETE",
       // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
       path: "/v1/counterparties/{counterpartyId}",

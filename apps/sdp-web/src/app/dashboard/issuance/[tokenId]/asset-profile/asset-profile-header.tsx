@@ -4,31 +4,13 @@ import type { AssetProfile, Token } from "@sdp/types";
 import { ArrowUpRight, Copy, Play, Rocket } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { getCategoryPresentation, getSubTypePresentation } from "../../create/asset-taxonomy";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
 
 // SDP design-system badge tokens (sdp-design-system.css): .badge-gray,
 // .badge-green, .badge-amber, .badge-red — tinted fill + semantic text, no border.
-const STATUS_BADGES: Record<Token["status"], { label: string; className: string }> = {
-  pending: {
-    label: "Draft",
-    className: "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]",
-  },
-  active: {
-    label: "Active",
-    className: "bg-[rgba(0,160,102,0.08)] text-[#00a066]",
-  },
-  paused: {
-    label: "Paused",
-    className: "bg-[rgba(234,179,8,0.08)] text-[#92400e]",
-  },
-  revoked: {
-    label: "Revoked",
-    className: "bg-[rgba(220,38,38,0.08)] text-[#dc2626]",
-  },
-};
-
 // Decorated header in the asset-profile design language: logo avatar,
 // classification chips with taxonomy icons, quiet identity rows.
 export function AssetProfileHeader({
@@ -58,9 +40,16 @@ export function AssetProfileHeader({
   onDeploy: () => void;
   onUnpause: () => void;
 }) {
+  const t = useTranslations();
+  const statusBadges: Record<Token["status"], { label: string; className: string }> = {
+    pending: { label: t("DashboardIssuance.status.draft"), className: "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]" },
+    active: { label: t("DashboardIssuance.status.active"), className: "bg-[rgba(0,160,102,0.08)] text-[#00a066]" },
+    paused: { label: t("DashboardIssuance.status.paused"), className: "bg-[rgba(234,179,8,0.08)] text-[#92400e]" },
+    revoked: { label: t("DashboardIssuance.status.revoked"), className: "bg-[rgba(220,38,38,0.08)] text-[#dc2626]" },
+  };
   const category = getCategoryPresentation(assetProfile.assetCategory);
   const subType = getSubTypePresentation(assetProfile.assetCategory, assetProfile.assetType);
-  const status = STATUS_BADGES[token.status];
+  const status = statusBadges[token.status];
   const addressLabel = token.mintAddress
     ? `${token.mintAddress.slice(0, 5)}…${token.mintAddress.slice(-4)}`
     : null;
@@ -72,7 +61,7 @@ export function AssetProfileHeader({
           // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
           <img
             src={token.imageUrl}
-            alt={`${token.name} logo`}
+            alt={t("DashboardIssuance.header.tokenLogo", { name: token.name })}
             className="h-16 w-16 shrink-0 rounded-full object-cover ring-1 ring-black/5"
           />
         ) : (
@@ -97,8 +86,8 @@ export function AssetProfileHeader({
           </div>
 
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            {category ? <ClassificationChip icon={category.icon} label={category.label} /> : null}
-            {subType ? <ClassificationChip icon={subType.icon} label={subType.label} /> : null}
+            {category ? <ClassificationChip icon={category.icon} label={t(category.labelKey)} /> : null}
+            {subType ? <ClassificationChip icon={subType.icon} label={t(subType.labelKey)} /> : null}
           </div>
 
           <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-[rgba(28,28,29,0.55)]">
@@ -109,7 +98,7 @@ export function AssetProfileHeader({
                   type="button"
                   onClick={onCopyAddress}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[rgba(28,28,29,0.5)] transition-colors hover:bg-[rgba(28,28,29,0.05)] hover:text-[#1c1c1d]"
-                  aria-label="Copy token address"
+                  aria-label={t("DashboardIssuance.header.copyTokenAddress")}
                 >
                   <Copy className="h-3.5 w-3.5" />
                 </button>
@@ -121,7 +110,7 @@ export function AssetProfileHeader({
                 type="button"
                 onClick={onCopyTokenId}
                 className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[rgba(28,28,29,0.5)] transition-colors hover:bg-[rgba(28,28,29,0.05)] hover:text-[#1c1c1d]"
-                aria-label="Copy token ID"
+                aria-label={t("DashboardIssuance.header.copyTokenId")}
               >
                 <Copy className="h-3.5 w-3.5" />
               </button>
@@ -134,7 +123,7 @@ export function AssetProfileHeader({
         {explorerHref ? (
           <Button variant="outline" asChild>
             <Link href={explorerHref} target="_blank" rel="noopener noreferrer">
-              Explorer
+              {t("DashboardIssuance.header.explorer")}
               <ArrowUpRight className="h-4 w-4" />
             </Link>
           </Button>
@@ -148,7 +137,7 @@ export function AssetProfileHeader({
               onClick={onDeploy}
               disabled={isPending || Boolean(deployDisabledReason)}
             >
-              Deploy
+              {t("DashboardIssuance.header.deploy")}
             </Button>
           </TokenDisabledActionTooltip>
         ) : token.status === "paused" && canManageTokenAdmin ? (
@@ -159,7 +148,7 @@ export function AssetProfileHeader({
               onClick={onUnpause}
               disabled={isPending || Boolean(pauseDisabledReason)}
             >
-              Unpause
+              {t("DashboardIssuance.header.unpause")}
             </Button>
           </TokenDisabledActionTooltip>
         ) : null}

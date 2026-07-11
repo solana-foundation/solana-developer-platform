@@ -2,6 +2,7 @@
 
 import type { CounterpartyAccount } from "@sdp/types";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 import { CryptoAccountForm } from "./crypto-account-form";
 
 interface AddExternalAccountDialogProps {
@@ -17,16 +18,17 @@ export function AddExternalAccountDialog({
   onAdded,
   onClose,
 }: AddExternalAccountDialogProps) {
+  const t = useTranslations();
+
   return (
-    <Modal isOpen={isOpen} ariaLabel="Add external account" onClose={onClose} size="md">
+    <Modal isOpen={isOpen} ariaLabel={t("DashboardPayments.counterparty.addExternalAccount")} onClose={onClose} size="md">
       <div className="space-y-5 p-6">
         <div className="space-y-1">
           <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
-            Add external account
+            {t("DashboardPayments.counterparty.addExternalAccount")}
           </h2>
           <p className="text-sm text-text-medium">
-            Attach a crypto wallet for this counterparty. The address is screened for risk before
-            it's added.
+            {t("DashboardPayments.counterparty.addExternalAccountDescription")}
           </p>
         </div>
         <CryptoAccountForm

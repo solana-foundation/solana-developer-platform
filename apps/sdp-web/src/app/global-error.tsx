@@ -3,6 +3,8 @@
 import * as Sentry from "@sentry/nextjs";
 import NextError from "next/error";
 import { useEffect, useState } from "react";
+import { translate } from "@/i18n/messages";
+import en from "../../messages/en.json";
 
 export default function GlobalError({
   error,
@@ -27,11 +29,11 @@ export default function GlobalError({
         generic error message. */}
         <NextError statusCode={0} />
         <button onClick={() => reset()} type="button">
-          Try again
+          {translate(en, "Error.tryAgain")}
         </button>
         {eventId ? (
           <button onClick={() => Sentry.showReportDialog({ eventId })} type="button">
-            Report this issue
+            {translate(en, "Error.reportIssue")}
           </button>
         ) : null}
       </body>

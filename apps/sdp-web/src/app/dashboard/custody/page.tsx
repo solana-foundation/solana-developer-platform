@@ -19,6 +19,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createOrgSdpApiClient, createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { getTranslations } from "@/i18n/server";
 import type { OnboardingStatusResponse } from "../onboarding-status";
 import { WalletsWorkspace } from "./wallets-workspace";
 
@@ -92,36 +93,36 @@ async function getClerkOrganizationSummary(
 }
 
 async function OnboardingGateSection({ orgId }: { orgId: string }) {
+  const t = await getTranslations();
   const organization = await getClerkOrganizationSummary(orgId);
 
   return (
     <Card className="rounded-[24px] border-[rgba(28,28,29,0.08)] shadow-none">
       <CardHeader>
-        <CardTitle>Waiting for organization sync</CardTitle>
+        <CardTitle>{t("DashboardCustody.waitingForOrganizationSync")}</CardTitle>
         <CardDescription>
-          SDP is waiting for the Clerk webhook to create this organization mapping.
+          {t("DashboardCustody.organizationSyncDescription")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] p-4 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-[rgba(28,28,29,0.72)]">Organization name</span>
-            <span className="font-medium text-[#1c1c1d]">{organization.name ?? "Unavailable"}</span>
+            <span className="text-[rgba(28,28,29,0.72)]">{t("DashboardCustody.organizationName")}</span>
+            <span className="font-medium text-[#1c1c1d]">{organization.name ?? t("DashboardCustody.unavailable")}</span>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-[rgba(28,28,29,0.72)]">Organization slug</span>
+            <span className="text-[rgba(28,28,29,0.72)]">{t("DashboardCustody.organizationSlug")}</span>
             <span className="font-mono text-xs text-[#1c1c1d]">
-              {organization.slug ?? "Unavailable"}
+              {organization.slug ?? t("DashboardCustody.unavailable")}
             </span>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-[rgba(28,28,29,0.72)]">Clerk organization ID</span>
+            <span className="text-[rgba(28,28,29,0.72)]">{t("DashboardCustody.clerkOrganizationId")}</span>
             <span className="font-mono text-xs text-[#1c1c1d]">{organization.id}</span>
           </div>
         </div>
         <p className="text-sm text-[rgba(28,28,29,0.72)]">
-          Organization creation and membership sync now happen from Clerk webhooks only. Refresh in
-          a moment; if this keeps showing, check the Clerk webhook delivery for this organization.
+          {t("DashboardCustody.organizationSyncHelp")}
         </p>
       </CardContent>
     </Card>
@@ -129,6 +130,7 @@ async function OnboardingGateSection({ orgId }: { orgId: string }) {
 }
 
 export default async function CustodyPage() {
+  const t = await getTranslations();
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -188,12 +190,12 @@ export default async function CustodyPage() {
       ? null
       : configsResult.error instanceof Error
         ? configsResult.error.message
-        : "Unable to load wallet providers";
+        : t("DashboardCustody.unableToLoadWalletProviders");
     const walletsError = walletsResult.ok
       ? null
       : walletsResult.error instanceof Error
         ? walletsResult.error.message
-        : "Unable to load wallets";
+        : t("DashboardCustody.unableToLoadWallets");
     const apiKeys = apiKeysResult.ok ? (apiKeysResult.data ?? []) : [];
     const enabledProviders = providerAccessResult.ok
       ? providerAccessResult.value.enabledCustodyProviders

@@ -14,6 +14,7 @@ import {
 } from "@/lib/places";
 import { useDebounce } from "@/lib/use-debounce";
 import { cn } from "@/lib/utils";
+import { useTranslations } from "@/i18n/provider";
 
 const MIN_QUERY_LENGTH = 3;
 
@@ -22,6 +23,7 @@ interface AddressAutocompleteProps {
 }
 
 export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
+  const t = useTranslations();
   const [query, setQuery] = useState("");
   const [pickedQuery, setPickedQuery] = useState("");
   const [focused, setFocused] = useState(false);
@@ -67,7 +69,9 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
       setSelected(place);
       onSelect(place.addressFields);
     } catch (err) {
-      setResolveError(err instanceof Error ? err.message : "Failed to load place details");
+      setResolveError(
+        err instanceof Error ? err.message : t("DashboardPayments.counterparty.failedToLoadPlaceDetails")
+      );
     } finally {
       sessionTokenRef.current = newPlacesSessionToken();
       setResolving(false);
@@ -77,13 +81,13 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
   return (
     <div className="flex flex-col gap-3">
       <div className="space-y-2">
-        <Label htmlFor="address-search">Search address</Label>
+        <Label htmlFor="address-search">{t("DashboardPayments.counterparty.searchAddress")}</Label>
         <div className="relative">
           <Input
             size="xl"
             id="address-search"
             iconLeft={resolving ? <LoaderCircleIcon className="animate-spin" /> : <SearchIcon />}
-            placeholder="Search address or business…"
+            placeholder={t("DashboardPayments.counterparty.searchAddressPlaceholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => setFocused(true)}
@@ -114,12 +118,18 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
               <div className="max-h-56 overflow-y-auto p-1.5">
                 {searchError ? (
                   <p className="px-3 py-6 text-center text-sm text-status-error-text">
-                    {searchError instanceof Error ? searchError.message : "Search failed"}
+                    {searchError instanceof Error
+                      ? searchError.message
+                      : t("DashboardPayments.counterparty.searchFailed")}
                   </p>
                 ) : suggestions === undefined ? (
-                  <p className="px-3 py-6 text-center text-sm text-text-low">Searching…</p>
+                  <p className="px-3 py-6 text-center text-sm text-text-low">
+                    {t("DashboardPayments.counterparty.searching")}
+                  </p>
                 ) : suggestions.length === 0 ? (
-                  <p className="px-3 py-6 text-center text-sm text-text-low">No matches found.</p>
+                  <p className="px-3 py-6 text-center text-sm text-text-low">
+                    {t("DashboardPayments.counterparty.noMatches")}
+                  </p>
                 ) : (
                   suggestions.map((suggestion, index) => (
                     <button
@@ -149,7 +159,9 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
                   ))
                 )}
                 {isLoading && suggestions !== undefined && (
-                  <p className="px-3 py-1.5 text-center text-xs text-text-low">Updating…</p>
+                  <p className="px-3 py-1.5 text-center text-xs text-text-low">
+                    {t("DashboardPayments.counterparty.updating")}
+                  </p>
                 )}
               </div>
             </div>
@@ -168,7 +180,7 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 bg-border-extra-light text-text-low">
             <MapPinnedIcon className="size-6" />
-            <p className="text-sm">Search to preview the address</p>
+            <p className="text-sm">{t("DashboardPayments.counterparty.searchToPreviewAddress")}</p>
           </div>
         )}
       </div>

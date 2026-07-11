@@ -3,6 +3,7 @@ import {
   type CustodyProvider,
   type CustodyProviderCapabilities,
 } from "@sdp/types";
+import type { MessageKey } from "@/i18n/messages";
 
 const DEFAULT_CUSTODY_CAPABILITIES = ["Issuance", "Transfers", "Compliance"] as const;
 
@@ -12,17 +13,17 @@ export type WalletProviderCategory = (typeof WALLET_PROVIDER_CATEGORIES)[number]
 export const WALLET_PROVIDER_CATEGORY_DETAILS: Record<
   WalletProviderCategory,
   {
-    label: string;
-    description: string;
+    labelKey: MessageKey;
+    descriptionKey: MessageKey;
   }
 > = {
   server: {
-    label: "API",
-    description: "Wallet infrastructure for API-driven product, operations, and automated flows.",
+    labelKey: "DashboardCustody.providerCategoryApi",
+    descriptionKey: "DashboardCustody.providerCategoryApiDescription",
   },
   institutional: {
-    label: "Institutional",
-    description: "Policy-based custody for treasury, settlement, and multi-party approval flows.",
+    labelKey: "DashboardCustody.providerCategoryInstitutional",
+    descriptionKey: "DashboardCustody.providerCategoryInstitutionalDescription",
   },
 };
 
@@ -31,7 +32,7 @@ export type KnownCustodyProvider = CustodyProvider;
 export interface CustodyProviderCatalogEntry {
   id: KnownCustodyProvider;
   label: string;
-  description: string;
+  descriptionKey: MessageKey;
   category: WalletProviderCategory;
   supportsAdditionalWallets: boolean;
   supportsSigning: boolean;
@@ -46,7 +47,7 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
   local: {
     id: "local",
     label: "Local Signer",
-    description: "Self-hosted Ed25519 keypair signer from CUSTODY_PRIVATE_KEY.",
+    descriptionKey: "DashboardCustody.providerLocalDescription",
     category: "server",
     supportsAdditionalWallets: providerSupportsAdditionalWallets("local"),
     supportsSigning: providerSupportsSigning("local"),
@@ -55,7 +56,7 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
   privy: {
     id: "privy",
     label: "Privy",
-    description: "Hosted wallet infrastructure for API signing.",
+    descriptionKey: "DashboardCustody.providerPrivyDescription",
     category: "server",
     supportsAdditionalWallets: providerSupportsAdditionalWallets("privy"),
     supportsSigning: providerSupportsSigning("privy"),
@@ -64,7 +65,7 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
   fireblocks: {
     id: "fireblocks",
     label: "Fireblocks",
-    description: "MPC custody with vault-based wallet controls.",
+    descriptionKey: "DashboardCustody.providerFireblocksDescription",
     category: "institutional",
     supportsAdditionalWallets: providerSupportsAdditionalWallets("fireblocks"),
     supportsSigning: providerSupportsSigning("fireblocks"),
@@ -73,7 +74,7 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
   coinbase_cdp: {
     id: "coinbase_cdp",
     label: "Coinbase CDP",
-    description: "Programmatic wallet provisioning through Coinbase CDP.",
+    descriptionKey: "DashboardCustody.providerCoinbaseCdpDescription",
     category: "server",
     supportsAdditionalWallets: providerSupportsAdditionalWallets("coinbase_cdp"),
     supportsSigning: providerSupportsSigning("coinbase_cdp"),
@@ -82,7 +83,7 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
   para: {
     id: "para",
     label: "Para",
-    description: "Embedded wallet custody for organization-level operations.",
+    descriptionKey: "DashboardCustody.providerParaDescription",
     category: "server",
     supportsAdditionalWallets: providerSupportsAdditionalWallets("para"),
     supportsSigning: providerSupportsSigning("para"),
@@ -91,7 +92,7 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
   turnkey: {
     id: "turnkey",
     label: "Turnkey",
-    description: "Policy-based key custody for production signing workloads.",
+    descriptionKey: "DashboardCustody.providerTurnkeyDescription",
     category: "server",
     supportsAdditionalWallets: providerSupportsAdditionalWallets("turnkey"),
     supportsSigning: providerSupportsSigning("turnkey"),
@@ -100,7 +101,7 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
   dfns: {
     id: "dfns",
     label: "DFNS",
-    description: "MPC wallet orchestration with secure API-driven signing.",
+    descriptionKey: "DashboardCustody.providerDfnsDescription",
     category: "institutional",
     supportsAdditionalWallets: providerSupportsAdditionalWallets("dfns"),
     supportsSigning: providerSupportsSigning("dfns"),
@@ -109,7 +110,7 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
   ibm_haven: {
     id: "ibm_haven",
     label: "IBM Digital Asset Haven",
-    description: "Institutional custody on IBM Digital Asset Haven.",
+    descriptionKey: "DashboardCustody.providerIbmHavenDescription",
     category: "institutional",
     supportsAdditionalWallets: providerSupportsAdditionalWallets("ibm_haven"),
     supportsSigning: providerSupportsSigning("ibm_haven"),
@@ -118,7 +119,7 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
   anchorage: {
     id: "anchorage",
     label: "Anchorage",
-    description: "Institutional custody with wallet lifecycle management.",
+    descriptionKey: "DashboardCustody.providerAnchorageDescription",
     category: "institutional",
     capabilities: ["Transfers", "Compliance"],
     supportsAdditionalWallets: providerSupportsAdditionalWallets("anchorage"),
@@ -127,7 +128,7 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
   utila: {
     id: "utila",
     label: "Utila",
-    description: "Vault-backed Solana wallet signing through Utila service accounts.",
+    descriptionKey: "DashboardCustody.providerUtilaDescription",
     category: "institutional",
     supportsAdditionalWallets: providerSupportsAdditionalWallets("utila"),
     supportsSigning: providerSupportsSigning("utila"),

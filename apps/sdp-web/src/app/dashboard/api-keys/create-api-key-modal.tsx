@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { createApiKeyAction } from "./actions";
 
@@ -35,14 +36,14 @@ function normalizeDraft(): ApiKeyDraft {
   };
 }
 
-function formatEnvironmentLabel(environment: SdpEnvironment): string {
-  return environment === "production" ? "Production" : "Sandbox";
+function formatEnvironmentLabel(environment: SdpEnvironment, t: ReturnType<typeof useTranslations>): string {
+  return environment === "production" ? t("DashboardCustody.production") : t("DashboardCustody.sandbox");
 }
 
-function formatDisplayDate(value: string): string {
-  if (!value) return "None";
+function formatDisplayDate(value: string, t: ReturnType<typeof useTranslations>): string {
+  if (!value) return t("DashboardCustody.none");
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Invalid date";
+  if (Number.isNaN(date.getTime())) return t("DashboardCustody.invalidDate");
   return date.toLocaleString();
 }
 
@@ -50,10 +51,10 @@ function formatWalletLabel(wallet: PaymentsDashboardWallet): string {
   return wallet.label?.trim() || wallet.walletId;
 }
 
-function formatRoleLabel(role: ApiKeyRole): string {
-  if (role === "api_admin") return "Admin";
-  if (role === "api_readonly") return "Read only";
-  return "Developer";
+function formatRoleLabel(role: ApiKeyRole, t: ReturnType<typeof useTranslations>): string {
+  if (role === "api_admin") return t("DashboardCustody.admin");
+  if (role === "api_readonly") return t("DashboardCustody.readOnly");
+  return t("DashboardCustody.developer");
 }
 
 function truncateAddress(value: string): string {
@@ -62,9 +63,10 @@ function truncateAddress(value: string): string {
 }
 
 function PolicyScopeBadge() {
+  const t = useTranslations();
   return (
     <Badge variant="default" className="shrink-0 whitespace-nowrap text-[10px]">
-      No API-key policy
+      {t("DashboardCustody.noApiKeyPolicy")}
     </Badge>
   );
 }
@@ -78,6 +80,7 @@ function ReviewDetail({
   label: string;
   children: ReactNode;
 }) {
+  const t = useTranslations();
   return (
     <div className="flex min-w-0 items-center gap-3 px-4 py-3.5">
       <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.64)]">
@@ -122,12 +125,13 @@ function WalletAccessSection({
   setDraft: Dispatch<SetStateAction<ApiKeyDraft>>;
   toggleWallet: (walletId: string) => void;
 }) {
+  const t = useTranslations();
   return (
     <div className="grid gap-3">
       <div>
-        <Label>Wallet access</Label>
+        <Label>{t("DashboardCustody.walletAccess")}</Label>
         <p className="mt-1 text-xs text-[rgba(28,28,29,0.65)]">
-          Choose whether this key can use every wallet in scope or only selected wallets.
+          {t("DashboardCustody.walletAccessDescription")}
         </p>
       </div>
 
@@ -141,14 +145,14 @@ function WalletAccessSection({
           className="mt-1"
         />
         <div className="min-w-0">
-          <p className="text-sm font-medium text-[#1c1c1d]">All wallets</p>
+          <p className="text-sm font-medium text-[#1c1c1d]">{t("DashboardCustody.allWallets")}</p>
           <p className="text-xs text-[rgba(28,28,29,0.65)]">
-            This key can use every wallet available in its org or project scope.
+            {t("DashboardCustody.allWalletsDescription")}
           </p>
           {draft.walletScope === "all" ? (
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[rgba(28,28,29,0.68)]">
               <ShieldCheck className="size-3.5" />
-              <span>Operation policy</span>
+              <span>{t("DashboardCustody.operationPolicy")}</span>
               <PolicyScopeBadge />
             </div>
           ) : null}
@@ -165,9 +169,9 @@ function WalletAccessSection({
           className="mt-1"
         />
         <div className="min-w-0">
-          <p className="text-sm font-medium text-[#1c1c1d]">Selected wallets</p>
+          <p className="text-sm font-medium text-[#1c1c1d]">{t("DashboardCustody.selectedWallets")}</p>
           <p className="text-xs text-[rgba(28,28,29,0.65)]">
-            Restrict this key to a specific wallet set and choose its default signing wallet.
+            {t("DashboardCustody.selectedWalletsDescription")}
           </p>
         </div>
       </label>
@@ -176,7 +180,7 @@ function WalletAccessSection({
         <div className="rounded-lg border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.02)] p-3">
           {wallets.length === 0 ? (
             <p className="text-sm text-[rgba(28,28,29,0.72)]">
-              No active wallets are available for binding yet.
+              {t("DashboardCustody.noActiveWallets")}
             </p>
           ) : (
             <div className="space-y-3">
@@ -205,7 +209,7 @@ function WalletAccessSection({
                         {checked ? (
                           <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-2 py-1.5 text-xs text-[rgba(28,28,29,0.68)]">
                             <ShieldCheck className="size-3.5" />
-                            <span>Operation policy</span>
+                            <span>{t("DashboardCustody.operationPolicy")}</span>
                             <PolicyScopeBadge />
                           </div>
                         ) : null}
@@ -217,7 +221,7 @@ function WalletAccessSection({
 
               {draft.selectedWalletIds.length > 1 ? (
                 <div className="grid gap-2">
-                  <Label htmlFor="create-key-default-wallet">Default signing wallet</Label>
+                  <Label htmlFor="create-key-default-wallet">{t("DashboardCustody.defaultSigningWallet")}</Label>
                   <select
                     id="create-key-default-wallet"
                     value={draft.defaultWalletId}
@@ -264,10 +268,11 @@ function CreateApiKeyDetailsStep({
   setDraft: Dispatch<SetStateAction<ApiKeyDraft>>;
   toggleWallet: (walletId: string) => void;
 }) {
+  const t = useTranslations();
   return (
     <div className="mt-4 space-y-4">
       <div className="grid gap-2">
-        <Label htmlFor="create-key-name">Name</Label>
+        <Label htmlFor="create-key-name">{t("DashboardCustody.nameLabel")}</Label>
         <Input
           id="create-key-name"
           value={draft.name}
@@ -275,13 +280,13 @@ function CreateApiKeyDetailsStep({
             const name = event.currentTarget.value;
             setDraft((previous) => ({ ...previous, name }));
           }}
-          placeholder="CI deploy key"
+          placeholder={t("DashboardCustody.namePlaceholder")}
           required
         />
       </div>
 
       <div className="grid gap-2">
-        <Label htmlFor="create-key-role">Role</Label>
+        <Label htmlFor="create-key-role">{t("DashboardCustody.role")}</Label>
         <select
           id="create-key-role"
           value={draft.role}
@@ -291,27 +296,27 @@ function CreateApiKeyDetailsStep({
           }}
           className="h-10 w-full rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
         >
-          <option value="api_admin">Admin</option>
-          <option value="api_developer">Developer</option>
-          <option value="api_readonly">Read only</option>
+          <option value="api_admin">{t("DashboardCustody.admin")}</option>
+          <option value="api_developer">{t("DashboardCustody.developer")}</option>
+          <option value="api_readonly">{t("DashboardCustody.readOnly")}</option>
         </select>
         <p className="text-xs text-[rgba(28,28,29,0.65)]">
-          Admin includes custody and platform-level privileges. Developer excludes custody actions.
+          {t("DashboardCustody.apiKeyAdminDescription")}
         </p>
       </div>
 
       <div className="grid gap-2">
-        <Label>Environment</Label>
+        <Label>{t("DashboardCustody.environment")}</Label>
         <div className="flex h-10 items-center rounded-lg border border-[rgba(28,28,29,0.16)] bg-[rgba(28,28,29,0.02)] px-3 text-sm text-[#1c1c1d]">
-          {formatEnvironmentLabel(environment)}
+          {formatEnvironmentLabel(environment, t)}
         </div>
         <p className="text-xs text-[rgba(28,28,29,0.65)]">
-          Switch the workspace environment in the sidebar to create a key in the other environment.
+          {t("DashboardCustody.apiKeyEnvironmentDescription")}
         </p>
       </div>
 
       <div className="grid gap-2">
-        <Label htmlFor="create-key-expires-at">Expiration (optional)</Label>
+        <Label htmlFor="create-key-expires-at">{t("DashboardCustody.expirationOptional")}</Label>
         <Input
           id="create-key-expires-at"
           name="expiresAt"
@@ -334,10 +339,10 @@ function CreateApiKeyDetailsStep({
 
       <div className="mt-2 flex items-center justify-end gap-2">
         <Button type="button" variant="secondary" onClick={close}>
-          Cancel
+          {t("DashboardCustody.cancel")}
         </Button>
         <Button type="button" disabled={!canContinue} onClick={nextStep}>
-          Continue
+          {t("DashboardCustody.continue")}
         </Button>
       </div>
     </div>
@@ -355,6 +360,7 @@ function CreateApiKeyReviewStep({
   environment: SdpEnvironment;
   onBack: () => void;
 }) {
+  const t = useTranslations();
   const defaultSelectedWallet = resolveDefaultSelectedWallet(
     selectedWallets,
     draft.defaultWalletId
@@ -385,29 +391,31 @@ function CreateApiKeyReviewStep({
           <div className="min-w-0">
             <p className="truncate text-base font-semibold text-[#1c1c1d]">{draft.name}</p>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[rgba(28,28,29,0.62)]">
-              <span>{formatEnvironmentLabel(environment)}</span>
+              <span>{formatEnvironmentLabel(environment, t)}</span>
               <span aria-hidden="true">·</span>
-              <span>Expires {formatDisplayDate(draft.expiresAt)}</span>
+              <span>{t("DashboardCustody.expiresOn", { date: formatDisplayDate(draft.expiresAt, t) })}</span>
             </div>
           </div>
         </div>
 
         <div className="grid divide-y divide-[rgba(28,28,29,0.08)] sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-          <ReviewDetail icon={KeyRound} label="Endpoint permissions">
-            {formatRoleLabel(draft.role)}
+          <ReviewDetail icon={KeyRound} label={t("DashboardCustody.endpointPermissions")}>
+            {formatRoleLabel(draft.role, t)}
           </ReviewDetail>
 
-          <ReviewDetail icon={Wallet} label="Wallet access">
+          <ReviewDetail icon={Wallet} label={t("DashboardCustody.walletAccess")}>
             <div className="space-y-2">
               <p>
-                {draft.walletScope === "all" ? "All wallets" : `${selectedWallets.length} selected`}
+                {draft.walletScope === "all"
+                  ? t("DashboardCustody.allWallets")
+                  : t("DashboardCustody.selected", { count: selectedWallets.length })}
               </p>
               {draft.walletScope === "selected" ? (
                 <div className="space-y-1.5 text-xs text-[rgba(28,28,29,0.62)]">
                   <p>
-                    Default:{" "}
+                    {t("DashboardCustody.default")} {" "}
                     <span className="text-[#1c1c1d]">
-                      {defaultSelectedWallet ? formatWalletLabel(defaultSelectedWallet) : "None"}
+                      {defaultSelectedWallet ? formatWalletLabel(defaultSelectedWallet) : t("DashboardCustody.none")}
                     </span>
                   </p>
                   <div className="flex flex-wrap gap-1.5">
@@ -427,13 +435,13 @@ function CreateApiKeyReviewStep({
         </div>
 
         <div className="grid divide-y divide-[rgba(28,28,29,0.08)] border-t border-[rgba(28,28,29,0.08)] sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-          <ReviewDetail icon={ShieldCheck} label="Policy">
-            <span className="text-[rgba(28,28,29,0.74)]">No API-key policy</span>
+          <ReviewDetail icon={ShieldCheck} label={t("DashboardCustody.policy")}>
+            <span className="text-[rgba(28,28,29,0.74)]">{t("DashboardCustody.noApiKeyPolicy")}</span>
           </ReviewDetail>
 
-          <ReviewDetail icon={Info} label="Security note">
+          <ReviewDetail icon={Info} label={t("DashboardCustody.securityNote")}>
             <span className="text-[rgba(28,28,29,0.74)]">
-              The full key will only be shown once after creation.
+              {t("DashboardCustody.fullKeyOnlyShownOnce")}
             </span>
           </ReviewDetail>
         </div>
@@ -444,15 +452,16 @@ function CreateApiKeyReviewStep({
 }
 
 function CreateApiKeyReviewActions({ onBack }: { onBack: () => void }) {
+  const t = useTranslations();
   const { pending } = useFormStatus();
 
   return (
     <div className="mt-4 flex items-center justify-end gap-2 border-t border-[rgba(28,28,29,0.08)] pt-4">
       <Button type="button" variant="secondary" onClick={onBack} disabled={pending}>
-        Back
+        {t("DashboardCustody.back")}
       </Button>
       <Button type="submit" disabled={pending} aria-busy={pending}>
-        {pending ? "Creating..." : "Create key"}
+        {pending ? t("DashboardCustody.creating") : t("DashboardCustody.createKey")}
       </Button>
     </div>
   );
@@ -461,13 +470,15 @@ function CreateApiKeyReviewActions({ onBack }: { onBack: () => void }) {
 export function CreateApiKeyModal({
   wallets,
   triggerMode = "button",
-  triggerLabel = "Create API key",
+  triggerLabel,
   triggerVariant = "default",
 }: CreateApiKeyModalProps) {
+  const t = useTranslations();
   const { selectedProjectId, sdpEnvironment } = useDashboardWorkspace();
   const [isOpen, setIsOpen] = useState(false);
   const [step, setStep] = useState<1 | 2>(1);
   const [draft, setDraft] = useState<ApiKeyDraft>(normalizeDraft());
+  const resolvedTriggerLabel = triggerLabel ?? t("DashboardCustody.createApiKey");
 
   const selectedWallets = wallets.filter((wallet) =>
     draft.selectedWalletIds.includes(wallet.walletId)
@@ -513,34 +524,34 @@ export function CreateApiKeyModal({
         size={triggerMode === "icon" ? "icon" : "default"}
         variant={triggerMode === "icon" ? "secondary" : triggerVariant}
         onClick={() => setIsOpen(true)}
-        aria-label={triggerMode === "icon" ? "Create API key" : triggerLabel}
+        aria-label={triggerMode === "icon" ? t("DashboardCustody.createApiKey") : resolvedTriggerLabel}
       >
         {triggerMode === "icon" ? (
           <>
             <Plus className="size-4" />
-            <span className="sr-only">{triggerLabel}</span>
+            <span className="sr-only">{resolvedTriggerLabel}</span>
           </>
         ) : (
-          triggerLabel
+          resolvedTriggerLabel
         )}
       </Button>
 
       <Modal
         isOpen={isOpen}
         onClose={close}
-        ariaLabel={step === 1 ? "Create API key" : "Review API key"}
-        closeLabel="Close API key creation modal"
+        ariaLabel={step === 1 ? t("DashboardCustody.createApiKey") : t("DashboardCustody.reviewApiKey")}
+        closeLabel={t("DashboardCustody.closeApiKeyCreationModal")}
         contentClassName="flex max-h-[calc(100dvh-4rem)] flex-col overflow-hidden p-6"
         size="xl"
       >
         <div className="shrink-0 pr-12">
           <p className="text-sm font-semibold text-[#1c1c1d]">
-            {step === 1 ? "Create API key" : "Review API key"}
+            {step === 1 ? t("DashboardCustody.createApiKey") : t("DashboardCustody.reviewApiKey")}
           </p>
           <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
             {step === 1
-              ? "Define key details and wallet access, then confirm."
-              : "Review the request before creating the key."}
+              ? t("DashboardCustody.createApiKeyDescription")
+              : t("DashboardCustody.reviewApiKeyDescription")}
           </p>
         </div>
 

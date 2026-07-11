@@ -3,15 +3,16 @@
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
 import { useEffect, useState } from "react";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-
-const tabOptions = [
-  { id: "overview", label: "Overview" },
-  { id: "playground", label: "API Playground" },
-] as const;
+import { useTranslations } from "@/i18n/provider";
 
 export function CounterpartyHeaderTabs() {
   const { counterpartyTab, setCounterpartyTab } = useDashboardWorkspace();
   const [isMobile, setIsMobile] = useState(false);
+  const t = useTranslations();
+  const tabOptions = [
+    { id: "overview", label: t("Shared.tabs.overview") },
+    { id: "playground", label: t("Shared.tabs.apiPlayground") },
+  ] as const;
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 767px)");

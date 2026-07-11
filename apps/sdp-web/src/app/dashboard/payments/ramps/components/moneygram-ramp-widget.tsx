@@ -10,6 +10,7 @@ import {
   createTransfer,
   postMoneygramRampEvent,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import { useTranslations } from "@/i18n/provider";
 
 const SESSION_REFRESH_MS = 50 * 60 * 1000;
 
@@ -249,6 +250,7 @@ export function MoneygramRampWidget({
   fiatCurrency,
   onSessionExpiring,
 }: MoneygramRampWidgetProps) {
+  const t = useTranslations();
   const containerRef = useRef<HTMLDivElement>(null);
   const signedTransferIdRef = useRef<string | null>(null);
   const onSessionExpiringRef = useRef(onSessionExpiring);
@@ -280,8 +282,11 @@ export function MoneygramRampWidget({
 
     const post = (event: MoneygramRampEvent) => {
       postMoneygramRampEvent(event).catch((error) => {
-        toast.error("Failed to record MoneyGram event.", {
-          description: error instanceof Error ? error.message : "Event request failed.",
+        toast.error(t("DashboardPayments.ramps.moneygramEventFailed"), {
+          description:
+            error instanceof Error
+              ? error.message
+              : t("DashboardPayments.ramps.eventRequestFailed"),
           position: "bottom-right",
         });
       });
@@ -339,10 +344,9 @@ export function MoneygramRampWidget({
           onComplete: (transaction) => {
             const cryptoTransferId = signedTransferIdRef.current;
             if (!cryptoTransferId) {
-              toast.error(
-                "MoneyGram reported completion before the crypto transfer was recorded.",
-                { position: "bottom-right" }
-              );
+              toast.error(t("DashboardPayments.ramps.moneygramCompletionBeforeTransfer"), {
+                position: "bottom-right",
+              });
               return;
             }
             post({
@@ -376,7 +380,9 @@ export function MoneygramRampWidget({
       .catch((error) => {
         if (!cancelled) {
           setLoadError(
-            error instanceof Error ? error.message : "Failed to load the MoneyGram widget."
+            error instanceof Error
+              ? error.message
+              : t("DashboardPayments.ramps.moneygramWidgetLoadFailed")
           );
         }
       });
@@ -396,6 +402,7 @@ export function MoneygramRampWidget({
     sourceWalletAddress,
     sourceTokenMint,
     cryptoAmount,
+    t,
   ]);
 
   if (loadError) {

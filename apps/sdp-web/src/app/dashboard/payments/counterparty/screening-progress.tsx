@@ -12,6 +12,7 @@ import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { HeightReveal } from "@/components/ui/height-reveal";
+import { useTranslations } from "@/i18n/provider";
 import { COMPLIANCE_PROVIDER_LOGOS, type ComplianceProviderResult } from "@/lib/compliance";
 import {
   formatRiskScore,
@@ -37,6 +38,7 @@ interface ScreeningProgressProps {
 }
 
 export function ScreeningProgress({ results, onComplete }: ScreeningProgressProps) {
+  const t = useTranslations();
   const [resolvedCount, setResolvedCount] = useState(0);
   const firedRef = useRef(false);
 
@@ -61,7 +63,9 @@ export function ScreeningProgress({ results, onComplete }: ScreeningProgressProp
   return (
     <HeightReveal>
       <div className="space-y-2">
-        <div className="text-sm font-medium text-text-medium">Compliance screening</div>
+        <div className="text-sm font-medium text-text-medium">
+          {t("DashboardPayments.counterparty.complianceScreening")}
+        </div>
         <ul className="space-y-1.5">
           {results.map((result, index) => (
             <ScreeningRow
@@ -69,6 +73,7 @@ export function ScreeningProgress({ results, onComplete }: ScreeningProgressProp
               result={result}
               index={index}
               resolved={index < resolvedCount}
+              checkingLabel={t("DashboardPayments.counterparty.checking")}
             />
           ))}
         </ul>
@@ -81,9 +86,10 @@ interface ScreeningRowProps {
   result: ComplianceProviderResult;
   index: number;
   resolved: boolean;
+  checkingLabel: string;
 }
 
-function ScreeningRow({ result, index, resolved }: ScreeningRowProps) {
+function ScreeningRow({ result, index, resolved, checkingLabel }: ScreeningRowProps) {
   const { Icon, className } = TONE_ICON[resolveRiskTone(result)];
   const logo = COMPLIANCE_PROVIDER_LOGOS[result.provider];
 
@@ -125,7 +131,7 @@ function ScreeningRow({ result, index, resolved }: ScreeningRowProps) {
               exit={{ opacity: 0 }}
               className="text-xs text-text-extra-low"
             >
-              Checking…
+              {checkingLabel}
             </motion.span>
           )}
         </AnimatePresence>

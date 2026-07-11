@@ -5,6 +5,7 @@ import { ArrowRightIcon } from "lucide-react";
 import Image from "next/image";
 import useSWR from "swr";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { formatRelativeTime } from "../../../activity-format-utils";
 import { resolveTransferFlow, resolveTransferTypeLabel } from "../../payments-overview.utils";
@@ -19,6 +20,7 @@ const SKELETON_ROWS = [
 ] as const;
 
 export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId: string }) {
+  const t = useTranslations();
   const { data, error } = useSWR(
     ["counterparty-recent-transfers", counterpartyId],
     () =>
@@ -33,7 +35,9 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
   if (error) {
     return (
       <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text">
-        {error instanceof Error ? error.message : "Recent transfers request failed."}
+        {error instanceof Error
+          ? error.message
+          : t("DashboardPayments.ramps.recentTransfersRequestFailed")}
       </div>
     );
   }
@@ -62,15 +66,21 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
   if (data.length === 0) {
     return (
       <section className="space-y-3">
-        <h2 className="text-2xl font-medium text-text-extra-high">Recent Transfers</h2>
-        <p className="py-3 text-sm text-text-low">No recent transactions.</p>
+        <h2 className="text-2xl font-medium text-text-extra-high">
+          {t("DashboardPayments.ramps.recentTransfers")}
+        </h2>
+        <p className="py-3 text-sm text-text-low">
+          {t("DashboardPayments.ramps.noRecentTransactions")}
+        </p>
       </section>
     );
   }
 
   return (
     <section className="space-y-3">
-      <h2 className="text-2xl font-medium text-text-extra-high">Recent Transfers</h2>
+      <h2 className="text-2xl font-medium text-text-extra-high">
+        {t("DashboardPayments.ramps.recentTransfers")}
+      </h2>
       <div>
         {data.map((transfer) => {
           const flow = resolveTransferFlow(transfer);

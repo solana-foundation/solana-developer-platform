@@ -43,6 +43,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
@@ -220,15 +221,6 @@ function FilterChip({
   );
 }
 
-const TRANSFER_TABLE_HEADERS = [
-  { label: "Type", align: "left" as const, width: "12%" },
-  { label: "Provider", align: "left" as const, width: "16%" },
-  { label: "Wallet", align: "left" as const, width: "15%" },
-  { label: "Amount", align: "right" as const, width: "28%" },
-  { label: "Status", align: "left" as const, width: "13%" },
-  { label: "Date", align: "right" as const, width: "16%" },
-];
-
 function CounterpartyTransactions({
   transfers,
   counterpartyName,
@@ -236,6 +228,39 @@ function CounterpartyTransactions({
   transfers: PaymentTransferSummary[];
   counterpartyName: string;
 }) {
+  const t = useTranslations();
+  const transferTableHeaders = [
+    {
+      label: t("DashboardPayments.counterparty.transferType"),
+      align: "left" as const,
+      width: "12%",
+    },
+    {
+      label: t("DashboardPayments.counterparty.transferProvider"),
+      align: "left" as const,
+      width: "16%",
+    },
+    {
+      label: t("DashboardPayments.counterparty.transferWallet"),
+      align: "left" as const,
+      width: "15%",
+    },
+    {
+      label: t("DashboardPayments.counterparty.transferAmount"),
+      align: "right" as const,
+      width: "28%",
+    },
+    {
+      label: t("DashboardPayments.counterparty.transferStatus"),
+      align: "left" as const,
+      width: "13%",
+    },
+    {
+      label: t("DashboardPayments.counterparty.transferDate"),
+      align: "right" as const,
+      width: "16%",
+    },
+  ];
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [providerFilter, setProviderFilter] = useState<RampProviderId | null>(null);
   const [selectedTransfer, setSelectedTransfer] = useState<PaymentTransferSummary | null>(null);
@@ -281,7 +306,9 @@ function CounterpartyTransactions({
       {transfers.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-medium py-10 text-center">
           <ReceiptTextIcon className="size-7 text-text-extra-low" />
-          <p className="text-sm text-text-low">No transactions tied to this counterparty yet.</p>
+          <p className="text-sm text-text-low">
+            {t("DashboardPayments.counterparty.noTransactions")}
+          </p>
         </div>
       ) : (
         <>
@@ -290,7 +317,7 @@ function CounterpartyTransactions({
               {availableTypes.length > 1 ? (
                 <>
                   <FilterChip active={typeFilter === null} onClick={() => setTypeFilter(null)}>
-                    All types
+                    {t("DashboardPayments.counterparty.allTypes")}
                   </FilterChip>
                   {availableTypes.map((type) => (
                     <FilterChip
@@ -310,7 +337,7 @@ function CounterpartyTransactions({
                     active={providerFilter === null}
                     onClick={() => setProviderFilter(null)}
                   >
-                    All providers
+                    {t("DashboardPayments.counterparty.allProviders")}
                   </FilterChip>
                   {availableProviders.map((provider) => (
                     <FilterChip
@@ -330,7 +357,7 @@ function CounterpartyTransactions({
             <table className="w-full min-w-[760px] table-fixed border-collapse">
               <thead>
                 <tr className="border-b border-border-light">
-                  {TRANSFER_TABLE_HEADERS.map((header) => (
+                  {transferTableHeaders.map((header) => (
                     <th
                       key={header.label}
                       style={{ width: header.width }}
@@ -348,10 +375,10 @@ function CounterpartyTransactions({
                 {filteredTransfers.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={TRANSFER_TABLE_HEADERS.length}
+                      colSpan={transferTableHeaders.length}
                       className="px-4 py-8 text-center text-sm text-text-low"
                     >
-                      No transactions match the selected filters.
+                      {t("DashboardPayments.counterparty.noFilteredTransactions")}
                     </td>
                   </tr>
                 ) : (
@@ -379,6 +406,7 @@ function CounterpartyTransactions({
 }
 
 function CopyButton({ value, label }: { value: string; label: string }) {
+  const t = useTranslations();
   const { copy, copied } = useCopy(1200);
   return (
     <Button
@@ -388,7 +416,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
       aria-label={label}
       onClick={() => {
         void copy(value);
-        toast.success("Copied", { position: "bottom-right" });
+        toast.success(t("Shared.SharedComponents.copied"), { position: "bottom-right" });
       }}
     >
       {copied ? <CheckIcon className="text-status-success-text" /> : <CopyIcon />}
@@ -482,6 +510,7 @@ function TransferDetailModal({
   counterpartyName: string;
   onClose: () => void;
 }) {
+  const t = useTranslations();
   if (!transfer) {
     return null;
   }
@@ -523,7 +552,9 @@ function TransferDetailModal({
         <div className="flex items-center justify-between gap-4 rounded-2xl bg-border-extra-light p-5">
           <div className="min-w-0 space-y-0.5">
             <p className="text-xs font-medium uppercase tracking-wide text-text-medium">
-              {isInbound ? "You deposit" : "You send"}
+              {isInbound
+                ? t("DashboardPayments.counterparty.youDeposit")
+                : t("DashboardPayments.counterparty.youSend")}
             </p>
             <p className="truncate text-xl font-semibold tracking-tight text-text-extra-high">
               {flow.send ?? "—"}
@@ -532,7 +563,7 @@ function TransferDetailModal({
           <ArrowRightIcon className="size-5 shrink-0 text-text-low" />
           <div className="min-w-0 space-y-0.5 text-right">
             <p className="text-xs font-medium uppercase tracking-wide text-text-medium">
-              Recipient gets
+              {t("DashboardPayments.counterparty.recipientGets")}
             </p>
             <p className="truncate text-xl font-semibold tracking-tight text-text-extra-high">
               {flow.receive ?? "—"}
@@ -630,7 +661,7 @@ function TransferDetailModal({
               window.open(getDevnetExplorerUrl(signature), "_blank", "noopener,noreferrer")
             }
           >
-            View on explorer
+            {t("DashboardPayments.counterparty.viewOnExplorer")}
           </Button>
         ) : null}
       </div>
@@ -668,7 +699,10 @@ function FieldList({ rows }: { rows: InfoRowData[] }) {
   );
 }
 
-function buildPersonalInfoRows(counterparty: Counterparty): InfoRowData[] {
+function buildPersonalInfoRows(
+  counterparty: Counterparty,
+  t: ReturnType<typeof useTranslations>
+): InfoRowData[] {
   const rows: InfoRowData[] = [];
 
   if (counterparty.entityType === "individual") {
@@ -681,9 +715,22 @@ function buildPersonalInfoRows(counterparty: Counterparty): InfoRowData[] {
     ]
       .filter((part): part is string => Boolean(part?.trim()))
       .join(" ");
-    if (fullName) rows.push({ label: "Full name", value: fullName, icon: <UserIcon /> });
-    rows.push({ label: "Date of birth", value: identity.dateOfBirth, icon: <CakeIcon /> });
-    rows.push({ label: "Phone", value: identity.phone, icon: <PhoneIcon /> });
+    if (fullName)
+      rows.push({
+        label: t("DashboardPayments.counterparty.fullName"),
+        value: fullName,
+        icon: <UserIcon />,
+      });
+    rows.push({
+      label: t("DashboardPayments.counterparty.dateOfBirth"),
+      value: identity.dateOfBirth,
+      icon: <CakeIcon />,
+    });
+    rows.push({
+      label: t("DashboardPayments.counterparty.phone"),
+      value: identity.phone,
+      icon: <PhoneIcon />,
+    });
   }
 
   const address = counterparty.identity.address;
@@ -698,7 +745,12 @@ function buildPersonalInfoRows(counterparty: Counterparty): InfoRowData[] {
     ]
       .filter((part): part is string => Boolean(part?.trim()))
       .join(", ");
-    if (formatted) rows.push({ label: "Address", value: formatted, icon: <MapPinIcon /> });
+    if (formatted)
+      rows.push({
+        label: t("DashboardPayments.counterparty.address"),
+        value: formatted,
+        icon: <MapPinIcon />,
+      });
   }
 
   return rows;
@@ -709,6 +761,7 @@ export function CounterpartyDetailWorkspace({
   initialAccounts,
   initialTransfers,
 }: CounterpartyDetailWorkspaceProps) {
+  const t = useTranslations();
   const router = useRouter();
   const { copy, copied } = useCopy(1200);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -716,7 +769,7 @@ export function CounterpartyDetailWorkspace({
   const [addOpen, setAddOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"details" | "transactions">("details");
-  const personalInfoRows = buildPersonalInfoRows(counterparty);
+  const personalInfoRows = buildPersonalInfoRows(counterparty, t);
 
   async function confirmDelete() {
     const result = await dashboardFetch(
@@ -727,7 +780,9 @@ export function CounterpartyDetailWorkspace({
       toast.error(result.error, { position: "bottom-right" });
       return;
     }
-    toast.success(`${counterparty.displayName} deleted`, { position: "bottom-right" });
+    toast.success(t("DashboardPayments.counterparty.deleted", { name: counterparty.displayName }), {
+      position: "bottom-right",
+    });
     router.push("/dashboard/payments/counterparty");
   }
 
@@ -739,13 +794,13 @@ export function CounterpartyDetailWorkspace({
             {counterparty.displayName}
           </h2>
           <p className="text-sm text-text-medium">
-            {toTitleCase(counterparty.entityType)} · Counterparty
+            {toTitleCase(counterparty.entityType)} · {t("DashboardPayments.counterpartyLabel")}
           </p>
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="outline" size="sm" iconRight={<ChevronDownIcon />}>
-              Manage
+              {t("DashboardPayments.counterparty.manage")}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent>
@@ -754,7 +809,7 @@ export function CounterpartyDetailWorkspace({
               onSelect={() => setDeleteOpen(true)}
             >
               <Trash2Icon />
-              Delete counterparty
+              {t("DashboardPayments.counterparty.deleteCounterparty")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -773,7 +828,9 @@ export function CounterpartyDetailWorkspace({
                 : "text-text-medium hover:text-text-extra-high"
             )}
           >
-            {tab === "details" ? "Details" : "Transactions"}
+            {tab === "details"
+              ? t("DashboardPayments.counterparty.details")
+              : t("DashboardPayments.counterparty.transactions")}
             {activeTab === tab ? (
               <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-gray-1400" />
             ) : null}
@@ -790,29 +847,39 @@ export function CounterpartyDetailWorkspace({
         <>
           <div className="grid gap-6 lg:grid-cols-2">
             <section className="space-y-3">
-              <h3 className="text-2xl font-medium text-text-extra-high">Identity</h3>
+              <h3 className="text-2xl font-medium text-text-extra-high">
+                {t("DashboardPayments.counterparty.identity")}
+              </h3>
               <div className="rounded-2xl border border-border-light bg-white p-5 shadow-sm">
                 <FieldList
                   rows={[
-                    { label: "Display name", value: counterparty.displayName, icon: <UserIcon /> },
                     {
-                      label: "Type",
+                      label: t("DashboardPayments.counterparty.displayName"),
+                      value: counterparty.displayName,
+                      icon: <UserIcon />,
+                    },
+                    {
+                      label: t("DashboardPayments.counterparty.transferType"),
                       value: toTitleCase(counterparty.entityType),
                       icon: <UsersIcon />,
                     },
-                    { label: "Email", value: counterparty.email, icon: <MailIcon /> },
                     {
-                      label: "External ID",
+                      label: t("DashboardPayments.counterparty.email"),
+                      value: counterparty.email,
+                      icon: <MailIcon />,
+                    },
+                    {
+                      label: t("DashboardPayments.counterparty.externalId"),
                       value: counterparty.externalId ?? "—",
                       icon: <HashIcon />,
                     },
                     {
-                      label: "Status",
+                      label: t("DashboardPayments.counterparty.transferStatus"),
                       value: toTitleCase(counterparty.status),
                       icon: <ShieldCheckIcon />,
                     },
                     {
-                      label: "Created",
+                      label: t("DashboardPayments.counterparty.createdLabel"),
                       value: new Date(counterparty.createdAt).toLocaleDateString("en-US", {
                         month: "short",
                         day: "2-digit",
@@ -826,12 +893,16 @@ export function CounterpartyDetailWorkspace({
             </section>
 
             <section className="space-y-3">
-              <h3 className="text-2xl font-medium text-text-extra-high">Personal information</h3>
+              <h3 className="text-2xl font-medium text-text-extra-high">
+                {t("DashboardPayments.counterparty.personalInformation")}
+              </h3>
               <div className="rounded-2xl border border-border-light bg-white p-5 shadow-sm">
                 {personalInfoRows.length > 0 ? (
                   <FieldList rows={personalInfoRows} />
                 ) : (
-                  <p className="text-sm text-text-low">No personal information on file.</p>
+                  <p className="text-sm text-text-low">
+                    {t("DashboardPayments.counterparty.noPersonalInformation")}
+                  </p>
                 )}
               </div>
             </section>
@@ -839,20 +910,24 @@ export function CounterpartyDetailWorkspace({
 
           <section className="space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <h3 className="text-2xl font-medium text-text-extra-high">External accounts</h3>
+              <h3 className="text-2xl font-medium text-text-extra-high">
+                {t("DashboardPayments.counterparty.externalAccounts")}
+              </h3>
               <Button
                 type="button"
                 size="sm"
                 iconLeft={<PlusIcon />}
                 onClick={() => setAddOpen(true)}
               >
-                Add External Account
+                {t("DashboardPayments.counterparty.addExternalAccountTitle")}
               </Button>
             </div>
             {accounts.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-medium py-10 text-center">
                 <WalletIcon className="size-7 text-text-extra-low" />
-                <p className="text-sm text-text-low">No external accounts yet.</p>
+                <p className="text-sm text-text-low">
+                  {t("DashboardPayments.counterparty.noExternalAccounts")}
+                </p>
               </div>
             ) : (
               <div className="overflow-hidden rounded-2xl border border-border-light bg-white shadow-sm">
@@ -865,7 +940,7 @@ export function CounterpartyDetailWorkspace({
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-text-extra-high">
-                          {account.label ?? "Crypto wallet"}
+                          {account.label ?? t("DashboardPayments.counterparty.cryptoWallet")}
                         </p>
                         <div className="flex h-5 items-center gap-1">
                           <p className="truncate font-mono text-xs text-text-medium">
@@ -877,12 +952,14 @@ export function CounterpartyDetailWorkspace({
                               variant="ghost"
                               size="icon-xs"
                               className="size-5"
-                              aria-label="Copy address"
+                              aria-label={t("DashboardPayments.counterparty.copyAddress")}
                               onClick={() => {
                                 if (!details.address) return;
                                 setCopiedId(account.id);
                                 void copy(details.address);
-                                toast.success("Address copied", { position: "bottom-right" });
+                                toast.success(t("DashboardPayments.counterparty.addressCopied"), {
+                                  position: "bottom-right",
+                                });
                               }}
                             >
                               {copied && copiedId === account.id ? (

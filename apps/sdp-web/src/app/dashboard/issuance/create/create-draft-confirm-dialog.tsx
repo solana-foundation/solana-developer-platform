@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 
 interface CreateDraftConfirmDialogProps {
   open: boolean;
@@ -30,6 +31,7 @@ export function CreateDraftConfirmDialog({
   onCancel,
   onConfirm,
 }: CreateDraftConfirmDialogProps) {
+  const t = useTranslations();
   const name = assetName.trim();
   const openedAtRef = useRef(Infinity);
 
@@ -50,35 +52,35 @@ export function CreateDraftConfirmDialog({
     <Modal
       isOpen={open}
       onClose={onCancel}
-      ariaLabel="Create asset draft"
+      ariaLabel={t("DashboardIssuance.confirmDraft.ariaLabel")}
       size="sm"
       closeDisabled={submitting}
     >
       <div className="space-y-6 p-6">
         <div className="space-y-2">
           <p className="text-xl font-medium tracking-tight text-text-extra-high">
-            Create this asset draft?
+            {t("DashboardIssuance.confirmDraft.title")}
           </p>
           <p className="text-sm text-text-low">
-            This creates a draft
+            {t("DashboardIssuance.confirmDraft.descriptionStart")}
             {name ? (
               <>
                 {" "}
-                of <span className="font-medium text-text-high">{name}</span>
+                {t("DashboardIssuance.confirmDraft.of")} <span className="font-medium text-text-high">{name}</span>
               </>
             ) : null}
-            . You can keep editing it and publish when you&apos;re ready.
+            {t("DashboardIssuance.confirmDraft.descriptionEnd")}
           </p>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
           <Button type="button" variant="secondary" onClick={onCancel} disabled={submitting}>
-            Cancel
+            {t("DashboardIssuance.workspace.cancel")}
           </Button>
           {/* Focus the primary action on open so Enter confirms straight away
               (a stray Enter still only *opens* the dialog — this is the second,
               deliberate press). */}
           <Button type="button" autoFocus onClick={handleConfirm} disabled={submitting}>
-            {submitting ? "Creating…" : "Create draft"}
+            {submitting ? t("DashboardIssuance.wizard.creating") : t("DashboardIssuance.create.createDraft")}
           </Button>
         </div>
       </div>

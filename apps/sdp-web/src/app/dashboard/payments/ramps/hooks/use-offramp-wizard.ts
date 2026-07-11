@@ -8,6 +8,8 @@ import {
   createTransfer,
   fetchTransferByProviderReference,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import { OFFRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
 import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
 import {
@@ -25,34 +27,50 @@ function isCryptoDepositInstruction(
   return "kind" in instruction && instruction.kind === "crypto_deposit";
 }
 
-export const OFFRAMP_STEPS = [
-  { id: "WALLET", label: "Wallet", title: "Which wallet are you withdrawing from?" },
-  { id: "WITHDRAW", label: "Withdraw", title: "How much would you like to withdraw?" },
-  { id: "COMPLETE", label: "Complete", title: "Complete your payout" },
-] as const satisfies readonly RampWizardStep[];
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+export type OfframpStepId = "WALLET" | "WITHDRAW" | "COMPLETE" | "REQUIREMENTS";
 
-const OFFRAMP_REQUIREMENTS_STEP = {
-  id: "REQUIREMENTS",
-  label: "Payout details",
-  title: "Where should we send the payout?",
-} as const satisfies RampWizardStep;
+export function getOfframpSteps(t: Translate): readonly RampWizardStep<OfframpStepId>[] {
+  return [
+    {
+      id: "WALLET",
+      label: t("DashboardPayments.ramps.offrampWalletStep"),
+      title: t("DashboardPayments.ramps.offrampWalletTitle"),
+    },
+    {
+      id: "WITHDRAW",
+      label: t("DashboardPayments.ramps.offrampWithdrawStep"),
+      title: t("DashboardPayments.ramps.offrampWithdrawTitle"),
+    },
+    {
+      id: "COMPLETE",
+      label: t("DashboardPayments.ramps.offrampCompleteStep"),
+      title: t("DashboardPayments.ramps.offrampCompleteTitle"),
+    },
+  ];
+}
 
-export type OfframpStepId =
-  | (typeof OFFRAMP_STEPS)[number]["id"]
-  | typeof OFFRAMP_REQUIREMENTS_STEP.id;
+function getOfframpRequirementsStep(t: Translate): RampWizardStep<OfframpStepId> {
+  return {
+    id: "REQUIREMENTS",
+    label: t("DashboardPayments.ramps.payoutDetailsStep"),
+    title: t("DashboardPayments.ramps.payoutDetailsTitle"),
+  };
+}
 
 export function useOfframpWizard(props: UseRampWizardProps) {
+  const t = useTranslations();
   const [onchainSendLoading, setOnchainSendLoading] = useState(false);
   const [onchainSendResult, setOnchainSendResult] = useState<PaymentTransferSummary | null>(null);
   const [quoteExpired, setQuoteExpired] = useState(false);
 
   const wizard = useRampWizard<OfframpStepId>(props, {
     pairs: OFFRAMP_PAIRS,
-    steps: OFFRAMP_STEPS,
+    steps: getOfframpSteps(t),
     stepSchemas: { WALLET: sourceWalletSchema, WITHDRAW: withdrawAmountSchema },
     quoteStepId: "WITHDRAW",
     requirements: {
-      step: OFFRAMP_REQUIREMENTS_STEP,
+      step: getOfframpRequirementsStep(t),
       insertAfter: "WITHDRAW",
       direction: "offramp",
     },
@@ -128,15 +146,18 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     // Re-check the timestamp at call time — the armed timeout only covers renders.
     if (quoteExpiresAt && Date.parse(quoteExpiresAt) <= Date.now()) {
       setQuoteExpired(true);
-      toast.error("Quote expired.", {
-        description: "Create a new quote to continue the withdrawal.",
+      toast.error(t("DashboardPayments.ramps.quoteExpired"), {
+        // biome-ignore lint/security/noSecrets: typed translation catalog key
+        description: t("DashboardPayments.ramps.status.quoteExpiredPayoutDescription"),
         position: "bottom-right",
       });
       return;
     }
 
     setOnchainSendLoading(true);
-    const toastId = toast.loading("Submitting on-chain transfer.", { position: "bottom-right" });
+    const toastId = toast.loading(t("DashboardPayments.ramps.submittingOnchainTransfer"), {
+      position: "bottom-right",
+    });
 
     try {
       const transfer = await createTransfer({
@@ -146,17 +167,18 @@ export function useOfframpWizard(props: UseRampWizardProps) {
         amount: wizard.fields.amount.trim(),
       });
       setOnchainSendResult(transfer);
-      toast.success("Transfer submitted.", {
+      toast.success(t("DashboardPayments.ramps.transferSubmitted"), {
         id: toastId,
         description: transfer.signature
-          ? "Transaction sent successfully."
-          : `Status: ${transfer.status}`,
+          ? t("DashboardPayments.ramps.transactionSentSuccessfully")
+          : t("DashboardPayments.ramps.transferStatus", { status: transfer.status }),
         position: "bottom-right",
       });
     } catch (error) {
-      toast.error("Transfer failed.", {
+      toast.error(t("DashboardPayments.ramps.transferFailed"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Transfer failed.",
+        description:
+          error instanceof Error ? error.message : t("DashboardPayments.ramps.transferFailed"),
         position: "bottom-right",
       });
     } finally {

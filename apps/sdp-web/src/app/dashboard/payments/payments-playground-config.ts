@@ -3,6 +3,7 @@ import type {
   ApiPlaygroundFieldConfig,
   ApiPlaygroundFieldOption,
 } from "@/components/api-playground-shell";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 
 export interface PaymentsPlaygroundWalletView {
   label: string | null;
@@ -19,12 +20,6 @@ interface BuildPaymentsPlaygroundConfigOptions {
   transfers: PaymentsPlaygroundTransferView[];
   wallets: PaymentsPlaygroundWalletView[];
 }
-
-const rampProviderOptions: ApiPlaygroundFieldOption[] = [
-  { label: "MoonPay", value: "moonpay" },
-  { label: "Lightspark", value: "lightspark" },
-  { label: "BVNK", value: "bvnk" },
-];
 
 const fiatCurrencyOptions: ApiPlaygroundFieldOption[] = [{ label: "USD", value: "USD" }];
 const exampleWalletAddressFallback = "1".repeat(32);
@@ -47,6 +42,16 @@ function buildTransferOptions(
     value: transfer.id,
     label: `${transfer.id} (${transfer.status})`,
   }));
+}
+
+function buildRampProviderOptions(
+  t: (key: MessageKey, values?: TranslationValues) => string
+): ApiPlaygroundFieldOption[] {
+  return [
+    { label: t("DashboardPayments.playground.moonPay"), value: "moonpay" },
+    { label: t("DashboardPayments.playground.lightspark"), value: "lightspark" },
+    { label: t("DashboardPayments.playground.bvnk"), value: "bvnk" },
+  ];
 }
 
 function buildSelectBackedField(
@@ -76,40 +81,41 @@ function buildSelectBackedField(
   };
 }
 
-export function buildPaymentsPlaygroundEndpointConfigs({
-  transfers,
-  wallets,
-}: BuildPaymentsPlaygroundConfigOptions): ApiPlaygroundEndpointConfig[] {
+export function buildPaymentsPlaygroundEndpointConfigs(
+  { transfers, wallets }: BuildPaymentsPlaygroundConfigOptions,
+  t: (key: MessageKey, values?: TranslationValues) => string
+): ApiPlaygroundEndpointConfig[] {
+  const rampProviderOptions = buildRampProviderOptions(t);
   const walletOptions = buildWalletOptions(wallets);
   const transferOptions = buildTransferOptions(transfers);
   const walletIdField = buildSelectBackedField(
     "walletId",
-    "{walletId}",
-    "Wallet ID (e.g. wal_ops_123)",
+    t("DashboardPayments.playground.walletIdPathLabel"),
+    t("DashboardPayments.playground.walletIdPlaceholder"),
     walletOptions
   );
   const transferIdField = buildSelectBackedField(
     "transferId",
-    "{transferId}",
-    "Transfer ID (e.g. xfr_123)",
+    t("DashboardPayments.playground.transferIdPathLabel"),
+    t("DashboardPayments.playground.transferIdPlaceholder"),
     transferOptions
   );
   const sourceField = buildSelectBackedField(
     "source",
     "source",
-    "Custody wallet ID (e.g. wal_ops_123)",
+    t("DashboardPayments.playground.custodyWalletIdPlaceholder"),
     walletOptions
   );
   const destinationWalletField = buildSelectBackedField(
     "destinationWallet",
     "destinationWallet",
-    "Destination wallet ID",
+    t("DashboardPayments.playground.destinationWalletIdPlaceholder"),
     walletOptions
   );
   const sourceWalletField = buildSelectBackedField(
     "sourceWallet",
     "sourceWallet",
-    "Source wallet ID",
+    t("DashboardPayments.playground.sourceWalletIdPlaceholder"),
     walletOptions
   );
   const firstWallet = wallets[0];
@@ -121,7 +127,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
   return [
     {
       id: "wallet-balances",
-      title: "Get Wallet Balances",
+      title: t("DashboardPayments.playground.getWalletBalances"),
       method: "GET",
       path: "/v1/payments/wallets/{walletId}/balances",
       pathFields: [walletIdField],
@@ -144,7 +150,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
     },
     {
       id: "get-wallet-policy",
-      title: "Get Wallet Policy",
+      title: t("DashboardPayments.playground.getWalletPolicy"),
       method: "GET",
       path: "/v1/payments/wallets/{walletId}/policies",
       pathFields: [walletIdField],
@@ -162,7 +168,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
     },
     {
       id: "update-wallet-policy",
-      title: "Update Wallet Policy",
+      title: t("DashboardPayments.playground.updateWalletPolicy"),
       method: "PUT",
       path: "/v1/payments/wallets/{walletId}/policies",
       pathFields: [walletIdField],
@@ -170,7 +176,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
         {
           key: destinationAllowlistFieldKey,
           label: destinationAllowlistFieldKey,
-          placeholder: "Comma-separated destination addresses",
+          placeholder: t("DashboardPayments.playground.destinationAllowlistPlaceholder"),
           defaultValue: exampleWalletAddress,
           valueType: "string_array",
           required: true,
@@ -199,7 +205,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
     },
     {
       id: "execute-transfer",
-      title: "Execute Transfer",
+      title: t("DashboardPayments.playground.executeTransfer"),
       method: "POST",
       path: "/v1/payments/transfers",
       pathFields: [],
@@ -208,13 +214,13 @@ export function buildPaymentsPlaygroundEndpointConfigs({
         {
           key: "destination",
           label: "destination",
-          placeholder: "Solana address (32-44 chars)",
+          placeholder: t("DashboardPayments.playground.solanaAddressPlaceholder"),
           required: true,
         },
         {
           key: "token",
           label: "token",
-          placeholder: "USDC",
+          placeholder: t("DashboardPayments.playground.usdc"),
           defaultValue: "USDC",
           required: true,
         },
@@ -228,7 +234,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
         {
           key: "memo",
           label: "memo",
-          placeholder: "Optional memo",
+          placeholder: t("DashboardPayments.playground.optionalMemo"),
         },
       ],
       expectedResponse: {
@@ -243,7 +249,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
     },
     {
       id: "list-transfers",
-      title: "List Transfers",
+      title: t("DashboardPayments.playground.listTransfers"),
       method: "GET",
       path: "/v1/payments/transfers",
       pathFields: [],
@@ -265,7 +271,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
     },
     {
       id: "get-transfer",
-      title: "Get Transfer",
+      title: t("DashboardPayments.playground.getTransfer"),
       method: "GET",
       path: "/v1/payments/transfers/{transferId}",
       pathFields: [transferIdField],
@@ -282,7 +288,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
     },
     {
       id: "create-onramp-quote",
-      title: "Create Onramp Quote",
+      title: t("DashboardPayments.playground.createOnrampQuote"),
       method: "POST",
       path: "/v1/payments/ramps/onramp/quote",
       pathFields: [],
@@ -290,7 +296,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
         {
           key: "provider",
           label: "provider",
-          placeholder: "Select provider",
+          placeholder: t("DashboardPayments.playground.selectProvider"),
           kind: "select",
           options: rampProviderOptions,
           defaultValue: "moonpay",
@@ -299,21 +305,21 @@ export function buildPaymentsPlaygroundEndpointConfigs({
         {
           key: "counterpartyId",
           label: "counterpartyId",
-          placeholder: "Counterparty ID (e.g. cpty_abc123)",
+          placeholder: t("DashboardPayments.playground.counterpartyIdPlaceholder"),
           required: true,
         },
         destinationWalletField,
         {
           key: "cryptoToken",
           label: "cryptoToken",
-          placeholder: "USDC",
+          placeholder: t("DashboardPayments.playground.usdc"),
           defaultValue: "USDC",
           required: true,
         },
         {
           key: "fiatCurrency",
           label: "fiatCurrency",
-          placeholder: "Select fiat currency",
+          placeholder: t("DashboardPayments.playground.selectFiatCurrency"),
           kind: "select",
           options: fiatCurrencyOptions,
           defaultValue: "USD",
@@ -328,7 +334,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
         {
           key: "redirectUrl",
           label: "redirectUrl",
-          placeholder: "https://app.example.com/payments/onramp/complete",
+          placeholder: t("DashboardPayments.playground.onrampRedirectUrlPlaceholder"),
         },
       ],
       expectedResponse: {
@@ -345,7 +351,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
     },
     {
       id: "create-offramp-quote",
-      title: "Create Offramp Quote",
+      title: t("DashboardPayments.playground.createOfframpQuote"),
       method: "POST",
       path: "/v1/payments/ramps/offramp/quote",
       pathFields: [],
@@ -353,7 +359,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
         {
           key: "provider",
           label: "provider",
-          placeholder: "Select provider",
+          placeholder: t("DashboardPayments.playground.selectProvider"),
           kind: "select",
           options: rampProviderOptions,
           defaultValue: "moonpay",
@@ -362,21 +368,21 @@ export function buildPaymentsPlaygroundEndpointConfigs({
         {
           key: "counterpartyId",
           label: "counterpartyId",
-          placeholder: "Counterparty ID (e.g. cpty_abc123)",
+          placeholder: t("DashboardPayments.playground.counterpartyIdPlaceholder"),
           required: true,
         },
         sourceWalletField,
         {
           key: "cryptoToken",
           label: "cryptoToken",
-          placeholder: "USDC",
+          placeholder: t("DashboardPayments.playground.usdc"),
           defaultValue: "USDC",
           required: true,
         },
         {
           key: "fiatCurrency",
           label: "fiatCurrency",
-          placeholder: "Select fiat currency",
+          placeholder: t("DashboardPayments.playground.selectFiatCurrency"),
           kind: "select",
           options: fiatCurrencyOptions,
           defaultValue: "USD",
@@ -391,7 +397,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
         {
           key: "redirectUrl",
           label: "redirectUrl",
-          placeholder: "https://app.example.com/payments/offramp/complete",
+          placeholder: t("DashboardPayments.playground.offrampRedirectUrlPlaceholder"),
         },
       ],
       expectedResponse: {

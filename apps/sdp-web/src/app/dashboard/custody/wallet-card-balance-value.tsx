@@ -2,6 +2,7 @@
 
 import type { CustodyWalletTokenBalance } from "@sdp/types";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { useTranslations } from "@/i18n/provider";
 import { formatCurrencyAmount, resolveTotalBalance } from "../payments/payments-overview.utils";
 
 const BALANCE_REFRESH_INTERVAL_MS = 30_000;
@@ -51,6 +52,7 @@ async function fetchWalletBalances(walletId: string): Promise<CustodyWalletToken
 }
 
 export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCardBalanceValueProps) {
+  const t = useTranslations();
   const { data, error } = usePersistedDashboardSWR<CustodyWalletTokenBalance[]>(
     walletId ? `wallet-card-balance:${walletId}` : null,
     () => fetchWalletBalances(walletId),
@@ -72,7 +74,7 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
   return (
     <span className={`font-medium ${error ? "text-[rgba(28,28,29,0.4)]" : "text-[#1c1c1d]"}`}>
       {formatCurrencyAmount(totalBalance)}
-      {error ? <span className="sr-only"> (stale)</span> : null}
+      {error ? <span className="sr-only"> {t("DashboardCustody.stale")}</span> : null}
     </span>
   );
 }

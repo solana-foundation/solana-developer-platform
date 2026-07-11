@@ -2,8 +2,9 @@
 
 import { OnchainReceiveStepContent } from "./components/onchain-receive-step-content";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
-import { ONCHAIN_RECEIVE_STEPS, useOnchainReceiveWizard } from "./hooks/use-onchain-receive-wizard";
+import { useOnchainReceiveWizard } from "./hooks/use-onchain-receive-wizard";
 import type { RailProps } from "./ramp-action-page";
+import { useTranslations } from "@/i18n/provider";
 
 export function OnchainReceiveRail({
   wallets,
@@ -12,16 +13,21 @@ export function OnchainReceiveRail({
   preSteps,
   onExit,
 }: RailProps) {
+  const t = useTranslations();
   const wizard = useOnchainReceiveWizard({ wallets, walletsError, counterpartyId, onExit });
 
   return (
     <RampWizardShell
-      steps={[...preSteps, ...ONCHAIN_RECEIVE_STEPS]}
+      steps={[...preSteps, ...wizard.steps]}
       stepIndex={preSteps.length + wizard.stepIndex}
       primaryDisabled={
         !wizard.canProceed || (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
       }
-      primaryLabel={wizard.isLastStep ? "Done" : "Next"}
+      primaryLabel={
+        wizard.isLastStep
+          ? t("DashboardPayments.counterparty.done")
+          : t("DashboardPayments.counterparty.next")
+      }
       walletsError={wizard.liveWalletsError}
       onPrimary={wizard.handlePrimary}
       onSecondary={wizard.handleSecondary}

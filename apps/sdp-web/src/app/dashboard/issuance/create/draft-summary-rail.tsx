@@ -17,9 +17,10 @@ import {
   ShieldCheck,
   Tag,
 } from "lucide-react";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { accessControlLabel, getPegSummary } from "./asset-details-config";
-import { getAssetTypeLabel, getCategoryLabel } from "./asset-taxonomy";
+import { getAssetTypeLabelKey, getCategoryLabelKey } from "./asset-taxonomy";
 import { safeLinkHref } from "./draft-mapping";
 import type { DraftState } from "./issuance-draft-wizard.types";
 
@@ -72,7 +73,7 @@ function SummaryRow({ icon: Icon, label, value, href }: SummaryRowProps) {
   );
 }
 
-function formatUpdatedAt(updatedAt: string | null): string | null {
+function formatUpdatedAt(updatedAt: string | null, locale: string): string | null {
   if (!updatedAt) {
     return null;
   }
@@ -80,7 +81,7 @@ function formatUpdatedAt(updatedAt: string | null): string | null {
   if (Number.isNaN(date.getTime())) {
     return null;
   }
-  return date.toLocaleString("en-US", {
+  return date.toLocaleString(locale, {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -89,8 +90,12 @@ function formatUpdatedAt(updatedAt: string | null): string | null {
 }
 
 export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailProps) {
-  const categoryLabel = getCategoryLabel(draft.assetCategory);
-  const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType);
+  const t = useTranslations();
+  const locale = useLocale();
+  const categoryLabelKey = getCategoryLabelKey(draft.assetCategory);
+  const typeLabelKey = getAssetTypeLabelKey(draft.assetCategory, draft.assetType);
+  const categoryLabel = categoryLabelKey ? t(categoryLabelKey) : null;
+  const typeLabel = typeLabelKey ? t(typeLabelKey) : null;
   const transferRestrictionsEnabled =
     draft.accessControl === "allowlist" ||
     draft.accessControl === "blocklist" ||
@@ -101,37 +106,71 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
   return (
     <aside className="lg:sticky lg:top-4">
       <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
-        <p className="text-base font-medium text-[#1c1c1d]">Summary</p>
+        <p className="text-base font-medium text-[#1c1c1d]">
+          {t("DashboardIssuance.summary.title")}
+        </p>
 
         <div className="mt-3">
-          <SummaryRow icon={Layers} label="Asset category" value={categoryLabel} />
-          <SummaryRow icon={Tag} label="Asset type" value={typeLabel} />
-          <SummaryRow icon={FileText} label="Name" value={draft.name} />
-          <SummaryRow icon={DollarSign} label="Symbol" value={draft.symbol} />
-          <SummaryRow icon={Hash} label="Decimals" value={draft.decimals} />
-          {pegSummary ? <SummaryRow icon={Anchor} label="Pegged to" value={pegSummary} /> : null}
+          <SummaryRow
+            icon={Layers}
+            label={t("DashboardIssuance.summary.assetCategory")}
+            value={categoryLabel}
+          />
+          <SummaryRow
+            icon={Tag}
+            label={t("DashboardIssuance.summary.assetType")}
+            value={typeLabel}
+          />
+          <SummaryRow
+            icon={FileText}
+            label={t("DashboardIssuance.forms.name")}
+            value={draft.name}
+          />
+          <SummaryRow
+            icon={DollarSign}
+            label={t("DashboardIssuance.create.symbol")}
+            value={draft.symbol}
+          />
+          <SummaryRow
+            icon={Hash}
+            label={t("DashboardIssuance.create.decimals")}
+            value={draft.decimals}
+          />
+          {pegSummary ? (
+            <SummaryRow
+              icon={Anchor}
+              label={t("DashboardIssuance.summary.peggedTo")}
+              value={pegSummary}
+            />
+          ) : null}
           <SummaryRow
             icon={ShieldCheck}
-            label="Access control"
+            label={t("DashboardIssuance.summary.accessControl")}
             value={accessControlLabel(draft.accessControl)}
           />
           <SummaryRow
             icon={ArrowLeftRight}
-            label="Transfer restrictions"
-            value={transferRestrictionsEnabled ? "Enabled" : null}
+            label={t("DashboardIssuance.summary.transferRestrictions")}
+            value={transferRestrictionsEnabled ? t("DashboardIssuance.summary.enabled") : null}
           />
           <SummaryRow
             icon={ClipboardList}
-            label="Investor reporting"
-            value={draft.capacities.investorReporting ? "Enabled" : null}
+            label={t("DashboardIssuance.summary.investorReporting")}
+            value={
+              draft.capacities.investorReporting ? t("DashboardIssuance.summary.enabled") : null
+            }
           />
           <SummaryRow
             icon={Globe}
-            label="Website"
+            label={t("DashboardIssuance.assetDetails.website")}
             value={website || null}
             href={safeLinkHref(website) ?? null}
           />
-          <SummaryRow icon={Clock} label="Last updated" value={formatUpdatedAt(updatedAt)} />
+          <SummaryRow
+            icon={Clock}
+            label={t("DashboardIssuance.summary.lastUpdated")}
+            value={formatUpdatedAt(updatedAt, locale)}
+          />
         </div>
 
         {review ? (
@@ -140,7 +179,9 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
               <div className="rounded-xl border border-[rgba(199,31,55,0.25)] bg-[rgba(199,31,55,0.06)] p-3">
                 <div className="flex items-center gap-2 text-[#8a1f2a]">
                   <CircleAlert className="h-4 w-4 shrink-0" />
-                  <p className="text-sm font-semibold">Resolve before creating</p>
+                  <p className="text-sm font-semibold">
+                    {t("DashboardIssuance.summary.resolveBeforeCreating")}
+                  </p>
                 </div>
                 <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-xs text-[#8a1f2a]">
                   {review.blockers.map((item) => (
@@ -153,10 +194,10 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
                 <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#0c804c]" />
                 <div>
                   <p className="text-sm font-semibold text-[#0c804c]">
-                    You&apos;re ready to create a draft
+                    {t("DashboardIssuance.summary.readyToCreate")}
                   </p>
                   <p className="mt-0.5 text-xs text-[rgba(12,128,76,0.85)]">
-                    You can review, edit, and publish when you&apos;re ready.
+                    {t("DashboardIssuance.summary.readyDescription")}
                   </p>
                 </div>
               </div>
@@ -166,9 +207,11 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
           <div className="mt-4 flex items-start gap-2 rounded-xl bg-[rgba(28,28,29,0.03)] p-3">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[rgba(28,28,29,0.5)]" />
             <div>
-              <p className="text-xs font-semibold text-[#1c1c1d]">Private by default</p>
+              <p className="text-xs font-semibold text-[#1c1c1d]">
+                {t("DashboardIssuance.summary.privateByDefault")}
+              </p>
               <p className="mt-0.5 text-xs text-[rgba(28,28,29,0.58)]">
-                Details you provide are private and only used to configure your asset.
+                {t("DashboardIssuance.summary.privateDescription")}
               </p>
             </div>
           </div>

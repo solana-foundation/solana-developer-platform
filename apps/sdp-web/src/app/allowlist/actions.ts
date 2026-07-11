@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
+import { getTranslations } from "@/i18n/server";
 
 export interface AllowlistEntry {
   id: string;
@@ -19,11 +20,12 @@ export async function listAllowlistEntries(): Promise<AllowlistEntry[]> {
 }
 
 export async function addAllowlistEntry(formData: FormData) {
+  const t = await getTranslations();
   const value = String(formData.get("value") ?? "").trim();
   const type = (String(formData.get("type") ?? "email").trim() || "email") as "email" | "domain";
 
   if (!value) {
-    throw new Error("Allowlist value is required");
+    throw new Error(t("Shared.pay.allowlistValueRequired"));
   }
 
   const client = await createOrgSdpApiClient();
@@ -36,9 +38,10 @@ export async function addAllowlistEntry(formData: FormData) {
 }
 
 export async function removeAllowlistEntry(formData: FormData) {
+  const t = await getTranslations();
   const id = String(formData.get("id") ?? "").trim();
   if (!id) {
-    throw new Error("Allowlist entry id is required");
+    throw new Error(t("Shared.pay.allowlistEntryIdRequired"));
   }
 
   const client = await createOrgSdpApiClient();

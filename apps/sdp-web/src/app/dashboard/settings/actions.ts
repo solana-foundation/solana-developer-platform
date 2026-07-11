@@ -2,6 +2,7 @@
 
 import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
+import { getTranslations } from "@/i18n/server";
 
 type OrganizationSettings = {
   rpcProvider?: OrganizationRpcProvider;
@@ -23,23 +24,24 @@ function isOrganizationRpcProvider(value: string): value is OrganizationRpcProvi
   return ORGANIZATION_RPC_PROVIDERS.includes(value as OrganizationRpcProvider);
 }
 
-function toErrorMessage(error: unknown): string {
+function toErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message;
   }
-  return "Failed to save RPC settings.";
+  return fallback;
 }
 
 export async function updateOrganizationRpcSettingsAction(
   formData: FormData
 ): Promise<UpdateOrganizationRpcSettingsResult> {
+  const t = await getTranslations();
   const organizationId = String(formData.get("organizationId") ?? "").trim();
   const rpcProvider = String(formData.get("rpcProvider") ?? "default").trim();
 
   if (!organizationId) {
     return {
       status: "error",
-      message: "Missing organization id.",
+      message: t("DashboardCustody.missingOrganizationId"),
     };
   }
 
@@ -60,20 +62,23 @@ export async function updateOrganizationRpcSettingsAction(
     if (persistedProvider !== resolvedProvider) {
       return {
         status: "error",
-        message: `RPC provider save mismatch (requested ${resolvedProvider}, persisted ${persistedProvider}).`,
+        message: t("DashboardCustody.rpcProviderSaveMismatch", {
+          requested: resolvedProvider,
+          persisted: persistedProvider,
+        }),
       };
     }
 
     return {
       status: "success",
-      message: "RPC settings saved.",
+      message: t("DashboardCustody.rpcSettingsSaved"),
       savedOrganizationId: organizationId,
       savedRpcProvider: persistedProvider,
     };
   } catch (error) {
     return {
       status: "error",
-      message: toErrorMessage(error),
+      message: toErrorMessage(error, t("DashboardCustody.failedToSaveRpcSettings")),
     };
   }
 }

@@ -6,6 +6,7 @@ import {
   formatCurrencyAmount,
   resolveUsdBalanceValue,
 } from "@/app/dashboard/payments/payments-overview.utils";
+import { useTranslations } from "@/i18n/provider";
 
 interface BreakdownRow {
   token: string;
@@ -35,6 +36,7 @@ function formatTwoDecimals(value: number): string {
 }
 
 export function WalletAssetBreakdown({ wallet }: { wallet: PaymentsDashboardWallet }) {
+  const t = useTranslations();
   const rows = breakdownRows(wallet);
   if (rows.length === 0) {
     return null;
@@ -51,9 +53,13 @@ export function WalletAssetBreakdown({ wallet }: { wallet: PaymentsDashboardWall
       className="space-y-5 pt-4"
     >
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-medium tracking-tight text-text-extra-high">Asset breakdown</h2>
+        <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
+          {t("DashboardPayments.ramps.assetBreakdown")}
+        </h2>
         {totalUsd > 0 ? (
-          <p className="text-sm text-text-low">{formatCurrencyAmount(totalUsd)} total</p>
+          <p className="text-sm text-text-low">
+            {t("DashboardPayments.ramps.total", { amount: formatCurrencyAmount(totalUsd) })}
+          </p>
         ) : null}
       </div>
       <div className="space-y-6">

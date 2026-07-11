@@ -3,6 +3,7 @@ import {
   formatTokenAmount,
   shortenAddress,
 } from "@/app/dashboard/payments/payments-overview.utils";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 export function AmountBalanceReadout({
@@ -16,6 +17,7 @@ export function AmountBalanceReadout({
   exceeds: boolean;
   onMax?: () => void;
 }) {
+  const t = useTranslations();
   const trimmedAssetLabel = assetLabel.trim();
   const displayAssetLabel =
     WELL_KNOWN_TOKEN_BY_MINT.get(trimmedAssetLabel)?.symbol ?? shortenAddress(trimmedAssetLabel);
@@ -39,7 +41,7 @@ export function AmountBalanceReadout({
             className="shrink-0 rounded-md bg-border-light px-2 py-0.5 text-xs font-semibold text-text-medium transition-colors hover:bg-border-medium"
             onClick={onMax}
           >
-            MAX
+            {t("DashboardPayments.ramps.max")}
           </button>
         </>
       ) : null}

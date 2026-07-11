@@ -4,6 +4,7 @@ import { BanIcon, CheckIcon, CopyIcon, EraserIcon, PauseIcon, PlayIcon } from "l
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { type NetworkDebugEntry, useNetworkDebug } from "@/contexts/network-debug-context";
+import { useTranslations } from "@/i18n/provider";
 import {
   formatNetworkDebugMetaSummary,
   formatNetworkDebugPayloadValue,
@@ -58,6 +59,7 @@ function NetworkDebugPayloadBlock({
   label: string;
   value?: string;
 }) {
+  const t = useTranslations();
   const { copied, copy } = useCopy(1200);
 
   if (!value) {
@@ -86,7 +88,7 @@ function NetworkDebugPayloadBlock({
             ) : (
               <CopyIcon className="size-3 shrink-0" />
             )}
-            {copied ? "Copied" : "Copy"}
+            {copied ? t("Shared.SharedComponents.copied") : t("Shared.SharedComponents.copy")}
           </button>
           <pre
             className={cn(
@@ -113,6 +115,7 @@ function NetworkDebugEntryRow({
   isSelected: boolean;
   onSelect: () => void;
 }) {
+  const t = useTranslations();
   return (
     <motion.li
       initial={{ opacity: 0, y: -8 }}
@@ -137,11 +140,19 @@ function NetworkDebugEntryRow({
               getNetworkDebugStatusClassName(entry)
             )}
           >
-            {entry.state === "pending" ? "pending" : (entry.status ?? entry.state)}
+            {entry.state === "pending"
+              ? t("Shared.SharedComponents.pending")
+              : (entry.status ?? entry.state)}
           </span>
         </div>
         <div className="flex items-center justify-between gap-2 text-[11px] text-text-low">
-          <span>{entry.durationMs === undefined ? "pending" : `${entry.durationMs}ms`}</span>
+          <span>
+            {entry.durationMs === undefined
+              ? t("Shared.SharedComponents.pending")
+              : t("Shared.SharedComponents.durationMilliseconds", {
+                  duration: entry.durationMs,
+                })}
+          </span>
           <span>{new Date(entry.startedAt).toLocaleTimeString()}</span>
         </div>
       </button>
@@ -153,6 +164,7 @@ function NetworkDebugEntryRow({
 }
 
 export function NetworkDebugToggle({ collapsed = false }: { collapsed?: boolean }) {
+  const t = useTranslations();
   const { available, enabled, pendingCount, setEnabled } = useNetworkDebug();
 
   if (!available) {
@@ -164,8 +176,8 @@ export function NetworkDebugToggle({ collapsed = false }: { collapsed?: boolean 
       type="button"
       onClick={() => setEnabled(!enabled)}
       aria-pressed={enabled}
-      aria-label={collapsed ? "API Debug Logs" : undefined}
-      title={collapsed ? "API Debug Logs" : undefined}
+      aria-label={collapsed ? t("Shared.SharedComponents.apiDebugLogs") : undefined}
+      title={collapsed ? t("Shared.SharedComponents.apiDebugLogs") : undefined}
       className={cn(
         "flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high",
         collapsed && "justify-center"
@@ -189,7 +201,9 @@ export function NetworkDebugToggle({ collapsed = false }: { collapsed?: boolean 
       </span>
       {collapsed ? null : (
         <>
-          <span className="min-w-0 flex-1 truncate text-left">API Debug Logs</span>
+          <span className="min-w-0 flex-1 truncate text-left">
+            {t("Shared.SharedComponents.apiDebugLogs")}
+          </span>
           {pendingCount > 0 ? (
             <span className="shrink-0 rounded-full bg-border-extra-light px-1.5 py-0.5 text-[10px] text-text-medium">
               {pendingCount}
@@ -222,6 +236,7 @@ function NetworkDebugExpandedPanel({
   setPaused: (paused: boolean) => void;
   setSelectedEntryId: React.Dispatch<React.SetStateAction<string | null>>;
 }) {
+  const t = useTranslations();
   return (
     <motion.div
       key="network-debug-panel"
@@ -234,9 +249,14 @@ function NetworkDebugExpandedPanel({
       <motion.div className="flex min-h-0 flex-1 flex-col" {...CONTENT_FADE_PROPS}>
         <div className="flex items-start justify-between gap-3 border-b border-border-light px-4 py-3">
           <div className="min-w-0">
-            <h2 className="text-sm font-medium text-text-extra-high">API Debug Logs</h2>
+            <h2 className="text-sm font-medium text-text-extra-high">
+              {t("Shared.SharedComponents.apiDebugLogs")}
+            </h2>
             <p className="text-xs text-text-low">
-              {pendingCount} pending, {entries.length - pendingCount} completed
+              {t("Shared.SharedComponents.networkDebugSummary", {
+                pending: pendingCount,
+                completed: entries.length - pendingCount,
+              })}
             </p>
           </div>
           <button
@@ -244,7 +264,7 @@ function NetworkDebugExpandedPanel({
             onClick={() => setIsOpen(false)}
             className="shrink-0 rounded-md px-2 py-1 text-xs text-text-medium hover:bg-border-extra-light"
           >
-            Collapse
+            {t("Shared.SharedComponents.collapse")}
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2 border-b border-border-light px-4 py-2">
@@ -255,7 +275,7 @@ function NetworkDebugExpandedPanel({
             size="xs"
             iconLeft={paused ? <PlayIcon /> : <PauseIcon />}
           >
-            {paused ? "Resume" : "Pause"}
+            {paused ? t("Shared.SharedComponents.resume") : t("Shared.SharedComponents.pause")}
           </Button>
           <Button
             type="button"
@@ -264,7 +284,7 @@ function NetworkDebugExpandedPanel({
             size="xs"
             iconLeft={<EraserIcon />}
           >
-            Clear
+            {t("Shared.SharedComponents.clear")}
           </Button>
           <Button
             type="button"
@@ -273,7 +293,7 @@ function NetworkDebugExpandedPanel({
             size="xs"
             iconLeft={<BanIcon />}
           >
-            Disable
+            {t("Shared.SharedComponents.disable")}
           </Button>
         </div>
         <div className="flex min-h-0 min-w-0 flex-1 flex-row">
@@ -292,7 +312,7 @@ function NetworkDebugExpandedPanel({
             </ul>
           ) : (
             <div className="flex min-h-0 flex-1 items-center justify-center px-4 py-8 text-center text-sm text-text-low">
-              No requests captured yet.
+              {t("Shared.SharedComponents.noRequests")}
             </div>
           )}
           {selectedEntry ? (
@@ -314,6 +334,7 @@ function NetworkDebugEntryDetails({
   entry: NetworkDebugEntry;
   onClose: () => void;
 }) {
+  const t = useTranslations();
   const { copied: copiedMeta, copy: copyMeta } = useCopy(1200);
   const metaSummary = formatNetworkDebugMetaSummary(entry);
   const durationPart = entry.durationMs === undefined ? "pending" : `${entry.durationMs}ms`;
@@ -325,7 +346,7 @@ function NetworkDebugEntryDetails({
           <div className="relative min-w-0 flex-1">
             <p className="line-clamp-4 font-mono text-xs text-text-extra-high">{entry.path}</p>
             <fieldset
-              aria-label="Request method, duration, copy summary"
+              aria-label={t("Shared.SharedComponents.requestSummary")}
               className={NETWORK_DEBUG_META_ROW_CLASS}
             >
               <span className="shrink-0">{entry.method}</span>
@@ -337,7 +358,9 @@ function NetworkDebugEntryDetails({
                 onClick={() => void copyMeta(metaSummary)}
                 className={NETWORK_DEBUG_META_COPY_CLASS}
               >
-                {copiedMeta ? "Copied" : "Copy"}
+                {copiedMeta
+                  ? t("Shared.SharedComponents.copied")
+                  : t("Shared.SharedComponents.copy")}
               </button>
             </fieldset>
           </div>
@@ -346,17 +369,25 @@ function NetworkDebugEntryDetails({
             onClick={onClose}
             className="shrink-0 rounded-md px-2 py-1 text-xs text-text-medium hover:bg-border-extra-light"
           >
-            Close
+            {t("Shared.SharedComponents.close")}
           </button>
         </div>
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-          <NetworkDebugPayloadBlock label="Query" value={entry.query} />
-          <NetworkDebugPayloadBlock label="Request body" value={entry.requestBody} />
-          <NetworkDebugPayloadBlock fill label="Response" value={entry.responseBody} />
+          <NetworkDebugPayloadBlock
+            label={t("Shared.SharedComponents.query")}
+            value={entry.query}
+          />
+          <NetworkDebugPayloadBlock
+            label={t("Shared.SharedComponents.requestBody")}
+            value={entry.requestBody}
+          />
+          <NetworkDebugPayloadBlock
+            fill
+            label={t("Shared.SharedComponents.response")}
+            value={entry.responseBody}
+          />
           {!entry.query && !entry.requestBody && !entry.responseBody ? (
-            <p className="text-[11px] text-text-low">
-              No query, request body, or response captured.
-            </p>
+            <p className="text-[11px] text-text-low">{t("Shared.SharedComponents.noPayload")}</p>
           ) : null}
         </div>
       </div>
@@ -371,6 +402,7 @@ function NetworkDebugCollapsedButton({
   requestCount: number;
   setIsOpen: (open: boolean) => void;
 }) {
+  const t = useTranslations();
   return (
     <Button
       asChild
@@ -386,7 +418,9 @@ function NetworkDebugCollapsedButton({
         style={{ borderRadius: PANEL_RADIUS }}
         transition={PANEL_TRANSITION}
       >
-        <motion.span {...COLLAPSED_CONTENT_FADE_PROPS}>API Debug Logs</motion.span>
+        <motion.span {...COLLAPSED_CONTENT_FADE_PROPS}>
+          {t("Shared.SharedComponents.apiDebugLogs")}
+        </motion.span>
         <motion.span
           {...COLLAPSED_CONTENT_FADE_PROPS}
           className="absolute right-2 rounded-full bg-border-extra-light px-1.5 py-0.5 text-[10px] text-text-medium"

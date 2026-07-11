@@ -7,6 +7,7 @@ import type {
 } from "@sdp/types";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import {
   createTransfer,
@@ -79,6 +80,7 @@ export interface PaymentsWorkspaceState {
 }
 
 export function usePaymentsWorkspace(): PaymentsWorkspaceState {
+  const t = useTranslations();
   const {
     data: wallets = [],
     error: walletsFetchError,
@@ -301,8 +303,8 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
 
   const checkTransferCompliance = async () => {
     if (!transferDestinationTrimmed) {
-      toast.error("Compliance check failed.", {
-        description: "Destination address is required.",
+      toast.error(t("DashboardPayments.workspace.complianceCheckFailed"), {
+        description: t("DashboardPayments.workspace.destinationRequired"),
         position: "bottom-right",
       });
       return;
@@ -316,8 +318,11 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
       );
     } catch (error) {
       setTransferCompliance(null);
-      toast.error("Compliance check failed.", {
-        description: error instanceof Error ? error.message : "Compliance check failed.",
+      toast.error(t("DashboardPayments.workspace.complianceCheckFailed"), {
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.workspace.complianceCheckFailed"),
         position: "bottom-right",
       });
     } finally {
@@ -327,16 +332,15 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
 
   const submitTransfer = async () => {
     if (!canSubmitTransfer) {
-      toast.error("Transfer blocked.", {
-        description:
-          "Run compliance check or use a destination already in the source wallet allowlist.",
+      toast.error(t("DashboardPayments.workspace.transferBlocked"), {
+        description: t("DashboardPayments.workspace.transferBlockedDescription"),
         position: "bottom-right",
       });
       return;
     }
 
     setIsSubmittingTransfer(true);
-    const toastId = toast.loading("Submitting transfer.", {
+    const toastId = toast.loading(t("DashboardPayments.onchainSend.submittingTransfer"), {
       position: "bottom-right",
     });
     try {
@@ -358,34 +362,39 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
       void mutateWallets();
 
       if (transfer.signature) {
-        toast.success("Transfer submitted.", {
+        toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
           id: toastId,
           description: (
             <span>
-              Transaction sent.{" "}
+              {t("DashboardPayments.workspace.transactionSent")}{" "}
               <a
                 href={getDevnetExplorerUrl(transfer.signature)}
                 target="_blank"
                 rel="noreferrer"
                 className="underline underline-offset-2"
               >
-                View on Solana Explorer
+                {t("DashboardPayments.workspace.viewOnSolanaExplorer")}
               </a>
             </span>
           ),
           position: "bottom-right",
         });
       } else {
-        toast.success("Transfer submitted.", {
+        toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
           id: toastId,
-          description: `Status: ${transfer.status}`,
+          description: t("DashboardPayments.onchainSend.transferStatus", {
+            status: transfer.status,
+          }),
           position: "bottom-right",
         });
       }
     } catch (error) {
-      toast.error("Transfer failed.", {
+      toast.error(t("DashboardPayments.onchainSend.transferFailed"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Transfer failed.",
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.onchainSend.transferFailed"),
         position: "bottom-right",
       });
     } finally {

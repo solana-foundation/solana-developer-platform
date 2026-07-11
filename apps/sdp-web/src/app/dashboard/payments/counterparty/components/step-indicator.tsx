@@ -1,4 +1,7 @@
+"use client";
+
 import { cn } from "@/lib/utils";
+import { useTranslations } from "@/i18n/provider";
 import type { StepId } from "../counterparty-create-schemas";
 
 interface StepIndicatorProps {
@@ -7,6 +10,8 @@ interface StepIndicatorProps {
 }
 
 export function StepIndicator({ steps, step }: StepIndicatorProps) {
+  const t = useTranslations();
+
   return (
     <div className="flex items-center gap-3">
       <div className="flex items-center gap-1.5">
@@ -25,7 +30,10 @@ export function StepIndicator({ steps, step }: StepIndicatorProps) {
         ))}
       </div>
       <span className="text-xs text-text-extra-low">
-        Step {step + 1} of {steps.length}
+        {t("DashboardPayments.counterparty.stepProgress", {
+          current: step + 1,
+          total: steps.length,
+        })}
       </span>
     </div>
   );

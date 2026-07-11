@@ -11,6 +11,7 @@ import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useTranslations } from "@/i18n/provider";
 import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
@@ -104,10 +105,13 @@ function formatSupply(value: string): string {
   return formatted.replace(/\.0([A-Za-z])$/, "$1");
 }
 
-function getTokenTypeLabel(template: IssuanceTokenView["template"]): string {
+function getTokenTypeLabel(
+  template: IssuanceTokenView["template"],
+  t: ReturnType<typeof useTranslations>
+): string {
   const templateEntry = getTemplateCatalogEntry(template);
-  if (templateEntry?.name) {
-    return templateEntry.name;
+  if (templateEntry) {
+    return t(`DashboardIssuance.templates.${templateEntry.nameKey}`);
   }
 
   return template;
@@ -127,6 +131,7 @@ export function IssuanceWorkspace({
   signerWallets,
   signerWalletsError,
 }: IssuanceWorkspaceProps) {
+  const t = useTranslations();
   const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -209,7 +214,7 @@ export function IssuanceWorkspace({
         <>
           {tokensNotice && tokens.length > 0 ? (
             <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-4 py-3">
-              <p className="text-sm font-medium text-[#1c1c1d]">Token list unavailable</p>
+              <p className="text-sm font-medium text-[#1c1c1d]">{t("DashboardIssuance.workspace.tokenListUnavailable")}</p>
               <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">{tokensNotice}</p>
             </div>
           ) : null}
@@ -224,7 +229,7 @@ export function IssuanceWorkspace({
                   setSearch(value);
                 }}
                 className="h-10 rounded-[10px] border-[rgba(28,28,29,0.16)] bg-white pl-9"
-                placeholder="Search"
+                placeholder={t("DashboardIssuance.workspace.search")}
               />
             </div>
             <Button
@@ -232,13 +237,13 @@ export function IssuanceWorkspace({
               className="h-10 rounded-[10px] bg-[#1c1c1d] px-4 text-white hover:bg-[rgba(28,28,29,0.92)]"
               onClick={startTokenCreation}
             >
-              Create draft
+              {t("DashboardIssuance.workspace.createDraft")}
             </Button>
           </div>
 
           {hasTokens && filteredTokens.length === 0 ? (
             <p className="text-sm text-[rgba(28,28,29,0.64)]">
-              No tokens match your current search.
+              {t("DashboardIssuance.workspace.noTokensMatch")}
             </p>
           ) : null}
 
@@ -259,7 +264,7 @@ export function IssuanceWorkspace({
                           // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
                           <img
                             src={token.imageUrl}
-                            alt={`${token.name} logo`}
+                            alt={t("DashboardIssuance.workspace.tokenLogo", { name: token.name })}
                             className="h-full w-full object-cover"
                           />
                         ) : (
@@ -278,7 +283,9 @@ export function IssuanceWorkspace({
                             : "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]",
                         ].join(" ")}
                       >
-                        {deploymentStatus}
+                        {deploymentStatus === "active"
+                          ? t("DashboardIssuance.workspace.active")
+                          : t("DashboardIssuance.workspace.draft")}
                       </span>
                     </div>
                   );
@@ -292,19 +299,19 @@ export function IssuanceWorkspace({
 
                 <div className="mt-6 space-y-2 rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] p-3">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-[rgba(28,28,29,0.58)]">Type</span>
+                    <span className="text-[rgba(28,28,29,0.58)]">{t("DashboardIssuance.workspace.type")}</span>
                     <span className="font-medium text-[#1c1c1d]">
-                      {getTokenTypeLabel(token.template)}
+                      {getTokenTypeLabel(token.template, t)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-[rgba(28,28,29,0.58)]">Supply</span>
+                    <span className="text-[rgba(28,28,29,0.58)]">{t("DashboardIssuance.workspace.supply")}</span>
                     <span className="font-medium text-[#1c1c1d]">
                       {formatSupply(token.totalSupply)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-[rgba(28,28,29,0.58)]">Created</span>
+                    <span className="text-[rgba(28,28,29,0.58)]">{t("DashboardIssuance.workspace.created")}</span>
                     <span className="font-medium text-[#1c1c1d]">
                       {formatDate(token.createdAt)}
                     </span>
@@ -318,7 +325,7 @@ export function IssuanceWorkspace({
                     className="h-11 w-full rounded-[10px]"
                     asChild
                   >
-                    <Link href={`/dashboard/issuance/${token.id}`}>Manage</Link>
+                    <Link href={`/dashboard/issuance/${token.id}`}>{t("DashboardIssuance.workspace.manage")}</Link>
                   </Button>
                 </div>
               </article>
@@ -329,7 +336,7 @@ export function IssuanceWorkspace({
               onClick={startTokenCreation}
               data-testid="token-add-card"
               className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-[rgba(28,28,29,0.2)] bg-[#fcfcfa] text-[rgba(28,28,29,0.5)] transition-colors hover:border-[rgba(28,28,29,0.35)] hover:text-[rgba(28,28,29,0.75)]"
-              aria-label="Add new token"
+              aria-label={t("DashboardIssuance.workspace.addNewToken")}
             >
               <Plus className="h-6 w-6" />
             </button>

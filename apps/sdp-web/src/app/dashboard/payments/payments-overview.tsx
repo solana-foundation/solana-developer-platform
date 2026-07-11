@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { useTranslations } from "@/i18n/provider";
 import {
   formatCurrencyAmount,
   formatDirection,
@@ -63,13 +64,17 @@ function statusClassName(status: string): string {
   }
 }
 
-function resolveRequestError(error: unknown, fallback: string | null): string | null {
+function resolveRequestError(
+  error: unknown,
+  fallback: string | null,
+  requestFailed: string
+): string | null {
   if (error instanceof Error) {
     return error.message;
   }
 
   if (error) {
-    return "Request failed.";
+    return requestFailed;
   }
 
   return fallback;
@@ -122,6 +127,7 @@ export function PaymentsOverview({
   transfers,
   transfersError,
 }: PaymentsOverviewProps) {
+  const t = useTranslations();
   const searchParams = useSearchParams();
   const refreshSeed = searchParams.get("refresh") ?? "default";
   const {
@@ -164,12 +170,12 @@ export function PaymentsOverview({
   const liveAggregate = swrAggregate ?? aggregate;
   const liveTransfers = swrTransfers ?? transfers;
   const liveAggregateError = aggregateFetchError
-    ? resolveRequestError(aggregateFetchError, aggregateError)
+    ? resolveRequestError(aggregateFetchError, aggregateError, t("DashboardPayments.requestFailed"))
     : swrAggregate === undefined
       ? aggregateError
       : null;
   const liveTransfersError = transfersFetchError
-    ? resolveRequestError(transfersFetchError, transfersError)
+    ? resolveRequestError(transfersFetchError, transfersError, t("DashboardPayments.requestFailed"))
     : swrTransfers === undefined
       ? transfersError
       : null;
@@ -196,13 +202,18 @@ export function PaymentsOverview({
           <div className="flex min-h-[244px] flex-col justify-center rounded-[4px] bg-[rgba(28,28,29,0.04)] px-8 py-10 sm:px-14">
             <div className="space-y-3">
               <p className="text-[15px] font-medium tracking-[0.01em] text-[#1c1c1d]">
-                Total SDP balance
+                {t("DashboardPayments.totalSdpBalance")}
               </p>
               <p className="text-[38px] leading-none font-medium tracking-[-0.05em] text-[#1c1c1d] sm:text-[54px]">
                 {formatCurrencyAmount(totalBalance)}
               </p>
               <p className="text-sm text-[rgba(28,28,29,0.56)]">
-                Aggregated across {walletCount} {walletCount === 1 ? "wallet" : "wallets"}.
+                {t("DashboardPayments.aggregatedAcrossWallets", {
+                  count: walletCount,
+                  walletLabel: t(
+                    walletCount === 1 ? "DashboardPayments.wallet" : "DashboardPayments.wallets"
+                  ),
+                })}
               </p>
             </div>
           </div>
@@ -238,7 +249,7 @@ export function PaymentsOverview({
               })
             ) : (
               <div className="flex min-h-[78px] items-center rounded-[4px] bg-[rgba(28,28,29,0.04)] px-6 py-5 text-sm text-[rgba(28,28,29,0.64)]">
-                No USD-valued asset rows available yet.
+                {t("DashboardPayments.noUsdValuedAssets")}
               </div>
             )}
           </div>
@@ -253,9 +264,9 @@ export function PaymentsOverview({
         <Card className="min-w-0 overflow-hidden">
           <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 space-y-1">
-              <CardTitle>Recent transactions</CardTitle>
+              <CardTitle>{t("DashboardPayments.recentTransactions")}</CardTitle>
               <CardDescription className="hidden sm:block">
-                Latest transfer activity across all organization wallets.
+                {t("DashboardPayments.recentTransactionsDescription")}
               </CardDescription>
             </div>
             <Button
@@ -266,30 +277,32 @@ export function PaymentsOverview({
               onClick={handleRefresh}
               disabled={isRefreshing}
             >
-              {isRefreshing ? "Refreshing..." : "Refresh"}
+              {isRefreshing ? t("DashboardPayments.refreshing") : t("DashboardPayments.refresh")}
             </Button>
           </CardHeader>
           <CardContent>
             {liveTransfersError ? (
               <p className="text-sm text-[#9e2b38]">{liveTransfersError}</p>
             ) : liveTransfers.length === 0 ? (
-              <p className="text-sm text-[rgba(28,28,29,0.72)]">No transactions found yet.</p>
+              <p className="text-sm text-[rgba(28,28,29,0.72)]">
+                {t("DashboardPayments.noTransactions")}
+              </p>
             ) : (
               <TooltipProvider>
                 <Table className="min-w-0 [&_table]:table-fixed">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[8.75rem]">Status</TableHead>
+                      <TableHead className="w-[8.75rem]">{t("DashboardPayments.status")}</TableHead>
                       <TableHead className="w-[calc(100%-8.75rem)] lg:w-[16rem] xl:w-[20%]">
-                        <span className="lg:hidden">Transfer</span>
-                        <span className="hidden lg:inline">Asset</span>
+                        <span className="lg:hidden">{t("DashboardPayments.transfer")}</span>
+                        <span className="hidden lg:inline">{t("DashboardPayments.asset")}</span>
                       </TableHead>
-                      <TableHead className="hidden w-[8rem] lg:table-cell">Direction</TableHead>
+                      <TableHead className="hidden w-[8rem] lg:table-cell">{t("DashboardPayments.direction")}</TableHead>
                       <TableHead className="hidden xl:table-cell xl:w-[26%]">
-                        Counterparty
+                        {t("DashboardPayments.counterpartyLabel")}
                       </TableHead>
-                      <TableHead className="hidden 2xl:table-cell 2xl:w-[22%]">Signature</TableHead>
-                      <TableHead className="hidden w-[10rem] lg:table-cell">Created</TableHead>
+                      <TableHead className="hidden 2xl:table-cell 2xl:w-[22%]">{t("DashboardPayments.signature")}</TableHead>
+                      <TableHead className="hidden w-[10rem] lg:table-cell">{t("DashboardPayments.createdLabel")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -356,7 +369,7 @@ export function PaymentsOverview({
                                 </TooltipContent>
                               </Tooltip>
                             ) : (
-                              <span className="text-[rgba(28,28,29,0.52)]">Pending</span>
+                              <span className="text-[rgba(28,28,29,0.52)]">{t("DashboardPayments.pending")}</span>
                             )}
                           </TableCell>
                           <TableCell className="hidden text-[rgba(28,28,29,0.72)] lg:table-cell">

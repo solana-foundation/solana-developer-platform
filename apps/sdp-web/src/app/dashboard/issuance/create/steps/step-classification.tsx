@@ -4,6 +4,7 @@ import { ArrowRight } from "lucide-react";
 import { motion } from "motion/react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useTranslations } from "@/i18n/provider";
 import { getDefaultAccessControl, getRecommendedCapacities } from "../asset-details-config";
 import { ASSET_TAXONOMY, getCategoryPresentation } from "../asset-taxonomy";
 import { getDefaultPublicFields } from "../draft-mapping";
@@ -11,6 +12,7 @@ import { SelectionCard } from "../selection-card";
 import { useIssuanceDraft } from "../use-issuance-draft";
 
 export function StepClassification() {
+  const t = useTranslations();
   const { draft, updateDraft } = useIssuanceDraft();
   // Sub-asset options only appear once a classification is chosen — the grid is
   // scoped to the selected category's supported sub types.
@@ -25,33 +27,33 @@ export function StepClassification() {
       className="space-y-6"
     >
       <div>
-        <h2 className="text-xl font-medium text-[#1c1c1d]">What is this asset?</h2>
+        <h2 className="text-xl font-medium text-[#1c1c1d]">{t("DashboardIssuance.classification.title")}</h2>
         <p className="mt-1 text-sm text-[rgba(28,28,29,0.62)]">
-          Start by telling us what this asset represents and how it should be classified.
+          {t("DashboardIssuance.classification.description")}
         </p>
       </div>
 
       <div className="grid max-w-md gap-2">
-        <Label htmlFor="asset-name">Name</Label>
+        <Label htmlFor="asset-name">{t("DashboardIssuance.classification.name")}</Label>
         <Input
           id="asset-name"
           value={draft.name}
           onChange={(event) => updateDraft({ name: event.currentTarget.value })}
-          placeholder="e.g., USD Workshop Money Market Fund"
+          placeholder={t("DashboardIssuance.classification.namePlaceholder")}
         />
-        <p className="text-sm text-[rgba(28,28,29,0.55)]">A clear name to identify this asset.</p>
+        <p className="text-sm text-[rgba(28,28,29,0.55)]">{t("DashboardIssuance.classification.nameHint")}</p>
       </div>
 
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3">
-          <Label>Choose a classification</Label>
+          <Label>{t("DashboardIssuance.classification.chooseClassification")}</Label>
           <a
             href="https://platform.solana.com/docs"
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-sm font-medium text-[#1c1c1d] hover:underline"
           >
-            Not sure what to pick
+            {t("DashboardIssuance.classification.notSure")}
             <ArrowRight className="h-3.5 w-3.5" />
           </a>
         </div>
@@ -60,8 +62,8 @@ export function StepClassification() {
             <SelectionCard
               key={entry.category}
               icon={entry.icon}
-              title={entry.label}
-              description={entry.description}
+              title={t(entry.labelKey)}
+              description={t(entry.descriptionKey)}
               selected={draft.assetCategory === entry.category}
               onSelect={() => {
                 if (draft.assetCategory === entry.category) {
@@ -84,14 +86,14 @@ export function StepClassification() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-3"
         >
-          <Label>Choose asset type</Label>
+          <Label>{t("DashboardIssuance.classification.chooseAssetType")}</Label>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {category.subTypes.map((subType) => (
               <SelectionCard
                 key={subType.type}
                 icon={subType.icon}
-                title={subType.label}
-                description={subType.description}
+                title={t(subType.labelKey)}
+                description={t(subType.descriptionKey)}
                 selected={draft.assetType === subType.type}
                 onSelect={() => {
                   if (draft.assetType === subType.type) {

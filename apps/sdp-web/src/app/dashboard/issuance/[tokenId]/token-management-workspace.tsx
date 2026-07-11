@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { getTokenAccessControlMode, hasAccessControlList } from "../access-control.utils";
 import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialog";
@@ -72,19 +73,19 @@ import { TokenSignerSelect } from "./token-signer-select";
 import { TokenTransactionsSection } from "./token-transactions-section";
 import { useTokenActionRunner } from "./use-token-action-runner";
 
-const managementTabs: Array<{ id: TokenManagementTab; label: string }> = [
-  { id: "overview", label: "Overview" },
-  { id: "permissions", label: "Permissions" },
-  { id: "extensions", label: "Extensions" },
-  { id: "compliance", label: "Compliance" },
-  { id: "metadata", label: "Metadata" },
-  { id: "fund-management", label: "Operations" },
+const managementTabIds: TokenManagementTab[] = [
+  "overview",
+  "permissions",
+  "extensions",
+  "compliance",
+  "metadata",
+  "fund-management",
 ];
 const TOKEN_AUTHORITY_WALLETS_CACHE_TTL_MS = 60_000;
 const TOKEN_SUPPORTING_DATA_CACHE_TTL_MS = 60_000;
 
 function isTokenManagementTab(value: string | null): value is TokenManagementTab {
-  return managementTabs.some((tab) => tab.id === value);
+  return managementTabIds.some((tab) => tab === value);
 }
 
 function getDefaultActionForActiveTab({
@@ -112,26 +113,6 @@ function getDefaultActionForActiveTab({
 
   return getDefaultActionForTab(tab);
 }
-
-const liveFundManagementRows: Array<{
-  id: FundManagementModalAction;
-  title: string;
-  helper: string;
-  actionLabel: string;
-}> = [
-  {
-    id: "mint",
-    title: "Mint Tokens",
-    helper: "Create new supply in a destination wallet or token account.",
-    actionLabel: "Mint",
-  },
-  {
-    id: "burn",
-    title: "Burn Tokens",
-    helper: "Remove supply from a source wallet or token account.",
-    actionLabel: "Burn",
-  },
-];
 
 function mergeWalletsPreferBalances(
   primaryWallets: PaymentsDashboardWallet[],
@@ -204,6 +185,7 @@ export function TokenManagementWorkspace({
   frozenAccountsTotal: initialFrozenAccountsTotal,
   frozenAccountsHasMore: initialFrozenAccountsHasMore,
 }: TokenManagementWorkspaceProps) {
+  const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
   const pathname = usePathname();
   const router = useRouter();
@@ -236,7 +218,34 @@ export function TokenManagementWorkspace({
   const [allowlistForm, setAllowlistForm] = useState(createInitialAllowlistForm);
   const canManageTokenAdmin = dashboardAccess.capabilities.canManageTokenAdmin;
   const accessControlMode = getTokenAccessControlMode(token);
-  const controlListCopy = getControlListCopy(accessControlMode);
+  const controlListCopy = getControlListCopy(accessControlMode, t);
+  const managementTabs: Array<{ id: TokenManagementTab; label: string }> = [
+    { id: "overview", label: t("DashboardIssuance.management.overview") },
+    { id: "permissions", label: t("DashboardIssuance.management.permissions") },
+    { id: "extensions", label: t("DashboardIssuance.management.extensions") },
+    { id: "compliance", label: t("DashboardIssuance.management.compliance") },
+    { id: "metadata", label: t("DashboardIssuance.management.metadata") },
+    { id: "fund-management", label: t("DashboardIssuance.management.operations") },
+  ];
+  const liveFundManagementRows: Array<{
+    id: FundManagementModalAction;
+    title: string;
+    helper: string;
+    actionLabel: string;
+  }> = [
+    {
+      id: "mint",
+      title: t("DashboardIssuance.management.mintTokens"),
+      helper: t("DashboardIssuance.management.mintHelper"),
+      actionLabel: t("DashboardIssuance.management.mint"),
+    },
+    {
+      id: "burn",
+      title: t("DashboardIssuance.management.burnTokens"),
+      helper: t("DashboardIssuance.management.burnHelper"),
+      actionLabel: t("DashboardIssuance.management.burn"),
+    },
+  ];
   const showControlList = hasAccessControlList(accessControlMode);
   const visibleManagementTabs = useMemo(
     () =>
@@ -341,7 +350,7 @@ export function TokenManagementWorkspace({
   const supportingDataError = supportingDataRequestError
     ? supportingDataRequestError instanceof Error
       ? supportingDataRequestError.message
-      : "Unable to load token management data."
+      : t("DashboardIssuance.management.unableToLoadData")
     : null;
   const supportingDataLoading =
     shouldLoadSupportingData && supportingData === undefined && !supportingDataError;
@@ -349,7 +358,7 @@ export function TokenManagementWorkspace({
   const authorityWalletsFetchError = authorityWalletsRequestError
     ? authorityWalletsRequestError instanceof Error
       ? authorityWalletsRequestError.message
-      : "Unable to load signer wallets."
+      : t("DashboardIssuance.management.unableToLoadSignerWallets")
     : null;
   const authorityWalletsLoading =
     shouldLoadAuthorityWallets && authorityWalletsData === undefined && !authorityWalletsFetchError;
@@ -417,11 +426,14 @@ export function TokenManagementWorkspace({
     forceBurnDisabledReason,
     pauseDisabledReason,
     freezeDisabledReason,
-  } = getTokenActionDisabledReasons(token);
+  } = getTokenActionDisabledReasons(token, t);
   const metadataAuthority = token.metadataAuthority ?? token.mintAuthority;
   const withWalletLoadError = <T extends { unavailableReason: string | null }>(selection: T): T => {
     if (authorityWalletsLoading && selection.unavailableReason) {
-      return { ...selection, unavailableReason: "Loading signer wallets…" };
+      return {
+        ...selection,
+        unavailableReason: t("DashboardIssuance.management.loadingSignerWallets"),
+      };
     }
 
     if (authorityWalletsError && selection.unavailableReason) {
@@ -436,6 +448,7 @@ export function TokenManagementWorkspace({
       token,
       authorityWallets,
       metadataAuthority,
+      t,
     })
   );
   const mintSignerSelection = withWalletLoadError(
@@ -444,6 +457,7 @@ export function TokenManagementWorkspace({
       token,
       authorityWallets,
       metadataAuthority,
+      t,
     })
   );
   const burnSignerSelection = withWalletLoadError(
@@ -452,6 +466,7 @@ export function TokenManagementWorkspace({
       token,
       authorityWallets,
       metadataAuthority,
+      t,
     })
   );
   const seizeSignerSelection = withWalletLoadError(
@@ -460,6 +475,7 @@ export function TokenManagementWorkspace({
       token,
       authorityWallets,
       metadataAuthority,
+      t,
     })
   );
   const forceBurnSignerSelection = withWalletLoadError(
@@ -468,6 +484,7 @@ export function TokenManagementWorkspace({
       token,
       authorityWallets,
       metadataAuthority,
+      t,
     })
   );
   const freezeSignerSelection = withWalletLoadError(
@@ -476,6 +493,7 @@ export function TokenManagementWorkspace({
       token,
       authorityWallets,
       metadataAuthority,
+      t,
     })
   );
   const pauseSignerSelection = withWalletLoadError(
@@ -484,9 +502,10 @@ export function TokenManagementWorkspace({
       token,
       authorityWallets,
       metadataAuthority,
+      t,
     })
   );
-  const permissionRows = getPermissionRows(token, metadataAuthority).map((row) => {
+  const permissionRows = getPermissionRows(token, metadataAuthority, t).map((row) => {
     const displayedAuthorityAddress = getDisplayedAuthorityAddress({
       token,
       role: row.authorityRole,
@@ -507,10 +526,11 @@ export function TokenManagementWorkspace({
               token,
               authorityWallets,
               metadataAuthority,
+              t,
               permissionRow: rowWithDisplayedValue,
             })
           ).unavailableReason
-        : "Only admins can edit token authorities.",
+        : t("DashboardIssuance.management.onlyAdminsCanEditAuthorities"),
     };
   });
   const displayedMintAuthority = getDisplayedAuthorityAddress({
@@ -519,15 +539,15 @@ export function TokenManagementWorkspace({
     metadataAuthority,
     authorityWallets,
   });
-  const extensionRows = getExtensionRows(token);
+  const extensionRows = getExtensionRows(token, t);
   const complianceActions: Array<{ id: AdminAction; label: string }> = [
     ...(controlListCopy ? [{ id: "allowlist" as const, label: controlListCopy.label }] : []),
     ...(canManageTokenAdmin
       ? [
-          { id: "seize" as const, label: "Force transfer" },
-          { id: "force-burn" as const, label: "Force burn" },
-          { id: "freeze" as const, label: "Freeze" },
-          { id: "pause" as const, label: "Pause" },
+          { id: "seize" as const, label: t("DashboardIssuance.compliance.forceTransfer") },
+          { id: "force-burn" as const, label: t("DashboardIssuance.compliance.forceBurn") },
+          { id: "freeze" as const, label: t("DashboardIssuance.compliance.freeze") },
+          { id: "pause" as const, label: t("DashboardIssuance.compliance.pause") },
         ]
       : []),
   ];
@@ -553,12 +573,14 @@ export function TokenManagementWorkspace({
     destination: mintForm.destination,
     amount: mintForm.amount,
     allowlistEntries,
+    t,
   });
   const mintValidationErrors = getMintValidationErrors({
     token,
     destination: mintForm.destination,
     amount: mintForm.amount,
     allowlistEntries,
+    t,
   });
   const burnValidationReason = getBurnValidationReason({
     token,
@@ -566,6 +588,7 @@ export function TokenManagementWorkspace({
     amount: burnForm.amount,
     signerWallet: selectedBurnSignerWallet,
     walletOptions: authorityWallets,
+    t,
   });
   const burnValidationErrors = getBurnValidationErrors({
     token,
@@ -573,6 +596,7 @@ export function TokenManagementWorkspace({
     amount: burnForm.amount,
     signerWallet: selectedBurnSignerWallet,
     walletOptions: authorityWallets,
+    t,
   });
   const seizeValidationReason = getSeizeValidationReason({
     token,
@@ -581,6 +605,7 @@ export function TokenManagementWorkspace({
     amount: seizeForm.amount,
     allowlistEntries,
     walletOptions: authorityWallets,
+    t,
   });
   const seizeValidationErrors = getSeizeValidationErrors({
     token,
@@ -589,18 +614,21 @@ export function TokenManagementWorkspace({
     amount: seizeForm.amount,
     allowlistEntries,
     walletOptions: authorityWallets,
+    t,
   });
   const forceBurnValidationReason = getForceBurnValidationReason({
     token,
     source: forceBurnForm.source,
     amount: forceBurnForm.amount,
     walletOptions: authorityWallets,
+    t,
   });
   const forceBurnValidationErrors = getForceBurnValidationErrors({
     token,
     source: forceBurnForm.source,
     amount: forceBurnForm.amount,
     walletOptions: authorityWallets,
+    t,
   });
   const fundManagementDisabledReasons: Record<FundManagementModalAction, string | null> = {
     deploy: deploySignerSelection.unavailableReason,
@@ -617,9 +645,9 @@ export function TokenManagementWorkspace({
     ? [
         {
           id: "deploy" as const,
-          title: "Deploy Token",
-          helper: "Deploy this token onchain before running other fund operations.",
-          actionLabel: "Deploy",
+          title: t("DashboardIssuance.management.deployToken"),
+          helper: t("DashboardIssuance.management.deployHelper"),
+          actionLabel: t("DashboardIssuance.header.deploy"),
           disabled: Boolean(fundManagementDisabledReasons.deploy),
           disabledReason: fundManagementDisabledReasons.deploy,
         },
@@ -682,7 +710,10 @@ export function TokenManagementWorkspace({
     }
   }, [activeTab, fundManagementModalAction]);
 
-  const handleCopy = async (value: string | null, successMessage = "Copied") => {
+  const handleCopy = async (
+    value: string | null,
+    successMessage = t("DashboardIssuance.management.copied")
+  ) => {
     if (!value) {
       return;
     }
@@ -691,19 +722,19 @@ export function TokenManagementWorkspace({
       await navigator.clipboard.writeText(value);
       toast.success(successMessage);
     } catch {
-      toast.error("Unable to copy");
+      toast.error(t("DashboardIssuance.management.unableToCopy"));
     }
   };
 
   const handleUpdateMetadata = () => {
     const nextName = metadataForm.name.trim();
     if (!nextName) {
-      toast.error("Token name is required.");
+      toast.error(t("DashboardIssuance.management.tokenNameRequired"));
       return;
     }
 
     runAction({
-      label: "Update token",
+      label: t("DashboardIssuance.management.updateToken"),
       method: "PATCH",
       path: tokenBasePath,
       body: {
@@ -719,7 +750,7 @@ export function TokenManagementWorkspace({
     closeFundManagementModal();
     void runActionImmediately(
       {
-        label: "Deploy token",
+        label: t("DashboardIssuance.management.deployToken"),
         method: "POST",
         path: `${tokenBasePath}/deploy`,
         body: {
@@ -728,15 +759,15 @@ export function TokenManagementWorkspace({
         },
       },
       {
-        submitToast: "Submitting deploy transaction...",
-        successToast: "Deploy transaction finalized.",
+        submitToast: t("DashboardIssuance.management.submittingDeploy"),
+        successToast: t("DashboardIssuance.management.deployFinalized"),
       }
     );
   };
 
   const handleRefreshSupply = () => {
     runAction({
-      label: "Refresh supply",
+      label: t("DashboardIssuance.management.refreshSupply"),
       method: "POST",
       path: `${tokenBasePath}/supply/refresh`,
       body: {},
@@ -752,7 +783,7 @@ export function TokenManagementWorkspace({
     const destination = mintForm.destination.trim();
     const amount = mintForm.amount.trim();
     if (!destination || !amount) {
-      toast.error("Mint destination and amount are required.");
+      toast.error(t("DashboardIssuance.management.mintDetailsRequired"));
       return;
     }
     if (mintValidationReason) {
@@ -760,13 +791,13 @@ export function TokenManagementWorkspace({
       return;
     }
     if (!isPositiveAmount(amount)) {
-      toast.error("Amount must be a positive number.");
+      toast.error(t("DashboardIssuance.management.amountPositive"));
       return;
     }
 
     runAction(
       {
-        label: "Mint tokens",
+        label: t("DashboardIssuance.management.mintTokens"),
         method: "POST",
         path: `${tokenBasePath}/mint`,
         body: {
@@ -780,11 +811,11 @@ export function TokenManagementWorkspace({
       },
       {
         requiresConfirmation: true,
-        confirmationTitle: "Mint tokens?",
-        confirmationDescription: "This will submit a mint transaction onchain.",
-        confirmButtonLabel: "Mint now",
-        submitToast: "Submitting mint transaction...",
-        successToast: "Mint transaction finalized.",
+        confirmationTitle: t("DashboardIssuance.management.mintConfirmationTitle"),
+        confirmationDescription: t("DashboardIssuance.management.mintConfirmationDescription"),
+        confirmButtonLabel: t("DashboardIssuance.management.mintNow"),
+        submitToast: t("DashboardIssuance.management.submittingMint"),
+        successToast: t("DashboardIssuance.management.mintFinalized"),
       }
     );
   };
@@ -798,7 +829,7 @@ export function TokenManagementWorkspace({
     const source = burnForm.source.trim();
     const amount = burnForm.amount.trim();
     if (!source || !amount) {
-      toast.error("Burn source and amount are required.");
+      toast.error(t("DashboardIssuance.management.burnDetailsRequired"));
       return;
     }
     if (burnValidationReason) {
@@ -806,13 +837,13 @@ export function TokenManagementWorkspace({
       return;
     }
     if (!isPositiveAmount(amount)) {
-      toast.error("Amount must be a positive number.");
+      toast.error(t("DashboardIssuance.management.amountPositive"));
       return;
     }
 
     runAction(
       {
-        label: "Burn tokens",
+        label: t("DashboardIssuance.management.burnTokens"),
         method: "POST",
         path: `${tokenBasePath}/burn`,
         body: {
@@ -826,11 +857,11 @@ export function TokenManagementWorkspace({
       },
       {
         requiresConfirmation: true,
-        confirmationTitle: "Burn tokens?",
-        confirmationDescription: "This will submit a burn transaction onchain.",
-        confirmButtonLabel: "Burn now",
-        submitToast: "Submitting burn transaction...",
-        successToast: "Burn transaction finalized.",
+        confirmationTitle: t("DashboardIssuance.management.burnConfirmationTitle"),
+        confirmationDescription: t("DashboardIssuance.management.burnConfirmationDescription"),
+        confirmButtonLabel: t("DashboardIssuance.management.burnNow"),
+        submitToast: t("DashboardIssuance.management.submittingBurn"),
+        successToast: t("DashboardIssuance.management.burnFinalized"),
       }
     );
   };
@@ -845,7 +876,7 @@ export function TokenManagementWorkspace({
     const destination = seizeForm.destination.trim();
     const amount = seizeForm.amount.trim();
     if (!source || !destination || !amount) {
-      toast.error("Seize source, destination, and amount are required.");
+      toast.error(t("DashboardIssuance.management.seizeDetailsRequired"));
       return;
     }
     if (seizeValidationReason) {
@@ -853,13 +884,13 @@ export function TokenManagementWorkspace({
       return;
     }
     if (!isPositiveAmount(amount)) {
-      toast.error("Amount must be a positive number.");
+      toast.error(t("DashboardIssuance.management.amountPositive"));
       return;
     }
 
     runAction(
       {
-        label: "Force transfer",
+        label: t("DashboardIssuance.compliance.forceTransfer"),
         method: "POST",
         path: `${tokenBasePath}/seize`,
         body: {
@@ -875,11 +906,11 @@ export function TokenManagementWorkspace({
       },
       {
         requiresConfirmation: true,
-        confirmationTitle: "Force transfer?",
-        confirmationDescription: "This will submit a seize (force transfer) transaction onchain.",
-        confirmButtonLabel: "Transfer now",
-        submitToast: "Submitting force transfer transaction...",
-        successToast: "Force transfer transaction finalized.",
+        confirmationTitle: t("DashboardIssuance.management.seizeConfirmationTitle"),
+        confirmationDescription: t("DashboardIssuance.management.seizeConfirmationDescription"),
+        confirmButtonLabel: t("DashboardIssuance.management.transferNow"),
+        submitToast: t("DashboardIssuance.management.submittingForceTransfer"),
+        successToast: t("DashboardIssuance.management.forceTransferFinalized"),
       }
     );
   };
@@ -893,7 +924,7 @@ export function TokenManagementWorkspace({
     const source = forceBurnForm.source.trim();
     const amount = forceBurnForm.amount.trim();
     if (!source || !amount) {
-      toast.error("Force-burn source and amount are required.");
+      toast.error(t("DashboardIssuance.management.forceBurnDetailsRequired"));
       return;
     }
     if (forceBurnValidationReason) {
@@ -901,13 +932,13 @@ export function TokenManagementWorkspace({
       return;
     }
     if (!isPositiveAmount(amount)) {
-      toast.error("Amount must be a positive number.");
+      toast.error(t("DashboardIssuance.management.amountPositive"));
       return;
     }
 
     runAction(
       {
-        label: "Force burn",
+        label: t("DashboardIssuance.compliance.forceBurn"),
         method: "POST",
         path: `${tokenBasePath}/force-burn`,
         body: {
@@ -922,11 +953,11 @@ export function TokenManagementWorkspace({
       },
       {
         requiresConfirmation: true,
-        confirmationTitle: "Force burn tokens?",
-        confirmationDescription: "This will submit a force-burn transaction onchain.",
-        confirmButtonLabel: "Force burn now",
-        submitToast: "Submitting force-burn transaction...",
-        successToast: "Force-burn transaction finalized.",
+        confirmationTitle: t("DashboardIssuance.management.forceBurnConfirmationTitle"),
+        confirmationDescription: t("DashboardIssuance.management.forceBurnConfirmationDescription"),
+        confirmButtonLabel: t("DashboardIssuance.management.forceBurnNow"),
+        submitToast: t("DashboardIssuance.management.submittingForceBurn"),
+        successToast: t("DashboardIssuance.management.forceBurnFinalized"),
       }
     );
   };
@@ -934,7 +965,7 @@ export function TokenManagementWorkspace({
   const handleAuthorityUpdate = () => {
     runAction(
       {
-        label: "Update authority",
+        label: t("DashboardIssuance.management.updateAuthority"),
         method: "POST",
         path: `${tokenBasePath}/authority`,
         body: {
@@ -947,11 +978,11 @@ export function TokenManagementWorkspace({
       },
       {
         requiresConfirmation: true,
-        confirmationTitle: "Update authority?",
-        confirmationDescription: "This will submit an authority update transaction onchain.",
-        confirmButtonLabel: "Update now",
-        submitToast: "Submitting authority update transaction...",
-        successToast: "Authority update finalized.",
+        confirmationTitle: t("DashboardIssuance.management.authorityConfirmationTitle"),
+        confirmationDescription: t("DashboardIssuance.management.authorityConfirmationDescription"),
+        confirmButtonLabel: t("DashboardIssuance.management.updateNow"),
+        submitToast: t("DashboardIssuance.management.submittingAuthority"),
+        successToast: t("DashboardIssuance.management.authorityFinalized"),
       }
     );
   };
@@ -964,22 +995,30 @@ export function TokenManagementWorkspace({
 
     runAction(
       {
-        label: pause ? "Pause token" : "Unpause token",
+        label: pause
+          ? t("DashboardIssuance.management.pauseToken")
+          : t("DashboardIssuance.management.unpauseToken"),
         method: "POST",
         path: `${tokenBasePath}/${pause ? "pause" : "unpause"}`,
         body: {},
       },
       {
         requiresConfirmation: true,
-        confirmationTitle: pause ? "Pause token?" : "Unpause token?",
+        confirmationTitle: pause
+          ? t("DashboardIssuance.management.pauseConfirmationTitle")
+          : t("DashboardIssuance.management.unpauseConfirmationTitle"),
         confirmationDescription: pause
-          ? "This will submit a pause transaction onchain."
-          : "This will submit an unpause transaction onchain.",
-        confirmButtonLabel: pause ? "Pause now" : "Unpause now",
+          ? t("DashboardIssuance.management.pauseConfirmationDescription")
+          : t("DashboardIssuance.management.unpauseConfirmationDescription"),
+        confirmButtonLabel: pause
+          ? t("DashboardIssuance.management.pauseNow")
+          : t("DashboardIssuance.management.unpauseNow"),
         submitToast: pause
-          ? "Submitting pause transaction..."
-          : "Submitting unpause transaction...",
-        successToast: pause ? "Pause transaction finalized." : "Unpause transaction finalized.",
+          ? t("DashboardIssuance.management.submittingPause")
+          : t("DashboardIssuance.management.submittingUnpause"),
+        successToast: pause
+          ? t("DashboardIssuance.management.pauseFinalized")
+          : t("DashboardIssuance.management.unpauseFinalized"),
       }
     );
   };
@@ -992,14 +1031,14 @@ export function TokenManagementWorkspace({
 
     const accountAddress = freezeForm.accountAddress.trim();
     if (!accountAddress) {
-      toast.error("Account address is required.");
+      toast.error(t("DashboardIssuance.management.accountAddressRequired"));
       return;
     }
 
     if (unfreeze) {
       runAction(
         {
-          label: "Unfreeze account",
+          label: t("DashboardIssuance.management.unfreezeAccount"),
           method: "POST",
           path: `${tokenBasePath}/unfreeze`,
           body: {
@@ -1008,11 +1047,13 @@ export function TokenManagementWorkspace({
         },
         {
           requiresConfirmation: true,
-          confirmationTitle: "Unfreeze account?",
-          confirmationDescription: "This will submit an unfreeze transaction onchain.",
-          confirmButtonLabel: "Unfreeze now",
-          submitToast: "Submitting unfreeze transaction...",
-          successToast: "Unfreeze transaction finalized.",
+          confirmationTitle: t("DashboardIssuance.management.unfreezeConfirmationTitle"),
+          confirmationDescription: t(
+            "DashboardIssuance.management.unfreezeConfirmationDescription"
+          ),
+          confirmButtonLabel: t("DashboardIssuance.management.unfreezeNow"),
+          submitToast: t("DashboardIssuance.management.submittingUnfreeze"),
+          successToast: t("DashboardIssuance.management.unfreezeFinalized"),
         }
       );
       return;
@@ -1020,7 +1061,7 @@ export function TokenManagementWorkspace({
 
     runAction(
       {
-        label: "Freeze account",
+        label: t("DashboardIssuance.management.freezeAccount"),
         method: "POST",
         path: `${tokenBasePath}/freeze`,
         body: {
@@ -1030,11 +1071,11 @@ export function TokenManagementWorkspace({
       },
       {
         requiresConfirmation: true,
-        confirmationTitle: "Freeze account?",
-        confirmationDescription: "This will submit a freeze transaction onchain.",
-        confirmButtonLabel: "Freeze now",
-        submitToast: "Submitting freeze transaction...",
-        successToast: "Freeze transaction finalized.",
+        confirmationTitle: t("DashboardIssuance.management.freezeConfirmationTitle"),
+        confirmationDescription: t("DashboardIssuance.management.freezeConfirmationDescription"),
+        confirmButtonLabel: t("DashboardIssuance.management.freezeNow"),
+        submitToast: t("DashboardIssuance.management.submittingFreeze"),
+        successToast: t("DashboardIssuance.management.freezeFinalized"),
       }
     );
   };
@@ -1042,12 +1083,15 @@ export function TokenManagementWorkspace({
   const handleAddAllowlist = () => {
     const address = allowlistForm.address.trim();
     if (!address) {
-      toast.error(controlListCopy?.addressRequiredMessage ?? "Allowlist address is required.");
+      toast.error(
+        controlListCopy?.addressRequiredMessage ??
+          t("DashboardIssuance.management.allowlistAddressRequired")
+      );
       return;
     }
 
     runAction({
-      label: controlListCopy?.addActionLabel ?? "Add allowlist entry",
+      label: controlListCopy?.addActionLabel ?? t("DashboardIssuance.management.addAllowlistEntry"),
       method: "POST",
       path: `${tokenBasePath}/allowlist`,
       body: {
@@ -1060,7 +1104,9 @@ export function TokenManagementWorkspace({
   const handleRemoveAllowlist = (entryId: string) => {
     runAction(
       {
-        label: controlListCopy?.removeActionLabel ?? "Remove allowlist entry",
+        label:
+          controlListCopy?.removeActionLabel ??
+          t("DashboardIssuance.management.removeAllowlistEntry"),
         method: "DELETE",
         path: `${tokenBasePath}/allowlist/${entryId}`,
       },
@@ -1107,6 +1153,7 @@ export function TokenManagementWorkspace({
         authorityWallets,
         metadataAuthority,
         permissionRow: row,
+        t,
       })
     );
 
@@ -1134,7 +1181,9 @@ export function TokenManagementWorkspace({
 
     const result = await runActionImmediately(
       {
-        label: `Update ${authorityModalRow.title}`,
+        label: t("DashboardIssuance.management.updateAuthorityLabel", {
+          authority: authorityModalRow.title,
+        }),
         method: "POST",
         path: `${tokenBasePath}/authority`,
         body: {
@@ -1147,8 +1196,12 @@ export function TokenManagementWorkspace({
         },
       },
       {
-        submitToast: `Updating ${authorityModalRow.title.toLowerCase()}...`,
-        successToast: `${authorityModalRow.title} updated.`,
+        submitToast: t("DashboardIssuance.management.updatingAuthority", {
+          authority: authorityModalRow.title.toLowerCase(),
+        }),
+        successToast: t("DashboardIssuance.management.authorityUpdated", {
+          authority: authorityModalRow.title,
+        }),
       }
     );
 
@@ -1279,6 +1332,7 @@ export function TokenManagementWorkspace({
           authorityWallets,
           metadataAuthority,
           permissionRow: authorityModalRow,
+          t,
         })
       )
     : {
@@ -1313,8 +1367,12 @@ export function TokenManagementWorkspace({
         allowlistError={allowlistError}
         controlListLabel={controlListCopy?.label ?? null}
         controlListDescription={controlListCopy?.description ?? null}
-        controlListAddActionLabel={controlListCopy?.addActionLabel ?? "Add allowlist entry"}
-        controlListEmptyState={controlListCopy?.emptyState ?? "No allowlist entries yet."}
+        controlListAddActionLabel={
+          controlListCopy?.addActionLabel ?? t("DashboardIssuance.management.addAllowlistEntry")
+        }
+        controlListEmptyState={
+          controlListCopy?.emptyState ?? t("DashboardIssuance.management.noAllowlistEntries")
+        }
         freezeHint={controlListCopy?.freezeHint ?? null}
         signerWallets={visibleActionSignerProps.signerWallets}
         defaultSignerWalletId={visibleActionSignerProps.defaultSignerWalletId}
@@ -1359,7 +1417,9 @@ export function TokenManagementWorkspace({
         pauseDisabledReason={pauseDisabledReason}
         canManageTokenAdmin={canManageTokenAdmin}
         onCopyAddress={() => void handleCopy(token.mintAddress)}
-        onCopyTokenId={() => void handleCopy(token.id, "Token ID copied")}
+        onCopyTokenId={() =>
+          void handleCopy(token.id, t("DashboardIssuance.management.tokenIdCopied"))
+        }
         onDeploy={() => {
           if (!canDeployToken) {
             return;
@@ -1394,7 +1454,9 @@ export function TokenManagementWorkspace({
 
       {tokenError ? (
         <div className="rounded-xl border border-[rgba(220,38,38,0.2)] bg-[rgba(220,38,38,0.08)] px-4 py-3">
-          <p className="text-sm font-medium text-[#dc2626]">Token load warning</p>
+          <p className="text-sm font-medium text-[#dc2626]">
+            {t("DashboardIssuance.workspace.tokenLoadWarning")}
+          </p>
           <p className="mt-1 text-sm text-[#dc2626]">{tokenError}</p>
         </div>
       ) : null}
@@ -1402,10 +1464,11 @@ export function TokenManagementWorkspace({
       {token.status === "paused" ? (
         <div className="flex flex-col gap-3 rounded-xl border border-[rgba(234,179,8,0.2)] bg-[rgba(234,179,8,0.08)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-[#92400e]">Token is paused</p>
+            <p className="text-sm font-medium text-[#92400e]">
+              {t("DashboardIssuance.workspace.tokenPaused")}
+            </p>
             <p className="mt-1 text-sm text-[#92400e]">
-              Minting, burning, and administrative transfer actions are disabled until the token is
-              unpaused.
+              {t("DashboardIssuance.workspace.pausedHint")}
             </p>
           </div>
           {canManageTokenAdmin ? (
@@ -1416,7 +1479,7 @@ export function TokenManagementWorkspace({
                 onClick={() => handlePause(false)}
                 disabled={isPending || Boolean(effectivePauseDisabledReason)}
               >
-                Unpause token
+                {t("DashboardIssuance.workspace.unpauseToken")}
               </Button>
             </TokenDisabledActionTooltip>
           ) : null}
@@ -1437,7 +1500,9 @@ export function TokenManagementWorkspace({
 
       {activeTab === "permissions" ? (
         authorityWalletsLoading ? (
-          <LoadingSection message="Loading authority wallet access…" />
+          <LoadingSection
+            message={t("DashboardIssuance.management.loadingAuthorityWalletAccess")}
+          />
         ) : (
           <div className="space-y-4">
             <TokenSettingsSection
@@ -1469,7 +1534,7 @@ export function TokenManagementWorkspace({
 
       {activeTab === "compliance" ? (
         supportingDataLoading ? (
-          <LoadingSection message="Loading compliance controls…" />
+          <LoadingSection message={t("DashboardIssuance.management.loadingComplianceControls")} />
         ) : (
           <div className="space-y-4">
             <ActionSelector
@@ -1545,10 +1610,10 @@ export function TokenManagementWorkspace({
         {fundManagementModalAction === "deploy" ? (
           <div className="rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
             <p className="pr-12 text-[20px] leading-[1.2] font-medium text-[#1c1c1d]">
-              Deploy token
+              {t("DashboardIssuance.management.deployToken")}
             </p>
             <p className="mt-2 text-[14px] leading-[1.45] text-[rgba(28,28,29,0.72)]">
-              This will deploy the token onchain so operations can run.
+              {t("DashboardIssuance.workspace.deployHint")}
             </p>
             <div className="mt-5 space-y-5">
               <TokenSignerSelect
@@ -1556,7 +1621,7 @@ export function TokenManagementWorkspace({
                 signerWalletId={deploySignerWalletId}
                 signerUnavailableReason={deploySignerSelection.unavailableReason}
                 onSignerWalletIdChange={setDeploySignerWalletId}
-                helperText="Pay the transaction and account fees from the signer wallet, or with Kora sponsorship."
+                helperText={t("DashboardIssuance.management.deploySignerHint")}
               />
               <div className="flex items-center justify-between gap-2">
                 <button
@@ -1565,7 +1630,7 @@ export function TokenManagementWorkspace({
                   disabled={isPending}
                   className="inline-flex h-10 items-center rounded-[12px] border border-[rgba(28,28,29,0.16)] bg-white px-4 text-sm font-medium text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.04)] disabled:pointer-events-none disabled:opacity-50"
                 >
-                  Cancel
+                  {t("DashboardIssuance.workspace.cancel")}
                 </button>
                 <div className="flex items-center gap-2">
                   <button
@@ -1575,16 +1640,18 @@ export function TokenManagementWorkspace({
                     className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-[rgba(28,28,29,0.16)] bg-white px-4 text-sm font-medium text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.04)] disabled:pointer-events-none disabled:opacity-50"
                   >
                     <WalletIcon className="size-4" />
-                    Deploy with Wallet
+                    {t("DashboardIssuance.management.deployWithWallet")}
                   </button>
-                  <TokenDisabledActionTooltip reason="Kora sponsorship is unavailable right now.">
+                  <TokenDisabledActionTooltip
+                    reason={t("DashboardIssuance.management.koraUnavailable")}
+                  >
                     <button
                       type="button"
                       disabled
                       className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-[#0f0f10] px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
                     >
                       <SparklesIcon className="size-4" />
-                      Deploy with Kora
+                      {t("DashboardIssuance.management.deployWithKora")}
                     </button>
                   </TokenDisabledActionTooltip>
                 </div>
@@ -1616,8 +1683,12 @@ export function TokenManagementWorkspace({
             allowlistError={allowlistError}
             controlListLabel={controlListCopy?.label ?? null}
             controlListDescription={controlListCopy?.description ?? null}
-            controlListAddActionLabel={controlListCopy?.addActionLabel ?? "Add allowlist entry"}
-            controlListEmptyState={controlListCopy?.emptyState ?? "No allowlist entries yet."}
+            controlListAddActionLabel={
+              controlListCopy?.addActionLabel ?? t("DashboardIssuance.management.addAllowlistEntry")
+            }
+            controlListEmptyState={
+              controlListCopy?.emptyState ?? t("DashboardIssuance.management.noAllowlistEntries")
+            }
             freezeHint={controlListCopy?.freezeHint ?? null}
             signerWallets={fundManagementActionSignerProps.signerWallets}
             defaultSignerWalletId={fundManagementActionSignerProps.defaultSignerWalletId}
@@ -1657,7 +1728,7 @@ export function TokenManagementWorkspace({
       {isPending ? (
         <div className="fixed right-4 bottom-4 z-30 inline-flex items-center gap-2 rounded-lg border border-[rgba(28,28,29,0.12)] bg-white px-3 py-2 text-sm shadow-lg">
           <Loader2Icon className="h-4 w-4 animate-spin" />
-          Running action...
+          {t("DashboardIssuance.workspace.runningAction")}
         </div>
       ) : null}
     </div>

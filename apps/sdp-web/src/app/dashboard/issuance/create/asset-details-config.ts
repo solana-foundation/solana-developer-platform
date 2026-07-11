@@ -1,4 +1,5 @@
 import type { AssetCategory } from "@sdp/types";
+import type { MessageKey } from "@/i18n/messages";
 import {
   type AccessControlMode,
   type CapacityKey,
@@ -27,40 +28,40 @@ export type DetailFieldKey =
 
 export interface FieldDescriptor {
   key: DetailFieldKey;
-  label: string;
+  labelKey: MessageKey;
   control: FieldControl;
-  placeholder?: string;
-  help?: string;
-  options?: readonly { value: string; label: string }[];
+  placeholderKey?: MessageKey;
+  helpKey?: MessageKey;
+  options?: readonly { value: string; labelKey: MessageKey }[];
 }
 
 export interface DetailSection {
-  title: string;
-  description?: string;
+  titleKey: MessageKey;
+  descriptionKey?: MessageKey;
   fields: readonly FieldDescriptor[];
 }
 
 const JURISDICTION_OPTIONS = [
-  { value: "us", label: "United States" },
-  { value: "eu", label: "European Union" },
-  { value: "uk", label: "United Kingdom" },
-  { value: "sg", label: "Singapore" },
-  { value: "other", label: "Other" },
+  { value: "us", labelKey: "DashboardIssuance.config.unitedStates" },
+  { value: "eu", labelKey: "DashboardIssuance.config.europeanUnion" },
+  { value: "uk", labelKey: "DashboardIssuance.config.unitedKingdom" },
+  { value: "sg", labelKey: "DashboardIssuance.config.singapore" },
+  { value: "other", labelKey: "DashboardIssuance.config.other" },
 ] as const;
 
 const OFFERING_OPTIONS = [
-  { value: "reg_d", label: "Reg D" },
-  { value: "reg_s", label: "Reg S" },
-  { value: "reg_a", label: "Reg A+" },
-  { value: "public", label: "Public offering" },
-  { value: "other", label: "Other" },
+  { value: "reg_d", labelKey: "DashboardIssuance.config.regD" },
+  { value: "reg_s", labelKey: "DashboardIssuance.config.regS" },
+  { value: "reg_a", labelKey: "DashboardIssuance.config.regA" },
+  { value: "public", labelKey: "DashboardIssuance.config.publicOffering" },
+  { value: "other", labelKey: "DashboardIssuance.config.other" },
 ] as const;
 
 const BACKING_OPTIONS = [
-  { value: "fiat", label: "Fiat-backed" },
-  { value: "crypto", label: "Crypto-backed" },
-  { value: "commodity", label: "Commodity-backed" },
-  { value: "algorithmic", label: "Algorithmic" },
+  { value: "fiat", labelKey: "DashboardIssuance.taxonomy.fiatBacked" },
+  { value: "crypto", labelKey: "DashboardIssuance.taxonomy.cryptoBacked" },
+  { value: "commodity", labelKey: "DashboardIssuance.config.commodityBacked" },
+  { value: "algorithmic", labelKey: "DashboardIssuance.config.algorithmic" },
 ] as const;
 
 // Category-specific sections shown in the Overview tab, below the common "About"
@@ -68,59 +69,69 @@ const BACKING_OPTIONS = [
 const CATEGORY_SECTIONS: Record<AssetCategory, readonly DetailSection[]> = {
   stablecoin: [
     {
-      title: "Financial details",
-      description: "Key financial attributes of the asset.",
+      titleKey: "DashboardIssuance.config.financialDetails",
+      descriptionKey: "DashboardIssuance.config.financialDetailsDescription",
       fields: [
         {
           key: "issuerName",
-          label: "Issuer name",
+          labelKey: "DashboardIssuance.config.issuerName",
           control: "text",
-          placeholder: "e.g., Acme Financial Inc.",
+          placeholderKey: "DashboardIssuance.config.issuerNamePlaceholder",
         },
-        { key: "backingType", label: "Backing type", control: "select", options: BACKING_OPTIONS },
-        { key: "pegCurrency", label: "Currency", control: "currency" },
-        { key: "pegTarget", label: "Peg or target", control: "text", placeholder: "1.00 USD" },
+        {
+          key: "backingType",
+          labelKey: "DashboardIssuance.config.backingType",
+          control: "select",
+          options: BACKING_OPTIONS,
+        },
+        { key: "pegCurrency", labelKey: "DashboardIssuance.config.currency", control: "currency" },
+        {
+          key: "pegTarget",
+          labelKey: "DashboardIssuance.config.pegTarget",
+          control: "text",
+          placeholderKey: "DashboardIssuance.config.pegTargetPlaceholder",
+        },
         {
           key: "reserveAsset",
-          label: "Reserve asset",
+          labelKey: "DashboardIssuance.config.reserveAsset",
           control: "text",
-          placeholder: "USD (U.S. Dollar)",
+          placeholderKey: "DashboardIssuance.config.reserveAssetPlaceholder",
         },
         {
           key: "reserveCustodian",
-          label: "Reserve custodian",
+          labelKey: "DashboardIssuance.config.reserveCustodian",
           control: "text",
-          placeholder: "e.g., Acme Treasury Ltd.",
+          placeholderKey: "DashboardIssuance.config.reserveCustodianPlaceholder",
         },
         {
           key: "redemptionEnabled",
-          label: "Redemption",
+          labelKey: "DashboardIssuance.config.redemption",
           control: "toggle",
-          help: "Holders can redeem tokens for the underlying reserves.",
+          helpKey: "DashboardIssuance.config.redemptionHelp",
         },
       ],
     },
   ],
   tokenized_security: [
     {
-      title: "Security details",
-      description: "Issuer and offering information.",
+      titleKey: "DashboardIssuance.config.securityDetails",
+      descriptionKey: "DashboardIssuance.config.securityDetailsDescription",
       fields: [
         {
           key: "issuerName",
-          label: "Issuer name",
+          labelKey: "DashboardIssuance.config.issuerName",
           control: "text",
-          placeholder: "e.g., Acme Financial Inc.",
+          placeholderKey: "DashboardIssuance.config.issuerNamePlaceholder",
         },
         {
           key: "jurisdiction",
-          label: "Jurisdiction",
+          labelKey: "DashboardIssuance.config.jurisdiction",
           control: "select",
           options: JURISDICTION_OPTIONS,
         },
         {
           key: "offeringType",
-          label: "Offering type",
+          labelKey: "DashboardIssuance.config.offeringType",
           control: "select",
           options: OFFERING_OPTIONS,
         },
@@ -129,20 +140,20 @@ const CATEGORY_SECTIONS: Record<AssetCategory, readonly DetailSection[]> = {
   ],
   generic: [
     {
-      title: "Asset details",
-      description: "What backs or represents this asset.",
+      titleKey: "DashboardIssuance.config.categoryAssetDetails",
+      descriptionKey: "DashboardIssuance.config.categoryAssetDetailsDescription",
       fields: [
         {
           key: "underlyingAsset",
-          label: "Underlying asset",
+          labelKey: "DashboardIssuance.config.underlyingAsset",
           control: "text",
-          placeholder: "e.g., Gold, real estate",
+          placeholderKey: "DashboardIssuance.config.underlyingAssetPlaceholder",
         },
         {
           key: "custodian",
-          label: "Custodian",
+          labelKey: "DashboardIssuance.config.custodian",
           control: "text",
-          placeholder: "e.g., Acme Custody",
+          placeholderKey: "DashboardIssuance.config.custodianPlaceholder",
         },
       ],
     },
@@ -185,7 +196,7 @@ for (const sections of Object.values(CATEGORY_SECTIONS)) {
     for (const field of section.fields) {
       if (field.options) {
         OPTION_LABELS_BY_KEY[field.key] = Object.fromEntries(
-          field.options.map((option) => [option.value, option.label])
+          field.options.map((option) => [option.value, option.value])
         );
       }
     }
@@ -199,11 +210,12 @@ export function detailFieldOptionLabel(key: string, value: string): string | und
   return OPTION_LABELS_BY_KEY[key as DetailFieldKey]?.[value];
 }
 
-export const ACCESS_CONTROL_OPTIONS: readonly { value: AccessControlMode; label: string }[] = [
-  { value: "allowlist", label: "Allow list" },
-  { value: "blocklist", label: "Block list" },
-  { value: "disabled", label: "None" },
-];
+export const ACCESS_CONTROL_OPTIONS: readonly { value: AccessControlMode; labelKey: MessageKey }[] =
+  [
+    { value: "allowlist", labelKey: "DashboardIssuance.config.allowList" },
+    { value: "blocklist", labelKey: "DashboardIssuance.config.blockList" },
+    { value: "disabled", labelKey: "DashboardIssuance.wallet.none" },
+  ];
 
 export function getDefaultAccessControl(category: AssetCategory): AccessControlMode {
   switch (category) {
@@ -216,34 +228,37 @@ export function getDefaultAccessControl(category: AssetCategory): AccessControlM
   }
 }
 
-export const CAPACITY_META: Record<CapacityKey, { label: string; description: string }> = {
+export const CAPACITY_META: Record<
+  CapacityKey,
+  { labelKey: MessageKey; descriptionKey: MessageKey }
+> = {
   kyc: {
-    label: "KYC",
-    description: "Require identity verification before users can hold or transfer tokens.",
+    labelKey: "DashboardIssuance.config.kyc",
+    descriptionKey: "DashboardIssuance.config.kycDescription",
   },
   restrictTradingHours: {
-    label: "Restrict trading hours",
-    description: "Limit token transfers to specific days and time windows.",
+    labelKey: "DashboardIssuance.config.restrictTradingHours",
+    descriptionKey: "DashboardIssuance.config.restrictTradingHoursDescription",
   },
   freezeTransfers: {
-    label: "Freeze transfers",
-    description: "Freeze tokens in response to compliance events or investigations.",
+    labelKey: "DashboardIssuance.config.freezeTransfers",
+    descriptionKey: "DashboardIssuance.config.freezeTransfersDescription",
   },
   issueRetireControls: {
-    label: "Issue & retire controls",
-    description: "Control who can issue new tokens or retire existing supply.",
+    labelKey: "DashboardIssuance.config.issueRetireControls",
+    descriptionKey: "DashboardIssuance.config.issueRetireControlsDescription",
   },
   redemptionApprovals: {
-    label: "Redemption approvals",
-    description: "Require approval before redeeming tokens for underlying reserves.",
+    labelKey: "DashboardIssuance.config.redemptionApprovals",
+    descriptionKey: "DashboardIssuance.config.redemptionApprovalsDescription",
   },
   investorReporting: {
-    label: "Investor reporting",
-    description: "Generate periodic reports for investors and stakeholders.",
+    labelKey: "DashboardIssuance.config.investorReporting",
+    descriptionKey: "DashboardIssuance.config.investorReportingDescription",
   },
   transferApprovals: {
-    label: "Transfer approvals",
-    description: "Require approval for transfers above a set threshold.",
+    labelKey: "DashboardIssuance.config.transferApprovals",
+    descriptionKey: "DashboardIssuance.config.transferApprovalsDescription",
   },
 };
 

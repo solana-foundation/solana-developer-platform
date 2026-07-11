@@ -8,6 +8,8 @@ import {
   fetchTransferByProviderReference,
   simulateSandboxTransfer,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import { ONRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
 import { depositAmountSchema, depositSelectionSchema } from "../schema";
 import {
@@ -17,30 +19,44 @@ import {
   useRampWizard,
 } from "./use-ramp-wizard";
 
-export const ONRAMP_STEPS = [
-  { id: "DEPOSIT", label: "Deposit", title: "How much would you like to deposit?" },
-  { id: "PROVIDER", label: "Provider", title: "Complete your deposit" },
-] as const satisfies readonly RampWizardStep[];
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+export type OnrampStepId = "DEPOSIT" | "PROVIDER" | "REQUIREMENTS";
 
-const ONRAMP_REQUIREMENTS_STEP = {
-  id: "REQUIREMENTS",
-  label: "Details",
-  title: "A few details to continue",
-} as const satisfies RampWizardStep;
+export function getOnrampSteps(t: Translate): readonly RampWizardStep<OnrampStepId>[] {
+  return [
+    {
+      id: "DEPOSIT",
+      label: t("DashboardPayments.ramps.onrampDepositStep"),
+      title: t("DashboardPayments.ramps.onrampDepositTitle"),
+    },
+    {
+      id: "PROVIDER",
+      label: t("DashboardPayments.ramps.provider"),
+      title: t("DashboardPayments.ramps.onrampProviderTitle"),
+    },
+  ];
+}
 
-export type OnrampStepId = (typeof ONRAMP_STEPS)[number]["id"] | typeof ONRAMP_REQUIREMENTS_STEP.id;
+function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
+  return {
+    id: "REQUIREMENTS",
+    label: t("DashboardPayments.ramps.detailsStep"),
+    title: t("DashboardPayments.ramps.onrampRequirementsTitle"),
+  };
+}
 
 export function useOnrampWizard(props: UseRampWizardProps) {
+  const t = useTranslations();
   const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
   const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
 
   const wizard = useRampWizard<OnrampStepId>(props, {
     pairs: ONRAMP_PAIRS,
-    steps: ONRAMP_STEPS,
+    steps: getOnrampSteps(t),
     stepSchemas: { DEPOSIT: depositAmountSchema },
     quoteStepId: "DEPOSIT",
     requirements: {
-      step: ONRAMP_REQUIREMENTS_STEP,
+      step: getOnrampRequirementsStep(t),
       insertAfter: "DEPOSIT",
       direction: "onramp",
     },
@@ -91,7 +107,9 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     }
 
     setQuoteSimulationLoading(true);
-    const toastId = toast.loading("Simulating quote funding.", { position: "bottom-right" });
+    const toastId = toast.loading(t("DashboardPayments.ramps.simulatingQuoteFunding"), {
+      position: "bottom-right",
+    });
 
     try {
       if (quote.provider === "lightspark") {
@@ -125,11 +143,17 @@ export function useOnrampWizard(props: UseRampWizardProps) {
         });
       }
       setQuoteSimulationSucceeded(true);
-      toast.success("Quote funding simulated.", { id: toastId, position: "bottom-right" });
-    } catch (error) {
-      toast.error("Quote simulation failed.", {
+      toast.success(t("DashboardPayments.ramps.quoteFundingSimulated"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Sandbox simulation failed.",
+        position: "bottom-right",
+      });
+    } catch (error) {
+      toast.error(t("DashboardPayments.ramps.quoteSimulationFailed"), {
+        id: toastId,
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.ramps.sandboxSimulationFailed"),
         position: "bottom-right",
       });
     } finally {

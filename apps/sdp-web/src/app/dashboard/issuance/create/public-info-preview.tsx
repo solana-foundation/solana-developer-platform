@@ -29,9 +29,10 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
-import { getAssetTypeLabel, getCategoryLabel } from "./asset-taxonomy";
+import { getAssetTypeLabelKey, getCategoryLabelKey } from "./asset-taxonomy";
 import {
   buildPublicMetadata,
   getDefaultPublicFields,
@@ -61,12 +62,11 @@ type PreviewSurface = "wallet" | "explorer" | "token";
 
 const SURFACES: readonly {
   id: PreviewSurface;
-  label: string;
   Icon: LucideIcon;
 }[] = [
-  { id: "token", label: "Token", Icon: FileText },
-  { id: "explorer", label: "Explorer", Icon: Globe },
-  { id: "wallet", label: "Wallet", Icon: Wallet },
+  { id: "token", Icon: FileText },
+  { id: "explorer", Icon: Globe },
+  { id: "wallet", Icon: Wallet },
 ];
 
 interface PreviewProps {
@@ -189,11 +189,14 @@ export function PublicInfoPreview({
   mintAddress?: string | null;
   explorerHref?: string | null;
 }) {
+  const t = useTranslations();
   const [showOptional, setShowOptional] = useState(false);
   const [surface, setSurface] = useState<PreviewSurface>("token");
   const [jsonOpen, setJsonOpen] = useState(false);
-  const categoryLabel = getCategoryLabel(draft.assetCategory);
-  const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType);
+  const categoryLabelKey = getCategoryLabelKey(draft.assetCategory);
+  const typeLabelKey = getAssetTypeLabelKey(draft.assetCategory, draft.assetType);
+  const categoryLabel = categoryLabelKey ? t(categoryLabelKey) : null;
+  const typeLabel = typeLabelKey ? t(typeLabelKey) : null;
   const publicMetadata = buildPublicMetadata(draft);
 
   // Core identity + classification: inherent to the token / served from the
@@ -201,21 +204,41 @@ export function PublicInfoPreview({
   const alwaysPublic: StaticField[] = [
     {
       key: "name",
-      label: "Name",
-      value: draft.name.trim() || "Untitled asset",
+      label: t("DashboardIssuance.publicInfo.name"),
+      value: draft.name.trim() || t("DashboardIssuance.publicInfo.untitledAsset"),
     },
-    draft.symbol.trim() ? { key: "symbol", label: "Symbol", value: draft.symbol.trim() } : null,
+    draft.symbol.trim()
+      ? {
+          key: "symbol",
+          label: t("DashboardIssuance.publicInfo.symbol"),
+          value: draft.symbol.trim(),
+        }
+      : null,
     draft.description.trim()
       ? {
           key: "description",
-          label: "Description",
+          label: t("DashboardIssuance.publicInfo.description"),
           value: draft.description.trim(),
         }
       : null,
-    { key: "decimals", label: "Decimals", value: draft.decimals.trim() || "—" },
-    categoryLabel ? { key: "category", label: "Category", value: categoryLabel } : null,
-    typeLabel ? { key: "type", label: "Asset type", value: typeLabel } : null,
-    draft.imageUrl.trim() ? { key: "logo", label: "Logo", value: fileName(draft.imageUrl) } : null,
+    {
+      key: "decimals",
+      label: t("DashboardIssuance.publicInfo.decimals"),
+      value: draft.decimals.trim() || t("DashboardIssuance.publicInfo.notProvided"),
+    },
+    categoryLabel
+      ? { key: "category", label: t("DashboardIssuance.publicInfo.category"), value: categoryLabel }
+      : null,
+    typeLabel
+      ? { key: "type", label: t("DashboardIssuance.publicInfo.assetType"), value: typeLabel }
+      : null,
+    draft.imageUrl.trim()
+      ? {
+          key: "logo",
+          label: t("DashboardIssuance.publicInfo.logo"),
+          value: fileName(draft.imageUrl),
+        }
+      : null,
   ].filter((field): field is StaticField => Boolean(field));
 
   // Optional asset.* fields whose public/private state the issuer controls.
@@ -239,15 +262,31 @@ export function PublicInfoPreview({
   // field, so hiding a field also removes it from the preview.
   const facts: Fact[] = [
     ...(draft.symbol.trim()
-      ? [{ label: "Symbol", value: draft.symbol.trim(), path: "symbol" }]
+      ? [
+          {
+            label: t("DashboardIssuance.publicInfo.symbol"),
+            value: draft.symbol.trim(),
+            path: "symbol",
+          },
+        ]
       : []),
     {
-      label: "Decimals",
-      value: draft.decimals.trim() || "—",
+      label: t("DashboardIssuance.publicInfo.decimals"),
+      value: draft.decimals.trim() || t("DashboardIssuance.publicInfo.notProvided"),
       path: "decimals",
     },
-    ...(categoryLabel ? [{ label: "Category", value: categoryLabel, path: "category" }] : []),
-    ...(typeLabel ? [{ label: "Asset type", value: typeLabel, path: "type" }] : []),
+    ...(categoryLabel
+      ? [
+          {
+            label: t("DashboardIssuance.publicInfo.category"),
+            value: categoryLabel,
+            path: "category",
+          },
+        ]
+      : []),
+    ...(typeLabel
+      ? [{ label: t("DashboardIssuance.publicInfo.assetType"), value: typeLabel, path: "type" }]
+      : []),
     ...enabledCandidates.map((candidate) => ({
       label: candidate.label,
       value: candidate.value,
@@ -273,9 +312,11 @@ export function PublicInfoPreview({
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-xl font-medium text-[#1c1c1d]">Public token information</h3>
+          <h3 className="text-xl font-medium text-[#1c1c1d]">
+            {t("DashboardIssuance.publicInfo.publicTokenInformation")}
+          </h3>
           <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
-            This is how your asset will appear to wallets, explorers, and the public.
+            {t("DashboardIssuance.publicInfo.publicTokenInfoHelp")}
           </p>
         </div>
         <MetadataJsonToggle open={jsonOpen} onToggle={() => setJsonOpen((prev) => !prev)} />
@@ -285,9 +326,11 @@ export function PublicInfoPreview({
         {/* Checklist — public coverage + what's public, with interactive toggles. */}
         <div>
           <div className="mb-2 flex h-8 items-center justify-between gap-3">
-            <p className="text-sm font-medium text-[#1c1c1d]">Included in public view</p>
+            <p className="text-sm font-medium text-[#1c1c1d]">
+              {t("DashboardIssuance.publicInfo.includedInPublicView")}
+            </p>
             <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.6)]">
-              {publicCount} public
+              {t("DashboardIssuance.publicInfo.publicCount", { count: publicCount })}
             </span>
           </div>
 
@@ -301,7 +344,7 @@ export function PublicInfoPreview({
                 />
               </div>
               <p className="mt-1.5 text-xs text-[rgba(28,28,29,0.5)]">
-                {publicCount} of {totalCount} fields public
+                {t("DashboardIssuance.publicInfo.publicCoverage", { publicCount, totalCount })}
               </p>
             </div>
             <div className="divide-y divide-[rgba(28,28,29,0.06)]">
@@ -332,9 +375,11 @@ export function PublicInfoPreview({
                 <div className="flex items-start gap-2">
                   <Lock className="mt-0.5 h-4 w-4 shrink-0 text-[rgba(28,28,29,0.5)]" />
                   <div>
-                    <p className="text-sm font-medium text-[#1c1c1d]">Not included by default</p>
+                    <p className="text-sm font-medium text-[#1c1c1d]">
+                      {t("DashboardIssuance.publicInfo.notIncludedByDefault")}
+                    </p>
                     <p className="text-sm text-[rgba(28,28,29,0.55)]">
-                      These fields stay private unless you choose to include them.
+                      {t("DashboardIssuance.publicInfo.notIncludedHelp")}
                     </p>
                   </div>
                 </div>
@@ -369,7 +414,9 @@ export function PublicInfoPreview({
             viewer sits under this column when toggled open. */}
         <div>
           <div className="mb-2 flex h-8 items-center justify-between gap-3">
-            <p className="text-sm font-medium text-[#1c1c1d]">Preview</p>
+            <p className="text-sm font-medium text-[#1c1c1d]">
+              {t("DashboardIssuance.publicInfo.preview")}
+            </p>
             <SurfaceSwitch value={surface} onChange={setSurface} />
           </div>
           <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
@@ -400,9 +447,10 @@ function SurfaceSwitch({
   value: PreviewSurface;
   onChange: (next: PreviewSurface) => void;
 }) {
+  const t = useTranslations();
   return (
     <div className="inline-flex items-center gap-0.5 rounded-full border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] p-0.5">
-      {SURFACES.map(({ id, label, Icon }) => {
+      {SURFACES.map(({ id, Icon }) => {
         const active = id === value;
         return (
           <button
@@ -418,7 +466,7 @@ function SurfaceSwitch({
             )}
           >
             <Icon className="h-3.5 w-3.5" />
-            {label}
+            {t(`DashboardIssuance.publicInfo.${id}`)}
           </button>
         );
       })}
@@ -439,6 +487,7 @@ function AssetAvatar({
   symbol: string;
   size?: "sm" | "md";
 }) {
+  const t = useTranslations();
   const dim = size === "sm" ? "h-10 w-10" : "h-14 w-14";
   const initial = symbol.slice(0, 1).toUpperCase() || "?";
 
@@ -449,7 +498,9 @@ function AssetAvatar({
         {/* biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here. */}
         <img
           src={imageUrl}
-          alt={`${name || "Asset"} logo`}
+          alt={t("DashboardIssuance.publicInfo.assetLogo", {
+            name: name || t("DashboardIssuance.publicInfo.asset"),
+          })}
           className={cn(
             "relative rounded-full border border-[rgba(28,28,29,0.1)] object-cover",
             dim
@@ -482,11 +533,12 @@ function IdentityHeader({
   categoryLabel,
   typeLabel,
 }: Pick<PreviewProps, "draft" | "categoryLabel" | "typeLabel">) {
+  const t = useTranslations();
   return (
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
         <h4 className="text-lg leading-tight font-semibold tracking-tight text-[#1c1c1d]">
-          {draft.name.trim() || "Untitled asset"}
+          {draft.name.trim() || t("DashboardIssuance.publicInfo.untitledAsset")}
         </h4>
         {draft.symbol.trim() ? (
           <span className="rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.7)]">
@@ -495,7 +547,7 @@ function IdentityHeader({
         ) : null}
         <span className="ml-1 flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-2 py-0.5 text-xs font-medium text-[rgba(28,28,29,0.6)]">
           <CircleCheck className="h-3 w-3 text-[rgba(28,28,29,0.5)]" />
-          Preview
+          {t("DashboardIssuance.publicInfo.preview")}
         </span>
       </div>
 
@@ -518,18 +570,29 @@ function AddressRow({
   mintAddress: string;
   explorerHref?: string | null;
 }) {
+  const t = useTranslations();
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-3 py-2.5">
       <div className="min-w-0">
-        <p className="text-xs text-[rgba(28,28,29,0.5)]">Mint address</p>
+        <p className="text-xs text-[rgba(28,28,29,0.5)]">
+          {t("DashboardIssuance.publicInfo.mintAddress")}
+        </p>
         <p className="mt-0.5 truncate text-sm font-medium text-[#1c1c1d]">
           {shortAddress(mintAddress)}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <CopyIconButton value={mintAddress} label="Copy mint address" />
+        <CopyIconButton
+          value={mintAddress}
+          label={t("DashboardIssuance.publicInfo.copyMintAddress")}
+        />
         {explorerHref ? (
-          <Button asChild variant="ghost" size="icon-xs" aria-label="View on explorer">
+          <Button
+            asChild
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t("DashboardIssuance.publicInfo.viewOnExplorer")}
+          >
             <a href={explorerHref} target="_blank" rel="noreferrer">
               <ExternalLink />
             </a>
@@ -542,6 +605,7 @@ function AddressRow({
 
 // Copy affordance mirroring the payments CopyButton pattern.
 function CopyIconButton({ value, label }: { value: string; label: string }) {
+  const t = useTranslations();
   const { copy, copied } = useCopy(1200);
   return (
     <Button
@@ -551,7 +615,7 @@ function CopyIconButton({ value, label }: { value: string; label: string }) {
       aria-label={label}
       onClick={() => {
         void copy(value);
-        toast.success("Copied", { position: "bottom-right" });
+        toast.success(t("DashboardIssuance.publicInfo.copied"), { position: "bottom-right" });
       }}
     >
       {copied ? <Check className="text-status-success-text" /> : <Copy />}
@@ -569,6 +633,7 @@ function TokenPreview({
   mintAddress,
   explorerHref,
 }: PreviewProps) {
+  const t = useTranslations();
   return (
     <div>
       <div className="flex items-start gap-4">
@@ -582,7 +647,7 @@ function TokenPreview({
           draft.description.trim() ? "text-[rgba(28,28,29,0.62)]" : "text-[rgba(28,28,29,0.4)]"
         )}
       >
-        {draft.description.trim() || "No public description"}
+        {draft.description.trim() || t("DashboardIssuance.publicInfo.noPublicDescription")}
       </p>
 
       <dl className="mt-4 space-y-2 border-t border-[rgba(28,28,29,0.08)] pt-4">
@@ -628,20 +693,27 @@ function TokenPreview({
 // Wallet surface — a compact token-list row: logo + name / classification on the
 // left, symbol + decimals on the right.
 function WalletPreview({ draft, categoryLabel, typeLabel }: PreviewProps) {
+  const t = useTranslations();
   const secondary = [draft.symbol.trim(), categoryLabel || typeLabel].filter(Boolean).join(" · ");
   return (
     <div className="flex items-center gap-3">
       <AssetAvatar imageUrl={draft.imageUrl} name={draft.name} symbol={draft.symbol} size="sm" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-[#1c1c1d]">
-          {draft.name.trim() || "Untitled asset"}
+          {draft.name.trim() || t("DashboardIssuance.publicInfo.untitledAsset")}
         </p>
-        <p className="mt-0.5 truncate text-xs text-[rgba(28,28,29,0.5)]">{secondary || "—"}</p>
+        <p className="mt-0.5 truncate text-xs text-[rgba(28,28,29,0.5)]">
+          {secondary || t("DashboardIssuance.publicInfo.notProvided")}
+        </p>
       </div>
       <div className="shrink-0 text-right">
-        <p className="text-sm font-medium text-[#1c1c1d]">{draft.symbol.trim() || "—"}</p>
+        <p className="text-sm font-medium text-[#1c1c1d]">
+          {draft.symbol.trim() || t("DashboardIssuance.publicInfo.notProvided")}
+        </p>
         <p className="mt-0.5 text-xs text-[rgba(28,28,29,0.5)]">
-          {draft.decimals.trim() || "—"} decimals
+          {t("DashboardIssuance.publicInfo.decimalsValue", {
+            count: draft.decimals.trim() || t("DashboardIssuance.publicInfo.notProvided"),
+          })}
         </p>
       </div>
     </div>
@@ -716,6 +788,7 @@ function FieldRow({
   locked?: boolean;
   disabled?: boolean;
 }) {
+  const t = useTranslations();
   const hasToggle = Boolean(onToggle) && !locked;
 
   const body = (
@@ -729,7 +802,7 @@ function FieldRow({
       </div>
       {locked ? (
         <span
-          title="Always public — can't be hidden"
+          title={t("DashboardIssuance.publicInfo.alwaysPublic")}
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.55)]"
         >
           <Lock className="h-3.5 w-3.5" />
@@ -753,7 +826,11 @@ function FieldRow({
       type="button"
       aria-pressed={checked}
       aria-disabled={disabled}
-      aria-label={checked ? "Public — hide this field" : "Hidden — show this field publicly"}
+      aria-label={t(
+        checked
+          ? "DashboardIssuance.publicInfo.hidePublicField"
+          : "DashboardIssuance.publicInfo.showPublicField"
+      )}
       onClick={onToggle}
       disabled={disabled}
       className={cn(

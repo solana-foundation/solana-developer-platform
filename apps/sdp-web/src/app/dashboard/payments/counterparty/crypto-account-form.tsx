@@ -11,6 +11,7 @@ import { HeightReveal } from "@/components/ui/height-reveal";
 import { HoldButton } from "@/components/ui/hold-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getHighRiskProviders, runComplianceCheck } from "../payments-workspace.data";
 import type { ComplianceSnapshot } from "../payments-workspace.types";
@@ -34,6 +35,7 @@ interface CryptoAccountFormProps {
 }
 
 export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountFormProps) {
+  const t = useTranslations();
   const [label, setLabel] = useState("");
   const [network, setNetwork] = useState<CryptoAccountNetwork>("solana");
   const [address, setAddress] = useState("");
@@ -58,14 +60,14 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
   const buttonState = ((): { label: string; icon: ReactNode } => {
     switch (phase) {
       case "submitting":
-        return { label: "Adding", icon: <Loader2Icon className="animate-spin" /> };
+        return { label: t("DashboardPayments.counterparty.adding"), icon: <Loader2Icon className="animate-spin" /> };
       case "screening":
       case "revealing":
-        return { label: "Screening", icon: <Loader2Icon className="animate-spin" /> };
+        return { label: t("DashboardPayments.counterparty.screening"), icon: <Loader2Icon className="animate-spin" /> };
       case "ready":
-        return { label: "Add account", icon: <CheckIcon /> };
+        return { label: t("DashboardPayments.counterparty.addAccount"), icon: <CheckIcon /> };
       case "idle":
-        return { label: "Add account", icon: <PlusIcon /> };
+        return { label: t("DashboardPayments.counterparty.addAccount"), icon: <PlusIcon /> };
     }
   })();
 
@@ -109,7 +111,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
 
     const account = result.data?.data?.account;
     if (account) onAdded?.(account);
-    toast.success("Crypto account attached", { position: "bottom-right" });
+    toast.success(t("DashboardPayments.counterparty.cryptoAccountAttached"), { position: "bottom-right" });
     setLabel("");
     setAddress("");
     resetScreening();
@@ -141,12 +143,13 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
     <div className="space-y-6">
       <div className="flex flex-col gap-2">
         <Label className="text-sm font-medium text-text-low" htmlFor="account-label">
-          Label <span className="font-normal text-text-extra-low">(optional)</span>
+          {t("DashboardPayments.counterparty.label")} {" "}
+          <span className="font-normal text-text-extra-low">{t("DashboardPayments.counterparty.optional")}</span>
         </Label>
         <Input
           id="account-label"
           size="xl"
-          placeholder="e.g. Alice's Solana wallet"
+          placeholder={t("DashboardPayments.counterparty.accountLabelPlaceholder")}
           value={label}
           disabled={busy}
           onChange={(e) => setLabel(e.target.value)}
@@ -154,7 +157,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
       </div>
 
       <Combobox
-        label="Network"
+        label={t("DashboardPayments.counterparty.network")}
         value={network}
         onChange={(next) => {
           const match = CRYPTO_ACCOUNT_NETWORKS.find((n) => n === next);
@@ -162,19 +165,19 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
           clearScreening();
         }}
         options={NETWORK_OPTIONS}
-        placeholder="Select network"
+        placeholder={t("DashboardPayments.counterparty.selectNetwork")}
         searchable={false}
         disabled={busy}
       />
 
       <div className="flex flex-col gap-2">
         <Label className="text-sm font-medium text-text-low" htmlFor="account-address">
-          Wallet address
+          {t("DashboardPayments.counterparty.walletAddress")}
         </Label>
         <Input
           id="account-address"
           size="xl"
-          placeholder="Destination wallet address"
+          placeholder={t("DashboardPayments.counterparty.destinationWalletAddress")}
           value={address}
           disabled={busy}
           onChange={(e) => {
@@ -201,8 +204,8 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
           <HeightReveal key="risk-warning" durationSeconds={0.25}>
             <p className="text-sm text-status-error-text">
               {screenUnavailable
-                ? "We couldn't screen this address — compliance screening is unavailable. Add it anyway?"
-                : "One or more checks flagged this wallet or couldn't be completed. Add it anyway?"}
+                ? t("DashboardPayments.counterparty.screeningUnavailable")
+                : t("DashboardPayments.counterparty.screeningWarning")}
             </p>
           </HeightReveal>
         )}
@@ -214,7 +217,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
             iconLeft={<ShieldAlertIcon className="size-3.5" />}
             onHoldComplete={() => void createAccount()}
           >
-            Hold to add anyway
+            {t("DashboardPayments.counterparty.holdToAddAnyway")}
           </HoldButton>
         ) : (
           <Button

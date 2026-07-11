@@ -11,6 +11,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { Input } from "./input";
 import { Label } from "./label";
@@ -84,6 +85,7 @@ export function Combobox({
   onEnterSelect,
   footer,
 }: ComboboxProps) {
+  const t = useTranslations();
   const labelId = useId();
   const portalContainer = usePortalContainer();
   const [open, setOpen] = useState(false);
@@ -225,12 +227,16 @@ export function Combobox({
         className={cn("overflow-y-auto", variant === "dialog" ? "max-h-96 p-2" : "max-h-56 p-1.5")}
       >
         {isLoading ? (
-          <p className="px-3 py-6 text-center text-sm text-text-low">Loading…</p>
+          <p className="px-3 py-6 text-center text-sm text-text-low">
+            {t("Shared.SharedComponents.loading")}
+          </p>
         ) : error ? (
           <p className="px-3 py-6 text-center text-sm text-status-error-text">{error}</p>
         ) : filtered.length === 0 ? (
           <p className="px-3 py-6 text-center text-sm text-text-low">
-            {options.length === 0 ? "No options available." : "No matches for your search."}
+            {options.length === 0
+              ? t("Shared.SharedComponents.noOptionsAvailable")
+              : t("Shared.SharedComponents.noSearchMatches")}
           </p>
         ) : (
           filtered.map((option, index) => {

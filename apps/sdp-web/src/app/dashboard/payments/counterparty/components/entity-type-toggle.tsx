@@ -4,6 +4,7 @@ import { COUNTERPARTY_ENTITY_TYPES, type CounterpartyEntityType } from "@sdp/typ
 import { Building2Icon, UserIcon } from "lucide-react";
 import type { ComponentType } from "react";
 import { Label } from "@/components/ui/label";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 interface EntityTypeToggleProps {
@@ -17,9 +18,11 @@ const ENTITY_ICONS: Record<CounterpartyEntityType, ComponentType<{ className?: s
 };
 
 export function EntityTypeToggle({ value, onChange }: EntityTypeToggleProps) {
+  const t = useTranslations();
+
   return (
     <div className="space-y-2">
-      <Label>Entity type</Label>
+      <Label>{t("DashboardPayments.counterparty.entityType")}</Label>
       <div className="inline-flex w-full gap-1 rounded-xl bg-border-extra-light p-1">
         {COUNTERPARTY_ENTITY_TYPES.map((type) => {
           const Icon = ENTITY_ICONS[type];
@@ -37,7 +40,7 @@ export function EntityTypeToggle({ value, onChange }: EntityTypeToggleProps) {
               )}
             >
               <Icon className="size-4" />
-              {type}
+              {t(`DashboardPayments.counterparty.${type}`)}
             </button>
           );
         })}

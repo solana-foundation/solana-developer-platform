@@ -6,6 +6,7 @@ import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { normalizeApiKeyInput } from "@/lib/playground-api-keys";
 import { cn } from "@/lib/utils";
@@ -528,6 +529,7 @@ export function ApiPlaygroundShell({
   productName,
   rightMessages = [],
 }: ApiPlaygroundShellProps) {
+  const t = useTranslations();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const initialEndpoint =
     endpoints.find((endpoint) => endpoint.id === defaultEndpointId) ?? endpoints[0];
@@ -749,7 +751,7 @@ export function ApiPlaygroundShell({
               </span>
             </div>
             <select
-              aria-label="Select API endpoint"
+              aria-label={t("Shared.SharedComponents.selectApiEndpoint")}
               className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-xl opacity-0"
               value={activeEndpoint.id}
               onChange={(event) => updateEndpointInUrl(event.currentTarget.value)}
@@ -784,8 +786,8 @@ export function ApiPlaygroundShell({
         <div className="grid grid-cols-2 gap-1 rounded-full bg-border-light p-1">
           {(
             [
-              ["request", "Request"],
-              ["output", "Output"],
+              ["request", t("Shared.SharedComponents.request")],
+              ["output", t("Shared.SharedComponents.output")],
             ] as const
           ).map(([value, label]) => (
             <button
@@ -824,10 +826,10 @@ export function ApiPlaygroundShell({
             <div className="min-h-0 flex-1 space-y-6 overflow-y-auto lg:pr-2">
               <section className="space-y-3">
                 <h2 className="text-[18px] leading-6 font-medium text-text-extra-high">
-                  Path Parameters
+                  {t("Shared.SharedComponents.pathParameters")}
                 </h2>
                 {activeEndpoint.pathFields.length === 0 ? (
-                  <EmptyState>This endpoint does not require path parameters.</EmptyState>
+                  <EmptyState>{t("Shared.SharedComponents.noPathParameters")}</EmptyState>
                 ) : (
                   <div className="space-y-4">
                     {activeEndpoint.pathFields.map((field) => (
@@ -845,7 +847,9 @@ export function ApiPlaygroundShell({
                             }
                             className="h-11 w-full rounded-[var(--sdp-field-radius)] border border-border-light bg-white px-4 text-sm text-text-extra-high outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-light"
                           >
-                            <option value="">{field.placeholder ?? "Select value"}</option>
+                            <option value="">
+                              {field.placeholder ?? t("Shared.SharedComponents.selectValue")}
+                            </option>
                             {(field.options ?? []).map((option) => (
                               <option key={option.value} value={option.value}>
                                 {option.label}
@@ -871,10 +875,10 @@ export function ApiPlaygroundShell({
 
               <section className="space-y-3">
                 <h2 className="text-[18px] leading-6 font-medium text-text-extra-high">
-                  Request body
+                  {t("Shared.SharedComponents.requestBody")}
                 </h2>
                 {activeEndpoint.bodyFields.length === 0 ? (
-                  <EmptyState>This endpoint does not require a JSON request body.</EmptyState>
+                  <EmptyState>{t("Shared.SharedComponents.noRequestBody")}</EmptyState>
                 ) : (
                   <div className="space-y-4">
                     {activeEndpoint.bodyFields.map((field) => (
@@ -892,7 +896,9 @@ export function ApiPlaygroundShell({
                             }
                             className="h-11 w-full rounded-[var(--sdp-field-radius)] border border-border-light bg-white px-4 text-sm text-text-extra-high outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-light"
                           >
-                            <option value="">{field.placeholder ?? "Select value"}</option>
+                            <option value="">
+                              {field.placeholder ?? t("Shared.SharedComponents.selectValue")}
+                            </option>
                             {(field.options ?? []).map((option) => (
                               <option key={option.value} value={option.value}>
                                 {option.label}
@@ -940,7 +946,13 @@ export function ApiPlaygroundShell({
 
             <div className="mb-4 shrink-0 rounded-full bg-border-light p-1">
               <div className="grid grid-cols-3 gap-1">
-                {(["code", "response", "example"] as const).map((tab) => (
+                {(
+                  [
+                    ["code", t("Shared.SharedComponents.code")],
+                    ["response", t("Shared.SharedComponents.response")],
+                    ["example", t("Shared.SharedComponents.example")],
+                  ] as const
+                ).map(([tab, label]) => (
                   <button
                     key={tab}
                     type="button"
@@ -952,7 +964,7 @@ export function ApiPlaygroundShell({
                         : "text-text-low"
                     )}
                   >
-                    {tab}
+                    {label}
                   </button>
                 ))}
               </div>
@@ -978,7 +990,9 @@ export function ApiPlaygroundShell({
                   boxShadow: "inset 0 1px 0 var(--code-block-header-border)",
                 }}
               >
-                <span className="leading-none text-text-low">Status:</span>
+                <span className="leading-none text-text-low">
+                  {t("Shared.SharedComponents.status")}
+                </span>
                 <Badge
                   className="h-6 whitespace-nowrap px-2.5 leading-none"
                   variant={statusToneVariant}
@@ -988,7 +1002,11 @@ export function ApiPlaygroundShell({
                 {executionResult ? (
                   <Badge className="h-6 whitespace-nowrap px-2.5 leading-none [&>span]:inline-flex [&>span]:items-center [&>span]:gap-1.5 [&>span]:leading-none">
                     <Clock3 className="inline-block size-3 shrink-0" aria-hidden="true" />
-                    <span className="tabular-nums">{executionResult.durationMs}ms</span>
+                    <span className="tabular-nums">
+                      {t("Shared.SharedComponents.durationMilliseconds", {
+                        duration: executionResult.durationMs,
+                      })}
+                    </span>
                   </Badge>
                 ) : null}
               </div>
@@ -1002,7 +1020,7 @@ export function ApiPlaygroundShell({
           <div className="flex flex-col gap-3">
             {requiresApiKey ? (
               <p className="text-sm leading-6 text-[rgba(28,28,29,0.62)]">
-                Create an API key first to enable live playground requests.
+                {t("Shared.SharedComponents.apiKeyRequired")}
               </p>
             ) : null}
             <div className="flex flex-wrap items-center gap-3">
@@ -1019,7 +1037,7 @@ export function ApiPlaygroundShell({
                   )
                 }
               >
-                Run request
+                {t("Shared.SharedComponents.runRequest")}
               </Button>
               <Button
                 type="button"
@@ -1027,7 +1045,7 @@ export function ApiPlaygroundShell({
                 onClick={handleReset}
                 className="h-10 rounded-[var(--button-radius-lg)] px-2 text-text-medium hover:bg-transparent hover:text-text-extra-high"
               >
-                Reset
+                {t("Shared.SharedComponents.reset")}
               </Button>
             </div>
           </div>
@@ -1041,7 +1059,9 @@ export function ApiPlaygroundShell({
             className="h-10 rounded-[var(--button-radius-lg)] border-border-light bg-white px-4 max-sm:flex-1 whitespace-nowrap"
             iconLeft={<Copy className="size-4" />}
           >
-            {copiedAction === "code" ? "Copied" : "Copy Code"}
+            {copiedAction === "code"
+              ? t("Shared.SharedComponents.copied")
+              : t("Shared.SharedComponents.copyCode")}
           </Button>
           <Button
             type="button"
@@ -1050,7 +1070,9 @@ export function ApiPlaygroundShell({
             className="h-10 rounded-[var(--button-radius-lg)] border-border-light bg-white px-4 max-sm:flex-1 whitespace-nowrap"
             iconLeft={<Sparkles className="size-4" />}
           >
-            {copiedAction === "ai" ? "Copied" : "AI instructions"}
+            {copiedAction === "ai"
+              ? t("Shared.SharedComponents.copied")
+              : t("Shared.SharedComponents.aiInstructions")}
           </Button>
         </div>
       </div>

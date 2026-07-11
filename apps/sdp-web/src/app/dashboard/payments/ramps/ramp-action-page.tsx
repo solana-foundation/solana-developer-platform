@@ -4,6 +4,7 @@ import type { ComplianceProviderId, Counterparty, PaymentsDashboardWallet } from
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR, { preload } from "swr";
+import { useTranslations } from "@/i18n/provider";
 import {
   type CounterpartiesResult,
   fetchAllCounterparties,
@@ -54,6 +55,7 @@ export interface RailProps {
 type RampsPhase = "counterparty" | "method" | "rail";
 
 export function PaymentsActionPage(props: PaymentsActionPageProps) {
+  const t = useTranslations();
   const { mode, rampProviderAccess } = props;
   const router = useRouter();
 
@@ -85,16 +87,21 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   const availableMethods: PaymentMethod[] = fiatEnabled ? ["onchain", "ramp"] : ["onchain"];
   const showMethodStep = availableMethods.length > 1;
 
-  const counterpartyTitle = mode === "send" ? "Who are you paying?" : "Who is this deposit from?";
+  const counterpartyTitle =
+    mode === "send"
+      ? t("DashboardPayments.whoAreYouPaying")
+      : t("DashboardPayments.whoIsThisDepositFrom");
   const methodTitle =
-    mode === "send" ? "How would you like to pay?" : "How would you like to deposit?";
+    mode === "send"
+      ? t("DashboardPayments.howWouldYouLikeToPay")
+      : t("DashboardPayments.howWouldYouLikeToDeposit");
 
   const preSteps = useMemo<WizardStep[]>(
     () => [
-      { label: "Counterparty", title: counterpartyTitle },
-      ...(showMethodStep ? [{ label: "Method", title: methodTitle }] : []),
+      { label: t("DashboardPayments.counterpartyLabel"), title: counterpartyTitle },
+      ...(showMethodStep ? [{ label: t("DashboardPayments.method"), title: methodTitle }] : []),
     ],
-    [counterpartyTitle, methodTitle, showMethodStep]
+    [counterpartyTitle, methodTitle, showMethodStep, t]
   );
 
   const effectiveMethod: PaymentMethod = showMethodStep ? (method ?? "onchain") : "onchain";
@@ -187,7 +194,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
       steps={preSteps}
       stepIndex={stepIndex}
       primaryDisabled={primaryDisabled}
-      primaryLabel="Next"
+      primaryLabel={t("DashboardPayments.counterparty.next")}
       walletsError={null}
       onPrimary={onPrimary}
       onSecondary={onSecondary}

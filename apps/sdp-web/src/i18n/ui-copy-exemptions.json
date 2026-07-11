@@ -1,0 +1,190 @@
+[
+  {
+    "candidate": "src/app/dashboard/custody/provider-catalog.ts:49:5:Local Signer",
+    "reason": "Provider brand name"
+  },
+  {
+    "candidate": "src/app/dashboard/custody/provider-catalog.ts:58:5:Privy",
+    "reason": "Provider brand name"
+  },
+  {
+    "candidate": "src/app/dashboard/custody/provider-catalog.ts:67:5:Fireblocks",
+    "reason": "Provider brand name"
+  },
+  {
+    "candidate": "src/app/dashboard/custody/provider-catalog.ts:76:5:Coinbase CDP",
+    "reason": "Provider brand name"
+  },
+  {
+    "candidate": "src/app/dashboard/custody/provider-catalog.ts:85:5:Para",
+    "reason": "Provider brand name"
+  },
+  {
+    "candidate": "src/app/dashboard/custody/provider-catalog.ts:94:5:Turnkey",
+    "reason": "Provider brand name"
+  },
+  {
+    "candidate": "src/app/dashboard/custody/provider-catalog.ts:103:5:DFNS",
+    "reason": "Provider brand name"
+  },
+  {
+    "candidate": "src/app/dashboard/custody/provider-catalog.ts:112:5:IBM Digital Asset Haven",
+    "reason": "Provider brand name"
+  },
+  {
+    "candidate": "src/app/dashboard/custody/provider-catalog.ts:121:5:Anchorage",
+    "reason": "Provider brand name"
+  },
+  {
+    "candidate": "src/app/dashboard/custody/provider-catalog.ts:130:5:Utila",
+    "reason": "Provider brand name"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/setup/loading.tsx:9:9:provider-coinbase",
+    "reason": "Loading-skeleton provider identifier"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/setup/loading.tsx:9:9:provider-para",
+    "reason": "Loading-skeleton provider identifier"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/setup/loading.tsx:9:9:provider-privy",
+    "reason": "Loading-skeleton provider identifier"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/setup/loading.tsx:9:9:provider-turnkey",
+    "reason": "Loading-skeleton provider identifier"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/setup/loading.tsx:9:9:provider-utila",
+    "reason": "Loading-skeleton provider identifier"
+  },
+  {
+    "candidate": "src/lib/ramps.ts:38:20:MoonPay",
+    "reason": "Ramp provider brand name"
+  },
+  {
+    "candidate": "src/lib/ramps.ts:39:23:Lightspark",
+    "reason": "Ramp provider brand name"
+  },
+  {
+    "candidate": "src/lib/ramps.ts:40:17:BVNK",
+    "reason": "Ramp provider brand name"
+  },
+  {
+    "candidate": "src/lib/ramps.ts:41:22:MoneyGram",
+    "reason": "Ramp provider brand name"
+  },
+  {
+    "candidate": "src/lib/ramps.ts:42:21:Coinbase",
+    "reason": "Ramp provider brand name"
+  },
+  {
+    "candidate": "src/lib/ramps.ts:43:18:Mural Pay",
+    "reason": "Ramp provider brand name"
+  },
+  {
+    "candidate": "src/lib/ramps.ts:44:19:Stripe",
+    "reason": "Ramp provider brand name"
+  },
+  {
+    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:819:9:details",
+    "reason": "Internal counterparty tab identifier"
+  },
+  {
+    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:819:9:transactions",
+    "reason": "Internal counterparty tab identifier"
+  },
+  {
+    "candidate": "src/app/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:982:25:Solana",
+    "reason": "Solana product brand name"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/[walletId]/loading.tsx:22:11:provider",
+    "reason": "Loading-skeleton layout key"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/[walletId]/loading.tsx:22:11:public-key",
+    "reason": "Loading-skeleton layout key"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/[walletId]/loading.tsx:22:11:status",
+    "reason": "Loading-skeleton layout key"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/[walletId]/loading.tsx:22:11:wallet-id",
+    "reason": "Loading-skeleton layout key"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/[walletId]/loading.tsx:46:11:address",
+    "reason": "Loading-skeleton layout key"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/[walletId]/loading.tsx:46:11:provider",
+    "reason": "Loading-skeleton layout key"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/[walletId]/loading.tsx:46:11:purpose",
+    "reason": "Loading-skeleton layout key"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/[walletId]/loading.tsx:66:9:balance-1",
+    "reason": "Loading-skeleton list key"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/[walletId]/loading.tsx:66:9:balance-2",
+    "reason": "Loading-skeleton list key"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/[walletId]/loading.tsx:97:9:activity-1",
+    "reason": "Loading-skeleton list key"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/[walletId]/loading.tsx:97:9:activity-2",
+    "reason": "Loading-skeleton list key"
+  },
+  {
+    "candidate": "src/app/dashboard/wallets/[walletId]/loading.tsx:97:9:activity-3",
+    "reason": "Loading-skeleton list key"
+  },
+  {
+    "candidate": "src/app/dashboard/issuance/[tokenId]/asset-profile/asset-profile-mapping.ts:143:5:description",
+    "reason": "Persisted metadata property key"
+  },
+  {
+    "candidate": "src/app/dashboard/payments/counterparty/counterparty-workspace.tsx:241:29:2-digit",
+    "reason": "Intl.DateTimeFormat option value"
+  },
+  {
+    "candidate": "src/app/dashboard/payments/counterparty/counterparty-workspace.tsx:241:29:numeric",
+    "reason": "Intl.DateTimeFormat option value"
+  },
+  {
+    "candidate": "src/app/dashboard/payments/counterparty/counterparty-workspace.tsx:241:29:short",
+    "reason": "Intl.DateTimeFormat option value"
+  },
+  {
+    "candidate": "src/components/api-playground-shell.tsx:787:11:output",
+    "reason": "Internal mobile-panel state identifier; its display label is translated"
+  },
+  {
+    "candidate": "src/components/api-playground-shell.tsx:787:11:request",
+    "reason": "Internal mobile-panel state identifier; its display label is translated"
+  },
+  {
+    "candidate": "src/components/api-playground-shell.tsx:949:17:code",
+    "reason": "Internal API-playground panel identifier; its display label is translated"
+  },
+  {
+    "candidate": "src/components/api-playground-shell.tsx:949:17:example",
+    "reason": "Internal API-playground panel identifier; its display label is translated"
+  },
+  {
+    "candidate": "src/components/api-playground-shell.tsx:949:17:response",
+    "reason": "Internal API-playground panel identifier; its display label is translated"
+  },
+  {
+    "candidate": "src/components/network-debug-panel.tsx:48:7:&middot;",
+    "reason": "Decorative typographic separator"
+  }
+]

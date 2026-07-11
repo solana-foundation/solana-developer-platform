@@ -6,16 +6,18 @@ import Image from "next/image";
 import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/payments/counterparty/counterparty-create-dialog";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { cn } from "@/lib/utils";
 import { CancelTransactionDialog } from "./cancel-transaction-dialog";
 
 export function PoweredByRampProvider({ provider }: { provider: RampProviderId }) {
+  const t = useTranslations();
   const providerLabel = getRampProviderLabel(provider);
 
   return (
     <div className="flex items-center justify-center gap-2 text-sm text-text-low">
-      <span>Powered by</span>
+      <span>{t("DashboardPayments.poweredBy")}</span>
       <Image
         src={RAMP_PROVIDER_LOGOS[provider]}
         alt=""
@@ -72,6 +74,7 @@ export function RampWizardShell({
   secondaryDisabled,
   hideSecondary,
 }: RampWizardShellProps) {
+  const t = useTranslations();
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   return (
     <div className="mx-auto flex h-[80vh] w-full max-w-5xl flex-col py-6">
@@ -94,7 +97,10 @@ export function RampWizardShell({
               ))}
             </div>
             <span className="text-xs text-text-extra-low">
-              Step {stepIndex + 1} of {steps.length}
+              {t("DashboardPayments.counterparty.stepProgress", {
+                current: stepIndex + 1,
+                total: steps.length,
+              })}
             </span>
           </div>
           <div className="flex items-center justify-between gap-4">
@@ -133,7 +139,10 @@ export function RampWizardShell({
             disabled={secondaryDisabled}
             onClick={confirmSecondary ? () => setCancelConfirmOpen(true) : onSecondary}
           >
-            {secondaryLabel ?? (stepIndex === 0 ? "Cancel" : "Previous")}
+            {secondaryLabel ??
+              (stepIndex === 0
+                ? t("DashboardPayments.counterparty.cancel")
+                : t("DashboardPayments.previous"))}
           </Button>
         )}
         <div className="flex flex-col gap-3 sm:flex-row">

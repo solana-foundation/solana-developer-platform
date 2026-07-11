@@ -1,6 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useTranslations } from "@/i18n/provider";
 
 interface TokenControlListsSectionProps {
   showControlList: boolean;
@@ -27,16 +28,19 @@ export function TokenControlListsSection({
   frozenAccountsTotal,
   frozenAccountsHasMore,
 }: TokenControlListsSectionProps) {
-  const controlListSummaryTitle = controlListLabel ? `${controlListLabel} Entries` : "Control List";
+  const t = useTranslations();
+  const controlListSummaryTitle = controlListLabel
+    ? t("DashboardIssuance.controlLists.entriesTitle", { label: controlListLabel })
+    : t("DashboardIssuance.controlLists.controlList");
   const controlListDescription =
     showControlList && controlListLabel
-      ? `${controlListLabel} entries and frozen account status`
-      : "Frozen account status";
+      ? t("DashboardIssuance.controlLists.descriptionWithList", { label: controlListLabel })
+      : t("DashboardIssuance.controlLists.descriptionWithoutList");
 
   return (
     <Card className="gap-4">
       <CardHeader>
-        <CardTitle>Control Lists</CardTitle>
+        <CardTitle>{t("DashboardIssuance.controlLists.title")}</CardTitle>
         <CardDescription>{controlListDescription}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -51,11 +55,15 @@ export function TokenControlListsSection({
             ) : (
               <>
                 <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
-                  {(allowlistTotal ?? allowlistEntriesCount).toLocaleString("en-US")} entries
+                  {t("DashboardIssuance.controlLists.entriesCount", {
+                    count: (allowlistTotal ?? allowlistEntriesCount).toLocaleString(),
+                  })}
                 </p>
                 {allowlistHasMore ? (
                   <p className="mt-1 text-xs text-[rgba(28,28,29,0.62)]">
-                    Showing first {allowlistEntriesCount.toLocaleString("en-US")} entries.
+                    {t("DashboardIssuance.controlLists.showingEntries", {
+                      count: allowlistEntriesCount.toLocaleString(),
+                    })}
                   </p>
                 ) : null}
               </>
@@ -66,17 +74,21 @@ export function TokenControlListsSection({
           data-testid="frozen-accounts-summary-card"
           className="rounded-xl border border-[rgba(28,28,29,0.12)] p-3"
         >
-          <p className="text-sm font-medium text-[#1c1c1d]">Frozen Accounts</p>
+          <p className="text-sm font-medium text-[#1c1c1d]">{t("DashboardIssuance.controlLists.frozenAccounts")}</p>
           {frozenAccountsError ? (
             <p className="mt-1 text-sm text-[#8a1f2a]">{frozenAccountsError}</p>
           ) : (
             <>
               <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
-                {(frozenAccountsTotal ?? frozenAccountsCount).toLocaleString("en-US")} accounts
+                {t("DashboardIssuance.controlLists.accountsCount", {
+                  count: (frozenAccountsTotal ?? frozenAccountsCount).toLocaleString(),
+                })}
               </p>
               {frozenAccountsHasMore ? (
                 <p className="mt-1 text-xs text-[rgba(28,28,29,0.62)]">
-                  Showing first {frozenAccountsCount.toLocaleString("en-US")} accounts.
+                  {t("DashboardIssuance.controlLists.showingAccounts", {
+                    count: frozenAccountsCount.toLocaleString(),
+                  })}
                 </p>
               ) : null}
             </>

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "@/i18n/provider";
 import { TokenSettingsSection } from "../../token-settings-section";
 import type { TokenOperations } from "../use-token-operations";
 
@@ -10,12 +11,14 @@ export function PermissionsTab({
   ops: TokenOperations;
   canManageTokenAdmin: boolean;
 }) {
+  const t = useTranslations();
+
   return (
     <div className="space-y-5">
       <div className="space-y-3">
         <SectionHeading
-          title="Authorities"
-          description="On-chain keys that control minting, freezing, and metadata for this token."
+          title={t("DashboardIssuance.management.permissions")}
+          description={t("DashboardIssuance.management.permissionsDescription")}
         />
         <TokenSettingsSection
           mode="permissions"
@@ -29,8 +32,8 @@ export function PermissionsTab({
       </div>
       <div className="space-y-3 pt-2">
         <SectionHeading
-          title="Extensions"
-          description="Configured at creation and read-only after deploy."
+          title={t("DashboardIssuance.management.extensions")}
+          description={t("DashboardIssuance.management.extensionsDescription")}
         />
         <TokenSettingsSection
           mode="extensions"

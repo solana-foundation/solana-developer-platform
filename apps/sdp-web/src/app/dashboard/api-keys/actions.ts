@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createSdpApiClient } from "@/lib/sdp-api";
+import { getTranslations } from "@/i18n/server";
 import { API_KEY_FLASH_COOKIE, API_KEYS_PAGE_PATH, type ApiKeyFlash } from "./api-key-flash";
 
 function parsePositiveInt(value: FormDataEntryValue | null, fallback: number): number {
@@ -50,33 +51,34 @@ async function deactivateApiKeyRequest(input: {
   keyName: string;
   confirmation: string;
 }): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
+  const t = await getTranslations();
   const { keyId, keyName, confirmation } = normalizeDeactivateApiKeyInput(input);
 
   if (!keyId) {
     return {
       ok: false,
-      message: "Missing API key id for deletion.",
+      message: t("DashboardCustody.missingApiKeyIdForDeletion"),
     };
   }
 
   if (!keyName) {
     return {
       ok: false,
-      message: "Missing API key name for deletion confirmation.",
+      message: t("DashboardCustody.missingApiKeyNameForDeletion"),
     };
   }
 
   if (!confirmation) {
     return {
       ok: false,
-      message: "Type the key name to confirm API key deletion.",
+      message: t("DashboardCustody.confirmApiKeyDeletion"),
     };
   }
 
   if (confirmation !== keyName) {
     return {
       ok: false,
-      message: "Confirmation did not match the key name.",
+      message: t("DashboardCustody.apiKeyConfirmationMismatch"),
     };
   }
 
@@ -91,17 +93,18 @@ async function deactivateApiKeyRequest(input: {
 
     return {
       ok: true,
-      message: `API key "${keyName}" has been deactivated.`,
+      message: t("DashboardCustody.apiKeyDeactivated", { name: keyName }),
     };
   } catch (error) {
     return {
       ok: false,
-      message: `Delete failed: ${extractErrorMessage(error)}`,
+      message: t("DashboardCustody.apiKeyDeleteFailed", { error: extractErrorMessage(error) }),
     };
   }
 }
 
 export async function createApiKeyAction(formData: FormData) {
+  const t = await getTranslations();
   const name = String(formData.get("name") ?? "").trim();
   const role = String(formData.get("role") ?? "api_developer");
   const walletScope = String(formData.get("walletScope") ?? "").trim();
@@ -115,7 +118,7 @@ export async function createApiKeyAction(formData: FormData) {
   if (!name) {
     await setFlash({
       level: "error",
-      message: "API key name is required.",
+      message: t("DashboardCustody.apiKeyNameRequired"),
     });
     redirect(API_KEYS_PAGE_PATH);
   }
@@ -123,7 +126,7 @@ export async function createApiKeyAction(formData: FormData) {
   if (walletScope !== "all" && walletScope !== "selected") {
     await setFlash({
       level: "error",
-      message: "Choose whether this key can access all wallets or selected wallets.",
+      message: t("DashboardCustody.apiKeyWalletScopeRequired"),
     });
     redirect(API_KEYS_PAGE_PATH);
   }
@@ -131,7 +134,7 @@ export async function createApiKeyAction(formData: FormData) {
   if (walletScope === "selected" && signingWalletIds.length === 0) {
     await setFlash({
       level: "error",
-      message: "Select at least one wallet for a wallet-scoped API key.",
+      message: t("DashboardCustody.apiKeyWalletRequired"),
     });
     redirect(API_KEYS_PAGE_PATH);
   }
@@ -162,7 +165,7 @@ export async function createApiKeyAction(formData: FormData) {
     if (Number.isNaN(parsedDate.getTime())) {
       await setFlash({
         level: "error",
-        message: "Invalid expiration date.",
+        message: t("DashboardCustody.invalidExpirationDate"),
       });
       redirect(API_KEYS_PAGE_PATH);
     }
@@ -185,7 +188,7 @@ export async function createApiKeyAction(formData: FormData) {
 
     await setFlash({
       level: "success",
-      message: `API key "${response.apiKey.name}" created. Save it now; it will not be shown again.`,
+      message: t("DashboardCustody.apiKeyCreated", { name: response.apiKey.name }),
       key: response.apiKey.key,
       apiKeyId: response.apiKey.id,
       keyPrefix: response.apiKey.keyPrefix,
@@ -193,7 +196,7 @@ export async function createApiKeyAction(formData: FormData) {
   } catch (error) {
     await setFlash({
       level: "error",
-      message: `Create failed: ${extractErrorMessage(error)}`,
+      message: t("DashboardCustody.apiKeyCreateFailed", { error: extractErrorMessage(error) }),
     });
   }
 
@@ -202,13 +205,14 @@ export async function createApiKeyAction(formData: FormData) {
 }
 
 export async function rotateApiKeyAction(formData: FormData) {
+  const t = await getTranslations();
   const keyId = String(formData.get("keyId") ?? "").trim();
   const gracePeriodHours = Math.min(168, Math.max(0, parsePositiveInt(formData.get("grace"), 24)));
 
   if (!keyId) {
     await setFlash({
       level: "error",
-      message: "Missing API key id for rotation.",
+      message: t("DashboardCustody.missingApiKeyIdForRotation"),
     });
     redirect(API_KEYS_PAGE_PATH);
   }
@@ -233,7 +237,9 @@ export async function rotateApiKeyAction(formData: FormData) {
 
     await setFlash({
       level: "success",
-      message: `API key rotated. Previous key remains valid until ${new Date(response.previousKey.rotationDeadline).toLocaleString()}.`,
+      message: t("DashboardCustody.apiKeyRotated", {
+        deadline: new Date(response.previousKey.rotationDeadline).toLocaleString(),
+      }),
       key: response.apiKey.key,
       apiKeyId: response.apiKey.id,
       keyPrefix: response.apiKey.keyPrefix,
@@ -241,7 +247,7 @@ export async function rotateApiKeyAction(formData: FormData) {
   } catch (error) {
     await setFlash({
       level: "error",
-      message: `Rotate failed: ${extractErrorMessage(error)}`,
+      message: t("DashboardCustody.apiKeyRotateFailed", { error: extractErrorMessage(error) }),
     });
   }
 

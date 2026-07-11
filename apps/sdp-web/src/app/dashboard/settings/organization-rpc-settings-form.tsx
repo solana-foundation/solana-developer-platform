@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { useTranslations } from "@/i18n/provider";
 import { updateOrganizationRpcSettingsAction } from "./actions";
 
 type OrganizationSettings = {
@@ -42,15 +43,16 @@ type RpcTestResult = {
   latencyMs?: number;
 };
 
-function toRpcTestErrorMessage(error: unknown): string {
+function toRpcTestErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message;
   }
-  return "Failed to test RPC provider.";
+  return fallback;
 }
 
 async function runRpcProviderTest(
-  requestedProvider: OrganizationRpcProvider
+  requestedProvider: OrganizationRpcProvider,
+  t: ReturnType<typeof useTranslations>
 ): Promise<RpcTestResult> {
   const startedAt = Date.now();
 
@@ -88,7 +90,7 @@ async function runRpcProviderTest(
     if (!executeResponse.ok || envelope.status === undefined || envelope.statusText === undefined) {
       return {
         status: "error",
-        message: envelope.error ?? "RPC test failed.",
+        message: envelope.error ?? t("DashboardCustody.rpcTestFailed"),
         requestedProvider,
         latencyMs,
       };
@@ -97,7 +99,9 @@ async function runRpcProviderTest(
     if (!envelope.ok || !envelope.body?.data) {
       return {
         status: "error",
-        message: envelope.body?.error?.message || `RPC test failed (${envelope.status}).`,
+        message:
+          envelope.body?.error?.message ||
+          t("DashboardCustody.rpcTestFailedStatus", { status: envelope.status }),
         requestedProvider,
         latencyMs,
       };
@@ -111,7 +115,10 @@ async function runRpcProviderTest(
     if (requestedProvider !== "default" && resolvedProvider !== requestedProvider) {
       return {
         status: "error",
-        message: `RPC test mismatch (requested ${requestedProvider}, resolved ${resolvedProvider}).`,
+        message: t("DashboardCustody.rpcTestMismatch", {
+          requested: requestedProvider,
+          resolved: resolvedProvider,
+        }),
         requestedProvider,
         resolvedProvider,
         selectionMode,
@@ -125,7 +132,10 @@ async function runRpcProviderTest(
     if (!upstream.ok) {
       return {
         status: "error",
-        message: `RPC upstream returned ${upstream.status} ${upstream.statusText}.`,
+        message: t("DashboardCustody.rpcUpstreamReturned", {
+          status: upstream.status,
+          statusText: upstream.statusText,
+        }),
         requestedProvider,
         resolvedProvider,
         selectionMode,
@@ -138,7 +148,11 @@ async function runRpcProviderTest(
 
     return {
       status: "success",
-      message: `RPC test passed (${upstream.status} ${upstream.statusText}) in ${latencyMs}ms.`,
+      message: t("DashboardCustody.rpcTestPassed", {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        latency: latencyMs,
+      }),
       requestedProvider,
       resolvedProvider,
       selectionMode,
@@ -150,7 +164,7 @@ async function runRpcProviderTest(
   } catch (error) {
     return {
       status: "error",
-      message: toRpcTestErrorMessage(error),
+      message: toRpcTestErrorMessage(error, t("DashboardCustody.failedToTestRpcProvider")),
       requestedProvider,
       latencyMs: Date.now() - startedAt,
     };
@@ -175,6 +189,7 @@ export function OrganizationRpcSettingsForm({
   enabledProviders: OrganizationRpcProvider[];
   organization: SettingsOrganization;
 }) {
+  const t = useTranslations();
   const rpcProvider = organization.settings?.rpcProvider ?? "default";
   const availableProviders = useMemo(
     () =>
@@ -211,7 +226,7 @@ export function OrganizationRpcSettingsForm({
     try {
       const result = await updateOrganizationRpcSettingsAction(formData);
       if (result.status !== "success") {
-        setErrorMessage(result.message || "Failed to save RPC settings.");
+        setErrorMessage(result.message || t("DashboardCustody.failedToSaveRpcSettings"));
         return;
       }
 
@@ -233,20 +248,20 @@ export function OrganizationRpcSettingsForm({
 
   const testProvider = async () => {
     if (isSaving) {
-      toast.error("Save in progress.", {
-        description: "Try again in a moment.",
+      toast.error(t("DashboardCustody.saveInProgress"), {
+        description: t("DashboardCustody.tryAgainSoon"),
         position: "bottom-right",
       });
       return;
     }
 
     setIsTesting(true);
-    const toastId = toast.loading("Checking RPC provider.", {
+    const toastId = toast.loading(t("DashboardCustody.checkingRpcProvider"), {
       position: "bottom-right",
     });
 
     try {
-      const result = await runRpcProviderTest(selectedProvider);
+      const result = await runRpcProviderTest(selectedProvider, t);
       const requestedLabel =
         RPC_PROVIDER_LABELS[result.requestedProvider] ?? result.requestedProvider;
       const resolvedLabel = result.resolvedProvider
@@ -256,7 +271,7 @@ export function OrganizationRpcSettingsForm({
       const latency = result.latencyMs !== undefined ? `${result.latencyMs}ms` : null;
 
       if (result.status === "success") {
-        toast.success("RPC check passed.", {
+        toast.success(t("DashboardCustody.rpcCheckPassed"), {
           id: toastId,
           description: [requestedLabel, latency].filter(Boolean).join(" • "),
           position: "bottom-right",
@@ -267,20 +282,26 @@ export function OrganizationRpcSettingsForm({
           !!result.resolvedProvider &&
           result.resolvedProvider !== result.requestedProvider;
 
-        toast.error(isProviderMismatch ? "Provider mismatch." : "RPC check failed.", {
+        toast.error(
+          isProviderMismatch ? t("DashboardCustody.providerMismatch") : t("DashboardCustody.rpcCheckFailed"),
+          {
           id: toastId,
           description: isProviderMismatch
-            ? `${requestedLabel} requested, ${resolvedLabel ?? "another provider"} resolved.`
+            ? t("DashboardCustody.rpcTestMismatch", {
+                requested: requestedLabel,
+                resolved: resolvedLabel ?? t("DashboardCustody.anotherProvider"),
+              })
             : [resolvedLabel ?? requestedLabel, result.upstreamStatus, latency]
                 .filter((value) => value !== undefined && value !== null && value !== "")
                 .join(" • "),
-          position: "bottom-right",
-        });
+            position: "bottom-right",
+          }
+        );
       }
     } catch (error) {
-      toast.error("RPC check failed.", {
+      toast.error(t("DashboardCustody.rpcCheckFailed"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "RPC check failed.",
+        description: error instanceof Error ? error.message : t("DashboardCustody.rpcCheckFailed"),
         position: "bottom-right",
       });
     } finally {
@@ -294,20 +315,20 @@ export function OrganizationRpcSettingsForm({
         <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-3 py-2">
           <div className="flex items-center gap-3">
             <span className="text-sm text-[rgba(28,28,29,0.7)]">
-              Editing organization: {organization.name}
+              {t("DashboardCustody.editingOrganization", { name: organization.name })}
             </span>
           </div>
         </div>
 
         {!canManageSettings ? (
           <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-sm text-[rgba(28,28,29,0.72)]">
-            You can view organization RPC settings, but only admins can change them.
+            {t("DashboardCustody.viewOnlyRpcSettings")}
           </div>
         ) : null}
 
         {!hasEnabledProviders ? (
           <div className="rounded-xl border border-[rgba(158,43,56,0.2)] bg-[rgba(158,43,56,0.06)] px-3 py-2 text-sm text-[#9e2b38]">
-            No RPC providers are enabled for this organization in the current environment.
+            {t("DashboardCustody.noRpcProviders")}
           </div>
         ) : null}
 
@@ -315,9 +336,9 @@ export function OrganizationRpcSettingsForm({
           <div className="rounded-xl border border-[rgba(180,83,9,0.22)] bg-[rgba(245,158,11,0.12)] px-3 py-2 text-sm text-[#8a5a00]">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p>
-                The saved RPC provider for this organization is no longer available on the current
-                tier. The form has fallen back to {RPC_PROVIDER_LABELS[fallbackProvider]} until you
-                save an enabled provider.
+                {t("DashboardCustody.rpcFallback", {
+                  provider: RPC_PROVIDER_LABELS[fallbackProvider],
+                })}
               </p>
               {canManageSettings ? (
                 <Button
@@ -329,7 +350,7 @@ export function OrganizationRpcSettingsForm({
                     void applyFallbackProvider();
                   }}
                 >
-                  {isApplyingFallback ? "Saving..." : "Save fallback"}
+                  {isApplyingFallback ? t("DashboardCustody.saving") : t("DashboardCustody.saveFallback")}
                 </Button>
               ) : null}
             </div>
@@ -337,7 +358,7 @@ export function OrganizationRpcSettingsForm({
         ) : null}
 
         <div className="grid gap-2">
-          <Label htmlFor="rpcProvider">RPC provider</Label>
+          <Label htmlFor="rpcProvider">{t("DashboardCustody.rpcProvider")}</Label>
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_112px] sm:items-center">
             <select
               id="rpcProvider"
@@ -367,7 +388,7 @@ export function OrganizationRpcSettingsForm({
                 void testProvider();
               }}
             >
-              {isTesting ? "Testing..." : "Test RPC"}
+              {isTesting ? t("DashboardCustody.testing") : t("DashboardCustody.testRpc")}
             </Button>
           </div>
         </div>

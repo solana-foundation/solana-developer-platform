@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 import { OnrampStepContent } from "./components/onramp-step-content";
 import { PoweredByRampProvider, RampWizardShell } from "./components/ramp-wizard-shell";
 import { type OnrampWizard, useOnrampWizard } from "./hooks/use-onramp-wizard";
@@ -11,17 +12,18 @@ import type { RailProps } from "./ramp-action-page";
 function onrampPrimaryLabel(
   wizard: OnrampWizard,
   verificationPending: boolean,
-  verificationUrl: string | undefined
+  verificationUrl: string | undefined,
+  t: ReturnType<typeof useTranslations>
 ): string {
   switch (true) {
     case wizard.hostedQuoteLoading:
-      return "Processing";
+      return t("DashboardPayments.processing");
     case verificationPending:
-      return "Verification pending";
+      return t("DashboardPayments.verificationPending");
     case verificationUrl !== undefined:
-      return "Complete Verification";
+      return t("DashboardPayments.completeVerification");
     default:
-      return "Next";
+      return t("DashboardPayments.counterparty.next");
   }
 }
 
@@ -49,6 +51,7 @@ export function OnrampRail({
   preSteps,
   onExit,
 }: RailProps) {
+  const t = useTranslations();
   const wizard = useOnrampWizard({
     wallets,
     walletsError,
@@ -84,7 +87,7 @@ export function OnrampRail({
         !wizard.canProceed ||
         (wizard.currentStepId === "DEPOSIT" && wizard.walletsLoading)
       }
-      primaryLabel={onrampPrimaryLabel(wizard, verificationPending, verificationUrl)}
+      primaryLabel={onrampPrimaryLabel(wizard, verificationPending, verificationUrl, t)}
       walletsError={wizard.liveWalletsError}
       onPrimary={onrampPrimaryAction(wizard, verificationUrl)}
       onSecondary={wizard.handleSecondary}
@@ -97,14 +100,16 @@ export function OnrampRail({
           <PoweredByRampProvider provider={wizard.fields.provider} />
         ) : null
       }
-      secondaryLabel={wizard.onTransactionStage ? "Cancel" : undefined}
+      secondaryLabel={
+        wizard.onTransactionStage ? t("DashboardPayments.counterparty.cancel") : undefined
+      }
       confirmSecondary={wizard.onTransactionStage}
       secondaryDisabled={wizard.isCanceling}
       footerActions={
         transferTerminal ? (
           <Button asChild type="button">
             <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
-              Go to transaction
+              {t("DashboardPayments.goToTransaction")}
             </Link>
           </Button>
         ) : null

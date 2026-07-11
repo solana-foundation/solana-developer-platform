@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
+import { getTranslations } from "@/i18n/server";
 
 export interface Member {
   id: string;
@@ -22,11 +23,12 @@ export async function listMembers(): Promise<Member[]> {
 }
 
 export async function inviteMember(formData: FormData) {
+  const t = await getTranslations();
   const email = String(formData.get("email") ?? "").trim();
   const role = String(formData.get("role") ?? "member").trim();
 
   if (!email) {
-    throw new Error("Email is required");
+    throw new Error(t("Shared.pay.emailRequired"));
   }
 
   const client = await createOrgSdpApiClient();

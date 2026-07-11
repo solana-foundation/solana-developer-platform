@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 import { fetchWallets } from "../payments/payments-workspace.data";
 import { type CreateIssuanceTokenResult, createIssuanceTokenAction } from "./actions";
 import { CreateTokenFeaturesStep } from "./create-token-features-step";
@@ -42,9 +43,10 @@ export function CreateIssuanceTokenModal({
   open,
   onOpenChange,
   hideTrigger = false,
-  triggerLabel = "Create draft",
+  triggerLabel,
   triggerClassName,
 }: CreateIssuanceTokenModalProps = {}) {
+  const t = useTranslations();
   const router = useRouter();
   const [isOpenInternal, setIsOpenInternal] = useState(false);
   const [flow, setFlow] = useState<FlowState>({ kind: "templateSelection" });
@@ -83,7 +85,7 @@ export function CreateIssuanceTokenModal({
   const resolvedSignerWalletsError = liveSignerWalletsError
     ? liveSignerWalletsError instanceof Error
       ? liveSignerWalletsError.message
-      : "Unable to load signer wallets."
+      : t("DashboardIssuance.create.unableToLoadSignerWallets")
     : liveSignerWalletsData === undefined
       ? signerWalletsError
       : null;
@@ -169,14 +171,14 @@ export function CreateIssuanceTokenModal({
     }
 
     const formData = new FormData(event.currentTarget);
-    const toastId = toast.loading("Creating draft token.", {
+    const toastId = toast.loading(t("DashboardIssuance.create.creatingDraft"), {
       position: "bottom-right",
     });
 
     startTransition(async () => {
       const response = await createIssuanceTokenAction(formData).catch((error) => ({
         state: "error" as const,
-        message: error instanceof Error ? error.message : "Unable to create draft token.",
+        message: error instanceof Error ? error.message : t("DashboardIssuance.create.unableToCreateDraft"),
         tokenId: null,
         tokenName: null,
       }));
@@ -184,7 +186,7 @@ export function CreateIssuanceTokenModal({
 
       if (response.state === "success") {
         toast.success(
-          response.message ?? "Draft created. Deploy it on-chain from the token page.",
+          response.message ?? t("DashboardIssuance.create.draftCreated"),
           {
             id: toastId,
             position: "bottom-right",
@@ -195,7 +197,7 @@ export function CreateIssuanceTokenModal({
         return;
       }
 
-      toast.error(response.message ?? "Unable to create draft token.", {
+      toast.error(response.message ?? t("DashboardIssuance.create.unableToCreateDraft"), {
         id: toastId,
         position: "bottom-right",
       });
@@ -206,7 +208,7 @@ export function CreateIssuanceTokenModal({
     <>
       {hideTrigger ? null : (
         <Button type="button" className={triggerClassName} onClick={() => setIsOpen(true)}>
-          {triggerLabel}
+          {triggerLabel ?? t("DashboardIssuance.create.createDraft")}
         </Button>
       )}
 
@@ -214,20 +216,20 @@ export function CreateIssuanceTokenModal({
         isOpen={isOpen}
         onClose={close}
         closeDisabled={isPending}
-        ariaLabel={template ? getTemplateTitle(template) : "Create New Token Draft"}
-        closeLabel="Close token creation modal"
+        ariaLabel={template ? getTemplateTitle(template) : t("DashboardIssuance.create.title")}
+        closeLabel={t("DashboardIssuance.create.closeModal")}
         contentClassName="overflow-hidden rounded-3xl shadow-[0_24px_64px_rgba(28,28,29,0.28)]"
         size="xl"
       >
         <div className="border-b border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-8 py-7 pr-20">
           <div>
             <p className="text-4xl leading-none font-semibold">
-              {template ? getTemplateTitle(template) : "Create New Token Draft"}
+              {template ? getTemplateTitle(template) : t("DashboardIssuance.create.title")}
             </p>
             <p className="mt-2 text-lg text-[rgba(28,28,29,0.62)]">
               {template
-                ? "Configure the draft now, then deploy it on-chain from the token page."
-                : "Choose a template to create a draft first, then deploy it on-chain."}
+                ? t("DashboardIssuance.create.configureDraft")
+                : t("DashboardIssuance.create.chooseTemplate")}
             </p>
           </div>
         </div>

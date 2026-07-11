@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 interface WalletActionsMenuProps {
@@ -43,25 +44,27 @@ export function WalletActionsMenu({
   walletId,
   walletLabel,
   supportsSignerCheck = true,
-  triggerLabel = "Actions",
+  triggerLabel,
   triggerMode = "icon",
   triggerClassName,
 }: WalletActionsMenuProps) {
+  const t = useTranslations();
   const { dashboardAccess, sandboxProject } = useDashboardWorkspace();
   const [isBusy, startTransition] = useTransition();
   const resolvedWalletLabel = formatWalletLabel(walletLabel, walletAddress);
+  const resolvedTriggerLabel = triggerLabel ?? t("DashboardCustody.actions");
   const canRunSignerCheck =
     supportsSignerCheck && dashboardAccess.capabilities.canUseWalletSignerCheck;
 
   const runSignerCheck = () => {
     if (!sandboxProject) {
-      toast.error("Sandbox project unavailable. Reload the dashboard and try again.", {
+      toast.error(t("DashboardCustody.sandboxProjectUnavailable"), {
         position: "bottom-right",
       });
       return;
     }
 
-    const toastId = toast.loading("Sending signer check.", {
+    const toastId = toast.loading(t("DashboardCustody.sendingSignerCheck"), {
       position: "bottom-right",
     });
 
@@ -69,24 +72,24 @@ export function WalletActionsMenu({
       void (async () => {
         const result = await checkWalletSignerMemoAction(walletId).catch((error) => ({
           status: "error" as const,
-          message: error instanceof Error ? error.message : "Signer check failed.",
+          message: error instanceof Error ? error.message : t("DashboardCustody.signerCheckFailed"),
         }));
 
         if (result.status === "success") {
           const explorerUrl = getDevnetExplorerUrl(result.signature);
 
-          toast.success("Signer check sent.", {
+          toast.success(t("DashboardCustody.signerCheckSent"), {
             id: toastId,
             description: (
               <span>
-                Memo transaction submitted.{" "}
+                {t("DashboardCustody.memoTransactionSubmitted")} {" "}
                 <a
                   href={explorerUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="underline underline-offset-2"
                 >
-                  View on Solana Explorer
+                  {t("DashboardCustody.viewOnSolanaExplorer")}
                 </a>
               </span>
             ),
@@ -95,7 +98,7 @@ export function WalletActionsMenu({
           return;
         }
 
-        toast.error("Signer check failed.", {
+        toast.error(t("DashboardCustody.signerCheckFailed"), {
           id: toastId,
           description: result.message,
           position: "bottom-right",
@@ -105,7 +108,7 @@ export function WalletActionsMenu({
   };
 
   const requestDevnetSol = () => {
-    const toastId = toast.loading("Requesting devnet SOL.", {
+    const toastId = toast.loading(t("DashboardCustody.requestingDevnetSol"), {
       position: "bottom-right",
     });
 
@@ -114,25 +117,25 @@ export function WalletActionsMenu({
         const result = await requestDevnetSolanaFaucetAction(walletId, walletAddress).catch(
           (error) => ({
             status: "error" as const,
-            message: error instanceof Error ? error.message : "Devnet faucet failed.",
+            message: error instanceof Error ? error.message : t("DashboardCustody.devnetFaucetFailed"),
           })
         );
 
         if (result.status === "success") {
           const explorerUrl = getDevnetExplorerUrl(result.signature);
 
-          toast.success(`${result.amountSol} devnet SOL requested.`, {
+          toast.success(t("DashboardCustody.devnetSolRequested", { amount: result.amountSol }), {
             id: toastId,
             description: (
               <span>
-                Faucet transaction submitted.{" "}
+                {t("DashboardCustody.faucetTransactionSubmitted")} {" "}
                 <a
                   href={explorerUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="underline underline-offset-2"
                 >
-                  View on Solana Explorer
+                  {t("DashboardCustody.viewOnSolanaExplorer")}
                 </a>
               </span>
             ),
@@ -141,7 +144,7 @@ export function WalletActionsMenu({
           return;
         }
 
-        toast.error("Devnet faucet failed.", {
+        toast.error(t("DashboardCustody.devnetFaucetFailed"), {
           id: toastId,
           description: result.message,
           position: "bottom-right",
@@ -160,10 +163,10 @@ export function WalletActionsMenu({
             size="sm"
             className={cn("min-w-[132px] whitespace-nowrap", triggerClassName)}
             iconRight={<ChevronDown className="size-4" />}
-            aria-label={`Wallet actions for ${resolvedWalletLabel}`}
+            aria-label={t("DashboardCustody.walletActionsFor", { wallet: resolvedWalletLabel })}
             disabled={isBusy}
           >
-            {triggerLabel}
+            {resolvedTriggerLabel}
           </Button>
         ) : (
           <Button
@@ -171,7 +174,7 @@ export function WalletActionsMenu({
             variant="outline"
             size="icon-sm"
             className={triggerClassName}
-            aria-label={`Wallet actions for ${resolvedWalletLabel}`}
+            aria-label={t("DashboardCustody.walletActionsFor", { wallet: resolvedWalletLabel })}
             disabled={isBusy}
           >
             <Ellipsis className="h-4 w-4" />
@@ -182,17 +185,17 @@ export function WalletActionsMenu({
         <DropdownMenuItem onSelect={runSignerCheck} disabled={isBusy || !canRunSignerCheck}>
           <ShieldCheck className="h-4 w-4" />
           {isBusy
-            ? "Proving..."
+            ? t("DashboardCustody.proving")
             : !supportsSignerCheck
-              ? "Prove ownership (not supported)"
+              ? t("DashboardCustody.proveOwnershipUnsupported")
               : dashboardAccess.capabilities.canUseWalletSignerCheck
-                ? "Prove ownership"
-                : "Prove ownership (admin only)"}
+                ? t("DashboardCustody.proveOwnership")
+                : t("DashboardCustody.proveOwnershipAdminOnly")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={requestDevnetSol} disabled={isBusy}>
           <Droplets className="h-4 w-4" />
-          {isBusy ? "Requesting..." : "Request devnet SOL"}
+          {isBusy ? t("DashboardCustody.requesting") : t("DashboardCustody.requestDevnetSol")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
