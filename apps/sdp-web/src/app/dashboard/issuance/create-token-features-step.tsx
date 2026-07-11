@@ -163,7 +163,7 @@ export function CreateTokenFeaturesStep({
           {t("DashboardIssuance.create.back")}
         </Button>
         <Button type="submit" disabled={!canSubmit} className="flex-1">
-          {isPending ? t("DashboardIssuance.create.creating") : getCreateButtonLabel(template)}
+          {isPending ? t("DashboardIssuance.create.creating") : getCreateButtonLabel(template, t)}
         </Button>
       </div>
     </motion.form>

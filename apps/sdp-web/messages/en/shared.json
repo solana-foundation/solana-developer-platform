@@ -122,6 +122,11 @@
     "members": "Members",
     "allowlist": "Allowlist"
   },
+  "validation": {
+    "allowlistValueRequired": "Allowlist value is required",
+    "allowlistEntryIdRequired": "Allowlist entry id is required",
+    "emailRequired": "Email is required"
+  },
   "pay": {
     "productName": "Solana Developer Platform",
     "paymentReceived": "Payment received",
@@ -138,10 +143,7 @@
     "expires": "Expires",
     "noExpiry": "No expiry",
     "securedBySolanaPay": "Secured by Solana Pay",
-    "qrCode": "Solana Pay QR code",
-    "allowlistValueRequired": "Allowlist value is required",
-    "allowlistEntryIdRequired": "Allowlist entry id is required",
-    "emailRequired": "Email is required"
+    "qrCode": "Solana Pay QR code"
   },
   "homeWorkspace": {
     "unavailable": "Unavailable",

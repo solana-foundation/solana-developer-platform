@@ -217,7 +217,7 @@ export function CreateIssuanceTokenModal({
         isOpen={isOpen}
         onClose={close}
         closeDisabled={isPending}
-        ariaLabel={template ? getTemplateTitle(template) : t("DashboardIssuance.create.title")}
+        ariaLabel={template ? getTemplateTitle(template, t) : t("DashboardIssuance.create.title")}
         closeLabel={t("DashboardIssuance.create.closeModal")}
         contentClassName="overflow-hidden rounded-3xl shadow-[0_24px_64px_rgba(28,28,29,0.28)]"
         size="xl"
@@ -225,7 +225,7 @@ export function CreateIssuanceTokenModal({
         <div className="border-b border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-8 py-7 pr-20">
           <div>
             <p className="text-4xl leading-none font-semibold">
-              {template ? getTemplateTitle(template) : t("DashboardIssuance.create.title")}
+              {template ? getTemplateTitle(template, t) : t("DashboardIssuance.create.title")}
             </p>
             <p className="mt-2 text-lg text-[rgba(28,28,29,0.62)]">
               {template

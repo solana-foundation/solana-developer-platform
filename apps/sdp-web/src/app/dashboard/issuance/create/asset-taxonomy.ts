@@ -1,4 +1,9 @@
-import { ASSET_TYPES, type AssetCategory, isAssetTypeSupported } from "@sdp/types";
+import {
+  ASSET_TYPES,
+  type AssetCategory,
+  getAssetTypeRegistryEntry,
+  isAssetTypeSupported,
+} from "@sdp/types";
 import {
   Banknote,
   Bitcoin,
@@ -13,7 +18,9 @@ import {
   ScrollText,
   TrendingUp,
 } from "lucide-react";
-import type { MessageKey } from "@/i18n/messages";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 // Presentation-only layer for the create-asset wizard. It annotates the shared
 // registry codes from `@sdp/types` (ASSET_TYPES / ASSET_TYPE_REGISTRY) with
@@ -156,7 +163,7 @@ export function getCategoryLabelKey(category: AssetCategory | null): MessageKey 
   return getCategoryPresentation(category)?.labelKey ?? null;
 }
 
-export function getAssetTypeLabelKey(
+function getAssetTypeLabelKey(
   category: AssetCategory | null,
   type: string | null
 ): MessageKey | null {
@@ -164,4 +171,16 @@ export function getAssetTypeLabelKey(
     return null;
   }
   return getSubTypePresentation(category, type)?.labelKey ?? null;
+}
+
+export function getAssetTypeLabel(
+  category: AssetCategory | null,
+  type: string | null,
+  t: Translate
+): string | null {
+  if (!category || !type) {
+    return null;
+  }
+  const labelKey = getAssetTypeLabelKey(category, type);
+  return labelKey ? t(labelKey) : (getAssetTypeRegistryEntry(category, type)?.label ?? type);
 }

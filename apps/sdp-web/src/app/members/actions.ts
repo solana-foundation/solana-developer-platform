@@ -28,7 +28,7 @@ export async function inviteMember(formData: FormData) {
   const role = String(formData.get("role") ?? "member").trim();
 
   if (!email) {
-    throw new Error(t("Shared.pay.emailRequired"));
+    throw new Error(t("Shared.validation.emailRequired"));
   }
 
   const client = await createOrgSdpApiClient();

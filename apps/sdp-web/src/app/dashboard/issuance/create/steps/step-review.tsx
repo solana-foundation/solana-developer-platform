@@ -25,7 +25,7 @@ import { motion } from "motion/react";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { getCategorySections, getPegSummary } from "../asset-details-config";
-import { getAssetTypeLabelKey, getCategoryLabelKey } from "../asset-taxonomy";
+import { getAssetTypeLabel, getCategoryLabelKey } from "../asset-taxonomy";
 import { safeLinkHref } from "../draft-mapping";
 import type { DraftState, WizardStep } from "../issuance-draft-wizard.types";
 import { useIssuanceDraft } from "../use-issuance-draft";
@@ -79,9 +79,8 @@ export function StepReview() {
   const { draft, goToStep } = useIssuanceDraft();
 
   const categoryLabelKey = getCategoryLabelKey(draft.assetCategory);
-  const typeLabelKey = getAssetTypeLabelKey(draft.assetCategory, draft.assetType);
   const categoryLabel = categoryLabelKey ? t(categoryLabelKey) : null;
-  const typeLabel = typeLabelKey ? t(typeLabelKey) : null;
+  const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType, t);
   const transferRestrictionsEnabled =
     draft.accessControl === "allowlist" ||
     draft.accessControl === "blocklist" ||

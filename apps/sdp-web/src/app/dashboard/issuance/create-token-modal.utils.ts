@@ -20,7 +20,7 @@ export function getTemplateCards(t: Translate): Array<
   return [
     {
       id: "stablecoin",
-      name: "Stablecoin",
+      name: t("DashboardIssuance.create.stablecoinTemplateName"),
       description: t("DashboardIssuance.create.stablecoinTemplateDescription"),
       icon: BadgeDollarSign,
       iconClassName: "bg-[#dee6ff] text-[#375dff]",
@@ -29,7 +29,7 @@ export function getTemplateCards(t: Translate): Array<
     },
     {
       id: "tokenized-security",
-      name: "Tokenized Security",
+      name: t("DashboardIssuance.create.tokenizedSecurityTemplateName"),
       description: t("DashboardIssuance.create.tokenizedSecurityTemplateDescription"),
       icon: ShieldCheck,
       iconClassName: "bg-[#d8f7e4] text-[#0f9b58]",
@@ -38,7 +38,7 @@ export function getTemplateCards(t: Translate): Array<
     },
     {
       id: "custom",
-      name: "Custom Token",
+      name: t("DashboardIssuance.create.customTemplateName"),
       description: t("DashboardIssuance.create.customTemplateDescription"),
       icon: CircleHelp,
       iconClassName: "bg-[#ebe5ff] text-[#6436ff]",
@@ -67,30 +67,21 @@ export function createInitialDraft(): TokenDraft {
   };
 }
 
-export function getTemplateTitle(template: TemplateSelection): string {
+export function getTemplateTitle(template: TemplateSelection, t: Translate): string {
   switch (template) {
     case "stablecoin":
-      return "Create Stablecoin Draft";
+      return t("DashboardIssuance.create.createStablecoinDraft");
     case "custom":
-      return "Create Custom Token Draft";
+      return t("DashboardIssuance.create.createCustomTokenDraft");
     case "tokenized-security":
-      return "Create Tokenized Security Draft";
+      return t("DashboardIssuance.create.createTokenizedSecurityDraft");
     default:
-      return "Create Token Draft";
+      return t("DashboardIssuance.create.createTokenDraft");
   }
 }
 
-export function getCreateButtonLabel(template: TemplateSelection): string {
-  switch (template) {
-    case "stablecoin":
-      return "Create Stablecoin Draft";
-    case "custom":
-      return "Create Custom Token Draft";
-    case "tokenized-security":
-      return "Create Tokenized Security Draft";
-    default:
-      return "Create Token Draft";
-  }
+export function getCreateButtonLabel(template: TemplateSelection, t: Translate): string {
+  return getTemplateTitle(template, t);
 }
 
 export function getTemplateDefaultDecimals(template: TemplateSelection): TokenDraft["decimals"] {

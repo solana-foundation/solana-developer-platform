@@ -25,7 +25,7 @@ export async function addAllowlistEntry(formData: FormData) {
   const type = (String(formData.get("type") ?? "email").trim() || "email") as "email" | "domain";
 
   if (!value) {
-    throw new Error(t("Shared.pay.allowlistValueRequired"));
+    throw new Error(t("Shared.validation.allowlistValueRequired"));
   }
 
   const client = await createOrgSdpApiClient();
@@ -41,7 +41,7 @@ export async function removeAllowlistEntry(formData: FormData) {
   const t = await getTranslations();
   const id = String(formData.get("id") ?? "").trim();
   if (!id) {
-    throw new Error(t("Shared.pay.allowlistEntryIdRequired"));
+    throw new Error(t("Shared.validation.allowlistEntryIdRequired"));
   }
 
   const client = await createOrgSdpApiClient();

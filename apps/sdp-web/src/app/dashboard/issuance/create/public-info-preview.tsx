@@ -32,7 +32,7 @@ import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
-import { getAssetTypeLabelKey, getCategoryLabelKey } from "./asset-taxonomy";
+import { getAssetTypeLabel, getCategoryLabelKey } from "./asset-taxonomy";
 import {
   buildPublicMetadata,
   getDefaultPublicFields,
@@ -194,9 +194,8 @@ export function PublicInfoPreview({
   const [surface, setSurface] = useState<PreviewSurface>("token");
   const [jsonOpen, setJsonOpen] = useState(false);
   const categoryLabelKey = getCategoryLabelKey(draft.assetCategory);
-  const typeLabelKey = getAssetTypeLabelKey(draft.assetCategory, draft.assetType);
   const categoryLabel = categoryLabelKey ? t(categoryLabelKey) : null;
-  const typeLabel = typeLabelKey ? t(typeLabelKey) : null;
+  const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType, t);
   const publicMetadata = buildPublicMetadata(draft);
 
   // Core identity + classification: inherent to the token / served from the

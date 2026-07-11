@@ -20,7 +20,7 @@ import {
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { accessControlLabel, getPegSummary } from "./asset-details-config";
-import { getAssetTypeLabelKey, getCategoryLabelKey } from "./asset-taxonomy";
+import { getAssetTypeLabel, getCategoryLabelKey } from "./asset-taxonomy";
 import { safeLinkHref } from "./draft-mapping";
 import type { DraftState } from "./issuance-draft-wizard.types";
 
@@ -93,9 +93,8 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
   const t = useTranslations();
   const locale = useLocale();
   const categoryLabelKey = getCategoryLabelKey(draft.assetCategory);
-  const typeLabelKey = getAssetTypeLabelKey(draft.assetCategory, draft.assetType);
   const categoryLabel = categoryLabelKey ? t(categoryLabelKey) : null;
-  const typeLabel = typeLabelKey ? t(typeLabelKey) : null;
+  const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType, t);
   const transferRestrictionsEnabled =
     draft.accessControl === "allowlist" ||
     draft.accessControl === "blocklist" ||
