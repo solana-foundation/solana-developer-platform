@@ -2,11 +2,7 @@ import type { RampProviderId } from "@sdp/types";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import type { LucideIcon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import {
-  getBvnkOnboardingCopy,
-  getBvnkProvisioningDetail,
-  getBvnkSimulateLabels,
-} from "./bvnk";
+import { getBvnkOnboardingCopy, getBvnkProvisioningDetail, getBvnkSimulateLabels } from "./bvnk";
 import {
   getLightsparkOnboardingCopy,
   getLightsparkProvisioningDetail,

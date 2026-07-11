@@ -1,10 +1,10 @@
 "use client";
 
+import { useTranslations } from "@/i18n/provider";
 import { OnchainReceiveStepContent } from "./components/onchain-receive-step-content";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { useOnchainReceiveWizard } from "./hooks/use-onchain-receive-wizard";
 import type { RailProps } from "./ramp-action-page";
-import { useTranslations } from "@/i18n/provider";
 
 export function OnchainReceiveRail({
   wallets,

@@ -14,7 +14,9 @@ export const ONCHAIN_RECEIVE_STEP_IDS = ["WALLET", "RECEIVE"] as const;
 
 export type OnchainReceiveStepId = (typeof ONCHAIN_RECEIVE_STEP_IDS)[number];
 
-export function getOnchainReceiveSteps(t: Translate): readonly RampWizardStep<OnchainReceiveStepId>[] {
+export function getOnchainReceiveSteps(
+  t: Translate
+): readonly RampWizardStep<OnchainReceiveStepId>[] {
   return [
     {
       id: "WALLET",

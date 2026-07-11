@@ -75,7 +75,9 @@ export function ApiKeyFlashSurface() {
     <Card className={flash.level === "error" ? "border-[#c71f37]/25" : "border-[#1c1c1d]/12"}>
       <CardHeader>
         <CardTitle>
-          {flash.level === "error" ? t("DashboardCustody.actionFailed") : t("DashboardCustody.notice")}
+          {flash.level === "error"
+            ? t("DashboardCustody.actionFailed")
+            : t("DashboardCustody.notice")}
         </CardTitle>
         <CardDescription>{flash.message}</CardDescription>
       </CardHeader>

@@ -18,33 +18,33 @@ export function getTemplateCards(t: Translate): Array<
   }
 > {
   return [
-  {
-    id: "stablecoin",
-    name: "Stablecoin",
-    description: t("DashboardIssuance.create.stablecoinTemplateDescription"),
-    icon: BadgeDollarSign,
-    iconClassName: "bg-[#dee6ff] text-[#375dff]",
-    enabled: true,
-    template: "stablecoin",
-  },
-  {
-    id: "tokenized-security",
-    name: "Tokenized Security",
-    description: t("DashboardIssuance.create.tokenizedSecurityTemplateDescription"),
-    icon: ShieldCheck,
-    iconClassName: "bg-[#d8f7e4] text-[#0f9b58]",
-    enabled: true,
-    template: "tokenized-security",
-  },
-  {
-    id: "custom",
-    name: "Custom Token",
-    description: t("DashboardIssuance.create.customTemplateDescription"),
-    icon: CircleHelp,
-    iconClassName: "bg-[#ebe5ff] text-[#6436ff]",
-    enabled: true,
-    template: "custom",
-  },
+    {
+      id: "stablecoin",
+      name: "Stablecoin",
+      description: t("DashboardIssuance.create.stablecoinTemplateDescription"),
+      icon: BadgeDollarSign,
+      iconClassName: "bg-[#dee6ff] text-[#375dff]",
+      enabled: true,
+      template: "stablecoin",
+    },
+    {
+      id: "tokenized-security",
+      name: "Tokenized Security",
+      description: t("DashboardIssuance.create.tokenizedSecurityTemplateDescription"),
+      icon: ShieldCheck,
+      iconClassName: "bg-[#d8f7e4] text-[#0f9b58]",
+      enabled: true,
+      template: "tokenized-security",
+    },
+    {
+      id: "custom",
+      name: "Custom Token",
+      description: t("DashboardIssuance.create.customTemplateDescription"),
+      icon: CircleHelp,
+      iconClassName: "bg-[#ebe5ff] text-[#6436ff]",
+      enabled: true,
+      template: "custom",
+    },
   ];
 }
 
@@ -127,7 +127,10 @@ export function isAccessControlModeAvailable(
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export function getAccessControlOptions(template: TemplateSelection, t: Translate): Array<{
+export function getAccessControlOptions(
+  template: TemplateSelection,
+  t: Translate
+): Array<{
   mode: AccessControlMode;
   title: string;
   description: string;
@@ -137,11 +140,15 @@ export function getAccessControlOptions(template: TemplateSelection, t: Translat
     return [
       {
         mode: "blocklist",
-        title: t("DashboardIssuance.create.denylist"), description: t("DashboardIssuance.create.denylistDescription"), note: t("DashboardIssuance.create.stablecoinDenylistNote"),
+        title: t("DashboardIssuance.create.denylist"),
+        description: t("DashboardIssuance.create.denylistDescription"),
+        note: t("DashboardIssuance.create.stablecoinDenylistNote"),
       },
       {
         mode: "allowlist",
-        title: t("DashboardIssuance.create.allowlist"), description: t("DashboardIssuance.create.allowlistDescription"), note: t("DashboardIssuance.create.stablecoinAllowlistNote"),
+        title: t("DashboardIssuance.create.allowlist"),
+        description: t("DashboardIssuance.create.allowlistDescription"),
+        note: t("DashboardIssuance.create.stablecoinAllowlistNote"),
       },
     ];
   }
@@ -150,11 +157,15 @@ export function getAccessControlOptions(template: TemplateSelection, t: Translat
     return [
       {
         mode: "allowlist",
-        title: t("DashboardIssuance.create.allowlist"), description: t("DashboardIssuance.create.allowlistDescription"), note: t("DashboardIssuance.create.securityAllowlistNote"),
+        title: t("DashboardIssuance.create.allowlist"),
+        description: t("DashboardIssuance.create.allowlistDescription"),
+        note: t("DashboardIssuance.create.securityAllowlistNote"),
       },
       {
         mode: "blocklist",
-        title: t("DashboardIssuance.create.denylist"), description: t("DashboardIssuance.create.denylistDescription"), note: t("DashboardIssuance.create.securityDenylistNote"),
+        title: t("DashboardIssuance.create.denylist"),
+        description: t("DashboardIssuance.create.denylistDescription"),
+        note: t("DashboardIssuance.create.securityDenylistNote"),
       },
     ];
   }
@@ -162,11 +173,15 @@ export function getAccessControlOptions(template: TemplateSelection, t: Translat
   return [
     {
       mode: "disabled",
-      title: t("DashboardIssuance.create.disabled"), description: t("DashboardIssuance.create.disabledDescription"), note: t("DashboardIssuance.create.customDisabledNote"),
+      title: t("DashboardIssuance.create.disabled"),
+      description: t("DashboardIssuance.create.disabledDescription"),
+      note: t("DashboardIssuance.create.customDisabledNote"),
     },
     {
       mode: "allowlist",
-      title: t("DashboardIssuance.create.allowlist"), description: t("DashboardIssuance.create.allowlistDescription"), note: t("DashboardIssuance.create.customAllowlistNote"),
+      title: t("DashboardIssuance.create.allowlist"),
+      description: t("DashboardIssuance.create.allowlistDescription"),
+      note: t("DashboardIssuance.create.customAllowlistNote"),
     },
   ];
 }

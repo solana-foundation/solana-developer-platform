@@ -283,17 +283,19 @@ export function OrganizationRpcSettingsForm({
           result.resolvedProvider !== result.requestedProvider;
 
         toast.error(
-          isProviderMismatch ? t("DashboardCustody.providerMismatch") : t("DashboardCustody.rpcCheckFailed"),
+          isProviderMismatch
+            ? t("DashboardCustody.providerMismatch")
+            : t("DashboardCustody.rpcCheckFailed"),
           {
-          id: toastId,
-          description: isProviderMismatch
-            ? t("DashboardCustody.rpcTestMismatch", {
-                requested: requestedLabel,
-                resolved: resolvedLabel ?? t("DashboardCustody.anotherProvider"),
-              })
-            : [resolvedLabel ?? requestedLabel, result.upstreamStatus, latency]
-                .filter((value) => value !== undefined && value !== null && value !== "")
-                .join(" • "),
+            id: toastId,
+            description: isProviderMismatch
+              ? t("DashboardCustody.rpcTestMismatch", {
+                  requested: requestedLabel,
+                  resolved: resolvedLabel ?? t("DashboardCustody.anotherProvider"),
+                })
+              : [resolvedLabel ?? requestedLabel, result.upstreamStatus, latency]
+                  .filter((value) => value !== undefined && value !== null && value !== "")
+                  .join(" • "),
             position: "bottom-right",
           }
         );
@@ -350,7 +352,9 @@ export function OrganizationRpcSettingsForm({
                     void applyFallbackProvider();
                   }}
                 >
-                  {isApplyingFallback ? t("DashboardCustody.saving") : t("DashboardCustody.saveFallback")}
+                  {isApplyingFallback
+                    ? t("DashboardCustody.saving")
+                    : t("DashboardCustody.saveFallback")}
                 </Button>
               ) : null}
             </div>

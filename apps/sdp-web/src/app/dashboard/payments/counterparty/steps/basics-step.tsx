@@ -54,8 +54,10 @@ export function BasicsStep() {
 
       <div className="space-y-2">
         <Label htmlFor="externalId">
-          {t("DashboardPayments.counterparty.externalId")} {" "}
-          <span className="font-normal text-text-extra-low">{t("DashboardPayments.counterparty.optional")}</span>
+          {t("DashboardPayments.counterparty.externalId")}{" "}
+          <span className="font-normal text-text-extra-low">
+            {t("DashboardPayments.counterparty.optional")}
+          </span>
         </Label>
         <Input
           size="xl"

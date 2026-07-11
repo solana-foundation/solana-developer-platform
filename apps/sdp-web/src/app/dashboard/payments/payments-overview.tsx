@@ -16,8 +16,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { useTranslations } from "@/i18n/provider";
+import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import {
   formatCurrencyAmount,
   formatDirection,
@@ -297,12 +297,18 @@ export function PaymentsOverview({
                         <span className="lg:hidden">{t("DashboardPayments.transfer")}</span>
                         <span className="hidden lg:inline">{t("DashboardPayments.asset")}</span>
                       </TableHead>
-                      <TableHead className="hidden w-[8rem] lg:table-cell">{t("DashboardPayments.direction")}</TableHead>
+                      <TableHead className="hidden w-[8rem] lg:table-cell">
+                        {t("DashboardPayments.direction")}
+                      </TableHead>
                       <TableHead className="hidden xl:table-cell xl:w-[26%]">
                         {t("DashboardPayments.counterpartyLabel")}
                       </TableHead>
-                      <TableHead className="hidden 2xl:table-cell 2xl:w-[22%]">{t("DashboardPayments.signature")}</TableHead>
-                      <TableHead className="hidden w-[10rem] lg:table-cell">{t("DashboardPayments.createdLabel")}</TableHead>
+                      <TableHead className="hidden 2xl:table-cell 2xl:w-[22%]">
+                        {t("DashboardPayments.signature")}
+                      </TableHead>
+                      <TableHead className="hidden w-[10rem] lg:table-cell">
+                        {t("DashboardPayments.createdLabel")}
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -369,7 +375,9 @@ export function PaymentsOverview({
                                 </TooltipContent>
                               </Tooltip>
                             ) : (
-                              <span className="text-[rgba(28,28,29,0.52)]">{t("DashboardPayments.pending")}</span>
+                              <span className="text-[rgba(28,28,29,0.52)]">
+                                {t("DashboardPayments.pending")}
+                              </span>
                             )}
                           </TableCell>
                           <TableCell className="hidden text-[rgba(28,28,29,0.72)] lg:table-cell">

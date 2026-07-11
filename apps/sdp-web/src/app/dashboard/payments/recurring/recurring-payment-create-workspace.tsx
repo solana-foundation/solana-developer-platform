@@ -164,9 +164,21 @@ export function RecurringPaymentCreateWorkspace({
 }: RecurringPaymentCreateWorkspaceProps) {
   const t = useTranslations();
   const createSteps = [
-    { id: "counterparty", label: t("DashboardPayments.counterpartyLabel"), title: t("DashboardPayments.recurring.counterpartyStepTitle") },
-    { id: "destination", label: t("DashboardPayments.recurring.destination"), title: t("DashboardPayments.recurring.destinationStepTitle") },
-    { id: "details", label: t("DashboardPayments.recurring.details"), title: t("DashboardPayments.recurring.detailsStepTitle") },
+    {
+      id: "counterparty",
+      label: t("DashboardPayments.counterpartyLabel"),
+      title: t("DashboardPayments.recurring.counterpartyStepTitle"),
+    },
+    {
+      id: "destination",
+      label: t("DashboardPayments.recurring.destination"),
+      title: t("DashboardPayments.recurring.destinationStepTitle"),
+    },
+    {
+      id: "details",
+      label: t("DashboardPayments.recurring.details"),
+      title: t("DashboardPayments.recurring.detailsStepTitle"),
+    },
     {
       id: "review",
       label: t("DashboardPayments.counterparty.review"),
@@ -174,10 +186,26 @@ export function RecurringPaymentCreateWorkspace({
     },
   ] as const satisfies readonly { id: StepId; label: string; title: string }[];
   const schedulePresets = [
-    { value: "24", label: t("DashboardPayments.recurring.everyDay"), description: t("DashboardPayments.recurring.collectDaily") },
-    { value: "168", label: t("DashboardPayments.recurring.everyWeek"), description: t("DashboardPayments.recurring.collectWeekly") },
-    { value: "720", label: t("DashboardPayments.recurring.everyThirtyDays"), description: t("DashboardPayments.recurring.collectMonthly") },
-    { value: "custom", label: t("DashboardPayments.recurring.custom"), description: t("DashboardPayments.recurring.customScheduleDescription") },
+    {
+      value: "24",
+      label: t("DashboardPayments.recurring.everyDay"),
+      description: t("DashboardPayments.recurring.collectDaily"),
+    },
+    {
+      value: "168",
+      label: t("DashboardPayments.recurring.everyWeek"),
+      description: t("DashboardPayments.recurring.collectWeekly"),
+    },
+    {
+      value: "720",
+      label: t("DashboardPayments.recurring.everyThirtyDays"),
+      description: t("DashboardPayments.recurring.collectMonthly"),
+    },
+    {
+      value: "custom",
+      label: t("DashboardPayments.recurring.custom"),
+      description: t("DashboardPayments.recurring.customScheduleDescription"),
+    },
   ] as const satisfies readonly { value: SchedulePreset; label: string; description: string }[];
   const router = useRouter();
   const [stepIndex, setStepIndex] = useState(0);
@@ -379,9 +407,14 @@ export function RecurringPaymentCreateWorkspace({
     {
       label: t("DashboardPayments.recurring.fundingWallet"),
       value:
-        selectedWallet?.label ?? selectedWallet?.walletId ?? t("DashboardPayments.recurring.notSelected"),
+        selectedWallet?.label ??
+        selectedWallet?.walletId ??
+        t("DashboardPayments.recurring.notSelected"),
     },
-    { label: t("DashboardPayments.recurring.amount"), value: `${fields.amount || "-"} ${selectedAsset?.label ?? ""}`.trim() },
+    {
+      label: t("DashboardPayments.recurring.amount"),
+      value: `${fields.amount || "-"} ${selectedAsset?.label ?? ""}`.trim(),
+    },
     {
       label: t("DashboardPayments.recurring.billingInterval"),
       value: resolveScheduleLabel(fields, t, schedulePresets),

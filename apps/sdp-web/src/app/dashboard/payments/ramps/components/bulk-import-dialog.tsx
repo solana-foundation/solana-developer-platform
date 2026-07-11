@@ -81,9 +81,7 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
     try {
       const { unresolved } = await onImport(valid);
       if (unresolved.length > 0) {
-        setErrors(
-          unresolved.map((id) => t("DashboardPayments.batchSend.walletNotFound", { id }))
-        );
+        setErrors(unresolved.map((id) => t("DashboardPayments.batchSend.walletNotFound", { id })));
         return;
       }
       handleClose();
@@ -110,9 +108,7 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
           </p>
           <p className="text-sm text-text-low">
             {t("DashboardPayments.batchSend.bulkImportDescriptionBefore")}
-            <span className="font-mono">
-              {t("DashboardPayments.batchSend.bulkImportFields")}
-            </span>
+            <span className="font-mono">{t("DashboardPayments.batchSend.bulkImportFields")}</span>
             {t("DashboardPayments.batchSend.bulkImportDescriptionAfter")}
           </p>
         </div>

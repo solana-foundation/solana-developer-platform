@@ -1,7 +1,7 @@
 "use client";
 
-import { cn } from "@/lib/utils";
 import { useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 
 export type SendMode = "single" | "batch";
 

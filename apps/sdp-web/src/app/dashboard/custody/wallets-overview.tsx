@@ -107,7 +107,9 @@ function ProviderChoiceCard({
           disabled={isDisabled}
           title={
             isDisabled
-              ? t("DashboardCustody.providerAdditionalWalletUnavailable", { provider: provider.label })
+              ? t("DashboardCustody.providerAdditionalWalletUnavailable", {
+                  provider: provider.label,
+                })
               : undefined
           }
         >
@@ -185,14 +187,19 @@ function WalletCard({
               value={wallet.walletId}
               displayValue={formatWalletMeta(wallet.walletId, 10, 6)}
             />
-            <WalletMetadataCopyButton value={wallet.walletId} label={t("DashboardCustody.walletId")} />
+            <WalletMetadataCopyButton
+              value={wallet.walletId}
+              label={t("DashboardCustody.walletId")}
+            />
           </div>
         </div>
       </div>
 
       <div className="mt-auto pt-3">
         <Button asChild variant="outline" className="h-11 w-full rounded-[10px]">
-          <Link href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}>{t("DashboardCustody.manage")}</Link>
+          <Link href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}>
+            {t("DashboardCustody.manage")}
+          </Link>
         </Button>
       </div>
     </article>
@@ -247,7 +254,9 @@ export function WalletsOverview({
       <div className="mx-auto flex max-w-6xl flex-col gap-6 py-8">
         <div className="max-w-2xl space-y-2">
           <h2 className="text-[32px] leading-[1.08] font-medium tracking-[-0.04em] text-[#1c1c1d]">
-            {canManageCustody ? t("DashboardCustody.createFirstWallet") : t("DashboardCustody.noWalletsAvailable")}
+            {canManageCustody
+              ? t("DashboardCustody.createFirstWallet")
+              : t("DashboardCustody.noWalletsAvailable")}
           </h2>
           <p className="text-sm leading-6 text-[rgba(28,28,29,0.62)]">
             {canManageCustody

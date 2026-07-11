@@ -21,7 +21,12 @@ export function AddExternalAccountDialog({
   const t = useTranslations();
 
   return (
-    <Modal isOpen={isOpen} ariaLabel={t("DashboardPayments.counterparty.addExternalAccount")} onClose={onClose} size="md">
+    <Modal
+      isOpen={isOpen}
+      ariaLabel={t("DashboardPayments.counterparty.addExternalAccount")}
+      onClose={onClose}
+      size="md"
+    >
       <div className="space-y-5 p-6">
         <div className="space-y-1">
           <h2 className="text-lg font-medium tracking-tight text-text-extra-high">

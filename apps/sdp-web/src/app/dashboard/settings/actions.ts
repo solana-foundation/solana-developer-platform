@@ -1,8 +1,8 @@
 "use server";
 
 import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types";
-import { createOrgSdpApiClient } from "@/lib/sdp-api";
 import { getTranslations } from "@/i18n/server";
+import { createOrgSdpApiClient } from "@/lib/sdp-api";
 
 type OrganizationSettings = {
   rpcProvider?: OrganizationRpcProvider;

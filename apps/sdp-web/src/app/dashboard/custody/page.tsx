@@ -15,11 +15,11 @@ import {
   WalletsPageSkeleton,
 } from "@/app/dashboard/wallets/wallets-page-skeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createOrgSdpApiClient, createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
-import { getTranslations } from "@/i18n/server";
 import type { OnboardingStatusResponse } from "../onboarding-status";
 import { WalletsWorkspace } from "./wallets-workspace";
 
@@ -100,24 +100,30 @@ async function OnboardingGateSection({ orgId }: { orgId: string }) {
     <Card className="rounded-[24px] border-[rgba(28,28,29,0.08)] shadow-none">
       <CardHeader>
         <CardTitle>{t("DashboardCustody.waitingForOrganizationSync")}</CardTitle>
-        <CardDescription>
-          {t("DashboardCustody.organizationSyncDescription")}
-        </CardDescription>
+        <CardDescription>{t("DashboardCustody.organizationSyncDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] p-4 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-[rgba(28,28,29,0.72)]">{t("DashboardCustody.organizationName")}</span>
-            <span className="font-medium text-[#1c1c1d]">{organization.name ?? t("DashboardCustody.unavailable")}</span>
+            <span className="text-[rgba(28,28,29,0.72)]">
+              {t("DashboardCustody.organizationName")}
+            </span>
+            <span className="font-medium text-[#1c1c1d]">
+              {organization.name ?? t("DashboardCustody.unavailable")}
+            </span>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-[rgba(28,28,29,0.72)]">{t("DashboardCustody.organizationSlug")}</span>
+            <span className="text-[rgba(28,28,29,0.72)]">
+              {t("DashboardCustody.organizationSlug")}
+            </span>
             <span className="font-mono text-xs text-[#1c1c1d]">
               {organization.slug ?? t("DashboardCustody.unavailable")}
             </span>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-[rgba(28,28,29,0.72)]">{t("DashboardCustody.clerkOrganizationId")}</span>
+            <span className="text-[rgba(28,28,29,0.72)]">
+              {t("DashboardCustody.clerkOrganizationId")}
+            </span>
             <span className="font-mono text-xs text-[#1c1c1d]">{organization.id}</span>
           </div>
         </div>

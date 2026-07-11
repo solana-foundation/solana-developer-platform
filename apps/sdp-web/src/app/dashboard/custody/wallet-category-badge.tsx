@@ -3,8 +3,8 @@ import {
   WALLET_PROVIDER_CATEGORY_DETAILS,
   type WalletProviderCategory,
 } from "@/app/dashboard/custody/provider-catalog";
-import { cn } from "@/lib/utils";
 import { useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 
 interface WalletCategoryBadgeProps {
   category: WalletProviderCategory;

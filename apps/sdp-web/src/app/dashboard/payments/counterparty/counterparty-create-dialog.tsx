@@ -20,7 +20,12 @@ export function CounterpartyCreateDialog({
   const t = useTranslations();
 
   return (
-    <Modal isOpen={open} onClose={onClose} ariaLabel={t("DashboardPayments.counterparty.addCounterparty")} size="lg">
+    <Modal
+      isOpen={open}
+      onClose={onClose}
+      ariaLabel={t("DashboardPayments.counterparty.addCounterparty")}
+      size="lg"
+    >
       <div className="px-6 pt-12 pb-6">
         <CounterpartyCreateProvider onCreated={onCreated}>
           <CounterpartyCreatePage />

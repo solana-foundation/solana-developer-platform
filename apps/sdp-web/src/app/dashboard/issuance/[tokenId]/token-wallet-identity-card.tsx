@@ -26,7 +26,11 @@ export function TokenWalletIdentityCard({
         <p className="text-sm font-medium text-[#1c1c1d]">{label}</p>
         <div className="mt-3 space-y-2">
           <IdentityRow label={t("DashboardIssuance.wallet.walletId")} value={wallet.walletId} />
-          <IdentityRow label={t("DashboardIssuance.wallet.publicKey")} value={wallet.publicKey} monospace />
+          <IdentityRow
+            label={t("DashboardIssuance.wallet.publicKey")}
+            value={wallet.publicKey}
+            monospace
+          />
         </div>
       </div>
     );
@@ -35,9 +39,15 @@ export function TokenWalletIdentityCard({
   if (publicKey?.trim()) {
     return (
       <div className="rounded-[12px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] px-4 py-3">
-        <p className="text-sm font-medium text-[#1c1c1d]">{t("DashboardIssuance.wallet.customAddress")}</p>
+        <p className="text-sm font-medium text-[#1c1c1d]">
+          {t("DashboardIssuance.wallet.customAddress")}
+        </p>
         <div className="mt-3">
-          <IdentityRow label={t("DashboardIssuance.wallet.publicKey")} value={publicKey} monospace />
+          <IdentityRow
+            label={t("DashboardIssuance.wallet.publicKey")}
+            value={publicKey}
+            monospace
+          />
         </div>
       </div>
     );

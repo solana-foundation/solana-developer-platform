@@ -66,7 +66,8 @@ export function CreateDraftConfirmDialog({
             {name ? (
               <>
                 {" "}
-                {t("DashboardIssuance.confirmDraft.of")} <span className="font-medium text-text-high">{name}</span>
+                {t("DashboardIssuance.confirmDraft.of")}{" "}
+                <span className="font-medium text-text-high">{name}</span>
               </>
             ) : null}
             {t("DashboardIssuance.confirmDraft.descriptionEnd")}
@@ -80,7 +81,9 @@ export function CreateDraftConfirmDialog({
               (a stray Enter still only *opens* the dialog — this is the second,
               deliberate press). */}
           <Button type="button" autoFocus onClick={handleConfirm} disabled={submitting}>
-            {submitting ? t("DashboardIssuance.wizard.creating") : t("DashboardIssuance.create.createDraft")}
+            {submitting
+              ? t("DashboardIssuance.wizard.creating")
+              : t("DashboardIssuance.create.createDraft")}
           </Button>
         </div>
       </div>

@@ -1,8 +1,4 @@
-import {
-  ASSET_TYPES,
-  type AssetCategory,
-  isAssetTypeSupported,
-} from "@sdp/types";
+import { ASSET_TYPES, type AssetCategory, isAssetTypeSupported } from "@sdp/types";
 import {
   Banknote,
   Bitcoin,

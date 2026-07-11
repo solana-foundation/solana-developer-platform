@@ -45,8 +45,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
-import type { MessageKey } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
 import { Select, SelectItem } from "@/components/ui/select";
 import {
   Table,
@@ -60,6 +58,8 @@ import {
   type DashboardPlaygroundApiKeyOption,
   useDashboardWorkspace,
 } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { useZodForm } from "@/lib/use-zod-form";
@@ -359,7 +359,9 @@ function CreateRequestModal({
                 form.setField("counterparty", value === null ? ANYONE_OPTION : value)
               }
             >
-              <SelectItem value={ANYONE_OPTION}>{t("DashboardPayments.requests.anyoneWithLink")}</SelectItem>
+              <SelectItem value={ANYONE_OPTION}>
+                {t("DashboardPayments.requests.anyoneWithLink")}
+              </SelectItem>
               {counterparties.map((counterparty) => (
                 <SelectItem key={counterparty.id} value={counterparty.id}>
                   {counterparty.displayName}
@@ -373,7 +375,7 @@ function CreateRequestModal({
             )}
             {selectedCounterpartyId && !accountsLoading && primaryCryptoAccount && (
               <p className="text-xs text-text-low">
-                {t("DashboardPayments.requests.paysFrom")} {" "}
+                {t("DashboardPayments.requests.paysFrom")}{" "}
                 <span className="font-mono text-text-medium">
                   {resolveAccountAddress(primaryCryptoAccount)}
                 </span>
@@ -405,9 +407,7 @@ function CreateRequestModal({
               iconLeft={<ClockIcon />}
               trailing={expiresAtPreview ? formatLocalExpiry(expiresAtPreview) : undefined}
               value={form.values.expiry}
-              onValueChange={(value) =>
-                form.setField("expiry", value === null ? "none" : value)
-              }
+              onValueChange={(value) => form.setField("expiry", value === null ? "none" : value)}
             >
               {EXPIRY_OPTIONS.map((option) => (
                 <SelectItem key={option.id} value={option.id}>
@@ -561,10 +561,18 @@ export function PaymentRequestsWorkspace({
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-[16%]">{t("DashboardPayments.status")}</TableHead>
-                        <TableHead className="w-[20%]">{t("DashboardPayments.requests.amount")}</TableHead>
-                        <TableHead className="w-[22%]">{t("DashboardPayments.requests.from")}</TableHead>
-                        <TableHead className="w-[22%]">{t("DashboardPayments.requests.to")}</TableHead>
-                        <TableHead className="w-[20%]">{t("DashboardPayments.recurring.created")}</TableHead>
+                        <TableHead className="w-[20%]">
+                          {t("DashboardPayments.requests.amount")}
+                        </TableHead>
+                        <TableHead className="w-[22%]">
+                          {t("DashboardPayments.requests.from")}
+                        </TableHead>
+                        <TableHead className="w-[22%]">
+                          {t("DashboardPayments.requests.to")}
+                        </TableHead>
+                        <TableHead className="w-[20%]">
+                          {t("DashboardPayments.recurring.created")}
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>

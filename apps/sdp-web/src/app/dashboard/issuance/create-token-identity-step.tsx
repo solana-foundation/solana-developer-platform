@@ -37,7 +37,9 @@ export function CreateTokenIdentityStep({
       className="px-6 pb-6"
     >
       <div className="space-y-5 rounded-[28px] bg-white p-5">
-        <p className="text-sm text-[rgba(28,28,29,0.62)]">{t("DashboardIssuance.create.requiredFields")}</p>
+        <p className="text-sm text-[rgba(28,28,29,0.62)]">
+          {t("DashboardIssuance.create.requiredFields")}
+        </p>
 
         <div className="grid gap-4">
           <div className="grid gap-2">

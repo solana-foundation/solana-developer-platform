@@ -37,6 +37,7 @@ interface CreateIssuanceTokenModalProps {
   triggerClassName?: string;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: modal coordinates the existing multi-step issuance flow.
 export function CreateIssuanceTokenModal({
   signerWallets = [],
   signerWalletsError = null,
@@ -178,20 +179,20 @@ export function CreateIssuanceTokenModal({
     startTransition(async () => {
       const response = await createIssuanceTokenAction(formData).catch((error) => ({
         state: "error" as const,
-        message: error instanceof Error ? error.message : t("DashboardIssuance.create.unableToCreateDraft"),
+        message:
+          error instanceof Error
+            ? error.message
+            : t("DashboardIssuance.create.unableToCreateDraft"),
         tokenId: null,
         tokenName: null,
       }));
       setSubmitState(response);
 
       if (response.state === "success") {
-        toast.success(
-          response.message ?? t("DashboardIssuance.create.draftCreated"),
-          {
-            id: toastId,
-            position: "bottom-right",
-          }
-        );
+        toast.success(response.message ?? t("DashboardIssuance.create.draftCreated"), {
+          id: toastId,
+          position: "bottom-right",
+        });
         close();
         router.refresh();
         return;

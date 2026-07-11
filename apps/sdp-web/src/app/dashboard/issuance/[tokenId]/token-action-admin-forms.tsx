@@ -18,9 +18,9 @@ import type {
   SeizeValidationErrors,
 } from "./token-management-workspace.types";
 import {
+  getTokenAmountFieldDescription,
   NON_WHITESPACE_PATTERN,
   SOLANA_ADDRESS_PATTERN,
-  getTokenAmountFieldDescription,
 } from "./token-management-workspace.utils";
 import { TokenSignerSelect } from "./token-signer-select";
 import { TokenValidationMessage } from "./token-validation-message";

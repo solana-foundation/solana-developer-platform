@@ -2,9 +2,8 @@
 
 import type { IssuanceMetadata } from "@sdp/types";
 import { Check, Code2, Copy } from "lucide-react";
-
-import { useCopy } from "@/lib/use-copy";
 import { useTranslations } from "@/i18n/provider";
+import { useCopy } from "@/lib/use-copy";
 
 // "View JSON" affordance for the Asset details step. Split into a header toggle
 // and a full-width panel so a large body / long line wraps and scrolls inside
@@ -40,7 +39,11 @@ export function MetadataJsonPanel({ metadata }: { metadata: IssuanceMetadata }) 
         type="button"
         onClick={() => void copy(jsonString)}
         className="absolute right-3 top-3 inline-flex items-center justify-center rounded-lg p-1.5 text-[rgba(28,28,29,0.5)] transition-all hover:bg-[rgba(28,28,29,0.1)] hover:text-[#1c1c1d]"
-        title={copied ? t("DashboardIssuance.assetDetails.copied") : t("DashboardIssuance.assetDetails.copyJson")}
+        title={
+          copied
+            ? t("DashboardIssuance.assetDetails.copied")
+            : t("DashboardIssuance.assetDetails.copyJson")
+        }
       >
         {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
       </button>

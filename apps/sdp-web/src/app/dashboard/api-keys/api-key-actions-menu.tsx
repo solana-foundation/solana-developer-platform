@@ -3,13 +3,13 @@
 import { ChevronDown } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { useTranslations } from "@/i18n/provider";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useTranslations } from "@/i18n/provider";
 import { rotateApiKeyAction } from "./actions";
 import { DeleteApiKeyModal } from "./delete-api-key-modal";
 

@@ -87,7 +87,10 @@ function getWalletNames(
   const walletNames = walletIds.map((walletId) => walletLabelById.get(walletId) ?? walletId);
 
   if (walletNames.length === 0) {
-    return { label: t("DashboardCustody.selectedWallets"), title: t("DashboardCustody.selectedWallets") };
+    return {
+      label: t("DashboardCustody.selectedWallets"),
+      title: t("DashboardCustody.selectedWallets"),
+    };
   }
 
   return {
@@ -104,14 +107,20 @@ function formatPolicyBinding(
     const revision = binding.apiKeyControlProfileRevisionId
       ? t("DashboardCustody.revision", { id: shortId(binding.apiKeyControlProfileRevisionId) })
       : "";
-    return t("DashboardCustody.apiProfile", { id: shortId(binding.apiKeyControlProfileId), revision });
+    return t("DashboardCustody.apiProfile", {
+      id: shortId(binding.apiKeyControlProfileId),
+      revision,
+    });
   }
 
   if (binding.walletControlProfileId) {
     const revision = binding.walletControlProfileRevisionId
       ? t("DashboardCustody.revision", { id: shortId(binding.walletControlProfileRevisionId) })
       : "";
-    return t("DashboardCustody.walletProfile", { id: shortId(binding.walletControlProfileId), revision });
+    return t("DashboardCustody.walletProfile", {
+      id: shortId(binding.walletControlProfileId),
+      revision,
+    });
   }
 
   return t("DashboardCustody.policyBinding");
@@ -133,7 +142,9 @@ function getPolicySummary(
     const walletLabel =
       binding.bindingScope === "all"
         ? t("DashboardCustody.allWallets")
-        : (walletLabelById.get(binding.walletId ?? "") ?? binding.walletId ?? t("DashboardCustody.selectedWallet"));
+        : (walletLabelById.get(binding.walletId ?? "") ??
+          binding.walletId ??
+          t("DashboardCustody.selectedWallet"));
     return `${walletLabel}: ${formatPolicyBinding(binding, t)}`;
   });
 
@@ -199,20 +210,36 @@ export function ApiKeysTableClient({
   }, [wallets]);
 
   if (sortedApiKeys.length === 0) {
-    return <p className="text-sm text-[rgba(28,28,29,0.72)]">{t("DashboardCustody.noApiKeysFound")}</p>;
+    return (
+      <p className="text-sm text-[rgba(28,28,29,0.72)]">{t("DashboardCustody.noApiKeysFound")}</p>
+    );
   }
 
   return (
     <Table className="[&_table]:w-full [&_table]:min-w-0 [&_table]:table-fixed">
       <TableHeader>
         <TableRow>
-          <TableHead className="w-[24%] @4xl/api-keys-table:w-[17%]">{t("DashboardCustody.name")}</TableHead>
-          <TableHead className={`${PREFIX_COLUMN_CLASS} w-[10%]`}>{t("DashboardCustody.prefix")}</TableHead>
-          <TableHead className="w-[48%] @4xl/api-keys-table:w-[27%]">{t("DashboardCustody.access")}</TableHead>
-          <TableHead className={`${STATUS_COLUMN_CLASS} w-[8%]`}>{t("DashboardCustody.status")}</TableHead>
-          <TableHead className={`${LAST_USED_COLUMN_CLASS} w-[9%]`}>{t("DashboardCustody.lastUsed")}</TableHead>
-          <TableHead className={`${EXPIRES_COLUMN_CLASS} w-[9%]`}>{t("DashboardCustody.expires")}</TableHead>
-          <TableHead className={`${CREATED_COLUMN_CLASS} w-[9%]`}>{t("DashboardCustody.created")}</TableHead>
+          <TableHead className="w-[24%] @4xl/api-keys-table:w-[17%]">
+            {t("DashboardCustody.name")}
+          </TableHead>
+          <TableHead className={`${PREFIX_COLUMN_CLASS} w-[10%]`}>
+            {t("DashboardCustody.prefix")}
+          </TableHead>
+          <TableHead className="w-[48%] @4xl/api-keys-table:w-[27%]">
+            {t("DashboardCustody.access")}
+          </TableHead>
+          <TableHead className={`${STATUS_COLUMN_CLASS} w-[8%]`}>
+            {t("DashboardCustody.status")}
+          </TableHead>
+          <TableHead className={`${LAST_USED_COLUMN_CLASS} w-[9%]`}>
+            {t("DashboardCustody.lastUsed")}
+          </TableHead>
+          <TableHead className={`${EXPIRES_COLUMN_CLASS} w-[9%]`}>
+            {t("DashboardCustody.expires")}
+          </TableHead>
+          <TableHead className={`${CREATED_COLUMN_CLASS} w-[9%]`}>
+            {t("DashboardCustody.created")}
+          </TableHead>
           <TableHead className="w-[18%] @4xl/api-keys-table:w-[14%] @7xl/api-keys-table:w-[11%]">
             {canManageApiKeys ? t("DashboardCustody.actions") : ""}
           </TableHead>

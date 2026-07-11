@@ -23,8 +23,8 @@ import {
   formatRampQuoteTimeRemaining,
 } from "@/app/dashboard/payments/payments-overview.utils";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 
 type ManualQuote = Extract<PaymentRampQuote, { deliveryMode: "manual_instructions" }>;
 type LightsparkQuote = Extract<ManualQuote, { provider: "lightspark" }>;
@@ -36,9 +36,14 @@ async function copyPaymentInstruction(
 ) {
   try {
     await navigator.clipboard.writeText(value);
-    toast.success(t("DashboardPayments.manualInstructions.copied", { label }), { position: "bottom-right" });
+    toast.success(t("DashboardPayments.manualInstructions.copied", { label }), {
+      position: "bottom-right",
+    });
   } catch {
-    toast.error(t("DashboardPayments.manualInstructions.copyFailed", { label: label.toLowerCase() }), { position: "bottom-right" });
+    toast.error(
+      t("DashboardPayments.manualInstructions.copyFailed", { label: label.toLowerCase() }),
+      { position: "bottom-right" }
+    );
   }
 }
 
@@ -86,7 +91,6 @@ function QuoteSummaryField({
   label: string;
   value?: string | null;
 }) {
-  const t = useTranslations();
   if (!value) {
     return null;
   }
@@ -169,8 +173,12 @@ function ManualQuoteSummary({
   return (
     <div className="space-y-4 text-left">
       <div>
-        <p className="text-sm font-medium text-text-extra-high">{t("DashboardPayments.manualInstructions.quoteSummary")}</p>
-        <p className="mt-1 text-sm text-text-low">{t("DashboardPayments.manualInstructions.quoteSummaryDescription")}</p>
+        <p className="text-sm font-medium text-text-extra-high">
+          {t("DashboardPayments.manualInstructions.quoteSummary")}
+        </p>
+        <p className="mt-1 text-sm text-text-low">
+          {t("DashboardPayments.manualInstructions.quoteSummaryDescription")}
+        </p>
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
         <QuoteSummaryField
@@ -193,7 +201,11 @@ function ManualQuoteSummary({
           label={t("DashboardPayments.manualInstructions.exchangeRate")}
           value={exchangeRate}
         />
-        <QuoteSummaryField icon={<Clock3 className="size-4" />} label={t("DashboardPayments.manualInstructions.expires")} value={expiresAt} />
+        <QuoteSummaryField
+          icon={<Clock3 className="size-4" />}
+          label={t("DashboardPayments.manualInstructions.expires")}
+          value={expiresAt}
+        />
       </div>
     </div>
   );
@@ -267,16 +279,28 @@ function LightsparkInstruction({
         {showAction && action ? <InstructionActionButton action={action} /> : null}
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
-        <PaymentInstructionField label={t("DashboardPayments.manualInstructions.bankName")} value={info.bankName} />
-        <PaymentInstructionField label={t("DashboardPayments.manualInstructions.routingNumber")} value={info.routingNumber} />
-        <PaymentInstructionField label={t("DashboardPayments.manualInstructions.accountNumber")} value={info.accountNumber} />
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.bankName")}
+          value={info.bankName}
+        />
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.routingNumber")}
+          value={info.routingNumber}
+        />
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.accountNumber")}
+          value={info.accountNumber}
+        />
         <PaymentInstructionField
           label={t("DashboardPayments.manualInstructions.walletAddress")}
           value={info.address}
           className="lg:col-span-2"
         />
       </div>
-      <PaymentInstructionField label={t("DashboardPayments.manualInstructions.reference")} value={info.reference} />
+      <PaymentInstructionField
+        label={t("DashboardPayments.manualInstructions.reference")}
+        value={info.reference}
+      />
       {info.paymentRails?.length ? (
         <div className="rounded-xl bg-border-extra-light px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">
@@ -287,7 +311,9 @@ function LightsparkInstruction({
       ) : null}
       {instruction.instructionsNotes ? (
         <div className="rounded-xl bg-border-extra-light px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">{t("DashboardPayments.manualInstructions.notes")}</p>
+          <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">
+            {t("DashboardPayments.manualInstructions.notes")}
+          </p>
           <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
         </div>
       ) : null}
@@ -307,15 +333,27 @@ function BvnkCryptoDepositInstruction({
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <InstructionBadges>
-          <InstructionBadge>{t("DashboardPayments.manualInstructions.cryptoDeposit", { currency: instruction.cryptoCurrency })}</InstructionBadge>
+          <InstructionBadge>
+            {t("DashboardPayments.manualInstructions.cryptoDeposit", {
+              currency: instruction.cryptoCurrency,
+            })}
+          </InstructionBadge>
           <InstructionBadge>{instruction.network}</InstructionBadge>
         </InstructionBadges>
         {action ? <InstructionActionButton action={action} /> : null}
       </div>
-      <PaymentInstructionField label={t("DashboardPayments.manualInstructions.depositAddress")} value={instruction.destinationAddress} />
-      <PaymentInstructionField label={t("DashboardPayments.manualInstructions.reference")} value={instruction.reference} />
+      <PaymentInstructionField
+        label={t("DashboardPayments.manualInstructions.depositAddress")}
+        value={instruction.destinationAddress}
+      />
+      <PaymentInstructionField
+        label={t("DashboardPayments.manualInstructions.reference")}
+        value={instruction.reference}
+      />
       <div className="rounded-xl bg-border-extra-light px-4 py-3">
-        <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">{t("DashboardPayments.manualInstructions.notes")}</p>
+        <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">
+          {t("DashboardPayments.manualInstructions.notes")}
+        </p>
         <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
       </div>
     </div>
@@ -344,7 +382,11 @@ function BvnkInstruction({
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <InstructionBadges>
-          <InstructionBadge>{t("DashboardPayments.manualInstructions.virtualAccount", { currency: instruction.fiatCurrency })}</InstructionBadge>
+          <InstructionBadge>
+            {t("DashboardPayments.manualInstructions.virtualAccount", {
+              currency: instruction.fiatCurrency,
+            })}
+          </InstructionBadge>
           <InstructionBadge>{instruction.network}</InstructionBadge>
         </InstructionBadges>
         {isReady && action ? <InstructionActionButton action={action} /> : null}
@@ -408,13 +450,27 @@ function BvnkInstruction({
       {isReady ? (
         <>
           <div className="grid gap-3 lg:grid-cols-2">
-            <PaymentInstructionField label={t("DashboardPayments.manualInstructions.bankName")} value={bank?.bankName} />
-            <PaymentInstructionField label={t("DashboardPayments.manualInstructions.accountNumber")} value={bank?.accountNumber} />
-            <PaymentInstructionField label={t("DashboardPayments.manualInstructions.bankCode")} value={bank?.code} />
-            <PaymentInstructionField label={t("DashboardPayments.manualInstructions.paymentReference")} value={bank?.paymentReference} />
+            <PaymentInstructionField
+              label={t("DashboardPayments.manualInstructions.bankName")}
+              value={bank?.bankName}
+            />
+            <PaymentInstructionField
+              label={t("DashboardPayments.manualInstructions.accountNumber")}
+              value={bank?.accountNumber}
+            />
+            <PaymentInstructionField
+              label={t("DashboardPayments.manualInstructions.bankCode")}
+              value={bank?.code}
+            />
+            <PaymentInstructionField
+              label={t("DashboardPayments.manualInstructions.paymentReference")}
+              value={bank?.paymentReference}
+            />
           </div>
           <div className="rounded-xl bg-border-extra-light px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">{t("DashboardPayments.manualInstructions.notes")}</p>
+            <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">
+              {t("DashboardPayments.manualInstructions.notes")}
+            </p>
             <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
           </div>
         </>
@@ -437,7 +493,11 @@ function MuralInstruction({
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <InstructionBadges>
-          <InstructionBadge>{t("DashboardPayments.manualInstructions.payin", { currency: instruction.fiatCurrency })}</InstructionBadge>
+          <InstructionBadge>
+            {t("DashboardPayments.manualInstructions.payin", {
+              currency: instruction.fiatCurrency,
+            })}
+          </InstructionBadge>
           {instruction.payinRails.map((rail) => (
             <InstructionBadge key={rail}>{rail}</InstructionBadge>
           ))}
@@ -514,11 +574,15 @@ export function ManualInstructionsQuote({
           <LandmarkIcon className="size-5" />
         </span>
         <div>
-          <p className="text-sm font-medium text-text-extra-high">{t("DashboardPayments.manualInstructions.manualFundingInstructions")}</p>
+          <p className="text-sm font-medium text-text-extra-high">
+            {t("DashboardPayments.manualInstructions.manualFundingInstructions")}
+          </p>
           <p className="mt-2 text-sm text-text-low">
             {description ??
               t("DashboardPayments.manualInstructions.defaultDescription", {
-                amount: amount ? `$${amount}` : t("DashboardPayments.manualInstructions.quotedAmount"),
+                amount: amount
+                  ? `$${amount}`
+                  : t("DashboardPayments.manualInstructions.quotedAmount"),
               })}
           </p>
         </div>

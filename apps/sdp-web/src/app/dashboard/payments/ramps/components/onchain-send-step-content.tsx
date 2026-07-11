@@ -27,7 +27,9 @@ function NoAssetsHint({ walletId, assetCount }: { walletId: string; assetCount: 
   if (!walletId || assetCount > 0) {
     return null;
   }
-  return <p className="text-sm text-status-error-text">{t("DashboardPayments.onchainSend.noAssets")}</p>;
+  return (
+    <p className="text-sm text-status-error-text">{t("DashboardPayments.onchainSend.noAssets")}</p>
+  );
 }
 
 function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
@@ -107,7 +109,8 @@ export function OnchainSendStepContent({
             <span className="block text-sm text-text-low">
               {cryptoAccounts.length === 0
                 ? t("DashboardPayments.onchainSend.counterpartyNoAddress", {
-                    counterparty: counterpartyName || t("DashboardPayments.onchainSend.thisCounterparty"),
+                    counterparty:
+                      counterpartyName || t("DashboardPayments.onchainSend.thisCounterparty"),
                   })
                 : t("DashboardPayments.onchainSend.attachDestination")}
             </span>
@@ -249,7 +252,9 @@ export function OnchainSendStepContent({
           <p className="text-sm text-text-low">
             {transferResult.signature
               ? t("DashboardPayments.onchainSend.transferSuccess")
-              : t("DashboardPayments.onchainSend.transferStatus", { status: transferResult.status })}
+              : t("DashboardPayments.onchainSend.transferStatus", {
+                  status: transferResult.status,
+                })}
           </p>
         </div>
         <section className="w-full space-y-4 rounded-2xl bg-border-extra-light p-5">

@@ -82,7 +82,7 @@ export function WalletActionsMenu({
             id: toastId,
             description: (
               <span>
-                {t("DashboardCustody.memoTransactionSubmitted")} {" "}
+                {t("DashboardCustody.memoTransactionSubmitted")}{" "}
                 <a
                   href={explorerUrl}
                   target="_blank"
@@ -117,7 +117,8 @@ export function WalletActionsMenu({
         const result = await requestDevnetSolanaFaucetAction(walletId, walletAddress).catch(
           (error) => ({
             status: "error" as const,
-            message: error instanceof Error ? error.message : t("DashboardCustody.devnetFaucetFailed"),
+            message:
+              error instanceof Error ? error.message : t("DashboardCustody.devnetFaucetFailed"),
           })
         );
 
@@ -128,7 +129,7 @@ export function WalletActionsMenu({
             id: toastId,
             description: (
               <span>
-                {t("DashboardCustody.faucetTransactionSubmitted")} {" "}
+                {t("DashboardCustody.faucetTransactionSubmitted")}{" "}
                 <a
                   href={explorerUrl}
                   target="_blank"

@@ -2,6 +2,7 @@ import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types";
 import { CheckCircle2Icon, ClockIcon, XCircleIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
+import { getTranslations } from "@/i18n/server";
 import {
   formatDisplayAmount,
   formatTimestamp,
@@ -9,7 +10,6 @@ import {
 } from "../../dashboard/payments/payments-overview.utils";
 import { resolvePlaygroundApiBaseUrl } from "../../dashboard/playground-api-data";
 import { PayQrCode } from "./pay-qr-code";
-import { getTranslations } from "@/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -33,21 +33,21 @@ interface StatusPanel {
 
 function getStatusPanels(t: Awaited<ReturnType<typeof getTranslations>>) {
   return {
-  paid: {
-    icon: <CheckCircle2Icon className="size-12 text-status-success-text" />,
-    title: t("Shared.pay.paymentReceived"),
-    body: t("Shared.pay.paymentReceivedDescription"),
-  },
-  expired: {
-    icon: <ClockIcon className="size-12 text-text-low" />,
-    title: t("Shared.pay.linkExpired"),
-    body: t("Shared.pay.linkExpiredDescription"),
-  },
-  canceled: {
-    icon: <XCircleIcon className="size-12 text-status-error-text" />,
-    title: t("Shared.pay.requestCanceled"),
-    body: t("Shared.pay.requestCanceledDescription"),
-  },
+    paid: {
+      icon: <CheckCircle2Icon className="size-12 text-status-success-text" />,
+      title: t("Shared.pay.paymentReceived"),
+      body: t("Shared.pay.paymentReceivedDescription"),
+    },
+    expired: {
+      icon: <ClockIcon className="size-12 text-text-low" />,
+      title: t("Shared.pay.linkExpired"),
+      body: t("Shared.pay.linkExpiredDescription"),
+    },
+    canceled: {
+      icon: <XCircleIcon className="size-12 text-status-error-text" />,
+      title: t("Shared.pay.requestCanceled"),
+      body: t("Shared.pay.requestCanceledDescription"),
+    },
   } as const satisfies Record<Exclude<PayStatus, "awaiting_payment">, StatusPanel>;
 }
 
@@ -77,7 +77,8 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
   const request = (await response.json()) as PayRequest;
 
   const payUrl = request.solanaPayUrl;
-  const statusPanel = request.status === "awaiting_payment" ? null : getStatusPanels(t)[request.status];
+  const statusPanel =
+    request.status === "awaiting_payment" ? null : getStatusPanels(t)[request.status];
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-b from-[#e9e7de] to-[#f5f4ef] px-4 py-12">
@@ -145,7 +146,9 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
             <DetailRow label={t("Shared.pay.token")} value={request.tokenSymbol} />
             <DetailRow
               label={t("Shared.pay.expires")}
-              value={request.expiresAt ? formatTimestamp(request.expiresAt) : t("Shared.pay.noExpiry")}
+              value={
+                request.expiresAt ? formatTimestamp(request.expiresAt) : t("Shared.pay.noExpiry")
+              }
             />
           </div>
         </div>

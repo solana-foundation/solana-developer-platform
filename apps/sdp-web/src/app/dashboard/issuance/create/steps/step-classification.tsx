@@ -27,7 +27,9 @@ export function StepClassification() {
       className="space-y-6"
     >
       <div>
-        <h2 className="text-xl font-medium text-[#1c1c1d]">{t("DashboardIssuance.classification.title")}</h2>
+        <h2 className="text-xl font-medium text-[#1c1c1d]">
+          {t("DashboardIssuance.classification.title")}
+        </h2>
         <p className="mt-1 text-sm text-[rgba(28,28,29,0.62)]">
           {t("DashboardIssuance.classification.description")}
         </p>
@@ -41,7 +43,9 @@ export function StepClassification() {
           onChange={(event) => updateDraft({ name: event.currentTarget.value })}
           placeholder={t("DashboardIssuance.classification.namePlaceholder")}
         />
-        <p className="text-sm text-[rgba(28,28,29,0.55)]">{t("DashboardIssuance.classification.nameHint")}</p>
+        <p className="text-sm text-[rgba(28,28,29,0.55)]">
+          {t("DashboardIssuance.classification.nameHint")}
+        </p>
       </div>
 
       <div className="space-y-3">

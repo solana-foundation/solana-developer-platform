@@ -16,8 +16,8 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { useTranslations } from "@/i18n/provider";
+import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { formatRelativeTime } from "./activity-format-utils";
 import { fetchHomeActivity } from "./home-workspace.data";
 import { formatCurrencyAmount, formatDisplayAmount } from "./payments/payments-overview.utils";
@@ -162,9 +162,7 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
                 {activityNotice ? (
                   <CardDescription>{activityNotice}</CardDescription>
                 ) : (
-                  <CardDescription>
-                    {t("Shared.homeWorkspace.activityDescription")}
-                  </CardDescription>
+                  <CardDescription>{t("Shared.homeWorkspace.activityDescription")}</CardDescription>
                 )}
               </div>
               <Button asChild variant="secondary" size="sm">
@@ -181,12 +179,24 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
                   <Table className="min-w-0 [&_table]:table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[8rem] pl-6">{t("Shared.homeWorkspace.time")}</TableHead>
-                        <TableHead className="w-[calc(100%-8rem)] md:hidden">{t("Shared.homeWorkspace.activity")}</TableHead>
-                        <TableHead className="hidden w-[10rem] md:table-cell">{t("Shared.homeWorkspace.type")}</TableHead>
-                        <TableHead className="hidden w-[8rem] md:table-cell">{t("Shared.homeWorkspace.token")}</TableHead>
-                        <TableHead className="hidden w-[10rem] md:table-cell">{t("Shared.homeWorkspace.amount")}</TableHead>
-                        <TableHead className="hidden pr-6 md:table-cell">{t("Shared.homeWorkspace.address")}</TableHead>
+                        <TableHead className="w-[8rem] pl-6">
+                          {t("Shared.homeWorkspace.time")}
+                        </TableHead>
+                        <TableHead className="w-[calc(100%-8rem)] md:hidden">
+                          {t("Shared.homeWorkspace.activity")}
+                        </TableHead>
+                        <TableHead className="hidden w-[10rem] md:table-cell">
+                          {t("Shared.homeWorkspace.type")}
+                        </TableHead>
+                        <TableHead className="hidden w-[8rem] md:table-cell">
+                          {t("Shared.homeWorkspace.token")}
+                        </TableHead>
+                        <TableHead className="hidden w-[10rem] md:table-cell">
+                          {t("Shared.homeWorkspace.amount")}
+                        </TableHead>
+                        <TableHead className="hidden pr-6 md:table-cell">
+                          {t("Shared.homeWorkspace.address")}
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>

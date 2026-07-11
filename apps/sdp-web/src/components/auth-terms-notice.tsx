@@ -8,7 +8,7 @@ export async function AuthTermsNotice() {
 
   return (
     <p className="max-w-sm text-center text-xs leading-5 text-[rgba(28,28,29,0.72)]">
-      {t("Shared.authTerms.prefix")} {" "}
+      {t("Shared.authTerms.prefix")}{" "}
       <Link
         href={TOS_HREF}
         target="_blank"

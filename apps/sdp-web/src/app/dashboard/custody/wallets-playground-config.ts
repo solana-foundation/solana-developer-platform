@@ -133,7 +133,14 @@ export function buildWalletsPlaygroundEndpointConfigs({
       title: t("DashboardCustody.playgroundGetWallet"),
       method: "GET",
       path: "/v1/wallets/{walletId}",
-      pathFields: [buildSelectOrTextField("walletId", "{walletId}", t("DashboardCustody.walletId"), walletOptions)],
+      pathFields: [
+        buildSelectOrTextField(
+          "walletId",
+          "{walletId}",
+          t("DashboardCustody.walletId"),
+          walletOptions
+        ),
+      ],
       bodyFields: [],
       expectedResponse: {
         data: {
@@ -151,7 +158,14 @@ export function buildWalletsPlaygroundEndpointConfigs({
       method: "GET",
       // biome-ignore lint/security/noSecrets: Public API path with a documented query parameter.
       path: "/v1/wallets/public-key?walletId={walletId}",
-      pathFields: [buildSelectOrTextField("walletId", "walletId", t("DashboardCustody.walletId"), walletOptions)],
+      pathFields: [
+        buildSelectOrTextField(
+          "walletId",
+          "walletId",
+          t("DashboardCustody.walletId"),
+          walletOptions
+        ),
+      ],
       bodyFields: [],
       expectedResponse: {
         data: {
@@ -186,7 +200,12 @@ export function buildWalletsPlaygroundEndpointConfigs({
       path: "/v1/wallets",
       pathFields: [],
       bodyFields: [
-        buildSelectOrTextField("provider", t("DashboardCustody.playgroundProviderField"), t("DashboardCustody.rpcProvider"), providerOptions),
+        buildSelectOrTextField(
+          "provider",
+          t("DashboardCustody.playgroundProviderField"),
+          t("DashboardCustody.rpcProvider"),
+          providerOptions
+        ),
         {
           key: "label",
           label: t("DashboardCustody.playgroundLabelField"),
@@ -221,7 +240,12 @@ export function buildWalletsPlaygroundEndpointConfigs({
       path: "/v1/wallets/signer-check",
       pathFields: [],
       bodyFields: [
-        buildSelectOrTextField("walletId", "walletId", t("DashboardCustody.walletId"), walletOptions),
+        buildSelectOrTextField(
+          "walletId",
+          "walletId",
+          t("DashboardCustody.walletId"),
+          walletOptions
+        ),
         {
           key: "memo",
           label: t("DashboardCustody.playgroundMemoField"),

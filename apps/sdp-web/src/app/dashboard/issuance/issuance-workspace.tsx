@@ -214,7 +214,9 @@ export function IssuanceWorkspace({
         <>
           {tokensNotice && tokens.length > 0 ? (
             <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-4 py-3">
-              <p className="text-sm font-medium text-[#1c1c1d]">{t("DashboardIssuance.workspace.tokenListUnavailable")}</p>
+              <p className="text-sm font-medium text-[#1c1c1d]">
+                {t("DashboardIssuance.workspace.tokenListUnavailable")}
+              </p>
               <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">{tokensNotice}</p>
             </div>
           ) : null}
@@ -299,19 +301,25 @@ export function IssuanceWorkspace({
 
                 <div className="mt-6 space-y-2 rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] p-3">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-[rgba(28,28,29,0.58)]">{t("DashboardIssuance.workspace.type")}</span>
+                    <span className="text-[rgba(28,28,29,0.58)]">
+                      {t("DashboardIssuance.workspace.type")}
+                    </span>
                     <span className="font-medium text-[#1c1c1d]">
                       {getTokenTypeLabel(token.template, t)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-[rgba(28,28,29,0.58)]">{t("DashboardIssuance.workspace.supply")}</span>
+                    <span className="text-[rgba(28,28,29,0.58)]">
+                      {t("DashboardIssuance.workspace.supply")}
+                    </span>
                     <span className="font-medium text-[#1c1c1d]">
                       {formatSupply(token.totalSupply)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-[rgba(28,28,29,0.58)]">{t("DashboardIssuance.workspace.created")}</span>
+                    <span className="text-[rgba(28,28,29,0.58)]">
+                      {t("DashboardIssuance.workspace.created")}
+                    </span>
                     <span className="font-medium text-[#1c1c1d]">
                       {formatDate(token.createdAt)}
                     </span>
@@ -325,7 +333,9 @@ export function IssuanceWorkspace({
                     className="h-11 w-full rounded-[10px]"
                     asChild
                   >
-                    <Link href={`/dashboard/issuance/${token.id}`}>{t("DashboardIssuance.workspace.manage")}</Link>
+                    <Link href={`/dashboard/issuance/${token.id}`}>
+                      {t("DashboardIssuance.workspace.manage")}
+                    </Link>
                   </Button>
                 </div>
               </article>

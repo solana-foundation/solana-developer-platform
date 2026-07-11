@@ -44,11 +44,9 @@ export function DeleteCounterpartyDialog({
             {t("DashboardPayments.counterparty.deleteCounterparty")}
           </h2>
           <p className="text-sm text-text-medium">
-            {displayName ? (
-              t("DashboardPayments.counterparty.deleteNamedCounterparty", { name: displayName })
-            ) : (
-              t("DashboardPayments.counterparty.deleteThisCounterparty")
-            )}
+            {displayName
+              ? t("DashboardPayments.counterparty.deleteNamedCounterparty", { name: displayName })
+              : t("DashboardPayments.counterparty.deleteThisCounterparty")}
           </p>
         </div>
 

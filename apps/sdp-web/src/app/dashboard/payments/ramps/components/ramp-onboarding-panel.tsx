@@ -47,7 +47,9 @@ export function RampOnboardingPanel({
       {status === "funding_account_provisioning" ? (
         <div className="flex items-center gap-2 rounded-full bg-border-extra-light px-3 py-1.5">
           <span className="size-2 shrink-0 animate-pulse rounded-full bg-text-medium" />
-          <span className="text-xs text-text-low">{provisioningDetail(provider, direction, t)}</span>
+          <span className="text-xs text-text-low">
+            {provisioningDetail(provider, direction, t)}
+          </span>
         </div>
       ) : null}
       {status === "provisioning_failed" ? (

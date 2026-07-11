@@ -13,8 +13,8 @@ import { toast } from "sonner";
 import { updateWalletPolicy } from "@/app/dashboard/payments/payments-workspace.data";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useTranslations } from "@/i18n/provider";
 import type { MessageKey } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 type FlowStep = "intent" | "details" | "review";
@@ -348,10 +348,6 @@ function readStoredDraft(walletId: string): StoredPolicyDraft | null {
 
 function toggleValue<TValue extends string>(values: TValue[], value: TValue): TValue[] {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
-}
-
-function formatCount(count: number, singular: string, plural = `${singular}s`): string {
-  return `${count} ${count === 1 ? singular : plural}`;
 }
 
 function formatFamilyLabel(
@@ -800,7 +796,8 @@ export function WalletPolicyStartingProfileFlow({
     } catch (error) {
       toast.error(t("DashboardCustody.policyActivationFailed"), {
         id: toastId,
-        description: error instanceof Error ? error.message : t("DashboardCustody.policySaveFailed"),
+        description:
+          error instanceof Error ? error.message : t("DashboardCustody.policySaveFailed"),
         position: "bottom-right",
       });
     } finally {
@@ -863,7 +860,8 @@ export function WalletPolicyStartingProfileFlow({
     } catch (error) {
       toast.error(t("DashboardCustody.policyDisableFailed"), {
         id: toastId,
-        description: error instanceof Error ? error.message : t("DashboardCustody.policySaveFailed"),
+        description:
+          error instanceof Error ? error.message : t("DashboardCustody.policySaveFailed"),
         position: "bottom-right",
       });
     } finally {
@@ -969,7 +967,9 @@ export function WalletPolicyStartingProfileFlow({
               (currentStep.id === "review" && !canSubmitReview)
             }
           >
-            {currentStep.id === "review" ? t("DashboardCustody.policyApplyControls") : t("DashboardCustody.continue")}
+            {currentStep.id === "review"
+              ? t("DashboardCustody.policyApplyControls")
+              : t("DashboardCustody.continue")}
           </Button>
         </div>
       </footer>
@@ -986,7 +986,9 @@ function PolicyAuditPanel({ audit }: { audit: PolicyAudit | null }) {
     <section className="mb-4 rounded-lg border border-border-light bg-white p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-text-extra-high">{t("DashboardCustody.recentPolicyDecisions")}</h2>
+          <h2 className="text-sm font-semibold text-text-extra-high">
+            {t("DashboardCustody.recentPolicyDecisions")}
+          </h2>
           <p className="mt-1 text-xs text-text-extra-low">
             {t("DashboardCustody.policyEvaluationsShown", { count: evaluations.length })}
           </p>
@@ -1095,7 +1097,7 @@ function IntentStep({
             {selected ? (
               <span className="absolute right-4 bottom-4 flex size-6 items-center justify-center rounded-full bg-gray-1400 text-white">
                 <Check className="size-4" />
-                <span className="sr-only">{t("DashboardCustody.selected")}</span>
+                <span className="sr-only">{t("DashboardCustody.selectedLabel")}</span>
               </span>
             ) : null}
           </button>
@@ -1242,7 +1244,9 @@ function RuleSection({
             aria-hidden="true"
             className={cn("size-4 transition-transform duration-200", expanded && "rotate-180")}
           />
-          <span className="sr-only">{expanded ? t("DashboardCustody.collapse") : t("DashboardCustody.expand")}</span>
+          <span className="sr-only">
+            {expanded ? t("DashboardCustody.collapse") : t("DashboardCustody.expand")}
+          </span>
         </span>
       </button>
       {expanded ? <div className="pb-4 pr-2">{children}</div> : null}
@@ -1360,7 +1364,9 @@ function LimitRuleEditor({
     <div>
       <div className="grid gap-3 md:grid-cols-2">
         <label className="space-y-2" htmlFor="wallet-policy-max-transfer-amount">
-          <span className="text-sm font-medium text-text-extra-high">{t("DashboardCustody.policyPerTransferCap")}</span>
+          <span className="text-sm font-medium text-text-extra-high">
+            {t("DashboardCustody.policyPerTransferCap")}
+          </span>
           <Input
             id="wallet-policy-max-transfer-amount"
             value={maxTransferAmount}
@@ -1369,11 +1375,15 @@ function LimitRuleEditor({
             inputMode="decimal"
           />
           {!isPositiveAmount(maxTransferAmount) ? (
-            <span className="block text-sm text-status-error-text">{t("DashboardCustody.policyPositiveNumber")}</span>
+            <span className="block text-sm text-status-error-text">
+              {t("DashboardCustody.policyPositiveNumber")}
+            </span>
           ) : null}
         </label>
         <label className="space-y-2" htmlFor="wallet-policy-max-daily-amount">
-          <span className="text-sm font-medium text-text-extra-high">{t("DashboardCustody.policyDailyCap")}</span>
+          <span className="text-sm font-medium text-text-extra-high">
+            {t("DashboardCustody.policyDailyCap")}
+          </span>
           <Input
             id="wallet-policy-max-daily-amount"
             value={maxDailyAmount}
@@ -1382,7 +1392,9 @@ function LimitRuleEditor({
             inputMode="decimal"
           />
           {!isPositiveAmount(maxDailyAmount) ? (
-            <span className="block text-sm text-status-error-text">{t("DashboardCustody.policyPositiveNumber")}</span>
+            <span className="block text-sm text-status-error-text">
+              {t("DashboardCustody.policyPositiveNumber")}
+            </span>
           ) : null}
         </label>
       </div>
@@ -1455,7 +1467,9 @@ function getRuleSummary({
 }) {
   if (categoryId === "operations") {
     return blockedOperationFamilies.length > 0
-      ? t("DashboardCustody.policyBlockFamilies", { families: formatFamilyList(blockedOperationFamilies, t) })
+      ? t("DashboardCustody.policyBlockFamilies", {
+          families: formatFamilyList(blockedOperationFamilies, t),
+        })
       : t("DashboardCustody.policyChooseOperationFamilies");
   }
 
@@ -1467,21 +1481,29 @@ function getRuleSummary({
 
   if (categoryId === "limits") {
     const parts = [
-      maxTransferAmount.trim() ? t("DashboardCustody.policyPerTransferValue", { value: maxTransferAmount.trim() }) : null,
-      maxDailyAmount.trim() ? t("DashboardCustody.policyDailyValue", { value: maxDailyAmount.trim() }) : null,
+      maxTransferAmount.trim()
+        ? t("DashboardCustody.policyPerTransferValue", { value: maxTransferAmount.trim() })
+        : null,
+      maxDailyAmount.trim()
+        ? t("DashboardCustody.policyDailyValue", { value: maxDailyAmount.trim() })
+        : null,
     ].filter(Boolean);
     return parts.length > 0 ? parts.join(" / ") : t("DashboardCustody.policySetCaps");
   }
 
   if (categoryId === "approvals") {
     return approvalFamilies.length > 0
-      ? t("DashboardCustody.policyRequireApprovalFor", { families: formatFamilyList(approvalFamilies, t) })
+      ? t("DashboardCustody.policyRequireApprovalFor", {
+          families: formatFamilyList(approvalFamilies, t),
+        })
       : t("DashboardCustody.policyChooseApprovalFamilies");
   }
 
   if (categoryId === "advanced") {
     return advancedDeniedFamilies.length > 0
-      ? t("DashboardCustody.policyBlockFamilies", { families: formatFamilyList(advancedDeniedFamilies, t) })
+      ? t("DashboardCustody.policyBlockFamilies", {
+          families: formatFamilyList(advancedDeniedFamilies, t),
+        })
       : t("DashboardCustody.policyBlockAdvanced");
   }
 
@@ -1517,16 +1539,22 @@ function ReviewStep({
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-border-light bg-white p-4">
-        <p className="text-sm font-semibold text-text-extra-high">{t("DashboardCustody.policyActivationOutcome")}</p>
+        <p className="text-sm font-semibold text-text-extra-high">
+          {t("DashboardCustody.policyActivationOutcome")}
+        </p>
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
           <div>
             <dt className="text-text-extra-low">{t("DashboardCustody.policyDefault")}</dt>
-            <dd className="mt-1 font-medium text-text-extra-high">{t("DashboardCustody.policyAllowUnmatched")}</dd>
+            <dd className="mt-1 font-medium text-text-extra-high">
+              {t("DashboardCustody.policyAllowUnmatched")}
+            </dd>
           </div>
           <div>
             <dt className="text-text-extra-low">{t("DashboardCustody.policyRevision")}</dt>
             <dd className="mt-1 font-medium text-text-extra-high">
-              {controlProfile?.revisionNumber ? `#${controlProfile.revisionNumber}` : t("DashboardCustody.policyRevisionNew")}
+              {controlProfile?.revisionNumber
+                ? `#${controlProfile.revisionNumber}`
+                : t("DashboardCustody.policyRevisionNew")}
             </dd>
           </div>
           <div>
@@ -1555,7 +1583,9 @@ function ReviewStep({
             />
           ))
         ) : (
-          <div className="p-4 text-sm text-text-medium">{t("DashboardCustody.policyNoRestrictionCategory")}</div>
+          <div className="p-4 text-sm text-text-medium">
+            {t("DashboardCustody.policyNoRestrictionCategory")}
+          </div>
         )}
       </div>
     </div>
@@ -1586,7 +1616,9 @@ function ReviewCategory({
   if (category.id === "operations") {
     value =
       blockedOperationFamilies.length > 0
-        ? t("DashboardCustody.policyDenyFamilies", { families: formatFamilyList(blockedOperationFamilies, t) })
+        ? t("DashboardCustody.policyDenyFamilies", {
+            families: formatFamilyList(blockedOperationFamilies, t),
+          })
         : t("DashboardCustody.policyNoOperationsBlocked");
   }
   if (category.id === "destinations") {
@@ -1599,7 +1631,9 @@ function ReviewCategory({
   }
   if (category.id === "limits") {
     const parts = [
-      maxTransferAmount ? t("DashboardCustody.policyPerTransferValue", { value: maxTransferAmount }) : null,
+      maxTransferAmount
+        ? t("DashboardCustody.policyPerTransferValue", { value: maxTransferAmount })
+        : null,
       maxDailyAmount ? t("DashboardCustody.policyDailyValue", { value: maxDailyAmount }) : null,
     ].filter(Boolean);
     value = parts.length > 0 ? parts.join(" / ") : t("DashboardCustody.noCap");
@@ -1607,13 +1641,17 @@ function ReviewCategory({
   if (category.id === "approvals") {
     value =
       approvalFamilies.length > 0
-        ? t("DashboardCustody.policyRequireApprovalFor", { families: formatFamilyList(approvalFamilies, t) })
+        ? t("DashboardCustody.policyRequireApprovalFor", {
+            families: formatFamilyList(approvalFamilies, t),
+          })
         : t("DashboardCustody.policyNoApprovalChecks");
   }
   if (category.id === "advanced") {
     value =
       advancedDeniedFamilies.length > 0
-        ? t("DashboardCustody.policyDenyFamilies", { families: formatFamilyList(advancedDeniedFamilies, t) })
+        ? t("DashboardCustody.policyDenyFamilies", {
+            families: formatFamilyList(advancedDeniedFamilies, t),
+          })
         : t("DashboardCustody.policyNoAdvancedControls");
   }
 
@@ -1635,6 +1673,9 @@ function formatProviderMappingStatus(
     synced: "DashboardCustody.policyProviderMapped",
     partial: "DashboardCustody.policyProviderPartiallyMapped",
     failed: "DashboardCustody.policyProviderMappingFailed",
-  } satisfies Record<NonNullable<PaymentWalletPolicy["controlProfile"]>["providerMappingStatus"], MessageKey>;
+  } satisfies Record<
+    NonNullable<PaymentWalletPolicy["controlProfile"]>["providerMappingStatus"],
+    MessageKey
+  >;
   return t ? t(labels[status]) : labels[status];
 }

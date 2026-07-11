@@ -2,7 +2,6 @@
 
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
-import { useTranslations } from "@/i18n/provider";
 import {
   Table,
   TableBody,
@@ -11,6 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useTranslations } from "@/i18n/provider";
 import { formatRiskScore, riskToneClassName, toProviderLabel } from "./payments-workspace.data";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 

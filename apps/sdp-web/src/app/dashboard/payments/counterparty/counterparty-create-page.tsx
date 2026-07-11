@@ -10,28 +10,29 @@ import { useCounterpartyCreate } from "./counterparty-create-context";
 import type { StepId } from "./counterparty-create-schemas";
 import { CryptoAccountsPhase } from "./crypto-accounts-phase";
 
-const stepMeta: Record<StepId, { label: MessageKey; title: MessageKey; description: MessageKey }> = {
-  basics: {
-    label: "DashboardPayments.counterparty.basics",
-    title: "DashboardPayments.counterparty.basicInfo",
-    description: "DashboardPayments.counterparty.basicInfoDescription",
-  },
-  identity: {
-    label: "DashboardPayments.counterparty.personal",
-    title: "DashboardPayments.counterparty.personalDetails",
-    description: "DashboardPayments.counterparty.personalDetailsDescription",
-  },
-  address: {
-    label: "DashboardPayments.counterparty.address",
-    title: "DashboardPayments.counterparty.location",
-    description: "DashboardPayments.counterparty.locationDescription",
-  },
-  review: {
-    label: "DashboardPayments.counterparty.review",
-    title: "DashboardPayments.counterparty.reviewCreate",
-    description: "DashboardPayments.counterparty.reviewCreateDescription",
-  },
-};
+const stepMeta: Record<StepId, { label: MessageKey; title: MessageKey; description: MessageKey }> =
+  {
+    basics: {
+      label: "DashboardPayments.counterparty.basics",
+      title: "DashboardPayments.counterparty.basicInfo",
+      description: "DashboardPayments.counterparty.basicInfoDescription",
+    },
+    identity: {
+      label: "DashboardPayments.counterparty.personal",
+      title: "DashboardPayments.counterparty.personalDetails",
+      description: "DashboardPayments.counterparty.personalDetailsDescription",
+    },
+    address: {
+      label: "DashboardPayments.counterparty.address",
+      title: "DashboardPayments.counterparty.location",
+      description: "DashboardPayments.counterparty.locationDescription",
+    },
+    review: {
+      label: "DashboardPayments.counterparty.review",
+      title: "DashboardPayments.counterparty.reviewCreate",
+      description: "DashboardPayments.counterparty.reviewCreateDescription",
+    },
+  };
 
 const variants = {
   initial: (direction: number) => ({ x: direction * 32, opacity: 0 }),
@@ -67,9 +68,7 @@ export function CounterpartyCreatePage() {
               <h2 className="text-2xl font-medium tracking-tight text-text-extra-high">
                 {t(stepMeta[currentStepId].title)}
               </h2>
-              <p className="text-sm text-text-medium">
-                {t(stepMeta[currentStepId].description)}
-              </p>
+              <p className="text-sm text-text-medium">{t(stepMeta[currentStepId].description)}</p>
             </div>
             <StepContent stepId={currentStepId} />
           </motion.div>

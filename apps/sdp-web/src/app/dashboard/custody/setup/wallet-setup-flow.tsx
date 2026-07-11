@@ -204,7 +204,9 @@ export function WalletSetupFlow({
   if (enabledProviderEntries.length === 0) {
     return (
       <div className="mx-auto max-w-3xl rounded-lg border border-[rgba(28,28,29,0.1)] bg-white p-6">
-        <p className="text-lg font-medium text-[#1c1c1d]">{t("DashboardCustody.noWalletProvidersEnabled")}</p>
+        <p className="text-lg font-medium text-[#1c1c1d]">
+          {t("DashboardCustody.noWalletProvidersEnabled")}
+        </p>
         <p className="mt-2 text-sm leading-6 text-[rgba(28,28,29,0.62)]">
           {t("DashboardCustody.walletCreationAvailable")}
         </p>
@@ -215,7 +217,10 @@ export function WalletSetupFlow({
     );
   }
 
-  const heading = currentStep === "provider" ? t("DashboardCustody.chooseProvider") : t("DashboardCustody.walletDetails");
+  const heading =
+    currentStep === "provider"
+      ? t("DashboardCustody.chooseProvider")
+      : t("DashboardCustody.walletDetails");
   const canContinue = Boolean(selectedProviderEntry);
 
   const formContent = (
@@ -248,7 +253,9 @@ export function WalletSetupFlow({
       {!canProvisionWallet ? (
         <div className="rounded-2xl border border-border-light bg-border-extra-light px-4 py-3 text-sm leading-6 text-text-low">
           {selectedProviderEntry
-            ? t("DashboardCustody.connectedProviderDescription", { provider: selectedProviderEntry.label })
+            ? t("DashboardCustody.connectedProviderDescription", {
+                provider: selectedProviderEntry.label,
+              })
             : t("DashboardCustody.chooseEnabledProvider")}
         </div>
       ) : null}
@@ -335,7 +342,9 @@ export function WalletSetupFlow({
             disabled={!canProvisionWallet || isPending}
             onClick={handleCreateWallet}
           >
-            {isPending ? t("DashboardCustody.createWalletPending") : t("DashboardCustody.createWallet")}
+            {isPending
+              ? t("DashboardCustody.createWalletPending")
+              : t("DashboardCustody.createWallet")}
           </Button>
         </div>
       </div>

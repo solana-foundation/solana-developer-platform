@@ -117,7 +117,9 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
           <p className="text-sm text-[#9e2b38]">{liveActivityError}</p>
         ) : liveRows.length === 0 ? (
           <div className="space-y-2">
-            <p className="text-sm text-[rgba(28,28,29,0.72)]">{t("DashboardCustody.noWalletActivity")}</p>
+            <p className="text-sm text-[rgba(28,28,29,0.72)]">
+              {t("DashboardCustody.noWalletActivity")}
+            </p>
             {liveActivityNotice ? (
               <p className="text-xs text-[rgba(28,28,29,0.56)]">{liveActivityNotice}</p>
             ) : null}
@@ -136,10 +138,18 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
                       <span className="md:hidden">{t("DashboardCustody.activity")}</span>
                       <span className="hidden md:inline">{t("DashboardCustody.asset")}</span>
                     </TableHead>
-                    <TableHead className="hidden w-[8rem] md:table-cell">{t("DashboardCustody.direction")}</TableHead>
-                    <TableHead className="hidden w-[26%] md:table-cell">{t("DashboardCustody.counterparty")}</TableHead>
-                    <TableHead className="hidden w-[22%] md:table-cell">{t("DashboardCustody.signature")}</TableHead>
-                    <TableHead className="hidden w-[10rem] md:table-cell">{t("DashboardCustody.created")}</TableHead>
+                    <TableHead className="hidden w-[8rem] md:table-cell">
+                      {t("DashboardCustody.direction")}
+                    </TableHead>
+                    <TableHead className="hidden w-[26%] md:table-cell">
+                      {t("DashboardCustody.counterparty")}
+                    </TableHead>
+                    <TableHead className="hidden w-[22%] md:table-cell">
+                      {t("DashboardCustody.signature")}
+                    </TableHead>
+                    <TableHead className="hidden w-[10rem] md:table-cell">
+                      {t("DashboardCustody.created")}
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -199,7 +209,9 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
                               </TooltipContent>
                             </Tooltip>
                           ) : (
-                            <span className="text-[rgba(28,28,29,0.52)]">{t("DashboardCustody.pending")}</span>
+                            <span className="text-[rgba(28,28,29,0.52)]">
+                              {t("DashboardCustody.pending")}
+                            </span>
                           )}
                         </TableCell>
                         <TableCell className="hidden text-[rgba(28,28,29,0.72)] md:table-cell">

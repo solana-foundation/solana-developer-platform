@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import useSWR from "swr";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useTranslations } from "@/i18n/provider";
 import {
   autocompletePlaces,
   fetchPlaceDetails,
@@ -14,7 +15,6 @@ import {
 } from "@/lib/places";
 import { useDebounce } from "@/lib/use-debounce";
 import { cn } from "@/lib/utils";
-import { useTranslations } from "@/i18n/provider";
 
 const MIN_QUERY_LENGTH = 3;
 
@@ -70,7 +70,9 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
       onSelect(place.addressFields);
     } catch (err) {
       setResolveError(
-        err instanceof Error ? err.message : t("DashboardPayments.counterparty.failedToLoadPlaceDetails")
+        err instanceof Error
+          ? err.message
+          : t("DashboardPayments.counterparty.failedToLoadPlaceDetails")
       );
     } finally {
       sessionTokenRef.current = newPlacesSessionToken();

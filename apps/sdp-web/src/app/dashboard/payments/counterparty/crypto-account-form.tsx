@@ -60,10 +60,16 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
   const buttonState = ((): { label: string; icon: ReactNode } => {
     switch (phase) {
       case "submitting":
-        return { label: t("DashboardPayments.counterparty.adding"), icon: <Loader2Icon className="animate-spin" /> };
+        return {
+          label: t("DashboardPayments.counterparty.adding"),
+          icon: <Loader2Icon className="animate-spin" />,
+        };
       case "screening":
       case "revealing":
-        return { label: t("DashboardPayments.counterparty.screening"), icon: <Loader2Icon className="animate-spin" /> };
+        return {
+          label: t("DashboardPayments.counterparty.screening"),
+          icon: <Loader2Icon className="animate-spin" />,
+        };
       case "ready":
         return { label: t("DashboardPayments.counterparty.addAccount"), icon: <CheckIcon /> };
       case "idle":
@@ -111,7 +117,9 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
 
     const account = result.data?.data?.account;
     if (account) onAdded?.(account);
-    toast.success(t("DashboardPayments.counterparty.cryptoAccountAttached"), { position: "bottom-right" });
+    toast.success(t("DashboardPayments.counterparty.cryptoAccountAttached"), {
+      position: "bottom-right",
+    });
     setLabel("");
     setAddress("");
     resetScreening();
@@ -143,8 +151,10 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
     <div className="space-y-6">
       <div className="flex flex-col gap-2">
         <Label className="text-sm font-medium text-text-low" htmlFor="account-label">
-          {t("DashboardPayments.counterparty.label")} {" "}
-          <span className="font-normal text-text-extra-low">{t("DashboardPayments.counterparty.optional")}</span>
+          {t("DashboardPayments.counterparty.label")}{" "}
+          <span className="font-normal text-text-extra-low">
+            {t("DashboardPayments.counterparty.optional")}
+          </span>
         </Label>
         <Input
           id="account-label"

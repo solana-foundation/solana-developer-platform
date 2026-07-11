@@ -6,8 +6,8 @@ import { ExternalLink } from "lucide-react";
 import { motion } from "motion/react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Label } from "@/components/ui/label";
-import { useTranslations } from "@/i18n/provider";
 import { Select, SelectItem } from "@/components/ui/select";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { TokenSignerSelect } from "../../[tokenId]/token-signer-select";
 import { AdvancedCapacities } from "../advanced-capacities";
@@ -101,7 +101,9 @@ export function StepAssetDetails({
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-medium text-[#1c1c1d]">{t("DashboardIssuance.assetDetails.title")}</h2>
+          <h2 className="text-2xl font-medium text-[#1c1c1d]">
+            {t("DashboardIssuance.assetDetails.title")}
+          </h2>
           <p className="mt-1.5 text-sm text-[rgba(28,28,29,0.62)]">
             {t("DashboardIssuance.assetDetails.description")}
           </p>
@@ -194,7 +196,11 @@ export function StepAssetDetails({
           </FormCard>
 
           {sections.map((section) => (
-            <FormCard key={section.titleKey} title={t(section.titleKey)} description={section.descriptionKey ? t(section.descriptionKey) : undefined}>
+            <FormCard
+              key={section.titleKey}
+              title={t(section.titleKey)}
+              description={section.descriptionKey ? t(section.descriptionKey) : undefined}
+            >
               <div className="grid items-start gap-4 sm:grid-cols-2">
                 {section.fields.map((field) => (
                   <DetailField
@@ -262,7 +268,10 @@ export function StepAssetDetails({
       ) : null}
 
       {tab === "operational" ? (
-        <FormCard title={t("DashboardIssuance.assetDetails.operational")} description={t("DashboardIssuance.assetDetails.operationalDescription")}>
+        <FormCard
+          title={t("DashboardIssuance.assetDetails.operational")}
+          description={t("DashboardIssuance.assetDetails.operationalDescription")}
+        >
           <div>
             <TokenSignerSelect
               signerWallets={signerWallets}

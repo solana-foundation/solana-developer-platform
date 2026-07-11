@@ -2,12 +2,12 @@ import { auth } from "@clerk/nextjs/server";
 import type { OrganizationRpcProvider } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
-import { getTranslations } from "@/i18n/server";
 import { OrganizationRpcSettingsForm } from "./organization-rpc-settings-form";
 
 type OrganizationSettings = {
@@ -124,9 +124,7 @@ export default async function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>{t("DashboardCustody.organizationSettings")}</CardTitle>
-          <CardDescription>
-            {t("DashboardCustody.organizationSettingsDescription")}
-          </CardDescription>
+          <CardDescription>{t("DashboardCustody.organizationSettingsDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="w-full space-y-6">

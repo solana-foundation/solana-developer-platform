@@ -9,8 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
-import { useTranslations } from "@/i18n/provider";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useTranslations } from "@/i18n/provider";
 import { createApiKeyAction } from "./actions";
 
 type ApiKeyRole = "api_admin" | "api_developer" | "api_readonly";
@@ -36,8 +36,13 @@ function normalizeDraft(): ApiKeyDraft {
   };
 }
 
-function formatEnvironmentLabel(environment: SdpEnvironment, t: ReturnType<typeof useTranslations>): string {
-  return environment === "production" ? t("DashboardCustody.production") : t("DashboardCustody.sandbox");
+function formatEnvironmentLabel(
+  environment: SdpEnvironment,
+  t: ReturnType<typeof useTranslations>
+): string {
+  return environment === "production"
+    ? t("DashboardCustody.production")
+    : t("DashboardCustody.sandbox");
 }
 
 function formatDisplayDate(value: string, t: ReturnType<typeof useTranslations>): string {
@@ -80,7 +85,6 @@ function ReviewDetail({
   label: string;
   children: ReactNode;
 }) {
-  const t = useTranslations();
   return (
     <div className="flex min-w-0 items-center gap-3 px-4 py-3.5">
       <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.64)]">
@@ -169,7 +173,9 @@ function WalletAccessSection({
           className="mt-1"
         />
         <div className="min-w-0">
-          <p className="text-sm font-medium text-[#1c1c1d]">{t("DashboardCustody.selectedWallets")}</p>
+          <p className="text-sm font-medium text-[#1c1c1d]">
+            {t("DashboardCustody.selectedWallets")}
+          </p>
           <p className="text-xs text-[rgba(28,28,29,0.65)]">
             {t("DashboardCustody.selectedWalletsDescription")}
           </p>
@@ -221,7 +227,9 @@ function WalletAccessSection({
 
               {draft.selectedWalletIds.length > 1 ? (
                 <div className="grid gap-2">
-                  <Label htmlFor="create-key-default-wallet">{t("DashboardCustody.defaultSigningWallet")}</Label>
+                  <Label htmlFor="create-key-default-wallet">
+                    {t("DashboardCustody.defaultSigningWallet")}
+                  </Label>
                   <select
                     id="create-key-default-wallet"
                     value={draft.defaultWalletId}
@@ -393,7 +401,9 @@ function CreateApiKeyReviewStep({
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[rgba(28,28,29,0.62)]">
               <span>{formatEnvironmentLabel(environment, t)}</span>
               <span aria-hidden="true">·</span>
-              <span>{t("DashboardCustody.expiresOn", { date: formatDisplayDate(draft.expiresAt, t) })}</span>
+              <span>
+                {t("DashboardCustody.expiresOn", { date: formatDisplayDate(draft.expiresAt, t) })}
+              </span>
             </div>
           </div>
         </div>
@@ -413,9 +423,11 @@ function CreateApiKeyReviewStep({
               {draft.walletScope === "selected" ? (
                 <div className="space-y-1.5 text-xs text-[rgba(28,28,29,0.62)]">
                   <p>
-                    {t("DashboardCustody.default")} {" "}
+                    {t("DashboardCustody.default")}{" "}
                     <span className="text-[#1c1c1d]">
-                      {defaultSelectedWallet ? formatWalletLabel(defaultSelectedWallet) : t("DashboardCustody.none")}
+                      {defaultSelectedWallet
+                        ? formatWalletLabel(defaultSelectedWallet)
+                        : t("DashboardCustody.none")}
                     </span>
                   </p>
                   <div className="flex flex-wrap gap-1.5">
@@ -436,7 +448,9 @@ function CreateApiKeyReviewStep({
 
         <div className="grid divide-y divide-[rgba(28,28,29,0.08)] border-t border-[rgba(28,28,29,0.08)] sm:grid-cols-2 sm:divide-x sm:divide-y-0">
           <ReviewDetail icon={ShieldCheck} label={t("DashboardCustody.policy")}>
-            <span className="text-[rgba(28,28,29,0.74)]">{t("DashboardCustody.noApiKeyPolicy")}</span>
+            <span className="text-[rgba(28,28,29,0.74)]">
+              {t("DashboardCustody.noApiKeyPolicy")}
+            </span>
           </ReviewDetail>
 
           <ReviewDetail icon={Info} label={t("DashboardCustody.securityNote")}>
@@ -524,7 +538,9 @@ export function CreateApiKeyModal({
         size={triggerMode === "icon" ? "icon" : "default"}
         variant={triggerMode === "icon" ? "secondary" : triggerVariant}
         onClick={() => setIsOpen(true)}
-        aria-label={triggerMode === "icon" ? t("DashboardCustody.createApiKey") : resolvedTriggerLabel}
+        aria-label={
+          triggerMode === "icon" ? t("DashboardCustody.createApiKey") : resolvedTriggerLabel
+        }
       >
         {triggerMode === "icon" ? (
           <>
@@ -539,7 +555,9 @@ export function CreateApiKeyModal({
       <Modal
         isOpen={isOpen}
         onClose={close}
-        ariaLabel={step === 1 ? t("DashboardCustody.createApiKey") : t("DashboardCustody.reviewApiKey")}
+        ariaLabel={
+          step === 1 ? t("DashboardCustody.createApiKey") : t("DashboardCustody.reviewApiKey")
+        }
         closeLabel={t("DashboardCustody.closeApiKeyCreationModal")}
         contentClassName="flex max-h-[calc(100dvh-4rem)] flex-col overflow-hidden p-6"
         size="xl"

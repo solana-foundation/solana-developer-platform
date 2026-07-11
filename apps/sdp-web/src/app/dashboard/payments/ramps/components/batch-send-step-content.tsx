@@ -76,7 +76,11 @@ function pluralRecipients(count: number, t: Translate): string {
 }
 
 function rootLabelOf(wizard: BatchSendWizard, t: Translate): string {
-  return wizard.selectedWallet?.label ?? wizard.selectedWallet?.walletId ?? t("DashboardPayments.batchSend.yourWallet");
+  return (
+    wizard.selectedWallet?.label ??
+    wizard.selectedWallet?.walletId ??
+    t("DashboardPayments.batchSend.yourWallet")
+  );
 }
 
 function recipientsStatusLabel(
@@ -290,7 +294,9 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
                     <button
                       type="button"
                       onClick={() => toggleRecipient(account)}
-                      aria-label={t("DashboardPayments.batchSend.addRecipient", { name: account.name })}
+                      aria-label={t("DashboardPayments.batchSend.addRecipient", {
+                        name: account.name,
+                      })}
                       className="shrink-0 text-text-low transition-colors hover:text-text-extra-high"
                     >
                       <PlusIcon className="size-4" />
@@ -396,7 +402,9 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
             </div>
             <div className="h-px bg-border-light" />
             <div className="flex items-center justify-between">
-              <span className="font-medium text-text-extra-high">{t("DashboardPayments.batchSend.total")}</span>
+              <span className="font-medium text-text-extra-high">
+                {t("DashboardPayments.batchSend.total")}
+              </span>
               <span className="flex items-center gap-2">
                 {fees.sponsored ? (
                   <>
@@ -419,7 +427,9 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
             </div>
           </dl>
         ) : (
-          <p className="text-center text-sm text-text-low">{t("DashboardPayments.batchSend.estimating")}</p>
+          <p className="text-center text-sm text-text-low">
+            {t("DashboardPayments.batchSend.estimating")}
+          </p>
         )}
       </section>
       <div className="flex flex-col gap-0.5">

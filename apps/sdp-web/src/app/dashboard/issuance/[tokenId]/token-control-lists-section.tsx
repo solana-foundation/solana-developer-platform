@@ -74,7 +74,9 @@ export function TokenControlListsSection({
           data-testid="frozen-accounts-summary-card"
           className="rounded-xl border border-[rgba(28,28,29,0.12)] p-3"
         >
-          <p className="text-sm font-medium text-[#1c1c1d]">{t("DashboardIssuance.controlLists.frozenAccounts")}</p>
+          <p className="text-sm font-medium text-[#1c1c1d]">
+            {t("DashboardIssuance.controlLists.frozenAccounts")}
+          </p>
           {frozenAccountsError ? (
             <p className="mt-1 text-sm text-[#8a1f2a]">{frozenAccountsError}</p>
           ) : (

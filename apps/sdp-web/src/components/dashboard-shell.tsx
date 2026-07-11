@@ -79,14 +79,22 @@ function getNavSections(t: ReturnType<typeof useTranslations>): NavSection[] {
     {
       title: t("Shared.dashboardShell.manage"),
       items: [
-        { label: t("Shared.dashboardShell.issuance"), href: "/dashboard/issuance", icon: CoinsIcon },
+        {
+          label: t("Shared.dashboardShell.issuance"),
+          href: "/dashboard/issuance",
+          icon: CoinsIcon,
+        },
         {
           label: t("Shared.dashboardShell.payments"),
           href: "/dashboard/payments",
           icon: ArrowLeftRightIcon,
           children: getPaymentsActions(t),
         },
-        { label: t("Shared.dashboardShell.apiKeys"), href: "/dashboard/api-keys", icon: KeyRoundIcon },
+        {
+          label: t("Shared.dashboardShell.apiKeys"),
+          href: "/dashboard/api-keys",
+          icon: KeyRoundIcon,
+        },
       ],
     },
   ];
@@ -128,7 +136,6 @@ function HeaderBackAction({
   label: string;
   compactOnMobile?: boolean;
 }) {
-  const t = useTranslations();
   return (
     <Link
       href={href}
@@ -664,9 +671,20 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const pageConfig = getDashboardPageConfig(pathname, t);
   const navSections = getNavSections(t);
   const bottomNavItems: NavItem[] = [
-    { label: t("Shared.dashboardShell.apiDocs"), href: docsHref, icon: LibraryIcon, external: true },
+    {
+      label: t("Shared.dashboardShell.apiDocs"),
+      href: docsHref,
+      icon: LibraryIcon,
+      external: true,
+    },
     ...(dashboardAccess.capabilities.canManageOrgSettings
-      ? [{ label: t("Shared.dashboardShell.settings"), href: "/dashboard/settings", icon: Settings2Icon }]
+      ? [
+          {
+            label: t("Shared.dashboardShell.settings"),
+            href: "/dashboard/settings",
+            icon: Settings2Icon,
+          },
+        ]
       : []),
   ];
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
@@ -754,7 +772,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             {t("Shared.dashboardShell.selectOrganization")}
           </h1>
-          <p className="mt-3 text-sm text-text-low">{t("Shared.dashboardShell.selectOrganizationDescription")}</p>
+          <p className="mt-3 text-sm text-text-low">
+            {t("Shared.dashboardShell.selectOrganizationDescription")}
+          </p>
           <div className="mt-6">
             <OrganizationSwitcher hidePersonal />
           </div>
@@ -795,7 +815,11 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           <button
             type="button"
             onClick={() => setSidebarOpen(!isSidebarOpen)}
-            aria-label={isSidebarOpen ? t("Shared.dashboardShell.collapseSidebar") : t("Shared.dashboardShell.expandSidebar")}
+            aria-label={
+              isSidebarOpen
+                ? t("Shared.dashboardShell.collapseSidebar")
+                : t("Shared.dashboardShell.expandSidebar")
+            }
             className="group absolute top-1/2 right-0 z-10 flex h-24 w-5 -translate-y-1/2 translate-x-3/4 cursor-pointer items-center justify-center"
           >
             <span className="block h-8 w-0.5 rounded-full bg-border-medium group-hover:bg-text-low" />

@@ -116,7 +116,9 @@ export function CreateTokenFeaturesStep({
         </div>
 
         <div>
-          <p className="text-3xl font-medium text-[#1c1c1d]">{t("DashboardIssuance.create.transferControls")}</p>
+          <p className="text-3xl font-medium text-[#1c1c1d]">
+            {t("DashboardIssuance.create.transferControls")}
+          </p>
           <p className="mt-2 text-lg text-[rgba(28,28,29,0.64)]">
             {t("DashboardIssuance.create.transferControlsHint")}
           </p>

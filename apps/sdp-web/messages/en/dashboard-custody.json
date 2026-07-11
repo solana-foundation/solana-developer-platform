@@ -24,6 +24,7 @@
     "selectedWallets": "Selected wallets",
     "selected": "{count} selected",
     "selectedWallet": "Selected wallet",
+    "selectedLabel": "Selected",
     "noApiKeyPolicy": "No API-key policy",
     "noAdditionalApiKeyPolicy": "No additional API-key policy is attached.",
     "policyBinding": "Policy binding",
@@ -187,193 +188,191 @@
     "apiKeyCreateFailed": "Create failed: {error}",
     "missingApiKeyIdForRotation": "Missing API key id for rotation.",
     "apiKeyRotated": "API key rotated. Previous key remains valid until {deadline}.",
-    "apiKeyRotateFailed": "Rotate failed: {error}"
-    ,"providerLocalDescription": "Self-hosted Ed25519 keypair signer from CUSTODY_PRIVATE_KEY."
-    ,"providerPrivyDescription": "Hosted wallet infrastructure for API signing."
-    ,"providerFireblocksDescription": "MPC custody with vault-based wallet controls."
-    ,"providerCoinbaseCdpDescription": "Programmatic wallet provisioning through Coinbase CDP."
-    ,"providerParaDescription": "Embedded wallet custody for organization-level operations."
-    ,"providerTurnkeyDescription": "Policy-based key custody for production signing workloads."
-    ,"providerDfnsDescription": "MPC wallet orchestration with secure API-driven signing."
-    ,"providerIbmHavenDescription": "Institutional custody on IBM Digital Asset Haven."
-    ,"providerAnchorageDescription": "Institutional custody with wallet lifecycle management."
-    ,"providerUtilaDescription": "Vault-backed Solana wallet signing through Utila service accounts."
-    ,"apiKeyAdminDescription": "Admin includes custody and platform-level privileges. Developer excludes custody actions."
-    ,"apiKeyEnvironmentDescription": "Switch the workspace environment in the sidebar to create a key in the other environment."
-    ,"expiresOn": "Expires {date}"
-    ,"default": "Default:"
-    ,"fullKeyOnlyShownOnce": "The full key will only be shown once after creation."
-    ,"closeApiKeyCreationModal": "Close API key creation modal"
-    ,"policyDraftSaveFailed": "Draft could not be saved."
-    ,"policyDraftSaveFailedDescription": "You can keep configuring, but changes may be lost if you leave."
-    ,"policyDraftSaved": "Draft saved."
-    ,"policyDraftSavedDescription": "The profile is not active yet."
-    ,"policyChooseRestriction": "Choose at least one restriction category."
-    ,"policyCheckDestinations": "Check destination addresses."
-    ,"policyCheckDestinationsDescription": "Use valid Solana addresses before review."
-    ,"policyChooseOperations": "Choose operation access controls."
-    ,"policyChooseOperationsDescription": "Select at least one operation family to block."
-    ,"policyCheckLimits": "Check transfer limits."
-    ,"policyCheckLimitsDescription": "Enter a positive number for each configured limit."
-    ,"policyChooseApprovals": "Choose approval checks."
-    ,"policyChooseApprovalsDescription": "Select at least one operation family that should require approval."
-    ,"policyChooseAdvanced": "Choose advanced signing controls."
-    ,"policyChooseAdvancedDescription": "Select raw signing, program interactions, or both."
-    ,"policyActivating": "Activating wallet controls."
-    ,"policyActive": "Wallet controls active."
-    ,"policyActiveDescription": "The selected restrictions are now active."
-    ,"policyActivationFailed": "Activation failed."
-    ,"policySaveFailed": "Wallet controls could not be saved."
-    ,"policyDisabling": "Disabling wallet controls."
-    ,"policyDisabled": "Wallet controls disabled."
-    ,"policyDisabledDescription": "The wallet is back to default allow."
-    ,"policyDisableFailed": "Disable failed."
-    ,"wallets": "Wallets"
-    ,"playgroundListWallets": "List Wallets"
-    ,"playgroundListWalletConfigs": "List Wallet Configs"
-    ,"playgroundGetWallet": "Get Wallet"
-    ,"playgroundGetWalletPublicKey": "Get Wallet Public Key"
-    ,"playgroundAggregateBalances": "Aggregate Wallet Balances"
-    ,"playgroundCreateWallet": "Create Wallet"
-    ,"playgroundSignerCheck": "Signer Check"
-    ,"rootWallet": "Root wallet"
-    ,"mintAuthority": "Mint authority"
-    ,"freezeAuthority": "Freeze authority"
-    ,"feePayer": "Fee payer"
-    ,"transfers": "Transfers"
-    ,"mainWallet": "Main wallet"
-    ,"mainSettlementWallet": "Main settlement wallet"
-    ,"selectWalletPurpose": "Select wallet purpose"
-    ,"ownershipProof": "Ownership proof from the wallet playground"
-    ,"untitledWallet": "Untitled wallet"
-    ,"publicKey": "Public key"
-    ,"provider": "Provider"
-    ,"totalBalance": "Total balance"
-    ,"balances": "Balances"
-    ,"noTrackedBalances": "No tracked balances found yet for this wallet."
-    ,"walletControls": "Wallet controls"
-    ,"walletRestrictionsActive": "This wallet has outbound payment restrictions active."
-    ,"walletDefaultAllow": "This wallet starts from default allow. Add restrictions only where control is needed."
-    ,"destinations": "Destinations"
-    ,"open": "Open"
-    ,"perTransfer": "Per transfer"
-    ,"daily": "Daily"
-    ,"noCap": "No cap"
-    ,"reviewControls": "Review controls"
-    ,"startProfile": "Start profile"
-    ,"policyIntent": "Intent"
-    ,"policySetWalletPolicies": "Set wallet policies"
-    ,"policyIntentDescription": "Choose where funds can go and how much this wallet can transfer."
-    ,"policyRules": "Rules"
-    ,"policyStartingRules": "Starting rules"
-    ,"policyRulesDescription": "Configure the selected rule areas before review."
-    ,"policyReview": "Review"
-    ,"policyFinalReview": "Final review"
-    ,"policyReviewDescription": "Review the changes before applying wallet controls."
-    ,"policyOperationAccess": "Operation access"
-    ,"policyOperationAccessDescription": "Block high-risk operation families while keeping normal usage available."
-    ,"policyAllowedDestinations": "Allowed destinations"
-    ,"policyAllowedDestinationsDescription": "Use when this wallet should only pay known addresses."
-    ,"policyTransferLimits": "Transfer limits"
-    ,"policyTransferLimitsDescription": "Use when this wallet needs spend caps or daily outflow limits."
-    ,"policyApprovalChecks": "Approval checks"
-    ,"policyApprovalChecksDescription": "Pause selected operation families for approval before execution."
-    ,"policyAdvancedSigning": "Advanced signing"
-    ,"policyAdvancedSigningDescription": "Restrict raw signing and direct program interaction paths."
-    ,"policyPayments": "Payments"
-    ,"policyRamps": "Ramps"
-    ,"policyIssuance": "Issuance"
-    ,"policyProviderAdmin": "Provider admin"
-    ,"policyRawSigning": "Raw signing"
-    ,"policyProgramInteractions": "Program interactions"
-    ,"policyAllowed": "Allowed"
-    ,"policyDenied": "Denied"
-    ,"policyApprovalRequired": "Approval required"
-    ,"policyProviderApprovalRequired": "Provider approval required"
-    ,"policyNotEvaluated": "Not evaluated"
-    ,"policyFailed": "Failed"
-    ,"recentPolicyDecisions": "Recent policy decisions"
-    ,"policyEvaluationsShown": "{count} evaluations shown for this wallet"
-    ,"needsApproval": "Needs approval"
-    ,"stepOf": "Step {current} of {total}"
-    ,"selected": "Selected"
-    ,"collapse": "Collapse"
-    ,"expand": "Expand"
-    ,"policyActivationOutcome": "Activation outcome"
-    ,"policyDefault": "Default"
-    ,"policyAllowUnmatched": "Allow unmatched operations"
-    ,"policyRevision": "Revision"
-    ,"policyProviderMapping": "Provider mapping"
-    ,"policySdpEnforced": "SDP enforced"
-    ,"policyNoRestrictionCategory": "No restriction category selected."
-    ,"policyNoOperationsBlocked": "No operation families blocked"
-    ,"policyNoAddresses": "No addresses"
-    ,"policyNoApprovalChecks": "No approval checks"
-    ,"policyNoAdvancedControls": "No advanced signing controls"
-    ,"savedDraft": "Saved draft"
-    ,"policyApplyControls": "Apply controls"
-    ,"policyChooseOperationFamilies": "Choose operation families to block."
-    ,"policyPasteAddresses": "Paste approved Solana addresses or a CSV address column."
-    ,"policySetCaps": "Set a per-transfer cap, daily cap, or both."
-    ,"policyChooseApprovalFamilies": "Choose operation families that should pause for approval."
-    ,"policyBlockAdvanced": "Block raw signing, program interactions, or both."
-    ,"new": "New"
-    ,"policyProviderMappingPending": "Provider mapping pending"
-    ,"policyProviderMapped": "Provider mapped"
-    ,"policyProviderPartiallyMapped": "Partially provider mapped"
-    ,"policyProviderMappingFailed": "Provider mapping failed"
-    ,"policyBlockFamilies": "Block {families}"
-    ,"policyRequireApprovalFor": "Require approval for {families}"
-    ,"policyDenyFamilies": "Deny {families}"
-    ,"policyDestinationCount": "{count} addresses"
-    ,"policyInvalidCount": "{count} invalid"
-    ,"policyAllowedCount": "{count} allowed"
-    ,"policyPerTransferValue": "Per transfer {value}"
-    ,"policyDailyValue": "Daily {value}"
-    ,"sandboxProjectUnavailable": "Sandbox project unavailable. Reload the dashboard and try again."
-    ,"sendingSignerCheck": "Sending signer check."
-    ,"signerCheckFailed": "Signer check failed."
-    ,"signerCheckSent": "Signer check sent."
-    ,"memoTransactionSubmitted": "Memo transaction submitted."
-    ,"viewOnSolanaExplorer": "View on Solana Explorer"
-    ,"requestingDevnetSol": "Requesting devnet SOL."
-    ,"devnetFaucetFailed": "Devnet faucet failed."
-    ,"devnetSolRequested": "{amount} devnet SOL requested."
-    ,"faucetTransactionSubmitted": "Faucet transaction submitted."
-    ,"walletActionsFor": "Wallet actions for {wallet}"
-    ,"proving": "Proving..."
-    ,"proveOwnershipUnsupported": "Prove ownership (not supported)"
-    ,"proveOwnership": "Prove ownership"
-    ,"proveOwnershipAdminOnly": "Prove ownership (admin only)"
-    ,"requesting": "Requesting..."
-    ,"requestDevnetSol": "Request devnet SOL"
-    ,"policyRuleAllowedDestinations": "Allowed destinations"
-    ,"policyRulePerTransferLimit": "Per transfer limit"
-    ,"policyRuleApprovalChecks": "Approval checks"
-    ,"policyRevisionNew": "New"
-    ,"policyPerTransferCap": "Per transfer cap"
-    ,"policyDailyCap": "Daily cap"
-    ,"policyPositiveNumber": "Enter a positive number."
-    ,"policyAddressPlaceholder": "address&#10;9xQeWvG816bUx9EPfuxEzHh9VY5k..."
-    ,"policyDisable": "Disable"
-    ,"policyApprovalRequest": " / Approval {id}"
-    ,"playgroundProviderField": "Provider"
-    ,"playgroundLabelField": "Label"
-    ,"playgroundPurposeField": "Purpose"
-    ,"playgroundMemoField": "Memo"
-    ,"policyOperationEditorDescription": "Selected families are denied before signing or execution. Unselected families continue to use default allow unless another rule applies."
-    ,"policyDestinationEditorDescription": "Paste Solana addresses separated by line breaks, commas, semicolons, tabs, or a CSV column."
-    ,"policyInvalidAddress": "Invalid address: {addresses}"
-    ,"policyInvalidAddresses": "Invalid addresses: {addresses}"
-    ,"policyApprovalEditorDescription": "Selected families pause with an approval-required policy decision. Approval inbox routing is handled by the follow-up approval workflow."
-    ,"policyAdvancedEditorDescription": "These controls are intentionally strict because they can bypass high-level payment intent."
-    ,"providerCategoryApi": "API"
-    ,"providerCategoryApiDescription": "Wallet infrastructure for API-driven product, operations, and automated flows."
-    ,"providerCategoryInstitutional": "Institutional"
-    ,"providerCategoryInstitutionalDescription": "Policy-based custody for treasury, settlement, and multi-party approval flows."
-    ,"existingApiKeysDescription": "Active and historical keys for this workspace."
-    ,"newApiKey": "New API key"
-    ,"apiKeysViewOnly": "You can view API keys, but only admins can create, rotate, or delete them."
-    ,"apiKeyRotationHint": "Rotation hint: rotate active keys only. The dashboard uses a 24-hour grace period; use the API for custom grace values (0-168h). New key secrets are shown once."
+    "apiKeyRotateFailed": "Rotate failed: {error}",
+    "providerLocalDescription": "Self-hosted Ed25519 keypair signer from CUSTODY_PRIVATE_KEY.",
+    "providerPrivyDescription": "Hosted wallet infrastructure for API signing.",
+    "providerFireblocksDescription": "MPC custody with vault-based wallet controls.",
+    "providerCoinbaseCdpDescription": "Programmatic wallet provisioning through Coinbase CDP.",
+    "providerParaDescription": "Embedded wallet custody for organization-level operations.",
+    "providerTurnkeyDescription": "Policy-based key custody for production signing workloads.",
+    "providerDfnsDescription": "MPC wallet orchestration with secure API-driven signing.",
+    "providerIbmHavenDescription": "Institutional custody on IBM Digital Asset Haven.",
+    "providerAnchorageDescription": "Institutional custody with wallet lifecycle management.",
+    "providerUtilaDescription": "Vault-backed Solana wallet signing through Utila service accounts.",
+    "apiKeyAdminDescription": "Admin includes custody and platform-level privileges. Developer excludes custody actions.",
+    "apiKeyEnvironmentDescription": "Switch the workspace environment in the sidebar to create a key in the other environment.",
+    "expiresOn": "Expires {date}",
+    "default": "Default:",
+    "fullKeyOnlyShownOnce": "The full key will only be shown once after creation.",
+    "closeApiKeyCreationModal": "Close API key creation modal",
+    "policyDraftSaveFailed": "Draft could not be saved.",
+    "policyDraftSaveFailedDescription": "You can keep configuring, but changes may be lost if you leave.",
+    "policyDraftSaved": "Draft saved.",
+    "policyDraftSavedDescription": "The profile is not active yet.",
+    "policyChooseRestriction": "Choose at least one restriction category.",
+    "policyCheckDestinations": "Check destination addresses.",
+    "policyCheckDestinationsDescription": "Use valid Solana addresses before review.",
+    "policyChooseOperations": "Choose operation access controls.",
+    "policyChooseOperationsDescription": "Select at least one operation family to block.",
+    "policyCheckLimits": "Check transfer limits.",
+    "policyCheckLimitsDescription": "Enter a positive number for each configured limit.",
+    "policyChooseApprovals": "Choose approval checks.",
+    "policyChooseApprovalsDescription": "Select at least one operation family that should require approval.",
+    "policyChooseAdvanced": "Choose advanced signing controls.",
+    "policyChooseAdvancedDescription": "Select raw signing, program interactions, or both.",
+    "policyActivating": "Activating wallet controls.",
+    "policyActive": "Wallet controls active.",
+    "policyActiveDescription": "The selected restrictions are now active.",
+    "policyActivationFailed": "Activation failed.",
+    "policySaveFailed": "Wallet controls could not be saved.",
+    "policyDisabling": "Disabling wallet controls.",
+    "policyDisabled": "Wallet controls disabled.",
+    "policyDisabledDescription": "The wallet is back to default allow.",
+    "policyDisableFailed": "Disable failed.",
+    "wallets": "Wallets",
+    "playgroundListWallets": "List Wallets",
+    "playgroundListWalletConfigs": "List Wallet Configs",
+    "playgroundGetWallet": "Get Wallet",
+    "playgroundGetWalletPublicKey": "Get Wallet Public Key",
+    "playgroundAggregateBalances": "Aggregate Wallet Balances",
+    "playgroundCreateWallet": "Create Wallet",
+    "playgroundSignerCheck": "Signer Check",
+    "rootWallet": "Root wallet",
+    "mintAuthority": "Mint authority",
+    "freezeAuthority": "Freeze authority",
+    "feePayer": "Fee payer",
+    "transfers": "Transfers",
+    "mainWallet": "Main wallet",
+    "mainSettlementWallet": "Main settlement wallet",
+    "selectWalletPurpose": "Select wallet purpose",
+    "ownershipProof": "Ownership proof from the wallet playground",
+    "untitledWallet": "Untitled wallet",
+    "publicKey": "Public key",
+    "provider": "Provider",
+    "totalBalance": "Total balance",
+    "balances": "Balances",
+    "noTrackedBalances": "No tracked balances found yet for this wallet.",
+    "walletControls": "Wallet controls",
+    "walletRestrictionsActive": "This wallet has outbound payment restrictions active.",
+    "walletDefaultAllow": "This wallet starts from default allow. Add restrictions only where control is needed.",
+    "destinations": "Destinations",
+    "open": "Open",
+    "perTransfer": "Per transfer",
+    "daily": "Daily",
+    "noCap": "No cap",
+    "reviewControls": "Review controls",
+    "startProfile": "Start profile",
+    "policyIntent": "Intent",
+    "policySetWalletPolicies": "Set wallet policies",
+    "policyIntentDescription": "Choose where funds can go and how much this wallet can transfer.",
+    "policyRules": "Rules",
+    "policyStartingRules": "Starting rules",
+    "policyRulesDescription": "Configure the selected rule areas before review.",
+    "policyReview": "Review",
+    "policyFinalReview": "Final review",
+    "policyReviewDescription": "Review the changes before applying wallet controls.",
+    "policyOperationAccess": "Operation access",
+    "policyOperationAccessDescription": "Block high-risk operation families while keeping normal usage available.",
+    "policyAllowedDestinations": "Allowed destinations",
+    "policyAllowedDestinationsDescription": "Use when this wallet should only pay known addresses.",
+    "policyTransferLimits": "Transfer limits",
+    "policyTransferLimitsDescription": "Use when this wallet needs spend caps or daily outflow limits.",
+    "policyApprovalChecks": "Approval checks",
+    "policyApprovalChecksDescription": "Pause selected operation families for approval before execution.",
+    "policyAdvancedSigning": "Advanced signing",
+    "policyAdvancedSigningDescription": "Restrict raw signing and direct program interaction paths.",
+    "policyPayments": "Payments",
+    "policyRamps": "Ramps",
+    "policyIssuance": "Issuance",
+    "policyProviderAdmin": "Provider admin",
+    "policyRawSigning": "Raw signing",
+    "policyProgramInteractions": "Program interactions",
+    "policyAllowed": "Allowed",
+    "policyDenied": "Denied",
+    "policyApprovalRequired": "Approval required",
+    "policyProviderApprovalRequired": "Provider approval required",
+    "policyNotEvaluated": "Not evaluated",
+    "policyFailed": "Failed",
+    "recentPolicyDecisions": "Recent policy decisions",
+    "policyEvaluationsShown": "{count} evaluations shown for this wallet",
+    "needsApproval": "Needs approval",
+    "stepOf": "Step {current} of {total}",
+    "collapse": "Collapse",
+    "expand": "Expand",
+    "policyActivationOutcome": "Activation outcome",
+    "policyDefault": "Default",
+    "policyAllowUnmatched": "Allow unmatched operations",
+    "policyRevision": "Revision",
+    "policyProviderMapping": "Provider mapping",
+    "policySdpEnforced": "SDP enforced",
+    "policyNoRestrictionCategory": "No restriction category selected.",
+    "policyNoOperationsBlocked": "No operation families blocked",
+    "policyNoAddresses": "No addresses",
+    "policyNoApprovalChecks": "No approval checks",
+    "policyNoAdvancedControls": "No advanced signing controls",
+    "savedDraft": "Saved draft",
+    "policyApplyControls": "Apply controls",
+    "policyChooseOperationFamilies": "Choose operation families to block.",
+    "policyPasteAddresses": "Paste approved Solana addresses or a CSV address column.",
+    "policySetCaps": "Set a per-transfer cap, daily cap, or both.",
+    "policyChooseApprovalFamilies": "Choose operation families that should pause for approval.",
+    "policyBlockAdvanced": "Block raw signing, program interactions, or both.",
+    "new": "New",
+    "policyProviderMappingPending": "Provider mapping pending",
+    "policyProviderMapped": "Provider mapped",
+    "policyProviderPartiallyMapped": "Partially provider mapped",
+    "policyProviderMappingFailed": "Provider mapping failed",
+    "policyBlockFamilies": "Block {families}",
+    "policyRequireApprovalFor": "Require approval for {families}",
+    "policyDenyFamilies": "Deny {families}",
+    "policyDestinationCount": "{count} addresses",
+    "policyInvalidCount": "{count} invalid",
+    "policyAllowedCount": "{count} allowed",
+    "policyPerTransferValue": "Per transfer {value}",
+    "policyDailyValue": "Daily {value}",
+    "sandboxProjectUnavailable": "Sandbox project unavailable. Reload the dashboard and try again.",
+    "sendingSignerCheck": "Sending signer check.",
+    "signerCheckFailed": "Signer check failed.",
+    "signerCheckSent": "Signer check sent.",
+    "memoTransactionSubmitted": "Memo transaction submitted.",
+    "viewOnSolanaExplorer": "View on Solana Explorer",
+    "requestingDevnetSol": "Requesting devnet SOL.",
+    "devnetFaucetFailed": "Devnet faucet failed.",
+    "devnetSolRequested": "{amount} devnet SOL requested.",
+    "faucetTransactionSubmitted": "Faucet transaction submitted.",
+    "walletActionsFor": "Wallet actions for {wallet}",
+    "proving": "Proving...",
+    "proveOwnershipUnsupported": "Prove ownership (not supported)",
+    "proveOwnership": "Prove ownership",
+    "proveOwnershipAdminOnly": "Prove ownership (admin only)",
+    "requesting": "Requesting...",
+    "requestDevnetSol": "Request devnet SOL",
+    "policyRuleAllowedDestinations": "Allowed destinations",
+    "policyRulePerTransferLimit": "Per transfer limit",
+    "policyRuleApprovalChecks": "Approval checks",
+    "policyRevisionNew": "New",
+    "policyPerTransferCap": "Per transfer cap",
+    "policyDailyCap": "Daily cap",
+    "policyPositiveNumber": "Enter a positive number.",
+    "policyAddressPlaceholder": "address&#10;9xQeWvG816bUx9EPfuxEzHh9VY5k...",
+    "policyDisable": "Disable",
+    "policyApprovalRequest": " / Approval {id}",
+    "playgroundProviderField": "Provider",
+    "playgroundLabelField": "Label",
+    "playgroundPurposeField": "Purpose",
+    "playgroundMemoField": "Memo",
+    "policyOperationEditorDescription": "Selected families are denied before signing or execution. Unselected families continue to use default allow unless another rule applies.",
+    "policyDestinationEditorDescription": "Paste Solana addresses separated by line breaks, commas, semicolons, tabs, or a CSV column.",
+    "policyInvalidAddress": "Invalid address: {addresses}",
+    "policyInvalidAddresses": "Invalid addresses: {addresses}",
+    "policyApprovalEditorDescription": "Selected families pause with an approval-required policy decision. Approval inbox routing is handled by the follow-up approval workflow.",
+    "policyAdvancedEditorDescription": "These controls are intentionally strict because they can bypass high-level payment intent.",
+    "providerCategoryApi": "API",
+    "providerCategoryApiDescription": "Wallet infrastructure for API-driven product, operations, and automated flows.",
+    "providerCategoryInstitutional": "Institutional",
+    "providerCategoryInstitutionalDescription": "Policy-based custody for treasury, settlement, and multi-party approval flows.",
+    "existingApiKeysDescription": "Active and historical keys for this workspace.",
+    "apiKeysViewOnly": "You can view API keys, but only admins can create, rotate, or delete them.",
+    "apiKeyRotationHint": "Rotation hint: rotate active keys only. The dashboard uses a 24-hour grace period; use the API for custom grace values (0-168h). New key secrets are shown once."
   }
 }

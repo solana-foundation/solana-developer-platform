@@ -66,7 +66,9 @@ function GeneratedApiKeyModal({
       contentClassName="p-6 text-left"
       size="md"
     >
-      <p className="pr-12 text-sm font-semibold text-[#1c1c1d]">{t("DashboardCustody.apiKeyGenerated")}</p>
+      <p className="pr-12 text-sm font-semibold text-[#1c1c1d]">
+        {t("DashboardCustody.apiKeyGenerated")}
+      </p>
       <p className="mt-2 text-sm text-[rgba(28,28,29,0.72)]">{message}</p>
 
       {keyPrefix ? (

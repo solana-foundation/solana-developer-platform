@@ -11,8 +11,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDisplayLabel } from "@/lib/utils";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { formatDisplayLabel } from "@/lib/utils";
 import { formatDate } from "./token-management-workspace.utils";
 
 interface TokenTransactionsSectionProps {

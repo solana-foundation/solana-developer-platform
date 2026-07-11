@@ -36,7 +36,14 @@ type AssetManagementTab =
   | "operations"
   | "permissions";
 
-const managementTabIds: AssetManagementTab[] = ["overview", "details", "public-info", "compliance", "operations", "permissions"];
+const managementTabIds: AssetManagementTab[] = [
+  "overview",
+  "details",
+  "public-info",
+  "compliance",
+  "operations",
+  "permissions",
+];
 
 // Deep links minted for the legacy workspace keep working.
 const LEGACY_TAB_MAP: Record<string, AssetManagementTab> = {
@@ -207,7 +214,9 @@ export function AssetManagementWorkspace({
 
       {tokenError ? (
         <div className="rounded-xl border border-[rgba(220,38,38,0.2)] bg-[rgba(220,38,38,0.08)] px-4 py-3">
-          <p className="text-sm font-medium text-[#dc2626]">{t("DashboardIssuance.workspace.tokenLoadWarning")}</p>
+          <p className="text-sm font-medium text-[#dc2626]">
+            {t("DashboardIssuance.workspace.tokenLoadWarning")}
+          </p>
           <p className="mt-1 text-sm text-[#dc2626]">{tokenError}</p>
         </div>
       ) : null}
@@ -215,7 +224,9 @@ export function AssetManagementWorkspace({
       {token.status === "paused" ? (
         <div className="flex flex-col gap-3 rounded-xl border border-[rgba(234,179,8,0.2)] bg-[rgba(234,179,8,0.08)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-[#92400e]">{t("DashboardIssuance.workspace.tokenPaused")}</p>
+            <p className="text-sm font-medium text-[#92400e]">
+              {t("DashboardIssuance.workspace.tokenPaused")}
+            </p>
             <p className="mt-1 text-sm text-[#92400e]">
               {t("DashboardIssuance.workspace.pausedHint")}
             </p>

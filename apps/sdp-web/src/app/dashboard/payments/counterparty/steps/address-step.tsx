@@ -65,8 +65,10 @@ export function AddressStep() {
 
       <div className="space-y-2">
         <Label htmlFor="line2">
-          {t("DashboardPayments.counterparty.line2")} {" "}
-          <span className="font-normal text-text-extra-low">{t("DashboardPayments.counterparty.optional")}</span>
+          {t("DashboardPayments.counterparty.line2")}{" "}
+          <span className="font-normal text-text-extra-low">
+            {t("DashboardPayments.counterparty.optional")}
+          </span>
         </Label>
         <Input
           size="xl"
@@ -94,8 +96,10 @@ export function AddressStep() {
         </div>
         <div className="space-y-2">
           <Label htmlFor="postalCode">
-            {t("DashboardPayments.counterparty.postalCode")} {" "}
-            <span className="font-normal text-text-extra-low">{t("DashboardPayments.counterparty.optional")}</span>
+            {t("DashboardPayments.counterparty.postalCode")}{" "}
+            <span className="font-normal text-text-extra-low">
+              {t("DashboardPayments.counterparty.optional")}
+            </span>
           </Label>
           <Input
             size="xl"
@@ -144,8 +148,10 @@ export function AddressStep() {
           ) : (
             <>
               <Label htmlFor="subdivisionCode">
-                {t("DashboardPayments.counterparty.stateProvince")} {" "}
-                <span className="font-normal text-text-extra-low">{t("DashboardPayments.counterparty.optional")}</span>
+                {t("DashboardPayments.counterparty.stateProvince")}{" "}
+                <span className="font-normal text-text-extra-low">
+                  {t("DashboardPayments.counterparty.optional")}
+                </span>
               </Label>
               <Input
                 size="xl"

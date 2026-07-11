@@ -26,9 +26,9 @@ import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-fo
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
+import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
-import { getTranslations } from "@/i18n/server";
 import { formatDisplayLabel } from "@/lib/utils";
 import {
   formatCurrencyAmount,
@@ -272,12 +272,24 @@ export default async function WalletDetailPage({
                 monospace
                 trailing={<WalletAddressCopyButton address={wallet.publicKey} />}
               />
-              <WalletInfoRow label={t("DashboardCustody.walletId")} value={wallet.walletId} monospace />
-              <WalletInfoRow label={t("DashboardCustody.status")} value={formatDisplayLabel(wallet.status)} />
+              <WalletInfoRow
+                label={t("DashboardCustody.walletId")}
+                value={wallet.walletId}
+                monospace
+              />
+              <WalletInfoRow
+                label={t("DashboardCustody.status")}
+                value={formatDisplayLabel(wallet.status)}
+              />
               {provider ? (
-                <WalletInfoRow label={t("DashboardCustody.provider")} value={formatCustodyProviderName(provider)} />
+                <WalletInfoRow
+                  label={t("DashboardCustody.provider")}
+                  value={formatCustodyProviderName(provider)}
+                />
               ) : null}
-              {purposeLabel ? <WalletInfoRow label={t("DashboardCustody.purpose")} value={purposeLabel} /> : null}
+              {purposeLabel ? (
+                <WalletInfoRow label={t("DashboardCustody.purpose")} value={purposeLabel} />
+              ) : null}
             </div>
           </div>
         </section>
@@ -294,12 +306,20 @@ export default async function WalletDetailPage({
             </div>
 
             <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)]">
-              <WalletInfoRow label={t("DashboardCustody.address")} value={truncateMiddle(wallet.publicKey)} monospace />
+              <WalletInfoRow
+                label={t("DashboardCustody.address")}
+                value={truncateMiddle(wallet.publicKey)}
+                monospace
+              />
               <WalletInfoRow
                 label={t("DashboardCustody.provider")}
-                value={provider ? formatCustodyProviderName(provider) : t("DashboardCustody.unknown")}
+                value={
+                  provider ? formatCustodyProviderName(provider) : t("DashboardCustody.unknown")
+                }
               />
-              {purposeLabel ? <WalletInfoRow label={t("DashboardCustody.purpose")} value={purposeLabel} /> : null}
+              {purposeLabel ? (
+                <WalletInfoRow label={t("DashboardCustody.purpose")} value={purposeLabel} />
+              ) : null}
             </div>
           </div>
         </section>
@@ -376,7 +396,9 @@ async function WalletControlsPanel({
       <div className="flex flex-col gap-5 p-6 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-2xl font-medium text-[#1c1c1d]">{t("DashboardCustody.walletControls")}</h3>
+            <h3 className="text-2xl font-medium text-[#1c1c1d]">
+              {t("DashboardCustody.walletControls")}
+            </h3>
           </div>
           <p className="max-w-2xl text-sm leading-6 text-[rgba(28,28,29,0.62)]">
             {hasRestrictions
@@ -395,7 +417,10 @@ async function WalletControlsPanel({
                 label={t("DashboardCustody.perTransfer")}
                 value={policy?.maxTransferAmount ?? t("DashboardCustody.noCap")}
               />
-              <WalletControlMetric label={t("DashboardCustody.daily")} value={policy?.maxDailyAmount ?? t("DashboardCustody.noCap")} />
+              <WalletControlMetric
+                label={t("DashboardCustody.daily")}
+                value={policy?.maxDailyAmount ?? t("DashboardCustody.noCap")}
+              />
             </div>
           )}
         </div>
@@ -406,7 +431,9 @@ async function WalletControlsPanel({
         >
           <Link href={policyHref}>
             <SlidersHorizontal className="size-4" />
-            {hasRestrictions ? t("DashboardCustody.reviewControls") : t("DashboardCustody.startProfile")}
+            {hasRestrictions
+              ? t("DashboardCustody.reviewControls")
+              : t("DashboardCustody.startProfile")}
           </Link>
         </Button>
       </div>

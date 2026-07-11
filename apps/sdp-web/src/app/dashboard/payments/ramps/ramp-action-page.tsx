@@ -4,13 +4,13 @@ import type { ComplianceProviderId, Counterparty, PaymentsDashboardWallet } from
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR, { preload } from "swr";
-import { useTranslations } from "@/i18n/provider";
 import {
   type CounterpartiesResult,
   fetchAllCounterparties,
   fetchCounterpartyAccounts,
   fetchWallets,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider, type RampProviderAccess } from "@/lib/provider-availability";
 import { BatchSendRail } from "./batch-send-rail";
 import { CounterpartyPicker } from "./components/counterparty-picker";

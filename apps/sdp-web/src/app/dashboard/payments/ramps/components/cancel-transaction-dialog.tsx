@@ -17,7 +17,12 @@ export function CancelTransactionDialog({
 }: CancelTransactionDialogProps) {
   const t = useTranslations();
   return (
-    <Modal isOpen={open} onClose={onKeepGoing} ariaLabel={t("DashboardPayments.cancelTransaction.ariaLabel")} size="sm">
+    <Modal
+      isOpen={open}
+      onClose={onKeepGoing}
+      ariaLabel={t("DashboardPayments.cancelTransaction.ariaLabel")}
+      size="sm"
+    >
       <div className="space-y-6 p-6">
         <div className="space-y-2">
           <p className="text-xl font-medium tracking-tight text-text-extra-high">

@@ -117,7 +117,9 @@ export function DeleteApiKeyModal({
         contentClassName="rounded-xl p-5 text-left"
         size="sm"
       >
-        <p className="pr-10 text-sm font-medium text-[#1c1c1d]">{t("DashboardCustody.deleteApiKey")}</p>
+        <p className="pr-10 text-sm font-medium text-[#1c1c1d]">
+          {t("DashboardCustody.deleteApiKey")}
+        </p>
         <p className="mt-2 text-sm text-[rgba(28,28,29,0.72)]">
           {t("DashboardCustody.deleteApiKeyDescription")}
         </p>

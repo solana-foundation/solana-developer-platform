@@ -42,10 +42,22 @@ export function AssetProfileHeader({
 }) {
   const t = useTranslations();
   const statusBadges: Record<Token["status"], { label: string; className: string }> = {
-    pending: { label: t("DashboardIssuance.status.draft"), className: "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]" },
-    active: { label: t("DashboardIssuance.status.active"), className: "bg-[rgba(0,160,102,0.08)] text-[#00a066]" },
-    paused: { label: t("DashboardIssuance.status.paused"), className: "bg-[rgba(234,179,8,0.08)] text-[#92400e]" },
-    revoked: { label: t("DashboardIssuance.status.revoked"), className: "bg-[rgba(220,38,38,0.08)] text-[#dc2626]" },
+    pending: {
+      label: t("DashboardIssuance.status.draft"),
+      className: "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]",
+    },
+    active: {
+      label: t("DashboardIssuance.status.active"),
+      className: "bg-[rgba(0,160,102,0.08)] text-[#00a066]",
+    },
+    paused: {
+      label: t("DashboardIssuance.status.paused"),
+      className: "bg-[rgba(234,179,8,0.08)] text-[#92400e]",
+    },
+    revoked: {
+      label: t("DashboardIssuance.status.revoked"),
+      className: "bg-[rgba(220,38,38,0.08)] text-[#dc2626]",
+    },
   };
   const category = getCategoryPresentation(assetProfile.assetCategory);
   const subType = getSubTypePresentation(assetProfile.assetCategory, assetProfile.assetType);
@@ -86,8 +98,12 @@ export function AssetProfileHeader({
           </div>
 
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            {category ? <ClassificationChip icon={category.icon} label={t(category.labelKey)} /> : null}
-            {subType ? <ClassificationChip icon={subType.icon} label={t(subType.labelKey)} /> : null}
+            {category ? (
+              <ClassificationChip icon={category.icon} label={t(category.labelKey)} />
+            ) : null}
+            {subType ? (
+              <ClassificationChip icon={subType.icon} label={t(subType.labelKey)} />
+            ) : null}
           </div>
 
           <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-[rgba(28,28,29,0.55)]">
