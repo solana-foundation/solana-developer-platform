@@ -1,14 +1,16 @@
 import {
   type CustodyWalletAggregate,
   type CustodyWalletTokenBalance,
-  type RampDirection,
   SOL_MINT,
   type PaymentTransferSummary as TransferRecord,
   type PaymentsDashboardWallet as WalletRecord,
   WELL_KNOWN_TOKEN_BY_MINT,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { toTitleCase } from "../activity-format-utils";
+
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 function parseIntegerAmount(value: string): bigint | null {
   if (!/^\d+$/.test(value)) {
@@ -68,11 +70,7 @@ export function shortenAddress(address: string): string {
 }
 
 const TOKEN_AMOUNT_PATTERN = /^-?\d+(?:\.\d+)?$/;
-const TOKEN_AMOUNT_FORMATTER = new Intl.NumberFormat("en-US", {
-  maximumFractionDigits: 9,
-});
-
-export function formatTokenAmount(value: number | string): string {
+export function formatTokenAmount(value: number | string, locale?: string): string {
   const rawValue = String(value).trim();
   if (TOKEN_AMOUNT_PATTERN.test(rawValue)) {
     const [whole = "", fraction] = rawValue.split(".");
@@ -82,22 +80,22 @@ export function formatTokenAmount(value: number | string): string {
 
   const numericValue = Number(rawValue);
   return Number.isFinite(numericValue)
-    ? TOKEN_AMOUNT_FORMATTER.format(numericValue)
+    ? new Intl.NumberFormat(locale, { maximumFractionDigits: 9 }).format(numericValue)
     : String(value);
 }
 
-export function formatLamportsAsSol(lamports: bigint): string {
-  return `${formatTokenAmount(formatUiAmountFromRaw(lamports, WELL_KNOWN_TOKENS.SOL.decimals))} SOL`;
+export function formatLamportsAsSol(lamports: bigint, locale?: string): string {
+  return `${formatTokenAmount(formatUiAmountFromRaw(lamports, WELL_KNOWN_TOKENS.SOL.decimals), locale)} SOL`;
 }
 
-export function formatDisplayAmount(value?: string, token?: string): string {
+export function formatDisplayAmount(value?: string, token?: string, locale?: string): string {
   if (!value) {
     return token ? `- ${token}` : "-";
   }
 
   const numericValue = Number(value);
   const formattedValue = Number.isFinite(numericValue)
-    ? new Intl.NumberFormat("en-US", {
+    ? new Intl.NumberFormat(locale, {
         minimumFractionDigits: numericValue >= 100 ? 0 : 2,
         maximumFractionDigits: 6,
       }).format(numericValue)
@@ -106,7 +104,7 @@ export function formatDisplayAmount(value?: string, token?: string): string {
   return token ? `${formattedValue} ${token}` : formattedValue;
 }
 
-export function formatCurrencyAmount(value: number | string | null): string {
+export function formatCurrencyAmount(value: number | string | null, locale?: string): string {
   if (value === null) {
     return "$0.00";
   }
@@ -116,7 +114,7 @@ export function formatCurrencyAmount(value: number | string | null): string {
     return "$0.00";
   }
 
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 2,
@@ -124,17 +122,17 @@ export function formatCurrencyAmount(value: number | string | null): string {
   }).format(numericValue);
 }
 
-export function formatTimestamp(value?: string): string {
+export function formatTimestamp(value: string | undefined, t: Translate, locale?: string): string {
   if (!value) {
-    return "Pending";
+    return t("DashboardPayments.pending");
   }
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return "Pending";
+    return t("DashboardPayments.pending");
   }
 
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(locale, {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -178,7 +176,8 @@ export function formatRampQuoteExpiry(expiresAt: string | undefined): string | n
 
 export function formatRampQuoteTimeRemaining(
   expiresAt: string | undefined,
-  nowMs = Date.now()
+  nowMs = Date.now(),
+  t?: Translate
 ): string | null {
   if (!expiresAt) {
     return null;
@@ -191,7 +190,7 @@ export function formatRampQuoteTimeRemaining(
 
   const remainingSeconds = Math.max(0, Math.ceil((expiresAtMs - nowMs) / 1000));
   if (remainingSeconds === 0) {
-    return "Expired";
+    return t ? t("DashboardPayments.expired") : null;
   }
 
   const minutes = Math.floor(remainingSeconds / 60);
@@ -199,35 +198,33 @@ export function formatRampQuoteTimeRemaining(
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-export function formatDirection(direction?: string): string {
+export function formatDirection(direction: string | undefined, t: Translate): string {
   if (!direction) {
-    return "Unknown";
+    return t("DashboardPayments.unknown");
   }
   return direction[0]?.toUpperCase() + direction.slice(1);
 }
 
-export function resolveCounterparty(transfer: TransferRecord): string {
+export function resolveCounterparty(transfer: TransferRecord, t: Translate): string {
   if (transfer.direction === "outbound") {
-    return transfer.destination ?? "Unavailable";
+    return transfer.destination ?? t("DashboardPayments.unavailable");
   }
 
   if (transfer.direction === "inbound") {
-    return transfer.source ?? "Unavailable";
+    return transfer.source ?? t("DashboardPayments.unavailable");
   }
 
-  return transfer.destination ?? transfer.source ?? "Unavailable";
+  return transfer.destination ?? transfer.source ?? t("DashboardPayments.unavailable");
 }
 
-const RAMP_TYPE_LABELS = {
-  onramp: "Deposit",
-  offramp: "Pay",
-} as const satisfies Record<RampDirection, string>;
-
-export function resolveTransferTypeLabel(type: string | undefined): string {
-  if (type === "onramp" || type === "offramp") {
-    return RAMP_TYPE_LABELS[type];
+export function resolveTransferTypeLabel(type: string | undefined, t: Translate): string {
+  if (type === "onramp") {
+    return t("DashboardPayments.deposit");
   }
-  return type ? toTitleCase(type) : "Transfer";
+  if (type === "offramp") {
+    return t("DashboardPayments.pay");
+  }
+  return type ? toTitleCase(type) : t("DashboardPayments.transfer");
 }
 
 /** Source → destination amounts, Wise-style: what's sent vs. what's received. */

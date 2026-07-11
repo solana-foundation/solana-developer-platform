@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import type { CounterpartyAccount, ListCounterpartyAccountsResponse } from "@sdp/types";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
+import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { isRecurringPaymentsDashboardEnabled } from "@/lib/recurring-payments-feature";
@@ -75,9 +76,10 @@ export default async function RecurringPaymentDetailRoute({
   return withDashboardPageTrace(
     "dashboard.recurring-payments.detail.page",
     async ({ trace, apiClient }) => {
+      const t = await getTranslations();
       const [recurringPaymentResult, walletsResult] = await Promise.all([
         trace.step("fetch_recurring_payment", () =>
-          fetchRecurringPaymentById(apiClient.request, recurringPaymentId)
+          fetchRecurringPaymentById(apiClient.request, recurringPaymentId, t)
         ),
         trace.step("fetch_wallets", () =>
           fetchPaymentsWallets(apiClient.request, { includeBalances: true })
@@ -100,7 +102,8 @@ export default async function RecurringPaymentDetailRoute({
       const counterparty = await trace.step("fetch_recurring_payment_counterparty", () =>
         fetchCounterparty(apiClient.request, recurringPayment.counterpartyId)
       );
-      const counterpartyLabel = counterparty?.displayName ?? "Counterparty unavailable";
+      const counterpartyLabel =
+        counterparty?.displayName ?? t("DashboardPayments.recurring.counterpartyUnavailable");
       const counterpartyAccounts = await trace.step(
         "fetch_recurring_payment_counterparty_accounts",
         () => fetchAllCounterpartyWalletAccounts(apiClient.request, recurringPayment.counterpartyId)
@@ -108,7 +111,7 @@ export default async function RecurringPaymentDetailRoute({
       const subscriptionId = recurringPayment.subscriptionId;
       const collectionAttemptsResult = subscriptionId
         ? await trace.step("fetch_recurring_payment_collection_attempts", () =>
-            fetchRecurringPaymentCollectionAttempts(apiClient.request, subscriptionId)
+            fetchRecurringPaymentCollectionAttempts(apiClient.request, subscriptionId, t)
           )
         : { ok: true as const, data: { collectionAttempts: [], total: 0 } };
       const knownToken = WELL_KNOWN_TOKEN_BY_MINT.get(recurringPayment.token);

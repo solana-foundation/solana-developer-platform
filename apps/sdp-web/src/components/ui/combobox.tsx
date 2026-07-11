@@ -11,6 +11,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { Input } from "./input";
 import { Label } from "./label";
@@ -63,6 +64,7 @@ interface ComboboxProps {
   footer?: (close: () => void) => ReactNode;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Accessible combobox behavior is clearer when keyboard, filtering, and selection state remain co-located.
 export function Combobox({
   value,
   onChange,
@@ -70,9 +72,9 @@ export function Combobox({
   label,
   required,
   className,
-  placeholder = "Select an option",
+  placeholder,
   searchable = true,
-  searchPlaceholder = "Search…",
+  searchPlaceholder,
   icon,
   trailing,
   size = "xl",
@@ -84,6 +86,9 @@ export function Combobox({
   onEnterSelect,
   footer,
 }: ComboboxProps) {
+  const t = useTranslations();
+  const resolvedPlaceholder = placeholder ?? t("Shared.SharedComponents.selectAnOption");
+  const resolvedSearchPlaceholder = searchPlaceholder ?? t("Shared.SharedComponents.search");
   const labelId = useId();
   const portalContainer = usePortalContainer();
   const [open, setOpen] = useState(false);
@@ -169,7 +174,7 @@ export function Combobox({
             ) : null}
           </span>
         ) : (
-          <span className="text-text-low">{placeholder}</span>
+          <span className="text-text-low">{resolvedPlaceholder}</span>
         )}
       </span>
       {trailing ? <span className="shrink-0">{trailing}</span> : null}
@@ -214,7 +219,7 @@ export function Combobox({
                   }
                 }
               }}
-              placeholder={searchPlaceholder}
+              placeholder={resolvedSearchPlaceholder}
               className="pl-9"
             />
           </div>
@@ -225,12 +230,16 @@ export function Combobox({
         className={cn("overflow-y-auto", variant === "dialog" ? "max-h-96 p-2" : "max-h-56 p-1.5")}
       >
         {isLoading ? (
-          <p className="px-3 py-6 text-center text-sm text-text-low">Loading…</p>
+          <p className="px-3 py-6 text-center text-sm text-text-low">
+            {t("Shared.SharedComponents.loading")}
+          </p>
         ) : error ? (
           <p className="px-3 py-6 text-center text-sm text-status-error-text">{error}</p>
         ) : filtered.length === 0 ? (
           <p className="px-3 py-6 text-center text-sm text-text-low">
-            {options.length === 0 ? "No options available." : "No matches for your search."}
+            {options.length === 0
+              ? t("Shared.SharedComponents.noOptionsAvailable")
+              : t("Shared.SharedComponents.noSearchMatches")}
           </p>
         ) : (
           filtered.map((option, index) => {
@@ -282,7 +291,7 @@ export function Combobox({
             <span aria-hidden className="text-[#c71f37]">
               *
             </span>
-            <span className="sr-only"> (required)</span>
+            <span className="sr-only"> {t("Shared.SharedComponents.required")}</span>
           </>
         ) : null}
       </Label>

@@ -40,7 +40,7 @@ export async function fetchHomeActivity(
   const body = (await response.json().catch(() => ({}))) as HomeActivityResponseEnvelope;
 
   if (!response.ok) {
-    throw new Error(getApiError(body, `Home activity request failed (${response.status}).`));
+    throw new Error(getApiError(body, ""));
   }
 
   return {

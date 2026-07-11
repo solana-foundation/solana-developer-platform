@@ -8,27 +8,13 @@ export type WizardStep = (typeof WIZARD_STEPS)[number];
 
 export interface WizardStepMeta {
   id: WizardStep;
-  title: string;
-  description: string;
 }
 
 export const WIZARD_STEP_META: readonly WizardStepMeta[] = [
-  {
-    id: "classification",
-    title: "What is this asset?",
-    description: "Define the asset and its classification",
-  },
-  {
-    id: "asset-details",
-    title: "Asset details",
-    description: "Provide key information and settings",
-  },
-  {
-    id: "public-info",
-    title: "Public information",
-    description: "Review what will be made public",
-  },
-  { id: "review", title: "Review & finish", description: "Confirm and create draft" },
+  { id: "classification" },
+  { id: "asset-details" },
+  { id: "public-info" },
+  { id: "review" },
 ];
 
 export type AccessControlMode = "allowlist" | "blocklist" | "disabled";

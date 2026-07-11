@@ -4,6 +4,7 @@ import type { PaymentsDashboardWallet } from "@sdp/types";
 import { useMemo } from "react";
 import { ApiPlaygroundShell } from "@/components/api-playground-shell";
 import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";
+import { useTranslations } from "@/i18n/provider";
 import type { PaymentRequestTokenOption } from "./payment-requests-page.data";
 import { buildPaymentRequestsPlaygroundEndpointConfigs } from "./payment-requests-playground-config";
 
@@ -22,14 +23,15 @@ export function PaymentRequestsPlayground({
   wallets,
   tokens,
 }: PaymentRequestsPlaygroundProps) {
+  const t = useTranslations();
   const endpoints = useMemo(
-    () => buildPaymentRequestsPlaygroundEndpointConfigs(wallets, tokens),
-    [wallets, tokens]
+    () => buildPaymentRequestsPlaygroundEndpointConfigs(wallets, tokens, t),
+    [wallets, tokens, t]
   );
 
   return (
     <ApiPlaygroundShell
-      productName="Payment Requests"
+      productName={t("DashboardPayments.requests.playgroundProductName")}
       endpoints={endpoints}
       defaultEndpointId="list-payment-requests"
       apiBaseUrl={apiBaseUrl}

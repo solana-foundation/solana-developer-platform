@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useTranslations } from "@/i18n/provider";
 import { API_KEYS_FLASH_PATH, type ApiKeyFlash } from "./api-key-flash";
 import { GeneratedApiKeyModal } from "./generated-key-modal";
 
@@ -32,6 +33,7 @@ async function loadApiKeyFlash(): Promise<ApiKeyFlash | null> {
 }
 
 export function ApiKeyFlashSurface() {
+  const t = useTranslations();
   const [flash, setFlash] = useState<ApiKeyFlash | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -72,7 +74,11 @@ export function ApiKeyFlashSurface() {
   return (
     <Card className={flash.level === "error" ? "border-[#c71f37]/25" : "border-[#1c1c1d]/12"}>
       <CardHeader>
-        <CardTitle>{flash.level === "error" ? "Action failed" : "Notice"}</CardTitle>
+        <CardTitle>
+          {flash.level === "error"
+            ? t("DashboardCustody.actionFailed")
+            : t("DashboardCustody.notice")}
+        </CardTitle>
         <CardDescription>{flash.message}</CardDescription>
       </CardHeader>
     </Card>

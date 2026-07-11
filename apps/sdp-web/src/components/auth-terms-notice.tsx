@@ -1,18 +1,21 @@
 import Link from "next/link";
+import { getTranslations } from "@/i18n/server";
 
 const TOS_HREF = "https://solana.com/tos";
 
-export function AuthTermsNotice() {
+export async function AuthTermsNotice() {
+  const t = await getTranslations();
+
   return (
     <p className="max-w-sm text-center text-xs leading-5 text-[rgba(28,28,29,0.72)]">
-      By using the app, you agree to the{" "}
+      {t("Shared.authTerms.prefix")}{" "}
       <Link
         href={TOS_HREF}
         target="_blank"
         rel="noreferrer"
         className="font-medium text-[#1c1c1d] underline underline-offset-2 transition-colors hover:text-black"
       >
-        Solana Foundation Term Of Services
+        {t("Shared.authTerms.link")}
       </Link>
       .
     </p>

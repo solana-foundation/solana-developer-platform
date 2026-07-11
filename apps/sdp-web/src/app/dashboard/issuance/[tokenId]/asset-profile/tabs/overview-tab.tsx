@@ -17,19 +17,13 @@ import {
   TriangleAlert,
   Wallet,
 } from "lucide-react";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn, formatDisplayLabel } from "@/lib/utils";
 import { getCategoryPresentation, getSubTypePresentation } from "../../../create/asset-taxonomy";
 import { getAssetDetailsErrors, safeLinkHref } from "../../../create/draft-mapping";
 import type { DraftState } from "../../../create/issuance-draft-wizard.types";
 import { formatDate } from "../../token-management-workspace.utils";
 import type { TokenOperations } from "../use-token-operations";
-
-const STATUS_LABELS: Record<Token["status"], string> = {
-  pending: "Draft",
-  active: "Active",
-  paused: "Paused",
-  revoked: "Revoked",
-};
 
 export function OverviewTab({
   token,
@@ -44,9 +38,17 @@ export function OverviewTab({
   ops: TokenOperations;
   onDeploy: () => void;
 }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const statusLabels: Record<Token["status"], string> = {
+    pending: t("DashboardIssuance.status.draft"),
+    active: t("DashboardIssuance.status.active"),
+    paused: t("DashboardIssuance.status.paused"),
+    revoked: t("DashboardIssuance.status.revoked"),
+  };
   const category = getCategoryPresentation(assetProfile.assetCategory);
   const subType = getSubTypePresentation(assetProfile.assetCategory, assetProfile.assetType);
-  const deployBlockers = ops.canDeployToken ? Object.values(getAssetDetailsErrors(draft)) : [];
+  const deployBlockers = ops.canDeployToken ? Object.values(getAssetDetailsErrors(draft, t)) : [];
   const website = draft.website.trim();
   const websiteHref = safeLinkHref(website);
 
@@ -63,7 +65,7 @@ export function OverviewTab({
                   : "text-[13px] text-[rgba(28,28,29,0.4)]"
               }
             >
-              {token.description || "No description yet — add one in the Details tab."}
+              {token.description || t("DashboardIssuance.overview.noDescription")}
             </p>
             <IdentityFields
               website={website}
@@ -74,10 +76,14 @@ export function OverviewTab({
           </div>
 
           <div className="grid grid-cols-2 gap-0 md:border-l md:border-[rgba(28,28,29,0.08)] md:pl-5">
-            <StatTile icon={Activity} label="Status" value={STATUS_LABELS[token.status]} />
+            <StatTile
+              icon={Activity}
+              label={t("DashboardIssuance.transactions.status")}
+              value={statusLabels[token.status]}
+            />
             <StatTile
               icon={Coins}
-              label="Total supply"
+              label={t("DashboardIssuance.overview.totalSupply")}
               value={token.totalSupply}
               action={
                 token.status !== "pending" ? (
@@ -86,23 +92,35 @@ export function OverviewTab({
                     onClick={ops.handleRefreshSupply}
                     disabled={ops.isPending}
                     className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[rgba(28,28,29,0.5)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d] disabled:pointer-events-none disabled:opacity-50"
-                    aria-label="Refresh supply"
+                    aria-label={t("DashboardIssuance.management.refreshSupply")}
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
                   </button>
                 ) : null
               }
             />
-            <StatTile icon={Hash} label="Decimals" value={String(token.decimals)} />
-            <StatTile icon={Clock} label="Created" value={formatDate(token.createdAt)} />
-            <StatTile icon={Layers} label="Template" value={formatDisplayLabel(token.template)} />
+            <StatTile
+              icon={Hash}
+              label={t("DashboardIssuance.create.decimals")}
+              value={String(token.decimals)}
+            />
+            <StatTile
+              icon={Clock}
+              label={t("DashboardIssuance.transactions.created")}
+              value={formatDate(token.createdAt, locale)}
+            />
+            <StatTile
+              icon={Layers}
+              label={t("DashboardIssuance.overview.template")}
+              value={formatDisplayLabel(token.template)}
+            />
             <StatTile
               icon={KeyRound}
-              label="Mint authority"
+              label={t("DashboardIssuance.overview.mintAuthority")}
               value={
                 ops.displayedMintAuthority
                   ? `${ops.displayedMintAuthority.slice(0, 5)}…${ops.displayedMintAuthority.slice(-4)}`
-                  : "None"
+                  : t("DashboardIssuance.wallet.none")
               }
             />
           </div>
@@ -123,15 +141,15 @@ export function OverviewTab({
             {category ? (
               <ClassificationCell
                 icon={category.icon}
-                title={category.label}
-                description={category.description}
+                title={t(category.labelKey)}
+                description={t(category.descriptionKey)}
               />
             ) : null}
             {subType ? (
               <ClassificationCell
                 icon={subType.icon}
-                title={subType.label}
-                description={subType.description}
+                title={t(subType.labelKey)}
+                description={t(subType.descriptionKey)}
               />
             ) : null}
           </div>
@@ -141,7 +159,9 @@ export function OverviewTab({
             <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-4">
               <div className="flex items-center gap-2">
                 <TriangleAlert className="h-4.5 w-4.5 shrink-0 text-[#92400e]" />
-                <p className="text-[15px] font-semibold text-[#1c1c1d]">Ready for deploy</p>
+                <p className="text-[15px] font-semibold text-[#1c1c1d]">
+                  {t("DashboardIssuance.overview.readyForDeploy")}
+                </p>
               </div>
               <ul className="mt-2 space-y-1">
                 {deployBlockers.map((blocker) => (
@@ -159,11 +179,13 @@ export function OverviewTab({
             >
               <div className="flex items-center gap-2">
                 <CircleCheck className="h-4.5 w-4.5 shrink-0 text-[#00a066]" />
-                <p className="text-[15px] font-semibold text-[#1c1c1d]">Ready for deploy</p>
+                <p className="text-[15px] font-semibold text-[#1c1c1d]">
+                  {t("DashboardIssuance.overview.readyForDeploy")}
+                </p>
                 <ArrowUpRight className="ml-auto h-4 w-4 shrink-0 text-[rgba(28,28,29,0.4)] transition-colors group-hover:text-[#1c1c1d]" />
               </div>
               <p className="mt-2 text-[13px] leading-relaxed text-[rgba(28,28,29,0.62)]">
-                This asset is ready to deploy — continue in the Operations tab.
+                {t("DashboardIssuance.overview.readyForDeployDescription")}
               </p>
             </button>
           )
@@ -184,13 +206,14 @@ function IdentityFields({
   mintAddress: string | null;
   onCopy: (value: string) => void;
 }) {
+  const t = useTranslations();
   return (
     <div className="mt-4 flex flex-col gap-3 md:mt-auto">
       {website ? (
         <div>
           <div className="flex items-center gap-1.5 text-[rgba(28,28,29,0.5)]">
             <Globe className="h-3 w-3 shrink-0" />
-            <span className="text-[11px]">Website</span>
+            <span className="text-[11px]">{t("DashboardIssuance.assetDetails.website")}</span>
           </div>
           {websiteHref ? (
             <a
@@ -212,7 +235,7 @@ function IdentityFields({
       <div>
         <div className="flex items-center gap-1.5 text-[rgba(28,28,29,0.5)]">
           <Wallet className="h-3 w-3 shrink-0" />
-          <span className="text-[11px]">Mint address</span>
+          <span className="text-[11px]">{t("DashboardIssuance.overview.mintAddress")}</span>
         </div>
         {mintAddress ? (
           <div className="mt-0.5 flex w-fit max-w-full items-center gap-1.5">
@@ -223,13 +246,15 @@ function IdentityFields({
               type="button"
               onClick={() => onCopy(mintAddress)}
               className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[rgba(28,28,29,0.5)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
-              aria-label="Copy token address"
+              aria-label={t("DashboardIssuance.header.copyTokenAddress")}
             >
               <Copy className="h-3.5 w-3.5" />
             </button>
           </div>
         ) : (
-          <p className="mt-0.5 text-[13px] text-[rgba(28,28,29,0.4)]">Not deployed yet</p>
+          <p className="mt-0.5 text-[13px] text-[rgba(28,28,29,0.4)]">
+            {t("DashboardIssuance.overview.notDeployedYet")}
+          </p>
         )}
       </div>
     </div>

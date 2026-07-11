@@ -58,6 +58,8 @@ import {
   type DashboardPlaygroundApiKeyOption,
   useDashboardWorkspace,
 } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { useZodForm } from "@/lib/use-zod-form";
@@ -65,34 +67,38 @@ import { cn } from "@/lib/utils";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
-import { deriveTokenOptions, type PaymentRequestTokenOption } from "./payment-requests-page.data";
+import {
+  deriveTokenOptions,
+  type PaymentRequestsLocalErrorCode,
+  type PaymentRequestTokenOption,
+} from "./payment-requests-page.data";
 
 const PaymentRequestsPlayground = dynamic(
   () => import("./payment-requests-playground").then((module) => module.PaymentRequestsPlayground),
   { loading: () => <ApiPlaygroundShellSkeleton /> }
 );
 
-const STATUS_LABEL = {
-  awaiting_payment: "Awaiting payment",
-  paid: "Paid",
-  canceled: "Canceled",
-  expired: "Expired",
-} as const satisfies Record<PaymentRequestStatus, string>;
+const STATUS_TRANSLATION_KEYS = {
+  awaiting_payment: "DashboardPayments.requests.awaitingPayment",
+  paid: "DashboardPayments.requests.paid",
+  canceled: "DashboardPayments.requests.canceled",
+  expired: "DashboardPayments.requests.expired",
+} as const satisfies Record<PaymentRequestStatus, MessageKey>;
 
 const EXPIRY_OPTIONS = [
-  { label: "No expiry", hours: null },
-  { label: "1 hour", hours: 1 },
-  { label: "24 hours", hours: 24 },
-  { label: "7 days", hours: 168 },
-  { label: "30 days", hours: 720 },
-] as const satisfies readonly { label: string; hours: number | null }[];
+  { id: "none", hours: null, labelKey: "DashboardPayments.requests.noExpiry" },
+  { id: "oneHour", hours: 1, labelKey: "DashboardPayments.requests.oneHour" },
+  { id: "twentyFourHours", hours: 24, labelKey: "DashboardPayments.requests.twentyFourHours" },
+  { id: "sevenDays", hours: 168, labelKey: "DashboardPayments.requests.sevenDays" },
+  { id: "thirtyDays", hours: 720, labelKey: "DashboardPayments.requests.thirtyDays" },
+] as const satisfies readonly { id: string; hours: number | null; labelKey: MessageKey }[];
 
 /**
  * Resolves the absolute expiry instant from a preset label. Computed from the
  * browser clock; callers `.toISOString()` it to UTC before sending.
  */
-function resolveExpiryDate(expiryLabel: string): Date | null {
-  const option = EXPIRY_OPTIONS.find((entry) => entry.label === expiryLabel);
+function resolveExpiryDate(expiryId: string): Date | null {
+  const option = EXPIRY_OPTIONS.find((entry) => entry.id === expiryId);
   if (!option || option.hours === null) {
     return null;
   }
@@ -132,6 +138,7 @@ function statusTone(status: PaymentRequestStatus): "success" | "error" | "pendin
 }
 
 function StatusBadge({ status }: { status: PaymentRequestStatus }) {
+  const t = useTranslations();
   const tone = statusTone(status);
   return (
     <span
@@ -142,7 +149,7 @@ function StatusBadge({ status }: { status: PaymentRequestStatus }) {
         tone === "pending" && "bg-border-light text-text-medium"
       )}
     >
-      {STATUS_LABEL[status]}
+      {t(STATUS_TRANSLATION_KEYS[status])}
     </span>
   );
 }
@@ -158,7 +165,7 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
-const ANYONE_OPTION = "Anyone with the link";
+const ANYONE_OPTION = "anyone";
 
 function resolveAccountAddress(account: CounterpartyAccount): string {
   const address = account.details.address;
@@ -193,12 +200,13 @@ function CreateRequestModal({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const t = useTranslations();
   const form = useZodForm(createRequestSchema, {
     amount: "",
     token: "",
     wallet: "",
     counterparty: ANYONE_OPTION,
-    expiry: "No expiry",
+    expiry: "none",
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -215,7 +223,7 @@ function CreateRequestModal({
     selectedCounterpartyId
       ? ["payment-request-counterparty-accounts", selectedCounterpartyId]
       : null,
-    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id),
+    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
     { revalidateOnFocus: false }
   );
   const cryptoAccounts = useMemo(
@@ -255,7 +263,7 @@ function CreateRequestModal({
       toast.error(res.error);
       return;
     }
-    toast.success("Payment link created");
+    toast.success(t("DashboardPayments.requests.paymentLinkCreated"));
     onCreated();
   }
 
@@ -263,23 +271,23 @@ function CreateRequestModal({
     <>
       <Modal
         isOpen
-        ariaLabel="Create payment request"
+        ariaLabel={t("DashboardPayments.requests.createPaymentRequest")}
         onClose={submitting || addingAccount ? undefined : onClose}
         size="lg"
       >
         <div className="space-y-5 p-6">
           <div className="space-y-1">
             <h2 className="text-xl font-medium tracking-tight text-text-extra-high">
-              Create payment link
+              {t("DashboardPayments.requests.createPaymentLink")}
             </h2>
             <p className="text-sm text-text-medium">
-              Request a fixed payment to one of your wallets.
+              {t("DashboardPayments.requests.createPaymentLinkDescription")}
             </p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="pr-amount">Amount</Label>
+              <Label htmlFor="pr-amount">{t("DashboardPayments.requests.amount")}</Label>
               <Input
                 size="xl"
                 id="pr-amount"
@@ -299,12 +307,12 @@ function CreateRequestModal({
               )}
             </div>
             <div className="space-y-2">
-              <Label>Token</Label>
+              <Label>{t("DashboardPayments.requests.token")}</Label>
               <Select
                 size="xl"
                 className="w-full"
                 iconLeft={<CoinsIcon />}
-                placeholder="Select token"
+                placeholder={t("DashboardPayments.requests.selectToken")}
                 value={form.values.token}
                 onValueChange={(value) => form.setField("token", value === null ? "" : value)}
               >
@@ -321,12 +329,12 @@ function CreateRequestModal({
           </div>
 
           <div className="space-y-2">
-            <Label>Destination wallet</Label>
+            <Label>{t("DashboardPayments.requests.destinationWallet")}</Label>
             <Select
               size="xl"
               className="w-full"
               iconLeft={<WalletIcon />}
-              placeholder="Select wallet"
+              placeholder={t("DashboardPayments.requests.selectWallet")}
               value={form.values.wallet}
               onValueChange={(value) => form.setField("wallet", value === null ? "" : value)}
             >
@@ -345,7 +353,7 @@ function CreateRequestModal({
           </div>
 
           <div className="space-y-2">
-            <Label>From (counterparty)</Label>
+            <Label>{t("DashboardPayments.requests.fromCounterparty")}</Label>
             <Select
               size="xl"
               className="w-full"
@@ -355,7 +363,9 @@ function CreateRequestModal({
                 form.setField("counterparty", value === null ? ANYONE_OPTION : value)
               }
             >
-              <SelectItem value={ANYONE_OPTION}>{ANYONE_OPTION}</SelectItem>
+              <SelectItem value={ANYONE_OPTION}>
+                {t("DashboardPayments.requests.anyoneWithLink")}
+              </SelectItem>
               {counterparties.map((counterparty) => (
                 <SelectItem key={counterparty.id} value={counterparty.id}>
                   {counterparty.displayName}
@@ -363,11 +373,13 @@ function CreateRequestModal({
               ))}
             </Select>
             {selectedCounterpartyId && accountsLoading && (
-              <p className="text-xs text-text-low">Loading crypto account…</p>
+              <p className="text-xs text-text-low">
+                {t("DashboardPayments.requests.loadingCryptoAccount")}
+              </p>
             )}
             {selectedCounterpartyId && !accountsLoading && primaryCryptoAccount && (
               <p className="text-xs text-text-low">
-                Pays from{" "}
+                {t("DashboardPayments.requests.paysFrom")}{" "}
                 <span className="font-mono text-text-medium">
                   {resolveAccountAddress(primaryCryptoAccount)}
                 </span>
@@ -375,7 +387,9 @@ function CreateRequestModal({
             )}
             {selectedCounterpartyId && !accountsLoading && !primaryCryptoAccount && (
               <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-border-medium px-3 py-2">
-                <p className="text-xs text-text-low">No crypto account on file.</p>
+                <p className="text-xs text-text-low">
+                  {t("DashboardPayments.requests.noCryptoAccount")}
+                </p>
                 <Button
                   type="button"
                   variant="secondary"
@@ -383,27 +397,25 @@ function CreateRequestModal({
                   iconLeft={<PlusIcon />}
                   onClick={() => setAddingAccount(true)}
                 >
-                  Add
+                  {t("DashboardPayments.requests.add")}
                 </Button>
               </div>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label>Link expires</Label>
+            <Label>{t("DashboardPayments.requests.linkExpires")}</Label>
             <Select
               size="xl"
               className="w-full"
               iconLeft={<ClockIcon />}
               trailing={expiresAtPreview ? formatLocalExpiry(expiresAtPreview) : undefined}
               value={form.values.expiry}
-              onValueChange={(value) =>
-                form.setField("expiry", value === null ? "No expiry" : value)
-              }
+              onValueChange={(value) => form.setField("expiry", value === null ? "none" : value)}
             >
               {EXPIRY_OPTIONS.map((option) => (
-                <SelectItem key={option.label} value={option.label}>
-                  {option.label}
+                <SelectItem key={option.id} value={option.id}>
+                  {t(option.labelKey)}
                 </SelectItem>
               ))}
             </Select>
@@ -411,10 +423,12 @@ function CreateRequestModal({
 
           <div className="flex items-center justify-end gap-3">
             <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
-              Cancel
+              {t("DashboardPayments.requests.cancel")}
             </Button>
             <Button type="button" onClick={() => void handleSubmit()} disabled={submitting}>
-              {submitting ? "Creating…" : "Create link"}
+              {submitting
+                ? t("DashboardPayments.requests.creating")
+                : t("DashboardPayments.requests.createLink")}
             </Button>
           </div>
         </div>
@@ -434,6 +448,7 @@ function CreateRequestModal({
 interface PaymentRequestsWorkspaceProps {
   initialPaymentRequests: PaymentRequest[];
   initialError?: string;
+  initialLocalErrorCode?: PaymentRequestsLocalErrorCode;
   apiBaseUrl: string | null;
   apiKeys: DashboardPlaygroundApiKeyOption[];
   wallets: PaymentsDashboardWallet[];
@@ -443,11 +458,13 @@ interface PaymentRequestsWorkspaceProps {
 export function PaymentRequestsWorkspace({
   initialPaymentRequests,
   initialError,
+  initialLocalErrorCode,
   apiBaseUrl,
   apiKeys,
   wallets,
   counterparties,
 }: PaymentRequestsWorkspaceProps) {
+  const t = useTranslations();
   const router = useRouter();
   const { counterpartyTab, sdpEnvironment, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
     useDashboardWorkspace();
@@ -514,32 +531,36 @@ export function PaymentRequestsWorkspace({
         overview={
           <Card className="flex min-h-0 flex-1 flex-col">
             <CardHeader>
-              <CardTitle>Payment requests</CardTitle>
-              <CardDescription>Shareable links that request a fixed payment.</CardDescription>
+              <CardTitle>{t("DashboardPayments.requests.paymentRequests")}</CardTitle>
+              <CardDescription>
+                {t("DashboardPayments.requests.paymentRequestsDescription")}
+              </CardDescription>
               {requests.length > 0 && (
                 <CardAction>
                   <Button type="button" iconLeft={<PlusIcon />} onClick={() => setCreateOpen(true)}>
-                    Create
+                    {t("DashboardPayments.requests.create")}
                   </Button>
                 </CardAction>
               )}
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col">
-              {initialError ? (
-                <p className="text-sm text-status-error-text">{initialError}</p>
+              {initialError || initialLocalErrorCode ? (
+                <p className="text-sm text-status-error-text">
+                  {initialError ?? t("DashboardPayments.requests.loadFailed")}
+                </p>
               ) : requests.length === 0 ? (
                 <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-medium py-16 text-center">
                   <ReceiptTextIcon className="h-10 w-10 text-text-extra-low" />
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-text-extra-high">
-                      No payment requests yet
+                      {t("DashboardPayments.requests.noPaymentRequests")}
                     </p>
                     <p className="text-sm text-text-low">
-                      Create a payment link to request a fixed payment.
+                      {t("DashboardPayments.requests.noPaymentRequestsDescription")}
                     </p>
                   </div>
                   <Button type="button" iconLeft={<PlusIcon />} onClick={() => setCreateOpen(true)}>
-                    Create
+                    {t("DashboardPayments.requests.create")}
                   </Button>
                 </div>
               ) : (
@@ -547,11 +568,19 @@ export function PaymentRequestsWorkspace({
                   <Table className="[&_table]:table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[16%]">Status</TableHead>
-                        <TableHead className="w-[20%]">Amount</TableHead>
-                        <TableHead className="w-[22%]">From</TableHead>
-                        <TableHead className="w-[22%]">To</TableHead>
-                        <TableHead className="w-[20%]">Created</TableHead>
+                        <TableHead className="w-[16%]">{t("DashboardPayments.status")}</TableHead>
+                        <TableHead className="w-[20%]">
+                          {t("DashboardPayments.requests.amount")}
+                        </TableHead>
+                        <TableHead className="w-[22%]">
+                          {t("DashboardPayments.requests.from")}
+                        </TableHead>
+                        <TableHead className="w-[22%]">
+                          {t("DashboardPayments.requests.to")}
+                        </TableHead>
+                        <TableHead className="w-[20%]">
+                          {t("DashboardPayments.recurring.created")}
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -593,7 +622,7 @@ export function PaymentRequestsWorkspace({
                               </span>
                             </TableCell>
                             <TableCell className="text-sm text-text-medium">
-                              {formatTimestamp(request.createdAt)}
+                              {formatTimestamp(request.createdAt, t)}
                             </TableCell>
                           </TableRow>
                         );
@@ -619,7 +648,7 @@ export function PaymentRequestsWorkspace({
       {selected && payLink ? (
         <Modal
           isOpen
-          ariaLabel="Payment request details"
+          ariaLabel={t("DashboardPayments.requests.paymentRequestDetails")}
           onClose={() => setSelected(null)}
           size="lg"
         >
@@ -627,16 +656,16 @@ export function PaymentRequestsWorkspace({
             <div className="flex items-start justify-between gap-4 pr-8">
               <div className="space-y-1">
                 <h2 className="text-xl font-medium tracking-tight text-text-extra-high">
-                  Payment request
+                  {t("DashboardPayments.requests.paymentRequest")}
                 </h2>
-                <p className="text-sm text-text-medium">{formatTimestamp(selected.createdAt)}</p>
+                <p className="text-sm text-text-medium">{formatTimestamp(selected.createdAt, t)}</p>
               </div>
               <StatusBadge status={selected.status} />
             </div>
 
             <div className="rounded-2xl bg-border-extra-light p-5">
               <p className="text-xs font-medium uppercase tracking-wide text-text-medium">
-                Amount requested
+                {t("DashboardPayments.requests.amountRequested")}
               </p>
               <p className="truncate text-xl font-semibold tracking-tight text-text-extra-high">
                 {formatDisplayAmount(
@@ -657,17 +686,19 @@ export function PaymentRequestsWorkspace({
                 iconLeft={<CopyIcon />}
                 onClick={() => {
                   void navigator.clipboard.writeText(payLink);
-                  toast.success("Payment link copied");
+                  toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
                 }}
               >
-                Copy
+                {t("DashboardPayments.requests.copy")}
               </Button>
             </div>
 
             <div className="rounded-2xl border border-border-light px-4">
               <div className="divide-y divide-border-light">
-                <DetailRow label="From">{fromLabel(selected.counterpartyId)}</DetailRow>
-                <DetailRow label="To">
+                <DetailRow label={t("DashboardPayments.requests.from")}>
+                  {fromLabel(selected.counterpartyId)}
+                </DetailRow>
+                <DetailRow label={t("DashboardPayments.requests.to")}>
                   {selectedWalletName ? (
                     <span className="block font-medium text-text-extra-high">
                       {selectedWalletName}
@@ -677,14 +708,20 @@ export function PaymentRequestsWorkspace({
                     {selected.destinationAddress}
                   </span>
                 </DetailRow>
-                <DetailRow label="Token">
+                <DetailRow label={t("DashboardPayments.requests.token")}>
                   {selectedTokenSymbol ? selectedTokenSymbol : shortenAddress(selected.token)}
                 </DetailRow>
-                <DetailRow label="Reference">{shortenAddress(selected.reference)}</DetailRow>
-                <DetailRow label="Expires">
-                  {selected.expiresAt ? formatTimestamp(selected.expiresAt) : "No expiry"}
+                <DetailRow label={t("DashboardPayments.requests.reference")}>
+                  {shortenAddress(selected.reference)}
                 </DetailRow>
-                <DetailRow label="Created">{formatTimestamp(selected.createdAt)}</DetailRow>
+                <DetailRow label={t("DashboardPayments.requests.expires")}>
+                  {selected.expiresAt
+                    ? formatTimestamp(selected.expiresAt, t)
+                    : t("DashboardPayments.requests.noExpiry")}
+                </DetailRow>
+                <DetailRow label={t("DashboardPayments.recurring.created")}>
+                  {formatTimestamp(selected.createdAt, t)}
+                </DetailRow>
               </div>
             </div>
           </div>

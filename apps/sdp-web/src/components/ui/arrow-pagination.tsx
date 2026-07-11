@@ -2,6 +2,7 @@
 
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 interface ArrowPaginationProps {
@@ -20,15 +21,18 @@ export function ArrowPagination({
   className,
   summary,
 }: ArrowPaginationProps) {
+  const t = useTranslations();
   return (
     <div className={cn("flex items-center justify-between gap-3", className)}>
-      <span className="text-xs text-text-medium">{summary ?? `Page ${page} of ${pageCount}`}</span>
+      <span className="text-xs text-text-medium">
+        {summary ?? t("Shared.SharedComponents.pageOf", { page, pageCount })}
+      </span>
       <div className="flex items-center gap-2">
         <Button
           type="button"
           variant="outline"
           size="icon-sm"
-          aria-label="Previous page"
+          aria-label={t("Shared.SharedComponents.previousPage")}
           disabled={page <= 1}
           onClick={() => onPageChange(page - 1)}
         >
@@ -38,7 +42,7 @@ export function ArrowPagination({
           type="button"
           variant="outline"
           size="icon-sm"
-          aria-label="Next page"
+          aria-label={t("Shared.SharedComponents.nextPage")}
           disabled={page >= pageCount}
           onClick={() => onPageChange(page + 1)}
         >

@@ -2,6 +2,8 @@ import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { Toaster } from "sonner";
+import { I18nProvider } from "@/i18n/provider";
+import { getI18nRequest, getTranslations } from "@/i18n/server";
 import { shouldLoadClerkForPath } from "@/lib/auth-entry";
 import "./globals.css";
 
@@ -10,10 +12,13 @@ const ALLOWED_SATELLITE_REDIRECT_ORIGINS = [
   "https://bookface-git-main-solana-foundation.vercel.app",
 ];
 
-export const metadata: Metadata = {
-  title: "Solana Developer Platform",
-  description: "SDP dashboard",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations();
+  return {
+    title: t("Metadata.title"),
+    description: t("Metadata.description"),
+  };
+}
 
 export default async function RootLayout({
   children,
@@ -21,6 +26,7 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const pathname = (await headers()).get("x-sdp-pathname") ?? "/";
+  const { locale, messages } = await getI18nRequest();
   const shouldLoadClerk = await shouldLoadClerkForPath(pathname);
   const content = shouldLoadClerk ? (
     <ClerkProvider
@@ -38,10 +44,12 @@ export default async function RootLayout({
   );
 
   return (
-    <html lang="en">
+    <html lang={locale}>
       <body>
-        {content}
-        <Toaster position="bottom-right" richColors closeButton />
+        <I18nProvider locale={locale} messages={messages}>
+          {content}
+          <Toaster position="bottom-right" richColors closeButton />
+        </I18nProvider>
       </body>
     </html>
   );

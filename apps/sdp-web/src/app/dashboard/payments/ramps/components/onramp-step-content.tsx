@@ -2,6 +2,7 @@
 
 import { isMuralSandboxPayinCurrency } from "@sdp/types";
 import { DollarSignIcon } from "lucide-react";
+import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import { toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
@@ -18,6 +19,7 @@ import { RequirementsFields } from "./requirements-fields";
 import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
 export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
+  const t = useTranslations();
   const {
     currentStepId,
     rampProviderAccess,
@@ -46,7 +48,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     if (!hasEnabledRampProvider(rampProviderAccess)) {
       return (
         <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
-          No deposit providers are enabled for this organization.
+          {t("DashboardPayments.ramps.noDepositProviders")}
         </div>
       );
     }
@@ -124,7 +126,10 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         {quote.provider === "coinbase" ? (
           <CoinbaseRampFrame orderId={quote.id} src={quote.hostedUrl} />
         ) : (
-          <MoonpayRampFrame title={`${quote.provider} deposit`} src={quote.hostedUrl} />
+          <MoonpayRampFrame
+            title={t("DashboardPayments.ramps.providerDeposit", { provider: quote.provider })}
+            src={quote.hostedUrl}
+          />
         )}
         <div className="border-t border-border-light pt-5">
           <RampStatusPanel direction="onramp" transfer={transferStatus} />
@@ -137,7 +142,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     if (!quote.paymentInstructions) {
       return (
         <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-5 py-5 text-sm text-status-error-text">
-          Ramp quote is missing payment instructions.
+          {t("DashboardPayments.ramps.quoteMissingInstructions")}
         </div>
       );
     }
@@ -145,7 +150,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     const labels =
       quote.provider === "mural" && !isMuralSandboxPayinCurrency(selectedRampPair.fiatCurrency)
         ? null
-        : simulateActionLabels(quote.provider);
+        : simulateActionLabels(quote.provider, t);
     const simulateAction = labels
       ? {
           loading: quoteSimulationLoading,

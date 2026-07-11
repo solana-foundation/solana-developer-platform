@@ -10,9 +10,12 @@ import type {
   PaymentSubscriptionCollectionAttempt,
   UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { getPaymentApiError, parsePaymentApiErrorText } from "../payment-api-errors";
 import type { FetchResult } from "../payments-page.data";
+
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 export const RECURRING_PAYMENTS_PAGE_SIZE = 100;
 
@@ -65,19 +68,24 @@ export function buildRecurringPaymentsQuery(
   return query;
 }
 
-async function readDashboardEnvelope<T>(response: Response, fallback: string): Promise<T> {
+async function readDashboardEnvelope<T>(
+  response: Response,
+  fallback: string,
+  t: Translate
+): Promise<T> {
   const body = (await response.json().catch(() => ({}))) as DashboardApiEnvelope<T>;
   if (!response.ok) {
     throw new Error(getPaymentApiError(body, `${fallback} (${response.status}).`));
   }
   if (!body.data) {
-    throw new Error(`${fallback} returned an empty response.`);
+    throw new Error(t("DashboardPayments.recurring.emptyResponse", { request: fallback }));
   }
   return body.data;
 }
 
 export async function listRecurringPayments(
-  options: ClientRecurringPaymentsListOptions = {}
+  options: ClientRecurringPaymentsListOptions = {},
+  t: Translate
 ): Promise<ListPaymentRecurringPaymentsResponse> {
   const { signal, ...filters } = options;
   const query = buildRecurringPaymentsQuery({
@@ -93,13 +101,15 @@ export async function listRecurringPayments(
   });
   return readDashboardEnvelope<ListPaymentRecurringPaymentsResponse>(
     response,
-    "Recurring payment list request failed"
+    t("DashboardPayments.recurring.unableToLoad"),
+    t
   );
 }
 
 export async function getRecurringPayment(
   recurringPaymentId: string,
-  signal?: AbortSignal
+  signal: AbortSignal | undefined,
+  t: Translate
 ): Promise<PaymentRecurringPayment> {
   const response = await fetch(
     `/api/dashboard/payments/recurring-payments/${encodeURIComponent(recurringPaymentId)}`,
@@ -111,14 +121,16 @@ export async function getRecurringPayment(
   );
   const data = await readDashboardEnvelope<PaymentRecurringPaymentResponse>(
     response,
-    "Recurring payment request failed"
+    t("DashboardPayments.recurring.unableToLoad"),
+    t
   );
   return data.recurringPayment;
 }
 
 export async function createRecurringPayment(
   input: CreatePaymentRecurringPaymentRequest,
-  signal?: AbortSignal
+  signal: AbortSignal | undefined,
+  t: Translate
 ): Promise<PaymentRecurringPayment> {
   const response = await fetch("/api/dashboard/payments/recurring-payments", {
     method: "POST",
@@ -128,7 +140,8 @@ export async function createRecurringPayment(
   });
   const data = await readDashboardEnvelope<PaymentRecurringPaymentResponse>(
     response,
-    "Recurring payment creation failed"
+    t("DashboardPayments.recurring.unableToCreate"),
+    t
   );
   return data.recurringPayment;
 }
@@ -136,7 +149,8 @@ export async function createRecurringPayment(
 export async function updateRecurringPayment(
   recurringPaymentId: string,
   input: UpdatePaymentRecurringPaymentRequest,
-  signal?: AbortSignal
+  signal: AbortSignal | undefined,
+  t: Translate
 ): Promise<PaymentRecurringPayment> {
   const response = await fetch(
     `/api/dashboard/payments/recurring-payments/${encodeURIComponent(recurringPaymentId)}`,
@@ -149,7 +163,8 @@ export async function updateRecurringPayment(
   );
   const data = await readDashboardEnvelope<PaymentRecurringPaymentResponse>(
     response,
-    "Recurring payment update failed"
+    t("DashboardPayments.recurring.paymentUpdateFailed"),
+    t
   );
   return data.recurringPayment;
 }
@@ -157,7 +172,8 @@ export async function updateRecurringPayment(
 export async function runRecurringPaymentAction(
   recurringPaymentId: string,
   action: RecurringPaymentAction,
-  signal?: AbortSignal
+  signal: AbortSignal | undefined,
+  t: Translate
 ): Promise<PaymentRecurringPayment> {
   const response = await fetch(
     `/api/dashboard/payments/recurring-payments/${encodeURIComponent(
@@ -172,12 +188,13 @@ export async function runRecurringPaymentAction(
   );
   const data = await readDashboardEnvelope<
     PaymentRecurringPaymentResponse | PaymentRecurringPaymentCollectionResponse
-  >(response, "Recurring payment action failed");
+  >(response, t("DashboardPayments.recurring.actionFailed"), t);
   return data.recurringPayment;
 }
 
 export async function fetchRecurringPayments(
   request: SdpApiClient["request"],
+  t: Translate,
   options: RecurringPaymentsListOptions = {}
 ): Promise<PaginatedResponse<PaymentRecurringPayment>> {
   try {
@@ -208,14 +225,15 @@ export async function fetchRecurringPayments(
       ok: false,
       data: [],
       total: 0,
-      error: error instanceof Error ? error.message : "Unable to load recurring payments",
+      error: error instanceof Error ? error.message : t("DashboardPayments.recurring.unableToLoad"),
     };
   }
 }
 
 export async function fetchRecurringPaymentById(
   request: SdpApiClient["request"],
-  recurringPaymentId: string
+  recurringPaymentId: string,
+  t: Translate
 ): Promise<FetchResult<PaymentRecurringPayment>> {
   try {
     const response = await request(
@@ -233,7 +251,7 @@ export async function fetchRecurringPaymentById(
     if (!json.data?.recurringPayment) {
       return {
         ok: false,
-        error: "Recurring payment response is missing recurring payment details.",
+        error: t("DashboardPayments.recurring.unableToLoad"),
       };
     }
 
@@ -241,14 +259,15 @@ export async function fetchRecurringPaymentById(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unable to load recurring payment",
+      error: error instanceof Error ? error.message : t("DashboardPayments.recurring.unableToLoad"),
     };
   }
 }
 
 export async function fetchRecurringPaymentCollectionAttempts(
   request: SdpApiClient["request"],
-  subscriptionId: string
+  subscriptionId: string,
+  t: Translate
 ): Promise<FetchResult<RecurringPaymentCollectionAttemptsResult>> {
   try {
     const response = await request(
@@ -277,7 +296,10 @@ export async function fetchRecurringPaymentCollectionAttempts(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unable to load collection history",
+      error:
+        error instanceof Error
+          ? error.message
+          : t("DashboardPayments.recurring.unableToLoadCollectionHistory", { error: "" }),
     };
   }
 }

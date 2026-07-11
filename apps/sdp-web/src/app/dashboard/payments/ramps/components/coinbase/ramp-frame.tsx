@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTranslations } from "@/i18n/provider";
 import { handleCoinbaseFrameEvent } from "./frame-events";
 
 /**
@@ -21,22 +22,23 @@ import { handleCoinbaseFrameEvent } from "./frame-events";
  * @see https://docs.cdp.coinbase.com/onramp/headless-onramp/overview#web-app-testing
  */
 export function CoinbaseRampFrame({ orderId, src }: { orderId: string; src: string }) {
+  const t = useTranslations();
   useEffect(() => {
     const expectedOrigin = new URL(src).origin;
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== expectedOrigin) {
         return;
       }
-      handleCoinbaseFrameEvent(orderId, event.data);
+      handleCoinbaseFrameEvent(orderId, event.data, t);
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [src, orderId]);
+  }, [src, orderId, t]);
 
   return (
     <div className="overflow-hidden rounded-2xl">
       <iframe
-        title="Coinbase onramp"
+        title={t("DashboardPayments.ramps.coinbaseOnramp")}
         src={src}
         className="h-[480px] w-full border-0"
         allow="payment"

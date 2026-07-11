@@ -3,6 +3,7 @@
 import { Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 
 interface WalletMetadataCopyButtonProps {
   value: string;
@@ -10,14 +11,15 @@ interface WalletMetadataCopyButtonProps {
 }
 
 export function WalletMetadataCopyButton({ value, label }: WalletMetadataCopyButtonProps) {
+  const t = useTranslations();
   const copyLabel = label.toLowerCase();
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(value);
-      toast.success(`${label} copied.`);
+      toast.success(t("DashboardCustody.walletMetadataCopied", { label }));
     } catch {
-      toast.error(`Unable to copy ${copyLabel}.`);
+      toast.error(t("DashboardCustody.unableToCopy", { label: copyLabel }));
     }
   };
 
@@ -27,8 +29,8 @@ export function WalletMetadataCopyButton({ value, label }: WalletMetadataCopyBut
       variant="ghost"
       size="icon-xs"
       onClick={() => void handleCopy()}
-      aria-label={`Copy ${copyLabel}`}
-      title={`Copy ${copyLabel}`}
+      aria-label={t("DashboardCustody.copy", { label: copyLabel })}
+      title={t("DashboardCustody.copy", { label: copyLabel })}
     >
       <Copy className="h-3 w-3" />
     </Button>
@@ -40,5 +42,6 @@ interface WalletAddressCopyButtonProps {
 }
 
 export function WalletAddressCopyButton({ address }: WalletAddressCopyButtonProps) {
-  return <WalletMetadataCopyButton value={address} label="Wallet address" />;
+  const t = useTranslations();
+  return <WalletMetadataCopyButton value={address} label={t("DashboardCustody.walletAddress")} />;
 }

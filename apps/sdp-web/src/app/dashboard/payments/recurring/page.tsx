@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
+import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { isRecurringPaymentsDashboardEnabled } from "@/lib/recurring-payments-feature";
@@ -26,8 +27,9 @@ export default async function RecurringPaymentsPage() {
   return withDashboardPageTrace(
     "dashboard.recurring-payments.page",
     async ({ trace, apiClient }) => {
+      const t = await getTranslations();
       const [recurringPaymentsResult, walletsResult] = await Promise.all([
-        trace.step("fetch_recurring_payments", () => fetchRecurringPayments(apiClient.request)),
+        trace.step("fetch_recurring_payments", () => fetchRecurringPayments(apiClient.request, t)),
         trace.step("fetch_wallets", () =>
           fetchPaymentsWallets(apiClient.request, { includeBalances: true })
         ),

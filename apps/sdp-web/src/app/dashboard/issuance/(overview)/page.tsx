@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
@@ -33,32 +34,36 @@ interface FetchResult<T> {
   error?: string;
 }
 
-function resolveTokenListNotice(result: FetchResult<IssuanceTokenView[]>): string | null {
+function resolveTokenListNotice(
+  result: FetchResult<IssuanceTokenView[]>,
+  t: Awaited<ReturnType<typeof getTranslations>>
+): string | null {
   if (result.ok) {
     return null;
   }
 
   if (typeof result.status === "number" && result.status >= 400 && result.status < 500) {
-    return "We couldn't load the token list right now. Refresh the page to try again.";
+    return t("DashboardIssuance.errors.tokenListRetry");
   }
 
-  return "We couldn't load the token list right now. You can still create a token or try again shortly.";
+  return t("DashboardIssuance.errors.tokenListCreateOrRetry");
 }
 
-function parseErrorMessage(body: string): string {
+function parseErrorMessage(body: string, fallback: string): string {
   try {
     const parsed = JSON.parse(body) as {
       error?: { message?: string };
       message?: string;
     };
-    return parsed?.error?.message ?? parsed?.message ?? body;
+    return (parsed?.error?.message ?? parsed?.message ?? body) || fallback;
   } catch {
-    return body;
+    return body || fallback;
   }
 }
 
 async function fetchTemplates(
-  request: SdpApiClient["request"]
+  request: SdpApiClient["request"],
+  t: Awaited<ReturnType<typeof getTranslations>>
 ): Promise<FetchResult<IssuanceTemplateView[]>> {
   try {
     const response = await request("/v1/issuance/templates");
@@ -67,7 +72,7 @@ async function fetchTemplates(
       return {
         ok: false,
         status: response.status,
-        error: parseErrorMessage(body),
+        error: parseErrorMessage(body, t("DashboardIssuance.errors.unknown")),
       };
     }
 
@@ -91,13 +96,17 @@ async function fetchTemplates(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unable to load templates",
+      error:
+        error instanceof Error
+          ? error.message
+          : t("DashboardIssuance.errors.unableToLoadTemplates"),
     };
   }
 }
 
 async function fetchTokens(
-  request: SdpApiClient["request"]
+  request: SdpApiClient["request"],
+  t: Awaited<ReturnType<typeof getTranslations>>
 ): Promise<FetchResult<IssuanceTokenView[]>> {
   try {
     const tokensPath = `/v1/issuance/tokens?${new URLSearchParams({
@@ -110,7 +119,7 @@ async function fetchTokens(
       return {
         ok: false,
         status: response.status,
-        error: parseErrorMessage(body),
+        error: parseErrorMessage(body, t("DashboardIssuance.errors.unknown")),
       };
     }
 
@@ -133,7 +142,7 @@ async function fetchTokens(
       .filter((token): token is NonNullable<typeof token> => Boolean(token?.id))
       .map((token) => ({
         id: token.id ?? "",
-        name: token.name ?? "Untitled token",
+        name: token.name ?? t("DashboardIssuance.management.untitledToken"),
         symbol: token.symbol ?? "-",
         status: token.status ?? "pending",
         template: token.template ?? "custom",
@@ -148,7 +157,8 @@ async function fetchTokens(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unable to load tokens",
+      error:
+        error instanceof Error ? error.message : t("DashboardIssuance.errors.unableToLoadTokens"),
     };
   }
 }
@@ -158,6 +168,7 @@ interface IssuancePageProps {
 }
 
 export default async function IssuancePage({ searchParams }: IssuancePageProps) {
+  const t = await getTranslations();
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -180,8 +191,8 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
       createSdpApiClient(trace.childContext("dashboard.issuance.api"))
     );
     const [templatesResult, tokensResult, apiKeysResult, signerWalletsResult] = await Promise.all([
-      trace.step("fetch_templates", () => fetchTemplates(apiClient.request)),
-      trace.step("fetch_tokens", () => fetchTokens(apiClient.request)),
+      trace.step("fetch_templates", () => fetchTemplates(apiClient.request, t)),
+      trace.step("fetch_tokens", () => fetchTokens(apiClient.request, t)),
       trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
       trace.step("fetch_signer_wallets", () =>
         fetchPaymentsWallets(apiClient.request, { view: "summary" })
@@ -192,7 +203,11 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
     const apiKeys = apiKeysResult.data ?? [];
     const templatesError = templatesResult.ok
       ? null
-      : `Template API ${templatesResult.status ?? "unavailable"}: ${templatesResult.error ?? "Unknown error"}`;
+      : t("DashboardIssuance.errors.apiRequestFailed", {
+          resource: t("DashboardIssuance.errors.templateResource"),
+          status: templatesResult.status ?? t("DashboardIssuance.errors.unavailable"),
+          error: templatesResult.error ?? t("DashboardIssuance.errors.unknown"),
+        });
 
     trace.log({
       ok: true,
@@ -211,18 +226,22 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
         signerWallets={signerWalletsResult.data ?? []}
         apiBaseUrl={apiBaseUrl}
         templatesError={templatesError}
-        tokensNotice={resolveTokenListNotice(tokensResult)}
+        tokensNotice={resolveTokenListNotice(tokensResult, t)}
         signerWalletsError={
           signerWalletsResult.ok
             ? null
-            : `Wallet API ${signerWalletsResult.status ?? "unavailable"}: ${signerWalletsResult.error ?? "Unknown error"}`
+            : t("DashboardIssuance.errors.apiRequestFailed", {
+                resource: t("DashboardIssuance.errors.walletResource"),
+                status: signerWalletsResult.status ?? t("DashboardIssuance.errors.unavailable"),
+                error: signerWalletsResult.error ?? t("DashboardIssuance.errors.unknown"),
+              })
         }
       />
     );
   } catch (error) {
     trace.log({
       ok: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: error instanceof Error ? error.message : t("DashboardIssuance.errors.unknown"),
     });
     throw error;
   }

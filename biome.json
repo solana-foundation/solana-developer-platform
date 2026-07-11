@@ -60,6 +60,21 @@
   },
   "overrides": [
     {
+      "includes": ["**/apps/sdp-web/src/**/*.ts", "**/apps/sdp-web/src/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "security": {
+            "noSecrets": {
+              "level": "error",
+              "options": {
+                "entropyThreshold": 100
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/src/openapi/**/*.ts", "**/apps/sdp-api/src/openapi/**/*.ts"],
       "linter": {
         "rules": {

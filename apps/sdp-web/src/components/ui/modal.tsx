@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslations } from "@/i18n/provider";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import { cn } from "@/lib/utils";
 import { ModalCloseButton } from "./modal-close-button";
@@ -35,11 +36,13 @@ export function Modal({
   children,
   onClose,
   closeDisabled = false,
-  closeLabel = "Close modal",
+  closeLabel,
   contentClassName,
   showCloseButton = true,
   size = "md",
 }: ModalProps) {
+  const t = useTranslations();
+  const resolvedCloseLabel = closeLabel ?? t("Shared.SharedComponents.closeModal");
   const [mounted, setMounted] = useState(false);
   const [dialogNode, setDialogNode] = useState<HTMLElement | null>(null);
   const canClose = Boolean(onClose) && !closeDisabled;
@@ -61,7 +64,7 @@ export function Modal({
       {onClose ? (
         <button
           type="button"
-          aria-label={closeLabel}
+          aria-label={resolvedCloseLabel}
           className="absolute inset-0 cursor-default"
           onClick={onClose}
           disabled={!canClose}
@@ -84,7 +87,7 @@ export function Modal({
           )}
         >
           {showCloseButton && onClose ? (
-            <ModalCloseButton onClick={onClose} disabled={!canClose} label={closeLabel} />
+            <ModalCloseButton onClick={onClose} disabled={!canClose} label={resolvedCloseLabel} />
           ) : null}
           <PortalContainerProvider container={dialogNode}>{children}</PortalContainerProvider>
         </div>

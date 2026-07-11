@@ -16,17 +16,19 @@ import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useTranslations } from "@/i18n/provider";
 import type { OnchainSendWizard } from "../hooks/use-onchain-send-wizard";
 import { walletComboboxOptions } from "../wallet-options";
 import { AmountBalanceReadout } from "./amount-balance-readout";
 import { CounterpartyAccountSelector } from "./counterparty-account-selector";
 
 function NoAssetsHint({ walletId, assetCount }: { walletId: string; assetCount: number }) {
+  const t = useTranslations();
   if (!walletId || assetCount > 0) {
     return null;
   }
   return (
-    <p className="text-sm text-status-error-text">This wallet has no assets available to send.</p>
+    <p className="text-sm text-status-error-text">{t("DashboardPayments.onchainSend.noAssets")}</p>
   );
 }
 
@@ -53,6 +55,7 @@ export function OnchainSendStepContent({
   wizard: OnchainSendWizard;
   counterpartyName: string;
 }) {
+  const t = useTranslations();
   const {
     currentStepId,
     cryptoAccounts,
@@ -101,12 +104,15 @@ export function OnchainSendStepContent({
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-sm font-medium text-text-extra-high">
-              Add Solana address
+              {t("DashboardPayments.onchainSend.addSolanaAddress")}
             </span>
             <span className="block text-sm text-text-low">
               {cryptoAccounts.length === 0
-                ? `${counterpartyName || "This counterparty"} has no Solana address on file yet.`
-                : "Attach another destination address for this counterparty."}
+                ? t("DashboardPayments.onchainSend.counterpartyNoAddress", {
+                    counterparty:
+                      counterpartyName || t("DashboardPayments.onchainSend.thisCounterparty"),
+                  })
+                : t("DashboardPayments.onchainSend.attachDestination")}
             </span>
           </span>
         </button>
@@ -124,19 +130,19 @@ export function OnchainSendStepContent({
     return (
       <div className="space-y-4">
         <Combobox
-          label="Source wallet"
+          label={t("DashboardPayments.onchainSend.sourceWallet")}
           value={fields.walletId || null}
           onChange={selectWallet}
           options={walletOptions}
-          placeholder="Select a source wallet"
-          searchPlaceholder="Search wallets"
+          placeholder={t("DashboardPayments.onchainSend.selectSourceWallet")}
+          searchPlaceholder={t("DashboardPayments.onchainSend.searchWallets")}
           icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
           isLoading={walletsLoading}
         />
         <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
           <div className="flex flex-col gap-2">
             <Label className="text-sm font-medium text-text-low" htmlFor="onchain-send-amount">
-              Amount
+              {t("DashboardPayments.onchainSend.amount")}
             </Label>
             <Input
               id="onchain-send-amount"
@@ -166,11 +172,11 @@ export function OnchainSendStepContent({
             />
           </div>
           <Combobox
-            label="Asset"
+            label={t("DashboardPayments.onchainSend.asset")}
             value={fields.asset || null}
             onChange={(value) => setField("asset", value)}
             options={assetSelectOptions}
-            placeholder="Select an asset"
+            placeholder={t("DashboardPayments.onchainSend.selectAsset")}
             searchable={false}
             disabled={!fields.walletId || assetSelectOptions.length === 0}
           />
@@ -178,13 +184,13 @@ export function OnchainSendStepContent({
         <NoAssetsHint walletId={fields.walletId} assetCount={assetSelectOptions.length} />
         <div className="flex flex-col gap-2">
           <Label className="text-sm font-medium text-text-low" htmlFor="onchain-send-memo">
-            Memo (optional)
+            {t("DashboardPayments.onchainSend.memoOptional")}
           </Label>
           <Input
             id="onchain-send-memo"
             value={fields.memo}
             onChange={(event) => setField("memo", event.currentTarget.value)}
-            placeholder="Add a note for this transfer"
+            placeholder={t("DashboardPayments.onchainSend.memoPlaceholder")}
             size="xl"
             className="shadow-none ring-0 [&>span:first-child]:border-0 [&>span:first-child]:bg-border-extra-light"
           />
@@ -197,23 +203,23 @@ export function OnchainSendStepContent({
     <div className="divide-y divide-border-light">
       <DetailRow
         icon={<UserRoundIcon className="size-3.5" />}
-        label="To"
+        label={t("DashboardPayments.onchainSend.to")}
         value={counterpartyName || "—"}
       />
       <DetailRow
         icon={<WalletIcon className="size-3.5" />}
-        label="Destination"
+        label={t("DashboardPayments.onchainSend.destination")}
         value={<span className="font-mono text-xs">{shortenAddress(destinationAddress)}</span>}
       />
       <DetailRow
         icon={<WalletIcon className="size-3.5" />}
-        label="Source wallet"
+        label={t("DashboardPayments.onchainSend.sourceWallet")}
         value={selectedWallet?.label ?? selectedWallet?.walletId ?? "—"}
       />
       {fields.memo.trim() ? (
         <DetailRow
           icon={<StickyNoteIcon className="size-3.5" />}
-          label="Memo"
+          label={t("DashboardPayments.onchainSend.memo")}
           value={fields.memo.trim()}
         />
       ) : null}
@@ -225,7 +231,11 @@ export function OnchainSendStepContent({
       <p className="text-3xl font-semibold tracking-tight text-text-extra-high">
         {fields.amount || "0"} {selectedAsset?.label ?? fields.asset}
       </p>
-      <p className="text-sm text-text-low">to {counterpartyName || "counterparty"}</p>
+      <p className="text-sm text-text-low">
+        {t("DashboardPayments.onchainSend.toCounterparty", {
+          counterparty: counterpartyName || t("DashboardPayments.onchainSend.counterparty"),
+        })}
+      </p>
     </div>
   );
 
@@ -237,12 +247,14 @@ export function OnchainSendStepContent({
         </div>
         <div className="space-y-1 text-center">
           <p className="text-2xl font-medium tracking-tight text-text-extra-high">
-            Transfer submitted
+            {t("DashboardPayments.onchainSend.transferSubmitted")}
           </p>
           <p className="text-sm text-text-low">
             {transferResult.signature
-              ? "Your transfer was sent successfully."
-              : `Status: ${transferResult.status}`}
+              ? t("DashboardPayments.onchainSend.transferSuccess")
+              : t("DashboardPayments.onchainSend.transferStatus", {
+                  status: transferResult.status,
+                })}
           </p>
         </div>
         <section className="w-full space-y-4 rounded-2xl bg-border-extra-light p-5">
@@ -259,7 +271,7 @@ export function OnchainSendStepContent({
               window.open(getDevnetExplorerUrl(transferResult.signature ?? ""), "_blank")
             }
           >
-            View on explorer
+            {t("DashboardPayments.onchainSend.viewOnExplorer")}
           </Button>
         ) : null}
       </div>

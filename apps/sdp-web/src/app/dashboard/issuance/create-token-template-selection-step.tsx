@@ -2,14 +2,17 @@
 
 import { ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
+import { useTranslations } from "@/i18n/provider";
 import type { TemplateSelection } from "./create-token-modal.types";
-import { templateCards } from "./create-token-modal.utils";
+import { getTemplateCards } from "./create-token-modal.utils";
 
 interface TemplateSelectionStepProps {
   onSelect: (template: TemplateSelection) => void;
 }
 
 export function TemplateSelectionStep({ onSelect }: TemplateSelectionStepProps) {
+  const t = useTranslations();
+  const templateCards = getTemplateCards(t);
   return (
     <motion.div
       key="template-selection"
@@ -31,7 +34,7 @@ function TemplateCard({
   descriptor,
   onSelect,
 }: {
-  descriptor: (typeof templateCards)[number];
+  descriptor: ReturnType<typeof getTemplateCards>[number];
   onSelect: (template: TemplateSelection) => void;
 }) {
   const Icon = descriptor.icon;
