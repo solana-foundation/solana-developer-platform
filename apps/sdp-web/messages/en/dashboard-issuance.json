@@ -132,7 +132,7 @@
       "pausedHint": "Minting, burning, and administrative transfer actions are disabled until the token is unpaused.",
       "unpauseToken": "Unpause token",
       "deployToken": "Deploy token",
-      "deployHint": "This will deploy the token on-chain so operations can run.",
+      "deployHint": "This will deploy the token onchain so operations can run.",
       "cancel": "Cancel",
       "deployNow": "Deploy now",
       "runningAction": "Running action...",
