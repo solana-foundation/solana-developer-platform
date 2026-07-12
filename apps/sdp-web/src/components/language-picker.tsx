@@ -31,7 +31,7 @@ export function LanguagePicker({ variant = "topbar" }: { variant?: "topbar" | "l
     if (!isAppLocale(value) || value === locale) return;
 
     // biome-ignore lint/suspicious/noDocumentCookie: The server locale resolver needs this preference on the next request.
-    document.cookie = `${localeCookieName}=${encodeURIComponent(value)}; Path=/; Max-Age=${localeCookieMaxAgeSeconds}; SameSite=Lax`;
+    document.cookie = `${localeCookieName}=${encodeURIComponent(value)}; Path=/; Max-Age=${localeCookieMaxAgeSeconds}; SameSite=Lax; Secure`;
     document.documentElement.lang = value;
     router.refresh();
   };
