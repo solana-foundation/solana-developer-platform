@@ -17,8 +17,19 @@ import { cn } from "@/lib/utils";
 
 const localeCookieMaxAgeSeconds = 60 * 60 * 24 * 365;
 
+const displayNamesCache = new Map<AppLocale, Intl.DisplayNames>();
+
+function getDisplayNames(displayLocale: AppLocale): Intl.DisplayNames {
+  let dn = displayNamesCache.get(displayLocale);
+  if (!dn) {
+    dn = new Intl.DisplayNames([displayLocale], { type: "language" });
+    displayNamesCache.set(displayLocale, dn);
+  }
+  return dn;
+}
+
 function localeDisplayName(locale: AppLocale, displayLocale: AppLocale): string {
-  return new Intl.DisplayNames([displayLocale], { type: "language" }).of(locale) ?? locale;
+  return getDisplayNames(displayLocale).of(locale) ?? locale;
 }
 
 export function LanguagePicker({ variant = "topbar" }: { variant?: "topbar" | "landing" }) {
