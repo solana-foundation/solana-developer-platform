@@ -9,8 +9,11 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
+  approveApprovalRequest,
+  cancelApprovalRequest,
   createWallet,
   deleteWallet,
+  getApprovalRequest,
   getConfig,
   getConfigs,
   getPublicKey,
@@ -18,7 +21,9 @@ import {
   getWalletAggregate,
   getWalletById,
   initializeSigning,
+  listApprovalRequests,
   listWallets,
+  rejectApprovalRequest,
   setDefaultWallet,
   signerCheck,
   switchSigning,
@@ -47,6 +52,27 @@ wallets.get("/", requirePermissions("wallets:read"), listWallets);
 wallets.get("/aggregate", requirePermissions("wallets:read"), getWalletAggregate);
 wallets.get("/public-key", requirePermissions("wallets:read"), getPublicKey);
 wallets.get("/switch-options", requirePermissions("custody:admin"), getSwitchProviderOptions);
+wallets.get("/approval-requests", requirePermissions("wallets:read"), listApprovalRequests);
+wallets.get(
+  "/approval-requests/:approvalRequestId",
+  requirePermissions("wallets:read"),
+  getApprovalRequest
+);
+wallets.post(
+  "/approval-requests/:approvalRequestId/approve",
+  requirePermissions("wallets:write"),
+  approveApprovalRequest
+);
+wallets.post(
+  "/approval-requests/:approvalRequestId/reject",
+  requirePermissions("wallets:write"),
+  rejectApprovalRequest
+);
+wallets.post(
+  "/approval-requests/:approvalRequestId/cancel",
+  requirePermissions("wallets:write"),
+  cancelApprovalRequest
+);
 wallets.get("/:walletId", requirePermissions("wallets:read"), getWalletById);
 
 export default wallets;
