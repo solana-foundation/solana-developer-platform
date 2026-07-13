@@ -8,6 +8,7 @@ import type { Context, Next } from "hono";
 import type { Env } from "@/types/env";
 
 const REQUEST_ID_HEADER = "X-Request-ID";
+const IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
 const MAX_REQUEST_ID_LENGTH = 128;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
@@ -22,7 +23,7 @@ function stripControlChars(value: string): string {
   return result;
 }
 
-function normalizeRequestId(value: string | null | undefined): string | null {
+function normalizeHeaderToken(value: string | null | undefined): string | null {
   if (!value) {
     return null;
   }
@@ -44,12 +45,17 @@ export function requestIdMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     // Use provided request ID or generate a new one
     const requestId =
-      normalizeRequestId(c.req.header(REQUEST_ID_HEADER)) ||
-      normalizeRequestId(c.req.header("cf-ray")) ||
+      normalizeHeaderToken(c.req.header(REQUEST_ID_HEADER)) ||
+      normalizeHeaderToken(c.req.header("cf-ray")) ||
       `req_${crypto.randomUUID()}`;
 
     c.set("requestId", requestId);
     c.header(REQUEST_ID_HEADER, requestId);
+
+    const idempotencyKey = normalizeHeaderToken(c.req.header(IDEMPOTENCY_KEY_HEADER));
+    if (idempotencyKey) {
+      c.header(IDEMPOTENCY_KEY_HEADER, idempotencyKey);
+    }
 
     await next();
   };
