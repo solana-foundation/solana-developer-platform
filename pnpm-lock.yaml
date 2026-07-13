@@ -410,6 +410,9 @@ importers:
 
   packages/sdp-api-integration:
     dependencies:
+      '@sdp/payments':
+        specifier: workspace:*
+        version: link:../sdp-payments
       '@sdp/rpc':
         specifier: workspace:*
         version: link:../sdp-rpc

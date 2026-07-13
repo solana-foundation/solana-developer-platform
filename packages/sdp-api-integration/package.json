@@ -15,6 +15,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@sdp/payments": "workspace:*",
     "@sdp/rpc": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana-program/system": "catalog:",

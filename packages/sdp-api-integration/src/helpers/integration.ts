@@ -1,7 +1,5 @@
 import { getDb } from "@sdp/api/db";
 import app from "@sdp/api/index";
-import { hashString } from "@sdp/api/lib/hash";
-import { createFeePaymentAdapter } from "@sdp/api/services/adapters/fee-payment";
 import { createSigningService } from "@sdp/api/services/domain/signing.service";
 import { createMosaicService } from "@sdp/api/services/mosaic";
 import { createToken2022Service, Token2022Service } from "@sdp/api/services/solana";
@@ -16,6 +14,8 @@ import {
   TEST_PROJECT_CACHED_KEY,
 } from "@sdp/api-test/fixtures/tokens";
 import { clearTestDatabase, seedTestDatabase } from "@sdp/api-test/mocks/db";
+import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
+import { hashString } from "@sdp/payments/hash";
 import {
   confirmTransaction,
   createRpc,
