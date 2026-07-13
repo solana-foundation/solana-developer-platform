@@ -97,6 +97,30 @@ describe("recurring payment lifecycle transitions", () => {
       "recoverable"
     );
     assert.equal(
+      decideRecurringPaymentActivationTransition({
+        status: "activating",
+        updatedAt: FRESH,
+        nowIso: NOW,
+      }),
+      "processing"
+    );
+    assert.equal(
+      decideRecurringPaymentActivationTransition({
+        status: "active",
+        updatedAt: FRESH,
+        nowIso: NOW,
+      }),
+      "already_final"
+    );
+    assert.equal(
+      decideRecurringPaymentUpdateTransition({
+        status: "pending_activation",
+        updatedAt: FRESH,
+        nowIso: NOW,
+      }),
+      "claimable"
+    );
+    assert.equal(
       decideRecurringPaymentUpdateTransition({
         status: "active",
         updatedAt: FRESH,
@@ -111,6 +135,14 @@ describe("recurring payment lifecycle transitions", () => {
         nowIso: NOW,
       }),
       "processing"
+    );
+    assert.equal(
+      decideRecurringPaymentUpdateTransition({
+        status: "updating",
+        updatedAt: STALE,
+        nowIso: NOW,
+      }),
+      "recoverable"
     );
     assert.equal(
       decideRecurringPaymentUpdateTransition({
