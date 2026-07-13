@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.40.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.40.0...v0.40.1) (2026-07-13)
+
+### Refactors
+
+* **payments:** extract recurring payment lifecycle ([#689](https://github.com/solana-foundation/solana-developer-platform/pull/689)) ([369ff70](https://github.com/solana-foundation/solana-developer-platform/commit/369ff70b66b90a2a3790527703d391c738a27155))
+
 ## [0.40.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.39.0...v0.40.0) (2026-07-11)
 
 ### Features
