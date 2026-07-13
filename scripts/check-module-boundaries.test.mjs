@@ -4,6 +4,7 @@ import {
   findWorkspaceDependencyCycles,
   forbiddenPackageSourceImport,
   validateModuleBoundaries,
+  workspaceImportName,
 } from "./check-module-boundaries.mjs";
 
 const api = {
@@ -18,6 +19,15 @@ const integration = {
   allowedDependencies: ["@sdp/api"],
   declaredDependencies: ["@sdp/api"],
 };
+
+test("assigns subpath imports to the longest matching workspace package", () => {
+  const workspacePackage = workspaceImportName("@sdp/api-integration/helpers", [
+    "@sdp/api",
+    "@sdp/api-integration",
+  ]);
+
+  assert.equal(workspacePackage, "@sdp/api-integration");
+});
 
 test("permits the explicit API test-support facade", () => {
   const errors = validateModuleBoundaries({
