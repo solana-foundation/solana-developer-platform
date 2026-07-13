@@ -45,6 +45,25 @@ test("rejects package imports of API-private paths", () => {
   assert.equal(violation, "imports API source outside @sdp/api/test-support");
 });
 
+test("reports package-to-app imports once", () => {
+  const errors = validateModuleBoundaries({
+    modules: [api, integration],
+    appSourceRoots: ["/repo/apps/sdp-api/src"],
+    sourceReferences: [
+      {
+        module: integration,
+        filePath: "/repo/packages/sdp-api-integration/src/helpers/integration.ts",
+        kind: "import",
+        specifier: "@sdp/api/services/solana",
+      },
+    ],
+  });
+
+  assert.deepEqual(errors, [
+    "/repo/packages/sdp-api-integration/src/helpers/integration.ts imports application source from @sdp/api/services/solana.",
+  ]);
+});
+
 test("rejects app compatibility re-exports", () => {
   const errors = validateModuleBoundaries({
     modules: [

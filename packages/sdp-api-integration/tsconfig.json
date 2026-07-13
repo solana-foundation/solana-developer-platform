@@ -3,8 +3,7 @@
   "compilerOptions": {
     "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"],
     "paths": {
-      "@/*": ["../../apps/sdp-api/src/*"],
-      "@sdp/api/test-support": ["../../apps/sdp-api/src/test/integration-support.ts"]
+      "@sdp/api/test-support": ["./src/api-test-support.d.ts"]
     }
   },
   "include": ["src/**/*.ts"]

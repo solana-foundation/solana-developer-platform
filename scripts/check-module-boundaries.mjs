@@ -213,6 +213,10 @@ export function validateModuleBoundaries({
 
   for (const reference of sourceReferences) {
     const importedWorkspace = workspaceImportName(reference.specifier, moduleNames);
+    const importedModule = importedWorkspace ? byName.get(importedWorkspace) : undefined;
+    const isPackageToAppImport =
+      reference.module.directory.startsWith("packages/") &&
+      importedModule?.directory.startsWith("apps/");
     if (importedWorkspace && importedWorkspace !== reference.module.name) {
       if (!reference.module.declaredDependencies.includes(importedWorkspace)) {
         errors.push(
@@ -220,10 +224,8 @@ export function validateModuleBoundaries({
         );
       }
 
-      const importedModule = byName.get(importedWorkspace);
       if (
-        reference.module.directory.startsWith("packages/") &&
-        importedModule?.directory.startsWith("apps/") &&
+        isPackageToAppImport &&
         !(
           reference.module.name === "@sdp/api-integration" &&
           reference.specifier === "@sdp/api/test-support"
@@ -245,7 +247,9 @@ export function validateModuleBoundaries({
       }
     }
 
-    const violation = forbiddenPackageSourceImport({ ...reference, appSourceRoots });
+    const violation = isPackageToAppImport
+      ? undefined
+      : forbiddenPackageSourceImport({ ...reference, appSourceRoots });
     if (violation) {
       errors.push(`${toPosixPath(reference.filePath)} ${violation}: ${reference.specifier}.`);
     }

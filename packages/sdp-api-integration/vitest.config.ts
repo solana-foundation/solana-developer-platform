@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 import { defineConfig } from "vitest/config";
+import { resolveApiInternalImports } from "./resolve-api-internal-imports";
 
 const DEV_VARS_PATH = path.resolve(__dirname, "../../apps/sdp-api/.dev.vars");
 
@@ -56,6 +57,7 @@ const turnkeyRequestDelayMs = getEnv("TURNKEY_REQUEST_DELAY_MS");
 
 export default defineConfig({
   plugins: [
+    resolveApiInternalImports(),
     cloudflareTest({
       wrangler: {
         configPath: path.resolve(__dirname, "../../apps/sdp-api/wrangler.toml"),
@@ -110,7 +112,6 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "../../apps/sdp-api/src"),
       "@sdp/api/test-support": path.resolve(
         __dirname,
         "../../apps/sdp-api/src/test/integration-support.ts"
