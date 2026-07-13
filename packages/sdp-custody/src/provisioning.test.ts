@@ -1,10 +1,14 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type {
+  ProvisionCoinbaseCdpConfig,
+  ProvisionParaConfig,
+  ProvisionUtilaConfig,
+} from "./provisioning";
 import {
   provisionCoinbaseCdpAccount,
   provisionParaWallet,
   provisionUtilaWallet,
-} from "@/services/custody/provisioning";
-import type { Env } from "@/types/env";
+} from "./provisioning";
 
 const CREATED_ADDRESS = "11111111111111111111111111111111";
 const EXISTING_ADDRESS = "22222222222222222222222222222222";
@@ -42,13 +46,7 @@ describe("coinbase account provisioning", () => {
       });
 
     const result = await provisionCoinbaseCdpAccount(
-      createCoinbaseEnv({
-        ENVIRONMENT: "production",
-      }),
-      {
-        orgId: "org_abc",
-        orgSlug: "Acme Labs",
-      }
+      createCoinbaseConfig({ accountScope: "production" })
     );
 
     expect(result.address).toBe(CREATED_ADDRESS);
@@ -77,13 +75,7 @@ describe("coinbase account provisioning", () => {
       });
 
     const result = await provisionCoinbaseCdpAccount(
-      createCoinbaseEnv({
-        COINBASE_CDP_ACCOUNT_NAMESPACE: "local",
-      }),
-      {
-        orgId: "org_abc",
-        orgSlug: "Acme Labs",
-      }
+      createCoinbaseConfig({ accountScope: "local" })
     );
 
     expect(result.address).toBe(EXISTING_ADDRESS);
@@ -106,11 +98,11 @@ describe("coinbase account provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
-      orgId: "org_abc",
-      orgSlug: "Acme Labs",
-      walletAddress: EXISTING_ADDRESS,
-    });
+    const result = await provisionCoinbaseCdpAccount(
+      createCoinbaseConfig({
+        walletAddress: EXISTING_ADDRESS,
+      })
+    );
 
     expect(result.address).toBe(EXISTING_ADDRESS);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -133,10 +125,7 @@ describe("coinbase account provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
-      orgId: "org_abc",
-      orgSlug: "Acme Labs",
-    });
+    const result = await provisionCoinbaseCdpAccount(createCoinbaseConfig());
 
     expect(result.address).toBe(EXISTING_ADDRESS);
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -159,12 +148,9 @@ describe("coinbase account provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    await expect(
-      provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
-        orgId: "org_abc",
-        orgSlug: "Acme Labs",
-      })
-    ).rejects.toThrowError(/could not be resolved by name/i);
+    await expect(provisionCoinbaseCdpAccount(createCoinbaseConfig())).rejects.toThrowError(
+      /could not be resolved by name/i
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -186,12 +172,9 @@ describe("coinbase account provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    await expect(
-      provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
-        orgId: "org_abc",
-        orgSlug: "Acme Labs",
-      })
-    ).rejects.toThrowError(/could not be resolved by name/i);
+    await expect(provisionCoinbaseCdpAccount(createCoinbaseConfig())).rejects.toThrowError(
+      /could not be resolved by name/i
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -232,7 +215,8 @@ describe("utila wallet provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionUtilaWallet(createUtilaEnv(), {
+    const result = await provisionUtilaWallet({
+      ...createUtilaConfig(),
       displayName: "Root Wallet",
     });
 
@@ -283,10 +267,7 @@ describe("para wallet provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionParaWallet(createParaEnv(), {
-      orgId: "org_abc",
-      orgSlug: "Acme Labs",
-    });
+    const result = await provisionParaWallet(createParaConfig());
 
     expect(result.walletId).toBe(walletId);
     expect(result.address).toBe(CREATED_ADDRESS);
@@ -306,12 +287,9 @@ describe("para wallet provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    await expect(
-      provisionParaWallet(createParaEnv(), {
-        orgId: "org_abc",
-        orgSlug: "Acme Labs",
-      })
-    ).rejects.toThrowError(/Para API error: 400/i);
+    await expect(provisionParaWallet(createParaConfig())).rejects.toThrowError(
+      /Para API error: 400/i
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -341,11 +319,11 @@ describe("para wallet provisioning", () => {
       });
 
     await expect(
-      provisionParaWallet(createParaEnv(), {
-        orgId: "org_abc",
-        orgSlug: "Acme Labs",
-        walletId,
-      })
+      provisionParaWallet(
+        createParaConfig({
+          walletId,
+        })
+      )
     ).rejects.toThrowError(/not a solana wallet/i);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -376,11 +354,11 @@ describe("para wallet provisioning", () => {
       });
 
     await expect(
-      provisionParaWallet(createParaEnv(), {
-        orgId: "org_abc",
-        orgSlug: "Acme Labs",
-        walletId,
-      })
+      provisionParaWallet(
+        createParaConfig({
+          walletId,
+        })
+      )
     ).rejects.toThrowError(/not ed25519/i);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -406,10 +384,7 @@ describe("para wallet provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const provisionPromise = provisionParaWallet(createParaEnv(), {
-      orgId: "org_abc",
-      orgSlug: "Acme Labs",
-    });
+    const provisionPromise = provisionParaWallet(createParaConfig());
 
     const resultPromise = expect(provisionPromise).rejects.toThrowError(/Para API error: 500/i);
 
@@ -419,35 +394,39 @@ describe("para wallet provisioning", () => {
   });
 });
 
-function createCoinbaseEnv(overrides: Partial<Env> = {}): Env {
+function createCoinbaseConfig(
+  overrides: Partial<ProvisionCoinbaseCdpConfig> = {}
+): ProvisionCoinbaseCdpConfig {
   return {
-    ENVIRONMENT: "development",
-    COINBASE_CDP_API_KEY_ID: "test-api-key-id",
-    COINBASE_CDP_API_KEY_SECRET: keyMaterial.privateKeyPem,
-    COINBASE_CDP_WALLET_SECRET: keyMaterial.privateKeyPkcs8Base64,
+    orgId: "org_abc",
+    orgSlug: "Acme Labs",
+    apiKeyId: "test-api-key-id",
+    apiKeySecret: keyMaterial.privateKeyPem,
+    walletSecret: keyMaterial.privateKeyPkcs8Base64,
+    accountScope: "development",
     ...overrides,
-  } as Env;
+  };
 }
 
-function createParaEnv(overrides: Partial<Env> = {}): Env {
+function createParaConfig(overrides: Partial<ProvisionParaConfig> = {}): ProvisionParaConfig {
   return {
-    ENVIRONMENT: "development",
-    PARA_API_KEY: "test-para-api-key",
-    PARA_API_BASE_URL: "https://api.getpara.com",
+    orgId: "org_abc",
+    orgSlug: "Acme Labs",
+    apiKey: "test-para-api-key",
+    apiBaseUrl: "https://api.getpara.com",
     ...overrides,
-  } as Env;
+  };
 }
 
-function createUtilaEnv(overrides: Partial<Env> = {}): Env {
+function createUtilaConfig(overrides: Partial<ProvisionUtilaConfig> = {}): ProvisionUtilaConfig {
   return {
-    ENVIRONMENT: "development",
-    SOLANA_NETWORK: "devnet",
-    UTILA_SERVICE_ACCOUNT_EMAIL: "service-account@example.com",
-    UTILA_SERVICE_ACCOUNT_PRIVATE_KEY: utilaPrivateKeyPem,
-    UTILA_VAULT_ID: "vaults/vault_123",
-    UTILA_API_BASE_URL: "https://api.utila.io",
+    serviceAccountEmail: "service-account@example.com",
+    serviceAccountPrivateKeyPem: utilaPrivateKeyPem,
+    vaultId: "vaults/vault_123",
+    network: "networks/solana-devnet",
+    apiBaseUrl: "https://api.utila.io",
     ...overrides,
-  } as Env;
+  };
 }
 
 function toUrlString(input: string | URL | Request): string {

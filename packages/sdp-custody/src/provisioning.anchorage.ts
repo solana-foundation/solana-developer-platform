@@ -1,7 +1,5 @@
-import { SigningError } from "@sdp/custody/signing";
-import { readStringFrom } from "@/lib/json";
-import type { Env } from "@/types/env";
-import { parseJsonResponse, readErrorResponseText } from "./provisioning.common";
+import { parseJsonResponse, readErrorResponseText, readStringFrom } from "./provisioning.common";
+import { SigningError } from "./signing";
 
 const DEFAULT_ANCHORAGE_API_BASE_URL = "https://api.anchorage.com";
 
@@ -17,7 +15,8 @@ interface AnchorageRequestParams {
 
 type AnchorageAuthStrategy = "api-key" | "bearer";
 
-export interface ProvisionAnchorageOptions {
+export interface ProvisionAnchorageConfig {
+  apiKey?: string;
   apiBaseUrl?: string;
   walletId?: string;
   walletLabel?: string;
@@ -29,16 +28,16 @@ export interface ProvisionAnchorageResult {
   address: string;
 }
 
-export interface DeleteAnchorageOptions {
+export interface DeleteAnchorageConfig {
+  apiKey?: string;
   apiBaseUrl?: string;
   walletId: string;
 }
 
 export async function provisionAnchorageWallet(
-  env: Env,
-  options: ProvisionAnchorageOptions
+  options: ProvisionAnchorageConfig
 ): Promise<ProvisionAnchorageResult> {
-  const { apiBaseUrl, apiKey } = resolveAnchorageConfig(env, options.apiBaseUrl);
+  const { apiBaseUrl, apiKey } = resolveAnchorageConfig(options);
 
   if (options.walletId) {
     const existing = await anchorageRequest<unknown>({
@@ -64,11 +63,8 @@ export async function provisionAnchorageWallet(
   return extractAnchorageWallet(created);
 }
 
-export async function deleteAnchorageWallet(
-  env: Env,
-  options: DeleteAnchorageOptions
-): Promise<void> {
-  const { apiBaseUrl, apiKey } = resolveAnchorageConfig(env, options.apiBaseUrl);
+export async function deleteAnchorageWallet(options: DeleteAnchorageConfig): Promise<void> {
+  const { apiBaseUrl, apiKey } = resolveAnchorageConfig(options);
 
   await anchorageRequest<void>({
     method: "DELETE",
@@ -78,14 +74,11 @@ export async function deleteAnchorageWallet(
   });
 }
 
-function resolveAnchorageConfig(
-  env: Env,
-  apiBaseUrlOverride?: string
-): {
+function resolveAnchorageConfig(options: { apiKey?: string; apiBaseUrl?: string }): {
   apiBaseUrl: string;
   apiKey: string;
 } {
-  const apiKey = env.ANCHORAGE_API_KEY;
+  const apiKey = options.apiKey;
   if (!apiKey) {
     throw new SigningError(
       "Anchorage environment variables not configured: ANCHORAGE_API_KEY",
@@ -94,7 +87,7 @@ function resolveAnchorageConfig(
   }
 
   return {
-    apiBaseUrl: apiBaseUrlOverride ?? env.ANCHORAGE_API_BASE_URL ?? DEFAULT_ANCHORAGE_API_BASE_URL,
+    apiBaseUrl: options.apiBaseUrl ?? DEFAULT_ANCHORAGE_API_BASE_URL,
     apiKey,
   };
 }

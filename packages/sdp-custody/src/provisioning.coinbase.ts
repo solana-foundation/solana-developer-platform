@@ -1,6 +1,4 @@
-import { SigningError } from "@sdp/custody/signing";
 import { importJWK, importPKCS8, SignJWT } from "jose";
-import type { Env } from "@/types/env";
 import {
   decodeBase64ToBytes,
   encodePkcs8Pem,
@@ -11,6 +9,7 @@ import {
   sortJsonKeys,
   toBase64Url,
 } from "./provisioning.common";
+import { SigningError } from "./signing";
 
 export interface CoinbaseCdpRequestParams {
   method: "GET" | "POST" | "PUT" | "DELETE";
@@ -218,11 +217,6 @@ export function buildCoinbaseCdpAccountName(value: string, scope?: string): stri
   }
 
   return name;
-}
-
-export function resolveCoinbaseCdpAccountScope(env: Env): string {
-  const explicitNamespace = env.COINBASE_CDP_ACCOUNT_NAMESPACE?.trim();
-  return explicitNamespace || env.ENVIRONMENT;
 }
 
 export function extractCoinbaseCdpAccountAddress(response: unknown): string | null {

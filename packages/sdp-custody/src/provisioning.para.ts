@@ -1,5 +1,5 @@
-import { SigningError } from "@sdp/custody/signing";
 import { parseJsonResponse, readErrorResponseText, sleep } from "./provisioning.common";
+import { SigningError } from "./signing";
 
 const PARA_WALLET_READY_MAX_ATTEMPTS = 8;
 const PARA_WALLET_READY_DELAY_MS = 500;

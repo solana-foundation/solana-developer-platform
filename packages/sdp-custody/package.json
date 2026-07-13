@@ -23,9 +23,15 @@
       "types": "./src/dfns/index.ts",
       "import": "./src/dfns/index.ts",
       "default": "./src/dfns/index.ts"
+    },
+    "./provisioning": {
+      "types": "./src/provisioning.ts",
+      "import": "./src/provisioning.ts",
+      "default": "./src/provisioning.ts"
     }
   },
   "scripts": {
+    "test": "vitest run src/*.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/"
   },
@@ -42,6 +48,10 @@
     "@solana/keychain-utila": "1.3.0",
     "@solana/kit": "catalog:",
     "@solana/signers": "catalog:",
-    "@solana/transactions": "catalog:"
+    "@solana/transactions": "catalog:",
+    "jose": "^6.2.3"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.8"
   }
 }

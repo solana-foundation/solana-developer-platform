@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { provisionAnchorageWallet } from "@/services/custody/provisioning.anchorage";
-import type { Env } from "@/types/env";
+import type { ProvisionAnchorageConfig } from "./provisioning.anchorage";
+import { provisionAnchorageWallet } from "./provisioning.anchorage";
 
 describe("anchorage wallet provisioning", () => {
   afterEach(() => {
@@ -12,7 +12,7 @@ describe("anchorage wallet provisioning", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse({ walletId: "wa_anch_1", address: "anch_address_1" }, 200));
 
-    await provisionAnchorageWallet(createAnchorageEnv(), {});
+    await provisionAnchorageWallet(createAnchorageConfig());
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const headers = toHeaderRecord(fetchMock.mock.calls[0]?.[1]?.headers);
@@ -38,22 +38,20 @@ describe("anchorage wallet provisioning", () => {
         return jsonResponse({ walletId: "wa_anch_2", address: "anch_address_2" }, 200);
       });
 
-    const result = await provisionAnchorageWallet(createAnchorageEnv(), {});
+    const result = await provisionAnchorageWallet(createAnchorageConfig());
 
     expect(result.walletId).toBe("wa_anch_2");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
-function createAnchorageEnv(overrides?: Partial<Env>): Env {
+function createAnchorageConfig(
+  overrides: Partial<ProvisionAnchorageConfig> = {}
+): ProvisionAnchorageConfig {
   return {
-    DB: {} as DatabaseClient,
-    ENVIRONMENT: "development",
-    API_VERSION: "v1",
-    CUSTODY_ENCRYPTION_KEY: "unused",
-    ANCHORAGE_API_KEY: "anchorage-test-key",
+    apiKey: "anchorage-test-key",
     ...overrides,
-  } as Env;
+  };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

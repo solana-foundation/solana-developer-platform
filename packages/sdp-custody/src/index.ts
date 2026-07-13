@@ -6,6 +6,7 @@ export {
 } from "./keychain/utila-config";
 export * from "./provider-wallet-ids";
 export * from "./providers";
+export * from "./provisioning";
 export { redactCredentialSecrets, redactCredentialString } from "./redaction";
 export {
   type FullSigningPort,
