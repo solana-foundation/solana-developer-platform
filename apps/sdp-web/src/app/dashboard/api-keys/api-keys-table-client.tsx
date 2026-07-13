@@ -174,11 +174,11 @@ function AccessSummary({
 
   return (
     <div className="min-w-0">
-      <p className="truncate text-sm font-medium text-[#1c1c1d]">
+      <p className="truncate text-sm font-medium text-primary">
         {t("DashboardCustody.roleAccess", { role: formatRole(apiKey.role, t) })}
       </p>
       <p
-        className="mt-1 truncate text-xs text-[rgba(28,28,29,0.62)]"
+        className="mt-1 truncate text-xs text-secondary"
         title={`${walletSummary.title} · ${policySummary.title}`}
       >
         {walletSummary.label} · {policySummary.label}
@@ -215,9 +215,7 @@ export function ApiKeysTableClient({
   }, [wallets]);
 
   if (sortedApiKeys.length === 0) {
-    return (
-      <p className="text-sm text-[rgba(28,28,29,0.72)]">{t("DashboardCustody.noApiKeysFound")}</p>
-    );
+    return <p className="text-sm text-secondary">{t("DashboardCustody.noApiKeysFound")}</p>;
   }
 
   return (
@@ -258,7 +256,7 @@ export function ApiKeysTableClient({
             <TableRow key={key.id}>
               <TableCell className="font-medium">
                 <span className="block truncate">{key.name}</span>
-                <span className="mt-1 block truncate text-[11px] font-normal text-[rgba(28,28,29,0.58)]">
+                <span className="mt-1 block truncate text-[11px] font-normal text-tertiary">
                   {key.environment}
                   <span className="@5xl/api-keys-table:hidden"> · {key.status}</span>
                   <span className="@4xl/api-keys-table:hidden"> · {key.keyPrefix}</span>
@@ -273,13 +271,13 @@ export function ApiKeysTableClient({
               <TableCell className={`${STATUS_COLUMN_CLASS} text-xs`}>
                 <span className="block truncate">{key.status}</span>
               </TableCell>
-              <TableCell className={`${LAST_USED_COLUMN_CLASS} text-xs text-[rgba(28,28,29,0.72)]`}>
+              <TableCell className={`${LAST_USED_COLUMN_CLASS} text-xs text-secondary`}>
                 {formatDate(key.lastUsedAt, locale, t)}
               </TableCell>
-              <TableCell className={`${EXPIRES_COLUMN_CLASS} text-xs text-[rgba(28,28,29,0.72)]`}>
+              <TableCell className={`${EXPIRES_COLUMN_CLASS} text-xs text-secondary`}>
                 {formatDate(key.expiresAt, locale, t)}
               </TableCell>
-              <TableCell className={`${CREATED_COLUMN_CLASS} text-xs text-[rgba(28,28,29,0.72)]`}>
+              <TableCell className={`${CREATED_COLUMN_CLASS} text-xs text-secondary`}>
                 {formatDate(key.createdAt, locale, t)}
               </TableCell>
               <TableCell>

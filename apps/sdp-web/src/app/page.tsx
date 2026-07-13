@@ -13,21 +13,21 @@ export default async function Home() {
   const t = await getTranslations();
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#e9e7de] to-[#f5f4ef] text-[#1c1c1d]">
-      <header className="border-b border-[rgba(28,28,29,0.08)]">
+    <main className="min-h-screen bg-gradient-to-b from-surface to-surface-sunken text-primary">
+      <header className="border-b border-border-subtle">
         <div className="mx-auto flex h-[72px] max-w-[1200px] items-center justify-between px-6 xl:px-0">
           <Image src="/landing/solana-logo.svg" alt={t("Home.solanaLogo")} width={20} height={18} />
           <div className="flex items-center gap-2">
             <Link
               href={docsHref}
-              className="mr-2 text-sm font-medium text-[rgba(28,28,29,0.72)] transition-colors hover:text-[#1c1c1d]"
+              className="mr-2 text-sm font-medium text-secondary transition-colors hover:text-primary"
             >
               {t("Home.docs")}
             </Link>
             <LanguagePicker variant="landing" />
             <Link
               href="/sign-in"
-              className="inline-flex h-9 items-center justify-center rounded-lg bg-[#0f0f10] px-3 text-sm font-semibold text-white transition-colors hover:bg-black"
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-sm font-semibold text-white transition hover:opacity-90"
             >
               {t("Home.dashboard")}
             </Link>
@@ -41,7 +41,7 @@ export default async function Home() {
             {t("Home.title")}
           </h1>
 
-          <p className="mt-[26px] max-w-[510px] text-[16px] font-[450] leading-6 text-[rgba(28,28,29,0.72)]">
+          <p className="mt-[26px] max-w-[510px] text-[16px] font-[450] leading-6 text-secondary">
             {t("Home.description")}
           </p>
 
@@ -50,7 +50,7 @@ export default async function Home() {
               href={waitlistHref}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex h-10 items-center justify-center rounded-[10px] bg-[#0f0f10] px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
+              className="inline-flex h-10 items-center justify-center rounded-[10px] bg-primary px-[18px] text-[15px] font-semibold leading-[15px] text-white transition hover:opacity-90"
             >
               {t("Home.joinWaitlist")}
             </Link>
@@ -82,9 +82,9 @@ export default async function Home() {
               />
             </div>
 
-            <div className="absolute left-0 top-[-75px] h-[60px] w-px bg-[rgba(28,28,29,0.2)]" />
-            <div className="absolute left-0 top-[281px] h-[299px] w-px bg-[rgba(28,28,29,0.2)]" />
-            <div className="absolute right-0 top-[447px] h-[137px] w-px bg-[rgba(28,28,29,0.2)]" />
+            <div className="absolute left-0 top-[-75px] h-[60px] w-px bg-border-strong" />
+            <div className="absolute left-0 top-[281px] h-[299px] w-px bg-border-strong" />
+            <div className="absolute right-0 top-[447px] h-[137px] w-px bg-border-strong" />
           </div>
         </div>
       </section>

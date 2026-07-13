@@ -45,9 +45,9 @@ export function WalletReceiveCard({ address }: { address: string }) {
   }
 
   return (
-    <section className="rounded-2xl border border-border-light bg-border-extra-light p-6">
+    <section className="rounded-2xl border border-border-default bg-fill-subtle p-6">
       <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start">
-        <div className="flex size-[180px] items-center justify-center rounded-2xl bg-white p-4 ring-1 ring-border-extra-light">
+        <div className="flex size-[180px] items-center justify-center rounded-2xl bg-white p-4 ring-1 ring-border-subtle">
           {qrCodeUrl ? (
             <Image
               src={qrCodeUrl}
@@ -58,15 +58,15 @@ export function WalletReceiveCard({ address }: { address: string }) {
               className="size-full"
             />
           ) : (
-            <div className="size-full animate-pulse rounded-xl bg-border-light" />
+            <div className="size-full animate-pulse rounded-xl bg-fill-strong" />
           )}
         </div>
         <div className="min-w-0 flex-1 space-y-3">
-          <p className="text-sm text-text-low">
+          <p className="text-sm text-tertiary">
             {t("DashboardPayments.ramps.walletReceiveDescription")}
           </p>
-          <div className="rounded-2xl border border-border-extra-light bg-white px-4 py-3">
-            <p className="break-all font-mono text-xs text-text-medium">{address}</p>
+          <div className="rounded-2xl border border-border-subtle bg-white px-4 py-3">
+            <p className="break-all font-mono text-xs text-secondary">{address}</p>
           </div>
           <div className="flex justify-end">
             <Button

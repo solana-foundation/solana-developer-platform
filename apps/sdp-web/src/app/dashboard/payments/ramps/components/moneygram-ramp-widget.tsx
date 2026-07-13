@@ -422,7 +422,7 @@ export function MoneygramRampWidget({
 
   if (loadError) {
     return (
-      <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-5 py-5 text-sm text-status-error-text">
+      <div className="rounded-2xl border border-error-border bg-error-bg px-5 py-5 text-sm text-error">
         {loadError}
       </div>
     );

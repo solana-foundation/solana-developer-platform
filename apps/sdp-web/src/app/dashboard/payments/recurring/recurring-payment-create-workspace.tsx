@@ -123,17 +123,15 @@ function firstCollectionAtIsValid(value: string): boolean {
 
 function ReviewSummaryCard({ rows }: { rows: Array<{ label: string; value: ReactNode }> }) {
   return (
-    <section className="rounded-2xl border border-border-light bg-border-extra-light p-5">
-      <div className="divide-y divide-border-extra-light">
+    <section className="rounded-2xl border border-border-default bg-fill-subtle p-5">
+      <div className="divide-y divide-border-subtle">
         {rows.map((row) => (
           <div
             key={row.label}
             className="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0"
           >
-            <p className="text-sm text-text-low">{row.label}</p>
-            <div className="min-w-0 text-right text-base font-medium text-text-extra-high">
-              {row.value}
-            </div>
+            <p className="text-sm text-tertiary">{row.label}</p>
+            <div className="min-w-0 text-right text-base font-medium text-primary">{row.value}</div>
           </div>
         ))}
       </div>
@@ -149,9 +147,7 @@ function FieldHint({
   tone?: "neutral" | "error";
 }) {
   return (
-    <p className={tone === "error" ? "text-sm text-status-error-text" : "text-sm text-text-low"}>
-      {children}
-    </p>
+    <p className={tone === "error" ? "text-sm text-error" : "text-sm text-tertiary"}>{children}</p>
   );
 }
 
@@ -526,7 +522,7 @@ export function RecurringPaymentCreateWorkspace({
       {formError ? (
         <div
           role="alert"
-          className="rounded-2xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text"
+          className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error"
         >
           {formError}
         </div>
@@ -577,16 +573,16 @@ export function RecurringPaymentCreateWorkspace({
             <button
               type="button"
               onClick={() => setDestinationAccountDialogOpen(true)}
-              className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-medium px-4 py-4 text-left transition-colors hover:bg-border-extra-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
+              className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
             >
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-border-extra-light text-text-extra-high">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary">
                 <PlusIcon className="size-4" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium text-text-extra-high">
+                <span className="block text-sm font-medium text-primary">
                   {t("DashboardPayments.recurring.addSolanaAddress")}
                 </span>
-                <span className="block text-sm text-text-low">
+                <span className="block text-sm text-tertiary">
                   {cryptoAccounts.length === 0
                     ? t("DashboardPayments.recurring.noDestinationWallet", {
                         name:
@@ -743,7 +739,7 @@ export function RecurringPaymentCreateWorkspace({
       {currentStep.id === "review" ? (
         <div className="space-y-5">
           <ReviewSummaryCard rows={reviewRows} />
-          <div className="rounded-2xl border border-border-light bg-white px-4 py-3 text-sm text-text-medium">
+          <div className="rounded-2xl border border-border-default bg-white px-4 py-3 text-sm text-secondary">
             {t("DashboardPayments.recurring.pendingRecordDescription")}
           </div>
         </div>

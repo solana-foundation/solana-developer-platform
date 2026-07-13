@@ -84,11 +84,11 @@ function transferStatusCopy(
 function statusIcon(state: TransferStatusCopy["state"]) {
   switch (state) {
     case "success":
-      return <CheckCircle2Icon className="size-5 text-status-success-text" />;
+      return <CheckCircle2Icon className="size-5 text-success" />;
     case "error":
-      return <XCircleIcon className="size-5 text-status-error-text" />;
+      return <XCircleIcon className="size-5 text-error" />;
     case "loading":
-      return <Loader2Icon className="size-5 animate-spin text-text-medium" />;
+      return <Loader2Icon className="size-5 animate-spin text-secondary" />;
     default: {
       const exhaustive: never = state;
       throw new Error(`Unhandled transfer status state: ${exhaustive}`);
@@ -115,8 +115,8 @@ export function RampStatusPanel({
     <div className="flex items-start gap-3">
       <span className="mt-0.5 shrink-0">{statusIcon(copy.state)}</span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-text-extra-high">{copy.title}</p>
-        <p className="mt-1 text-sm leading-relaxed text-text-low">{copy.description}</p>
+        <p className="text-sm font-medium text-primary">{copy.title}</p>
+        <p className="mt-1 text-sm leading-relaxed text-tertiary">{copy.description}</p>
       </div>
     </div>
   );

@@ -1,4 +1,11 @@
 export {
+  approveApprovalRequest,
+  cancelApprovalRequest,
+  getApprovalRequest,
+  listApprovalRequests,
+  rejectApprovalRequest,
+} from "./handlers/approval-requests";
+export {
   getConfig,
   getConfigs,
 } from "./handlers/configs";

@@ -446,7 +446,7 @@ describe("WalletPolicyEnforcementService", () => {
     );
   });
 
-  it("approves and cancels approval requests idempotently", async () => {
+  it("approves, rejects, and cancels approval requests idempotently", async () => {
     const repository = createRepository({
       walletPolicy: walletProfile([
         { id: "large-payment-approval", kind: "approval", families: ["payment"] },
@@ -491,6 +491,29 @@ describe("WalletPolicyEnforcementService", () => {
       secondService.cancelApprovalRequest("org_1", "appr_1", "usr_approver")
     ).resolves.toMatchObject({
       status: "canceled",
+      resolved_by: "usr_approver",
+    });
+
+    const thirdRepository = createRepository({
+      walletPolicy: walletProfile([
+        { id: "large-payment-approval", kind: "approval", families: ["payment"] },
+      ]),
+    });
+    const thirdService = new WalletPolicyEnforcementService(thirdRepository);
+
+    await expect(thirdService.enforce(baseOperation)).rejects.toMatchObject({
+      code: "SIGNING_PENDING",
+    });
+    await expect(
+      thirdService.rejectApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).resolves.toMatchObject({
+      status: "rejected",
+      resolved_by: "usr_approver",
+    });
+    await expect(
+      thirdService.rejectApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).resolves.toMatchObject({
+      status: "rejected",
       resolved_by: "usr_approver",
     });
   });
