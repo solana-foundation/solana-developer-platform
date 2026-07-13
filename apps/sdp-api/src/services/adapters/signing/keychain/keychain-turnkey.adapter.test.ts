@@ -1,6 +1,6 @@
+import { KeychainTurnkeyAdapter } from "@sdp/custody/keychain";
 import type { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
-import { KeychainTurnkeyAdapter } from "@/services/adapters/signing/keychain/keychain-turnkey.adapter";
 
 type TurnkeyTransaction = Transaction & TransactionWithinSizeLimit & TransactionWithLifetime;
 const DEFAULT_WALLET_PUBLIC_KEY = "1".repeat(32);

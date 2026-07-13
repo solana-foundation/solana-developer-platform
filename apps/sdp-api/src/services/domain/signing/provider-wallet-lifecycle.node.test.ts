@@ -6,8 +6,8 @@ const createWalletMock = vi.hoisted(() => vi.fn());
 const createDfnsApiClientMock = vi.hoisted(() => vi.fn());
 const createIbmHavenApiClientMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/services/dfns/client", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/dfns/client")>();
+vi.mock("@sdp/custody/dfns", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/custody/dfns")>();
 
   return {
     ...actual,

@@ -1,3 +1,22 @@
+import {
+  denormalizeAnchorageWalletId,
+  normalizeAnchorageWalletId,
+  normalizeCoinbaseCdpWalletId,
+  normalizeFireblocksWalletId,
+  normalizeIbmHavenWalletId,
+  normalizeParaWalletId,
+  normalizePrivyWalletId,
+  normalizeTurnkeyWalletId,
+  normalizeUtilaWalletId,
+} from "@sdp/custody";
+import {
+  createDfnsApiClient,
+  createIbmHavenApiClient,
+  IBM_HAVEN_PROVIDER_LABEL,
+  normalizeDfnsWalletId,
+  resolveDfnsNetwork,
+} from "@sdp/custody/dfns";
+import { SigningError } from "@sdp/custody/signing";
 import { KeychainFireblocksAdapter } from "@/services/adapters";
 import {
   deleteAnchorageWallet,
@@ -9,28 +28,9 @@ import {
   provisionTurnkeyPrivateKey,
   provisionUtilaWallet,
 } from "@/services/custody/provisioning";
-import {
-  createDfnsApiClient,
-  createIbmHavenApiClient,
-  IBM_HAVEN_PROVIDER_LABEL,
-  normalizeDfnsWalletId,
-  resolveDfnsNetwork,
-} from "@/services/dfns/client";
 import { createEncryptionService } from "@/services/encryption.service";
-import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { ProviderConfigRecord } from "./provider-config";
-import {
-  denormalizeAnchorageWalletId,
-  normalizeAnchorageWalletId,
-  normalizeCoinbaseCdpWalletId,
-  normalizeFireblocksWalletId,
-  normalizeIbmHavenWalletId,
-  normalizeParaWalletId,
-  normalizePrivyWalletId,
-  normalizeTurnkeyWalletId,
-  normalizeUtilaWalletId,
-} from "./provider-wallet-ids";
 
 export type ProvisionedProviderWallet = {
   walletId: string;

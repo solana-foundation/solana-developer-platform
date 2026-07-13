@@ -1,5 +1,5 @@
+import { SigningError } from "@sdp/custody/signing";
 import { importJWK, importPKCS8, SignJWT } from "jose";
-import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import {
   decodeBase64ToBytes,

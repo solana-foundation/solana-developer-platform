@@ -1,5 +1,5 @@
+import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";
 import { describe, expect, it } from "vitest";
-import { redactCredentialSecrets, redactCredentialString } from "./redaction";
 
 describe("credential redaction", () => {
   it("redacts credential-shaped object fields without hiding safe ids", () => {
