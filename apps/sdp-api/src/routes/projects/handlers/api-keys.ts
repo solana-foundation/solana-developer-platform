@@ -1,3 +1,4 @@
+import { SigningError } from "@sdp/custody/signing";
 import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -15,7 +16,6 @@ import {
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
 import { createSigningService } from "@/services/domain/signing.service";
-import { SigningError } from "@/services/ports";
 import type { WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 

@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
-import { redactCredentialString } from "@/lib/redaction";
-import { SigningError } from "@/services/ports";
+import { redactCredentialString } from "@sdp/custody";
+import { SigningError } from "@sdp/custody/signing";
 
 function hasEmptyResponseBody(response: Response): boolean {
   return response.status === 204 || response.headers.get("content-length") === "0";

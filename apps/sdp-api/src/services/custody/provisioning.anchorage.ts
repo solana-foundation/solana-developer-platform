@@ -1,5 +1,5 @@
+import { SigningError } from "@sdp/custody/signing";
 import { readStringFrom } from "@/lib/json";
-import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import { parseJsonResponse, readErrorResponseText } from "./provisioning.common";
 

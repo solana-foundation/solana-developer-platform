@@ -25,16 +25,3 @@ export type {
   TransactionConfirmation,
 } from "./rpc.port";
 export { RpcError } from "./rpc.port";
-// Signing port - custody provider abstraction
-export type {
-  FullSigningPort,
-  GeneratedKeypair,
-  SigningErrorCode,
-  SigningMetadata,
-  SigningPort,
-  SignRequest,
-  SignResult,
-  SignResultStatus,
-  SignStatus,
-} from "./signing.port";
-export { isFullSigningPort, SigningError } from "./signing.port";

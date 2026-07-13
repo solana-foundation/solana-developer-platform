@@ -9,6 +9,8 @@
  * both runtimes.
  */
 
+import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";
+import { SigningError } from "@sdp/custody/signing";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
@@ -17,7 +19,6 @@ import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError } from "@/lib/errors";
-import { redactCredentialSecrets, redactCredentialString } from "@/lib/redaction";
 import { corsMiddleware } from "@/middleware/cors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
@@ -45,7 +46,7 @@ import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
 import { isSentryEnabled, type Observability } from "@/runtime/observability";
-import { FeePaymentError, SigningError } from "@/services/ports";
+import { FeePaymentError } from "@/services/ports";
 import type { Env } from "@/types/env";
 
 export interface SdpPlugin {

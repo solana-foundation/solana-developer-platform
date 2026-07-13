@@ -5,6 +5,25 @@
  * Handles DB-backed config resolution (project default → org default) and async signing flows.
  */
 
+import type { CustodyProvider } from "@sdp/custody";
+import {
+  normalizeAnchorageWalletId,
+  normalizeCoinbaseCdpWalletId,
+  normalizeIbmHavenWalletId,
+  normalizeParaWalletId,
+  normalizePrivyWalletId,
+  normalizeTurnkeyWalletId,
+  normalizeUtilaWalletId,
+} from "@sdp/custody";
+import {
+  createDfnsApiClient,
+  createIbmHavenApiClient,
+  IBM_HAVEN_PROVIDER_LABEL,
+  normalizeDfnsWalletId,
+  resolveDfnsNetwork,
+} from "@sdp/custody/dfns";
+import type { SigningPort, SignRequest, SignResult, SignStatus } from "@sdp/custody/signing";
+import { isFullSigningPort, SigningError } from "@sdp/custody/signing";
 import { getBase58Codec } from "@solana/codecs";
 import type { Address, KeyPairSigner, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
@@ -16,7 +35,6 @@ import {
   KeychainMemoryAdapter,
   type SigningConfigRecord,
 } from "@/services/adapters";
-import type { CustodyProvider } from "@/services/custody/providers";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import {
   assertCustodyProviderCanCreateWallet,
@@ -25,13 +43,6 @@ import {
   custodyProviderCanSign,
   shouldSetCustodyScopeDefault,
 } from "@/services/custody-provider-lifecycle.service";
-import {
-  createDfnsApiClient,
-  createIbmHavenApiClient,
-  IBM_HAVEN_PROVIDER_LABEL,
-  normalizeDfnsWalletId,
-  resolveDfnsNetwork,
-} from "@/services/dfns/client";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
 import {
   type AnchorageProviderConfig,
@@ -47,21 +58,10 @@ import {
   type UtilaProviderConfig,
 } from "@/services/domain/signing/provider-config";
 import {
-  normalizeAnchorageWalletId,
-  normalizeCoinbaseCdpWalletId,
-  normalizeIbmHavenWalletId,
-  normalizeParaWalletId,
-  normalizePrivyWalletId,
-  normalizeTurnkeyWalletId,
-  normalizeUtilaWalletId,
-} from "@/services/domain/signing/provider-wallet-ids";
-import {
   createProviderWallet,
   deleteProviderWallet,
 } from "@/services/domain/signing/provider-wallet-lifecycle";
 import { createEncryptionService, type EncryptionService } from "@/services/encryption.service";
-import type { SigningPort, SignRequest, SignResult, SignStatus } from "@/services/ports";
-import { isFullSigningPort, SigningError } from "@/services/ports";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   CustodyConfigStore,
