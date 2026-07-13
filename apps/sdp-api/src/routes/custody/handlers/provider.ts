@@ -1,12 +1,11 @@
+import { CUSTODY_PROVIDERS, type CustodyProvider, redactCredentialString } from "@sdp/custody";
+import { SigningError } from "@sdp/custody/signing";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest } from "@/lib/errors";
-import { redactCredentialString } from "@/lib/redaction";
 import { created, success } from "@/lib/response";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { AuditService } from "@/services/audit.service";
-import type { CustodyProvider } from "@/services/custody/providers";
-import { CUSTODY_PROVIDERS } from "@/services/custody/providers";
 import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
 import { normalizePem } from "@/services/custody/provisioning.common";
 import {
@@ -14,7 +13,6 @@ import {
   parseConfigRecord,
 } from "@/services/domain/signing/provider-config";
 import { createSigningService } from "@/services/domain/signing.service";
-import { SigningError } from "@/services/ports";
 import {
   assertProviderAvailable,
   getEnabledProviders,

@@ -21,8 +21,8 @@ SDP Docs is the comprehensive external-facing documentation for the SDP platform
 
 ### Prerequisites
 
-- **Node.js 20+**
-- **pnpm 10.15.1+**
+- **Node.js 22+**
+- **pnpm 10.16+**
 
 ### Setup
 

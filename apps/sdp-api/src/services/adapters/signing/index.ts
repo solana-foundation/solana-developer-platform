@@ -17,18 +17,16 @@
  * - "utila": Utila vault wallets (KeychainUtilaAdapter)
  */
 
-import { parsePostgresJson } from "@/db/postgres-utils";
-import type { CustodyProvider } from "@/services/custody/providers";
-import { normalizePem } from "@/services/custody/provisioning.common";
+import {
+  buildKeychainUtilaConfig,
+  type CustodyProvider,
+  denormalizeIbmHavenWalletId,
+} from "@sdp/custody";
 import {
   createDfnsApiClient,
   createIbmHavenApiClient,
   normalizeDfnsWalletId,
-} from "@/services/dfns/client";
-import { denormalizeIbmHavenWalletId } from "@/services/domain/signing/provider-wallet-ids";
-import type { SigningPort } from "@/services/ports";
-import { SigningError } from "@/services/ports";
-import type { Env } from "@/types/env";
+} from "@sdp/custody/dfns";
 import {
   KeychainCoinbaseAdapter,
   type KeychainCoinbaseConfig,
@@ -45,8 +43,12 @@ import {
   KeychainTurnkeyAdapter,
   type KeychainTurnkeyConfig,
   KeychainUtilaAdapter,
-} from "./keychain";
-import { buildKeychainUtilaConfig } from "./keychain/utila-config";
+} from "@sdp/custody/keychain";
+import type { SigningPort } from "@sdp/custody/signing";
+import { SigningError } from "@sdp/custody/signing";
+import { parsePostgresJson } from "@/db/postgres-utils";
+import { normalizePem } from "@/services/custody/provisioning.common";
+import type { Env } from "@/types/env";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -724,4 +726,4 @@ export {
   type KeychainTurnkeyConfig,
   KeychainUtilaAdapter,
   type KeychainUtilaConfig,
-} from "./keychain";
+} from "@sdp/custody/keychain";
