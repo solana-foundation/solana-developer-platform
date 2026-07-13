@@ -485,6 +485,136 @@ describe("PolicyRepository (postgres)", () => {
     expect(updatedOperation?.status).toBe("executing");
   });
 
+  it("lists approval request details scoped by project and status", async () => {
+    await seedOtherProjectCustodyWallet();
+
+    const operation = await repo.createWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      operationFamily: "payment",
+      operationType: "payment_transfer",
+      asset: "USDC",
+      amount: "25.00",
+      destination: "recipient_1",
+      status: "pending_approval",
+    });
+    expect(operation).not.toBeNull();
+
+    const request = await repo.createApprovalRequest({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      walletOperationId: operation?.id ?? "",
+      requestedBy: TEST_USER.id,
+    });
+    expect(request).not.toBeNull();
+
+    await repo.createPolicyEvaluation({
+      walletOperationId: operation?.id ?? "",
+      decision: "approval_required",
+      reasonCode: "wallet_policy_match",
+      reason: "Payment matched approval policy.",
+      matchedRules: [{ ruleId: "payment-approval" }],
+      evaluationContext: buildPolicyEvaluationContext({
+        operationId: operation?.id ?? "",
+        custodyWalletId: TEST_CUSTODY_WALLET.id,
+        walletId: TEST_CUSTODY_WALLET.walletId,
+        operationFamily: "payment",
+        operationType: "payment_transfer",
+      }),
+      requiresApproval: true,
+      approvalRequestId: request?.id,
+    });
+
+    const otherOperation = await repo.createWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: OTHER_PROJECT.id,
+      custodyWalletId: OTHER_PROJECT_CUSTODY_WALLET.id,
+      walletId: OTHER_PROJECT_CUSTODY_WALLET.walletId,
+      operationFamily: "payment",
+      operationType: "payment_transfer",
+      status: "pending_approval",
+    });
+    expect(otherOperation).not.toBeNull();
+
+    const otherRequest = await repo.createApprovalRequest({
+      organizationId: TEST_ORG.id,
+      projectId: OTHER_PROJECT.id,
+      walletOperationId: otherOperation?.id ?? "",
+    });
+    expect(otherRequest).not.toBeNull();
+
+    const projectRows = await repo.listApprovalRequestDetails({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "pending",
+      limit: 10,
+    });
+
+    expect(projectRows).toHaveLength(1);
+    expect(projectRows[0]).toMatchObject({
+      approval_request_id: request?.id,
+      project_id: TEST_PROJECT.id,
+      wallet_operation_id: operation?.id,
+      wallet_id: TEST_CUSTODY_WALLET.walletId,
+      wallet_public_key: TEST_CUSTODY_WALLET.publicKey,
+      operation_family: "payment",
+      operation_type: "payment_transfer",
+      decision: "approval_required",
+      reason_code: "wallet_policy_match",
+      matched_rules: [{ ruleId: "payment-approval" }],
+      requires_approval: true,
+    });
+
+    await expect(
+      repo.getApprovalRequestDetail({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        approvalRequestId: request?.id ?? "",
+      })
+    ).resolves.toMatchObject({ approval_request_id: request?.id });
+    await expect(
+      repo.getApprovalRequestDetail({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        approvalRequestId: otherRequest?.id ?? "",
+      })
+    ).resolves.toBeNull();
+
+    await expect(
+      repo.updateApprovalRequestStatus({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        approvalRequestId: otherRequest?.id ?? "",
+        status: "approved",
+        operationStatus: "executing",
+      })
+    ).resolves.toBeNull();
+    await expect(
+      repo.getApprovalRequestDetail({
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        approvalRequestId: otherRequest?.id ?? "",
+      })
+    ).resolves.toMatchObject({
+      approval_request_id: otherRequest?.id,
+      approval_status: "pending",
+      operation_status: "pending_approval",
+    });
+
+    const orgRows = await repo.listApprovalRequestDetails({
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      status: "pending",
+      limit: 10,
+    });
+    expect(orgRows.map((row) => row.approval_request_id)).toEqual(
+      expect.arrayContaining([request?.id, otherRequest?.id])
+    );
+  });
+
   it("preserves an explicit null wallet operation actor through service mapping", async () => {
     const service = new PolicyFoundationService(repo);
 
