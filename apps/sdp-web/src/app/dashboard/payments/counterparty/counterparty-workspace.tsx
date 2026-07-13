@@ -177,13 +177,13 @@ export function CounterpartyWorkspace({
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col">
               {total === 0 ? (
-                <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-medium py-16 text-center">
-                  <UsersIcon className="h-10 w-10 text-text-extra-low" />
+                <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-strong py-16 text-center">
+                  <UsersIcon className="h-10 w-10 text-muted" />
                   <div className="space-y-1">
-                    <p className="text-sm font-medium text-text-extra-high">
+                    <p className="text-sm font-medium text-primary">
                       {t("DashboardPayments.counterparty.noCounterparties")}
                     </p>
-                    <p className="text-sm text-text-low">
+                    <p className="text-sm text-tertiary">
                       {t("DashboardPayments.counterparty.noCounterpartiesDescription")}
                     </p>
                   </div>
@@ -237,7 +237,7 @@ export function CounterpartyWorkspace({
                           <TableCell className="font-mono text-sm">
                             <span className="block truncate">{cp.externalId ?? "—"}</span>
                           </TableCell>
-                          <TableCell className="text-sm text-text-medium">
+                          <TableCell className="text-sm text-secondary">
                             {new Date(cp.createdAt).toLocaleDateString(locale, {
                               month: "short",
                               day: "2-digit",
@@ -269,7 +269,7 @@ export function CounterpartyWorkspace({
                                   {t("DashboardPayments.counterparty.manageCounterparty")}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
-                                  className="text-xs text-status-error-text focus:text-status-error-text [&_svg]:size-3.5"
+                                  className="text-xs text-error focus:text-error [&_svg]:size-3.5"
                                   onSelect={() => setPendingDelete(cp)}
                                 >
                                   <Trash2Icon />
@@ -286,7 +286,7 @@ export function CounterpartyWorkspace({
               )}
             </CardContent>
             {total > 0 && (
-              <CardFooter className="shrink-0 border-t border-border-light">
+              <CardFooter className="shrink-0 border-t border-border-default">
                 <ArrowPagination
                   className="w-full"
                   page={page}

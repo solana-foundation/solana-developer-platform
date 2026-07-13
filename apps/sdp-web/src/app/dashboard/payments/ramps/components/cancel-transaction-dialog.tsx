@@ -25,10 +25,10 @@ export function CancelTransactionDialog({
     >
       <div className="space-y-6 p-6">
         <div className="space-y-2">
-          <p className="text-xl font-medium tracking-tight text-text-extra-high">
+          <p className="text-xl font-medium tracking-tight text-primary">
             {t("DashboardPayments.cancelTransaction.title")}
           </p>
-          <p className="text-sm text-text-low">
+          <p className="text-sm text-tertiary">
             {t("DashboardPayments.cancelTransaction.description")}
           </p>
         </div>

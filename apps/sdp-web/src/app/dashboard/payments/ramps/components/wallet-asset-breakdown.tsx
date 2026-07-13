@@ -54,11 +54,11 @@ export function WalletAssetBreakdown({ wallet }: { wallet: PaymentsDashboardWall
       className="space-y-5 pt-4"
     >
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
+        <h2 className="text-lg font-medium tracking-tight text-primary">
           {t("DashboardPayments.ramps.assetBreakdown")}
         </h2>
         {totalUsd > 0 ? (
-          <p className="text-sm text-text-low">
+          <p className="text-sm text-tertiary">
             {t("DashboardPayments.ramps.total", { amount: formatCurrencyAmount(totalUsd, locale) })}
           </p>
         ) : null}
@@ -76,25 +76,25 @@ export function WalletAssetBreakdown({ wallet }: { wallet: PaymentsDashboardWall
             >
               <div className="flex items-center justify-between gap-4">
                 <div className="flex min-w-0 items-baseline gap-2">
-                  <p className="text-base font-medium text-text-extra-high">{row.token}</p>
+                  <p className="text-base font-medium text-primary">{row.token}</p>
                   {row.usdValue !== null ? (
-                    <p className="text-sm text-text-low">
+                    <p className="text-sm text-tertiary">
                       {formatCurrencyAmount(row.usdValue, locale)}
                     </p>
                   ) : null}
                 </div>
-                <p className="shrink-0 text-sm text-text-medium">
+                <p className="shrink-0 text-sm text-secondary">
                   {formatTwoDecimals(row.amount, locale)}
                   {shareValue !== null ? ` · ${formatTwoDecimals(shareValue, locale)}%` : ""}
                 </p>
               </div>
               {shareValue !== null ? (
-                <div className="mt-3 h-1.5 w-full rounded-full bg-border-light">
+                <div className="mt-3 h-1.5 w-full rounded-full bg-fill-strong">
                   <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${shareValue}%` }}
                     transition={{ duration: 0.5, ease: "easeOut", delay: 0.1 + index * 0.06 }}
-                    className="h-1.5 rounded-full bg-gray-1400"
+                    className="h-1.5 rounded-full bg-primary"
                   />
                 </div>
               ) : null}

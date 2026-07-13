@@ -16,7 +16,7 @@ export function PoweredByRampProvider({ provider }: { provider: RampProviderId }
   const providerLabel = getRampProviderLabel(provider);
 
   return (
-    <div className="flex items-center justify-center gap-2 text-sm text-text-low">
+    <div className="flex items-center justify-center gap-2 text-sm text-tertiary">
       <span>{t("DashboardPayments.poweredBy")}</span>
       <Image
         src={RAMP_PROVIDER_LOGOS[provider]}
@@ -25,7 +25,7 @@ export function PoweredByRampProvider({ provider }: { provider: RampProviderId }
         height={24}
         className="size-6 rounded-md object-contain"
       />
-      <span className="font-medium text-text-medium">{providerLabel}</span>
+      <span className="font-medium text-secondary">{providerLabel}</span>
     </div>
   );
 }
@@ -88,15 +88,15 @@ export function RampWizardShell({
                   className={cn(
                     "h-1.5 rounded-full transition-all duration-200",
                     index === stepIndex
-                      ? "w-4 bg-gray-1400"
+                      ? "w-4 bg-primary"
                       : index < stepIndex
-                        ? "w-1.5 bg-gray-1400"
-                        : "w-1.5 bg-border-light"
+                        ? "w-1.5 bg-primary"
+                        : "w-1.5 bg-fill-strong"
                   )}
                 />
               ))}
             </div>
-            <span className="text-xs text-text-extra-low">
+            <span className="text-xs text-muted">
               {t("DashboardPayments.counterparty.stepProgress", {
                 current: stepIndex + 1,
                 total: steps.length,
@@ -104,7 +104,7 @@ export function RampWizardShell({
             </span>
           </div>
           <div className="flex items-center justify-between gap-4">
-            <p className="text-3xl font-medium leading-tight tracking-tight text-text-extra-high">
+            <p className="text-3xl font-medium leading-tight tracking-tight text-primary">
               {steps[stepIndex]?.title}
             </p>
             {header}
@@ -112,7 +112,7 @@ export function RampWizardShell({
         </div>
 
         {walletsError ? (
-          <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text">
+          <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
             {walletsError}
           </div>
         ) : null}

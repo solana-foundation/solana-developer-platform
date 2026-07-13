@@ -101,7 +101,7 @@ export function DeleteApiKeyModal({
           type="button"
           variant="secondary"
           size="sm"
-          className="border-[#c71f37] text-[#c71f37] hover:bg-[#c71f37]/10"
+          className="border-destructive text-destructive hover:bg-destructive/10"
           onClick={openModal}
         >
           {t("DashboardCustody.delete")}
@@ -117,10 +117,10 @@ export function DeleteApiKeyModal({
         contentClassName="rounded-xl p-5 text-left"
         size="sm"
       >
-        <p className="pr-10 text-sm font-medium text-[#1c1c1d]">
+        <p className="pr-10 text-sm font-medium text-primary">
           {t("DashboardCustody.deleteApiKey")}
         </p>
-        <p className="mt-2 text-sm text-[rgba(28,28,29,0.72)]">
+        <p className="mt-2 text-sm text-secondary">
           {t("DashboardCustody.deleteApiKeyDescription")}
         </p>
         <p className="mt-2 text-sm">

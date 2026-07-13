@@ -437,12 +437,10 @@ export function TokenActionAdminForms({
                 }))
               }
             />
-            <p className="text-sm leading-6 text-[rgba(28,28,29,0.64)]">
+            <p className="text-sm leading-6 text-secondary">
               {t("DashboardIssuance.forms.walletAddressInstruction")}
             </p>
-            {freezeHint ? (
-              <p className="text-sm leading-6 text-[rgba(28,28,29,0.64)]">{freezeHint}</p>
-            ) : null}
+            {freezeHint ? <p className="text-sm leading-6 text-secondary">{freezeHint}</p> : null}
             <ActionField
               label={t("DashboardIssuance.forms.freezeReason")}
               value={freezeForm.reason}
@@ -532,17 +530,17 @@ export function TokenActionAdminForms({
             {allowlistError ? (
               <TokenValidationMessage message={allowlistError} reserveSpace={false} />
             ) : allowlistEntries.length === 0 ? (
-              <p className="text-sm text-[rgba(28,28,29,0.68)]">{controlListEmptyState}</p>
+              <p className="text-sm text-secondary">{controlListEmptyState}</p>
             ) : (
               <div className="space-y-2">
                 {allowlistEntries.map((entry) => (
                   <div
                     key={entry.id}
-                    className="flex items-center justify-between gap-2 rounded-lg border border-[rgba(28,28,29,0.12)] px-3 py-2"
+                    className="flex items-center justify-between gap-2 rounded-lg border border-border-default px-3 py-2"
                   >
                     <div className="min-w-0">
-                      <p className="truncate font-mono text-xs text-[#1c1c1d]">{entry.address}</p>
-                      <p className="text-xs text-[rgba(28,28,29,0.62)]">
+                      <p className="truncate font-mono text-xs text-primary">{entry.address}</p>
+                      <p className="text-xs text-secondary">
                         {entry.label ?? t("DashboardIssuance.forms.noLabel")}
                       </p>
                     </div>
@@ -601,13 +599,11 @@ function ActionField({
     <div className="space-y-2">
       <label
         htmlFor={fieldId}
-        className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-[rgba(28,28,29,0.68)]"
+        className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary"
       >
         {label}
       </label>
-      {description ? (
-        <p className="text-[13px] leading-5 text-[rgba(28,28,29,0.62)]">{description}</p>
-      ) : null}
+      {description ? <p className="text-[13px] leading-5 text-secondary">{description}</p> : null}
       <Input
         id={fieldId}
         type={type}
@@ -621,7 +617,7 @@ function ActionField({
         inputMode={inputMode}
         aria-invalid={Boolean(error)}
         onChange={(event) => onChange(event.currentTarget.value)}
-        className="h-11 rounded-[12px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+        className="h-11 rounded-[12px] border-border-default bg-white px-4 shadow-none"
       />
       <TokenValidationMessage message={error ?? null} />
     </div>
@@ -645,7 +641,7 @@ function ActionSelect({
     <div className="space-y-2">
       <label
         htmlFor={fieldId}
-        className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-[rgba(28,28,29,0.68)]"
+        className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary"
       >
         {label}
       </label>
@@ -653,7 +649,7 @@ function ActionSelect({
         id={fieldId}
         value={value}
         onChange={(event) => onChange(event.currentTarget.value)}
-        className="h-11 w-full rounded-[12px] border border-[rgba(28,28,29,0.12)] bg-white px-4 text-sm text-[#1c1c1d] shadow-none outline-none transition-[box-shadow,border-color] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)]"
+        className="h-11 w-full rounded-[12px] border border-border-default bg-white px-4 text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>

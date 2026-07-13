@@ -37,18 +37,16 @@ export function FormCard({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
+    <div className="rounded-2xl border border-border-default bg-white p-5">
       <div className="flex items-start gap-3">
         {Icon ? (
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.05)] text-[#1c1c1d]">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-primary">
             <Icon className="h-4.5 w-4.5" />
           </span>
         ) : null}
         <div>
-          <p className="text-base font-medium text-[#1c1c1d]">{title}</p>
-          {description ? (
-            <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">{description}</p>
-          ) : null}
+          <p className="text-base font-medium text-primary">{title}</p>
+          {description ? <p className="mt-0.5 text-sm text-tertiary">{description}</p> : null}
         </div>
       </div>
       <div className="mt-4">{children}</div>
@@ -85,7 +83,7 @@ export function TextField({
         {required ? (
           <>
             {" "}
-            <span aria-hidden className="text-[#c71f37]">
+            <span aria-hidden className="text-destructive">
               *
             </span>
             <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
@@ -118,10 +116,10 @@ export function ReadOnlyField({
   return (
     <div className="grid gap-1.5">
       <Label>{label}</Label>
-      <div className="flex h-10 items-center rounded-[14px] border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] px-4 text-sm text-[rgba(28,28,29,0.62)]">
+      <div className="flex h-10 items-center rounded-[14px] border border-border-default bg-fill-subtle px-4 text-sm text-secondary">
         {value || "—"}
       </div>
-      {lockReason ? <p className="text-xs text-[rgba(28,28,29,0.5)]">{lockReason}</p> : null}
+      {lockReason ? <p className="text-xs text-tertiary">{lockReason}</p> : null}
     </div>
   );
 }
@@ -144,7 +142,7 @@ export function ToggleSwitch({
       onClick={() => onChange(!checked)}
       className={cn(
         "relative h-6 w-11 shrink-0 rounded-full transition-colors",
-        checked ? "bg-[#1c1c1d]" : "bg-[rgba(28,28,29,0.2)]"
+        checked ? "bg-primary" : "bg-border-strong"
       )}
     >
       <span
@@ -186,15 +184,13 @@ export function DetailField({
             disabled={disabled}
             onChange={(next) => updateDraft({ [field.key]: next } as Partial<DraftState>)}
           />
-          <span className="text-sm text-[rgba(28,28,29,0.6)]">
+          <span className="text-sm text-tertiary">
             {checked
               ? t("DashboardIssuance.summary.enabled")
               : t("DashboardIssuance.management.disabled")}
           </span>
         </div>
-        {field.helpKey ? (
-          <p className="mt-1 text-xs text-[rgba(28,28,29,0.5)]">{t(field.helpKey)}</p>
-        ) : null}
+        {field.helpKey ? <p className="mt-1 text-xs text-tertiary">{t(field.helpKey)}</p> : null}
       </div>
     );
   }
@@ -231,7 +227,7 @@ export function DetailField({
           {required ? (
             <>
               {" "}
-              <span aria-hidden className="text-[#c71f37]">
+              <span aria-hidden className="text-destructive">
                 *
               </span>
               <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
@@ -240,7 +236,7 @@ export function DetailField({
         </Label>
         <div className="mt-1.5">
           <Select
-            className={cn(error && "ring-2 ring-inset ring-[#c71f37]")}
+            className={cn(error && "ring-2 ring-inset ring-destructive")}
             disabled={disabled}
             value={value || null}
             onValueChange={(next) =>
@@ -256,7 +252,7 @@ export function DetailField({
           </Select>
         </div>
         {error ? (
-          <p className="mt-1 text-xs text-[#c71f37]" role="alert">
+          <p className="mt-1 text-xs text-destructive" role="alert">
             {error}
           </p>
         ) : null}
@@ -317,7 +313,7 @@ export function CustomFieldRows({
             disabled={disabled}
             onClick={() => remove(field.id)}
             aria-label={t("DashboardIssuance.assetDetails.removeCustomField")}
-            className="self-center text-status-error-text hover:bg-status-error-bg hover:text-status-error-text"
+            className="self-center text-error hover:bg-error-bg hover:text-error"
           >
             <Trash2 className="h-4 w-4" />
           </Button>

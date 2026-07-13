@@ -7,13 +7,13 @@ export async function AuthTermsNotice() {
   const t = await getTranslations();
 
   return (
-    <p className="max-w-sm text-center text-xs leading-5 text-[rgba(28,28,29,0.72)]">
+    <p className="max-w-sm text-center text-xs leading-5 text-secondary">
       {t("Shared.authTerms.prefix")}{" "}
       <Link
         href={TOS_HREF}
         target="_blank"
         rel="noreferrer"
-        className="font-medium text-[#1c1c1d] underline underline-offset-2 transition-colors hover:text-black"
+        className="font-medium text-primary underline underline-offset-2 transition-colors hover:text-black"
       >
         {t("Shared.authTerms.link")}
       </Link>

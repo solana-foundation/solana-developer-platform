@@ -23,7 +23,7 @@ export function SentryFeedbackWidget({ collapsed = false }: { collapsed?: boolea
       title={collapsed ? t("Feedback.label") : undefined}
       aria-label={collapsed ? t("Feedback.label") : undefined}
       className={cn(
-        "flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high",
+        "flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-secondary transition-colors hover:bg-fill-strong hover:text-primary",
         collapsed && "justify-center"
       )}
     >
