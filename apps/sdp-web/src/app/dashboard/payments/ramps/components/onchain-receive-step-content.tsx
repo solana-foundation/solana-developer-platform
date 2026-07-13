@@ -24,7 +24,7 @@ export function OnchainReceiveStepContent({ wizard }: { wizard: OnchainReceiveWi
         options={walletOptions}
         placeholder={t("DashboardPayments.ramps.selectDestinationWallet")}
         searchPlaceholder={t("DashboardPayments.ramps.searchWallets")}
-        icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
+        icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
         isLoading={walletsLoading}
       />
     );

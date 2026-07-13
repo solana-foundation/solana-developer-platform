@@ -150,9 +150,9 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-2">
-        <Label className="text-sm font-medium text-text-low" htmlFor="account-label">
+        <Label className="text-sm font-medium text-tertiary" htmlFor="account-label">
           {t("DashboardPayments.counterparty.label")}{" "}
-          <span className="font-normal text-text-extra-low">
+          <span className="font-normal text-muted">
             {t("DashboardPayments.counterparty.optional")}
           </span>
         </Label>
@@ -181,7 +181,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
       />
 
       <div className="flex flex-col gap-2">
-        <Label className="text-sm font-medium text-text-low" htmlFor="account-address">
+        <Label className="text-sm font-medium text-tertiary" htmlFor="account-address">
           {t("DashboardPayments.counterparty.walletAddress")}
         </Label>
         <Input
@@ -197,7 +197,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
         />
       </div>
 
-      {error && <p className="text-sm text-status-error-text">{error}</p>}
+      {error && <p className="text-sm text-error">{error}</p>}
 
       <AnimatePresence>
         {snapshot && (
@@ -212,7 +212,7 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
       <AnimatePresence>
         {phase === "ready" && hasRisk && (
           <HeightReveal key="risk-warning" durationSeconds={0.25}>
-            <p className="text-sm text-status-error-text">
+            <p className="text-sm text-error">
               {screenUnavailable
                 ? t("DashboardPayments.counterparty.screeningUnavailable")
                 : t("DashboardPayments.counterparty.screeningWarning")}

@@ -285,10 +285,10 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
               Summary rail top-aligns with the first section card, not the header. */}
           {isReview ? (
             <div className="mb-5">
-              <h2 className="text-2xl font-medium text-[#1c1c1d]">
+              <h2 className="text-2xl font-medium text-primary">
                 {t("DashboardIssuance.wizard.reviewAndFinish")}
               </h2>
-              <p className="mt-1.5 text-sm text-[rgba(28,28,29,0.62)]">
+              <p className="mt-1.5 text-sm text-secondary">
                 {t("DashboardIssuance.wizard.reviewDescription")}
               </p>
             </div>
@@ -316,7 +316,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-[rgba(28,28,29,0.1)] bg-white/80 px-4 py-4 md:px-6">
+      <div className="shrink-0 border-t border-border-default bg-white/80 px-4 py-4 md:px-6">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3">
           <Button
             type="button"

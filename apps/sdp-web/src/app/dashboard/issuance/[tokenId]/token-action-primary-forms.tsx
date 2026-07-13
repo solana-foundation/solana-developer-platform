@@ -360,13 +360,11 @@ function ActionField({
     <div className="space-y-2">
       <label
         htmlFor={fieldId}
-        className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-[rgba(28,28,29,0.68)]"
+        className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary"
       >
         {label}
       </label>
-      {description ? (
-        <p className="text-[13px] leading-5 text-[rgba(28,28,29,0.62)]">{description}</p>
-      ) : null}
+      {description ? <p className="text-[13px] leading-5 text-secondary">{description}</p> : null}
       <Input
         id={fieldId}
         type={type}
@@ -380,7 +378,7 @@ function ActionField({
         inputMode={inputMode}
         aria-invalid={Boolean(error)}
         onChange={(event) => onChange(event.currentTarget.value)}
-        className="h-11 rounded-[12px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+        className="h-11 rounded-[12px] border-border-default bg-white px-4 shadow-none"
       />
       <TokenValidationMessage message={error ?? null} />
     </div>

@@ -13,10 +13,8 @@ import { getRampProviderLabel } from "@/lib/ramps";
 function TransferDetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
-      <span className="shrink-0 text-sm text-text-low">{label}</span>
-      <span className="min-w-0 break-all text-right text-sm font-medium text-text-extra-high">
-        {value}
-      </span>
+      <span className="shrink-0 text-sm text-tertiary">{label}</span>
+      <span className="min-w-0 break-all text-right text-sm font-medium text-primary">{value}</span>
     </div>
   );
 }
@@ -95,29 +93,27 @@ export function RampCompleteScreen({
 
   return (
     <div className="flex flex-col items-center gap-6">
-      <div className="flex size-16 items-center justify-center rounded-full bg-status-success-bg text-status-success-text">
+      <div className="flex size-16 items-center justify-center rounded-full bg-success-bg text-success">
         <CheckCircle2Icon className="size-8" />
       </div>
       <div className="space-y-1 text-center">
-        <p className="text-2xl font-medium tracking-tight text-text-extra-high">
+        <p className="text-2xl font-medium tracking-tight text-primary">
           {onramp
             ? t("DashboardPayments.ramps.depositComplete")
             : t("DashboardPayments.ramps.payoutComplete")}
         </p>
-        <p className="text-sm text-text-low">
+        <p className="text-sm text-tertiary">
           {onramp
             ? t("DashboardPayments.ramps.depositCompleteDescription")
             : t("DashboardPayments.ramps.payoutCompleteDescription")}
         </p>
       </div>
-      <section className="w-full space-y-4 rounded-2xl bg-border-extra-light p-5">
+      <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5">
         {primaryAmount ? (
-          <div className="flex flex-col items-center gap-0.5 border-b border-border-light pb-4">
-            <p className="text-3xl font-semibold tracking-tight text-text-extra-high">
-              {primaryAmount}
-            </p>
+          <div className="flex flex-col items-center gap-0.5 border-b border-border-default pb-4">
+            <p className="text-3xl font-semibold tracking-tight text-primary">{primaryAmount}</p>
             {secondaryAmount ? (
-              <p className="text-sm text-text-low">
+              <p className="text-sm text-tertiary">
                 {onramp
                   ? t("DashboardPayments.ramps.fundedWith")
                   : t("DashboardPayments.ramps.from")}{" "}

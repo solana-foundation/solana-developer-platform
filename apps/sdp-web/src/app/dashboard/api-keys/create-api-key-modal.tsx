@@ -91,12 +91,12 @@ function ReviewDetail({
 }) {
   return (
     <div className="flex min-w-0 items-center gap-3 px-4 py-3.5">
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.64)]">
+      <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-fill-subtle text-secondary">
         <Icon className="size-3.5" />
       </div>
       <div className="min-w-0">
-        <p className="text-xs font-medium text-[rgba(28,28,29,0.56)]">{label}</p>
-        <div className="mt-1 text-sm text-[#1c1c1d]">{children}</div>
+        <p className="text-xs font-medium text-tertiary">{label}</p>
+        <div className="mt-1 text-sm text-primary">{children}</div>
       </div>
     </div>
   );
@@ -138,12 +138,12 @@ function WalletAccessSection({
     <div className="grid gap-3">
       <div>
         <Label>{t("DashboardCustody.walletAccess")}</Label>
-        <p className="mt-1 text-xs text-[rgba(28,28,29,0.65)]">
+        <p className="mt-1 text-xs text-secondary">
           {t("DashboardCustody.walletAccessDescription")}
         </p>
       </div>
 
-      <label className="flex items-start gap-3 rounded-lg border border-[rgba(28,28,29,0.14)] p-3">
+      <label className="flex items-start gap-3 rounded-lg border border-border-default p-3">
         <input
           type="radio"
           name="wallet-access"
@@ -153,12 +153,10 @@ function WalletAccessSection({
           className="mt-1"
         />
         <div className="min-w-0">
-          <p className="text-sm font-medium text-[#1c1c1d]">{t("DashboardCustody.allWallets")}</p>
-          <p className="text-xs text-[rgba(28,28,29,0.65)]">
-            {t("DashboardCustody.allWalletsDescription")}
-          </p>
+          <p className="text-sm font-medium text-primary">{t("DashboardCustody.allWallets")}</p>
+          <p className="text-xs text-secondary">{t("DashboardCustody.allWalletsDescription")}</p>
           {draft.walletScope === "all" ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[rgba(28,28,29,0.68)]">
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-secondary">
               <ShieldCheck className="size-3.5" />
               <span>{t("DashboardCustody.operationPolicy")}</span>
               <PolicyScopeBadge />
@@ -167,7 +165,7 @@ function WalletAccessSection({
         </div>
       </label>
 
-      <label className="flex items-start gap-3 rounded-lg border border-[rgba(28,28,29,0.14)] p-3">
+      <label className="flex items-start gap-3 rounded-lg border border-border-default p-3">
         <input
           type="radio"
           name="wallet-access"
@@ -177,21 +175,19 @@ function WalletAccessSection({
           className="mt-1"
         />
         <div className="min-w-0">
-          <p className="text-sm font-medium text-[#1c1c1d]">
+          <p className="text-sm font-medium text-primary">
             {t("DashboardCustody.selectedWallets")}
           </p>
-          <p className="text-xs text-[rgba(28,28,29,0.65)]">
+          <p className="text-xs text-secondary">
             {t("DashboardCustody.selectedWalletsDescription")}
           </p>
         </div>
       </label>
 
       {draft.walletScope === "selected" ? (
-        <div className="rounded-lg border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.02)] p-3">
+        <div className="rounded-lg border border-border-default bg-fill-subtle p-3">
           {wallets.length === 0 ? (
-            <p className="text-sm text-[rgba(28,28,29,0.72)]">
-              {t("DashboardCustody.noActiveWallets")}
-            </p>
+            <p className="text-sm text-secondary">{t("DashboardCustody.noActiveWallets")}</p>
           ) : (
             <div className="space-y-3">
               <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
@@ -201,7 +197,7 @@ function WalletAccessSection({
                   return (
                     <label
                       key={wallet.walletId}
-                      className="flex items-start gap-3 rounded-lg border border-[rgba(28,28,29,0.12)] bg-white px-3 py-2"
+                      className="flex items-start gap-3 rounded-lg border border-border-default bg-white px-3 py-2"
                     >
                       <input
                         type="checkbox"
@@ -210,14 +206,14 @@ function WalletAccessSection({
                         className="mt-1"
                       />
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-[#1c1c1d]">
+                        <p className="text-sm font-medium text-primary">
                           {formatWalletLabel(wallet)}
                         </p>
-                        <p className="text-xs text-[rgba(28,28,29,0.65)]">
+                        <p className="text-xs text-secondary">
                           {wallet.walletId} · {truncateAddress(wallet.publicKey)}
                         </p>
                         {checked ? (
-                          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-2 py-1.5 text-xs text-[rgba(28,28,29,0.68)]">
+                          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-border-default bg-fill-subtle px-2 py-1.5 text-xs text-secondary">
                             <ShieldCheck className="size-3.5" />
                             <span>{t("DashboardCustody.operationPolicy")}</span>
                             <PolicyScopeBadge />
@@ -241,7 +237,7 @@ function WalletAccessSection({
                       const defaultWalletId = event.currentTarget.value;
                       setDraft((previous) => ({ ...previous, defaultWalletId }));
                     }}
-                    className="h-10 w-full rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
+                    className="h-10 w-full rounded-lg border border-border-default bg-white px-3 text-sm text-primary"
                   >
                     {selectedWallets.map((wallet) => (
                       <option key={wallet.walletId} value={wallet.walletId}>
@@ -306,23 +302,21 @@ function CreateApiKeyDetailsStep({
             const role = event.currentTarget.value as ApiKeyRole;
             setDraft((previous) => ({ ...previous, role }));
           }}
-          className="h-10 w-full rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
+          className="h-10 w-full rounded-lg border border-border-default bg-white px-3 text-sm text-primary"
         >
           <option value="api_admin">{t("DashboardCustody.admin")}</option>
           <option value="api_developer">{t("DashboardCustody.developer")}</option>
           <option value="api_readonly">{t("DashboardCustody.readOnly")}</option>
         </select>
-        <p className="text-xs text-[rgba(28,28,29,0.65)]">
-          {t("DashboardCustody.apiKeyAdminDescription")}
-        </p>
+        <p className="text-xs text-secondary">{t("DashboardCustody.apiKeyAdminDescription")}</p>
       </div>
 
       <div className="grid gap-2">
         <Label>{t("DashboardCustody.environment")}</Label>
-        <div className="flex h-10 items-center rounded-lg border border-[rgba(28,28,29,0.16)] bg-[rgba(28,28,29,0.02)] px-3 text-sm text-[#1c1c1d]">
+        <div className="flex h-10 items-center rounded-lg border border-border-default bg-fill-subtle px-3 text-sm text-primary">
           {formatEnvironmentLabel(environment, t)}
         </div>
-        <p className="text-xs text-[rgba(28,28,29,0.65)]">
+        <p className="text-xs text-secondary">
           {t("DashboardCustody.apiKeyEnvironmentDescription")}
         </p>
       </div>
@@ -399,11 +393,11 @@ function CreateApiKeyReviewStep({
         <input type="hidden" name="signingWalletId" value={draft.defaultWalletId} />
       ) : null}
 
-      <div className="overflow-hidden rounded-lg border border-[rgba(28,28,29,0.12)] bg-white">
-        <div className="flex flex-col gap-2 border-b border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="overflow-hidden rounded-lg border border-border-default bg-white">
+        <div className="flex flex-col gap-2 border-b border-border-subtle bg-fill-subtle px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <p className="truncate text-base font-semibold text-[#1c1c1d]">{draft.name}</p>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[rgba(28,28,29,0.62)]">
+            <p className="truncate text-base font-semibold text-primary">{draft.name}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-secondary">
               <span>{formatEnvironmentLabel(environment, t)}</span>
               <span aria-hidden="true">·</span>
               <span>
@@ -415,7 +409,7 @@ function CreateApiKeyReviewStep({
           </div>
         </div>
 
-        <div className="grid divide-y divide-[rgba(28,28,29,0.08)] sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+        <div className="grid divide-y divide-border-subtle sm:grid-cols-2 sm:divide-x sm:divide-y-0">
           <ReviewDetail icon={KeyRound} label={t("DashboardCustody.endpointPermissions")}>
             {formatRoleLabel(draft.role, t)}
           </ReviewDetail>
@@ -428,10 +422,10 @@ function CreateApiKeyReviewStep({
                   : t("DashboardCustody.selected", { count: selectedWallets.length })}
               </p>
               {draft.walletScope === "selected" ? (
-                <div className="space-y-1.5 text-xs text-[rgba(28,28,29,0.62)]">
+                <div className="space-y-1.5 text-xs text-secondary">
                   <p>
                     {t("DashboardCustody.default")}{" "}
-                    <span className="text-[#1c1c1d]">
+                    <span className="text-primary">
                       {defaultSelectedWallet
                         ? formatWalletLabel(defaultSelectedWallet)
                         : t("DashboardCustody.none")}
@@ -441,7 +435,7 @@ function CreateApiKeyReviewStep({
                     {selectedWallets.map((wallet) => (
                       <span
                         key={wallet.walletId}
-                        className="max-w-full truncate rounded-sm bg-[rgba(28,28,29,0.06)] px-1.5 py-0.5"
+                        className="max-w-full truncate rounded-sm bg-fill px-1.5 py-0.5"
                       >
                         {formatWalletLabel(wallet)}
                       </span>
@@ -453,17 +447,13 @@ function CreateApiKeyReviewStep({
           </ReviewDetail>
         </div>
 
-        <div className="grid divide-y divide-[rgba(28,28,29,0.08)] border-t border-[rgba(28,28,29,0.08)] sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+        <div className="grid divide-y divide-border-subtle border-t border-border-subtle sm:grid-cols-2 sm:divide-x sm:divide-y-0">
           <ReviewDetail icon={ShieldCheck} label={t("DashboardCustody.policy")}>
-            <span className="text-[rgba(28,28,29,0.74)]">
-              {t("DashboardCustody.noApiKeyPolicy")}
-            </span>
+            <span className="text-secondary">{t("DashboardCustody.noApiKeyPolicy")}</span>
           </ReviewDetail>
 
           <ReviewDetail icon={Info} label={t("DashboardCustody.securityNote")}>
-            <span className="text-[rgba(28,28,29,0.74)]">
-              {t("DashboardCustody.fullKeyOnlyShownOnce")}
-            </span>
+            <span className="text-secondary">{t("DashboardCustody.fullKeyOnlyShownOnce")}</span>
           </ReviewDetail>
         </div>
       </div>
@@ -477,7 +467,7 @@ function CreateApiKeyReviewActions({ onBack }: { onBack: () => void }) {
   const { pending } = useFormStatus();
 
   return (
-    <div className="mt-4 flex items-center justify-end gap-2 border-t border-[rgba(28,28,29,0.08)] pt-4">
+    <div className="mt-4 flex items-center justify-end gap-2 border-t border-border-subtle pt-4">
       <Button type="button" variant="secondary" onClick={onBack} disabled={pending}>
         {t("DashboardCustody.back")}
       </Button>
@@ -570,10 +560,10 @@ export function CreateApiKeyModal({
         size="xl"
       >
         <div className="shrink-0 pr-12">
-          <p className="text-sm font-semibold text-[#1c1c1d]">
+          <p className="text-sm font-semibold text-primary">
             {step === 1 ? t("DashboardCustody.createApiKey") : t("DashboardCustody.reviewApiKey")}
           </p>
-          <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
+          <p className="mt-1 text-sm text-secondary">
             {step === 1
               ? t("DashboardCustody.createApiKeyDescription")
               : t("DashboardCustody.reviewApiKeyDescription")}

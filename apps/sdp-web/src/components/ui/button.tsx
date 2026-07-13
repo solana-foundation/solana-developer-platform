@@ -16,16 +16,15 @@ type ButtonProps = Omit<SolanaButtonProps, "size" | "variant"> & {
 };
 
 const slotBaseClassName =
-  "relative inline-flex shrink-0 items-center justify-center whitespace-nowrap font-medium no-underline transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--gray-50)] disabled:pointer-events-none disabled:opacity-40";
+  "relative inline-flex shrink-0 items-center justify-center whitespace-nowrap font-medium no-underline transition duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--gray-50)] disabled:pointer-events-none disabled:opacity-40";
 
 const variantClassNames: Record<ButtonVariant, string | undefined> = {
   default: undefined,
-  destructive:
-    "bg-status-error-text text-white hover:bg-status-error-text focus-visible:ring-status-error-border",
-  outline: "border border-border-light bg-white text-text-extra-high hover:bg-gray-100",
+  destructive: "bg-error text-white hover:opacity-90 focus-visible:ring-error-border",
+  outline: "border border-border-default bg-white text-primary hover:bg-surface-sunken",
   secondary: undefined,
-  ghost: "bg-transparent text-text-medium hover:bg-border-extra-light hover:text-text-extra-high",
-  link: "h-auto bg-transparent px-0 text-text-extra-high underline-offset-4 hover:bg-transparent hover:underline",
+  ghost: "bg-transparent text-secondary hover:bg-fill-subtle hover:text-primary",
+  link: "h-auto bg-transparent px-0 text-primary underline-offset-4 hover:bg-transparent hover:underline",
 };
 
 const sizeMap: Record<ButtonSize, NonNullable<SolanaButtonProps["size"]>> = {
@@ -53,13 +52,12 @@ const sizeClassNames: Record<ButtonSize, string | undefined> = {
 };
 
 const slotVariantClassNames: Record<ButtonVariant, string> = {
-  default: "bg-[#0f0f10] !text-white hover:bg-black hover:!text-white visited:!text-white",
-  destructive:
-    "bg-status-error-text text-white hover:bg-status-error-text focus-visible:ring-status-error-border",
-  outline: "border border-border-light bg-white text-text-extra-high hover:bg-gray-100",
-  secondary: "bg-[rgba(28,28,29,0.08)] text-[#1c1c1d] hover:bg-[rgba(28,28,29,0.14)]",
-  ghost: "bg-transparent text-text-medium hover:bg-border-extra-light hover:text-text-extra-high",
-  link: "h-auto bg-transparent px-0 text-text-extra-high underline-offset-4 hover:bg-transparent hover:underline",
+  default: "bg-primary !text-white hover:opacity-90 visited:!text-white",
+  destructive: "bg-error text-white hover:opacity-90 focus-visible:ring-error-border",
+  outline: "border border-border-default bg-white text-primary hover:bg-surface-sunken",
+  secondary: "bg-fill text-primary hover:bg-fill-strong",
+  ghost: "bg-transparent text-secondary hover:bg-fill-subtle hover:text-primary",
+  link: "h-auto bg-transparent px-0 text-primary underline-offset-4 hover:bg-transparent hover:underline",
 };
 
 const slotSizeClassNames: Record<ButtonSize, string> = {

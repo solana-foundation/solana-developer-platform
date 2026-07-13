@@ -55,14 +55,14 @@ export function OverviewTab({
   return (
     <div className="space-y-4">
       {/* Identity hero — same grammar as the creation flow's public preview */}
-      <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-5">
+      <div className="rounded-2xl border border-border-default bg-white p-5">
         <div className="grid gap-5 md:grid-cols-2">
           <div className="flex min-w-0 flex-col">
             <p
               className={
                 token.description
-                  ? "max-w-prose text-[13px] leading-relaxed text-[rgba(28,28,29,0.62)]"
-                  : "text-[13px] text-[rgba(28,28,29,0.4)]"
+                  ? "max-w-prose text-[13px] leading-relaxed text-secondary"
+                  : "text-[13px] text-muted"
               }
             >
               {token.description || t("DashboardIssuance.overview.noDescription")}
@@ -75,7 +75,7 @@ export function OverviewTab({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-0 md:border-l md:border-[rgba(28,28,29,0.08)] md:pl-5">
+          <div className="grid grid-cols-2 gap-0 md:border-l md:border-border-subtle md:pl-5">
             <StatTile
               icon={Activity}
               label={t("DashboardIssuance.transactions.status")}
@@ -91,7 +91,7 @@ export function OverviewTab({
                     type="button"
                     onClick={ops.handleRefreshSupply}
                     disabled={ops.isPending}
-                    className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[rgba(28,28,29,0.5)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d] disabled:pointer-events-none disabled:opacity-50"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-md text-tertiary transition-colors hover:bg-fill hover:text-primary disabled:pointer-events-none disabled:opacity-50"
                     aria-label={t("DashboardIssuance.management.refreshSupply")}
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
@@ -137,7 +137,7 @@ export function OverviewTab({
         )}
       >
         {category || subType ? (
-          <div className="grid overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white sm:grid-cols-2 sm:divide-x sm:divide-[rgba(28,28,29,0.08)]">
+          <div className="grid overflow-hidden rounded-2xl border border-border-default bg-white sm:grid-cols-2 sm:divide-x sm:divide-border-subtle">
             {category ? (
               <ClassificationCell
                 icon={category.icon}
@@ -156,16 +156,16 @@ export function OverviewTab({
         ) : null}
         {ops.canDeployToken ? (
           deployBlockers.length > 0 ? (
-            <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-4">
+            <div className="rounded-2xl border border-border-default bg-white p-4">
               <div className="flex items-center gap-2">
-                <TriangleAlert className="h-4.5 w-4.5 shrink-0 text-[#92400e]" />
-                <p className="text-[15px] font-semibold text-[#1c1c1d]">
+                <TriangleAlert className="h-4.5 w-4.5 shrink-0 text-warning" />
+                <p className="text-[15px] font-semibold text-primary">
                   {t("DashboardIssuance.overview.readyForDeploy")}
                 </p>
               </div>
               <ul className="mt-2 space-y-1">
                 {deployBlockers.map((blocker) => (
-                  <li key={blocker} className="text-[13px] leading-relaxed text-[#92400e]">
+                  <li key={blocker} className="text-[13px] leading-relaxed text-warning">
                     {blocker}
                   </li>
                 ))}
@@ -175,16 +175,16 @@ export function OverviewTab({
             <button
               type="button"
               onClick={onDeploy}
-              className="group flex cursor-pointer flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-4 text-left transition-colors hover:border-[rgba(28,28,29,0.2)] hover:bg-[rgba(28,28,29,0.02)]"
+              className="group flex cursor-pointer flex-col rounded-2xl border border-border-default bg-white p-4 text-left transition-colors hover:border-border-strong hover:bg-fill-subtle"
             >
               <div className="flex items-center gap-2">
-                <CircleCheck className="h-4.5 w-4.5 shrink-0 text-[#00a066]" />
-                <p className="text-[15px] font-semibold text-[#1c1c1d]">
+                <CircleCheck className="h-4.5 w-4.5 shrink-0 text-success" />
+                <p className="text-[15px] font-semibold text-primary">
                   {t("DashboardIssuance.overview.readyForDeploy")}
                 </p>
-                <ArrowUpRight className="ml-auto h-4 w-4 shrink-0 text-[rgba(28,28,29,0.4)] transition-colors group-hover:text-[#1c1c1d]" />
+                <ArrowUpRight className="ml-auto h-4 w-4 shrink-0 text-muted transition-colors group-hover:text-primary" />
               </div>
-              <p className="mt-2 text-[13px] leading-relaxed text-[rgba(28,28,29,0.62)]">
+              <p className="mt-2 text-[13px] leading-relaxed text-secondary">
                 {t("DashboardIssuance.overview.readyForDeployDescription")}
               </p>
             </button>
@@ -211,7 +211,7 @@ function IdentityFields({
     <div className="mt-4 flex flex-col gap-3 md:mt-auto">
       {website ? (
         <div>
-          <div className="flex items-center gap-1.5 text-[rgba(28,28,29,0.5)]">
+          <div className="flex items-center gap-1.5 text-tertiary">
             <Globe className="h-3 w-3 shrink-0" />
             <span className="text-[11px]">{t("DashboardIssuance.assetDetails.website")}</span>
           </div>
@@ -220,39 +220,37 @@ function IdentityFields({
               href={websiteHref}
               target="_blank"
               rel="noreferrer"
-              className="mt-0.5 inline-flex w-fit max-w-full items-center gap-1 text-[13px] font-medium text-[#1c1c1d] hover:underline"
+              className="mt-0.5 inline-flex w-fit max-w-full items-center gap-1 text-[13px] font-medium text-primary hover:underline"
             >
               <span className="truncate">{website}</span>
               <ArrowUpRight className="h-3 w-3 shrink-0" />
             </a>
           ) : (
-            <p className="mt-0.5 truncate text-[13px] font-medium text-[rgba(28,28,29,0.62)]">
-              {website}
-            </p>
+            <p className="mt-0.5 truncate text-[13px] font-medium text-secondary">{website}</p>
           )}
         </div>
       ) : null}
       <div>
-        <div className="flex items-center gap-1.5 text-[rgba(28,28,29,0.5)]">
+        <div className="flex items-center gap-1.5 text-tertiary">
           <Wallet className="h-3 w-3 shrink-0" />
           <span className="text-[11px]">{t("DashboardIssuance.overview.mintAddress")}</span>
         </div>
         {mintAddress ? (
           <div className="mt-0.5 flex w-fit max-w-full items-center gap-1.5">
-            <span className="min-w-0 truncate text-[13px] font-medium text-[#1c1c1d]">
+            <span className="min-w-0 truncate text-[13px] font-medium text-primary">
               {mintAddress}
             </span>
             <button
               type="button"
               onClick={() => onCopy(mintAddress)}
-              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[rgba(28,28,29,0.5)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-tertiary transition-colors hover:bg-fill hover:text-primary"
               aria-label={t("DashboardIssuance.header.copyTokenAddress")}
             >
               <Copy className="h-3.5 w-3.5" />
             </button>
           </div>
         ) : (
-          <p className="mt-0.5 text-[13px] text-[rgba(28,28,29,0.4)]">
+          <p className="mt-0.5 text-[13px] text-muted">
             {t("DashboardIssuance.overview.notDeployedYet")}
           </p>
         )}
@@ -277,7 +275,7 @@ function StatTile({
   const hasValue = value !== null && value.trim().length > 0;
   return (
     <div className={cn("px-3 py-2.5", className)}>
-      <div className="flex items-center gap-1.5 text-[rgba(28,28,29,0.5)]">
+      <div className="flex items-center gap-1.5 text-tertiary">
         <Icon className="h-3 w-3 shrink-0" />
         <span className="text-[11px]">{label}</span>
         {action ? <span className="ml-auto">{action}</span> : null}
@@ -285,7 +283,7 @@ function StatTile({
       <p
         className={cn(
           "mt-0.5 truncate text-[13px] font-medium",
-          hasValue ? "text-[#1c1c1d]" : "text-[rgba(28,28,29,0.4)]"
+          hasValue ? "text-primary" : "text-muted"
         )}
       >
         {hasValue ? value : "—"}
@@ -305,12 +303,12 @@ function ClassificationCell({
 }) {
   return (
     <div className="flex items-start gap-3 p-4">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.05)] text-[#1c1c1d]">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-primary">
         <Icon className="h-4.5 w-4.5" />
       </span>
       <div className="min-w-0">
-        <p className="text-[15px] font-semibold text-[#1c1c1d]">{title}</p>
-        <p className="mt-1 text-[13px] leading-relaxed text-[rgba(28,28,29,0.62)]">{description}</p>
+        <p className="text-[15px] font-semibold text-primary">{title}</p>
+        <p className="mt-1 text-[13px] leading-relaxed text-secondary">{description}</p>
       </div>
     </div>
   );

@@ -32,7 +32,7 @@ export function getTemplateCards(t: Translate): Array<
       name: t("DashboardIssuance.create.tokenizedSecurityTemplateName"),
       description: t("DashboardIssuance.create.tokenizedSecurityTemplateDescription"),
       icon: ShieldCheck,
-      iconClassName: "bg-[#d8f7e4] text-[#0f9b58]",
+      iconClassName: "bg-success-bg text-success",
       enabled: true,
       template: "tokenized-security",
     },

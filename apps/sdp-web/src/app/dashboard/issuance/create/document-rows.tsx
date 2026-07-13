@@ -74,7 +74,7 @@ export function DocumentRows({ documents, onChange, disabled }: DocumentRowsProp
             disabled={disabled}
             onClick={() => remove(doc.id)}
             aria-label={t("DashboardIssuance.assetDetails.removeDocument")}
-            className="self-center text-status-error-text hover:bg-status-error-bg hover:text-status-error-text"
+            className="self-center text-error hover:bg-error-bg hover:text-error"
           >
             <Trash2 className="h-4 w-4" />
           </Button>

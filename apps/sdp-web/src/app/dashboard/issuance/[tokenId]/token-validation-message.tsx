@@ -24,7 +24,7 @@ export function TokenValidationMessage({
       className={[
         reserveSpace ? "min-h-5" : "",
         "text-sm leading-5",
-        message ? "text-[#9e2b38]" : "invisible text-transparent",
+        message ? "text-destructive-strong" : "invisible text-transparent",
       ].join(" ")}
     >
       {message ?? "\u00A0"}

@@ -23,11 +23,11 @@ import { AmountBalanceReadout } from "./amount-balance-readout";
 import { BulkImportDialog } from "./bulk-import-dialog";
 
 const RECIPIENT_STATUS_TONE = {
-  pending: "text-text-low",
-  processing: "text-text-low",
-  confirmed: "text-status-success-text",
-  failed: "text-status-error-text",
-  archived: "text-text-low",
+  pending: "text-tertiary",
+  processing: "text-tertiary",
+  confirmed: "text-success",
+  failed: "text-error",
+  archived: "text-tertiary",
 } as const satisfies Record<PaymentTransferBatchRecipientStatus, string>;
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -147,7 +147,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
           options={walletOptions}
           placeholder={t("DashboardPayments.batchSend.selectSourceWallet")}
           searchPlaceholder={t("DashboardPayments.batchSend.searchWallets")}
-          icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
+          icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
           isLoading={walletsLoading}
           trailing={
             selectedAssetBalance ? (
@@ -177,19 +177,17 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
       </div>
 
       {walletId && assetOptions.length === 0 ? (
-        <p className="text-sm text-status-error-text">
-          {t("DashboardPayments.batchSend.noAssets")}
-        </p>
+        <p className="text-sm text-error">{t("DashboardPayments.batchSend.noAssets")}</p>
       ) : null}
 
       <div className="flex items-center justify-between gap-4 px-1">
-        <p className="text-xl font-medium tracking-tight text-text-extra-high">
+        <p className="text-xl font-medium tracking-tight text-primary">
           {t("DashboardPayments.batchSend.selectRecipientWallets")}
         </p>
         <button
           type="button"
           onClick={() => setBulkOpen(true)}
-          className="text-sm font-medium text-text-low transition-colors hover:text-text-extra-high"
+          className="text-sm font-medium text-tertiary transition-colors hover:text-primary"
         >
           {t("DashboardPayments.batchSend.bulkImport")}
         </button>
@@ -198,7 +196,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
       <div className="space-y-2">
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-3.5 size-5 -translate-y-1/2 text-text-low" />
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-3.5 size-5 -translate-y-1/2 text-tertiary" />
             <Input
               value={search}
               onChange={(event) => setSearchQuery(event.currentTarget.value)}
@@ -221,7 +219,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
           initial={{ opacity: 0, y: 4 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.15 }}
-          className="divide-y divide-border-light"
+          className="divide-y divide-border-default"
         >
           {recipientsLoading ? (
             Array.from({ length: 6 }, (_, i) => (
@@ -235,7 +233,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
               </div>
             ))
           ) : pageRecipients.length === 0 ? (
-            <p className="py-6 text-center text-sm text-text-low">
+            <p className="py-6 text-center text-sm text-tertiary">
               {recipientTotal === 0
                 ? t("DashboardPayments.batchSend.noCounterpartiesWithSolanaAddress")
                 : t("DashboardPayments.batchSend.noMatches")}
@@ -250,7 +248,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
                   key={account.counterpartyAccountId}
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 transition-colors",
-                    isSelected ? "bg-border-extra-light" : "hover:bg-border-extra-light"
+                    isSelected ? "bg-fill-subtle" : "hover:bg-fill-subtle"
                   )}
                 >
                   <button
@@ -258,10 +256,10 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
                     onClick={() => toggleRecipient(account)}
                     className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
                   >
-                    <span className="truncate text-sm font-medium text-text-extra-high">
+                    <span className="truncate text-sm font-medium text-primary">
                       {account.name}
                     </span>
-                    <span className="truncate text-xs text-text-low">
+                    <span className="truncate text-xs text-tertiary">
                       {hasLabel ? `${account.label} · ` : ""}
                       <span className="font-mono">{shortenAddress(account.address)}</span>
                     </span>
@@ -286,9 +284,9 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
                           }
                         }}
                         placeholder="0.0"
-                        className="w-24 border-0 border-b border-border-medium bg-transparent pb-0.5 text-right text-sm text-text-extra-high [appearance:textfield] focus:border-[var(--input-border-focus)] focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        className="w-24 border-0 border-b border-border-strong bg-transparent pb-0.5 text-right text-sm text-primary [appearance:textfield] focus:border-[var(--input-border-focus)] focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       />
-                      <span className="text-sm text-text-low">{displayAsset}</span>
+                      <span className="text-sm text-tertiary">{displayAsset}</span>
                     </motion.div>
                   ) : (
                     <button
@@ -297,7 +295,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
                       aria-label={t("DashboardPayments.batchSend.addRecipient", {
                         name: account.name,
                       })}
-                      className="shrink-0 text-text-low transition-colors hover:text-text-extra-high"
+                      className="shrink-0 text-tertiary transition-colors hover:text-primary"
                     >
                       <PlusIcon className="size-4" />
                     </button>
@@ -315,19 +313,12 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
         <div className="flex items-center justify-between px-1 text-sm">
           <span
             className={
-              exceedsBalance || exceedsMaxRecipients
-                ? "font-medium text-status-error-text"
-                : "text-text-low"
+              exceedsBalance || exceedsMaxRecipients ? "font-medium text-error" : "text-tertiary"
             }
           >
             {recipientsStatusLabel(recipients.length, exceedsBalance, exceedsMaxRecipients, t)}
           </span>
-          <span
-            className={cn(
-              "font-medium",
-              exceedsBalance ? "text-status-error-text" : "text-text-extra-high"
-            )}
-          >
+          <span className={cn("font-medium", exceedsBalance ? "text-error" : "text-primary")}>
             {t("DashboardPayments.batchSend.totalAmount", {
               total: formatTokenAmount(totalAmount),
               asset: displayAsset,
@@ -358,9 +349,9 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
 
   return (
     <div className="space-y-5">
-      <section className="space-y-4 rounded-2xl bg-border-extra-light p-5">
+      <section className="space-y-4 rounded-2xl bg-fill-subtle p-5">
         <div className="space-y-0.5 text-center">
-          <p className="text-3xl font-semibold tracking-tight text-text-extra-high">
+          <p className="text-3xl font-semibold tracking-tight text-primary">
             {t("DashboardPayments.batchSend.reviewSummary", {
               total: formatTokenAmount(totalAmount),
               asset: displayAsset,
@@ -368,7 +359,7 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
             })}
           </p>
           {estimate ? (
-            <p className="text-sm text-text-low">
+            <p className="text-sm text-tertiary">
               {t(
                 estimate.transactionCount === 1
                   ? "DashboardPayments.batchSend.transactionCountSingular"
@@ -379,47 +370,47 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
           ) : null}
         </div>
         {estimateError ? (
-          <p className="text-center text-sm text-status-error-text">{estimateError}</p>
+          <p className="text-center text-sm text-error">{estimateError}</p>
         ) : fees && totalFeeLamports !== null ? (
           <dl className="space-y-2 text-sm">
             <div className="flex items-center justify-between">
-              <dt className="text-text-low">{t("DashboardPayments.batchSend.source")}</dt>
-              <dd className="text-text-high">{rootLabel}</dd>
+              <dt className="text-tertiary">{t("DashboardPayments.batchSend.source")}</dt>
+              <dd className="text-primary">{rootLabel}</dd>
             </div>
             <div className="flex items-center justify-between">
-              <dt className="text-text-low">{t("DashboardPayments.batchSend.transactionFees")}</dt>
-              <dd className="text-text-high">
+              <dt className="text-tertiary">{t("DashboardPayments.batchSend.transactionFees")}</dt>
+              <dd className="text-primary">
                 {formatLamportsAsSol(
                   BigInt(fees.networkFeeLamports) + BigInt(fees.priorityFeeLamports)
                 )}
               </dd>
             </div>
             <div className="flex items-center justify-between">
-              <dt className="text-text-low">{t("DashboardPayments.batchSend.rentFees")}</dt>
-              <dd className="text-text-high">
+              <dt className="text-tertiary">{t("DashboardPayments.batchSend.rentFees")}</dt>
+              <dd className="text-primary">
                 {formatLamportsAsSol(BigInt(fees.tokenAccountRentLamports))}
               </dd>
             </div>
-            <div className="h-px bg-border-light" />
+            <div className="h-px bg-fill-strong" />
             <div className="flex items-center justify-between">
-              <span className="font-medium text-text-extra-high">
+              <span className="font-medium text-primary">
                 {t("DashboardPayments.batchSend.total")}
               </span>
               <span className="flex items-center gap-2">
                 {fees.sponsored ? (
                   <>
-                    <span className="text-text-low line-through">
+                    <span className="text-tertiary line-through">
                       {formatLamportsAsSol(totalFeeLamports)}
                     </span>
-                    <span className="font-medium text-text-extra-high">
+                    <span className="font-medium text-primary">
                       {t("DashboardPayments.batchSend.sponsoredFee")}
                     </span>
-                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-text-medium">
+                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-secondary">
                       {t("DashboardPayments.batchSend.sponsoredBy")}
                     </span>
                   </>
                 ) : (
-                  <span className="font-medium text-text-extra-high">
+                  <span className="font-medium text-primary">
                     {formatLamportsAsSol(totalFeeLamports)}
                   </span>
                 )}
@@ -427,7 +418,7 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
             </div>
           </dl>
         ) : (
-          <p className="text-center text-sm text-text-low">
+          <p className="text-center text-sm text-tertiary">
             {t("DashboardPayments.batchSend.estimating")}
           </p>
         )}
@@ -439,19 +430,19 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
             className="flex items-center justify-between gap-3 px-3 py-2.5"
           >
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-text-extra-high">
+              <p className="truncate text-sm font-medium text-primary">
                 {recipient.label && recipient.label.trim().length > 0
                   ? recipient.label
                   : recipient.name}
               </p>
-              <p className="flex items-center gap-1.5 truncate text-xs text-text-low">
+              <p className="flex items-center gap-1.5 truncate text-xs text-tertiary">
                 {recipient.label && recipient.label.trim().length > 0 ? (
                   <span>{recipient.name}</span>
                 ) : null}
                 <span className="font-mono">{shortenAddress(recipient.address)}</span>
               </p>
             </div>
-            <span className="shrink-0 text-sm font-medium text-text-extra-high">
+            <span className="shrink-0 text-sm font-medium text-primary">
               {formatTokenAmount(recipient.amount)} {displayAsset}
             </span>
           </div>
@@ -478,10 +469,10 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
   return (
     <div className="space-y-5">
       <div className="flex flex-col items-center gap-1 pb-1 text-center">
-        <p className="text-2xl font-medium tracking-tight text-text-extra-high">
+        <p className="text-2xl font-medium tracking-tight text-primary">
           {batchResultTitle(batchResult.batch.status, t)}
         </p>
-        <p className="text-sm text-text-low">
+        <p className="text-sm text-tertiary">
           {t("DashboardPayments.batchSend.resultSummary", {
             recipients: batchResult.batch.recipientCount,
             transactions: batchResult.batch.transactionCount,
@@ -497,10 +488,8 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
           return (
             <div key={recipient.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
               <div className="min-w-0">
-                {name ? (
-                  <p className="truncate text-sm font-medium text-text-extra-high">{name}</p>
-                ) : null}
-                <p className="truncate font-mono text-xs text-text-low">
+                {name ? <p className="truncate text-sm font-medium text-primary">{name}</p> : null}
+                <p className="truncate font-mono text-xs text-tertiary">
                   {formatTokenAmount(recipient.amount)} {displayAsset} ·{" "}
                   {shortenAddress(recipient.destination)}
                 </p>
@@ -515,7 +504,7 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
                   <button
                     type="button"
                     onClick={() => window.open(getDevnetExplorerUrl(signature), "_blank")}
-                    className="text-text-low hover:text-text-extra-high"
+                    className="text-tertiary hover:text-primary"
                     aria-label={t("DashboardPayments.batchSend.viewOnExplorer")}
                   >
                     <ExternalLink className="size-4" />

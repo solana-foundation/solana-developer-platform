@@ -24,16 +24,16 @@ export function TokenFundManagementSection({
   onOpenAction,
 }: TokenFundManagementSectionProps) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+    <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
       {rows.map((row) => (
         <div
           key={row.id}
           data-testid={`fund-management-row-${row.id}`}
-          className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgba(28,28,29,0.08)] px-4 py-4 last:border-b-0"
+          className="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-4 py-4 last:border-b-0"
         >
           <div>
-            <p className="text-[17px] font-medium text-[#1c1c1d]">{row.title}</p>
-            <p className="text-sm text-[rgba(28,28,29,0.62)]">{row.helper}</p>
+            <p className="text-[17px] font-medium text-primary">{row.title}</p>
+            <p className="text-sm text-secondary">{row.helper}</p>
           </div>
           <TokenDisabledActionTooltip reason={row.disabledReason}>
             <Button

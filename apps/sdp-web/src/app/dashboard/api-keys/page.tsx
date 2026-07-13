@@ -83,14 +83,12 @@ export default async function ApiKeysPage() {
         </CardHeader>
         <CardContent>
           {!dashboardAccess.capabilities.canManageApiKeys ? (
-            <div className="mb-4 rounded-[10px] border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
+            <div className="mb-4 rounded-[10px] border border-border-default bg-fill-subtle px-3 py-2 text-xs text-secondary">
               {t("DashboardCustody.apiKeysViewOnly")}
             </div>
           ) : null}
-          <div className="mb-4 rounded-[10px] border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
-            <p className="text-xs text-[rgba(28,28,29,0.72)]">
-              {t("DashboardCustody.apiKeyRotationHint")}
-            </p>
+          <div className="mb-4 rounded-[10px] border border-border-default bg-fill-subtle px-3 py-2 text-xs text-secondary">
+            <p className="text-xs text-secondary">{t("DashboardCustody.apiKeyRotationHint")}</p>
           </div>
           <div className="@container/api-keys-table">
             <ApiKeysTableClient

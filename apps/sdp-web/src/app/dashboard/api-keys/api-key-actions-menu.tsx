@@ -63,7 +63,7 @@ export function ApiKeyActionsMenu({
             {t("DashboardCustody.rotateKey", { hours: DEFAULT_ROTATION_GRACE_HOURS })}
           </DropdownMenuItem>
           <DropdownMenuItem
-            className="text-[#c71f37] focus:bg-[#c71f37]/10 focus:text-[#c71f37]"
+            className="text-destructive focus:bg-destructive/10 focus:text-destructive"
             onSelect={() => setIsDeleteModalOpen(true)}
           >
             {t("DashboardCustody.deleteKey")}
