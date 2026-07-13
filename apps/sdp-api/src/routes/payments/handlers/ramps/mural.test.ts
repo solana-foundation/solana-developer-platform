@@ -1,6 +1,6 @@
+import type { MuralAccountResolution } from "@sdp/payments/ramps/providers/mural/provider-data";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
-import type { MuralAccountResolution } from "@/lib/ramps/providers/mural/provider-data";
 import { muralOnrampQuote } from "./mural";
 
 function account(overrides?: Partial<MuralAccountResolution>): MuralAccountResolution {

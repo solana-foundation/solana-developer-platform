@@ -1,3 +1,4 @@
+import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -50,7 +51,6 @@ import {
   resolveMintTokenProgram,
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
-import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { normalizePaymentToken, SOL_MINT } from "@/services/payment-operation.service";
 import { assertWalletPolicyAllowsTransferWithRepository } from "@/services/payments/wallet-policy";
 import * as solanaServices from "@/services/solana";

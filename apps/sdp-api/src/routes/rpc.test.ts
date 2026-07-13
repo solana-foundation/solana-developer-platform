@@ -1,8 +1,8 @@
+import { hashString } from "@sdp/payments/hash";
 import type { OrganizationRpcProvider } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { hashString } from "@/lib/hash";
 import { createKVStoreSet } from "@/runtime/factory";
 import type { KVStore } from "@/runtime/kv";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";

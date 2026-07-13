@@ -1,15 +1,15 @@
 import { createHmac, createSign, generateKeyPairSync } from "node:crypto";
-import { Webhook } from "svix";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
-import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   buildBvnkCustomerExternalReference,
   buildBvnkOfframpReference,
   buildBvnkOnrampPaymentRuleKey,
   buildBvnkOnrampWalletName,
-} from "@/lib/ramps/providers/bvnk/provider-data";
+} from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { Webhook } from "svix";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db";
+import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 

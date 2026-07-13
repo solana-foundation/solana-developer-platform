@@ -1,3 +1,6 @@
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import type { MuralWebhookEvent } from "@sdp/payments/ramps/providers/mural/client";
+import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
 import {
   createCounterpartiesRepository,
@@ -8,9 +11,6 @@ import {
 } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
-import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
-import type { MuralWebhookEvent } from "@/lib/ramps/providers/mural/client";
-import type { RampWebhookValidationContext } from "@/lib/ramps/types";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import type { AppContext, WebhookProcessor } from "./processor";
 

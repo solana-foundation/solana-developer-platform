@@ -1,9 +1,12 @@
 import { SdpPaymentsError } from "@sdp/payments";
+import {
+  buildBvnkIndividualPayload,
+  validateBvnkCounterparty,
+} from "@sdp/payments/ramps/providers/bvnk/counterparty";
+import { normalizeBvnkStateCode } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { Counterparty } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { buildBvnkIndividualPayload, validateBvnkCounterparty } from "./counterparty";
-import { normalizeBvnkStateCode } from "./provider-data";
 
 const ONRAMP_REQUIREMENTS_OPTIONS = {
   cryptoToken: "USDC_SOLANA",

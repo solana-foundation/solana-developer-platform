@@ -1,3 +1,5 @@
+import * as feePaymentAdapters from "@sdp/payments/fee-payment";
+import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import type { Context } from "hono";
@@ -11,8 +13,6 @@ import {
   createPolicyRepository,
 } from "@/db/repositories";
 import { resolveKoraUserId } from "@/lib/kora-user";
-import type { RampRuntimeContext } from "@/lib/ramps/types";
-import * as feePaymentAdapters from "@/services/adapters/fee-payment";
 import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;

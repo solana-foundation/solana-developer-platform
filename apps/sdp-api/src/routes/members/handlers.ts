@@ -1,9 +1,9 @@
+import { hashString } from "@sdp/payments/hash";
 import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
-import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";

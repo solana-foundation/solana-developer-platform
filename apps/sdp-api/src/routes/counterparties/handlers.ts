@@ -1,3 +1,5 @@
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
 import {
   COUNTERPARTY_ENTITY_TYPES,
   COUNTRIES,
@@ -23,8 +25,6 @@ import {
   internalError,
   notFound,
 } from "@/lib/errors";
-import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
-import { readMuralOrganization } from "@/lib/ramps/providers/mural/provider-data";
 import { created, noContent, success } from "@/lib/response";
 import {
   advanceCounterpartyRequirements,

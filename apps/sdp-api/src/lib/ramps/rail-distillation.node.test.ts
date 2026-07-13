@@ -1,8 +1,8 @@
+import { distillCoinbaseRailSupport } from "@sdp/payments/ramps/providers/coinbase/client";
+import { distillLightsparkRailSupport } from "@sdp/payments/ramps/providers/lightspark/client";
+import { distillMuralRailSupport } from "@sdp/payments/ramps/providers/mural/client";
+import { isActiveIso4217CurrencyCode } from "@sdp/payments/ramps/shared";
 import { describe, expect, it } from "vitest";
-import { distillCoinbaseRailSupport } from "./providers/coinbase/client";
-import { distillLightsparkRailSupport } from "./providers/lightspark/client";
-import { distillMuralRailSupport } from "./providers/mural/client";
-import { isActiveIso4217CurrencyCode } from "./shared";
 
 describe("ramp rail distillation", () => {
   it("validates ISO 4217 currency codes", () => {
