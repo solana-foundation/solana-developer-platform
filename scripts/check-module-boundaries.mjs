@@ -196,6 +196,21 @@ export function workspaceImportName(specifier, workspaceNames) {
     .find((name) => specifier === name || specifier.startsWith(`${name}/`));
 }
 
+export function workspaceImportPath({ filePath, specifier, modules }) {
+  if (!specifier.startsWith(".")) {
+    return undefined;
+  }
+
+  const resolvedPath = path.resolve(path.dirname(filePath), specifier);
+  return [...modules]
+    .filter(
+      (module) =>
+        module.sourceDirectory && isWithin(resolvedPath, path.dirname(module.sourceDirectory))
+    )
+    .sort((left, right) => right.sourceDirectory.length - left.sourceDirectory.length)
+    .at(0)?.name;
+}
+
 export function findWorkspaceDependencyCycles(modules) {
   const byName = new Map(modules.map((module) => [module.name, module]));
   const state = new Map();
@@ -284,7 +299,9 @@ export function validateModuleBoundaries({ modules, sourceImports, appSourceRoot
 
   for (const sourceImport of sourceImports) {
     const violation = forbiddenPackageSourceImport({ ...sourceImport, appSourceRoots });
-    const importedWorkspace = workspaceImportName(sourceImport.specifier, moduleNames);
+    const importedWorkspace =
+      workspaceImportName(sourceImport.specifier, moduleNames) ??
+      workspaceImportPath({ ...sourceImport, modules });
     if (
       importedWorkspace &&
       importedWorkspace !== sourceImport.module.name &&

@@ -5,6 +5,7 @@ import {
   forbiddenPackageSourceImport,
   validateModuleBoundaries,
   workspaceImportName,
+  workspaceImportPath,
 } from "./check-module-boundaries.mjs";
 
 const api = {
@@ -28,6 +29,25 @@ test("assigns subpath imports to the longest matching workspace package", () => 
   ]);
 
   assert.equal(workspacePackage, "@sdp/api-integration/helpers");
+});
+
+test("assigns relative imports to their owning workspace package", () => {
+  const workspacePackage = workspaceImportPath({
+    filePath: "/repo/packages/sdp-custody/src/index.ts",
+    specifier: "../../sdp-payments/src/index",
+    modules: [
+      {
+        name: "@sdp/custody",
+        sourceDirectory: "/repo/packages/sdp-custody/src",
+      },
+      {
+        name: "@sdp/payments",
+        sourceDirectory: "/repo/packages/sdp-payments/src",
+      },
+    ],
+  });
+
+  assert.equal(workspacePackage, "@sdp/payments");
 });
 
 test("permits the explicit API test-support facade", () => {
@@ -83,6 +103,38 @@ test("requires imported workspace packages to be declared", () => {
   });
 
   assert.match(errors.join("\n"), /without declaring @sdp\/api/);
+});
+
+test("requires relative imports to declare their owning workspace package", () => {
+  const custody = {
+    name: "@sdp/custody",
+    directory: "packages/sdp-custody",
+    sourceDirectory: "/repo/packages/sdp-custody/src",
+    allowedDependencies: ["@sdp/types"],
+    declaredDependencies: ["@sdp/types"],
+  };
+  const payments = {
+    name: "@sdp/payments",
+    directory: "packages/sdp-payments",
+    sourceDirectory: "/repo/packages/sdp-payments/src",
+    allowedDependencies: [],
+    declaredDependencies: [],
+  };
+  const errors = validateModuleBoundaries({
+    modules: [custody, payments],
+    appSourceRoots: [],
+    sourceImports: [
+      {
+        module: custody,
+        filePath: "/repo/packages/sdp-custody/src/index.ts",
+        specifier: "../../sdp-payments/src/index",
+      },
+    ],
+  });
+
+  assert.deepEqual(errors, [
+    "/repo/packages/sdp-custody/src/index.ts imports ../../sdp-payments/src/index without declaring @sdp/payments.",
+  ]);
 });
 
 test("reports one error for a forbidden API test-support import", () => {
