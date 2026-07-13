@@ -13,37 +13,37 @@ export function getLightsparkOnboardingCopy(
       title: t("DashboardPayments.lightspark.verificationRequiredTitle"),
       description: t("DashboardPayments.lightspark.verificationRequiredDescription"),
       icon: ShieldCheckIcon,
-      iconClassName: "text-text-extra-high",
+      iconClassName: "text-primary",
     },
     customer_verifying: {
       title: t("DashboardPayments.lightspark.verificationInReviewTitle"),
       description: t("DashboardPayments.lightspark.verificationInReviewDescription"),
       icon: Loader2Icon,
-      iconClassName: "animate-spin text-text-medium",
+      iconClassName: "animate-spin text-secondary",
     },
     customer_verification_failed: {
       title: t("DashboardPayments.lightspark.verificationFailedTitle"),
       description: t("DashboardPayments.lightspark.verificationFailedDescription"),
       icon: XCircleIcon,
-      iconClassName: "text-status-error-text",
+      iconClassName: "text-error",
     },
     funding_account_provisioning: {
       title: t("DashboardPayments.lightspark.fundingAccountProvisioningTitle"),
       description: t("DashboardPayments.lightspark.fundingAccountProvisioningDescription"),
       icon: Loader2Icon,
-      iconClassName: "animate-spin text-text-medium",
+      iconClassName: "animate-spin text-secondary",
     },
     provisioning_failed: {
       title: t("DashboardPayments.lightspark.provisioningFailedTitle"),
       description: t("DashboardPayments.lightspark.provisioningFailedDescription"),
       icon: XCircleIcon,
-      iconClassName: "text-status-error-text",
+      iconClassName: "text-error",
     },
     ready: {
       title: t("DashboardPayments.lightspark.readyTitle"),
       description: t("DashboardPayments.lightspark.readyDescription"),
       icon: Loader2Icon,
-      iconClassName: "animate-spin text-text-medium",
+      iconClassName: "animate-spin text-secondary",
     },
   };
 }

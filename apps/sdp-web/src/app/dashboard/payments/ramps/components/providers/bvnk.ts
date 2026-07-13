@@ -13,37 +13,37 @@ export function getBvnkOnboardingCopy(
       title: t("DashboardPayments.bvnk.verificationRequiredTitle"),
       description: t("DashboardPayments.bvnk.verificationRequiredDescription"),
       icon: ShieldCheckIcon,
-      iconClassName: "text-text-extra-high",
+      iconClassName: "text-primary",
     },
     customer_verifying: {
       title: t("DashboardPayments.bvnk.verificationInReviewTitle"),
       description: t("DashboardPayments.bvnk.verificationInReviewDescription"),
       icon: Loader2Icon,
-      iconClassName: "animate-spin text-text-medium",
+      iconClassName: "animate-spin text-secondary",
     },
     customer_verification_failed: {
       title: t("DashboardPayments.bvnk.verificationFailedTitle"),
       description: t("DashboardPayments.bvnk.verificationFailedDescription"),
       icon: XCircleIcon,
-      iconClassName: "text-status-error-text",
+      iconClassName: "text-error",
     },
     funding_account_provisioning: {
       title: t("DashboardPayments.bvnk.fundingAccountProvisioningTitle"),
       description: t("DashboardPayments.bvnk.fundingAccountProvisioningDescription"),
       icon: Loader2Icon,
-      iconClassName: "animate-spin text-text-medium",
+      iconClassName: "animate-spin text-secondary",
     },
     provisioning_failed: {
       title: t("DashboardPayments.bvnk.provisioningFailedTitle"),
       description: t("DashboardPayments.bvnk.provisioningFailedDescription"),
       icon: XCircleIcon,
-      iconClassName: "text-status-error-text",
+      iconClassName: "text-error",
     },
     ready: {
       title: t("DashboardPayments.bvnk.readyTitle"),
       description: t("DashboardPayments.bvnk.readyDescription"),
       icon: Loader2Icon,
-      iconClassName: "animate-spin text-text-medium",
+      iconClassName: "animate-spin text-secondary",
     },
   };
 }

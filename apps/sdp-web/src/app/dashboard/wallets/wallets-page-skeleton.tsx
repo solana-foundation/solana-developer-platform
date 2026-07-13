@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 
 function SkeletonBlock({ className }: { className: string }) {
-  return <div className={`animate-pulse rounded-[16px] bg-[rgba(28,28,29,0.1)] ${className}`} />;
+  return <div className={`animate-pulse rounded-[16px] bg-fill-strong ${className}`} />;
 }
 
 const PROVIDER_SKELETON_IDS = [
@@ -26,13 +26,13 @@ const WALLET_CARD_SKELETON_IDS = [
 
 function WalletCardSkeleton() {
   return (
-    <div className="animate-pulse rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[#fcfcfa] p-5">
+    <div className="animate-pulse rounded-2xl border border-border-subtle bg-surface-raised p-5">
       <SkeletonBlock className="h-12 w-12 rounded-2xl" />
       <div className="mt-4 space-y-2">
         <SkeletonBlock className="h-4 w-24" />
         <SkeletonBlock className="h-8 w-40" />
       </div>
-      <div className="mt-6 space-y-3 rounded-xl border border-[rgba(28,28,29,0.06)] bg-white/70 p-3">
+      <div className="mt-6 space-y-3 rounded-xl border border-border-subtle bg-white/70 p-3">
         <SkeletonBlock className="h-4 w-full" />
         <SkeletonBlock className="h-4 w-full" />
         <SkeletonBlock className="h-4 w-full" />
@@ -44,7 +44,7 @@ function WalletCardSkeleton() {
 
 function ProviderCardSkeleton() {
   return (
-    <div className="animate-pulse rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[#fcfcfa] p-5">
+    <div className="animate-pulse rounded-2xl border border-border-subtle bg-surface-raised p-5">
       <div className="flex items-start justify-between gap-4">
         <SkeletonBlock className="h-12 w-12 rounded-2xl" />
         <SkeletonBlock className="h-6 w-24 rounded-full" />

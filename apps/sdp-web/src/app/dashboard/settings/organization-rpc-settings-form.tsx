@@ -314,28 +314,28 @@ export function OrganizationRpcSettingsForm({
   return (
     <div className="grid gap-5">
       <div className="w-full max-w-3xl space-y-5">
-        <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-3 py-2">
+        <div className="rounded-xl border border-border-default bg-fill-subtle px-3 py-2">
           <div className="flex items-center gap-3">
-            <span className="text-sm text-[rgba(28,28,29,0.7)]">
+            <span className="text-sm text-secondary">
               {t("DashboardCustody.editingOrganization", { name: organization.name })}
             </span>
           </div>
         </div>
 
         {!canManageSettings ? (
-          <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-sm text-[rgba(28,28,29,0.72)]">
+          <div className="rounded-xl border border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
             {t("DashboardCustody.viewOnlyRpcSettings")}
           </div>
         ) : null}
 
         {!hasEnabledProviders ? (
-          <div className="rounded-xl border border-[rgba(158,43,56,0.2)] bg-[rgba(158,43,56,0.06)] px-3 py-2 text-sm text-[#9e2b38]">
+          <div className="rounded-xl border border-destructive-border bg-destructive-bg px-3 py-2 text-sm text-destructive-strong">
             {t("DashboardCustody.noRpcProviders")}
           </div>
         ) : null}
 
         {hasEnabledProviders && !hasPersistedProviderEnabled ? (
-          <div className="rounded-xl border border-[rgba(180,83,9,0.22)] bg-[rgba(245,158,11,0.12)] px-3 py-2 text-sm text-[#8a5a00]">
+          <div className="rounded-xl border border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p>
                 {t("DashboardCustody.rpcFallback", {
@@ -367,7 +367,7 @@ export function OrganizationRpcSettingsForm({
             <select
               id="rpcProvider"
               name="rpcProvider"
-              className="h-10 w-full min-w-0 rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
+              className="h-10 w-full min-w-0 rounded-lg border border-border-default bg-white px-3 text-sm text-primary"
               value={selectedProvider}
               disabled={!canManageSettings || !hasEnabledProviders || isSaving || isTesting}
               onChange={(event) => {
@@ -399,7 +399,7 @@ export function OrganizationRpcSettingsForm({
       </div>
 
       {errorMessage ? (
-        <div className="w-full max-w-3xl rounded-xl border border-[rgba(158,43,56,0.2)] bg-[rgba(158,43,56,0.06)] px-3 py-2 text-sm text-[#9e2b38]">
+        <div className="w-full max-w-3xl rounded-xl border border-destructive-border bg-destructive-bg px-3 py-2 text-sm text-destructive-strong">
           {errorMessage}
         </div>
       ) : null}

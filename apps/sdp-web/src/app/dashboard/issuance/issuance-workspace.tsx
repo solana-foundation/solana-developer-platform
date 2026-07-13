@@ -212,30 +212,30 @@ export function IssuanceWorkspace({
       overview={
         <>
           {tokensNotice && tokens.length > 0 ? (
-            <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-4 py-3">
-              <p className="text-sm font-medium text-[#1c1c1d]">
+            <div className="rounded-xl border border-border-default bg-fill-subtle px-4 py-3">
+              <p className="text-sm font-medium text-primary">
                 {t("DashboardIssuance.workspace.tokenListUnavailable")}
               </p>
-              <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">{tokensNotice}</p>
+              <p className="mt-1 text-sm text-secondary">{tokensNotice}</p>
             </div>
           ) : null}
 
           <div className="flex items-center gap-3">
             <div className="relative flex-1">
-              <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[rgba(28,28,29,0.52)]" />
+              <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-tertiary" />
               <Input
                 value={search}
                 onChange={(event) => {
                   const value = event.currentTarget.value;
                   setSearch(value);
                 }}
-                className="h-10 rounded-[10px] border-[rgba(28,28,29,0.16)] bg-white pl-9"
+                className="h-10 rounded-[10px] border-border-default bg-white pl-9"
                 placeholder={t("DashboardIssuance.workspace.search")}
               />
             </div>
             <Button
               type="button"
-              className="h-10 rounded-[10px] bg-[#1c1c1d] px-4 text-white hover:bg-[rgba(28,28,29,0.92)]"
+              className="h-10 rounded-[10px] bg-primary px-4 text-white hover:opacity-90"
               onClick={startTokenCreation}
             >
               {t("DashboardIssuance.workspace.createDraft")}
@@ -243,7 +243,7 @@ export function IssuanceWorkspace({
           </div>
 
           {hasTokens && filteredTokens.length === 0 ? (
-            <p className="text-sm text-[rgba(28,28,29,0.64)]">
+            <p className="text-sm text-secondary">
               {t("DashboardIssuance.workspace.noTokensMatch")}
             </p>
           ) : null}
@@ -253,14 +253,14 @@ export function IssuanceWorkspace({
               <article
                 key={token.id}
                 data-testid={`token-card-${token.id}`}
-                className="flex min-h-[340px] flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]"
+                className="flex min-h-[340px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]"
               >
                 {(() => {
                   const deploymentStatus = getDeploymentStatus(token);
 
                   return (
                     <div className="mb-4 flex items-start justify-between gap-3">
-                      <div className="h-14 w-14 overflow-hidden rounded-full border border-[rgba(28,28,29,0.1)] bg-white">
+                      <div className="h-14 w-14 overflow-hidden rounded-full border border-border-default bg-white">
                         {token.imageUrl ? (
                           // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
                           <img
@@ -269,7 +269,7 @@ export function IssuanceWorkspace({
                             className="h-full w-full object-cover"
                           />
                         ) : (
-                          <div className="flex h-full w-full items-center justify-center text-lg font-semibold text-[rgba(28,28,29,0.58)]">
+                          <div className="flex h-full w-full items-center justify-center text-lg font-semibold text-tertiary">
                             {token.symbol.slice(0, 1) || "?"}
                           </div>
                         )}
@@ -280,8 +280,8 @@ export function IssuanceWorkspace({
                         className={[
                           "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium tracking-[0.02em] capitalize",
                           deploymentStatus === "active"
-                            ? "bg-[rgba(12,128,76,0.10)] text-[#0c804c]"
-                            : "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]",
+                            ? "bg-success-bg text-success"
+                            : "bg-fill text-secondary",
                         ].join(" ")}
                       >
                         {deploymentStatus === "active"
@@ -291,35 +291,29 @@ export function IssuanceWorkspace({
                     </div>
                   );
                 })()}
-                <p className="text-sm font-medium tracking-wide text-[rgba(28,28,29,0.58)]">
-                  {token.symbol}
-                </p>
-                <h3 className="mt-1 text-[30px] leading-[1.1] font-medium text-[#1c1c1d]">
+                <p className="text-sm font-medium tracking-wide text-tertiary">{token.symbol}</p>
+                <h3 className="mt-1 text-[30px] leading-[1.1] font-medium text-primary">
                   {token.name}
                 </h3>
 
-                <div className="mt-6 space-y-2 rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] p-3">
+                <div className="mt-6 space-y-2 rounded-xl border border-border-subtle bg-fill-subtle p-3">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-[rgba(28,28,29,0.58)]">
-                      {t("DashboardIssuance.workspace.type")}
-                    </span>
-                    <span className="font-medium text-[#1c1c1d]">
+                    <span className="text-tertiary">{t("DashboardIssuance.workspace.type")}</span>
+                    <span className="font-medium text-primary">
                       {getTokenTypeLabel(token.template, t)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-[rgba(28,28,29,0.58)]">
-                      {t("DashboardIssuance.workspace.supply")}
-                    </span>
-                    <span className="font-medium text-[#1c1c1d]">
+                    <span className="text-tertiary">{t("DashboardIssuance.workspace.supply")}</span>
+                    <span className="font-medium text-primary">
                       {formatSupply(token.totalSupply, locale)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-[rgba(28,28,29,0.58)]">
+                    <span className="text-tertiary">
                       {t("DashboardIssuance.workspace.created")}
                     </span>
-                    <span className="font-medium text-[#1c1c1d]">
+                    <span className="font-medium text-primary">
                       {formatDate(token.createdAt, locale)}
                     </span>
                   </div>
@@ -344,7 +338,7 @@ export function IssuanceWorkspace({
               type="button"
               onClick={startTokenCreation}
               data-testid="token-add-card"
-              className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-[rgba(28,28,29,0.2)] bg-[#fcfcfa] text-[rgba(28,28,29,0.5)] transition-colors hover:border-[rgba(28,28,29,0.35)] hover:text-[rgba(28,28,29,0.75)]"
+              className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary"
               aria-label={t("DashboardIssuance.workspace.addNewToken")}
             >
               <Plus className="h-6 w-6" />

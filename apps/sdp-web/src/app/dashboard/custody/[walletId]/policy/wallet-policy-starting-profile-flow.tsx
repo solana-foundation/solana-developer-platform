@@ -884,10 +884,10 @@ export function WalletPolicyStartingProfileFlow({
       <StepIndicator stepIndex={stepIndex} />
 
       <div className="mt-6 space-y-1">
-        <h1 className="text-2xl font-medium text-text-extra-high">{t(currentStep.titleKey)}</h1>
-        <p className="text-sm text-text-medium">{t(currentStep.descriptionKey)}</p>
+        <h1 className="text-2xl font-medium text-primary">{t(currentStep.titleKey)}</h1>
+        <p className="text-sm text-secondary">{t(currentStep.descriptionKey)}</p>
         {savedDraft?.updatedAt && localStatus === "draft" ? (
-          <p className="pt-1 text-xs text-text-extra-low">
+          <p className="pt-1 text-xs text-muted">
             {t("DashboardCustody.policyDraftSaved")}{" "}
             {formatDateTime(savedDraft.updatedAt, locale, t)}
           </p>
@@ -895,7 +895,7 @@ export function WalletPolicyStartingProfileFlow({
       </div>
 
       {policyError ? (
-        <div className="mt-4 rounded-md border border-status-error-border bg-status-error-bg px-3 py-2 text-sm text-status-error-text">
+        <div className="mt-4 rounded-md border border-error-border bg-error-bg px-3 py-2 text-sm text-error">
           {policyError}
         </div>
       ) : null}
@@ -995,41 +995,41 @@ function PolicyAuditPanel({ audit }: { audit: PolicyAudit | null }) {
   if (evaluations.length === 0) return null;
 
   return (
-    <section className="mb-4 rounded-lg border border-border-light bg-white p-4">
+    <section className="mb-4 rounded-lg border border-border-default bg-white p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-text-extra-high">
+          <h2 className="text-sm font-semibold text-primary">
             {t("DashboardCustody.recentPolicyDecisions")}
           </h2>
-          <p className="mt-1 text-xs text-text-extra-low">
+          <p className="mt-1 text-xs text-muted">
             {t("DashboardCustody.policyEvaluationsShown", { count: evaluations.length })}
           </p>
         </div>
       </div>
 
-      <div className="mt-3 divide-y divide-border-light">
+      <div className="mt-3 divide-y divide-border-default">
         {evaluations.map((entry) => (
           <div key={entry.policyEvaluationId} className="py-3 first:pt-0 last:pb-0">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-semibold text-text-extra-high">
+              <span className="font-semibold text-primary">
                 {formatPolicyDecision(entry.decision, t)}
               </span>
-              <span className="rounded-full bg-border-extra-light px-2 py-0.5 text-text-medium">
+              <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-secondary">
                 {formatPolicyStatus(entry.status)}
               </span>
               {entry.requiresApproval ? (
-                <span className="rounded-full bg-status-warning-bg px-2 py-0.5 text-status-warning-text">
+                <span className="rounded-full bg-warning-bg px-2 py-0.5 text-warning">
                   {t("DashboardCustody.needsApproval")}
                 </span>
               ) : null}
             </div>
-            <p className="mt-1 text-sm leading-5 text-text-medium">
+            <p className="mt-1 text-sm leading-5 text-secondary">
               {formatPolicyAuditOperation(entry, t)}
             </p>
-            <p className="mt-1 text-xs leading-5 text-text-medium">
+            <p className="mt-1 text-xs leading-5 text-secondary">
               {entry.reason ?? entry.reasonCode}
             </p>
-            <p className="mt-1 text-xs text-text-extra-low">
+            <p className="mt-1 text-xs text-muted">
               {formatDateTime(entry.evaluatedAt, locale, t)}
               {entry.approvalRequestId
                 ? t("DashboardCustody.policyApprovalRequest", { id: entry.approvalRequestId })
@@ -1053,15 +1053,15 @@ function StepIndicator({ stepIndex }: { stepIndex: number }) {
             className={cn(
               "h-1.5 rounded-full transition-all duration-200",
               index === stepIndex
-                ? "w-4 bg-gray-1400"
+                ? "w-4 bg-primary"
                 : index < stepIndex
-                  ? "w-1.5 bg-gray-1400"
-                  : "w-1.5 bg-border-light"
+                  ? "w-1.5 bg-primary"
+                  : "w-1.5 bg-fill-strong"
             )}
           />
         ))}
       </div>
-      <span className="text-xs text-text-extra-low">
+      <span className="text-xs text-muted">
         {t("DashboardCustody.stepOf", { current: stepIndex + 1, total: FLOW_STEPS.length })}
       </span>
     </div>
@@ -1071,9 +1071,9 @@ function StepIndicator({ stepIndex }: { stepIndex: number }) {
 function LoadingState() {
   return (
     <div className="grid gap-3">
-      <div className="h-20 animate-pulse rounded-lg bg-gray-100" />
-      <div className="h-20 animate-pulse rounded-lg bg-gray-100" />
-      <div className="h-20 animate-pulse rounded-lg bg-gray-100" />
+      <div className="h-20 animate-pulse rounded-lg bg-surface-sunken" />
+      <div className="h-20 animate-pulse rounded-lg bg-surface-sunken" />
+      <div className="h-20 animate-pulse rounded-lg bg-surface-sunken" />
     </div>
   );
 }
@@ -1100,14 +1100,14 @@ function IntentStep({
             className={cn(
               "relative min-h-[150px] rounded-lg border p-4 pr-14 text-left transition-colors",
               selected
-                ? "border-[rgba(28,28,29,0.72)] bg-[rgba(28,28,29,0.04)] shadow-[inset_0_0_0_1px_rgba(28,28,29,0.72)]"
-                : "border-border-light bg-white hover:bg-gray-100"
+                ? "border-primary bg-fill-subtle shadow-[inset_0_0_0_1px_rgba(28,28,29,0.72)]"
+                : "border-border-default bg-white hover:bg-surface-sunken"
             )}
           >
-            <p className="text-base font-semibold text-text-extra-high">{t(category.titleKey)}</p>
-            <p className="mt-2 text-sm leading-6 text-text-medium">{t(category.descriptionKey)}</p>
+            <p className="text-base font-semibold text-primary">{t(category.titleKey)}</p>
+            <p className="mt-2 text-sm leading-6 text-secondary">{t(category.descriptionKey)}</p>
             {selected ? (
-              <span className="absolute right-4 bottom-4 flex size-6 items-center justify-center rounded-full bg-gray-1400 text-white">
+              <span className="absolute right-4 bottom-4 flex size-6 items-center justify-center rounded-full bg-primary text-white">
                 <Check className="size-4" />
                 <span className="sr-only">{t("DashboardCustody.selectedLabel")}</span>
               </span>
@@ -1162,7 +1162,7 @@ function DetailsStep({
   );
 
   return (
-    <div className="border-y border-border-light">
+    <div className="border-y border-border-default">
       {selected.map((category) => {
         const expanded = expandedRuleSet.has(category.id);
 
@@ -1238,7 +1238,7 @@ function RuleSection({
 }) {
   const t = useTranslations();
   return (
-    <section className="border-t border-border-light first:border-t-0">
+    <section className="border-t border-border-default first:border-t-0">
       <button
         type="button"
         aria-expanded={expanded}
@@ -1246,12 +1246,10 @@ function RuleSection({
         className="flex w-full items-start justify-between gap-4 py-3.5 pr-2 text-left"
       >
         <span className="min-w-0">
-          <span className="block text-base font-semibold text-text-extra-high">
-            {t(category.titleKey)}
-          </span>
-          <span className="mt-1 block text-sm leading-5 text-text-medium">{summary}</span>
+          <span className="block text-base font-semibold text-primary">{t(category.titleKey)}</span>
+          <span className="mt-1 block text-sm leading-5 text-secondary">{summary}</span>
         </span>
-        <span className="flex size-6 shrink-0 items-center justify-center text-text-low">
+        <span className="flex size-6 shrink-0 items-center justify-center text-tertiary">
           <ChevronDown
             aria-hidden="true"
             className={cn("size-4 transition-transform duration-200", expanded && "rotate-180")}
@@ -1290,8 +1288,8 @@ function OptionGrid<TValue extends string>({
             className={cn(
               "min-h-11 rounded-md border px-3 py-2 text-left text-sm font-medium transition-colors",
               selected
-                ? "border-[rgba(28,28,29,0.72)] bg-[rgba(28,28,29,0.04)] text-text-extra-high"
-                : "border-border-light bg-white text-text-medium hover:bg-gray-100"
+                ? "border-primary bg-fill-subtle text-primary"
+                : "border-border-default bg-white text-secondary hover:bg-surface-sunken"
             )}
           >
             {t(option.labelKey)}
@@ -1312,7 +1310,7 @@ function OperationRuleEditor({
   const t = useTranslations();
   return (
     <div className="space-y-3">
-      <p className="text-sm leading-6 text-text-medium">
+      <p className="text-sm leading-6 text-secondary">
         {t("DashboardCustody.policyOperationEditorDescription")}
       </p>
       <OptionGrid
@@ -1336,18 +1334,18 @@ function DestinationRuleEditor({
   const t = useTranslations();
   return (
     <div>
-      <p className="text-sm leading-6 text-text-medium">
+      <p className="text-sm leading-6 text-secondary">
         {t("DashboardCustody.policyDestinationEditorDescription")}
       </p>
       <textarea
         value={destinationText}
         onChange={(event) => setDestinationText(event.target.value)}
         rows={6}
-        className="mt-2 min-h-[128px] w-full resize-y rounded-lg border border-border-light bg-white px-3 py-3 font-mono text-sm text-text-extra-high outline-none transition-colors placeholder:text-text-extra-low focus:border-gray-1400"
+        className="mt-2 min-h-[128px] w-full resize-y rounded-lg border border-border-default bg-white px-3 py-3 font-mono text-sm text-primary outline-none transition-colors placeholder:text-muted focus:border-primary"
         placeholder={t("DashboardCustody.policyAddressPlaceholder")}
       />
       {invalidDestinations.length > 0 ? (
-        <p className="mt-2 text-sm text-status-error-text">
+        <p className="mt-2 text-sm text-error">
           {t(
             invalidDestinations.length === 1
               ? "DashboardCustody.policyInvalidAddress"
@@ -1376,7 +1374,7 @@ function LimitRuleEditor({
     <div>
       <div className="grid gap-3 md:grid-cols-2">
         <label className="space-y-2" htmlFor="wallet-policy-max-transfer-amount">
-          <span className="text-sm font-medium text-text-extra-high">
+          <span className="text-sm font-medium text-primary">
             {t("DashboardCustody.policyPerTransferCap")}
           </span>
           <Input
@@ -1387,13 +1385,13 @@ function LimitRuleEditor({
             inputMode="decimal"
           />
           {!isPositiveAmount(maxTransferAmount) ? (
-            <span className="block text-sm text-status-error-text">
+            <span className="block text-sm text-error">
               {t("DashboardCustody.policyPositiveNumber")}
             </span>
           ) : null}
         </label>
         <label className="space-y-2" htmlFor="wallet-policy-max-daily-amount">
-          <span className="text-sm font-medium text-text-extra-high">
+          <span className="text-sm font-medium text-primary">
             {t("DashboardCustody.policyDailyCap")}
           </span>
           <Input
@@ -1404,7 +1402,7 @@ function LimitRuleEditor({
             inputMode="decimal"
           />
           {!isPositiveAmount(maxDailyAmount) ? (
-            <span className="block text-sm text-status-error-text">
+            <span className="block text-sm text-error">
               {t("DashboardCustody.policyPositiveNumber")}
             </span>
           ) : null}
@@ -1424,7 +1422,7 @@ function ApprovalRuleEditor({
   const t = useTranslations();
   return (
     <div className="space-y-3">
-      <p className="text-sm leading-6 text-text-medium">
+      <p className="text-sm leading-6 text-secondary">
         {t("DashboardCustody.policyApprovalEditorDescription")}
       </p>
       <OptionGrid
@@ -1446,7 +1444,7 @@ function AdvancedRuleEditor({
   const t = useTranslations();
   return (
     <div className="space-y-3">
-      <p className="text-sm leading-6 text-text-medium">
+      <p className="text-sm leading-6 text-secondary">
         {t("DashboardCustody.policyAdvancedEditorDescription")}
       </p>
       <OptionGrid
@@ -1550,28 +1548,28 @@ function ReviewStep({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-border-light bg-white p-4">
-        <p className="text-sm font-semibold text-text-extra-high">
+      <div className="rounded-lg border border-border-default bg-white p-4">
+        <p className="text-sm font-semibold text-primary">
           {t("DashboardCustody.policyActivationOutcome")}
         </p>
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
           <div>
-            <dt className="text-text-extra-low">{t("DashboardCustody.policyDefault")}</dt>
-            <dd className="mt-1 font-medium text-text-extra-high">
+            <dt className="text-muted">{t("DashboardCustody.policyDefault")}</dt>
+            <dd className="mt-1 font-medium text-primary">
               {t("DashboardCustody.policyAllowUnmatched")}
             </dd>
           </div>
           <div>
-            <dt className="text-text-extra-low">{t("DashboardCustody.policyRevision")}</dt>
-            <dd className="mt-1 font-medium text-text-extra-high">
+            <dt className="text-muted">{t("DashboardCustody.policyRevision")}</dt>
+            <dd className="mt-1 font-medium text-primary">
               {controlProfile?.revisionNumber
                 ? `#${controlProfile.revisionNumber}`
                 : t("DashboardCustody.policyRevisionNew")}
             </dd>
           </div>
           <div>
-            <dt className="text-text-extra-low">{t("DashboardCustody.policyProviderMapping")}</dt>
-            <dd className="mt-1 font-medium text-text-extra-high">
+            <dt className="text-muted">{t("DashboardCustody.policyProviderMapping")}</dt>
+            <dd className="mt-1 font-medium text-primary">
               {controlProfile
                 ? formatProviderMappingStatus(controlProfile.providerMappingStatus, t)
                 : t("DashboardCustody.policySdpEnforced")}
@@ -1579,7 +1577,7 @@ function ReviewStep({
           </div>
         </dl>
       </div>
-      <div className="overflow-hidden rounded-lg border border-border-light bg-white">
+      <div className="overflow-hidden rounded-lg border border-border-default bg-white">
         {selected.length > 0 ? (
           selected.map((category) => (
             <ReviewCategory
@@ -1595,7 +1593,7 @@ function ReviewStep({
             />
           ))
         ) : (
-          <div className="p-4 text-sm text-text-medium">
+          <div className="p-4 text-sm text-secondary">
             {t("DashboardCustody.policyNoRestrictionCategory")}
           </div>
         )}
@@ -1668,9 +1666,9 @@ function ReviewCategory({
   }
 
   return (
-    <div className="border-t border-border-light p-4 first:border-t-0">
-      <p className="text-sm font-semibold text-text-extra-high">{t(category.titleKey)}</p>
-      <p className="mt-1 text-sm leading-6 text-text-medium">{value}</p>
+    <div className="border-t border-border-default p-4 first:border-t-0">
+      <p className="text-sm font-semibold text-primary">{t(category.titleKey)}</p>
+      <p className="mt-1 text-sm leading-6 text-secondary">{value}</p>
     </div>
   );
 }

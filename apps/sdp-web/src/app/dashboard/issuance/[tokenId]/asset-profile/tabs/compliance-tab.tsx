@@ -87,7 +87,7 @@ export function ComplianceTab({
                   ))}
                 </Select>
               </div>
-              <p className="mt-1.5 text-xs text-[rgba(28,28,29,0.5)]">
+              <p className="mt-1.5 text-xs text-tertiary">
                 {t("DashboardIssuance.compliance.appliedOnDeploy")}
               </p>
             </div>
@@ -106,10 +106,10 @@ export function ComplianceTab({
       {availableActions.length > 0 ? (
         <div className="space-y-4 pt-2">
           <div>
-            <p className="text-base font-medium text-[#1c1c1d]">
+            <p className="text-base font-medium text-primary">
               {t("DashboardIssuance.compliance.controls")}
             </p>
-            <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
+            <p className="mt-0.5 text-sm text-tertiary">
               {t("DashboardIssuance.compliance.controlsDescription")}
             </p>
           </div>

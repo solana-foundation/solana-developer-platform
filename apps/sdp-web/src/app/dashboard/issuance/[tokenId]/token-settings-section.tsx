@@ -74,18 +74,18 @@ const FROZEN_STATUS_VALUE = "frozen"; // .badge-amber
 function extensionBadge(value: string): { className: string; showCheck: boolean } {
   const normalized = value.trim().toLowerCase();
   if (POSITIVE_STATUS_VALUES.has(normalized)) {
-    return { className: "bg-[rgba(0,160,102,0.08)] text-[#00a066]", showCheck: true };
+    return { className: "bg-success-bg text-success", showCheck: true };
   }
   if (normalized === FROZEN_STATUS_VALUE) {
-    return { className: "bg-[rgba(234,179,8,0.08)] text-[#92400e]", showCheck: false };
+    return { className: "bg-warning-bg text-warning", showCheck: false };
   }
   // .badge-gray — neutral fallback for all non-status values.
-  return { className: "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]", showCheck: false };
+  return { className: "bg-fill text-secondary", showCheck: false };
 }
 
 function IconTile({ icon: Icon }: { icon: LucideIcon }) {
   return (
-    <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.04)] text-[rgba(28,28,29,0.7)] min-[450px]:flex">
+    <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-border-subtle bg-fill-subtle text-secondary min-[450px]:flex">
       <Icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
     </span>
   );
@@ -97,8 +97,8 @@ function ExtensionItem({ row }: { row: ExtensionRow }) {
     <>
       <IconTile icon={EXTENSION_ROW_ICONS[row.id]} />
       <div className="min-w-0 flex-1">
-        <p className="text-[15px] font-medium text-[#1c1c1d]">{row.title}</p>
-        <p className="text-[13px] text-[rgba(28,28,29,0.6)]">{row.helper}</p>
+        <p className="text-[15px] font-medium text-primary">{row.title}</p>
+        <p className="text-[13px] text-tertiary">{row.helper}</p>
       </div>
       <span
         className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${badge.className}`}
@@ -131,7 +131,7 @@ export function TokenSettingsSection({
   return (
     <section className="space-y-3">
       {showTitle ? (
-        <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
+        <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
           {mode === "permissions"
             ? t("DashboardIssuance.management.permissions")
             : t("DashboardIssuance.management.extensions")}
@@ -139,23 +139,23 @@ export function TokenSettingsSection({
       ) : null}
 
       {mode === "permissions" ? (
-        <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+        <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
           {permissionRows.map((row) => (
             <div
               key={row.id}
               data-testid={`permission-row-${row.id}`}
-              className="flex flex-wrap items-center gap-x-3 gap-y-3 border-b border-[rgba(28,28,29,0.08)] px-4 py-3.5 last:border-b-0"
+              className="flex flex-wrap items-center gap-x-3 gap-y-3 border-b border-border-subtle px-4 py-3.5 last:border-b-0"
             >
               <IconTile icon={PERMISSION_ROW_ICONS[row.id]} />
               <div className="min-w-0 flex-1">
-                <p className="text-[15px] font-medium text-[#1c1c1d]">{row.title}</p>
-                <p className="text-[13px] text-[rgba(28,28,29,0.6)]">{row.helper}</p>
+                <p className="text-[15px] font-medium text-primary">{row.title}</p>
+                <p className="text-[13px] text-tertiary">{row.helper}</p>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => onCopy(row.value)}
-                  className="inline-flex items-center gap-1 rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] px-3 py-1 text-xs text-[rgba(28,28,29,0.75)]"
+                  className="inline-flex items-center gap-1 rounded-full border border-border-default bg-fill-subtle px-3 py-1 text-xs text-secondary"
                 >
                   {formatValue(row.value, t)}
                   {row.value ? <Copy className="h-3 w-3" /> : null}
@@ -190,7 +190,7 @@ export function TokenSettingsSection({
               <div
                 key={column.key}
                 className={cn(
-                  "overflow-hidden border-x border-[rgba(28,28,29,0.12)] bg-white",
+                  "overflow-hidden border-x border-border-default bg-white",
                   isFirstColumn && "rounded-t-2xl border-t",
                   isLastColumn && "rounded-b-2xl border-b",
                   "md:rounded-2xl md:border"
@@ -201,7 +201,7 @@ export function TokenSettingsSection({
                     key={row.id}
                     data-testid={`extension-row-${row.id}`}
                     className={cn(
-                      "flex items-center gap-3 border-b border-[rgba(28,28,29,0.08)] px-4 py-3.5",
+                      "flex items-center gap-3 border-b border-border-subtle px-4 py-3.5",
                       // Non-last columns keep the divider under their final row so
                       // the stacked mobile list stays continuous; desktop drops it.
                       isLastColumn ? "last:border-b-0" : "md:last:border-b-0"

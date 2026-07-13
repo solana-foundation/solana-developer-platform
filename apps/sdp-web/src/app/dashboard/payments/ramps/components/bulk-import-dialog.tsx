@@ -20,7 +20,7 @@ interface BulkImportDialogProps {
 }
 
 const INPUT_CLASS =
-  "h-10 w-full rounded-lg border border-border-light bg-[var(--input-bg-idle)] px-3 text-sm text-text-extra-high placeholder:text-text-low focus:border-[var(--input-border-focus)] focus:outline-none";
+  "h-10 w-full rounded-lg border border-border-default bg-[var(--input-bg-idle)] px-3 text-sm text-primary placeholder:text-tertiary focus:border-[var(--input-border-focus)] focus:outline-none";
 
 export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogProps) {
   const t = useTranslations();
@@ -103,10 +103,10 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
     >
       <div className="space-y-5 p-6">
         <div className="space-y-1">
-          <p className="text-xl font-medium tracking-tight text-text-extra-high">
+          <p className="text-xl font-medium tracking-tight text-primary">
             {t("DashboardPayments.batchSend.bulkImportTitle")}
           </p>
-          <p className="text-sm text-text-low">
+          <p className="text-sm text-tertiary">
             {t("DashboardPayments.batchSend.bulkImportDescriptionBefore")}
             <span className="font-mono">{t("DashboardPayments.batchSend.bulkImportFields")}</span>
             {t("DashboardPayments.batchSend.bulkImportDescriptionAfter")}
@@ -143,7 +143,7 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
                 type="button"
                 onClick={() => removeRow(index)}
                 aria-label={t("DashboardPayments.batchSend.removeRow", { row: index + 1 })}
-                className="flex size-9 items-center justify-center rounded-lg text-text-low transition-colors hover:bg-border-extra-light hover:text-text-extra-high"
+                className="flex size-9 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-subtle hover:text-primary"
               >
                 <XIcon className="size-4" />
               </button>
@@ -154,14 +154,14 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
         <button
           type="button"
           onClick={() => setRows((prev) => [...prev, emptyBulkRow()])}
-          className="flex items-center gap-1.5 text-sm font-medium text-text-low transition-colors hover:text-text-extra-high"
+          className="flex items-center gap-1.5 text-sm font-medium text-tertiary transition-colors hover:text-primary"
         >
           <PlusIcon className="size-4" />
           {t("DashboardPayments.batchSend.addRecipientRow")}
         </button>
 
         {errors.length > 0 ? (
-          <div className="space-y-1 rounded-xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text">
+          <div className="space-y-1 rounded-xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
             {errors.map((message, index) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: error list is positional; messages may repeat
               <p key={index}>{message}</p>

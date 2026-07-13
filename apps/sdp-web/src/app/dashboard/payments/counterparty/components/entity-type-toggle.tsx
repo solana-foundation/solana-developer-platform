@@ -23,7 +23,7 @@ export function EntityTypeToggle({ value, onChange }: EntityTypeToggleProps) {
   return (
     <div className="space-y-2">
       <Label>{t("DashboardPayments.counterparty.entityType")}</Label>
-      <div className="inline-flex w-full gap-1 rounded-xl bg-border-extra-light p-1">
+      <div className="inline-flex w-full gap-1 rounded-xl bg-fill-subtle p-1">
         {COUNTERPARTY_ENTITY_TYPES.map((type) => {
           const Icon = ENTITY_ICONS[type];
           const active = value === type;
@@ -34,9 +34,7 @@ export function EntityTypeToggle({ value, onChange }: EntityTypeToggleProps) {
               onClick={() => onChange(type)}
               className={cn(
                 "flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium capitalize transition-all",
-                active
-                  ? "bg-gray-1400 text-white shadow-sm"
-                  : "text-text-low hover:text-text-extra-high"
+                active ? "bg-primary text-white shadow-sm" : "text-tertiary hover:text-primary"
               )}
             >
               <Icon className="size-4" />

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 
 type InputProps = TextInputProps;
 
-const DEFAULT_ICON_CLASS = "size-5 shrink-0 text-text-low";
+const DEFAULT_ICON_CLASS = "size-5 shrink-0 text-tertiary";
 
 function withIconClass(node: ReactNode): ReactNode {
   if (!isValidElement<{ className?: string }>(node)) {

@@ -37,7 +37,7 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
 
   if (error) {
     return (
-      <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text">
+      <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
         {error instanceof Error
           ? error.message
           : t("DashboardPayments.ramps.recentTransfersRequestFailed")}
@@ -69,10 +69,10 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
   if (data.length === 0) {
     return (
       <section className="space-y-3">
-        <h2 className="text-2xl font-medium text-text-extra-high">
+        <h2 className="text-2xl font-medium text-primary">
           {t("DashboardPayments.ramps.recentTransfers")}
         </h2>
-        <p className="py-3 text-sm text-text-low">
+        <p className="py-3 text-sm text-tertiary">
           {t("DashboardPayments.ramps.noRecentTransactions")}
         </p>
       </section>
@@ -81,7 +81,7 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
 
   return (
     <section className="space-y-3">
-      <h2 className="text-2xl font-medium text-text-extra-high">
+      <h2 className="text-2xl font-medium text-primary">
         {t("DashboardPayments.ramps.recentTransfers")}
       </h2>
       <div>
@@ -99,27 +99,27 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
                     height={24}
                     className="size-6 rounded-md object-contain"
                   />
-                  <span className="text-sm font-medium text-text-extra-high">
+                  <span className="text-sm font-medium text-primary">
                     {getRampProviderLabel(transfer.provider)}
                   </span>
                 </>
               ) : null}
-              <span className="min-w-0 flex-1 truncate text-sm text-text-medium">
+              <span className="min-w-0 flex-1 truncate text-sm text-secondary">
                 {resolveTransferTypeLabel(transfer.type, t)}
               </span>
               {flow.send || flow.receive ? (
                 <span className="flex shrink-0 items-center gap-1.5 text-sm">
-                  {flow.send ? <span className="text-text-medium">{flow.send}</span> : null}
+                  {flow.send ? <span className="text-secondary">{flow.send}</span> : null}
                   {flow.send && flow.receive ? (
-                    <ArrowRightIcon className="size-3.5 text-text-low" />
+                    <ArrowRightIcon className="size-3.5 text-tertiary" />
                   ) : null}
                   {flow.receive ? (
-                    <span className="font-medium text-text-extra-high">{flow.receive}</span>
+                    <span className="font-medium text-primary">{flow.receive}</span>
                   ) : null}
                 </span>
               ) : null}
               {transfer.createdAt ? (
-                <span className="shrink-0 text-xs text-text-low">
+                <span className="shrink-0 text-xs text-tertiary">
                   {formatRelativeTime(transfer.createdAt)}
                 </span>
               ) : null}

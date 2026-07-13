@@ -33,9 +33,7 @@ export function BasicsStep() {
           value={values.displayName}
           onChange={(e) => setField("displayName", e.target.value)}
         />
-        {errors.displayName && (
-          <p className="mt-1 text-xs text-status-error-text">{errors.displayName}</p>
-        )}
+        {errors.displayName && <p className="mt-1 text-xs text-error">{errors.displayName}</p>}
       </div>
 
       <div className="space-y-2">
@@ -49,13 +47,13 @@ export function BasicsStep() {
           value={values.email}
           onChange={(e) => setField("email", e.target.value)}
         />
-        {errors.email && <p className="mt-1 text-xs text-status-error-text">{errors.email}</p>}
+        {errors.email && <p className="mt-1 text-xs text-error">{errors.email}</p>}
       </div>
 
       <div className="space-y-2">
         <Label htmlFor="externalId">
           {t("DashboardPayments.counterparty.externalId")}{" "}
-          <span className="font-normal text-text-extra-low">
+          <span className="font-normal text-muted">
             {t("DashboardPayments.counterparty.optional")}
           </span>
         </Label>
@@ -67,9 +65,7 @@ export function BasicsStep() {
           value={values.externalId}
           onChange={(e) => setField("externalId", e.target.value)}
         />
-        {errors.externalId && (
-          <p className="mt-1 text-xs text-status-error-text">{errors.externalId}</p>
-        )}
+        {errors.externalId && <p className="mt-1 text-xs text-error">{errors.externalId}</p>}
       </div>
     </div>
   );

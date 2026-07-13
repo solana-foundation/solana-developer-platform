@@ -79,7 +79,7 @@ function ProviderCardEstimate({
   const t = useTranslations();
   const locale = useLocale();
   if (estimateLoading) {
-    return <Loader2Icon className="size-4 shrink-0 animate-spin text-text-low" />;
+    return <Loader2Icon className="size-4 shrink-0 animate-spin text-tertiary" />;
   }
 
   if (estimate?.status === "ok") {
@@ -92,12 +92,12 @@ function ProviderCardEstimate({
 
     return (
       <div className="shrink-0 text-right leading-none">
-        <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.1em] text-text-low">
+        <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.1em] text-tertiary">
           {t("DashboardPayments.ramps.estimatedReceived")}
         </p>
         <div className="flex items-center justify-end gap-2 whitespace-nowrap">
-          <span className="text-sm leading-none font-semibold text-text-extra-high">{`≈ ${amount} ${unit}`}</span>
-          <span className="rounded-full bg-border-extra-light px-2 py-0.5 text-xs leading-none font-medium text-text-low">
+          <span className="text-sm leading-none font-semibold text-primary">{`≈ ${amount} ${unit}`}</span>
+          <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-xs leading-none font-medium text-tertiary">
             {feeLabel}
           </span>
         </div>
@@ -107,7 +107,7 @@ function ProviderCardEstimate({
 
   if (estimate?.status === "unsupported") {
     return (
-      <p className="shrink-0 text-sm text-text-low">
+      <p className="shrink-0 text-sm text-tertiary">
         {t("DashboardPayments.ramps.rateKnownAtQuote")}
       </p>
     );
@@ -115,7 +115,7 @@ function ProviderCardEstimate({
 
   if (estimate?.status === "error") {
     return (
-      <p className="shrink-0 text-sm text-text-low">{t("DashboardPayments.ramps.unavailable")}</p>
+      <p className="shrink-0 text-sm text-tertiary">{t("DashboardPayments.ramps.unavailable")}</p>
     );
   }
 
@@ -143,10 +143,10 @@ export function ProviderCard({
         scale: { duration: 0.15 },
       }}
       className={cn(
-        "flex w-full items-center gap-3 rounded-xl bg-border-extra-light px-4 py-3 text-left outline outline-2 -outline-offset-2 transition-colors",
+        "flex w-full items-center gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-left outline outline-2 -outline-offset-2 transition-colors",
         active
-          ? "outline-border-medium ring-2 ring-text-low ring-offset-2 ring-offset-white"
-          : "outline-transparent hover:bg-border-light"
+          ? "outline-border-strong ring-2 ring-tertiary ring-offset-2 ring-offset-white"
+          : "outline-transparent hover:bg-fill-strong"
       )}
     >
       <Image
@@ -159,7 +159,7 @@ export function ProviderCard({
 
       <p
         className={cn(
-          "min-w-0 flex-1 text-lg leading-tight text-text-extra-high",
+          "min-w-0 flex-1 text-lg leading-tight text-primary",
           active ? "font-medium" : "font-normal"
         )}
       >

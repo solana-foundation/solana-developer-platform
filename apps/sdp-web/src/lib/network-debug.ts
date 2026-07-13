@@ -20,10 +20,10 @@ export interface NetworkDebugEntry {
 }
 
 const NETWORK_DEBUG_STATUS_CLASS_NAMES = {
-  aborted: "bg-border-extra-light text-text-medium",
-  error: "bg-status-error-bg text-status-error-text",
-  pending: "bg-status-warning-bg text-status-warning-text",
-  success: "bg-status-success-bg text-status-success-text",
+  aborted: "bg-fill-subtle text-secondary",
+  error: "bg-error-bg text-error",
+  pending: "bg-warning-bg text-warning",
+  success: "bg-success-bg text-success",
 } as const;
 
 export function isNetworkDebugAvailable(): boolean {

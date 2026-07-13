@@ -26,16 +26,16 @@ export function CounterpartyPicker({
       <button
         type="button"
         onClick={onAddClick}
-        className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-medium px-4 py-4 text-left transition-colors hover:bg-border-extra-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
+        className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
       >
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-border-extra-light text-text-extra-high">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary">
           <PlusIcon className="size-4" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium text-text-extra-high">
+          <span className="block text-sm font-medium text-primary">
             {t("DashboardPayments.counterparty.addCounterparty")}
           </span>
-          <span className="block text-sm text-text-low">
+          <span className="block text-sm text-tertiary">
             {mode === "send"
               ? t("DashboardPayments.ramps.newPayeeHint")
               : t("DashboardPayments.ramps.newBuyerHint")}

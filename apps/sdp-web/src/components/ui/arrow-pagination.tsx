@@ -24,7 +24,7 @@ export function ArrowPagination({
   const t = useTranslations();
   return (
     <div className={cn("flex items-center justify-between gap-3", className)}>
-      <span className="text-xs text-text-medium">
+      <span className="text-xs text-secondary">
         {summary ?? t("Shared.SharedComponents.pageOf", { page, pageCount })}
       </span>
       <div className="flex items-center gap-2">

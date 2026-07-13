@@ -48,20 +48,20 @@ export function TokenControlListsSection({
         {showControlList ? (
           <div
             data-testid="allowlist-summary-card"
-            className="rounded-xl border border-[rgba(28,28,29,0.12)] p-3"
+            className="rounded-xl border border-border-default p-3"
           >
-            <p className="text-sm font-medium text-[#1c1c1d]">{controlListSummaryTitle}</p>
+            <p className="text-sm font-medium text-primary">{controlListSummaryTitle}</p>
             {allowlistError ? (
-              <p className="mt-1 text-sm text-[#8a1f2a]">{allowlistError}</p>
+              <p className="mt-1 text-sm text-destructive-strongest">{allowlistError}</p>
             ) : (
               <>
-                <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
+                <p className="mt-1 text-sm text-secondary">
                   {t("DashboardIssuance.controlLists.entriesCount", {
                     count: (allowlistTotal ?? allowlistEntriesCount).toLocaleString(locale),
                   })}
                 </p>
                 {allowlistHasMore ? (
-                  <p className="mt-1 text-xs text-[rgba(28,28,29,0.62)]">
+                  <p className="mt-1 text-xs text-secondary">
                     {t("DashboardIssuance.controlLists.showingEntries", {
                       count: allowlistEntriesCount.toLocaleString(locale),
                     })}
@@ -73,22 +73,22 @@ export function TokenControlListsSection({
         ) : null}
         <div
           data-testid="frozen-accounts-summary-card"
-          className="rounded-xl border border-[rgba(28,28,29,0.12)] p-3"
+          className="rounded-xl border border-border-default p-3"
         >
-          <p className="text-sm font-medium text-[#1c1c1d]">
+          <p className="text-sm font-medium text-primary">
             {t("DashboardIssuance.controlLists.frozenAccounts")}
           </p>
           {frozenAccountsError ? (
-            <p className="mt-1 text-sm text-[#8a1f2a]">{frozenAccountsError}</p>
+            <p className="mt-1 text-sm text-destructive-strongest">{frozenAccountsError}</p>
           ) : (
             <>
-              <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
+              <p className="mt-1 text-sm text-secondary">
                 {t("DashboardIssuance.controlLists.accountsCount", {
                   count: (frozenAccountsTotal ?? frozenAccountsCount).toLocaleString(locale),
                 })}
               </p>
               {frozenAccountsHasMore ? (
-                <p className="mt-1 text-xs text-[rgba(28,28,29,0.62)]">
+                <p className="mt-1 text-xs text-secondary">
                   {t("DashboardIssuance.controlLists.showingAccounts", {
                     count: frozenAccountsCount.toLocaleString(locale),
                   })}
