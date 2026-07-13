@@ -3,6 +3,7 @@ import type {
   TokenTransaction,
   TokenTransactionListItem,
 } from "@sdp/types";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { parseErrorMessage, readTransactionParam, toTitleCase } from "../activity-format-utils";
 import { type FetchResult, fetchPaymentTransfers } from "../payments/payments-page.data";
@@ -36,15 +37,16 @@ interface DashboardWalletActivityEnvelope {
 }
 
 const WALLET_ACTIVITY_LIMIT = 20;
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-function resolvePaymentOperation(transfer: PaymentTransferSummary): string {
+function resolvePaymentOperation(transfer: PaymentTransferSummary, t: Translate): string {
   if (transfer.direction === "inbound") {
-    return "Incoming";
+    return t("DashboardCustody.incoming");
   }
   if (transfer.direction === "outbound") {
-    return "Outgoing";
+    return t("DashboardCustody.outgoing");
   }
-  return transfer.type ? toTitleCase(transfer.type) : "Transfer";
+  return transfer.type ? toTitleCase(transfer.type) : t("DashboardCustody.transfer");
 }
 
 function resolvePaymentAddress(transfer: PaymentTransferSummary): string | undefined {
@@ -83,12 +85,13 @@ function resolveIssuanceAmount(transaction: TokenTransaction): string | undefine
 export function buildWalletActivityRows(
   transfers: PaymentTransferSummary[],
   issuanceTransactions: TokenTransactionListItem[],
+  t: Translate,
   limit = WALLET_ACTIVITY_LIMIT
 ): WalletActivityRow[] {
   const paymentRows = transfers.map((transfer) => ({
     id: `payment-${transfer.id}`,
     sourceKind: "payments" as const,
-    operationLabel: resolvePaymentOperation(transfer),
+    operationLabel: resolvePaymentOperation(transfer, t),
     status: transfer.status,
     signature: transfer.signature,
     token: transfer.token,
@@ -123,6 +126,7 @@ export function buildWalletActivityRows(
 export async function fetchWalletIssuanceActivity(
   request: SdpApiClient["request"],
   walletId: string,
+  t: Translate,
   pageSize = WALLET_ACTIVITY_LIMIT
 ): Promise<FetchResult<TokenTransactionListItem[]>> {
   try {
@@ -150,7 +154,8 @@ export async function fetchWalletIssuanceActivity(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unable to load issuance activity",
+      error:
+        error instanceof Error ? error.message : t("DashboardCustody.unableToLoadIssuanceActivity"),
     };
   }
 }
@@ -158,18 +163,20 @@ export async function fetchWalletIssuanceActivity(
 export async function loadWalletActivity(
   request: SdpApiClient["request"],
   walletId: string,
+  t: Translate,
   options: { pageSize?: number } = {}
 ): Promise<FetchResult<WalletActivityPayload>> {
   const pageSize = options.pageSize ?? WALLET_ACTIVITY_LIMIT;
 
   const [paymentsResult, issuanceResult] = await Promise.all([
     fetchPaymentTransfers(request, pageSize, { walletId }),
-    fetchWalletIssuanceActivity(request, walletId, pageSize),
+    fetchWalletIssuanceActivity(request, walletId, t, pageSize),
   ]);
 
   const activityRows = buildWalletActivityRows(
     paymentsResult.data ?? [],
     issuanceResult.data ?? [],
+    t,
     pageSize
   );
   const hasAvailableSource = paymentsResult.ok || issuanceResult.ok;
@@ -177,18 +184,18 @@ export async function loadWalletActivity(
 
   if (hasAvailableSource) {
     if (!paymentsResult.ok) {
-      noticeParts.push("Payments activity is unavailable right now.");
+      noticeParts.push(t("DashboardCustody.paymentsActivityUnavailable"));
     }
     if (!issuanceResult.ok) {
-      noticeParts.push("Issuance activity is unavailable right now.");
+      noticeParts.push(t("DashboardCustody.issuanceActivityUnavailable"));
     }
   }
 
   const activityError = hasAvailableSource
     ? null
     : paymentsResult.status === 403 && issuanceResult.status === 403
-      ? "No activity sources are available for this wallet."
-      : "Wallet activity is unavailable right now.";
+      ? t("DashboardCustody.noActivitySources")
+      : t("DashboardCustody.walletActivityUnavailable");
 
   return {
     ok: true,
@@ -211,7 +218,7 @@ export async function fetchWalletActivity(
   });
   const body = (await response.json().catch(() => ({}))) as DashboardWalletActivityEnvelope;
   if (!response.ok) {
-    throw new Error(body.error?.message ?? `Wallet activity request failed (${response.status}).`);
+    throw new Error(body.error?.message ?? "");
   }
 
   return {

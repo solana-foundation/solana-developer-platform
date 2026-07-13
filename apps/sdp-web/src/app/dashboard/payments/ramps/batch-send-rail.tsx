@@ -2,14 +2,11 @@
 
 import { CLUSTER_BY_SDP_ENVIRONMENT, type PaymentsDashboardWallet } from "@sdp/types";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useTranslations } from "@/i18n/provider";
 import { BatchSendStepContent } from "./components/batch-send-step-content";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type SendMode, SendModeToggle } from "./components/send-mode-toggle";
-import {
-  BATCH_SEND_STEPS,
-  type BatchSendWizard,
-  useBatchSendWizard,
-} from "./hooks/use-batch-send-wizard";
+import { type BatchSendWizard, useBatchSendWizard } from "./hooks/use-batch-send-wizard";
 
 interface BatchSendRailProps {
   wallets: PaymentsDashboardWallet[];
@@ -20,16 +17,16 @@ interface BatchSendRailProps {
   onSendModeChange: (mode: SendMode) => void;
 }
 
-function batchPrimaryLabel(wizard: BatchSendWizard): string {
+function batchPrimaryLabel(wizard: BatchSendWizard, t: ReturnType<typeof useTranslations>): string {
   switch (true) {
     case wizard.submitting:
-      return "Submitting...";
+      return t("DashboardPayments.submitting");
     case wizard.isLastStep && Boolean(wizard.batchResult):
-      return "Done";
+      return t("DashboardPayments.counterparty.done");
     case wizard.isLastStep:
-      return "Send batch";
+      return t("DashboardPayments.sendBatch");
     default:
-      return "Review";
+      return t("DashboardPayments.reviewAction");
   }
 }
 
@@ -41,6 +38,7 @@ export function BatchSendRail({
   sendMode,
   onSendModeChange,
 }: BatchSendRailProps) {
+  const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
   const wizard = useBatchSendWizard({
     wallets,
@@ -52,11 +50,11 @@ export function BatchSendRail({
 
   return (
     <RampWizardShell
-      steps={BATCH_SEND_STEPS}
+      steps={wizard.steps}
       stepIndex={wizard.stepIndex}
       primaryDisabled={wizard.submitting || !wizard.canProceed}
-      primaryLabel={batchPrimaryLabel(wizard)}
-      secondaryLabel="Cancel"
+      primaryLabel={batchPrimaryLabel(wizard, t)}
+      secondaryLabel={t("DashboardPayments.counterparty.cancel")}
       confirmSecondary={wizard.isLastStep && !wizard.batchResult}
       secondaryDisabled={wizard.submitting}
       hideSecondary={Boolean(wizard.batchResult)}

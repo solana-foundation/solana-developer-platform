@@ -42,7 +42,6 @@ export default async function PaymentsDepositPage() {
   return (
     <PaymentsActionPage
       mode="receive"
-      actionLabel="Deposit"
       wallets={[]}
       walletsError={null}
       issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}

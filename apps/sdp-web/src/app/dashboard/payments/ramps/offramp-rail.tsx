@@ -2,20 +2,21 @@
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 import { OfframpStepContent } from "./components/offramp-step-content";
 import { PoweredByRampProvider, RampWizardShell } from "./components/ramp-wizard-shell";
 import { type OfframpWizard, useOfframpWizard } from "./hooks/use-offramp-wizard";
 import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
 import type { RailProps } from "./ramp-action-page";
 
-function offrampPrimaryLabel(wizard: OfframpWizard): string {
+function offrampPrimaryLabel(wizard: OfframpWizard, t: ReturnType<typeof useTranslations>): string {
   switch (true) {
     case wizard.hostedQuoteLoading:
-      return "Processing";
+      return t("DashboardPayments.processing");
     case wizard.isLastStep:
-      return "Done";
+      return t("DashboardPayments.counterparty.done");
     default:
-      return "Next";
+      return t("DashboardPayments.counterparty.next");
   }
 }
 
@@ -29,6 +30,7 @@ export function OfframpRail({
   preSteps,
   onExit,
 }: RailProps) {
+  const t = useTranslations();
   const wizard = useOfframpWizard({
     wallets,
     walletsError,
@@ -52,7 +54,7 @@ export function OfframpRail({
         !wizard.canProceed ||
         (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
       }
-      primaryLabel={offrampPrimaryLabel(wizard)}
+      primaryLabel={offrampPrimaryLabel(wizard, t)}
       walletsError={wizard.liveWalletsError}
       onPrimary={() => void wizard.handlePrimary()}
       onSecondary={wizard.handleSecondary}
@@ -65,14 +67,16 @@ export function OfframpRail({
           <PoweredByRampProvider provider={wizard.fields.provider} />
         ) : null
       }
-      secondaryLabel={wizard.onTransactionStage ? "Cancel" : undefined}
+      secondaryLabel={
+        wizard.onTransactionStage ? t("DashboardPayments.counterparty.cancel") : undefined
+      }
       confirmSecondary={wizard.onTransactionStage}
       secondaryDisabled={wizard.isCanceling}
       footerActions={
         transferTerminal ? (
           <Button asChild type="button">
             <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
-              Go to transaction
+              {t("DashboardPayments.goToTransaction")}
             </Link>
           </Button>
         ) : null

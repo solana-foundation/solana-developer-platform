@@ -19,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatDisplayAmount } from "../payments/payments-overview.utils";
 
 interface WalletActivitySectionProps {
@@ -26,7 +27,7 @@ interface WalletActivitySectionProps {
   initialActivity: WalletActivityPayload;
 }
 
-function formatTimestamp(value: string | undefined): string {
+function formatTimestamp(value: string | undefined, locale: string): string {
   if (!value) {
     return "—";
   }
@@ -36,7 +37,7 @@ function formatTimestamp(value: string | undefined): string {
     return value;
   }
 
-  return date.toLocaleString("en-US", {
+  return date.toLocaleString(locale, {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -70,6 +71,8 @@ function TruncatedText({ value, className }: { value: string; className?: string
 }
 
 export function WalletActivitySection({ walletId, initialActivity }: WalletActivitySectionProps) {
+  const t = useTranslations();
+  const locale = useLocale();
   const {
     data: swrActivity,
     error: requestError,
@@ -84,8 +87,8 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
   const liveRows = Array.isArray(liveActivity.activityRows) ? liveActivity.activityRows : [];
   const requestErrorMessage = requestError
     ? requestError instanceof Error
-      ? requestError.message
-      : "Unable to load wallet activity."
+      ? requestError.message || t("DashboardCustody.walletActivityUnavailable")
+      : t("DashboardCustody.unableToLoadWallets")
     : null;
   const liveActivityError =
     requestErrorMessage && liveRows.length === 0 ? requestErrorMessage : liveActivity.activityError;
@@ -96,8 +99,8 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
     <Card className="min-w-0 overflow-hidden">
       <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
-          <CardTitle>Recent activity</CardTitle>
-          <CardDescription>Transfer and token operation activity for this wallet.</CardDescription>
+          <CardTitle>{t("DashboardCustody.recentActivity")}</CardTitle>
+          <CardDescription>{t("DashboardCustody.recentActivityDescription")}</CardDescription>
         </div>
         <Button
           type="button"
@@ -107,7 +110,7 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
           onClick={() => void mutate()}
           disabled={isValidating}
         >
-          {isValidating ? "Refreshing..." : "Refresh"}
+          {isValidating ? t("DashboardCustody.refreshing") : t("DashboardCustody.refresh")}
         </Button>
       </CardHeader>
       <CardContent>
@@ -115,7 +118,9 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
           <p className="text-sm text-[#9e2b38]">{liveActivityError}</p>
         ) : liveRows.length === 0 ? (
           <div className="space-y-2">
-            <p className="text-sm text-[rgba(28,28,29,0.72)]">No wallet activity found yet.</p>
+            <p className="text-sm text-[rgba(28,28,29,0.72)]">
+              {t("DashboardCustody.noWalletActivity")}
+            </p>
             {liveActivityNotice ? (
               <p className="text-xs text-[rgba(28,28,29,0.56)]">{liveActivityNotice}</p>
             ) : null}
@@ -129,25 +134,33 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
               <Table className="[&_table]:table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[9rem]">Status</TableHead>
+                    <TableHead className="w-[9rem]">{t("DashboardCustody.status")}</TableHead>
                     <TableHead className="w-[calc(100%-9rem)] md:w-[22%]">
-                      <span className="md:hidden">Activity</span>
-                      <span className="hidden md:inline">Asset</span>
+                      <span className="md:hidden">{t("DashboardCustody.activity")}</span>
+                      <span className="hidden md:inline">{t("DashboardCustody.asset")}</span>
                     </TableHead>
-                    <TableHead className="hidden w-[8rem] md:table-cell">Direction</TableHead>
-                    <TableHead className="hidden w-[26%] md:table-cell">Counterparty</TableHead>
-                    <TableHead className="hidden w-[22%] md:table-cell">Signature</TableHead>
-                    <TableHead className="hidden w-[10rem] md:table-cell">Created</TableHead>
+                    <TableHead className="hidden w-[8rem] md:table-cell">
+                      {t("DashboardCustody.direction")}
+                    </TableHead>
+                    <TableHead className="hidden w-[26%] md:table-cell">
+                      {t("DashboardCustody.counterparty")}
+                    </TableHead>
+                    <TableHead className="hidden w-[22%] md:table-cell">
+                      {t("DashboardCustody.signature")}
+                    </TableHead>
+                    <TableHead className="hidden w-[10rem] md:table-cell">
+                      {t("DashboardCustody.created")}
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {liveRows.map((row: WalletActivityRow) => {
                     const assetLabel =
                       row.amount && row.token
-                        ? formatDisplayAmount(row.amount, row.token)
-                        : (row.token ?? "Unknown asset");
-                    const createdLabel = formatTimestamp(row.createdAt);
-                    const address = row.address ?? "Unknown";
+                        ? formatDisplayAmount(row.amount, row.token, locale)
+                        : (row.token ?? t("DashboardCustody.unknownAsset"));
+                    const createdLabel = formatTimestamp(row.createdAt, locale);
+                    const address = row.address ?? t("DashboardCustody.unknown");
 
                     return (
                       <TableRow key={row.id}>
@@ -197,7 +210,9 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
                               </TooltipContent>
                             </Tooltip>
                           ) : (
-                            <span className="text-[rgba(28,28,29,0.52)]">Pending</span>
+                            <span className="text-[rgba(28,28,29,0.52)]">
+                              {t("DashboardCustody.pending")}
+                            </span>
                           )}
                         </TableCell>
                         <TableCell className="hidden text-[rgba(28,28,29,0.72)] md:table-cell">

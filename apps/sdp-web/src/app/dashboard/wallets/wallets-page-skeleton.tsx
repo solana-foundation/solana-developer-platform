@@ -1,5 +1,8 @@
+"use client";
+
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 
 function SkeletonBlock({ className }: { className: string }) {
   return <div className={`animate-pulse rounded-[16px] bg-[rgba(28,28,29,0.1)] ${className}`} />;
@@ -77,11 +80,12 @@ export function WalletsOnboardingSkeleton() {
 }
 
 export function WalletsPageSkeleton() {
+  const t = useTranslations();
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
       <div className="flex justify-end">
         <Button type="button" disabled className="w-full lg:w-auto">
-          Create Wallet
+          {t("Shared.dashboardShell.createWallet")}
         </Button>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

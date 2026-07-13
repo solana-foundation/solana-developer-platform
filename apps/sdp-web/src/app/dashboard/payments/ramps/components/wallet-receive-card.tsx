@@ -6,8 +6,10 @@ import QRCode from "qrcode";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 
 export function WalletReceiveCard({ address }: { address: string }) {
+  const t = useTranslations();
   const [qrCodeUrl, setQrCodeUrl] = useState("");
 
   useEffect(() => {
@@ -49,7 +51,7 @@ export function WalletReceiveCard({ address }: { address: string }) {
           {qrCodeUrl ? (
             <Image
               src={qrCodeUrl}
-              alt="Wallet address QR code"
+              alt={t("DashboardPayments.ramps.walletAddressQrCode")}
               width={148}
               height={148}
               unoptimized
@@ -61,8 +63,7 @@ export function WalletReceiveCard({ address }: { address: string }) {
         </div>
         <div className="min-w-0 flex-1 space-y-3">
           <p className="text-sm text-text-low">
-            Scan this QR code or copy the address to receive USDC or any SPL token on Solana into
-            the selected wallet.
+            {t("DashboardPayments.ramps.walletReceiveDescription")}
           </p>
           <div className="rounded-2xl border border-border-extra-light bg-white px-4 py-3">
             <p className="break-all font-mono text-xs text-text-medium">{address}</p>
@@ -74,10 +75,12 @@ export function WalletReceiveCard({ address }: { address: string }) {
               iconLeft={<CopyIcon />}
               onClick={() => {
                 void navigator.clipboard.writeText(address);
-                toast.success("Address copied.", { position: "bottom-right" });
+                toast.success(t("DashboardPayments.ramps.addressCopied"), {
+                  position: "bottom-right",
+                });
               }}
             >
-              Copy address
+              {t("DashboardPayments.ramps.copyAddress")}
             </Button>
           </div>
         </div>

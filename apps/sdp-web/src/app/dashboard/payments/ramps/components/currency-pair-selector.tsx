@@ -14,12 +14,14 @@ import {
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useTranslations } from "@/i18n/provider";
 import { toRampCryptoToken } from "@/lib/ramps";
 import { findWalletBalanceForToken } from "../wallet-options";
 import { AmountBalanceReadout } from "./amount-balance-readout";
 import { useRampSelection } from "./ramp-selection-context";
 
 export function CurrencyPairSelector() {
+  const t = useTranslations();
   const {
     direction,
     fiatCurrencies,
@@ -86,29 +88,31 @@ export function CurrencyPairSelector() {
 
   const fiatCombobox = (
     <Combobox
-      label={isOfframp ? "Convert to" : "Currency"}
+      label={
+        isOfframp ? t("DashboardPayments.ramps.convertTo") : t("DashboardPayments.ramps.currency")
+      }
       value={selectedPair.fiatCurrency}
       onChange={(v) => {
         const currency = fiatCurrencies.find((c) => c === v);
         if (currency) onFiatCurrencyChange(currency);
       }}
       options={currencyOptions}
-      placeholder="Select a currency"
-      searchPlaceholder="Search currencies"
+      placeholder={t("DashboardPayments.ramps.selectCurrency")}
+      searchPlaceholder={t("DashboardPayments.ramps.searchCurrencies")}
       variant="dialog"
     />
   );
 
   const assetCombobox = (
     <Combobox
-      label={isOfframp ? "Asset" : "Convert to"}
+      label={isOfframp ? t("DashboardPayments.asset") : t("DashboardPayments.ramps.convertTo")}
       value={selectedPair.assetRail}
       onChange={(v) => {
         const rail = assetRails.find((r) => r === v);
         if (rail) onAssetRailChange(rail);
       }}
       options={assetOptions}
-      placeholder="Search assets"
+      placeholder={t("DashboardPayments.ramps.searchAssets")}
       searchable={false}
     />
   );
@@ -118,7 +122,7 @@ export function CurrencyPairSelector() {
       <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_200px]">
         <div className="flex flex-col gap-2">
           <Label className="text-sm font-medium text-text-low" htmlFor={`${direction}-ramp-amount`}>
-            Amount
+            {t("DashboardPayments.ramps.amount")}
           </Label>
           <Input
             id={`${direction}-ramp-amount`}
@@ -152,14 +156,20 @@ export function CurrencyPairSelector() {
       <div className={showWallet ? "grid gap-4 sm:grid-cols-[minmax(0,1fr)_200px]" : "grid gap-4"}>
         {showWallet ? (
           <Combobox
-            label={direction === "onramp" ? "Destination wallet" : "Source wallet"}
+            label={
+              direction === "onramp"
+                ? t("DashboardPayments.ramps.destinationWallet")
+                : t("DashboardPayments.ramps.sourceWallet")
+            }
             value={selectedWallet?.walletId ?? null}
             onChange={onWalletChange}
             options={walletOptions}
             placeholder={
-              direction === "onramp" ? "Select a destination wallet" : "Select a source wallet"
+              direction === "onramp"
+                ? t("DashboardPayments.ramps.selectDestinationWallet")
+                : t("DashboardPayments.ramps.selectSourceWallet")
             }
-            searchPlaceholder="Search wallets"
+            searchPlaceholder={t("DashboardPayments.ramps.searchWallets")}
             icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
             isLoading={walletsLoading}
           />

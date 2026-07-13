@@ -1,3 +1,21 @@
+import {
+  buildKeychainUtilaConfig,
+  denormalizeIbmHavenWalletId,
+  normalizeParaWalletId,
+  normalizePrivyWalletId,
+  normalizeTurnkeyWalletId,
+} from "@sdp/custody";
+import {
+  createDfnsApiClient,
+  createIbmHavenApiClient,
+  normalizeDfnsWalletId,
+} from "@sdp/custody/dfns";
+import {
+  SigningError,
+  type SigningPort,
+  type SignRequest,
+  type SignResult,
+} from "@sdp/custody/signing";
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
 import {
@@ -12,31 +30,13 @@ import {
   KeychainUtilaAdapter,
   type SigningConfigRecord,
 } from "@/services/adapters";
-import { buildKeychainUtilaConfig } from "@/services/adapters/signing/keychain/utila-config";
-import {
-  createDfnsApiClient,
-  createIbmHavenApiClient,
-  normalizeDfnsWalletId,
-} from "@/services/dfns/client";
 import { createEncryptionService } from "@/services/encryption.service";
-import {
-  SigningError,
-  type SigningPort,
-  type SignRequest,
-  type SignResult,
-} from "@/services/ports";
 import type { Env } from "@/types/env";
 import {
   type ProviderConfigRecord,
   parseConfigRecord,
   parseOptionalRequestDelayMs,
 } from "./provider-config";
-import {
-  denormalizeIbmHavenWalletId,
-  normalizeParaWalletId,
-  normalizePrivyWalletId,
-  normalizeTurnkeyWalletId,
-} from "./provider-wallet-ids";
 
 type AdapterFactoryContext<TParsed extends ProviderConfigRecord = ProviderConfigRecord> = {
   env: Env;

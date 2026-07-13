@@ -4,6 +4,7 @@ import type { PaymentsDashboardWallet, TokenAllowlistEntry } from "@sdp/types";
 import { type ComponentProps, type Dispatch, type SetStateAction, useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useTranslations } from "@/i18n/provider";
 import { TokenActionCard } from "./token-action-card";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import type {
@@ -17,9 +18,9 @@ import type {
   SeizeValidationErrors,
 } from "./token-management-workspace.types";
 import {
+  getTokenAmountFieldDescription,
   NON_WHITESPACE_PATTERN,
   SOLANA_ADDRESS_PATTERN,
-  TOKEN_AMOUNT_FIELD_DESCRIPTION,
 } from "./token-management-workspace.utils";
 import { TokenSignerSelect } from "./token-signer-select";
 import { TokenValidationMessage } from "./token-validation-message";
@@ -105,12 +106,13 @@ export function TokenActionAdminForms({
   onAddAllowlist,
   onRemoveAllowlist,
 }: TokenActionAdminFormsProps) {
+  const t = useTranslations();
   return (
     <>
       {activeAction === "seize" ? (
         <TokenActionCard
-          title="Force Transfer"
-          description="Administrative seizure transfer between accounts."
+          title={t("DashboardIssuance.compliance.forceTransfer")}
+          description={t("DashboardIssuance.forms.forceTransferDescription")}
         >
           <form
             className="space-y-4"
@@ -126,13 +128,13 @@ export function TokenActionAdminForms({
               onSignerWalletIdChange={onSignerWalletIdChange}
             />
             <TokenWalletAddressField
-              label="Source"
+              label={t("DashboardIssuance.forms.source")}
               value={seizeForm.source}
               walletOptions={walletOptions}
               required
               pattern={SOLANA_ADDRESS_PATTERN}
-              title="Enter a valid Solana address."
-              placeholder="Source wallet or token account"
+              title={t("DashboardIssuance.forms.enterSolanaAddress")}
+              placeholder={t("DashboardIssuance.forms.sourceWalletPlaceholder")}
               error={seizeValidationErrors.source}
               onChange={(value) =>
                 setSeizeForm((previous) => ({
@@ -142,13 +144,13 @@ export function TokenActionAdminForms({
               }
             />
             <TokenWalletAddressField
-              label="Destination"
+              label={t("DashboardIssuance.forms.destination")}
               value={seizeForm.destination}
               walletOptions={walletOptions}
               required
               pattern={SOLANA_ADDRESS_PATTERN}
-              title="Enter a valid Solana address."
-              placeholder="Destination wallet or token account"
+              title={t("DashboardIssuance.forms.enterSolanaAddress")}
+              placeholder={t("DashboardIssuance.forms.destinationPlaceholder")}
               error={seizeValidationErrors.destination}
               onChange={(value) =>
                 setSeizeForm((previous) => ({
@@ -158,8 +160,8 @@ export function TokenActionAdminForms({
               }
             />
             <ActionField
-              label="Amount"
-              description={TOKEN_AMOUNT_FIELD_DESCRIPTION}
+              label={t("DashboardIssuance.forms.amount")}
+              description={getTokenAmountFieldDescription(t)}
               type="number"
               inputMode="decimal"
               min="0.000000001"
@@ -175,7 +177,7 @@ export function TokenActionAdminForms({
               }
             />
             <ActionField
-              label="Memo"
+              label={t("DashboardIssuance.forms.memo")}
               value={seizeForm.memo}
               onChange={(value) =>
                 setSeizeForm((previous) => ({
@@ -196,7 +198,7 @@ export function TokenActionAdminForms({
                   isPending || Boolean(signerUnavailableReason) || Boolean(seizeValidationReason)
                 }
               >
-                Force transfer
+                {t("DashboardIssuance.compliance.forceTransfer")}
               </Button>
             </div>
           </form>
@@ -205,8 +207,8 @@ export function TokenActionAdminForms({
 
       {activeAction === "force-burn" ? (
         <TokenActionCard
-          title="Force Burn"
-          description="Administrative forced burn from source account."
+          title={t("DashboardIssuance.compliance.forceBurn")}
+          description={t("DashboardIssuance.forms.forceBurnDescription")}
         >
           <form
             className="space-y-4"
@@ -222,13 +224,13 @@ export function TokenActionAdminForms({
               onSignerWalletIdChange={onSignerWalletIdChange}
             />
             <TokenWalletAddressField
-              label="Source"
+              label={t("DashboardIssuance.forms.source")}
               value={forceBurnForm.source}
               walletOptions={walletOptions}
               required
               pattern={SOLANA_ADDRESS_PATTERN}
-              title="Enter a valid Solana address."
-              placeholder="Source wallet or token account"
+              title={t("DashboardIssuance.forms.enterSolanaAddress")}
+              placeholder={t("DashboardIssuance.forms.sourceWalletPlaceholder")}
               error={forceBurnValidationErrors.source}
               onChange={(value) =>
                 setForceBurnForm((previous) => ({
@@ -238,8 +240,8 @@ export function TokenActionAdminForms({
               }
             />
             <ActionField
-              label="Amount"
-              description={TOKEN_AMOUNT_FIELD_DESCRIPTION}
+              label={t("DashboardIssuance.forms.amount")}
+              description={getTokenAmountFieldDescription(t)}
               type="number"
               inputMode="decimal"
               min="0.000000001"
@@ -255,7 +257,7 @@ export function TokenActionAdminForms({
               }
             />
             <ActionField
-              label="Memo"
+              label={t("DashboardIssuance.forms.memo")}
               value={forceBurnForm.memo}
               onChange={(value) =>
                 setForceBurnForm((previous) => ({
@@ -278,7 +280,7 @@ export function TokenActionAdminForms({
                   Boolean(forceBurnValidationReason)
                 }
               >
-                Force burn
+                {t("DashboardIssuance.compliance.forceBurn")}
               </Button>
             </div>
           </form>
@@ -286,7 +288,10 @@ export function TokenActionAdminForms({
       ) : null}
 
       {activeAction === "authority" ? (
-        <TokenActionCard title="Update Authority" description="Rotate or remove token authorities.">
+        <TokenActionCard
+          title={t("DashboardIssuance.forms.updateAuthority")}
+          description={t("DashboardIssuance.forms.updateAuthorityDescription")}
+        >
           <form
             className="space-y-4"
             onSubmit={(event) => {
@@ -295,7 +300,7 @@ export function TokenActionAdminForms({
             }}
           >
             <ActionSelect
-              label="Role"
+              label={t("DashboardIssuance.forms.role")}
               value={authorityForm.role}
               onChange={(value) =>
                 setAuthorityForm((previous) => ({
@@ -304,17 +309,20 @@ export function TokenActionAdminForms({
                 }))
               }
               options={[
-                { label: "mint", value: "mint" },
-                { label: "freeze", value: "freeze" },
-                { label: "permanentDelegate", value: "permanentDelegate" },
-                { label: "metadata", value: "metadata" },
+                { label: t("DashboardIssuance.forms.mintAuthority"), value: "mint" },
+                { label: t("DashboardIssuance.forms.freezeAuthority"), value: "freeze" },
+                {
+                  label: t("DashboardIssuance.forms.permanentDelegate"),
+                  value: "permanentDelegate",
+                },
+                { label: t("DashboardIssuance.forms.metadataAuthority"), value: "metadata" },
               ]}
             />
             <ActionField
-              label="Current Authority (optional)"
+              label={t("DashboardIssuance.forms.currentAuthorityOptional")}
               value={authorityForm.currentAuthority}
               pattern={SOLANA_ADDRESS_PATTERN}
-              title="Enter a valid Solana address."
+              title={t("DashboardIssuance.forms.enterSolanaAddress")}
               onChange={(value) =>
                 setAuthorityForm((previous) => ({
                   ...previous,
@@ -323,10 +331,10 @@ export function TokenActionAdminForms({
               }
             />
             <ActionField
-              label="New Authority (empty to remove)"
+              label={t("DashboardIssuance.forms.newAuthorityEmptyToRemove")}
               value={authorityForm.newAuthority}
               pattern={SOLANA_ADDRESS_PATTERN}
-              title="Enter a valid Solana address."
+              title={t("DashboardIssuance.forms.enterSolanaAddress")}
               onChange={(value) =>
                 setAuthorityForm((previous) => ({
                   ...previous,
@@ -341,7 +349,7 @@ export function TokenActionAdminForms({
               ].join(" ")}
             >
               <Button type="submit" disabled={isPending}>
-                Update authority
+                {t("DashboardIssuance.management.updateAuthority")}
               </Button>
             </div>
           </form>
@@ -349,7 +357,10 @@ export function TokenActionAdminForms({
       ) : null}
 
       {activeAction === "pause" ? (
-        <TokenActionCard title="Pause Controls" description="Pause or resume token-wide transfers.">
+        <TokenActionCard
+          title={t("DashboardIssuance.forms.pauseControls")}
+          description={t("DashboardIssuance.forms.pauseControlsDescription")}
+        >
           <div className="space-y-4">
             <TokenSignerSelect
               signerWallets={signerWallets}
@@ -359,7 +370,9 @@ export function TokenActionAdminForms({
             />
             <div className="flex flex-wrap gap-2">
               <TokenDisabledActionTooltip
-                reason={tokenStatus === "paused" ? "Token is already paused." : null}
+                reason={
+                  tokenStatus === "paused" ? t("DashboardIssuance.forms.alreadyPaused") : null
+                }
               >
                 <Button
                   type="button"
@@ -369,11 +382,11 @@ export function TokenActionAdminForms({
                     isPending || tokenStatus === "paused" || Boolean(signerUnavailableReason)
                   }
                 >
-                  Pause token
+                  {t("DashboardIssuance.management.pauseToken")}
                 </Button>
               </TokenDisabledActionTooltip>
               <TokenDisabledActionTooltip
-                reason={tokenStatus === "active" ? "Token is not paused." : null}
+                reason={tokenStatus === "active" ? t("DashboardIssuance.forms.notPaused") : null}
               >
                 <Button
                   type="button"
@@ -382,7 +395,7 @@ export function TokenActionAdminForms({
                     isPending || tokenStatus === "active" || Boolean(signerUnavailableReason)
                   }
                 >
-                  Unpause token
+                  {t("DashboardIssuance.management.unpauseToken")}
                 </Button>
               </TokenDisabledActionTooltip>
             </div>
@@ -392,8 +405,8 @@ export function TokenActionAdminForms({
 
       {activeAction === "freeze" ? (
         <TokenActionCard
-          title="Freeze Controls"
-          description="Freeze or thaw a wallet's token holdings for this mint."
+          title={t("DashboardIssuance.forms.freezeControls")}
+          description={t("DashboardIssuance.forms.freezeControlsDescription")}
         >
           <form
             className="space-y-4"
@@ -411,12 +424,12 @@ export function TokenActionAdminForms({
               onSignerWalletIdChange={onSignerWalletIdChange}
             />
             <ActionField
-              label="Wallet Address"
+              label={t("DashboardIssuance.forms.walletAddress")}
               value={freezeForm.accountAddress}
               required
               pattern={SOLANA_ADDRESS_PATTERN}
-              title="Enter the wallet address. SDP will derive the associated token account for this mint automatically."
-              placeholder="Wallet address that holds this token"
+              title={t("DashboardIssuance.forms.enterWalletAddress")}
+              placeholder={t("DashboardIssuance.forms.walletAddressPlaceholder")}
               onChange={(value) =>
                 setFreezeForm((previous) => ({
                   ...previous,
@@ -425,14 +438,13 @@ export function TokenActionAdminForms({
               }
             />
             <p className="text-sm leading-6 text-[rgba(28,28,29,0.64)]">
-              Enter the wallet address that holds this token. SDP derives the associated token
-              account automatically for this mint.
+              {t("DashboardIssuance.forms.walletAddressInstruction")}
             </p>
             {freezeHint ? (
               <p className="text-sm leading-6 text-[rgba(28,28,29,0.64)]">{freezeHint}</p>
             ) : null}
             <ActionField
-              label="Reason (freeze only)"
+              label={t("DashboardIssuance.forms.freezeReason")}
               value={freezeForm.reason}
               onChange={(value) =>
                 setFreezeForm((previous) => ({
@@ -453,14 +465,14 @@ export function TokenActionAdminForms({
                 value="freeze"
                 disabled={isPending || Boolean(signerUnavailableReason)}
               >
-                Freeze account
+                {t("DashboardIssuance.management.freezeAccount")}
               </Button>
               <Button
                 type="submit"
                 value="unfreeze"
                 disabled={isPending || Boolean(signerUnavailableReason)}
               >
-                Unfreeze account
+                {t("DashboardIssuance.management.unfreezeAccount")}
               </Button>
             </div>
           </form>
@@ -471,7 +483,7 @@ export function TokenActionAdminForms({
         <TokenActionCard
           title={controlListLabel}
           description={
-            controlListDescription ?? "Manage the approved destination addresses for this token."
+            controlListDescription ?? t("DashboardIssuance.forms.controlListDescription")
           }
         >
           <form
@@ -482,11 +494,11 @@ export function TokenActionAdminForms({
             }}
           >
             <ActionField
-              label="Address"
+              label={t("DashboardIssuance.forms.address")}
               value={allowlistForm.address}
               required
               pattern={SOLANA_ADDRESS_PATTERN}
-              title="Enter a valid Solana address."
+              title={t("DashboardIssuance.forms.enterSolanaAddress")}
               onChange={(value) =>
                 setAllowlistForm((previous) => ({
                   ...previous,
@@ -495,10 +507,10 @@ export function TokenActionAdminForms({
               }
             />
             <ActionField
-              label="Label"
+              label={t("DashboardIssuance.forms.label")}
               value={allowlistForm.label}
               pattern={NON_WHITESPACE_PATTERN}
-              title="Enter a label or leave this blank."
+              title={t("DashboardIssuance.forms.enterLabel")}
               onChange={(value) =>
                 setAllowlistForm((previous) => ({
                   ...previous,
@@ -531,7 +543,7 @@ export function TokenActionAdminForms({
                     <div className="min-w-0">
                       <p className="truncate font-mono text-xs text-[#1c1c1d]">{entry.address}</p>
                       <p className="text-xs text-[rgba(28,28,29,0.62)]">
-                        {entry.label ?? "No label"}
+                        {entry.label ?? t("DashboardIssuance.forms.noLabel")}
                       </p>
                     </div>
                     <Button
@@ -541,7 +553,7 @@ export function TokenActionAdminForms({
                       onClick={() => onRemoveAllowlist(entry.id)}
                       disabled={isPending}
                     >
-                      Remove entry
+                      {t("DashboardIssuance.forms.removeEntry")}
                     </Button>
                   </div>
                 ))}

@@ -14,7 +14,6 @@ export async function fetchCounterparties(
 ): Promise<PaginatedResponse<Counterparty>> {
   const page = options.page ?? 1;
   const pageSize = options.pageSize ?? COUNTERPARTY_PAGE_SIZE;
-
   try {
     const response = await request(
       `/v1/counterparties?${new URLSearchParams({
@@ -37,7 +36,7 @@ export async function fetchCounterparties(
       ok: false,
       data: [],
       total: 0,
-      error: error instanceof Error ? error.message : "Unable to load counterparties",
+      ...(error instanceof Error ? { error: error.message } : {}),
     };
   }
 }

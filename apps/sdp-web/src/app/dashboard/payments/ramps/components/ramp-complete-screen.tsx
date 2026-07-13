@@ -7,6 +7,7 @@ import {
   formatMinorCurrencyAmount,
   formatTimestamp,
 } from "@/app/dashboard/payments/payments-overview.utils";
+import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
 
 function TransferDetailRow({ label, value }: { label: string; value: string }) {
@@ -29,6 +30,7 @@ export function RampCompleteScreen({
   quote: PaymentRampQuote;
   transfer: PaymentTransferSummary;
 }) {
+  const t = useTranslations();
   const onramp = direction === "onramp";
   const cryptoAmount =
     transfer.amount && transfer.token ? `${transfer.amount} ${transfer.token.toUpperCase()}` : null;
@@ -43,9 +45,15 @@ export function RampCompleteScreen({
 
   const detailRows: { label: string; value: string }[] = [];
   if (!primaryAmount && secondaryAmount) {
-    detailRows.push({ label: onramp ? "Funded" : "Sent", value: secondaryAmount });
+    detailRows.push({
+      label: onramp ? t("DashboardPayments.ramps.funded") : t("DashboardPayments.ramps.sent"),
+      value: secondaryAmount,
+    });
   }
-  detailRows.push({ label: "Provider", value: getRampProviderLabel(quote.provider) });
+  detailRows.push({
+    label: t("DashboardPayments.ramps.provider"),
+    value: getRampProviderLabel(quote.provider),
+  });
 
   if (quote.provider === "lightspark") {
     const sendingAmount = formatMinorCurrencyAmount(
@@ -60,23 +68,30 @@ export function RampCompleteScreen({
     );
     if (sendingAmount) {
       detailRows.push({
-        label: onramp ? "Final funded amount" : "Final sent amount",
+        label: onramp
+          ? t("DashboardPayments.ramps.finalFundedAmount")
+          : t("DashboardPayments.ramps.finalSentAmount"),
         value: sendingAmount,
       });
     }
     if (receivingAmount) {
       detailRows.push({
-        label: onramp ? "Final received amount" : "Final payout amount",
+        label: onramp
+          ? t("DashboardPayments.ramps.finalReceivedAmount")
+          : t("DashboardPayments.ramps.finalPayoutAmount"),
         value: receivingAmount,
       });
     }
   }
 
   if (transfer.updatedAt) {
-    detailRows.push({ label: "Completed", value: formatTimestamp(transfer.updatedAt) });
+    detailRows.push({
+      label: t("DashboardPayments.ramps.completed"),
+      value: formatTimestamp(transfer.updatedAt, t),
+    });
   }
-  detailRows.push({ label: "Transfer ID", value: transfer.id });
-  detailRows.push({ label: "Quote ID", value: quote.id });
+  detailRows.push({ label: t("DashboardPayments.ramps.transferId"), value: transfer.id });
+  detailRows.push({ label: t("DashboardPayments.ramps.quoteId"), value: quote.id });
 
   return (
     <div className="flex flex-col items-center gap-6">
@@ -85,12 +100,14 @@ export function RampCompleteScreen({
       </div>
       <div className="space-y-1 text-center">
         <p className="text-2xl font-medium tracking-tight text-text-extra-high">
-          {onramp ? "Deposit complete" : "Payout complete"}
+          {onramp
+            ? t("DashboardPayments.ramps.depositComplete")
+            : t("DashboardPayments.ramps.payoutComplete")}
         </p>
         <p className="text-sm text-text-low">
           {onramp
-            ? "The funds have settled to the destination wallet."
-            : "The payout has settled to the recipient's bank account."}
+            ? t("DashboardPayments.ramps.depositCompleteDescription")
+            : t("DashboardPayments.ramps.payoutCompleteDescription")}
         </p>
       </div>
       <section className="w-full space-y-4 rounded-2xl bg-border-extra-light p-5">
@@ -101,7 +118,10 @@ export function RampCompleteScreen({
             </p>
             {secondaryAmount ? (
               <p className="text-sm text-text-low">
-                {onramp ? "funded with" : "from"} {secondaryAmount}
+                {onramp
+                  ? t("DashboardPayments.ramps.fundedWith")
+                  : t("DashboardPayments.ramps.from")}{" "}
+                {secondaryAmount}
               </p>
             ) : null}
           </div>

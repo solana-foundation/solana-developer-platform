@@ -14,6 +14,7 @@ import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import type { BatchSendWizard } from "../hooks/use-batch-send-wizard";
 import { MAX_BATCH_RECIPIENTS } from "../schema";
@@ -29,26 +30,35 @@ const RECIPIENT_STATUS_TONE = {
   archived: "text-text-low",
 } as const satisfies Record<PaymentTransferBatchRecipientStatus, string>;
 
-const RECIPIENT_STATUS_LABEL = {
-  pending: "Pending",
-  processing: "Processing",
-  confirmed: "Complete",
-  failed: "Failed",
-  archived: "Archived",
-} as const satisfies Record<PaymentTransferBatchRecipientStatus, string>;
+type Translate = ReturnType<typeof useTranslations>;
 
-function batchResultTitle(status: PaymentTransferBatchStatus): string {
+function recipientStatusLabel(status: PaymentTransferBatchRecipientStatus, t: Translate): string {
+  switch (status) {
+    case "pending":
+      return t("DashboardPayments.batchSend.recipientStatusPending");
+    case "processing":
+      return t("DashboardPayments.batchSend.recipientStatusProcessing");
+    case "confirmed":
+      return t("DashboardPayments.batchSend.recipientStatusConfirmed");
+    case "failed":
+      return t("DashboardPayments.batchSend.recipientStatusFailed");
+    case "archived":
+      return t("DashboardPayments.batchSend.recipientStatusArchived");
+  }
+}
+
+function batchResultTitle(status: PaymentTransferBatchStatus, t: Translate): string {
   switch (status) {
     case "confirmed":
-      return "Batch sent";
+      return t("DashboardPayments.batchSend.resultConfirmed");
     case "partially_failed":
-      return "Batch partially failed";
+      return t("DashboardPayments.batchSend.resultPartiallyFailed");
     case "failed":
-      return "Batch failed";
+      return t("DashboardPayments.batchSend.resultFailed");
     case "pending":
     case "processing":
     case "archived":
-      return "Batch submitted";
+      return t("DashboardPayments.batchSend.resultSubmitted");
     default: {
       const exhaustive: never = status;
       throw new Error(`Unhandled batch status: ${JSON.stringify(exhaustive)}`);
@@ -56,29 +66,45 @@ function batchResultTitle(status: PaymentTransferBatchStatus): string {
   }
 }
 
-function pluralRecipients(count: number): string {
-  return `${count} recipient${count === 1 ? "" : "s"}`;
+function pluralRecipients(count: number, t: Translate): string {
+  return t(
+    count === 1
+      ? "DashboardPayments.batchSend.recipientSingular"
+      : "DashboardPayments.batchSend.recipientPlural",
+    { count }
+  );
 }
 
-function rootLabelOf(wizard: BatchSendWizard): string {
-  return wizard.selectedWallet?.label ?? wizard.selectedWallet?.walletId ?? "your wallet";
+function rootLabelOf(wizard: BatchSendWizard, t: Translate): string {
+  return (
+    wizard.selectedWallet?.label ??
+    wizard.selectedWallet?.walletId ??
+    t("DashboardPayments.batchSend.yourWallet")
+  );
 }
 
 function recipientsStatusLabel(
   count: number,
   exceedsBalance: boolean,
-  exceedsMax: boolean
+  exceedsMax: boolean,
+  t: Translate
 ): string {
   if (exceedsMax) {
-    return `A batch can have at most ${MAX_BATCH_RECIPIENTS} recipients.`;
+    return t("DashboardPayments.batchSend.maximumRecipients", { count: MAX_BATCH_RECIPIENTS });
   }
   if (exceedsBalance) {
-    return "Insufficient balance";
+    return t("DashboardPayments.batchSend.insufficientBalance");
   }
-  return `${count} wallet${count === 1 ? "" : "s"} selected`;
+  return t(
+    count === 1
+      ? "DashboardPayments.batchSend.walletsSelectedSingular"
+      : "DashboardPayments.batchSend.walletsSelectedPlural",
+    { count }
+  );
 }
 
 function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
+  const t = useTranslations();
   const {
     liveWallets,
     walletsLoading,
@@ -115,12 +141,12 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
     <div className="space-y-4">
       <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_200px]">
         <Combobox
-          label="From"
+          label={t("DashboardPayments.batchSend.from")}
           value={walletId || null}
           onChange={selectWallet}
           options={walletOptions}
-          placeholder="Select a source wallet"
-          searchPlaceholder="Search wallets"
+          placeholder={t("DashboardPayments.batchSend.selectSourceWallet")}
+          searchPlaceholder={t("DashboardPayments.batchSend.searchWallets")}
           icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
           isLoading={walletsLoading}
           trailing={
@@ -140,11 +166,11 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
           }
         />
         <Combobox
-          label="Asset"
+          label={t("DashboardPayments.batchSend.asset")}
           value={asset || null}
           onChange={setAsset}
           options={assetOptions}
-          placeholder="Select an asset"
+          placeholder={t("DashboardPayments.batchSend.selectAsset")}
           searchable={false}
           disabled={!walletId || assetOptions.length === 0}
         />
@@ -152,20 +178,20 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
 
       {walletId && assetOptions.length === 0 ? (
         <p className="text-sm text-status-error-text">
-          This wallet has no assets available to send.
+          {t("DashboardPayments.batchSend.noAssets")}
         </p>
       ) : null}
 
       <div className="flex items-center justify-between gap-4 px-1">
         <p className="text-xl font-medium tracking-tight text-text-extra-high">
-          Select recipient wallets
+          {t("DashboardPayments.batchSend.selectRecipientWallets")}
         </p>
         <button
           type="button"
           onClick={() => setBulkOpen(true)}
           className="text-sm font-medium text-text-low transition-colors hover:text-text-extra-high"
         >
-          Or bulk import
+          {t("DashboardPayments.batchSend.bulkImport")}
         </button>
       </div>
 
@@ -176,7 +202,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
             <Input
               value={search}
               onChange={(event) => setSearchQuery(event.currentTarget.value)}
-              placeholder="Search counterparty"
+              placeholder={t("DashboardPayments.batchSend.searchCounterparty")}
               size="xl"
               className="h-[var(--input-height-xl)] pl-11 [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:bg-[var(--input-bg-idle)]"
             />
@@ -185,7 +211,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
             page={page}
             pageCount={pageCount}
             onPageChange={setPage}
-            summary={`${page} / ${pageCount}`}
+            summary={t("DashboardPayments.batchSend.paginationSummary", { page, pageCount })}
             className="shrink-0 gap-2"
           />
         </div>
@@ -210,7 +236,9 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
             ))
           ) : pageRecipients.length === 0 ? (
             <p className="py-6 text-center text-sm text-text-low">
-              {recipientTotal === 0 ? "No counterparties with a Solana address." : "No matches."}
+              {recipientTotal === 0
+                ? t("DashboardPayments.batchSend.noCounterpartiesWithSolanaAddress")
+                : t("DashboardPayments.batchSend.noMatches")}
             </p>
           ) : (
             pageRecipients.map((account) => {
@@ -266,7 +294,9 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
                     <button
                       type="button"
                       onClick={() => toggleRecipient(account)}
-                      aria-label={`Add ${account.name}`}
+                      aria-label={t("DashboardPayments.batchSend.addRecipient", {
+                        name: account.name,
+                      })}
                       className="shrink-0 text-text-low transition-colors hover:text-text-extra-high"
                     >
                       <PlusIcon className="size-4" />
@@ -290,7 +320,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
                 : "text-text-low"
             }
           >
-            {recipientsStatusLabel(recipients.length, exceedsBalance, exceedsMaxRecipients)}
+            {recipientsStatusLabel(recipients.length, exceedsBalance, exceedsMaxRecipients, t)}
           </span>
           <span
             className={cn(
@@ -298,9 +328,15 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
               exceedsBalance ? "text-status-error-text" : "text-text-extra-high"
             )}
           >
-            Total {formatTokenAmount(totalAmount)} {displayAsset}
+            {t("DashboardPayments.batchSend.totalAmount", {
+              total: formatTokenAmount(totalAmount),
+              asset: displayAsset,
+            })}
             {availableAmount !== null
-              ? ` of ${formatTokenAmount(availableAmount)} ${displayAsset}`
+              ? t("DashboardPayments.batchSend.totalOfAmount", {
+                  available: formatTokenAmount(availableAmount),
+                  asset: displayAsset,
+                })
               : ""}
           </span>
         </div>
@@ -310,8 +346,9 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
 }
 
 function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
+  const t = useTranslations();
   const { recipients, displayAsset, totalAmount, estimate, estimateError } = wizard;
-  const rootLabel = rootLabelOf(wizard);
+  const rootLabel = rootLabelOf(wizard, t);
   const fees = estimate?.estimatedFees;
   const totalFeeLamports = fees
     ? BigInt(fees.networkFeeLamports) +
@@ -324,12 +361,20 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
       <section className="space-y-4 rounded-2xl bg-border-extra-light p-5">
         <div className="space-y-0.5 text-center">
           <p className="text-3xl font-semibold tracking-tight text-text-extra-high">
-            {formatTokenAmount(totalAmount)} {displayAsset} → {pluralRecipients(recipients.length)}
+            {t("DashboardPayments.batchSend.reviewSummary", {
+              total: formatTokenAmount(totalAmount),
+              asset: displayAsset,
+              recipients: pluralRecipients(recipients.length, t),
+            })}
           </p>
           {estimate ? (
             <p className="text-sm text-text-low">
-              {estimate.transactionCount} transaction
-              {estimate.transactionCount === 1 ? "" : "s"}
+              {t(
+                estimate.transactionCount === 1
+                  ? "DashboardPayments.batchSend.transactionCountSingular"
+                  : "DashboardPayments.batchSend.transactionCountPlural",
+                { count: estimate.transactionCount }
+              )}
             </p>
           ) : null}
         </div>
@@ -338,11 +383,11 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
         ) : fees && totalFeeLamports !== null ? (
           <dl className="space-y-2 text-sm">
             <div className="flex items-center justify-between">
-              <dt className="text-text-low">Source</dt>
+              <dt className="text-text-low">{t("DashboardPayments.batchSend.source")}</dt>
               <dd className="text-text-high">{rootLabel}</dd>
             </div>
             <div className="flex items-center justify-between">
-              <dt className="text-text-low">Transaction fees</dt>
+              <dt className="text-text-low">{t("DashboardPayments.batchSend.transactionFees")}</dt>
               <dd className="text-text-high">
                 {formatLamportsAsSol(
                   BigInt(fees.networkFeeLamports) + BigInt(fees.priorityFeeLamports)
@@ -350,23 +395,27 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
               </dd>
             </div>
             <div className="flex items-center justify-between">
-              <dt className="text-text-low">Rent fees</dt>
+              <dt className="text-text-low">{t("DashboardPayments.batchSend.rentFees")}</dt>
               <dd className="text-text-high">
                 {formatLamportsAsSol(BigInt(fees.tokenAccountRentLamports))}
               </dd>
             </div>
             <div className="h-px bg-border-light" />
             <div className="flex items-center justify-between">
-              <span className="font-medium text-text-extra-high">Total</span>
+              <span className="font-medium text-text-extra-high">
+                {t("DashboardPayments.batchSend.total")}
+              </span>
               <span className="flex items-center gap-2">
                 {fees.sponsored ? (
                   <>
                     <span className="text-text-low line-through">
                       {formatLamportsAsSol(totalFeeLamports)}
                     </span>
-                    <span className="font-medium text-text-extra-high">0 SOL</span>
+                    <span className="font-medium text-text-extra-high">
+                      {t("DashboardPayments.batchSend.sponsoredFee")}
+                    </span>
                     <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-text-medium">
-                      Sponsored by SDP via Kora
+                      {t("DashboardPayments.batchSend.sponsoredBy")}
                     </span>
                   </>
                 ) : (
@@ -378,7 +427,9 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
             </div>
           </dl>
         ) : (
-          <p className="text-center text-sm text-text-low">Estimating…</p>
+          <p className="text-center text-sm text-text-low">
+            {t("DashboardPayments.batchSend.estimating")}
+          </p>
         )}
       </section>
       <div className="flex flex-col gap-0.5">
@@ -411,6 +462,7 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
 }
 
 function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
+  const t = useTranslations();
   const { batchResult, recipients, displayAsset } = wizard;
   const nameByAccount = useMemo(
     () => new Map(recipients.map((r) => [r.counterpartyAccountId, r.name])),
@@ -427,11 +479,13 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
     <div className="space-y-5">
       <div className="flex flex-col items-center gap-1 pb-1 text-center">
         <p className="text-2xl font-medium tracking-tight text-text-extra-high">
-          {batchResultTitle(batchResult.batch.status)}
+          {batchResultTitle(batchResult.batch.status, t)}
         </p>
         <p className="text-sm text-text-low">
-          {batchResult.batch.recipientCount} recipients · {batchResult.batch.transactionCount}{" "}
-          transactions
+          {t("DashboardPayments.batchSend.resultSummary", {
+            recipients: batchResult.batch.recipientCount,
+            transactions: batchResult.batch.transactionCount,
+          })}
         </p>
       </div>
       <div className="flex flex-col gap-0.5">
@@ -455,14 +509,14 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
                 <span
                   className={cn("text-sm font-medium", RECIPIENT_STATUS_TONE[recipient.status])}
                 >
-                  {RECIPIENT_STATUS_LABEL[recipient.status]}
+                  {recipientStatusLabel(recipient.status, t)}
                 </span>
                 {signature ? (
                   <button
                     type="button"
                     onClick={() => window.open(getDevnetExplorerUrl(signature), "_blank")}
                     className="text-text-low hover:text-text-extra-high"
-                    aria-label="View on explorer"
+                    aria-label={t("DashboardPayments.batchSend.viewOnExplorer")}
                   >
                     <ExternalLink className="size-4" />
                   </button>

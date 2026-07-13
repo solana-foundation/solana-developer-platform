@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 
 interface TokenManagementModalShellProps {
   isOpen: boolean;
@@ -16,13 +17,14 @@ export function TokenManagementModalShell({
   onClose,
   children,
 }: TokenManagementModalShellProps) {
+  const t = useTranslations();
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
       closeDisabled={isPending}
-      ariaLabel="Token management action"
-      closeLabel="Close modal"
+      ariaLabel={t("DashboardIssuance.modal.tokenManagementAction")}
+      closeLabel={t("DashboardIssuance.modal.close")}
       contentClassName="border-0 bg-transparent shadow-none [&_[data-slot=card-header]]:pr-16"
       size="xl"
     >

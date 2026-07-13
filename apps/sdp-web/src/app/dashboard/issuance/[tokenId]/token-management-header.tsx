@@ -3,6 +3,7 @@
 import { ArrowUpRight, Copy } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 
 interface TokenManagementHeaderProps {
@@ -42,9 +43,10 @@ export function TokenManagementHeader({
   onDeploy,
   onUnpause,
 }: TokenManagementHeaderProps) {
+  const t = useTranslations();
   const tokenAddressLabel = tokenAddress
     ? `${tokenAddress.slice(0, 5)}...${tokenAddress.slice(-4)}`
-    : "Not deployed";
+    : t("DashboardIssuance.header.notDeployed");
 
   return (
     <div className="flex flex-col gap-8">
@@ -73,7 +75,7 @@ export function TokenManagementHeader({
                   type="button"
                   onClick={onCopyAddress}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-[rgba(28,28,29,0.12)] bg-white text-[rgba(28,28,29,0.62)] transition-colors hover:text-[#1c1c1d]"
-                  aria-label="Copy token address"
+                  aria-label={t("DashboardIssuance.header.copyTokenAddress")}
                 >
                   <Copy className="h-4 w-4" />
                 </button>
@@ -87,14 +89,14 @@ export function TokenManagementHeader({
               data-testid="token-id-row"
             >
               <span className="text-[13px] font-medium tracking-[-0.1px] text-[rgba(28,28,29,0.54)]">
-                Token ID:
+                {t("DashboardIssuance.header.tokenId")}:
               </span>
               <span className="font-mono text-[13px] tracking-[-0.1px]">{tokenId}</span>
               <button
                 type="button"
                 onClick={onCopyTokenId}
                 className="inline-flex h-7 w-7 items-center justify-center rounded-[10px] border border-[rgba(28,28,29,0.12)] bg-white text-[rgba(28,28,29,0.62)] transition-colors hover:text-[#1c1c1d]"
-                aria-label="Copy token ID"
+                aria-label={t("DashboardIssuance.header.copyTokenId")}
               >
                 <Copy className="h-3.5 w-3.5" />
               </button>
@@ -106,7 +108,7 @@ export function TokenManagementHeader({
           {explorerHref ? (
             <Button variant="outline" asChild>
               <Link href={explorerHref} target="_blank" rel="noopener noreferrer">
-                Explorer
+                {t("DashboardIssuance.header.explorer")}
                 <ArrowUpRight className="h-4 w-4" />
               </Link>
             </Button>
@@ -119,7 +121,7 @@ export function TokenManagementHeader({
                 onClick={onDeploy}
                 disabled={isPending || Boolean(deployDisabledReason)}
               >
-                Deploy
+                {t("DashboardIssuance.header.deploy")}
               </Button>
             </TokenDisabledActionTooltip>
           ) : (
@@ -131,7 +133,7 @@ export function TokenManagementHeader({
                     onClick={onUnpause}
                     disabled={isPending || Boolean(pauseDisabledReason)}
                   >
-                    Unpause
+                    {t("DashboardIssuance.header.unpause")}
                   </Button>
                 </TokenDisabledActionTooltip>
               ) : null}

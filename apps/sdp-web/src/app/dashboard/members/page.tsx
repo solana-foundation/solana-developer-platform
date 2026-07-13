@@ -1,14 +1,17 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getTranslations } from "@/i18n/server";
 
-export default function DashboardMembersPage() {
+export default async function DashboardMembersPage() {
+  const t = await getTranslations();
+
   return (
     <div className="w-full max-w-5xl flex flex-col gap-6">
       <Card>
         <CardHeader>
-          <CardTitle>Coming soon</CardTitle>
+          <CardTitle>{t("Shared.members.comingSoon")}</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-[rgba(28,28,29,0.72)]">
-          Member management will be available in a future update.
+          {t("Shared.members.description")}
         </CardContent>
       </Card>
     </div>

@@ -4,9 +4,9 @@
  * Records all significant actions for compliance and debugging.
  */
 
+import { redactCredentialSecrets } from "@sdp/custody";
 import type { Context } from "hono";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
-import { redactCredentialSecrets } from "@/lib/redaction";
 import type { Env } from "@/types/env";
 
 export type AuditAction =

@@ -17,6 +17,7 @@ import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import {
   findRampPair,
@@ -238,6 +239,7 @@ export function RampPairProviderSelector({
   onPairChange,
   onProviderSelect,
 }: RampPairProviderSelectorProps) {
+  const t = useTranslations();
   const [unavailableDialogOpen, setUnavailableDialogOpen] = useState(false);
   const pairs = pairsForDirection(direction);
   const selectedPairSupport = useMemo(
@@ -398,14 +400,18 @@ export function RampPairProviderSelector({
 
       <div className="space-y-2.5">
         <div className="flex items-center gap-3">
-          <p className="shrink-0 text-xl font-medium text-text-extra-high">Choose a provider</p>
+          <p className="shrink-0 text-xl font-medium text-text-extra-high">
+            {t("DashboardPayments.ramps.chooseProvider")}
+          </p>
           {providerExclusions.length > 0 ? (
             <button
               type="button"
               onClick={() => setUnavailableDialogOpen(true)}
               className="rounded-full bg-border-extra-light px-2 py-0.5 text-xs leading-none font-medium text-text-low transition-colors hover:bg-border-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-low focus-visible:ring-offset-2"
             >
-              {providerExclusions.length} unavailable
+              {t("DashboardPayments.ramps.unavailableCount", {
+                count: providerExclusions.length,
+              })}
             </button>
           ) : null}
           <div className="h-px flex-1 bg-border-light" />
@@ -433,7 +439,7 @@ export function RampPairProviderSelector({
                 animate={{ opacity: 1 }}
                 className="py-2 text-sm text-text-low"
               >
-                No providers are available for this selection.
+                {t("DashboardPayments.ramps.noProvidersAvailable")}
               </motion.p>
             ) : null}
           </motion.div>
@@ -443,11 +449,13 @@ export function RampPairProviderSelector({
       <Modal
         isOpen={unavailableDialogOpen && providerExclusions.length > 0}
         onClose={() => setUnavailableDialogOpen(false)}
-        ariaLabel="Unavailable ramp providers"
+        ariaLabel={t("DashboardPayments.ramps.unavailableProviders")}
         size="md"
       >
         <div className="px-5 py-5">
-          <h2 className="pr-10 text-lg font-medium text-text-extra-high">Unavailable providers</h2>
+          <h2 className="pr-10 text-lg font-medium text-text-extra-high">
+            {t("DashboardPayments.ramps.unavailableProviders")}
+          </h2>
           <div className="mt-4 max-h-96 space-y-3 overflow-y-auto pr-1">
             {providerExclusions.map((exclusion) => (
               <div

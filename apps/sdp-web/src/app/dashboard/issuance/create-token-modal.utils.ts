@@ -1,4 +1,5 @@
 import { BadgeDollarSign, CircleHelp, ShieldCheck } from "lucide-react";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {
   type AccessControlMode,
   getDefaultAccessControlMode as getDefaultModeForTemplate,
@@ -11,39 +12,41 @@ import type {
   TokenDraft,
 } from "./create-token-modal.types";
 
-export const templateCards: Array<
+export function getTemplateCards(t: Translate): Array<
   TemplateCardDescriptor & {
     icon: typeof BadgeDollarSign;
   }
-> = [
-  {
-    id: "stablecoin",
-    name: "Stablecoin",
-    description: "Create a regulatory-compliant stablecoin with transfer restrictions.",
-    icon: BadgeDollarSign,
-    iconClassName: "bg-[#dee6ff] text-[#375dff]",
-    enabled: true,
-    template: "stablecoin",
-  },
-  {
-    id: "tokenized-security",
-    name: "Tokenized Security",
-    description: "Create a compliant security token with scaled UI amounts and core controls.",
-    icon: ShieldCheck,
-    iconClassName: "bg-[#d8f7e4] text-[#0f9b58]",
-    enabled: true,
-    template: "tokenized-security",
-  },
-  {
-    id: "custom",
-    name: "Custom Token",
-    description: "Build your own token with full control over extensions and parameters.",
-    icon: CircleHelp,
-    iconClassName: "bg-[#ebe5ff] text-[#6436ff]",
-    enabled: true,
-    template: "custom",
-  },
-];
+> {
+  return [
+    {
+      id: "stablecoin",
+      name: t("DashboardIssuance.create.stablecoinTemplateName"),
+      description: t("DashboardIssuance.create.stablecoinTemplateDescription"),
+      icon: BadgeDollarSign,
+      iconClassName: "bg-[#dee6ff] text-[#375dff]",
+      enabled: true,
+      template: "stablecoin",
+    },
+    {
+      id: "tokenized-security",
+      name: t("DashboardIssuance.create.tokenizedSecurityTemplateName"),
+      description: t("DashboardIssuance.create.tokenizedSecurityTemplateDescription"),
+      icon: ShieldCheck,
+      iconClassName: "bg-[#d8f7e4] text-[#0f9b58]",
+      enabled: true,
+      template: "tokenized-security",
+    },
+    {
+      id: "custom",
+      name: t("DashboardIssuance.create.customTemplateName"),
+      description: t("DashboardIssuance.create.customTemplateDescription"),
+      icon: CircleHelp,
+      iconClassName: "bg-[#ebe5ff] text-[#6436ff]",
+      enabled: true,
+      template: "custom",
+    },
+  ];
+}
 
 export const INITIAL_CREATE_ISSUANCE_TOKEN_RESULT: CreateIssuanceTokenResult = {
   state: "idle",
@@ -64,30 +67,21 @@ export function createInitialDraft(): TokenDraft {
   };
 }
 
-export function getTemplateTitle(template: TemplateSelection): string {
+export function getTemplateTitle(template: TemplateSelection, t: Translate): string {
   switch (template) {
     case "stablecoin":
-      return "Create Stablecoin Draft";
+      return t("DashboardIssuance.create.createStablecoinDraft");
     case "custom":
-      return "Create Custom Token Draft";
+      return t("DashboardIssuance.create.createCustomTokenDraft");
     case "tokenized-security":
-      return "Create Tokenized Security Draft";
+      return t("DashboardIssuance.create.createTokenizedSecurityDraft");
     default:
-      return "Create Token Draft";
+      return t("DashboardIssuance.create.createTokenDraft");
   }
 }
 
-export function getCreateButtonLabel(template: TemplateSelection): string {
-  switch (template) {
-    case "stablecoin":
-      return "Create Stablecoin Draft";
-    case "custom":
-      return "Create Custom Token Draft";
-    case "tokenized-security":
-      return "Create Tokenized Security Draft";
-    default:
-      return "Create Token Draft";
-  }
+export function getCreateButtonLabel(template: TemplateSelection, t: Translate): string {
+  return getTemplateTitle(template, t);
 }
 
 export function getTemplateDefaultDecimals(template: TemplateSelection): TokenDraft["decimals"] {
@@ -122,7 +116,12 @@ export function isAccessControlModeAvailable(
   return template === "custom";
 }
 
-export function getAccessControlOptions(template: TemplateSelection): Array<{
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+export function getAccessControlOptions(
+  template: TemplateSelection,
+  t: Translate
+): Array<{
   mode: AccessControlMode;
   title: string;
   description: string;
@@ -132,15 +131,15 @@ export function getAccessControlOptions(template: TemplateSelection): Array<{
     return [
       {
         mode: "blocklist",
-        title: "Denylist",
-        description: "Listed destinations are blocked before they can receive controlled actions.",
-        note: "Recommended default for stablecoins.",
+        title: t("DashboardIssuance.create.denylist"),
+        description: t("DashboardIssuance.create.denylistDescription"),
+        note: t("DashboardIssuance.create.stablecoinDenylistNote"),
       },
       {
         mode: "allowlist",
-        title: "Allowlist",
-        description: "Only approved destinations can receive controlled token actions.",
-        note: "Use when transfers must stay inside a known set of wallets.",
+        title: t("DashboardIssuance.create.allowlist"),
+        description: t("DashboardIssuance.create.allowlistDescription"),
+        note: t("DashboardIssuance.create.stablecoinAllowlistNote"),
       },
     ];
   }
@@ -149,15 +148,15 @@ export function getAccessControlOptions(template: TemplateSelection): Array<{
     return [
       {
         mode: "allowlist",
-        title: "Allowlist",
-        description: "Only approved destinations can receive controlled token actions.",
-        note: "Default for tokenized securities.",
+        title: t("DashboardIssuance.create.allowlist"),
+        description: t("DashboardIssuance.create.allowlistDescription"),
+        note: t("DashboardIssuance.create.securityAllowlistNote"),
       },
       {
         mode: "blocklist",
-        title: "Denylist",
-        description: "Listed destinations are blocked before they can receive controlled actions.",
-        note: "Use when the token should remain open except for blocked wallets.",
+        title: t("DashboardIssuance.create.denylist"),
+        description: t("DashboardIssuance.create.denylistDescription"),
+        note: t("DashboardIssuance.create.securityDenylistNote"),
       },
     ];
   }
@@ -165,15 +164,15 @@ export function getAccessControlOptions(template: TemplateSelection): Array<{
   return [
     {
       mode: "disabled",
-      title: "Disabled",
-      description: "This token will not use a transfer control list.",
-      note: "Best for unrestricted custom tokens.",
+      title: t("DashboardIssuance.create.disabled"),
+      description: t("DashboardIssuance.create.disabledDescription"),
+      note: t("DashboardIssuance.create.customDisabledNote"),
     },
     {
       mode: "allowlist",
-      title: "Allowlist",
-      description: "Only approved destinations can receive controlled token actions.",
-      note: "Enable this when the token needs restricted transfer access.",
+      title: t("DashboardIssuance.create.allowlist"),
+      description: t("DashboardIssuance.create.allowlistDescription"),
+      note: t("DashboardIssuance.create.customAllowlistNote"),
     },
   ];
 }
@@ -214,15 +213,15 @@ export function isValidTokenDecimals(value: string): boolean {
   return parsed >= 0 && parsed <= 18;
 }
 
-export function getDecimalsHelperText(template: TemplateSelection): string {
+export function getDecimalsHelperText(template: TemplateSelection, t: Translate): string {
   switch (template) {
     case "stablecoin":
-      return "Stablecoin defaults to 6 decimals, but you can choose any value from 0 to 18.";
+      return t("DashboardIssuance.create.stablecoinDecimalsHelper");
     case "custom":
-      return "Custom tokens default to 9 decimals. Choose any value from 0 to 18.";
+      return t("DashboardIssuance.create.customDecimalsHelper");
     case "tokenized-security":
-      return "Tokenized Security defaults to 8 decimals, but you can choose any value from 0 to 18.";
+      return t("DashboardIssuance.create.tokenizedSecurityDecimalsHelper");
     default:
-      return "Choose any value from 0 to 18.";
+      return t("DashboardIssuance.create.decimalsHelper");
   }
 }

@@ -6,6 +6,7 @@ import {
   formatCurrencyAmount,
   resolveUsdBalanceValue,
 } from "@/app/dashboard/payments/payments-overview.utils";
+import { useLocale, useTranslations } from "@/i18n/provider";
 
 interface BreakdownRow {
   token: string;
@@ -30,11 +31,13 @@ function breakdownRows(wallet: PaymentsDashboardWallet): BreakdownRow[] {
   return rows.sort((a, b) => (b.usdValue ?? -1) - (a.usdValue ?? -1));
 }
 
-function formatTwoDecimals(value: number): string {
-  return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+function formatTwoDecimals(value: number, locale: string): string {
+  return value.toLocaleString(locale, { maximumFractionDigits: 2 });
 }
 
 export function WalletAssetBreakdown({ wallet }: { wallet: PaymentsDashboardWallet }) {
+  const t = useTranslations();
+  const locale = useLocale();
   const rows = breakdownRows(wallet);
   if (rows.length === 0) {
     return null;
@@ -51,9 +54,13 @@ export function WalletAssetBreakdown({ wallet }: { wallet: PaymentsDashboardWall
       className="space-y-5 pt-4"
     >
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-medium tracking-tight text-text-extra-high">Asset breakdown</h2>
+        <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
+          {t("DashboardPayments.ramps.assetBreakdown")}
+        </h2>
         {totalUsd > 0 ? (
-          <p className="text-sm text-text-low">{formatCurrencyAmount(totalUsd)} total</p>
+          <p className="text-sm text-text-low">
+            {t("DashboardPayments.ramps.total", { amount: formatCurrencyAmount(totalUsd, locale) })}
+          </p>
         ) : null}
       </div>
       <div className="space-y-6">
@@ -71,12 +78,14 @@ export function WalletAssetBreakdown({ wallet }: { wallet: PaymentsDashboardWall
                 <div className="flex min-w-0 items-baseline gap-2">
                   <p className="text-base font-medium text-text-extra-high">{row.token}</p>
                   {row.usdValue !== null ? (
-                    <p className="text-sm text-text-low">{formatCurrencyAmount(row.usdValue)}</p>
+                    <p className="text-sm text-text-low">
+                      {formatCurrencyAmount(row.usdValue, locale)}
+                    </p>
                   ) : null}
                 </div>
                 <p className="shrink-0 text-sm text-text-medium">
-                  {formatTwoDecimals(row.amount)}
-                  {shareValue !== null ? ` · ${formatTwoDecimals(shareValue)}%` : ""}
+                  {formatTwoDecimals(row.amount, locale)}
+                  {shareValue !== null ? ` · ${formatTwoDecimals(shareValue, locale)}%` : ""}
                 </p>
               </div>
               {shareValue !== null ? (

@@ -51,6 +51,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
@@ -60,18 +62,6 @@ import {
   runRecurringPaymentAction,
   updateRecurringPayment,
 } from "./recurring-payments.data";
-
-const STATUS_LABELS = {
-  pending_activation: "Pending activation",
-  activating: "Activating",
-  active: "Active",
-  updating: "Updating",
-  canceling: "Canceling",
-  resuming: "Resuming",
-  paused: "Paused",
-  canceled: "Canceled",
-  expired: "Expired",
-} as const satisfies Record<PaymentRecurringPaymentStatus, string>;
 
 const STATUS_VARIANTS = {
   pending_activation: "warning",
@@ -85,14 +75,6 @@ const STATUS_VARIANTS = {
   expired: "danger",
 } as const satisfies Record<PaymentRecurringPaymentStatus, BadgeVariant>;
 
-const COLLECTION_STATUS_LABELS = {
-  pending: "Pending",
-  processing: "Processing",
-  confirmed: "Collected",
-  failed: "Failed",
-  skipped: "Skipped",
-} as const satisfies Record<PaymentSubscriptionCollectionAttemptStatus, string>;
-
 const COLLECTION_STATUS_VARIANTS = {
   pending: "warning",
   processing: "info",
@@ -100,6 +82,14 @@ const COLLECTION_STATUS_VARIANTS = {
   failed: "danger",
   skipped: "default",
 } as const satisfies Record<PaymentSubscriptionCollectionAttemptStatus, BadgeVariant>;
+
+const COLLECTION_STATUS_TRANSLATION_KEYS = {
+  pending: "DashboardPayments.recurring.pending",
+  processing: "DashboardPayments.recurring.processing",
+  confirmed: "DashboardPayments.recurring.collected",
+  failed: "DashboardPayments.recurring.failed",
+  skipped: "DashboardPayments.recurring.skipped",
+} as const satisfies Record<PaymentSubscriptionCollectionAttemptStatus, MessageKey>;
 
 const COLLECTION_ATTEMPTED_COLUMN_CLASS = "hidden @4xl/collection-history:table-cell";
 const COLLECTION_TRANSFER_COLUMN_CLASS = "hidden @6xl/collection-history:table-cell";
@@ -134,43 +124,66 @@ interface RecurringPaymentDetailWorkspaceProps {
 }
 
 function RecurringPaymentStatusBadge({ status }: { status: PaymentRecurringPaymentStatus }) {
-  return <Badge variant={STATUS_VARIANTS[status]}>{STATUS_LABELS[status]}</Badge>;
+  const t = useTranslations();
+  return <Badge variant={STATUS_VARIANTS[status]}>{t(STATUS_TRANSLATION_KEYS[status])}</Badge>;
 }
 
-function formatOptionalTimestamp(value: string | null | undefined): string {
-  return value ? formatTimestamp(value) : "Not set";
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+function formatOptionalTimestamp(value: string | null | undefined, t: Translate): string {
+  return value ? formatTimestamp(value, t) : t("DashboardPayments.recurring.notSet");
 }
 
-function formatPeriodHours(periodHours: number): string {
+function formatPeriodHours(periodHours: number, t: Translate): string {
   if (periodHours === 24) {
-    return "Every day";
+    return t("DashboardPayments.recurring.everyDay");
   }
   if (periodHours % 168 === 0) {
     const weeks = periodHours / 168;
-    return weeks === 1 ? "Every week" : `Every ${weeks} weeks`;
+    return weeks === 1
+      ? t("DashboardPayments.recurring.everyWeek")
+      : t("DashboardPayments.recurring.everyWeeks", { count: weeks });
   }
   if (periodHours % 24 === 0) {
     const days = periodHours / 24;
-    return days === 1 ? "Every day" : `Every ${days} days`;
+    return days === 1
+      ? t("DashboardPayments.recurring.everyDay")
+      : t("DashboardPayments.recurring.everyDays", { count: days });
   }
-  return periodHours === 1 ? "Every hour" : `Every ${periodHours} hours`;
+  return periodHours === 1
+    ? t("DashboardPayments.recurring.everyHour")
+    : t("DashboardPayments.recurring.everyHours", { count: periodHours });
 }
 
 type SchedulePreset = "24" | "168" | "720" | "custom";
 
-const SCHEDULE_PRESETS = [
-  { value: "24", label: "Every day", description: "Collect once per day." },
-  { value: "168", label: "Every week", description: "Collect once per week." },
-  { value: "720", label: "Every 30 days", description: "Collect about once per month." },
-  { value: "custom", label: "Custom", description: "Enter an interval in hours." },
-] as const satisfies readonly {
-  value: SchedulePreset;
-  label: string;
-  description: string;
-}[];
+function getSchedulePresets(t: Translate) {
+  return [
+    {
+      value: "24",
+      label: t("DashboardPayments.recurring.everyDay"),
+      description: t("DashboardPayments.recurring.collectDaily"),
+    },
+    {
+      value: "168",
+      label: t("DashboardPayments.recurring.everyWeek"),
+      description: t("DashboardPayments.recurring.collectWeekly"),
+    },
+    {
+      value: "720",
+      label: t("DashboardPayments.recurring.everyThirtyDays"),
+      description: t("DashboardPayments.recurring.collectMonthly"),
+    },
+    {
+      value: "custom",
+      label: t("DashboardPayments.recurring.custom"),
+      description: t("DashboardPayments.recurring.customScheduleDescription"),
+    },
+  ] as const satisfies readonly { value: SchedulePreset; label: string; description: string }[];
+}
 
 function schedulePresetForPeriodHours(periodHours: number): SchedulePreset {
-  return SCHEDULE_PRESETS.some((preset) => preset.value === String(periodHours))
+  return ["24", "168", "720"].some((preset) => preset === String(periodHours))
     ? (String(periodHours) as SchedulePreset)
     : "custom";
 }
@@ -221,14 +234,17 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 function CopyableValue({
   value,
   label,
-  empty = "Not set",
+  empty,
 }: {
   value: string | null;
   label?: string;
   empty?: string;
 }) {
+  const t = useTranslations();
   if (!value) {
-    return <span className="text-text-low">{empty}</span>;
+    return (
+      <span className="text-text-low">{empty ?? t("DashboardPayments.recurring.notSet")}</span>
+    );
   }
 
   return (
@@ -243,10 +259,10 @@ function CopyableValue({
         type="button"
         variant="ghost"
         size="icon-xs"
-        aria-label="Copy value"
+        aria-label={t("DashboardPayments.recurring.copyValue")}
         onClick={() => {
           void navigator.clipboard.writeText(value);
-          toast.success("Copied");
+          toast.success(t("DashboardPayments.recurring.copied"));
         }}
       >
         <CopyIcon />
@@ -256,20 +272,29 @@ function CopyableValue({
 }
 
 function CollectionStatusBadge({ status }: { status: PaymentSubscriptionCollectionAttemptStatus }) {
+  const t = useTranslations();
   return (
-    <Badge variant={COLLECTION_STATUS_VARIANTS[status]}>{COLLECTION_STATUS_LABELS[status]}</Badge>
+    <Badge variant={COLLECTION_STATUS_VARIANTS[status]}>
+      {t(COLLECTION_STATUS_TRANSLATION_KEYS[status])}
+    </Badge>
   );
 }
 
 function ExplorerValue({ value }: { value: string | null }) {
+  const t = useTranslations();
   if (!value) {
-    return <span className="text-text-low">Not set</span>;
+    return <span className="text-text-low">{t("DashboardPayments.recurring.notSet")}</span>;
   }
 
   return (
     <span className="inline-flex max-w-full items-center gap-1.5">
       <CopyableValue value={value} label={shortenAddress(value)} />
-      <Button asChild variant="ghost" size="icon-xs" aria-label="Open signature">
+      <Button
+        asChild
+        variant="ghost"
+        size="icon-xs"
+        aria-label={t("DashboardPayments.recurring.openSignature")}
+      >
         <a href={getDevnetExplorerUrl(value)} target="_blank" rel="noreferrer">
           <ExternalLinkIcon />
         </a>
@@ -289,17 +314,20 @@ function RecurringPaymentCollectionHistory({
   error?: string;
   wallets: RecurringPaymentWalletView[];
 }) {
+  const t = useTranslations();
   const attemptsLabel =
     total > attempts.length
-      ? `Showing ${attempts.length} of ${total} attempts`
+      ? t("DashboardPayments.recurring.showingAttempts", { shown: attempts.length, total })
       : attempts.length === 1
-        ? "1 attempt"
-        : `${attempts.length} attempts`;
+        ? t("DashboardPayments.recurring.oneAttempt")
+        : t("DashboardPayments.recurring.attempts", { count: attempts.length });
 
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="text-sm font-medium text-text-extra-high">Collection history</h3>
+        <h3 className="text-sm font-medium text-text-extra-high">
+          {t("DashboardPayments.recurring.collectionHistory")}
+        </h3>
         {attempts.length > 0 ? (
           <span className="text-xs text-text-low">{attemptsLabel}</span>
         ) : null}
@@ -307,11 +335,11 @@ function RecurringPaymentCollectionHistory({
       <div className="@container/collection-history rounded-xl border border-border-light">
         {error ? (
           <div role="alert" className="p-4 text-sm text-status-error-text">
-            Unable to load collection history: {error}
+            {t("DashboardPayments.recurring.unableToLoadCollectionHistory", { error })}
           </div>
         ) : attempts.length === 0 ? (
           <div className="p-4 text-sm text-text-medium">
-            No collection attempts yet. The next scheduled collection is shown above.
+            {t("DashboardPayments.recurring.noCollectionAttempts")}
           </div>
         ) : (
           <div className="overflow-hidden">
@@ -319,26 +347,26 @@ function RecurringPaymentCollectionHistory({
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[28%] @4xl/collection-history:w-[20%] @6xl/collection-history:w-[17%] @7xl/collection-history:w-[15%]">
-                    Due
+                    {t("DashboardPayments.recurring.due")}
                   </TableHead>
                   <TableHead
                     className={`${COLLECTION_ATTEMPTED_COLUMN_CLASS} w-[20%] @6xl/collection-history:w-[16%] @7xl/collection-history:w-[15%]`}
                   >
-                    Attempted
+                    {t("DashboardPayments.recurring.attempted")}
                   </TableHead>
                   <TableHead className="w-[25%] @4xl/collection-history:w-[21%] @6xl/collection-history:w-[17%] @7xl/collection-history:w-[16%]">
-                    Amount
+                    {t("DashboardPayments.recurring.amount")}
                   </TableHead>
                   <TableHead className="w-[23%] @4xl/collection-history:w-[18%] @6xl/collection-history:w-[15%] @7xl/collection-history:w-[14%]">
-                    Status
+                    {t("DashboardPayments.status")}
                   </TableHead>
                   <TableHead
                     className={`${COLLECTION_TRANSFER_COLUMN_CLASS} w-[22%] @7xl/collection-history:w-[18%]`}
                   >
-                    Transfer
+                    {t("DashboardPayments.recurring.transfer")}
                   </TableHead>
                   <TableHead className="w-[24%] @4xl/collection-history:w-[21%] @6xl/collection-history:w-[18%] @7xl/collection-history:w-[22%]">
-                    Explorer
+                    {t("DashboardPayments.recurring.explorer")}
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -346,13 +374,15 @@ function RecurringPaymentCollectionHistory({
                 {attempts.map((attempt) => (
                   <TableRow key={attempt.id}>
                     <TableCell className="whitespace-nowrap text-sm">
-                      <span className="block truncate">{formatTimestamp(attempt.dueAt)}</span>
+                      <span className="block truncate">{formatTimestamp(attempt.dueAt, t)}</span>
                     </TableCell>
                     <TableCell
                       className={`${COLLECTION_ATTEMPTED_COLUMN_CLASS} whitespace-nowrap text-sm text-text-medium`}
                     >
                       <span className="block truncate">
-                        {attempt.attemptedAt ? formatTimestamp(attempt.attemptedAt) : "Not set"}
+                        {attempt.attemptedAt
+                          ? formatTimestamp(attempt.attemptedAt, t)
+                          : t("DashboardPayments.recurring.notSet")}
                       </span>
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-sm font-medium">
@@ -416,29 +446,29 @@ function isDueNow(value: string | null): boolean {
   return Boolean(value && Date.parse(value) <= Date.now());
 }
 
-function actionSuccessLabel(action: RecurringPaymentAction): string {
+function actionSuccessLabel(action: RecurringPaymentAction, t: Translate): string {
   switch (action) {
     case "activate":
-      return "Recurring payment activated.";
+      return t("DashboardPayments.recurring.paymentActivated");
     case "collect":
-      return "Recurring payment collection submitted.";
+      return t("DashboardPayments.recurring.collectionSubmitted");
     case "cancel":
-      return "Recurring payment canceled.";
+      return t("DashboardPayments.recurring.paymentCanceled");
     case "resume":
-      return "Recurring payment resumed.";
+      return t("DashboardPayments.recurring.paymentResumed");
   }
 }
 
-function actionFailureTitle(action: RecurringPaymentAction): string {
+function actionFailureTitle(action: RecurringPaymentAction, t: Translate): string {
   switch (action) {
     case "activate":
-      return "Activation failed";
+      return t("DashboardPayments.recurring.activationFailed");
     case "collect":
-      return "Collection failed";
+      return t("DashboardPayments.recurring.collectionFailed");
     case "cancel":
-      return "Cancellation failed";
+      return t("DashboardPayments.recurring.cancellationFailed");
     case "resume":
-      return "Resume failed";
+      return t("DashboardPayments.recurring.resumeFailed");
   }
 }
 
@@ -479,16 +509,16 @@ interface DetailActionError {
   message: string;
 }
 
-function disabledActionLabel(status: PaymentRecurringPaymentStatus): string | null {
+function disabledActionLabel(status: PaymentRecurringPaymentStatus, t: Translate): string | null {
   switch (status) {
     case "activating":
-      return "Activating";
+      return t("DashboardPayments.recurring.activating");
     case "updating":
-      return "Updating";
+      return t("DashboardPayments.recurring.updating");
     case "canceling":
-      return "Canceling";
+      return t("DashboardPayments.recurring.canceling");
     case "resuming":
-      return "Resuming";
+      return t("DashboardPayments.recurring.resuming");
     default:
       return null;
   }
@@ -497,24 +527,34 @@ function disabledActionLabel(status: PaymentRecurringPaymentStatus): string | nu
 function primaryDetailAction(
   status: PaymentRecurringPaymentStatus,
   dueNow: boolean,
-  error: DetailActionError | null
+  error: DetailActionError | null,
+  t: Translate
 ): DetailAction | null {
   if (status === "pending_activation") {
     return {
       action: "activate",
-      label: error?.action === "activate" ? "Retry activation" : "Activate",
+      label:
+        error?.action === "activate"
+          ? t("DashboardPayments.recurring.retryActivation")
+          : t("DashboardPayments.recurring.activate"),
     };
   }
   if (dueNow) {
     return {
       action: "collect",
-      label: error?.action === "collect" ? "Retry collection" : "Collect now",
+      label:
+        error?.action === "collect"
+          ? t("DashboardPayments.recurring.retryCollection")
+          : t("DashboardPayments.recurring.collectNow"),
     };
   }
   if (status === "canceled") {
     return {
       action: "resume",
-      label: error?.action === "resume" ? "Retry resume" : "Resume",
+      label:
+        error?.action === "resume"
+          ? t("DashboardPayments.recurring.retryResume")
+          : t("DashboardPayments.recurring.resume"),
     };
   }
   return null;
@@ -522,14 +562,18 @@ function primaryDetailAction(
 
 function secondaryDetailAction(
   status: PaymentRecurringPaymentStatus,
-  error: DetailActionError | null
+  error: DetailActionError | null,
+  t: Translate
 ): DetailAction | null {
   if (status !== "active") {
     return null;
   }
   return {
     action: "cancel",
-    label: error?.action === "cancel" ? "Retry cancellation" : "Cancel",
+    label:
+      error?.action === "cancel"
+        ? t("DashboardPayments.recurring.retryCancellation")
+        : t("DashboardPayments.recurring.cancel"),
   };
 }
 
@@ -554,9 +598,10 @@ function RecurringPaymentActionsMenu({
   onAction: (action: RecurringPaymentAction) => void;
   onCancel: () => void;
 }) {
-  const disabledLabel = disabledActionLabel(status);
-  const primaryAction = primaryDetailAction(status, dueNow, actionError);
-  const secondaryAction = secondaryDetailAction(status, actionError);
+  const t = useTranslations();
+  const disabledLabel = disabledActionLabel(status, t);
+  const primaryAction = primaryDetailAction(status, dueNow, actionError, t);
+  const secondaryAction = secondaryDetailAction(status, actionError, t);
   const actionsDisabled = Boolean(pendingAction) || Boolean(disabled);
 
   return (
@@ -569,13 +614,13 @@ function RecurringPaymentActionsMenu({
           disabled={actionsDisabled}
           iconRight={<ChevronDownIcon className="size-4" />}
         >
-          Actions
+          {t("DashboardPayments.recurring.actions")}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuItem onSelect={onEdit} disabled={!editable || actionsDisabled}>
           <PencilIcon className="size-4" />
-          <span>Edit payment</span>
+          <span>{t("DashboardPayments.recurring.editPayment")}</span>
         </DropdownMenuItem>
         {primaryAction ? (
           <DropdownMenuItem
@@ -614,7 +659,7 @@ function RecurringPaymentActionsMenu({
               <span className="grid gap-0.5">
                 <span>{secondaryAction.label}</span>
                 <span className="text-xs font-normal text-status-error-text">
-                  Stop future collections
+                  {t("DashboardPayments.recurring.stopFutureCollections")}
                 </span>
               </span>
             </DropdownMenuItem>
@@ -632,27 +677,34 @@ function RecurringPaymentLifecycleBand({
   status: PaymentRecurringPaymentStatus;
   actionError: DetailActionError | null;
 }) {
+  const t = useTranslations();
   if (actionError) {
     return (
-      <ActionBand variant="danger" title={actionFailureTitle(actionError.action)}>
+      <ActionBand variant="danger" title={actionFailureTitle(actionError.action, t)}>
         <div className="flex flex-wrap items-center gap-2">
           <span>{actionError.message}</span>
-          <CopyableValue value={actionError.message} label="Copy error" />
+          <CopyableValue
+            value={actionError.message}
+            label={t("DashboardPayments.recurring.copyError")}
+          />
         </div>
       </ActionBand>
     );
   }
   if (status === "pending_activation") {
     return (
-      <ActionBand variant="info" title="Ready to activate">
-        Creates the subscription and schedules the first payment.
+      <ActionBand variant="info" title={t("DashboardPayments.recurring.readyToActivate")}>
+        {t("DashboardPayments.recurring.readyToActivateDescription")}
       </ActionBand>
     );
   }
   if (status === "paused" || status === "expired") {
     return (
-      <ActionBand variant="warning" title="Lifecycle action unavailable">
-        This recurring payment cannot be changed from its current status.
+      <ActionBand
+        variant="warning"
+        title={t("DashboardPayments.recurring.lifecycleActionUnavailable")}
+      >
+        {t("DashboardPayments.recurring.lifecycleActionUnavailableDescription")}
       </ActionBand>
     );
   }
@@ -671,6 +723,7 @@ export function RecurringPaymentsWorkspace({
   wallets,
   counterparties,
 }: RecurringPaymentsWorkspaceProps) {
+  const t = useTranslations();
   const router = useRouter();
 
   const walletById = useMemo(
@@ -683,7 +736,9 @@ export function RecurringPaymentsWorkspace({
   );
 
   const countLabel =
-    initialTotal === 1 ? "1 recurring payment" : `${initialTotal} recurring payments`;
+    initialTotal === 1
+      ? t("DashboardPayments.recurring.oneRecurringPayment")
+      : t("DashboardPayments.recurring.recurringPaymentCount", { count: initialTotal });
 
   const getWalletLabel = (recurringPayment: PaymentRecurringPayment) => {
     const wallet = walletById.get(recurringPayment.sourceWalletId);
@@ -693,7 +748,7 @@ export function RecurringPaymentsWorkspace({
   };
   const getCounterpartyLabel = (recurringPayment: PaymentRecurringPayment) =>
     counterpartyById.get(recurringPayment.counterpartyId)?.displayName ??
-    "Counterparty unavailable";
+    t("DashboardPayments.recurring.counterpartyUnavailable");
   const getAmountLabel = (recurringPayment: PaymentRecurringPayment) =>
     formatDisplayAmount(
       recurringPayment.amount,
@@ -705,13 +760,13 @@ export function RecurringPaymentsWorkspace({
       <Card className="flex h-full min-h-0 flex-col">
         <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1.5">
-            <CardTitle>Recurring payments</CardTitle>
+            <CardTitle>{t("DashboardPayments.recurring.recurringPayments")}</CardTitle>
             <CardDescription>{countLabel}</CardDescription>
           </div>
           <Button asChild size="sm">
             <Link href="/dashboard/payments/recurring/create">
               <PlusIcon className="size-4" />
-              Create recurring payment
+              {t("DashboardPayments.recurring.createPayment")}
             </Link>
           </Button>
         </CardHeader>
@@ -721,7 +776,7 @@ export function RecurringPaymentsWorkspace({
               role="alert"
               className="border border-status-error-border bg-status-error-bg p-4 text-sm text-status-error-text"
             >
-              <p className="font-medium">Unable to load recurring payments</p>
+              <p className="font-medium">{t("DashboardPayments.recurring.unableToLoad")}</p>
               <p className="mt-1">{initialError}</p>
             </div>
           ) : initialRecurringPayments.length === 0 ? (
@@ -729,16 +784,16 @@ export function RecurringPaymentsWorkspace({
               <RepeatIcon className="h-10 w-10 text-text-extra-low" />
               <div className="space-y-1">
                 <p className="text-sm font-medium text-text-extra-high">
-                  No recurring payments yet.
+                  {t("DashboardPayments.recurring.noPayments")}
                 </p>
                 <p className="text-sm text-text-low">
-                  Created recurring payment records will appear here.
+                  {t("DashboardPayments.recurring.paymentsAppearHere")}
                 </p>
               </div>
               <Button asChild size="sm">
                 <Link href="/dashboard/payments/recurring/create">
                   <PlusIcon className="size-4" />
-                  Create recurring payment
+                  {t("DashboardPayments.recurring.createPayment")}
                 </Link>
               </Button>
             </div>
@@ -751,20 +806,22 @@ export function RecurringPaymentsWorkspace({
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[34%] md:w-[26%] lg:w-[21%] xl:w-[18%]">
-                      Status
+                      {t("DashboardPayments.status")}
                     </TableHead>
                     <TableHead className="w-[26%] md:w-[22%] lg:w-[20%] xl:w-[18%]">
-                      Amount
+                      {t("DashboardPayments.recurring.amount")}
                     </TableHead>
                     <TableHead className="w-[40%] md:w-[34%] lg:w-[31%] xl:w-[24%]">
-                      Counterparty
+                      {t("DashboardPayments.counterpartyLabel")}
                     </TableHead>
                     <TableHead className="hidden lg:table-cell lg:w-[28%] xl:w-[22%]">
-                      Funding wallet
+                      {t("DashboardPayments.recurring.fundingWallet")}
                     </TableHead>
-                    <TableHead className="hidden xl:table-cell xl:w-[18%]">Interval</TableHead>
+                    <TableHead className="hidden xl:table-cell xl:w-[18%]">
+                      {t("DashboardPayments.recurring.interval")}
+                    </TableHead>
                     <TableHead className="hidden md:table-cell md:w-[18%] xl:hidden 2xl:table-cell 2xl:w-[18%]">
-                      Next payment
+                      {t("DashboardPayments.recurring.nextPayment")}
                     </TableHead>
                   </TableRow>
                 </TableHeader>
@@ -804,10 +861,10 @@ export function RecurringPaymentsWorkspace({
                         <span className="block truncate">{getWalletLabel(recurringPayment)}</span>
                       </TableCell>
                       <TableCell className="hidden text-sm text-text-medium xl:table-cell">
-                        {formatPeriodHours(recurringPayment.periodHours)}
+                        {formatPeriodHours(recurringPayment.periodHours, t)}
                       </TableCell>
                       <TableCell className="hidden text-sm text-text-medium md:table-cell xl:hidden 2xl:table-cell">
-                        {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt)}
+                        {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt, t)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -834,6 +891,7 @@ export function RecurringPaymentDetailWorkspace({
   collectionAttemptsTotal,
   collectionAttemptsError,
 }: RecurringPaymentDetailWorkspaceProps) {
+  const t = useTranslations();
   const router = useRouter();
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
@@ -869,10 +927,10 @@ export function RecurringPaymentDetailWorkspace({
   const [selectedAmount, setSelectedAmount] = useState(recurringPayment.amount);
   const [amountValidationError, setAmountValidationError] = useState<string | null>(null);
   const [savingAmount, setSavingAmount] = useState(false);
-  const scheduleLabel = formatPeriodHours(recurringPayment.periodHours);
+  const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
   const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceWalletId);
-  const assetOptions = walletBalanceAssetOptions(wallet, {});
+  const assetOptions = walletBalanceAssetOptions(wallet, {}, t);
   const receivingAccount =
     counterpartyAccounts.find((account) => account.id === recurringPayment.counterpartyAccountId) ??
     null;
@@ -899,15 +957,18 @@ export function RecurringPaymentDetailWorkspace({
 
     setPendingAction(action);
     setActionError(null);
-    const toastId = toast.loading("Updating recurring payment.", { position: "bottom-right" });
+    const toastId = toast.loading(t("DashboardPayments.recurring.updatingPayment"), {
+      position: "bottom-right",
+    });
     try {
-      await runRecurringPaymentAction(recurringPayment.id, action);
-      toast.success(actionSuccessLabel(action), { id: toastId, position: "bottom-right" });
+      await runRecurringPaymentAction(recurringPayment.id, action, undefined, t);
+      toast.success(actionSuccessLabel(action, t), { id: toastId, position: "bottom-right" });
       router.refresh();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Recurring payment action failed.";
+      const message =
+        error instanceof Error ? error.message : t("DashboardPayments.recurring.actionFailed");
       setActionError({ action, message });
-      toast.error(actionFailureTitle(action), {
+      toast.error(actionFailureTitle(action, t), {
         id: toastId,
         description: message,
         position: "bottom-right",
@@ -922,26 +983,36 @@ export function RecurringPaymentDetailWorkspace({
       return;
     }
     if (!walletId) {
-      setWalletValidationError("Select a funding wallet.");
+      setWalletValidationError(t("DashboardPayments.recurring.selectFundingWallet"));
       return;
     }
     if (walletId === recurringPayment.sourceWalletId) {
-      setWalletValidationError(`${sourceWalletLabel} is already the funding wallet.`);
+      setWalletValidationError(
+        t("DashboardPayments.recurring.alreadyFundingWallet", { wallet: sourceWalletLabel })
+      );
       return;
     }
 
     setWalletValidationError(null);
     setSavingWallet(true);
-    const toastId = toast.loading("Updating funding wallet.", { position: "bottom-right" });
+    const toastId = toast.loading(t("DashboardPayments.recurring.updatingFundingWallet"), {
+      position: "bottom-right",
+    });
     try {
-      await updateRecurringPayment(recurringPayment.id, { sourceWalletId: walletId });
-      toast.success("Funding wallet updated.", { id: toastId, position: "bottom-right" });
+      await updateRecurringPayment(recurringPayment.id, { sourceWalletId: walletId }, undefined, t);
+      toast.success(t("DashboardPayments.recurring.fundingWalletUpdated"), {
+        id: toastId,
+        position: "bottom-right",
+      });
       setEditingWallet(false);
       router.refresh();
     } catch (error) {
-      toast.error("Funding wallet update failed", {
+      toast.error(t("DashboardPayments.recurring.fundingWalletUpdateFailed"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Recurring payment update failed.",
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.recurring.paymentUpdateFailed"),
         position: "bottom-right",
       });
     } finally {
@@ -960,28 +1031,41 @@ export function RecurringPaymentDetailWorkspace({
       return;
     }
     if (!accountId) {
-      setReceivingAccountValidationError("Select a receiving wallet.");
+      setReceivingAccountValidationError(t("DashboardPayments.recurring.selectReceivingWallet"));
       return;
     }
     if (accountId === recurringPayment.counterpartyAccountId) {
       setReceivingAccountValidationError(
-        `${receivingAccountLabel} is already the receiving wallet.`
+        t("DashboardPayments.recurring.alreadyReceivingWallet", { wallet: receivingAccountLabel })
       );
       return;
     }
 
     setReceivingAccountValidationError(null);
     setSavingReceivingAccount(true);
-    const toastId = toast.loading("Updating receiving wallet.", { position: "bottom-right" });
+    const toastId = toast.loading(t("DashboardPayments.recurring.updatingReceivingWallet"), {
+      position: "bottom-right",
+    });
     try {
-      await updateRecurringPayment(recurringPayment.id, { counterpartyAccountId: accountId });
-      toast.success("Receiving wallet updated.", { id: toastId, position: "bottom-right" });
+      await updateRecurringPayment(
+        recurringPayment.id,
+        { counterpartyAccountId: accountId },
+        undefined,
+        t
+      );
+      toast.success(t("DashboardPayments.recurring.receivingWalletUpdated"), {
+        id: toastId,
+        position: "bottom-right",
+      });
       setEditingReceivingAccount(false);
       router.refresh();
     } catch (error) {
-      toast.error("Receiving wallet update failed", {
+      toast.error(t("DashboardPayments.recurring.receivingWalletUpdateFailed"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Recurring payment update failed.",
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.recurring.paymentUpdateFailed"),
         position: "bottom-right",
       });
     } finally {
@@ -1001,26 +1085,36 @@ export function RecurringPaymentDetailWorkspace({
     }
     const periodHours = parsePeriodHours(selectedSchedulePreset, selectedCustomPeriodHours);
     if (!periodHours) {
-      setBillingIntervalValidationError("Enter a whole number of hours between 1 and 8760.");
+      setBillingIntervalValidationError(t("DashboardPayments.recurring.invalidInterval"));
       return;
     }
     if (periodHours === recurringPayment.periodHours) {
-      setBillingIntervalValidationError(`${formatPeriodHours(periodHours)} is already set.`);
+      setBillingIntervalValidationError(
+        t("DashboardPayments.recurring.alreadySet", { value: formatPeriodHours(periodHours, t) })
+      );
       return;
     }
 
     setBillingIntervalValidationError(null);
     setSavingBillingInterval(true);
-    const toastId = toast.loading("Updating billing interval.", { position: "bottom-right" });
+    const toastId = toast.loading(t("DashboardPayments.recurring.updatingBillingInterval"), {
+      position: "bottom-right",
+    });
     try {
-      await updateRecurringPayment(recurringPayment.id, { periodHours });
-      toast.success("Billing interval updated.", { id: toastId, position: "bottom-right" });
+      await updateRecurringPayment(recurringPayment.id, { periodHours }, undefined, t);
+      toast.success(t("DashboardPayments.recurring.billingIntervalUpdated"), {
+        id: toastId,
+        position: "bottom-right",
+      });
       setEditingBillingInterval(false);
       router.refresh();
     } catch (error) {
-      toast.error("Billing interval update failed", {
+      toast.error(t("DashboardPayments.recurring.billingIntervalUpdateFailed"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Recurring payment update failed.",
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.recurring.paymentUpdateFailed"),
         position: "bottom-right",
       });
     } finally {
@@ -1040,26 +1134,38 @@ export function RecurringPaymentDetailWorkspace({
       return;
     }
     if (!token) {
-      setCurrencyValidationError("Select a currency.");
+      setCurrencyValidationError(t("DashboardPayments.recurring.selectCurrency"));
       return;
     }
     if (token === recurringPayment.token) {
-      setCurrencyValidationError(`${resolveTokenLabel(token, wallets)} is already the currency.`);
+      setCurrencyValidationError(
+        t("DashboardPayments.recurring.alreadyCurrency", {
+          currency: resolveTokenLabel(token, wallets),
+        })
+      );
       return;
     }
 
     setCurrencyValidationError(null);
     setSavingCurrency(true);
-    const toastId = toast.loading("Updating currency.", { position: "bottom-right" });
+    const toastId = toast.loading(t("DashboardPayments.recurring.updatingCurrency"), {
+      position: "bottom-right",
+    });
     try {
-      await updateRecurringPayment(recurringPayment.id, { token });
-      toast.success("Currency updated.", { id: toastId, position: "bottom-right" });
+      await updateRecurringPayment(recurringPayment.id, { token }, undefined, t);
+      toast.success(t("DashboardPayments.recurring.currencyUpdated"), {
+        id: toastId,
+        position: "bottom-right",
+      });
       setEditingCurrency(false);
       router.refresh();
     } catch (error) {
-      toast.error("Currency update failed", {
+      toast.error(t("DashboardPayments.recurring.currencyUpdateFailed"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Recurring payment update failed.",
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.recurring.paymentUpdateFailed"),
         position: "bottom-right",
       });
     } finally {
@@ -1079,26 +1185,34 @@ export function RecurringPaymentDetailWorkspace({
     }
     const amount = selectedAmount.trim();
     if (!amountIsValid(amount)) {
-      setAmountValidationError("Enter an amount greater than zero.");
+      setAmountValidationError(t("DashboardPayments.recurring.invalidAmount"));
       return;
     }
     if (amount === recurringPayment.amount) {
-      setAmountValidationError(`${amountLabel} is already set.`);
+      setAmountValidationError(t("DashboardPayments.recurring.alreadySet", { value: amountLabel }));
       return;
     }
 
     setAmountValidationError(null);
     setSavingAmount(true);
-    const toastId = toast.loading("Updating amount.", { position: "bottom-right" });
+    const toastId = toast.loading(t("DashboardPayments.recurring.updatingAmount"), {
+      position: "bottom-right",
+    });
     try {
-      await updateRecurringPayment(recurringPayment.id, { amount });
-      toast.success("Amount updated.", { id: toastId, position: "bottom-right" });
+      await updateRecurringPayment(recurringPayment.id, { amount }, undefined, t);
+      toast.success(t("DashboardPayments.recurring.amountUpdated"), {
+        id: toastId,
+        position: "bottom-right",
+      });
       setEditingAmount(false);
       router.refresh();
     } catch (error) {
-      toast.error("Amount update failed", {
+      toast.error(t("DashboardPayments.recurring.amountUpdateFailed"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Recurring payment update failed.",
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.recurring.paymentUpdateFailed"),
         position: "bottom-right",
       });
     } finally {
@@ -1118,7 +1232,7 @@ export function RecurringPaymentDetailWorkspace({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 space-y-1">
             <h2 className="text-3xl font-medium tracking-tight text-text-extra-high">
-              Recurring payment
+              {t("DashboardPayments.recurring.payment")}
             </h2>
             <p className="truncate text-sm text-text-medium">
               {counterpartyLabel} · {amountLabel} · {scheduleLabel}
@@ -1151,11 +1265,13 @@ export function RecurringPaymentDetailWorkspace({
 
         <div className="rounded-xl border border-border-light px-4">
           <div className="divide-y divide-border-light">
-            <DetailRow label="Status">
+            <DetailRow label={t("DashboardPayments.status")}>
               <RecurringPaymentStatusBadge status={recurringPayment.status} />
             </DetailRow>
             <div className="flex items-start justify-between gap-4 py-3">
-              <span className="shrink-0 text-sm text-text-medium">Amount</span>
+              <span className="shrink-0 text-sm text-text-medium">
+                {t("DashboardPayments.recurring.amount")}
+              </span>
               <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-text-extra-high">
                 <span>{amountLabel}</span>
                 {isEditable ? (
@@ -1171,13 +1287,15 @@ export function RecurringPaymentDetailWorkspace({
                       setEditingAmount(true);
                     }}
                   >
-                    Edit
+                    {t("DashboardPayments.recurring.edit")}
                   </Button>
                 ) : null}
               </span>
             </div>
             <div className="flex items-start justify-between gap-4 py-3">
-              <span className="shrink-0 text-sm text-text-medium">Funding wallet</span>
+              <span className="shrink-0 text-sm text-text-medium">
+                {t("DashboardPayments.recurring.fundingWallet")}
+              </span>
               <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-text-extra-high">
                 {wallet ? (
                   <Link
@@ -1208,13 +1326,15 @@ export function RecurringPaymentDetailWorkspace({
                       setEditingWallet(true);
                     }}
                   >
-                    Edit
+                    {t("DashboardPayments.recurring.edit")}
                   </Button>
                 ) : null}
               </span>
             </div>
             <div className="flex items-start justify-between gap-4 py-3">
-              <span className="shrink-0 text-sm text-text-medium">Receiving wallet</span>
+              <span className="shrink-0 text-sm text-text-medium">
+                {t("DashboardPayments.recurring.receivingWallet")}
+              </span>
               <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-text-extra-high">
                 <span className="min-w-0 truncate">{receivingAccountLabel}</span>
                 {receivingAccountAddress ? (
@@ -1236,19 +1356,21 @@ export function RecurringPaymentDetailWorkspace({
                       setEditingReceivingAccount(true);
                     }}
                   >
-                    Edit
+                    {t("DashboardPayments.recurring.edit")}
                   </Button>
                 ) : null}
               </span>
             </div>
-            <DetailRow label="Starts">
-              {formatOptionalTimestamp(recurringPayment.firstCollectionAt)}
+            <DetailRow label={t("DashboardPayments.recurring.starts")}>
+              {formatOptionalTimestamp(recurringPayment.firstCollectionAt, t)}
             </DetailRow>
-            <DetailRow label="Next payment">
-              {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt)}
+            <DetailRow label={t("DashboardPayments.recurring.nextPayment")}>
+              {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt, t)}
             </DetailRow>
             <div className="flex items-start justify-between gap-4 py-3">
-              <span className="shrink-0 text-sm text-text-medium">Billing interval</span>
+              <span className="shrink-0 text-sm text-text-medium">
+                {t("DashboardPayments.recurring.billingInterval")}
+              </span>
               <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-text-extra-high">
                 <span>{scheduleLabel}</span>
                 {isEditable ? (
@@ -1267,13 +1389,15 @@ export function RecurringPaymentDetailWorkspace({
                       setEditingBillingInterval(true);
                     }}
                   >
-                    Edit
+                    {t("DashboardPayments.recurring.edit")}
                   </Button>
                 ) : null}
               </span>
             </div>
             <div className="flex items-start justify-between gap-4 py-3">
-              <span className="shrink-0 text-sm text-text-medium">Currency</span>
+              <span className="shrink-0 text-sm text-text-medium">
+                {t("DashboardPayments.recurring.currency")}
+              </span>
               <span className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-right text-sm font-medium text-text-extra-high">
                 <span>{currencyLabel}</span>
                 {isEditable ? (
@@ -1289,15 +1413,15 @@ export function RecurringPaymentDetailWorkspace({
                       setEditingCurrency(true);
                     }}
                   >
-                    Edit
+                    {t("DashboardPayments.recurring.edit")}
                   </Button>
                 ) : null}
               </span>
             </div>
-            <DetailRow label="Payment reference">
+            <DetailRow label={t("DashboardPayments.recurring.paymentReference")}>
               <CopyableValue value={recurringPayment.id} label={paymentReferenceLabel} />
             </DetailRow>
-            <DetailRow label="Metadata">
+            <DetailRow label={t("DashboardPayments.recurring.metadata")}>
               {recurringPayment.metadataUri ? (
                 <a
                   href={recurringPayment.metadataUri}
@@ -1305,20 +1429,24 @@ export function RecurringPaymentDetailWorkspace({
                   rel="noreferrer"
                   className="underline underline-offset-4"
                 >
-                  Open metadata
+                  {t("DashboardPayments.recurring.openMetadata")}
                 </a>
               ) : (
-                <span className="text-text-low">Not set</span>
+                <span className="text-text-low">{t("DashboardPayments.recurring.notSet")}</span>
               )}
             </DetailRow>
-            <DetailRow label="Created">{formatTimestamp(recurringPayment.createdAt)}</DetailRow>
-            <DetailRow label="Updated">{formatTimestamp(recurringPayment.updatedAt)}</DetailRow>
+            <DetailRow label={t("DashboardPayments.recurring.created")}>
+              {formatTimestamp(recurringPayment.createdAt, t)}
+            </DetailRow>
+            <DetailRow label={t("DashboardPayments.recurring.updated")}>
+              {formatTimestamp(recurringPayment.updatedAt, t)}
+            </DetailRow>
           </div>
         </div>
 
         <Modal
           isOpen={editingWallet}
-          ariaLabel="Edit funding wallet"
+          ariaLabel={t("DashboardPayments.recurring.editFundingWallet")}
           onClose={savingWallet ? undefined : closeFundingWalletModal}
           size="sm"
         >
@@ -1331,14 +1459,14 @@ export function RecurringPaymentDetailWorkspace({
           >
             <div className="space-y-1">
               <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
-                Edit funding wallet
+                {t("DashboardPayments.recurring.editFundingWallet")}
               </h2>
               <p className="text-sm text-text-medium">
-                Choose the wallet used to fund this recurring payment.
+                {t("DashboardPayments.recurring.editFundingWalletDescription")}
               </p>
             </div>
             <Combobox
-              label="Funding wallet"
+              label={t("DashboardPayments.recurring.fundingWallet")}
               value={selectedWalletId}
               onChange={(value) => {
                 setSelectedWalletId(value);
@@ -1349,8 +1477,8 @@ export function RecurringPaymentDetailWorkspace({
                 label: walletLabel(entry, entry.walletId),
                 description: shortenAddress(entry.publicKey),
               }))}
-              placeholder="Select a funding wallet"
-              searchPlaceholder="Search wallets"
+              placeholder={t("DashboardPayments.recurring.selectFundingWallet")}
+              searchPlaceholder={t("DashboardPayments.recurring.searchWallets")}
               icon={<WalletIcon />}
               disabled={savingWallet}
               validationError={walletValidationError ?? undefined}
@@ -1368,7 +1496,7 @@ export function RecurringPaymentDetailWorkspace({
                 disabled={savingWallet}
                 onClick={closeFundingWalletModal}
               >
-                Cancel
+                {t("DashboardPayments.recurring.cancel")}
               </Button>
               <Button
                 type="submit"
@@ -1380,7 +1508,7 @@ export function RecurringPaymentDetailWorkspace({
                   ) : undefined
                 }
               >
-                Save
+                {t("DashboardPayments.recurring.save")}
               </Button>
             </div>
           </form>
@@ -1388,7 +1516,7 @@ export function RecurringPaymentDetailWorkspace({
 
         <Modal
           isOpen={editingReceivingAccount}
-          ariaLabel="Edit receiving wallet"
+          ariaLabel={t("DashboardPayments.recurring.editReceivingWallet")}
           onClose={savingReceivingAccount ? undefined : closeReceivingAccountModal}
           size="sm"
         >
@@ -1401,14 +1529,14 @@ export function RecurringPaymentDetailWorkspace({
           >
             <div className="space-y-1">
               <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
-                Edit receiving wallet
+                {t("DashboardPayments.recurring.editReceivingWallet")}
               </h2>
               <p className="text-sm text-text-medium">
-                Choose where this recurring payment sends funds.
+                {t("DashboardPayments.recurring.editReceivingWalletDescription")}
               </p>
             </div>
             <Combobox
-              label="Receiving wallet"
+              label={t("DashboardPayments.recurring.receivingWallet")}
               value={selectedReceivingAccountId}
               onChange={(value) => {
                 setSelectedReceivingAccountId(value);
@@ -1422,8 +1550,8 @@ export function RecurringPaymentDetailWorkspace({
                   description: shortenAddress(address),
                 };
               })}
-              placeholder="Select a receiving wallet"
-              searchPlaceholder="Search wallets"
+              placeholder={t("DashboardPayments.recurring.selectReceivingWallet")}
+              searchPlaceholder={t("DashboardPayments.recurring.searchWallets")}
               icon={<WalletIcon />}
               disabled={savingReceivingAccount}
               validationError={receivingAccountValidationError ?? undefined}
@@ -1441,7 +1569,7 @@ export function RecurringPaymentDetailWorkspace({
                 disabled={savingReceivingAccount}
                 onClick={closeReceivingAccountModal}
               >
-                Cancel
+                {t("DashboardPayments.recurring.cancel")}
               </Button>
               <Button
                 type="submit"
@@ -1453,7 +1581,7 @@ export function RecurringPaymentDetailWorkspace({
                   ) : undefined
                 }
               >
-                Save
+                {t("DashboardPayments.recurring.save")}
               </Button>
             </div>
           </form>
@@ -1461,7 +1589,7 @@ export function RecurringPaymentDetailWorkspace({
 
         <Modal
           isOpen={editingAmount}
-          ariaLabel="Edit amount"
+          ariaLabel={t("DashboardPayments.recurring.editAmount")}
           onClose={savingAmount ? undefined : closeAmountModal}
           size="sm"
         >
@@ -1474,14 +1602,16 @@ export function RecurringPaymentDetailWorkspace({
           >
             <div className="space-y-1">
               <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
-                Edit amount
+                {t("DashboardPayments.recurring.editAmount")}
               </h2>
               <p className="text-sm text-text-medium">
-                Set the amount collected each billing period.
+                {t("DashboardPayments.recurring.editAmountDescription")}
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="recurring-payment-edit-amount">Amount</Label>
+              <Label htmlFor="recurring-payment-edit-amount">
+                {t("DashboardPayments.recurring.amount")}
+              </Label>
               <Input
                 id="recurring-payment-edit-amount"
                 inputMode="decimal"
@@ -1508,7 +1638,7 @@ export function RecurringPaymentDetailWorkspace({
                 disabled={savingAmount}
                 onClick={closeAmountModal}
               >
-                Cancel
+                {t("DashboardPayments.recurring.cancel")}
               </Button>
               <Button
                 type="submit"
@@ -1520,7 +1650,7 @@ export function RecurringPaymentDetailWorkspace({
                   ) : undefined
                 }
               >
-                Save
+                {t("DashboardPayments.recurring.save")}
               </Button>
             </div>
           </form>
@@ -1528,7 +1658,7 @@ export function RecurringPaymentDetailWorkspace({
 
         <Modal
           isOpen={editingBillingInterval}
-          ariaLabel="Edit billing interval"
+          ariaLabel={t("DashboardPayments.recurring.editBillingInterval")}
           onClose={savingBillingInterval ? undefined : closeBillingIntervalModal}
           size="sm"
         >
@@ -1541,27 +1671,29 @@ export function RecurringPaymentDetailWorkspace({
           >
             <div className="space-y-1">
               <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
-                Edit billing interval
+                {t("DashboardPayments.recurring.editBillingInterval")}
               </h2>
               <p className="text-sm text-text-medium">
-                Choose how often this recurring payment should collect.
+                {t("DashboardPayments.recurring.editBillingIntervalDescription")}
               </p>
             </div>
             <Combobox
-              label="Billing interval"
+              label={t("DashboardPayments.recurring.billingInterval")}
               value={selectedSchedulePreset}
               onChange={(value) => {
                 setSelectedSchedulePreset(value as SchedulePreset);
                 setBillingIntervalValidationError(null);
               }}
-              options={SCHEDULE_PRESETS}
+              options={getSchedulePresets(t)}
               searchable={false}
               icon={<RepeatIcon />}
               disabled={savingBillingInterval}
             />
             {selectedSchedulePreset === "custom" ? (
               <div className="space-y-2">
-                <Label htmlFor="recurring-payment-edit-period-hours">Interval in hours</Label>
+                <Label htmlFor="recurring-payment-edit-period-hours">
+                  {t("DashboardPayments.recurring.intervalHours")}
+                </Label>
                 <Input
                   id="recurring-payment-edit-period-hours"
                   inputMode="numeric"
@@ -1589,7 +1721,7 @@ export function RecurringPaymentDetailWorkspace({
                 disabled={savingBillingInterval}
                 onClick={closeBillingIntervalModal}
               >
-                Cancel
+                {t("DashboardPayments.recurring.cancel")}
               </Button>
               <Button
                 type="submit"
@@ -1601,7 +1733,7 @@ export function RecurringPaymentDetailWorkspace({
                   ) : undefined
                 }
               >
-                Save
+                {t("DashboardPayments.recurring.save")}
               </Button>
             </div>
           </form>
@@ -1609,7 +1741,7 @@ export function RecurringPaymentDetailWorkspace({
 
         <Modal
           isOpen={editingCurrency}
-          ariaLabel="Edit currency"
+          ariaLabel={t("DashboardPayments.recurring.editCurrency")}
           onClose={savingCurrency ? undefined : closeCurrencyModal}
           size="sm"
         >
@@ -1622,14 +1754,14 @@ export function RecurringPaymentDetailWorkspace({
           >
             <div className="space-y-1">
               <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
-                Edit currency
+                {t("DashboardPayments.recurring.editCurrency")}
               </h2>
               <p className="text-sm text-text-medium">
-                Choose a token balance from the funding wallet.
+                {t("DashboardPayments.recurring.editCurrencyDescription")}
               </p>
             </div>
             <Combobox
-              label="Currency"
+              label={t("DashboardPayments.recurring.currency")}
               value={selectedToken}
               onChange={(value) => {
                 setSelectedToken(value);
@@ -1637,9 +1769,11 @@ export function RecurringPaymentDetailWorkspace({
               }}
               options={assetOptions}
               placeholder={
-                assetOptions.length === 0 ? "No supported token balances" : "Select a currency"
+                assetOptions.length === 0
+                  ? t("DashboardPayments.recurring.noTokenBalances")
+                  : t("DashboardPayments.recurring.selectCurrency")
               }
-              searchPlaceholder="Search currencies"
+              searchPlaceholder={t("DashboardPayments.ramps.searchCurrencies")}
               icon={<CreditCardIcon />}
               disabled={savingCurrency || assetOptions.length === 0}
               validationError={currencyValidationError ?? undefined}
@@ -1657,7 +1791,7 @@ export function RecurringPaymentDetailWorkspace({
                 disabled={savingCurrency}
                 onClick={closeCurrencyModal}
               >
-                Cancel
+                {t("DashboardPayments.recurring.cancel")}
               </Button>
               <Button
                 type="submit"
@@ -1669,7 +1803,7 @@ export function RecurringPaymentDetailWorkspace({
                   ) : undefined
                 }
               >
-                Save
+                {t("DashboardPayments.recurring.save")}
               </Button>
             </div>
           </form>
@@ -1684,18 +1818,19 @@ export function RecurringPaymentDetailWorkspace({
 
         <Modal
           isOpen={cancelConfirmOpen}
-          ariaLabel="Cancel recurring payment"
+          ariaLabel={t("DashboardPayments.recurring.cancelPayment")}
           onClose={pendingAction === "cancel" ? undefined : () => setCancelConfirmOpen(false)}
           size="sm"
         >
           <div className="space-y-5 p-6">
             <div className="space-y-1">
               <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
-                Cancel recurring payment?
+                {t("DashboardPayments.recurring.cancelPaymentTitle")}
               </h2>
               <p className="text-sm text-text-medium">
-                This stops future collections for {counterpartyLabel}. You can resume the payment
-                later from the Actions menu.
+                {t("DashboardPayments.recurring.cancelPaymentDescription", {
+                  counterparty: counterpartyLabel,
+                })}
               </p>
             </div>
             <div className="flex justify-end gap-2">
@@ -1706,7 +1841,7 @@ export function RecurringPaymentDetailWorkspace({
                 disabled={pendingAction === "cancel"}
                 onClick={() => setCancelConfirmOpen(false)}
               >
-                Keep payment
+                {t("DashboardPayments.recurring.keepPayment")}
               </Button>
               <Button
                 type="button"
@@ -1722,7 +1857,7 @@ export function RecurringPaymentDetailWorkspace({
                   void submitAction("cancel").finally(() => setCancelConfirmOpen(false));
                 }}
               >
-                Cancel payment
+                {t("DashboardPayments.recurring.cancelPayment")}
               </Button>
             </div>
           </div>
@@ -1731,3 +1866,14 @@ export function RecurringPaymentDetailWorkspace({
     </div>
   );
 }
+const STATUS_TRANSLATION_KEYS = {
+  pending_activation: "DashboardPayments.recurring.pendingActivation",
+  activating: "DashboardPayments.recurring.activating",
+  active: "DashboardPayments.recurring.active",
+  updating: "DashboardPayments.recurring.updating",
+  canceling: "DashboardPayments.recurring.canceling",
+  resuming: "DashboardPayments.recurring.resuming",
+  paused: "DashboardPayments.recurring.paused",
+  canceled: "DashboardPayments.recurring.canceled",
+  expired: "DashboardPayments.recurring.expired",
+} as const satisfies Record<PaymentRecurringPaymentStatus, MessageKey>;

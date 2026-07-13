@@ -1,4 +1,4 @@
-import { SigningError } from "@/services/ports";
+import { SigningError } from "@sdp/custody/signing";
 import { parseJsonResponse, readErrorResponseText, sleep } from "./provisioning.common";
 
 const PARA_WALLET_READY_MAX_ATTEMPTS = 8;

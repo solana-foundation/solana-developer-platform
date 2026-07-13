@@ -2,6 +2,7 @@
 
 import type { Options } from "@solana/qr-code-styling";
 import { useEffect, useRef } from "react";
+import { useTranslations } from "@/i18n/provider";
 
 const QR_FOREGROUND = "#1c1c1d";
 const QR_BACKGROUND = "#ffffff";
@@ -24,6 +25,7 @@ function solanaQrOptions(url: string, size: number): Partial<Options> {
 }
 
 export function PayQrCode({ url, size }: { url: string; size: number }) {
+  const t = useTranslations();
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -48,7 +50,7 @@ export function PayQrCode({ url, size }: { url: string; size: number }) {
     <div
       ref={containerRef}
       role="img"
-      aria-label="Solana Pay QR code"
+      aria-label={t("Shared.pay.qrCode")}
       style={{ width: size, height: size }}
     />
   );

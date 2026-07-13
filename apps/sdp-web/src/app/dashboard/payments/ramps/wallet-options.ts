@@ -5,9 +5,11 @@ import {
   resolveTotalBalance,
 } from "@/app/dashboard/payments/payments-overview.utils";
 import type { ComboboxOption } from "@/components/ui/combobox";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 
 type WalletBalance = NonNullable<PaymentsDashboardWallet["balances"]>[number];
 type IssuedTokenSymbolsByMint = Record<string, string>;
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 interface ResolveWalletAssetOptionsConfig {
   hideUnresolvedMints?: boolean;
@@ -35,6 +37,7 @@ export function findWalletBalanceForToken(
 export function walletBalanceAssetOptions(
   wallet: PaymentsDashboardWallet | null,
   issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint,
+  t: Translate,
   options: Pick<ResolveWalletAssetOptionsConfig, "hideUnresolvedMints"> = {}
 ): ComboboxOption[] {
   const seen = new Set<string>();
@@ -56,7 +59,7 @@ export function walletBalanceAssetOptions(
     assetOptions.push({
       value: mint,
       label,
-      description: `${balance.uiAmount} available`,
+      description: t("DashboardPayments.ramps.balanceAvailable", { amount: balance.uiAmount }),
     });
   }
 

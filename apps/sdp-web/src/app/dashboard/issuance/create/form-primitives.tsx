@@ -9,6 +9,7 @@ import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import type { FieldDescriptor } from "./asset-details-config";
 import type { CustomFieldRow, DraftState } from "./issuance-draft-wizard.types";
@@ -76,6 +77,7 @@ export function TextField({
   required?: boolean;
   error?: string;
 }) {
+  const t = useTranslations();
   return (
     <div className="grid gap-1.5">
       <Label>
@@ -86,7 +88,7 @@ export function TextField({
             <span aria-hidden className="text-[#c71f37]">
               *
             </span>
-            <span className="sr-only"> (required)</span>
+            <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
           </>
         ) : null}
       </Label>
@@ -170,13 +172,14 @@ export function DetailField({
   error?: string;
   disabled?: boolean;
 }) {
+  const t = useTranslations();
   const raw = draft[field.key];
 
   if (field.control === "toggle") {
     const checked = Boolean(raw);
     return (
       <div>
-        <Label>{field.label}</Label>
+        <Label>{t(field.labelKey)}</Label>
         <div className="mt-1.5 flex items-center gap-2">
           <ToggleSwitch
             checked={checked}
@@ -184,19 +187,24 @@ export function DetailField({
             onChange={(next) => updateDraft({ [field.key]: next } as Partial<DraftState>)}
           />
           <span className="text-sm text-[rgba(28,28,29,0.6)]">
-            {checked ? "Enabled" : "Disabled"}
+            {checked
+              ? t("DashboardIssuance.summary.enabled")
+              : t("DashboardIssuance.management.disabled")}
           </span>
         </div>
-        {field.help ? <p className="mt-1 text-xs text-[rgba(28,28,29,0.5)]">{field.help}</p> : null}
+        {field.helpKey ? (
+          <p className="mt-1 text-xs text-[rgba(28,28,29,0.5)]">{t(field.helpKey)}</p>
+        ) : null}
       </div>
     );
   }
 
   if (field.control === "currency") {
     const value = typeof raw === "string" ? raw : "";
+    const fieldLabel = t(field.labelKey);
     return (
       <Combobox
-        label={field.label}
+        label={fieldLabel}
         required={required}
         disabled={disabled}
         value={value || null}
@@ -204,8 +212,10 @@ export function DetailField({
         options={FIAT_CURRENCY_OPTIONS}
         size="lg"
         variant="dialog"
-        placeholder={`Select ${field.label.toLowerCase()}`}
-        searchPlaceholder="Search currencies"
+        placeholder={t("DashboardIssuance.config.selectField", {
+          field: fieldLabel.toLowerCase(),
+        })}
+        searchPlaceholder={t("DashboardIssuance.config.searchCurrencies")}
         validationError={error}
         className="border-[length:var(--input-border-width)] border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] text-sm hover:border-[var(--input-border-hover)] hover:bg-[var(--input-bg-hover)]"
       />
@@ -217,14 +227,14 @@ export function DetailField({
     return (
       <div>
         <Label>
-          {field.label}
+          {t(field.labelKey)}
           {required ? (
             <>
               {" "}
               <span aria-hidden className="text-[#c71f37]">
                 *
               </span>
-              <span className="sr-only"> (required)</span>
+              <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
             </>
           ) : null}
         </Label>
@@ -236,11 +246,11 @@ export function DetailField({
             onValueChange={(next) =>
               updateDraft({ [field.key]: next ?? "" } as Partial<DraftState>)
             }
-            placeholder={`Select ${field.label.toLowerCase()}`}
+            placeholder={t(field.labelKey)}
           >
             {field.options?.map((option) => (
               <SelectItem key={option.value} value={option.value}>
-                {option.label}
+                {t(option.labelKey)}
               </SelectItem>
             ))}
           </Select>
@@ -257,14 +267,14 @@ export function DetailField({
   const value = typeof raw === "string" ? raw : "";
   return (
     <TextField
-      label={field.label}
+      label={t(field.labelKey)}
       required={required}
       disabled={disabled}
       value={value}
       onChange={(next) => updateDraft({ [field.key]: next } as Partial<DraftState>)}
-      placeholder={field.placeholder}
+      placeholder={field.placeholderKey ? t(field.placeholderKey) : undefined}
       type={field.control === "number" ? "number" : "text"}
-      help={field.help}
+      help={field.helpKey ? t(field.helpKey) : undefined}
       error={error}
     />
   );
@@ -279,6 +289,7 @@ export function CustomFieldRows({
   onChange: (fields: CustomFieldRow[]) => void;
   disabled?: boolean;
 }) {
+  const t = useTranslations();
   const update = (id: string, patch: Partial<CustomFieldRow>) =>
     onChange(fields.map((field) => (field.id === id ? { ...field, ...patch } : field)));
   const remove = (id: string) => onChange(fields.filter((field) => field.id !== id));
@@ -288,13 +299,13 @@ export function CustomFieldRows({
       {fields.map((field) => (
         <div key={field.id} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1.4fr_auto]">
           <Input
-            placeholder="Key"
+            placeholder={t("DashboardIssuance.assetDetails.customFieldKey")}
             disabled={disabled}
             value={field.key}
             onChange={(event) => update(field.id, { key: event.currentTarget.value })}
           />
           <Input
-            placeholder="Value"
+            placeholder={t("DashboardIssuance.assetDetails.customFieldValue")}
             disabled={disabled}
             value={field.value}
             onChange={(event) => update(field.id, { value: event.currentTarget.value })}
@@ -305,7 +316,7 @@ export function CustomFieldRows({
             size="icon-sm"
             disabled={disabled}
             onClick={() => remove(field.id)}
-            aria-label="Remove field"
+            aria-label={t("DashboardIssuance.assetDetails.removeCustomField")}
             className="self-center text-status-error-text hover:bg-status-error-bg hover:text-status-error-text"
           >
             <Trash2 className="h-4 w-4" />
@@ -320,7 +331,7 @@ export function CustomFieldRows({
         onClick={() => onChange([...fields, { id: crypto.randomUUID(), key: "", value: "" }])}
         iconLeft={<Plus className="h-4 w-4" />}
       >
-        Add field
+        {t("DashboardIssuance.assetDetails.addCustomField")}
       </Button>
     </div>
   );

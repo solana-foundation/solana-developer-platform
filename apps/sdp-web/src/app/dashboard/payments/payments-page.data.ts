@@ -81,7 +81,7 @@ export async function fetchPaymentsWallets(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unable to load wallets",
+      ...(error instanceof Error ? { error: error.message } : {}),
     };
   }
 }
@@ -110,7 +110,6 @@ export async function fetchPaymentsAggregate(
     if (!json?.data?.aggregate) {
       return {
         ok: false,
-        error: "Aggregate wallet response did not include aggregate data",
       };
     }
 
@@ -118,7 +117,7 @@ export async function fetchPaymentsAggregate(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unable to load aggregate balances",
+      ...(error instanceof Error ? { error: error.message } : {}),
     };
   }
 }
@@ -184,7 +183,7 @@ export async function fetchPaymentTransfers(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unable to load transfers",
+      ...(error instanceof Error ? { error: error.message } : {}),
     };
   }
 }
@@ -223,8 +222,7 @@ export async function fetchDashboardPaymentTransfers(
 
   for (const result of settledTransfers) {
     if (result.status !== "fulfilled") {
-      lastError =
-        result.reason instanceof Error ? result.reason.message : "Unable to load transfers";
+      lastError = result.reason instanceof Error ? result.reason.message : undefined;
       continue;
     }
 
@@ -327,7 +325,7 @@ export async function fetchPaymentsIssuedTokenSymbols(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unable to load issued token symbols",
+      ...(error instanceof Error ? { error: error.message } : {}),
     };
   }
 }

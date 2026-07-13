@@ -16,6 +16,7 @@ import {
 } from "react";
 import { SWRConfig } from "swr";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
@@ -62,13 +63,14 @@ const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue |
 
 function DashboardScopeRefreshFallback() {
   const router = useRouter();
+  const t = useTranslations();
 
   return (
     <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
       <div className="mx-auto max-w-5xl space-y-4 border border-border-extra-light bg-white/70 p-6">
-        <p className="text-sm text-text-low">Loading dashboard...</p>
+        <p className="text-sm text-text-low">{t("Shared.dashboardShell.loadingDashboard")}</p>
         <Button type="button" variant="ghost" size="sm" onClick={() => router.refresh()}>
-          Retry
+          {t("Shared.SharedComponents.retry")}
         </Button>
       </div>
     </main>
