@@ -7,7 +7,7 @@ export function toTitleCase(value: string): string {
     .join(" ");
 }
 
-export function formatRelativeTime(value: string): string {
+export function formatRelativeTime(value: string, locale?: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return "—";
@@ -15,7 +15,7 @@ export function formatRelativeTime(value: string): string {
 
   const diffMs = date.getTime() - Date.now();
   const diffMinutes = Math.round(diffMs / 60_000);
-  const formatter = new Intl.RelativeTimeFormat("en-US", { numeric: "auto" });
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
 
   if (Math.abs(diffMinutes) < 60) {
     return formatter.format(diffMinutes, "minute");

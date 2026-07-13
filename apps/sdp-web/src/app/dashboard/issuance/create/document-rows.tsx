@@ -3,6 +3,7 @@
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useTranslations } from "@/i18n/provider";
 import type { DocumentRow } from "./issuance-draft-wizard.types";
 
 interface DocumentRowsProps {
@@ -21,6 +22,7 @@ function emptyRow(id: string): DocumentRow {
 }
 
 export function DocumentRows({ documents, onChange, disabled }: DocumentRowsProps) {
+  const t = useTranslations();
   // Always render at least one row. When there are no real documents we show a
   // blank placeholder; the first edit promotes it into a stored row.
   const rows = documents.length > 0 ? documents : [emptyRow(EMPTY_ROW_ID)];
@@ -48,19 +50,19 @@ export function DocumentRows({ documents, onChange, disabled }: DocumentRowsProp
       {rows.map((doc) => (
         <div key={doc.id} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_1.4fr_auto]">
           <Input
-            placeholder="Document type"
+            placeholder={t("DashboardIssuance.assetDetails.documentTypePlaceholder")}
             disabled={disabled}
             value={doc.docType}
             onChange={(event) => update(doc.id, { docType: event.currentTarget.value })}
           />
           <Input
-            placeholder="Name"
+            placeholder={t("DashboardIssuance.assetDetails.documentNamePlaceholder")}
             disabled={disabled}
             value={doc.name}
             onChange={(event) => update(doc.id, { name: event.currentTarget.value })}
           />
           <Input
-            placeholder="https://…"
+            placeholder={t("DashboardIssuance.assetDetails.websitePlaceholder")}
             disabled={disabled}
             value={doc.url}
             onChange={(event) => update(doc.id, { url: event.currentTarget.value })}
@@ -71,7 +73,7 @@ export function DocumentRows({ documents, onChange, disabled }: DocumentRowsProp
             size="icon-sm"
             disabled={disabled}
             onClick={() => remove(doc.id)}
-            aria-label="Remove document"
+            aria-label={t("DashboardIssuance.assetDetails.removeDocument")}
             className="self-center text-error hover:bg-error-bg hover:text-error"
           >
             <Trash2 className="h-4 w-4" />
@@ -86,7 +88,7 @@ export function DocumentRows({ documents, onChange, disabled }: DocumentRowsProp
         onClick={() => onChange([...documents, emptyRow(crypto.randomUUID())])}
         iconLeft={<Plus className="h-4 w-4" />}
       >
-        Add document
+        {t("DashboardIssuance.assetDetails.addDocument")}
       </Button>
     </div>
   );

@@ -11,13 +11,18 @@ import type {
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { getApiError } from "@/app/dashboard/payments/payments-workspace.data";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import { requirementFieldError } from "../schema";
+
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 async function fetchCounterpartyRequirements(
   counterpartyId: string,
   provider: RampProviderId,
   direction: RampDirection,
-  corridor: AdvanceRequirementsPayload
+  corridor: AdvanceRequirementsPayload,
+  t: Translate
 ): Promise<CounterpartyRequirements> {
   const params = new URLSearchParams({
     provider,
@@ -37,7 +42,12 @@ async function fetchCounterpartyRequirements(
   };
 
   if (!response.ok || !body.data) {
-    throw new Error(getApiError(body, `Requirements request failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.requirementsRequestFailed", { status: response.status })
+      )
+    );
   }
 
   return body.data;
@@ -53,7 +63,8 @@ async function advanceCounterpartyRequirements(
   counterpartyId: string,
   provider: RampProviderId,
   direction: RampDirection,
-  payload: AdvanceRequirementsPayload & { collectedData: CollectedFieldData }
+  payload: AdvanceRequirementsPayload & { collectedData: CollectedFieldData },
+  t: Translate
 ): Promise<CounterpartyRequirements> {
   const response = await fetch(
     `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/requirements`,
@@ -69,7 +80,12 @@ async function advanceCounterpartyRequirements(
   };
 
   if (!response.ok || !body.data) {
-    throw new Error(getApiError(body, `Requirements advance failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.requirementsAdvanceFailed", { status: response.status })
+      )
+    );
   }
 
   return body.data;
@@ -126,6 +142,7 @@ export interface CounterpartyRequirementsState {
 export function useCounterpartyRequirements(
   params: CounterpartyRequirementsParams | null
 ): CounterpartyRequirementsState {
+  const t = useTranslations();
   const [collectedData, setCollectedData] = useState<CollectedFieldData>({});
   const setField = (key: string, value: string) => {
     setCollectedData((prev) => ({ ...prev, [key]: value }));
@@ -169,11 +186,17 @@ export function useCounterpartyRequirements(
   const { data, error } = useSWR(
     key,
     ([, counterpartyId, provider, direction, cryptoToken, fiatCurrency, destinationWallet]) =>
-      fetchCounterpartyRequirements(counterpartyId, provider, direction, {
-        cryptoToken,
-        fiatCurrency,
-        destinationWallet,
-      }),
+      fetchCounterpartyRequirements(
+        counterpartyId,
+        provider,
+        direction,
+        {
+          cryptoToken,
+          fiatCurrency,
+          destinationWallet,
+        },
+        t
+      ),
     { revalidateOnFocus: false, revalidateOnReconnect: false, revalidateIfStale: false }
   );
 
@@ -181,7 +204,7 @@ export function useCounterpartyRequirements(
     payload: AdvanceRequirementsPayload
   ): Promise<CounterpartyRequirements> => {
     if (!params?.provider || !params.counterpartyId) {
-      throw new Error("Cannot advance requirements without a provider and counterparty.");
+      throw new Error(t("DashboardPayments.workspace.requirementsContextMissing"));
     }
     setIsAdvancing(true);
     try {
@@ -189,7 +212,8 @@ export function useCounterpartyRequirements(
         params.counterpartyId,
         params.provider,
         params.direction,
-        { ...payload, collectedData }
+        { ...payload, collectedData },
+        t
       );
       setOnboarding(result);
       setLastAdvancePayload(payload);
@@ -217,7 +241,8 @@ export function useCounterpartyRequirements(
         params.counterpartyId,
         params.provider,
         params.direction,
-        lastAdvancePayload
+        lastAdvancePayload,
+        t
       );
       setOnboarding(result);
     },

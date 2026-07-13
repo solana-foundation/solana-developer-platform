@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
@@ -18,6 +19,7 @@ interface PaymentsPageProps {
 }
 
 export default async function PaymentsPage({ searchParams }: PaymentsPageProps) {
+  const t = await getTranslations();
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -73,13 +75,22 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
     );
     const walletsError = walletsResult.ok
       ? null
-      : `Wallet API ${walletsResult.status ?? "unavailable"}: ${walletsResult.error ?? "Unknown error"}`;
+      : t("DashboardPayments.page.walletApiError", {
+          status: walletsResult.status ?? t("DashboardPayments.page.unavailableStatus"),
+          error: walletsResult.error ?? t("DashboardPayments.page.unknownError"),
+        });
     const aggregateError = aggregateResult.ok
       ? null
-      : `Wallet aggregate API ${aggregateResult.status ?? "unavailable"}: ${aggregateResult.error ?? "Unknown error"}`;
+      : t("DashboardPayments.page.walletAggregateApiError", {
+          status: aggregateResult.status ?? t("DashboardPayments.page.unavailableStatus"),
+          error: aggregateResult.error ?? t("DashboardPayments.page.unknownError"),
+        });
     const transfersError = transfersResult.ok
       ? null
-      : `Transfer API ${transfersResult.status ?? "unavailable"}: ${transfersResult.error ?? "Unknown error"}`;
+      : t("DashboardPayments.page.transferApiError", {
+          status: transfersResult.status ?? t("DashboardPayments.page.unavailableStatus"),
+          error: transfersResult.error ?? t("DashboardPayments.page.unknownError"),
+        });
 
     trace.log({
       ok: true,

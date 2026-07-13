@@ -1,13 +1,9 @@
 "use client";
 
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 export type SendMode = "single" | "batch";
-
-const MODES = [
-  { id: "single", label: "Single" },
-  { id: "batch", label: "Batch" },
-] as const satisfies readonly { id: SendMode; label: string }[];
 
 export function SendModeToggle({
   value,
@@ -16,9 +12,14 @@ export function SendModeToggle({
   value: SendMode;
   onChange: (value: SendMode) => void;
 }) {
+  const t = useTranslations();
+  const modes = [
+    { id: "single" as const, label: t("DashboardPayments.sendMode.single") },
+    { id: "batch" as const, label: t("DashboardPayments.sendMode.batch") },
+  ];
   return (
     <div className="inline-flex items-center border-b border-border-default">
-      {MODES.map((mode) => (
+      {modes.map((mode) => (
         <button
           key={mode.id}
           type="button"
@@ -33,7 +34,7 @@ export function SendModeToggle({
           {mode.label}
           {mode.id === "batch" ? (
             <span className="rounded-full bg-fill-subtle px-1.5 text-xs font-semibold uppercase tracking-wide text-tertiary">
-              Onchain
+              {t("DashboardPayments.sendMode.onchain")}
             </span>
           ) : null}
         </button>

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 import type { PermissionRow } from "./token-management-workspace.types";
 import {
   getSignerWalletOptionLabel,
@@ -40,6 +41,7 @@ export function TokenAuthorityModal({
   onCancel,
   onConfirm,
 }: TokenAuthorityModalProps) {
+  const t = useTranslations();
   const dismissModal = () => {
     setNoneConfirmationRowId(null);
     onCancel();
@@ -62,10 +64,11 @@ export function TokenAuthorityModal({
     return null;
   }
 
-  const currentAuthority = currentAuthorityValue ?? "Resolved automatically from token state";
+  const currentAuthority =
+    currentAuthorityValue ?? t("DashboardIssuance.authority.resolvedAutomatically");
   const isSettingNone = newAuthority.trim().length === 0;
   const isConfirmingNone = noneConfirmationRowId === row.id && isSettingNone;
-  const noneConfirmationCopy = getNoneConfirmationCopy(row);
+  const noneConfirmationCopy = getNoneConfirmationCopy(row, t);
   const currentAuthorityWallet =
     availableWallets.find((wallet) => wallet.publicKey === currentAuthorityValue) ?? null;
   const selectedAuthorityWallet =
@@ -77,7 +80,7 @@ export function TokenAuthorityModal({
       onClose={dismissModal}
       closeDisabled={isPending}
       ariaLabel={isConfirmingNone ? noneConfirmationCopy.title : row.title}
-      closeLabel="Close authority modal"
+      closeLabel={t("DashboardIssuance.authority.closeModal")}
       contentClassName="border-border-default p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]"
       size="md"
     >
@@ -144,10 +147,10 @@ export function TokenAuthorityModal({
 
             <div className="flex items-center justify-end gap-2">
               <Button type="button" variant="outline" onClick={dismissModal} disabled={isPending}>
-                Cancel
+                {t("DashboardIssuance.workspace.cancel")}
               </Button>
               <Button type="submit" disabled={isPending || Boolean(signerUnavailableReason)}>
-                Save authority
+                {t("DashboardIssuance.authority.save")}
               </Button>
             </div>
           </form>
@@ -223,10 +226,11 @@ function CurrentAuthoritySection({
   currentAuthorityValue: string | null;
   currentAuthorityWallet: PaymentsDashboardWallet | null;
 }) {
+  const t = useTranslations();
   return (
     <div className="grid gap-2">
       <span className="text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary">
-        Current authority
+        {t("DashboardIssuance.authority.current")}
       </span>
       <TokenWalletIdentityCard
         wallet={currentAuthorityWallet}
@@ -256,6 +260,7 @@ function NoneConfirmationPanel({
   onBack: () => void;
   onConfirm: () => void;
 }) {
+  const t = useTranslations();
   return (
     <div className="space-y-5">
       <div>
@@ -264,7 +269,9 @@ function NoneConfirmationPanel({
       </div>
 
       <div className="rounded-xl border border-destructive-border bg-destructive-bg px-4 py-3">
-        <p className="text-sm font-medium text-destructive-strongest">What this means</p>
+        <p className="text-sm font-medium text-destructive-strongest">
+          {t("DashboardIssuance.authority.whatThisMeans")}
+        </p>
         <p className="mt-1 text-sm leading-[1.5] text-destructive-strongest">{copy.impact}</p>
       </div>
 
@@ -276,14 +283,14 @@ function NoneConfirmationPanel({
 
       <div className="flex items-center justify-end gap-2">
         <Button type="button" variant="outline" onClick={onBack} disabled={isPending}>
-          Back
+          {t("DashboardIssuance.create.back")}
         </Button>
         <Button
           type="button"
           onClick={onConfirm}
           disabled={isPending || Boolean(signerUnavailableReason)}
         >
-          Yes, set to None
+          {t("DashboardIssuance.authority.confirmNone")}
         </Button>
       </div>
     </div>
@@ -317,12 +324,13 @@ function AuthorityTargetSection({
   setSelectedWalletValue: (value: string) => void;
   walletModeAvailable: boolean;
 }) {
+  const t = useTranslations();
   if (walletModeAvailable) {
     return (
       <>
         {mode === "wallet" ? (
           <Label className="grid gap-2">
-            <span>New authority</span>
+            <span>{t("DashboardIssuance.authority.new")}</span>
             <select
               className="h-11 w-full rounded-[12px] border border-border-default bg-white px-4 text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
               value={selectedWalletValue}
@@ -334,25 +342,25 @@ function AuthorityTargetSection({
               }}
             >
               <option value="" disabled>
-                Select a controlled wallet
+                {t("DashboardIssuance.authority.selectWallet")}
               </option>
-              <option value={NONE_AUTHORITY_VALUE}>None</option>
+              <option value={NONE_AUTHORITY_VALUE}>{t("DashboardIssuance.wallet.none")}</option>
               {availableWallets.map((wallet) => (
                 <option key={wallet.id} value={wallet.publicKey}>
-                  {getSignerWalletOptionLabel(wallet)}
+                  {getSignerWalletOptionLabel(wallet, t)}
                 </option>
               ))}
             </select>
           </Label>
         ) : (
           <Label className="grid gap-2">
-            <span>Custom authority</span>
+            <span>{t("DashboardIssuance.authority.custom")}</span>
             <Input
               value={newAuthority}
               onChange={(event) => onNewAuthorityChange(event.currentTarget.value)}
-              placeholder="Solana address"
+              placeholder={t("DashboardIssuance.authority.solanaAddress")}
               pattern={SOLANA_ADDRESS_PATTERN}
-              title="Enter a valid Solana address."
+              title={t("DashboardIssuance.forms.enterSolanaAddress")}
               required
               autoFocus
             />
@@ -361,21 +369,18 @@ function AuthorityTargetSection({
 
         {isSettingNone ? (
           <p className="text-sm text-secondary">
-            Choosing None will clear this authority. You will confirm that change before it is
-            submitted.
+            {t("DashboardIssuance.authority.noneWalletWarning")}
           </p>
         ) : null}
 
         <TokenWalletIdentityCard
           wallet={selectedAuthorityWallet}
-          emptyLabel="None"
-          emptyDescription="This authority will be cleared if you save this change."
+          emptyLabel={t("DashboardIssuance.wallet.none")}
+          emptyDescription={t("DashboardIssuance.authority.noneDescription")}
         />
 
         <div className="flex items-center justify-between gap-3 text-sm">
-          <p className="text-secondary">
-            Controlled wallets are the recommended authority targets.
-          </p>
+          <p className="text-secondary">{t("DashboardIssuance.authority.controlledWalletHint")}</p>
           <Button
             type="button"
             variant="ghost"
@@ -383,7 +388,9 @@ function AuthorityTargetSection({
             onClick={onToggleMode}
             disabled={isPending}
           >
-            {mode === "wallet" ? "Use custom address" : "Choose controlled wallet"}
+            {mode === "wallet"
+              ? t("DashboardIssuance.authority.useCustom")
+              : t("DashboardIssuance.authority.chooseWallet")}
           </Button>
         </div>
       </>
@@ -393,13 +400,13 @@ function AuthorityTargetSection({
   return (
     <>
       <Label className="grid gap-2">
-        <span>New authority</span>
+        <span>{t("DashboardIssuance.authority.new")}</span>
         <Input
           value={newAuthority}
           onChange={(event) => onNewAuthorityChange(event.currentTarget.value)}
-          placeholder="Solana address or leave empty to set to None"
+          placeholder={t("DashboardIssuance.authority.solanaAddressOrNone")}
           pattern={SOLANA_ADDRESS_PATTERN}
-          title="Enter a valid Solana address or leave this blank to set the authority to None."
+          title={t("DashboardIssuance.authority.enterAddressOrNone")}
           autoFocus
         />
       </Label>
@@ -407,30 +414,29 @@ function AuthorityTargetSection({
       {authorityWalletsError ? (
         <p className="text-sm text-destructive-strongest">{authorityWalletsError}</p>
       ) : (
-        <p className="text-sm text-secondary">
-          No controlled wallets are available yet. Enter an address manually or leave it blank to
-          set the authority to None.
-        </p>
+        <p className="text-sm text-secondary">{t("DashboardIssuance.authority.noWalletsHint")}</p>
       )}
 
       {isSettingNone ? (
         <p className="text-sm text-secondary">
-          Setting this field to None will clear the authority. You will confirm that change before
-          it is submitted.
+          {t("DashboardIssuance.authority.noneFieldWarning")}
         </p>
       ) : null}
 
       <TokenWalletIdentityCard
         wallet={selectedAuthorityWallet}
         publicKey={selectedAuthorityWallet ? null : newAuthority.trim() || null}
-        emptyLabel="None"
-        emptyDescription="This authority will be cleared if you save this change."
+        emptyLabel={t("DashboardIssuance.wallet.none")}
+        emptyDescription={t("DashboardIssuance.authority.noneDescription")}
       />
     </>
   );
 }
 
-function getNoneConfirmationCopy(row: PermissionRow): {
+function getNoneConfirmationCopy(
+  row: PermissionRow,
+  t: ReturnType<typeof useTranslations>
+): {
   title: string;
   description: string;
   impact: string;
@@ -438,29 +444,27 @@ function getNoneConfirmationCopy(row: PermissionRow): {
   switch (row.authorityRole) {
     case "mint":
       return {
-        title: "Set Mint Authority to None?",
-        description: "This will clear the mint authority for the token.",
-        impact: "No wallet will be able to mint additional supply after this change.",
+        title: t("DashboardIssuance.authority.mintNoneTitle"),
+        description: t("DashboardIssuance.authority.mintNoneDescription"),
+        impact: t("DashboardIssuance.authority.mintNoneImpact"),
       };
     case "freeze":
       return {
-        title: "Set Freeze Authority to None?",
-        description: "This will clear the freeze authority for the token.",
-        impact: "Token accounts can no longer be frozen or unfrozen after this change.",
+        title: t("DashboardIssuance.authority.freezeNoneTitle"),
+        description: t("DashboardIssuance.authority.freezeNoneDescription"),
+        impact: t("DashboardIssuance.authority.freezeNoneImpact"),
       };
     case "permanentDelegate":
       return {
-        title: "Set Permanent Delegate Authority to None?",
-        description: "This will clear the permanent delegate authority for the token.",
-        impact:
-          "Administrative delegated transfer and burn actions will no longer be available after this change.",
+        title: t("DashboardIssuance.authority.delegateNoneTitle"),
+        description: t("DashboardIssuance.authority.delegateNoneDescription"),
+        impact: t("DashboardIssuance.authority.delegateNoneImpact"),
       };
     case "metadata":
       return {
-        title: "Set Metadata Authority to None?",
-        description: "This will clear the metadata authority for the token.",
-        impact:
-          "Metadata updates will no longer be available through this authority after this change.",
+        title: t("DashboardIssuance.authority.metadataNoneTitle"),
+        description: t("DashboardIssuance.authority.metadataNoneDescription"),
+        impact: t("DashboardIssuance.authority.metadataNoneImpact"),
       };
   }
 }

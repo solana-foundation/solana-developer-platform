@@ -1,0 +1,57 @@
+import type { AppLocale } from "@/i18n/config";
+import dashboardCustody from "../../messages/en/dashboard-custody.json";
+import dashboardIssuance from "../../messages/en/dashboard-issuance.json";
+import dashboardPayments from "../../messages/en/dashboard-payments.json";
+import shared from "../../messages/en/shared.json";
+import en from "../../messages/en.json";
+
+const enMessages = {
+  ...en,
+  ...dashboardCustody,
+  ...dashboardIssuance,
+  ...dashboardPayments,
+  Shared: shared,
+};
+
+export type Messages = typeof enMessages;
+
+export type MessageKeyFor<TValue> = TValue extends string
+  ? ""
+  : {
+      [TKey in Extract<keyof TValue, string>]: TValue[TKey] extends string
+        ? TKey
+        : `${TKey}.${MessageKeyFor<TValue[TKey]>}`;
+    }[Extract<keyof TValue, string>];
+
+export type MessageKey = MessageKeyFor<Messages>;
+export type TranslationValues = Record<string, string | number>;
+
+const messagesByLocale: Record<AppLocale, Messages> = { en: enMessages };
+
+export function getMessages(locale: AppLocale): Messages {
+  return messagesByLocale[locale];
+}
+
+export function translate<TMessages>(
+  messages: TMessages,
+  key: MessageKeyFor<TMessages> & string,
+  values?: TranslationValues
+): string {
+  const message = key.split(".").reduce<unknown>((value, segment) => {
+    return value && typeof value === "object"
+      ? (value as Record<string, unknown>)[segment]
+      : undefined;
+  }, messages);
+
+  if (typeof message !== "string") {
+    throw new Error(`Missing translation for ${key}`);
+  }
+
+  return message.replace(/\{(\w+)\}/g, (_, name: string) => {
+    const value = values?.[name];
+    if (value === undefined) {
+      throw new Error(`Missing interpolation value ${name} for ${key}`);
+    }
+    return String(value);
+  });
+}

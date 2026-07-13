@@ -3,6 +3,7 @@
 import { UsersIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Combobox } from "@/components/ui/combobox";
+import { useTranslations } from "@/i18n/provider";
 import type { CounterpartiesResult } from "../../payments-workspace.data";
 
 interface CounterpartySelectorProps {
@@ -16,6 +17,7 @@ export function CounterpartySelector({
   value,
   onChange,
 }: CounterpartySelectorProps) {
+  const t = useTranslations();
   const options = useMemo(
     () =>
       counterpartiesResult.data
@@ -26,18 +28,18 @@ export function CounterpartySelector({
 
   return (
     <Combobox
-      label="Counterparty"
+      label={t("DashboardPayments.counterpartyLabel")}
       value={value}
       onChange={onChange}
       options={options}
-      placeholder="Select a counterparty"
-      searchPlaceholder="Search counterparties"
+      placeholder={t("DashboardPayments.ramps.selectCounterparty")}
+      searchPlaceholder={t("DashboardPayments.ramps.searchCounterparties")}
       variant="dialog"
       icon={<UsersIcon className="size-5 shrink-0 text-tertiary" />}
       error={
         counterpartiesResult.ok
           ? undefined
-          : (counterpartiesResult.error ?? "Failed to load counterparties.")
+          : (counterpartiesResult.error ?? t("DashboardPayments.ramps.counterpartiesLoadFailed"))
       }
     />
   );

@@ -4,6 +4,7 @@ import { Loader2Icon } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 
 interface DeleteCounterpartyDialogProps {
   isOpen: boolean;
@@ -18,6 +19,7 @@ export function DeleteCounterpartyDialog({
   onConfirm,
   onClose,
 }: DeleteCounterpartyDialogProps) {
+  const t = useTranslations();
   const [deleting, setDeleting] = useState(false);
 
   async function handleConfirm() {
@@ -32,28 +34,25 @@ export function DeleteCounterpartyDialog({
   return (
     <Modal
       isOpen={isOpen}
-      ariaLabel="Delete counterparty"
+      ariaLabel={t("DashboardPayments.counterparty.deleteCounterparty")}
       onClose={deleting ? undefined : onClose}
       size="sm"
     >
       <div className="space-y-5 p-6">
         <div className="space-y-1">
-          <h2 className="text-lg font-medium tracking-tight text-primary">Delete counterparty</h2>
+          <h2 className="text-lg font-medium tracking-tight text-primary">
+            {t("DashboardPayments.counterparty.deleteCounterparty")}
+          </h2>
           <p className="text-sm text-secondary">
-            {displayName ? (
-              <>
-                Are you sure you want to delete <span className="font-medium">{displayName}</span>?
-                This will archive the counterparty and its accounts.
-              </>
-            ) : (
-              "Are you sure you want to delete this counterparty?"
-            )}
+            {displayName
+              ? t("DashboardPayments.counterparty.deleteNamedCounterparty", { name: displayName })
+              : t("DashboardPayments.counterparty.deleteThisCounterparty")}
           </p>
         </div>
 
         <div className="flex items-center justify-end gap-3">
           <Button type="button" variant="outline" onClick={onClose} disabled={deleting}>
-            Cancel
+            {t("DashboardPayments.counterparty.cancel")}
           </Button>
           <Button
             type="button"
@@ -62,7 +61,9 @@ export function DeleteCounterpartyDialog({
             disabled={deleting}
             iconLeft={deleting ? <Loader2Icon className="animate-spin" /> : undefined}
           >
-            {deleting ? "Deleting" : "Delete"}
+            {deleting
+              ? t("DashboardPayments.counterparty.deleting")
+              : t("DashboardPayments.counterparty.delete")}
           </Button>
         </div>
       </div>

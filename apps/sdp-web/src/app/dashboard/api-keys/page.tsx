@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -21,6 +22,7 @@ import { CreateApiKeyModal } from "./create-api-key-modal";
 export const dynamic = "force-dynamic";
 
 export default async function ApiKeysPage() {
+  const t = await getTranslations();
   const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -71,25 +73,22 @@ export default async function ApiKeysPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Existing API keys</CardTitle>
-          <CardDescription>Active and historical keys for this workspace.</CardDescription>
+          <CardTitle>{t("DashboardCustody.existingApiKeys")}</CardTitle>
+          <CardDescription>{t("DashboardCustody.existingApiKeysDescription")}</CardDescription>
           {dashboardAccess.capabilities.canManageApiKeys ? (
             <CardAction>
-              <CreateApiKeyModal triggerLabel="New API key" wallets={wallets} />
+              <CreateApiKeyModal triggerLabel={t("DashboardCustody.newApiKey")} wallets={wallets} />
             </CardAction>
           ) : null}
         </CardHeader>
         <CardContent>
           {!dashboardAccess.capabilities.canManageApiKeys ? (
             <div className="mb-4 rounded-[10px] border border-border-default bg-fill-subtle px-3 py-2 text-xs text-secondary">
-              You can view API keys, but only admins can create, rotate, or delete them.
+              {t("DashboardCustody.apiKeysViewOnly")}
             </div>
           ) : null}
           <div className="mb-4 rounded-[10px] border border-border-default bg-fill-subtle px-3 py-2 text-xs text-secondary">
-            <p className="text-xs text-secondary">
-              Rotation hint: rotate active keys only. The dashboard uses a 24-hour grace period; use
-              the API for custom grace values (0-168h). New key secrets are shown once.
-            </p>
+            <p className="text-xs text-secondary">{t("DashboardCustody.apiKeyRotationHint")}</p>
           </div>
           <div className="@container/api-keys-table">
             <ApiKeysTableClient

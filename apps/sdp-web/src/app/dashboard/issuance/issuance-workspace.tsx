@@ -11,6 +11,7 @@ import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
@@ -66,7 +67,7 @@ interface IssuanceWorkspaceProps {
   signerWalletsError: string | null;
 }
 
-function formatDate(value: string | null | undefined): string {
+function formatDate(value: string | null | undefined, locale: string): string {
   if (!value) {
     return "—";
   }
@@ -74,7 +75,7 @@ function formatDate(value: string | null | undefined): string {
   const isoDateMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
   if (isoDateMatch) {
     const [, year, month, day] = isoDateMatch;
-    return `${month}/${day}/${year}`;
+    return new Date(`${year}-${month}-${day}T00:00:00`).toLocaleDateString(locale);
   }
 
   const date = new Date(value);
@@ -82,10 +83,10 @@ function formatDate(value: string | null | undefined): string {
     return value;
   }
 
-  return date.toLocaleDateString("en-US");
+  return date.toLocaleDateString(locale);
 }
 
-function formatSupply(value: string): string {
+function formatSupply(value: string, locale: string): string {
   const normalized = value.trim();
   if (!normalized) {
     return "0";
@@ -96,18 +97,19 @@ function formatSupply(value: string): string {
     return value;
   }
 
-  const formatted = new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(locale, {
     notation: "compact",
     maximumFractionDigits: parsed >= 100 ? 0 : 1,
   }).format(parsed);
-
-  return formatted.replace(/\.0([A-Za-z])$/, "$1");
 }
 
-function getTokenTypeLabel(template: IssuanceTokenView["template"]): string {
+function getTokenTypeLabel(
+  template: IssuanceTokenView["template"],
+  t: ReturnType<typeof useTranslations>
+): string {
   const templateEntry = getTemplateCatalogEntry(template);
-  if (templateEntry?.name) {
-    return templateEntry.name;
+  if (templateEntry) {
+    return t(`DashboardIssuance.templates.${templateEntry.nameKey}`);
   }
 
   return template;
@@ -127,6 +129,8 @@ export function IssuanceWorkspace({
   signerWallets,
   signerWalletsError,
 }: IssuanceWorkspaceProps) {
+  const t = useTranslations();
+  const locale = useLocale();
   const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -209,7 +213,9 @@ export function IssuanceWorkspace({
         <>
           {tokensNotice && tokens.length > 0 ? (
             <div className="rounded-xl border border-border-default bg-fill-subtle px-4 py-3">
-              <p className="text-sm font-medium text-primary">Token list unavailable</p>
+              <p className="text-sm font-medium text-primary">
+                {t("DashboardIssuance.workspace.tokenListUnavailable")}
+              </p>
               <p className="mt-1 text-sm text-secondary">{tokensNotice}</p>
             </div>
           ) : null}
@@ -224,7 +230,7 @@ export function IssuanceWorkspace({
                   setSearch(value);
                 }}
                 className="h-10 rounded-[10px] border-border-default bg-white pl-9"
-                placeholder="Search"
+                placeholder={t("DashboardIssuance.workspace.search")}
               />
             </div>
             <Button
@@ -232,12 +238,14 @@ export function IssuanceWorkspace({
               className="h-10 rounded-[10px] bg-primary px-4 text-white hover:opacity-90"
               onClick={startTokenCreation}
             >
-              Create draft
+              {t("DashboardIssuance.workspace.createDraft")}
             </Button>
           </div>
 
           {hasTokens && filteredTokens.length === 0 ? (
-            <p className="text-sm text-secondary">No tokens match your current search.</p>
+            <p className="text-sm text-secondary">
+              {t("DashboardIssuance.workspace.noTokensMatch")}
+            </p>
           ) : null}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -257,7 +265,7 @@ export function IssuanceWorkspace({
                           // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
                           <img
                             src={token.imageUrl}
-                            alt={`${token.name} logo`}
+                            alt={t("DashboardIssuance.workspace.tokenLogo", { name: token.name })}
                             className="h-full w-full object-cover"
                           />
                         ) : (
@@ -276,7 +284,9 @@ export function IssuanceWorkspace({
                             : "bg-fill text-secondary",
                         ].join(" ")}
                       >
-                        {deploymentStatus}
+                        {deploymentStatus === "active"
+                          ? t("DashboardIssuance.workspace.active")
+                          : t("DashboardIssuance.workspace.draft")}
                       </span>
                     </div>
                   );
@@ -288,20 +298,24 @@ export function IssuanceWorkspace({
 
                 <div className="mt-6 space-y-2 rounded-xl border border-border-subtle bg-fill-subtle p-3">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-tertiary">Type</span>
+                    <span className="text-tertiary">{t("DashboardIssuance.workspace.type")}</span>
                     <span className="font-medium text-primary">
-                      {getTokenTypeLabel(token.template)}
+                      {getTokenTypeLabel(token.template, t)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-tertiary">Supply</span>
+                    <span className="text-tertiary">{t("DashboardIssuance.workspace.supply")}</span>
                     <span className="font-medium text-primary">
-                      {formatSupply(token.totalSupply)}
+                      {formatSupply(token.totalSupply, locale)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-tertiary">Created</span>
-                    <span className="font-medium text-primary">{formatDate(token.createdAt)}</span>
+                    <span className="text-tertiary">
+                      {t("DashboardIssuance.workspace.created")}
+                    </span>
+                    <span className="font-medium text-primary">
+                      {formatDate(token.createdAt, locale)}
+                    </span>
                   </div>
                 </div>
 
@@ -312,7 +326,9 @@ export function IssuanceWorkspace({
                     className="h-11 w-full rounded-[10px]"
                     asChild
                   >
-                    <Link href={`/dashboard/issuance/${token.id}`}>Manage</Link>
+                    <Link href={`/dashboard/issuance/${token.id}`}>
+                      {t("DashboardIssuance.workspace.manage")}
+                    </Link>
                   </Button>
                 </div>
               </article>
@@ -323,7 +339,7 @@ export function IssuanceWorkspace({
               onClick={startTokenCreation}
               data-testid="token-add-card"
               className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary"
-              aria-label="Add new token"
+              aria-label={t("DashboardIssuance.workspace.addNewToken")}
             >
               <Plus className="h-6 w-6" />
             </button>

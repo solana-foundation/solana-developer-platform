@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import type { OrganizationRpcProvider } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
@@ -32,6 +33,7 @@ type ProjectListResponse = {
 };
 
 export default async function SettingsPage() {
+  const t = await getTranslations();
   const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -121,22 +123,20 @@ export default async function SettingsPage() {
     <div className="w-full flex flex-col gap-6">
       <Card>
         <CardHeader>
-          <CardTitle>Organization settings</CardTitle>
-          <CardDescription>
-            Configure the RPC provider used across this organization.
-          </CardDescription>
+          <CardTitle>{t("DashboardCustody.organizationSettings")}</CardTitle>
+          <CardDescription>{t("DashboardCustody.organizationSettingsDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="w-full space-y-6">
             {loadError ? (
               <div className="rounded-xl border border-destructive-border bg-destructive-bg px-3 py-2 text-sm text-destructive-strong">
-                Failed to load organization settings.
+                {t("DashboardCustody.failedToLoadOrganizationSettings")}
               </div>
             ) : null}
 
             {!loadError && !organization && isLinked ? (
               <div className="rounded-xl border border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
-                Organization not found.
+                {t("DashboardCustody.organizationNotFound")}
               </div>
             ) : null}
 
@@ -150,7 +150,7 @@ export default async function SettingsPage() {
 
             {!loadError && !organization && !isLinked ? (
               <div className="rounded-xl border border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
-                This Clerk organization is not linked to an SDP organization yet.
+                {t("DashboardCustody.organizationNotLinked")}
               </div>
             ) : null}
           </div>

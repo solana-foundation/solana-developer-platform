@@ -1,24 +1,28 @@
 "use client";
 
+import { useTranslations } from "@/i18n/provider";
 import { OnchainSendStepContent } from "./components/onchain-send-step-content";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import {
-  ONCHAIN_SEND_STEPS,
+  getOnchainSendSteps,
   type OnchainSendWizard,
   useOnchainSendWizard,
 } from "./hooks/use-onchain-send-wizard";
 import type { RailProps } from "./ramp-action-page";
 
-function sendPrimaryLabel(wizard: OnchainSendWizard): string {
+function sendPrimaryLabel(
+  wizard: OnchainSendWizard,
+  t: ReturnType<typeof useTranslations>
+): string {
   switch (true) {
     case wizard.submitting:
-      return "Submitting...";
+      return t("DashboardPayments.submitting");
     case wizard.isLastStep && Boolean(wizard.transferResult):
-      return "Done";
+      return t("DashboardPayments.counterparty.done");
     case wizard.isLastStep:
-      return "Send transfer";
+      return t("DashboardPayments.sendTransfer");
     default:
-      return "Next";
+      return t("DashboardPayments.counterparty.next");
   }
 }
 
@@ -31,6 +35,7 @@ export function OnchainSendRail({
   preSteps,
   onExit,
 }: RailProps) {
+  const t = useTranslations();
   const wizard = useOnchainSendWizard({
     wallets,
     walletsError,
@@ -41,10 +46,10 @@ export function OnchainSendRail({
 
   return (
     <RampWizardShell
-      steps={[...preSteps, ...ONCHAIN_SEND_STEPS]}
+      steps={[...preSteps, ...getOnchainSendSteps(t)]}
       stepIndex={preSteps.length + wizard.stepIndex}
       primaryDisabled={wizard.submitting || !wizard.canProceed}
-      primaryLabel={sendPrimaryLabel(wizard)}
+      primaryLabel={sendPrimaryLabel(wizard, t)}
       walletsError={wizard.liveWalletsError}
       onPrimary={() => void wizard.handlePrimary()}
       onSecondary={wizard.handleSecondary}

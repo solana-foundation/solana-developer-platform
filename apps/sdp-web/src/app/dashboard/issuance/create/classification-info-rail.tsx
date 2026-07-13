@@ -1,11 +1,16 @@
 "use client";
 
 import { Braces, Hexagon, Link2, Lock, type LucideIcon, Target } from "lucide-react";
+import { useTranslations } from "@/i18n/provider";
 
 interface InfoStep {
   icon: LucideIcon;
-  title: string;
-  description: string;
+  titleKey: "assetProfile" | "issuanceMetadata" | "publicProjection" | "tokenMetadataUri";
+  descriptionKey:
+    | "assetProfileDescription"
+    | "issuanceMetadataDescription"
+    | "publicProjectionDescription"
+    | "tokenMetadataUriDescription";
 }
 
 // Explains the Asset Profile data model (profile -> metadata -> public
@@ -13,43 +18,50 @@ interface InfoStep {
 const STEPS: InfoStep[] = [
   {
     icon: Hexagon,
-    title: "Asset Profile",
-    description: "You select the category and type. SDP stores your canonical issuance metadata.",
+    titleKey: "assetProfile",
+    descriptionKey: "assetProfileDescription",
   },
   {
     icon: Braces,
-    title: "Issuance Metadata",
-    description: "Includes asset, compliance, chain, and custom (customer/integration) fields.",
+    titleKey: "issuanceMetadata",
+    descriptionKey: "issuanceMetadataDescription",
   },
   {
     icon: Target,
-    title: "Public Projection",
-    description: "SDP projects a safe public subset to token metadata.",
+    titleKey: "publicProjection",
+    descriptionKey: "publicProjectionDescription",
   },
   {
     icon: Link2,
-    title: "Token Metadata URI",
-    description: "SDP hosts the default URI that returns only the public metadata.",
+    titleKey: "tokenMetadataUri",
+    descriptionKey: "tokenMetadataUriDescription",
   },
 ];
 
 export function ClassificationInfoRail() {
+  const t = useTranslations();
   return (
     <aside className="lg:sticky lg:top-4">
       <div className="rounded-2xl border border-border-default bg-white p-5">
-        <p className="text-base font-medium text-primary">How this works</p>
+        <p className="text-base font-medium text-primary">
+          {t("DashboardIssuance.classificationRail.title")}
+        </p>
 
         <ul className="mt-4 space-y-4">
           {STEPS.map((step) => {
             const Icon = step.icon;
             return (
-              <li key={step.title} className="flex items-center gap-3">
+              <li key={step.titleKey} className="flex items-center gap-3">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
                   <Icon className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-primary">{step.title}</p>
-                  <p className="mt-0.5 text-sm text-tertiary">{step.description}</p>
+                  <p className="text-sm font-medium text-primary">
+                    {t(`DashboardIssuance.classificationRail.${step.titleKey}`)}
+                  </p>
+                  <p className="mt-0.5 text-sm text-tertiary">
+                    {t(`DashboardIssuance.classificationRail.${step.descriptionKey}`)}
+                  </p>
                 </div>
               </li>
             );
@@ -59,10 +71,11 @@ export function ClassificationInfoRail() {
         <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-border-subtle bg-fill-subtle p-3">
           <Lock className="mt-0.5 h-4 w-4 shrink-0 text-tertiary" />
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-primary">Private by default</p>
+            <p className="text-sm font-semibold text-primary">
+              {t("DashboardIssuance.summary.privateByDefault")}
+            </p>
             <p className="mt-0.5 text-xs text-tertiary">
-              Compliance and custom metadata stay private unless explicitly included in the public
-              metadata projection.
+              {t("DashboardIssuance.classificationRail.privateDescription")}
             </p>
           </div>
         </div>

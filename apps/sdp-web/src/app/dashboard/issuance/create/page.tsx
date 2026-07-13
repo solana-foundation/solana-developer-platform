@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
+import { getTranslations } from "@/i18n/server";
 import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient } from "@/lib/sdp-api";
@@ -8,6 +9,7 @@ import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import { IssuanceDraftWizard } from "./issuance-draft-wizard";
 
 export default async function CreateAssetPage() {
+  const t = await getTranslations();
   if (!isAssetProfilesUiEnabled()) {
     notFound();
   }
@@ -30,9 +32,16 @@ export default async function CreateAssetPage() {
     signerWallets = result.data ?? [];
     signerWalletsError = result.ok
       ? null
-      : `Wallet API ${result.status ?? "unavailable"}: ${result.error ?? "Unknown error"}`;
+      : t("DashboardIssuance.errors.apiRequestFailed", {
+          resource: t("DashboardIssuance.errors.walletResource"),
+          status: result.status ?? t("DashboardIssuance.errors.unavailable"),
+          error: result.error ?? t("DashboardIssuance.errors.unknown"),
+        });
   } catch (error) {
-    signerWalletsError = error instanceof Error ? error.message : "Unable to load signer wallets.";
+    signerWalletsError =
+      error instanceof Error
+        ? error.message
+        : t("DashboardIssuance.errors.unableToLoadSignerWallets");
   }
 
   return (

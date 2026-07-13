@@ -4,6 +4,7 @@ import type { CollectedFieldData, RequirementField } from "@sdp/types/ramp-requi
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useTranslations } from "@/i18n/provider";
 import { applyRequirementMask, requirementFieldError } from "../schema";
 
 function RequirementFieldInput({
@@ -15,6 +16,7 @@ function RequirementFieldInput({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const t = useTranslations();
   switch (field.kind) {
     case "select":
       return (
@@ -23,8 +25,10 @@ function RequirementFieldInput({
           value={value.length > 0 ? value : null}
           onChange={onChange}
           options={field.options}
-          placeholder={`Select ${field.label.toLowerCase()}`}
-          searchPlaceholder="Search…"
+          placeholder={t("DashboardPayments.ramps.selectField", {
+            field: field.label.toLowerCase(),
+          })}
+          searchPlaceholder={t("DashboardPayments.ramps.search")}
         />
       );
     case "text": {

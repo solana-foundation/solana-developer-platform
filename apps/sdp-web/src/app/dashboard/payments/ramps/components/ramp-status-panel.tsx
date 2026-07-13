@@ -3,6 +3,8 @@
 import type { PaymentTransferSummary } from "@sdp/types";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 import { CheckCircle2Icon, Loader2Icon, XCircleIcon } from "lucide-react";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 
 interface TransferStatusCopy {
   title: string;
@@ -10,55 +12,70 @@ interface TransferStatusCopy {
   state: "loading" | "success" | "error";
 }
 
-function transferStatusCopy(direction: RampDirection, status: string): TransferStatusCopy {
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+function transferStatusCopy(
+  t: Translate,
+  direction: RampDirection,
+  status: string
+): TransferStatusCopy {
   const onramp = direction === "onramp";
   switch (status) {
     case "pending":
     case "awaiting_payment":
       return {
-        title: onramp ? "Waiting for funding" : "Waiting to send",
+        title: onramp
+          ? t("DashboardPayments.ramps.status.waitingForFunding")
+          : t("DashboardPayments.ramps.status.waitingToSend"),
         description: onramp
-          ? "Send the funds using the instructions above. We will update this deposit automatically once the provider receives payment."
-          : "Complete the payout using the instructions above. We will update this outgoing transfer automatically once the provider receives your crypto.",
+          ? t("DashboardPayments.ramps.status.waitingForFundingDescription")
+          : t("DashboardPayments.ramps.status.waitingToSendDescription"),
         state: "loading",
       };
     case "processing":
     case "settling":
       return {
-        title: onramp ? "Deposit received" : "Sending payout",
+        title: onramp
+          ? t("DashboardPayments.ramps.status.depositReceived")
+          : t("DashboardPayments.ramps.status.sendingPayout"),
         description: onramp
-          ? "The provider has received funds and is settling the deposit to the destination wallet."
-          : "The provider received your crypto and is settling the outgoing payout to the recipient.",
+          ? t("DashboardPayments.ramps.status.depositReceivedDescription")
+          : t("DashboardPayments.ramps.status.sendingPayoutDescription"),
         state: "loading",
       };
     case "completed":
       return {
-        title: onramp ? "Transfer complete" : "Payout sent",
+        title: onramp
+          ? t("DashboardPayments.ramps.status.transferComplete")
+          : t("DashboardPayments.ramps.status.payoutSent"),
         description: onramp
-          ? "The deposit is complete. You can review the transfer from the counterparty record."
-          : "The outgoing payout has settled. You can review this transfer from the counterparty record.",
+          ? t("DashboardPayments.ramps.status.transferCompleteDescription")
+          : t("DashboardPayments.ramps.status.payoutSentDescription"),
         state: "success",
       };
     case "failed":
       return {
-        title: onramp ? "Transfer failed" : "Payout failed",
+        title: onramp
+          ? t("DashboardPayments.ramps.status.transferFailed")
+          : t("DashboardPayments.ramps.status.payoutFailed"),
         description: onramp
-          ? "The provider reported that this deposit failed. Review the counterparty record for the latest transfer status."
-          : "The provider reported that this outgoing payout failed. Review the counterparty record for the latest transfer status.",
+          ? t("DashboardPayments.ramps.status.transferFailedDescription")
+          : t("DashboardPayments.ramps.status.payoutFailedDescription"),
         state: "error",
       };
     case "expired":
       return {
-        title: "Quote expired",
+        title: t("DashboardPayments.ramps.status.quoteExpired"),
         description: onramp
-          ? "This quote expired before the transfer completed. Create a new quote to continue funding."
-          : "This quote expired before the payout completed. Create a new quote to continue the withdrawal.",
+          ? t("DashboardPayments.ramps.status.quoteExpiredFundingDescription")
+          : // biome-ignore lint/security/noSecrets: Translation catalog key, not a credential.
+            t("DashboardPayments.ramps.status.quoteExpiredPayoutDescription"),
         state: "error",
       };
     default:
       return {
-        title: "Transfer status updated",
-        description: `Current provider status: ${status}.`,
+        title: t("DashboardPayments.ramps.status.updated"),
+        description: t("DashboardPayments.ramps.status.currentProviderStatus", { status }),
         state: "loading",
       };
   }
@@ -86,11 +103,12 @@ export function RampStatusPanel({
   direction: RampDirection;
   transfer: PaymentTransferSummary | null | undefined;
 }) {
+  const t = useTranslations();
   const copy: TransferStatusCopy = transfer
-    ? transferStatusCopy(direction, transfer.status)
+    ? transferStatusCopy(t, direction, transfer.status)
     : {
-        title: "Preparing transfer status",
-        description: "We are waiting for the transfer record tied to this quote.",
+        title: t("DashboardPayments.ramps.status.preparing"),
+        description: t("DashboardPayments.ramps.status.preparingDescription"),
         state: "loading",
       };
   return (

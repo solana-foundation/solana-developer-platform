@@ -4,6 +4,7 @@ import type { CounterpartyAccount } from "@sdp/types";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Combobox } from "@/components/ui/combobox";
+import { useTranslations } from "@/i18n/provider";
 
 interface CounterpartyAccountSelectorProps {
   accounts: CounterpartyAccount[];
@@ -20,6 +21,7 @@ export function CounterpartyAccountSelector({
   isLoading,
   disabled,
 }: CounterpartyAccountSelectorProps) {
+  const t = useTranslations();
   const options = useMemo(
     () =>
       accounts.map((account) => {
@@ -35,18 +37,18 @@ export function CounterpartyAccountSelector({
 
   return (
     <Combobox
-      label="Destination account"
+      label={t("DashboardPayments.ramps.destinationAccount")}
       value={value}
       onChange={onChange}
       options={options}
       placeholder={
         disabled
-          ? "Select a counterparty first"
+          ? t("DashboardPayments.ramps.selectCounterpartyFirst")
           : options.length === 0
-            ? "No Solana accounts on file"
-            : "Select a destination account"
+            ? t("DashboardPayments.ramps.noSolanaAccounts")
+            : t("DashboardPayments.ramps.selectDestinationAccount")
       }
-      searchPlaceholder="Search accounts"
+      searchPlaceholder={t("DashboardPayments.ramps.searchAccounts")}
       icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
       isLoading={isLoading}
       disabled={disabled || options.length === 0}

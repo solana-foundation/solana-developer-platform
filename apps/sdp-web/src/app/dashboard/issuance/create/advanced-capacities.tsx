@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { CAPACITY_META } from "./asset-details-config";
 import { CAPACITY_KEYS, type CapacityKey } from "./issuance-draft-wizard.types";
@@ -14,14 +15,17 @@ interface AdvancedCapacitiesProps {
 // Collapsible "Advanced" panel — capacity checkboxes pre-selected based on the
 // chosen asset profile (see getRecommendedCapacities). Not a tab.
 export function AdvancedCapacities({ value, onChange, disabled }: AdvancedCapacitiesProps) {
+  const t = useTranslations();
   return (
     <details className="group rounded-2xl border border-border-default bg-white p-4" open>
       <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-        <span className="text-sm font-semibold text-primary">Advanced</span>
+        <span className="text-sm font-semibold text-primary">
+          {t("DashboardIssuance.config.advanced")}
+        </span>
         <ChevronDown className="ml-auto h-4 w-4 text-tertiary transition-transform group-open:rotate-180" />
       </summary>
       <p className="mt-2 text-sm text-tertiary">
-        Recommended capacities are pre-selected based on the asset profile.
+        {t("DashboardIssuance.config.advancedCapacitiesDescription")}
       </p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         {CAPACITY_KEYS.map((key) => {
@@ -45,8 +49,8 @@ export function AdvancedCapacities({ value, onChange, disabled }: AdvancedCapaci
                 className="mt-0.5 h-4 w-4 accent-primary"
               />
               <span className="min-w-0">
-                <span className="block text-sm font-medium text-primary">{meta.label}</span>
-                <span className="block text-xs text-tertiary">{meta.description}</span>
+                <span className="block text-sm font-medium text-primary">{t(meta.labelKey)}</span>
+                <span className="block text-xs text-tertiary">{t(meta.descriptionKey)}</span>
               </span>
             </label>
           );

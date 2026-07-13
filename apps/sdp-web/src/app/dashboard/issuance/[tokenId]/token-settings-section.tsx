@@ -18,6 +18,7 @@ import {
   Webhook,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import type {
@@ -118,6 +119,7 @@ export function TokenSettingsSection({
   onCopy,
   onEditAuthority,
 }: TokenSettingsSectionProps) {
+  const t = useTranslations();
   // Extensions render as two vertical lists side by side: split the rows into a
   // left and right column so each is its own joined container.
   const extensionSplit = Math.ceil(extensionRows.length / 2);
@@ -130,7 +132,9 @@ export function TokenSettingsSection({
     <section className="space-y-3">
       {showTitle ? (
         <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
-          {mode === "permissions" ? "Permissions" : "Extensions"}
+          {mode === "permissions"
+            ? t("DashboardIssuance.management.permissions")
+            : t("DashboardIssuance.management.extensions")}
         </h3>
       ) : null}
 
@@ -153,7 +157,7 @@ export function TokenSettingsSection({
                   onClick={() => onCopy(row.value)}
                   className="inline-flex items-center gap-1 rounded-full border border-border-default bg-fill-subtle px-3 py-1 text-xs text-secondary"
                 >
-                  {formatValue(row.value)}
+                  {formatValue(row.value, t)}
                   {row.value ? <Copy className="h-3 w-3" /> : null}
                 </button>
                 <TokenDisabledActionTooltip
@@ -170,7 +174,7 @@ export function TokenSettingsSection({
                     onClick={() => onEditAuthority(row)}
                     disabled={!canEditAuthorities || Boolean(row.editDisabledReason)}
                   >
-                    Edit
+                    {t("DashboardIssuance.management.edit")}
                   </Button>
                 </TokenDisabledActionTooltip>
               </div>

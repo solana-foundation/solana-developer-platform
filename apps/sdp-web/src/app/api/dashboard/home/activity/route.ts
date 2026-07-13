@@ -6,11 +6,13 @@ import {
   fetchOrgIssuanceActivity,
 } from "@/app/dashboard/home-page.data";
 import { fetchDashboardPaymentTransfers } from "@/app/dashboard/payments/payments-page.data";
+import { getTranslations } from "@/i18n/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.home.activity", request);
+  const t = await getTranslations();
 
   try {
     const apiClient = await createSdpApiClient(
@@ -20,27 +22,28 @@ export async function GET(request: Request) {
       trace.step("fetch_payment_transfers", () =>
         fetchDashboardPaymentTransfers(apiClient.request, 20)
       ),
-      trace.step("fetch_issuance_tokens", () => fetchIssuanceTokens(apiClient.request, 20)),
+      trace.step("fetch_issuance_tokens", () => fetchIssuanceTokens(apiClient.request, t, 20)),
     ]);
 
     const issuanceTokens = issuanceTokensResult.data ?? [];
     const issuanceActivityResult =
       issuanceTokensResult.ok && issuanceTokens.length > 0
         ? await trace.step("fetch_issuance_activity", () =>
-            fetchOrgIssuanceActivity(apiClient.request, issuanceTokens)
+            fetchOrgIssuanceActivity(apiClient.request, issuanceTokens, t)
           )
         : { rows: [], error: null };
 
     const transfersError = transfersResult.ok
       ? null
-      : "Payments activity is unavailable right now.";
+      : t("Shared.homeWorkspace.paymentsActivityUnavailable");
     const issuanceTokensError = issuanceTokensResult.ok
       ? null
-      : "Issuance activity is unavailable right now.";
+      : t("Shared.homeWorkspace.issuanceActivityUnavailable");
 
     const activityRows = buildHomeActivityRows(
       transfersResult.data ?? [],
-      issuanceActivityResult.rows
+      issuanceActivityResult.rows,
+      t
     );
     const activityError =
       activityRows.length === 0
@@ -77,7 +80,8 @@ export async function GET(request: Request) {
   } catch (error) {
     const response = NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to load dashboard activity",
+        error:
+          error instanceof Error ? error.message : t("Shared.homeWorkspace.failedToLoadActivity"),
       },
       {
         status: 500,
@@ -89,7 +93,8 @@ export async function GET(request: Request) {
     );
 
     logRouteResult(trace, 500, {
-      error: error instanceof Error ? error.message : "Failed to load dashboard activity",
+      error:
+        error instanceof Error ? error.message : t("Shared.homeWorkspace.failedToLoadActivity"),
     });
 
     return response;

@@ -34,9 +34,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
-import { toTitleCase } from "../../activity-format-utils";
 import type { CounterpartyPlaygroundView } from "./counterparty-playground-config";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 import { useCounterpartyDirectory } from "./use-counterparty-directory";
@@ -67,6 +67,8 @@ export function CounterpartyWorkspace({
   apiKeys,
   apiBaseUrl,
 }: CounterpartyWorkspaceProps) {
+  const t = useTranslations();
+  const locale = useLocale();
   const router = useRouter();
   const { counterpartyTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
     useDashboardWorkspace();
@@ -141,7 +143,9 @@ export function CounterpartyWorkspace({
       router.refresh(); // restore the optimistically-removed row
       return;
     }
-    toast.success(`${target.displayName} deleted`, { position: "bottom-right" });
+    toast.success(t("DashboardPayments.counterparty.deleted", { name: target.displayName }), {
+      position: "bottom-right",
+    });
     router.refresh();
   }
 
@@ -155,9 +159,9 @@ export function CounterpartyWorkspace({
         overview={
           <Card className="flex min-h-0 flex-1 flex-col">
             <CardHeader>
-              <CardTitle>Directory</CardTitle>
+              <CardTitle>{t("DashboardPayments.counterparty.directory")}</CardTitle>
               <CardDescription>
-                Registered individuals and businesses in your workspace.
+                {t("DashboardPayments.counterparty.directoryDescription")}
               </CardDescription>
               {total > 0 && (
                 <CardAction>
@@ -166,7 +170,7 @@ export function CounterpartyWorkspace({
                     iconLeft={<PlusIcon />}
                     onClick={() => router.push("/dashboard/payments/counterparty/create")}
                   >
-                    Create
+                    {t("DashboardPayments.counterparty.create")}
                   </Button>
                 </CardAction>
               )}
@@ -176,9 +180,11 @@ export function CounterpartyWorkspace({
                 <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-strong py-16 text-center">
                   <UsersIcon className="h-10 w-10 text-muted" />
                   <div className="space-y-1">
-                    <p className="text-sm font-medium text-primary">No counterparties yet</p>
+                    <p className="text-sm font-medium text-primary">
+                      {t("DashboardPayments.counterparty.noCounterparties")}
+                    </p>
                     <p className="text-sm text-tertiary">
-                      Add your first individual or business to get started.
+                      {t("DashboardPayments.counterparty.noCounterpartiesDescription")}
                     </p>
                   </div>
                   <Button
@@ -186,7 +192,7 @@ export function CounterpartyWorkspace({
                     iconLeft={<PlusIcon />}
                     onClick={() => router.push("/dashboard/payments/counterparty/create")}
                   >
-                    Create
+                    {t("DashboardPayments.counterparty.create")}
                   </Button>
                 </div>
               ) : (
@@ -194,11 +200,21 @@ export function CounterpartyWorkspace({
                   <Table className="[&_table]:table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[30%]">Display name</TableHead>
-                        <TableHead className="w-[12%]">Type</TableHead>
-                        <TableHead className="w-[24%]">Email</TableHead>
-                        <TableHead className="w-[16%]">External ID</TableHead>
-                        <TableHead className="w-[18%]">Created</TableHead>
+                        <TableHead className="w-[30%]">
+                          {t("DashboardPayments.counterparty.displayName")}
+                        </TableHead>
+                        <TableHead className="w-[12%]">
+                          {t("DashboardPayments.counterparty.type")}
+                        </TableHead>
+                        <TableHead className="w-[24%]">
+                          {t("DashboardPayments.counterparty.email")}
+                        </TableHead>
+                        <TableHead className="w-[16%]">
+                          {t("DashboardPayments.counterparty.externalId")}
+                        </TableHead>
+                        <TableHead className="w-[18%]">
+                          {t("DashboardPayments.recurring.created")}
+                        </TableHead>
                         <TableHead className="w-[56px]" />
                       </TableRow>
                     </TableHeader>
@@ -209,7 +225,11 @@ export function CounterpartyWorkspace({
                             <span className="block truncate">{cp.displayName}</span>
                           </TableCell>
                           <TableCell className="text-sm">
-                            <span className="block truncate">{toTitleCase(cp.entityType)}</span>
+                            <span className="block truncate">
+                              {cp.entityType === "individual"
+                                ? t("DashboardPayments.counterparty.individual")
+                                : t("DashboardPayments.counterparty.business")}
+                            </span>
                           </TableCell>
                           <TableCell className="text-sm">
                             <span className="block truncate">{cp.email}</span>
@@ -218,7 +238,7 @@ export function CounterpartyWorkspace({
                             <span className="block truncate">{cp.externalId ?? "—"}</span>
                           </TableCell>
                           <TableCell className="text-sm text-secondary">
-                            {new Date(cp.createdAt).toLocaleDateString("en-US", {
+                            {new Date(cp.createdAt).toLocaleDateString(locale, {
                               month: "short",
                               day: "2-digit",
                               year: "numeric",
@@ -231,7 +251,9 @@ export function CounterpartyWorkspace({
                                   type="button"
                                   variant="ghost"
                                   size="icon-sm"
-                                  aria-label="Counterparty actions"
+                                  aria-label={t(
+                                    "DashboardPayments.counterparty.counterpartyActions"
+                                  )}
                                 >
                                   <MoreHorizontalIcon />
                                 </Button>
@@ -244,14 +266,14 @@ export function CounterpartyWorkspace({
                                   }
                                 >
                                   <UserIcon />
-                                  Manage Counterparty
+                                  {t("DashboardPayments.counterparty.manageCounterparty")}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   className="text-xs text-error focus:text-error [&_svg]:size-3.5"
                                   onSelect={() => setPendingDelete(cp)}
                                 >
                                   <Trash2Icon />
-                                  Delete Counterparty
+                                  {t("DashboardPayments.counterparty.deleteCounterparty")}
                                 </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>

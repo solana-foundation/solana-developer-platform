@@ -23,17 +23,27 @@ import {
   formatRampQuoteTimeRemaining,
 } from "@/app/dashboard/payments/payments-overview.utils";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 type ManualQuote = Extract<PaymentRampQuote, { deliveryMode: "manual_instructions" }>;
 type LightsparkQuote = Extract<ManualQuote, { provider: "lightspark" }>;
 
-async function copyPaymentInstruction(label: string, value: string) {
+async function copyPaymentInstruction(
+  label: string,
+  value: string,
+  t: ReturnType<typeof useTranslations>
+) {
   try {
     await navigator.clipboard.writeText(value);
-    toast.success(`${label} copied.`, { position: "bottom-right" });
+    toast.success(t("DashboardPayments.manualInstructions.copied", { label }), {
+      position: "bottom-right",
+    });
   } catch {
-    toast.error(`Failed to copy ${label.toLowerCase()}.`, { position: "bottom-right" });
+    toast.error(
+      t("DashboardPayments.manualInstructions.copyFailed", { label: label.toLowerCase() }),
+      { position: "bottom-right" }
+    );
   }
 }
 
@@ -46,6 +56,7 @@ function PaymentInstructionField({
   value?: string;
   className?: string;
 }) {
+  const t = useTranslations();
   if (!value) {
     return null;
   }
@@ -62,9 +73,9 @@ function PaymentInstructionField({
           variant="secondary"
           size="xs"
           iconLeft={<CopyIcon />}
-          onClick={() => void copyPaymentInstruction(label, value)}
+          onClick={() => void copyPaymentInstruction(label, value, t)}
         >
-          Copy
+          {t("DashboardPayments.manualInstructions.copy")}
         </Button>
       </div>
     </div>
@@ -98,8 +109,9 @@ function QuoteSummaryField({
 }
 
 function QuoteExpiryTabLabel({ expiresAt }: { expiresAt?: string }) {
+  const t = useTranslations();
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const timeRemaining = formatRampQuoteTimeRemaining(expiresAt, nowMs);
+  const timeRemaining = formatRampQuoteTimeRemaining(expiresAt, nowMs, t);
 
   useEffect(() => {
     if (!expiresAt) {
@@ -113,7 +125,7 @@ function QuoteExpiryTabLabel({ expiresAt }: { expiresAt?: string }) {
 
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span>Instructions</span>
+      <span>{t("DashboardPayments.manualInstructions.instructions")}</span>
       {timeRemaining ? (
         <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-[11px] font-medium text-secondary">
           {timeRemaining}
@@ -132,6 +144,7 @@ function ManualQuoteSummary({
   fiatCurrency: string;
   cryptoToken: string;
 }) {
+  const t = useTranslations();
   const finalAmount = formatMinorCurrencyAmount(
     quote.totalReceivingAmount,
     quote.receivingCurrency.code,
@@ -160,31 +173,39 @@ function ManualQuoteSummary({
   return (
     <div className="space-y-4 text-left">
       <div>
-        <p className="text-sm font-medium text-primary">Quote Summary</p>
-        <p className="mt-1 text-sm text-tertiary">Locked pricing for this funding instruction.</p>
+        <p className="text-sm font-medium text-primary">
+          {t("DashboardPayments.manualInstructions.quoteSummary")}
+        </p>
+        <p className="mt-1 text-sm text-tertiary">
+          {t("DashboardPayments.manualInstructions.quoteSummaryDescription")}
+        </p>
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
         <QuoteSummaryField
           icon={<CoinsIcon className="size-4" />}
-          label="Final amount"
+          label={t("DashboardPayments.manualInstructions.finalAmount")}
           value={finalAmount}
         />
         <QuoteSummaryField
           icon={<WalletIcon className="size-4" />}
-          label="Deposit amount"
+          label={t("DashboardPayments.manualInstructions.depositAmount")}
           value={sendingAmount}
         />
         <QuoteSummaryField
           icon={<DollarSignIcon className="size-4" />}
-          label="Fees included"
+          label={t("DashboardPayments.manualInstructions.feesIncluded")}
           value={feesIncluded}
         />
         <QuoteSummaryField
           icon={<ArrowDownLeft className="size-4" />}
-          label="Exchange rate"
+          label={t("DashboardPayments.manualInstructions.exchangeRate")}
           value={exchangeRate}
         />
-        <QuoteSummaryField icon={<Clock3 className="size-4" />} label="Expires" value={expiresAt} />
+        <QuoteSummaryField
+          icon={<Clock3 className="size-4" />}
+          label={t("DashboardPayments.manualInstructions.expires")}
+          value={expiresAt}
+        />
       </div>
     </div>
   );
@@ -246,6 +267,7 @@ function LightsparkInstruction({
   showAction: boolean;
   action?: InstructionAction;
 }) {
+  const t = useTranslations();
   const info = instruction.accountOrWalletInfo;
   return (
     <div className="space-y-4">
@@ -257,27 +279,41 @@ function LightsparkInstruction({
         {showAction && action ? <InstructionActionButton action={action} /> : null}
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
-        <PaymentInstructionField label="Bank name" value={info.bankName} />
-        <PaymentInstructionField label="Routing number" value={info.routingNumber} />
-        <PaymentInstructionField label="Account number" value={info.accountNumber} />
         <PaymentInstructionField
-          label="Wallet address"
+          label={t("DashboardPayments.manualInstructions.bankName")}
+          value={info.bankName}
+        />
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.routingNumber")}
+          value={info.routingNumber}
+        />
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.accountNumber")}
+          value={info.accountNumber}
+        />
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.walletAddress")}
           value={info.address}
           className="lg:col-span-2"
         />
       </div>
-      <PaymentInstructionField label="Reference" value={info.reference} />
+      <PaymentInstructionField
+        label={t("DashboardPayments.manualInstructions.reference")}
+        value={info.reference}
+      />
       {info.paymentRails?.length ? (
         <div className="rounded-xl bg-fill-subtle px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
-            Supported rails
+            {t("DashboardPayments.manualInstructions.supportedRails")}
           </p>
           <p className="mt-1 text-sm text-primary">{info.paymentRails.join(", ")}</p>
         </div>
       ) : null}
       {instruction.instructionsNotes ? (
         <div className="rounded-xl bg-fill-subtle px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">Notes</p>
+          <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
+            {t("DashboardPayments.manualInstructions.notes")}
+          </p>
           <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
         </div>
       ) : null}
@@ -292,19 +328,32 @@ function BvnkCryptoDepositInstruction({
   instruction: Extract<BvnkInstructionType, { kind: "crypto_deposit" }>;
   action?: InstructionAction;
 }) {
+  const t = useTranslations();
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <InstructionBadges>
-          <InstructionBadge>{instruction.cryptoCurrency} deposit</InstructionBadge>
+          <InstructionBadge>
+            {t("DashboardPayments.manualInstructions.cryptoDeposit", {
+              currency: instruction.cryptoCurrency,
+            })}
+          </InstructionBadge>
           <InstructionBadge>{instruction.network}</InstructionBadge>
         </InstructionBadges>
         {action ? <InstructionActionButton action={action} /> : null}
       </div>
-      <PaymentInstructionField label="Deposit address" value={instruction.destinationAddress} />
-      <PaymentInstructionField label="Reference" value={instruction.reference} />
+      <PaymentInstructionField
+        label={t("DashboardPayments.manualInstructions.depositAddress")}
+        value={instruction.destinationAddress}
+      />
+      <PaymentInstructionField
+        label={t("DashboardPayments.manualInstructions.reference")}
+        value={instruction.reference}
+      />
       <div className="rounded-xl bg-fill-subtle px-4 py-3">
-        <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">Notes</p>
+        <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
+          {t("DashboardPayments.manualInstructions.notes")}
+        </p>
         <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
       </div>
     </div>
@@ -318,6 +367,7 @@ function BvnkInstruction({
   instruction: BvnkInstructionType;
   action?: InstructionAction;
 }) {
+  const t = useTranslations();
   if (instruction.kind === "crypto_deposit") {
     return <BvnkCryptoDepositInstruction instruction={instruction} action={action} />;
   }
@@ -332,7 +382,11 @@ function BvnkInstruction({
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <InstructionBadges>
-          <InstructionBadge>{instruction.fiatCurrency} virtual account</InstructionBadge>
+          <InstructionBadge>
+            {t("DashboardPayments.manualInstructions.virtualAccount", {
+              currency: instruction.fiatCurrency,
+            })}
+          </InstructionBadge>
           <InstructionBadge>{instruction.network}</InstructionBadge>
         </InstructionBadges>
         {isReady && action ? <InstructionActionButton action={action} /> : null}
@@ -346,7 +400,9 @@ function BvnkInstruction({
           <div className="min-w-0 flex-1">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-primary">Identity verification required</p>
+                <p className="text-sm font-medium text-primary">
+                  {t("DashboardPayments.manualInstructions.identityVerificationRequired")}
+                </p>
                 <p className="mt-1 text-sm leading-relaxed text-tertiary">
                   {instruction.instructionsNotes}
                 </p>
@@ -359,7 +415,7 @@ function BvnkInstruction({
                   className="shrink-0"
                   onClick={() => window.open(verificationUrl, "_blank", "noopener")}
                 >
-                  Complete verification
+                  {t("DashboardPayments.manualInstructions.completeVerification")}
                 </Button>
               ) : null}
             </div>
@@ -375,15 +431,17 @@ function BvnkInstruction({
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-primary">
               {isProvisioning
-                ? "BVNK is provisioning your virtual bank account"
-                : "Verification in review"}
+                ? t("DashboardPayments.manualInstructions.provisioningAccount")
+                : t("DashboardPayments.manualInstructions.verificationInReview")}
             </p>
             <p className="mt-1 text-sm leading-relaxed text-tertiary">
               {instruction.instructionsNotes}
             </p>
             <p className="mt-3 flex items-center gap-2 text-xs font-medium text-secondary">
               <Loader2 className="size-3.5 animate-spin" />
-              {isProvisioning ? "Provisioning funding account" : "Checking verification status"}
+              {isProvisioning
+                ? t("DashboardPayments.manualInstructions.provisioningFundingAccount")
+                : t("DashboardPayments.manualInstructions.checkingVerificationStatus")}
             </p>
           </div>
         </div>
@@ -392,13 +450,27 @@ function BvnkInstruction({
       {isReady ? (
         <>
           <div className="grid gap-3 lg:grid-cols-2">
-            <PaymentInstructionField label="Bank name" value={bank?.bankName} />
-            <PaymentInstructionField label="Account number" value={bank?.accountNumber} />
-            <PaymentInstructionField label="Bank code" value={bank?.code} />
-            <PaymentInstructionField label="Payment reference" value={bank?.paymentReference} />
+            <PaymentInstructionField
+              label={t("DashboardPayments.manualInstructions.bankName")}
+              value={bank?.bankName}
+            />
+            <PaymentInstructionField
+              label={t("DashboardPayments.manualInstructions.accountNumber")}
+              value={bank?.accountNumber}
+            />
+            <PaymentInstructionField
+              label={t("DashboardPayments.manualInstructions.bankCode")}
+              value={bank?.code}
+            />
+            <PaymentInstructionField
+              label={t("DashboardPayments.manualInstructions.paymentReference")}
+              value={bank?.paymentReference}
+            />
           </div>
           <div className="rounded-xl bg-fill-subtle px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">Notes</p>
+            <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
+              {t("DashboardPayments.manualInstructions.notes")}
+            </p>
             <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
           </div>
         </>
@@ -416,11 +488,16 @@ function MuralInstruction({
   showAction: boolean;
   action?: InstructionAction;
 }) {
+  const t = useTranslations();
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <InstructionBadges>
-          <InstructionBadge>{instruction.fiatCurrency} payin</InstructionBadge>
+          <InstructionBadge>
+            {t("DashboardPayments.manualInstructions.payin", {
+              currency: instruction.fiatCurrency,
+            })}
+          </InstructionBadge>
           {instruction.payinRails.map((rail) => (
             <InstructionBadge key={rail}>{rail}</InstructionBadge>
           ))}
@@ -455,6 +532,7 @@ export function ManualInstructionsQuote({
   /** Overrides the default fiat-deposit copy (e.g. for crypto-funded off-ramp quotes). */
   description?: string;
 }) {
+  const t = useTranslations();
   const [activeTab, setActiveTab] = useState<"instructions" | "summary">("instructions");
 
   const instructionList = instructions.map((instruction, index) =>
@@ -496,10 +574,16 @@ export function ManualInstructionsQuote({
           <LandmarkIcon className="size-5" />
         </span>
         <div>
-          <p className="text-sm font-medium text-primary">Manual Funding Instructions</p>
+          <p className="text-sm font-medium text-primary">
+            {t("DashboardPayments.manualInstructions.manualFundingInstructions")}
+          </p>
           <p className="mt-2 text-sm text-tertiary">
             {description ??
-              `Send ${amount ? `$${amount}` : "the quoted amount"} using one of the supported rails. Include the reference exactly so the provider can match the deposit to this quote.`}
+              t("DashboardPayments.manualInstructions.defaultDescription", {
+                amount: amount
+                  ? `$${amount}`
+                  : t("DashboardPayments.manualInstructions.quotedAmount"),
+              })}
           </p>
         </div>
       </div>
@@ -519,7 +603,7 @@ export function ManualInstructionsQuote({
               <Tab value="instructions">
                 <QuoteExpiryTabLabel expiresAt={quote.expiresAt} />
               </Tab>
-              <Tab value="summary">Quote Summary</Tab>
+              <Tab value="summary">{t("DashboardPayments.manualInstructions.quoteSummary")}</Tab>
             </TabList>
           </Tabs>
 

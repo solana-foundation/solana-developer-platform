@@ -17,6 +17,7 @@ import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 type SetupStep = "provider" | "details";
@@ -66,6 +67,7 @@ function ProviderStep({
   providers: CustodyProviderCatalogEntry[];
   selectedProvider: KnownCustodyProvider | null;
 }) {
+  const t = useTranslations();
   const connectedProviderSet = new Set(connectedProviders);
 
   return (
@@ -98,11 +100,11 @@ function ProviderStep({
                   </span>
                   {isConnected ? (
                     <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-secondary ring-1 ring-border-subtle">
-                      Active
+                      {t("DashboardCustody.active")}
                     </span>
                   ) : null}
                 </span>
-                <span className="block text-sm text-tertiary">{provider.description}</span>
+                <span className="block text-sm text-tertiary">{t(provider.descriptionKey)}</span>
               </span>
             </div>
           </button>
@@ -117,6 +119,7 @@ export function WalletSetupFlow({
   enabledProviders,
   initialProvider = null,
 }: WalletSetupFlowProps) {
+  const t = useTranslations();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const enabledProviderEntries = useMemo(
@@ -201,52 +204,59 @@ export function WalletSetupFlow({
   if (enabledProviderEntries.length === 0) {
     return (
       <div className="mx-auto max-w-3xl rounded-lg border border-border-default bg-white p-6">
-        <p className="text-lg font-medium text-primary">No wallet providers enabled</p>
+        <p className="text-lg font-medium text-primary">
+          {t("DashboardCustody.noWalletProvidersEnabled")}
+        </p>
         <p className="mt-2 text-sm leading-6 text-secondary">
-          Wallet creation is available after a custody provider is enabled for this organization.
+          {t("DashboardCustody.walletCreationAvailable")}
         </p>
         <Button asChild variant="secondary" className="mt-5">
-          <Link href="/dashboard/wallets">Back to wallets</Link>
+          <Link href="/dashboard/wallets">{t("DashboardCustody.backToWallets")}</Link>
         </Button>
       </div>
     );
   }
 
-  const heading = currentStep === "provider" ? "Choose provider" : "Wallet details";
+  const heading =
+    currentStep === "provider"
+      ? t("DashboardCustody.chooseProvider")
+      : t("DashboardCustody.walletDetails");
   const canContinue = Boolean(selectedProviderEntry);
 
   const formContent = (
     <>
       <input type="hidden" name="provider" value={selectedProviderEntry?.id ?? ""} />
       <div className="space-y-2">
-        <Label htmlFor="wallet-label">Wallet label</Label>
+        <Label htmlFor="wallet-label">{t("DashboardCustody.walletLabel")}</Label>
         <Input
           id="wallet-label"
           name={isConnected ? "label" : "walletLabel"}
           value={walletLabel}
           onChange={(event) => setWalletLabel(event.currentTarget.value)}
-          placeholder="Treasury"
+          placeholder={t("DashboardCustody.walletLabelPlaceholder")}
           className="h-12 rounded-2xl border-border-default bg-white px-4 shadow-none"
           required
         />
       </div>
       <div className="space-y-2">
-        <Label>Project</Label>
+        <Label>{t("DashboardCustody.project")}</Label>
         <div className="flex h-12 items-center rounded-2xl border border-border-default bg-fill-subtle px-4 text-sm font-medium text-primary">
-          Default Project
+          {t("DashboardCustody.projectValue")}
         </div>
       </div>
       <div className="space-y-2">
-        <Label>Environment</Label>
+        <Label>{t("DashboardCustody.environment")}</Label>
         <div className="flex h-12 items-center rounded-2xl border border-border-default bg-fill-subtle px-4 text-sm font-medium text-primary">
-          Sandbox
+          {t("DashboardCustody.sandbox")}
         </div>
       </div>
       {!canProvisionWallet ? (
         <div className="rounded-2xl border border-border-default bg-fill-subtle px-4 py-3 text-sm leading-6 text-tertiary">
           {selectedProviderEntry
-            ? `${selectedProviderEntry.label} uses its existing configured wallet in this flow.`
-            : "Choose an enabled provider to continue."}
+            ? t("DashboardCustody.connectedProviderDescription", {
+                provider: selectedProviderEntry.label,
+              })
+            : t("DashboardCustody.chooseEnabledProvider")}
         </div>
       ) : null}
       {errorMessage ? (
@@ -287,7 +297,7 @@ export function WalletSetupFlow({
             onClick={goBack}
             iconLeft={<ArrowLeft className="h-4 w-4" />}
           >
-            Previous
+            {t("DashboardCustody.previous")}
           </Button>
           <Button
             type="button"
@@ -296,7 +306,7 @@ export function WalletSetupFlow({
             disabled={!canContinue}
             iconRight={<ArrowRight className="h-4 w-4" />}
           >
-            Continue
+            {t("DashboardCustody.continue")}
           </Button>
         </div>
       </div>
@@ -324,7 +334,7 @@ export function WalletSetupFlow({
             onClick={goBack}
             iconLeft={<ArrowLeft className="h-4 w-4" />}
           >
-            Previous
+            {t("DashboardCustody.previous")}
           </Button>
           <Button
             type="button"
@@ -332,7 +342,9 @@ export function WalletSetupFlow({
             disabled={!canProvisionWallet || isPending}
             onClick={handleCreateWallet}
           >
-            {isPending ? "Creating..." : "Create wallet"}
+            {isPending
+              ? t("DashboardCustody.createWalletPending")
+              : t("DashboardCustody.createWallet")}
           </Button>
         </div>
       </div>

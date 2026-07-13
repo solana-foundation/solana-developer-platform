@@ -32,6 +32,7 @@ import type {
   PaymentsDashboardWallet as WalletRecord,
   PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {
   type ComplianceIntent,
   type ComplianceProviderResult,
@@ -61,6 +62,7 @@ export interface PaymentWalletBalancesSnapshot {
 }
 
 export type RiskTone = "green" | "yellow" | "red" | "neutral";
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 export function getDevnetExplorerUrl(signature: string): string {
   return `https://explorer.solana.com/tx/${encodeURIComponent(signature)}?cluster=devnet`;
@@ -76,7 +78,7 @@ export function toProviderLabel(value: string): string {
   return labels[value] ?? value.toUpperCase();
 }
 
-export function formatRiskScore(result: ComplianceProviderResult): string {
+export function formatRiskScore(result: ComplianceProviderResult, t: Translate): string {
   if (
     typeof result.riskScore === "number" &&
     typeof result.riskLevel === "string" &&
@@ -93,21 +95,21 @@ export function formatRiskScore(result: ComplianceProviderResult): string {
     result.riskScore === null &&
     !result.riskLevel?.trim()
   ) {
-    return "No TRM attribution";
+    return t("DashboardPayments.providerRisk.noTrmAttribution");
   }
   if (result.status === "error" && typeof result.message === "string" && result.message) {
     return result.message;
   }
   if (result.status === "unavailable") {
-    return "Unavailable";
+    return t("DashboardPayments.providerRisk.unavailable");
   }
   if (result.status === "ok" && typeof result.riskLevel === "string" && result.riskLevel) {
     return result.riskLevel;
   }
   if (result.status === "error") {
-    return "Error";
+    return t("DashboardPayments.providerRisk.error");
   }
-  return "N/A";
+  return t("DashboardPayments.providerRisk.notAvailable");
 }
 
 export function resolveRiskTone(result: ComplianceProviderResult): RiskTone {
@@ -187,7 +189,8 @@ export function riskToneClassName(result: ComplianceProviderResult): string {
 }
 
 export async function fetchWallets(
-  options: { signal?: AbortSignal; includeBalances?: boolean } = {}
+  options: { signal?: AbortSignal; includeBalances?: boolean },
+  t: Translate
 ): Promise<WalletRecord[]> {
   const query = new URLSearchParams({
     view: "summary",
@@ -202,12 +205,20 @@ export async function fetchWallets(
   });
   const body = (await response.json().catch(() => ({}))) as WalletsEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `Wallet list request failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.walletListRequestFailed", { status: response.status })
+      )
+    );
   }
   return body.data?.wallets ?? [];
 }
 
-export async function fetchWalletAggregate(signal?: AbortSignal): Promise<CustodyWalletAggregate> {
+export async function fetchWalletAggregate(
+  t: Translate,
+  signal?: AbortSignal
+): Promise<CustodyWalletAggregate> {
   const response = await fetch("/api/dashboard/wallets/aggregate", {
     method: "GET",
     cache: "no-store",
@@ -215,17 +226,22 @@ export async function fetchWalletAggregate(signal?: AbortSignal): Promise<Custod
   });
   const body = (await response.json().catch(() => ({}))) as PaymentsWalletAggregateEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `Wallet aggregate request failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.walletAggregateRequestFailed", { status: response.status })
+      )
+    );
   }
 
   if (!body.data?.aggregate) {
-    throw new Error("Wallet aggregate response is missing aggregate details.");
+    throw new Error(t("DashboardPayments.workspace.walletAggregateMissing"));
   }
 
   return body.data.aggregate;
 }
 
-export async function fetchWalletPolicy(walletId: string): Promise<WalletPolicy> {
+export async function fetchWalletPolicy(walletId: string, t: Translate): Promise<WalletPolicy> {
   const response = await fetch(
     `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/policies`,
     {
@@ -235,7 +251,12 @@ export async function fetchWalletPolicy(walletId: string): Promise<WalletPolicy>
   );
   const body = (await response.json().catch(() => ({}))) as WalletPolicyEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `Wallet policy request failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.walletPolicyRequestFailed", { status: response.status })
+      )
+    );
   }
 
   return (
@@ -310,14 +331,17 @@ function resolveWalletBalancesSnapshot(
   return null;
 }
 
-export async function fetchTransfers(options: {
-  pageSize: number;
-  walletId?: string;
-  category?: "wallet" | "ramp";
-  counterpartyId?: string;
-  statuses?: readonly string[];
-  signal?: AbortSignal;
-}): Promise<TransferRecord[]> {
+export async function fetchTransfers(
+  options: {
+    pageSize: number;
+    walletId?: string;
+    category?: "wallet" | "ramp";
+    counterpartyId?: string;
+    statuses?: readonly string[];
+    signal?: AbortSignal;
+  },
+  t: Translate
+): Promise<TransferRecord[]> {
   const transfersQuery = new URLSearchParams({
     page: "1",
     pageSize: String(options.pageSize),
@@ -333,21 +357,29 @@ export async function fetchTransfers(options: {
   });
   const body = (await response.json()) as TransferListEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `Transfer list request failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.transferListRequestFailed", { status: response.status })
+      )
+    );
   }
 
   if (!body.data) {
-    throw new Error("Transfer list response is missing transfer data.");
+    throw new Error(t("DashboardPayments.workspace.transferListMissing"));
   }
 
   return body.data;
 }
 
-export async function fetchTransferByProviderReference(input: {
-  provider: RampProviderId;
-  providerReference: string;
-  signal?: AbortSignal;
-}): Promise<TransferRecord | null> {
+export async function fetchTransferByProviderReference(
+  input: {
+    provider: RampProviderId;
+    providerReference: string;
+    signal?: AbortSignal;
+  },
+  t: Translate
+): Promise<TransferRecord | null> {
   const transfersQuery = new URLSearchParams({
     page: "1",
     pageSize: "1",
@@ -362,14 +394,19 @@ export async function fetchTransferByProviderReference(input: {
   });
   const body = (await response.json()) as TransferListEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `Transfer lookup failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.transferLookupFailed", { status: response.status })
+      )
+    );
   }
 
   if (!body.data) {
-    throw new Error("Transfer lookup response is missing transfer data.");
+    throw new Error(t("DashboardPayments.workspace.transferLookupMissing"));
   }
   if (body.data.length > 1) {
-    throw new Error("Transfer lookup returned multiple transfers.");
+    throw new Error(t("DashboardPayments.workspace.transferLookupMultiple"));
   }
   if (body.data.length === 0) {
     return null;
@@ -378,10 +415,13 @@ export async function fetchTransferByProviderReference(input: {
   return body.data[0];
 }
 
-export async function cancelRampTransfer(input: {
-  provider: RampProviderId;
-  providerReference: string;
-}): Promise<void> {
+export async function cancelRampTransfer(
+  input: {
+    provider: RampProviderId;
+    providerReference: string;
+  },
+  t: Translate
+): Promise<void> {
   const response = await fetch("/api/dashboard/payments/ramps/transfers/cancel", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -389,17 +429,25 @@ export async function cancelRampTransfer(input: {
   });
   const body = (await response.json()) as ApiErrorBody;
   if (!response.ok) {
-    throw new Error(getApiError(body, `Transfer cancellation failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.transferCancellationFailed", { status: response.status })
+      )
+    );
   }
 }
 
-export async function fetchRampEstimates(input: {
-  direction: RampDirection;
-  assetRail: CryptoRailId;
-  fiatCurrency: RampFiatCurrency;
-  amount: string;
-  signal?: AbortSignal;
-}): Promise<RampProviderEstimateResult[]> {
+export async function fetchRampEstimates(
+  input: {
+    direction: RampDirection;
+    assetRail: CryptoRailId;
+    fiatCurrency: RampFiatCurrency;
+    amount: string;
+    signal?: AbortSignal;
+  },
+  t: Translate
+): Promise<RampProviderEstimateResult[]> {
   const amountField = input.direction === "onramp" ? "fiatAmount" : "cryptoAmount";
   const response = await fetch(`/api/dashboard/payments/ramps/${input.direction}/estimate`, {
     method: "POST",
@@ -414,12 +462,17 @@ export async function fetchRampEstimates(input: {
   });
   const body = (await response.json().catch(() => ({}))) as PaymentRampEstimateEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `Ramp estimate request failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.rampEstimateRequestFailed", { status: response.status })
+      )
+    );
   }
 
   const estimates = body.data?.estimates;
   if (!estimates) {
-    throw new Error("Ramp estimate response is missing estimates.");
+    throw new Error(t("DashboardPayments.workspace.rampEstimateMissing"));
   }
 
   return estimates;
@@ -427,6 +480,7 @@ export async function fetchRampEstimates(input: {
 
 export async function fetchWalletBalances(
   walletId: string,
+  t: Translate,
   signal?: AbortSignal
 ): Promise<PaymentWalletBalancesSnapshot> {
   const response = await fetch(
@@ -439,12 +493,17 @@ export async function fetchWalletBalances(
   );
   const body = (await response.json().catch(() => ({}))) as WalletBalancesEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `Wallet balances request failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.walletBalancesRequestFailed", { status: response.status })
+      )
+    );
   }
 
   const snapshot = resolveWalletBalancesSnapshot(body);
   if (!snapshot) {
-    throw new Error("Wallet balances response is missing balance details.");
+    throw new Error(t("DashboardPayments.workspace.walletBalancesMissing"));
   }
 
   return snapshot;
@@ -452,7 +511,8 @@ export async function fetchWalletBalances(
 
 export async function updateWalletPolicy(
   walletId: string,
-  policy: WalletPolicy
+  policy: WalletPolicy,
+  t: Translate
 ): Promise<WalletPolicy> {
   const response = await fetch(
     `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/policies`,
@@ -472,23 +532,31 @@ export async function updateWalletPolicy(
   );
   const body = (await response.json().catch(() => ({}))) as WalletPolicyEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `Wallet policy update failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.walletPolicyUpdateFailed", { status: response.status })
+      )
+    );
   }
 
   if (!body.data?.policy) {
-    throw new Error("Wallet policy update returned an empty response.");
+    throw new Error(t("DashboardPayments.workspace.walletPolicyUpdateEmpty"));
   }
 
   return body.data.policy;
 }
 
-export async function createTransfer(input: {
-  source: string;
-  destination: string;
-  token: string;
-  amount: string;
-  memo?: string;
-}): Promise<TransferRecord> {
+export async function createTransfer(
+  input: {
+    source: string;
+    destination: string;
+    token: string;
+    amount: string;
+    memo?: string;
+  },
+  t: Translate
+): Promise<TransferRecord> {
   const response = await fetch("/api/dashboard/payments/transfers", {
     method: "POST",
     headers: {
@@ -504,23 +572,31 @@ export async function createTransfer(input: {
   });
   const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `Transfer request failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.transferRequestFailed", { status: response.status })
+      )
+    );
   }
 
   if (!body.data?.transfer) {
-    throw new Error("Transfer response is missing transfer details.");
+    throw new Error(t("DashboardPayments.workspace.transferMissing"));
   }
 
   return body.data.transfer;
 }
 
-export async function fetchBatchRecipients(input: {
-  page?: number;
-  pageSize?: number;
-  search?: string;
-  ids?: string[];
-  signal?: AbortSignal;
-}): Promise<ListProjectCounterpartyAccountsResponse> {
+export async function fetchBatchRecipients(
+  input: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    ids?: string[];
+    signal?: AbortSignal;
+  },
+  t: Translate
+): Promise<ListProjectCounterpartyAccountsResponse> {
   const query = new URLSearchParams({
     ...(input.page ? { page: String(input.page) } : {}),
     ...(input.pageSize ? { pageSize: String(input.pageSize) } : {}),
@@ -534,16 +610,22 @@ export async function fetchBatchRecipients(input: {
   });
   const body = (await response.json().catch(() => ({}))) as ListProjectCounterpartyAccountsEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `Recipient list request failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.recipientListRequestFailed", { status: response.status })
+      )
+    );
   }
   if (!body.data) {
-    throw new Error("Recipient list response is missing recipients.");
+    throw new Error(t("DashboardPayments.workspace.recipientListMissing"));
   }
   return body.data;
 }
 
 export async function estimateTransferBatch(
-  input: PaymentTransferBatchRequest
+  input: PaymentTransferBatchRequest,
+  t: Translate
 ): Promise<PaymentTransferBatchEstimate> {
   const response = await fetch("/api/dashboard/payments/transfers/batch/estimate", {
     method: "POST",
@@ -552,10 +634,15 @@ export async function estimateTransferBatch(
   });
   const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEstimateEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `Batch estimate request failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.batchEstimateRequestFailed", { status: response.status })
+      )
+    );
   }
   if (!body.data?.estimate) {
-    throw new Error("Batch estimate response is missing estimate details.");
+    throw new Error(t("DashboardPayments.workspace.batchEstimateMissing"));
   }
   return body.data.estimate;
 }
@@ -567,7 +654,8 @@ export interface CreateTransferBatchResult {
 }
 
 export async function createTransferBatch(
-  input: PaymentTransferBatchRequest
+  input: PaymentTransferBatchRequest,
+  t: Translate
 ): Promise<CreateTransferBatchResult> {
   const response = await fetch("/api/dashboard/payments/transfers/batch", {
     method: "POST",
@@ -576,10 +664,15 @@ export async function createTransferBatch(
   });
   const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `Batch transfer request failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.batchTransferRequestFailed", { status: response.status })
+      )
+    );
   }
   if (!body.data?.batch || !body.data.recipients || !body.data.transfers) {
-    throw new Error("Batch transfer response is missing batch details.");
+    throw new Error(t("DashboardPayments.workspace.batchTransferMissing"));
   }
   return {
     batch: body.data.batch,
@@ -590,7 +683,8 @@ export async function createTransferBatch(
 
 async function postRampEvent(
   provider: RampEventProvider,
-  event: MoneygramRampEvent | CoinbaseRampEvent
+  event: MoneygramRampEvent | CoinbaseRampEvent,
+  t: Translate
 ): Promise<TransferRecord> {
   const response = await fetch(`/api/dashboard/payments/ramps/events/${provider}`, {
     method: "POST",
@@ -601,26 +695,41 @@ async function postRampEvent(
   });
   const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
   if (!response.ok) {
-    throw new Error(getApiError(body, `${provider} event request failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.rampEventRequestFailed", {
+          provider,
+          status: response.status,
+        })
+      )
+    );
   }
 
   if (!body.data?.transfer) {
-    throw new Error(`${provider} event response is missing transfer details.`);
+    throw new Error(t("DashboardPayments.workspace.rampEventMissing", { provider }));
   }
 
   return body.data.transfer;
 }
 
-export function postMoneygramRampEvent(event: MoneygramRampEvent): Promise<TransferRecord> {
-  return postRampEvent("moneygram", event);
+export function postMoneygramRampEvent(
+  event: MoneygramRampEvent,
+  t: Translate
+): Promise<TransferRecord> {
+  return postRampEvent("moneygram", event, t);
 }
 
-export function postCoinbaseRampEvent(event: CoinbaseRampEvent): Promise<TransferRecord> {
-  return postRampEvent("coinbase", event);
+export function postCoinbaseRampEvent(
+  event: CoinbaseRampEvent,
+  t: Translate
+): Promise<TransferRecord> {
+  return postRampEvent("coinbase", event, t);
 }
 
 export async function fetchCounterpartyAccounts(
-  counterpartyId: string
+  counterpartyId: string,
+  t: Translate
 ): Promise<CounterpartyAccount[]> {
   const response = await fetch(
     `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/accounts?pageSize=100`
@@ -630,7 +739,14 @@ export async function fetchCounterpartyAccounts(
     error?: { message?: string };
   };
   if (!response.ok) {
-    throw new Error(getApiError(body, `Failed to load accounts (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.counterpartyAccountsRequestFailed", {
+          status: response.status,
+        })
+      )
+    );
   }
   return body.data?.accounts ?? [];
 }
@@ -663,7 +779,7 @@ type SandboxTransferSimulationInput =
       };
     };
 
-export async function simulateSandboxTransfer(input: SandboxTransferSimulationInput) {
+export async function simulateSandboxTransfer(input: SandboxTransferSimulationInput, t: Translate) {
   const response = await fetch("/api/dashboard/payments/ramps/sandbox/simulate", {
     method: "POST",
     headers: {
@@ -674,7 +790,14 @@ export async function simulateSandboxTransfer(input: SandboxTransferSimulationIn
   const body = (await response.json().catch(() => ({}))) as SandboxTransferSimulationEnvelope;
 
   if (!response.ok) {
-    throw new Error(getApiError(body, `Sandbox simulation failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.sandboxSimulationRequestFailed", {
+          status: response.status,
+        })
+      )
+    );
   }
 
   return body.data?.transaction ?? null;
@@ -737,7 +860,7 @@ export async function fetchAllCounterparties(): Promise<CounterpartiesResult> {
     return {
       ok: false,
       data: [],
-      error: error instanceof Error ? error.message : "Unable to load counterparties",
+      ...(error instanceof Error ? { error: error.message } : {}),
     };
   }
 }

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 import { storeApiKeySecret } from "@/lib/playground-api-keys";
 import { GeneratedApiKeyInput } from "./generated-key-input";
 
@@ -21,8 +22,9 @@ function GeneratedApiKeyModal({
   apiKeyId,
   keyPrefix,
 }: GeneratedApiKeyModalProps) {
+  const t = useTranslations();
   const [isOpen, setIsOpen] = useState(true);
-  const [copyLabel, setCopyLabel] = useState("Copy");
+  const [copyLabel, setCopyLabel] = useState(() => t("DashboardCustody.copyValue"));
 
   useEffect(() => {
     if (!keyValue) {
@@ -47,11 +49,11 @@ function GeneratedApiKeyModal({
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(keyValue);
-      setCopyLabel("Copied");
-      window.setTimeout(() => setCopyLabel("Copy"), 1200);
+      setCopyLabel(t("DashboardCustody.copied"));
+      window.setTimeout(() => setCopyLabel(t("DashboardCustody.copyValue")), 1200);
     } catch {
-      setCopyLabel("Unable to copy");
-      window.setTimeout(() => setCopyLabel("Copy"), 1600);
+      setCopyLabel(t("DashboardCustody.unableToCopy", { label: "" }));
+      window.setTimeout(() => setCopyLabel(t("DashboardCustody.copyValue")), 1600);
     }
   };
 
@@ -59,17 +61,19 @@ function GeneratedApiKeyModal({
     <Modal
       isOpen={isOpen}
       onClose={close}
-      ariaLabel="API key generated"
-      closeLabel="Close generated key modal"
+      ariaLabel={t("DashboardCustody.apiKeyGenerated")}
+      closeLabel={t("DashboardCustody.closeGeneratedKeyModal")}
       contentClassName="p-6 text-left"
       size="md"
     >
-      <p className="pr-12 text-sm font-semibold text-primary">API key generated</p>
+      <p className="pr-12 text-sm font-semibold text-primary">
+        {t("DashboardCustody.apiKeyGenerated")}
+      </p>
       <p className="mt-2 text-sm text-secondary">{message}</p>
 
       {keyPrefix ? (
         <div className="mt-4 space-y-2">
-          <Label htmlFor="generated-key-prefix">Key prefix</Label>
+          <Label htmlFor="generated-key-prefix">{t("DashboardCustody.keyPrefix")}</Label>
           <Input
             id="generated-key-prefix"
             readOnly
@@ -80,16 +84,14 @@ function GeneratedApiKeyModal({
       ) : null}
 
       <div className="mt-4 space-y-2">
-        <Label htmlFor="generated-key-value">Your full key (shown once)</Label>
+        <Label htmlFor="generated-key-value">{t("DashboardCustody.fullKeyShownOnce")}</Label>
         <GeneratedApiKeyInput value={keyValue} />
-        <p className="text-xs text-tertiary">
-          This browser session can now use this key in the API Playground without pasting it again.
-        </p>
+        <p className="text-xs text-tertiary">{t("DashboardCustody.apiKeyPlaygroundSession")}</p>
       </div>
 
       <div className="mt-5 flex items-center justify-end gap-2">
         <Button type="button" variant="secondary" onClick={close}>
-          Dismiss
+          {t("DashboardCustody.dismiss")}
         </Button>
         <Button type="button" onClick={copy} variant="outline">
           {copyLabel}

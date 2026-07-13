@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 import type { ActionConfirmationState } from "./token-management-workspace.types";
 
 interface TokenActionConfirmationDialogProps {
@@ -17,6 +18,7 @@ export function TokenActionConfirmationDialog({
   onCancel,
   onConfirm,
 }: TokenActionConfirmationDialogProps) {
+  const t = useTranslations();
   if (!actionConfirmation) {
     return null;
   }
@@ -27,7 +29,7 @@ export function TokenActionConfirmationDialog({
       onClose={onCancel}
       closeDisabled={isPending}
       ariaLabel={actionConfirmation.options.confirmationTitle}
-      closeLabel="Close confirmation modal"
+      closeLabel={t("DashboardIssuance.modal.closeConfirmation")}
       contentClassName="border-border-default p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]"
       size="sm"
     >
@@ -39,7 +41,7 @@ export function TokenActionConfirmationDialog({
       </p>
       <div className="mt-5 flex items-center justify-end gap-2">
         <Button type="button" variant="outline" onClick={onCancel} disabled={isPending}>
-          Not now
+          {t("DashboardIssuance.confirmation.notNow")}
         </Button>
         <Button type="button" onClick={onConfirm} disabled={isPending}>
           {actionConfirmation.options.confirmButtonLabel}

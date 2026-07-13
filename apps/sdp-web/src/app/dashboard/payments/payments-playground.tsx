@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { ApiPlaygroundShell } from "@/components/api-playground-shell";
 import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";
+import { useTranslations } from "@/i18n/provider";
 import {
   buildPaymentsPlaygroundEndpointConfigs,
   type PaymentsPlaygroundTransferView,
@@ -28,14 +29,15 @@ export function PaymentsPlayground({
   wallets,
   walletsError,
 }: PaymentsPlaygroundProps) {
+  const t = useTranslations();
   const endpoints = useMemo(
-    () => buildPaymentsPlaygroundEndpointConfigs({ transfers, wallets }),
-    [transfers, wallets]
+    () => buildPaymentsPlaygroundEndpointConfigs({ transfers, wallets }, t),
+    [transfers, wallets, t]
   );
 
   return (
     <ApiPlaygroundShell
-      productName="Payments"
+      productName={t("DashboardPayments.playgroundProductName")}
       endpoints={endpoints}
       defaultEndpointId="execute-transfer"
       apiBaseUrl={apiBaseUrl}

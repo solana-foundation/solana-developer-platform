@@ -10,6 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useTranslations } from "@/i18n/provider";
 import { formatRiskScore, riskToneClassName, toProviderLabel } from "./payments-workspace.data";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
@@ -20,6 +21,7 @@ interface ProviderRiskTableProps {
 }
 
 export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTableProps) {
+  const t = useTranslations();
   if (!snapshot || snapshot.providers.length === 0) {
     return null;
   }
@@ -33,7 +35,7 @@ export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTabl
       isOpen={true}
       onClose={onClose}
       ariaLabel={title}
-      closeLabel={`Close ${title}`}
+      closeLabel={t("DashboardPayments.providerRisk.close", { title })}
       contentClassName="rounded-[24px] border-border-default p-6"
       size="xl"
     >
@@ -41,17 +43,14 @@ export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTabl
         <div className="space-y-1">
           <p className="text-[22px] font-medium text-primary">{title}</p>
           <p className="text-sm text-tertiary">{new Date(snapshot.checkedAt).toLocaleString()}</p>
-          <p className="text-sm text-tertiary">
-            This screening checks major risk factors such as sanctions exposure and other compliance
-            signals from the connected providers.
-          </p>
+          <p className="text-sm text-tertiary">{t("DashboardPayments.providerRisk.description")}</p>
         </div>
       </div>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Provider</TableHead>
-            <TableHead>Analysis</TableHead>
+            <TableHead>{t("DashboardPayments.providerRisk.provider")}</TableHead>
+            <TableHead>{t("DashboardPayments.providerRisk.analysis")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -64,7 +63,7 @@ export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTabl
                 <span
                   className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${riskToneClassName(provider)}`}
                 >
-                  {formatRiskScore(provider)}
+                  {formatRiskScore(provider, t)}
                 </span>
               </TableCell>
             </TableRow>
@@ -74,7 +73,7 @@ export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTabl
       {onClose ? (
         <div className="mt-6 flex justify-end">
           <Button type="button" variant="secondary" onClick={() => onClose()}>
-            Dismiss
+            {t("DashboardPayments.providerRisk.dismiss")}
           </Button>
         </div>
       ) : null}

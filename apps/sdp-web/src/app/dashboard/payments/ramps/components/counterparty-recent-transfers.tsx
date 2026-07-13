@@ -5,6 +5,7 @@ import { ArrowRightIcon } from "lucide-react";
 import Image from "next/image";
 import useSWR from "swr";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { formatRelativeTime } from "../../../activity-format-utils";
 import { resolveTransferFlow, resolveTransferTypeLabel } from "../../payments-overview.utils";
@@ -19,21 +20,27 @@ const SKELETON_ROWS = [
 ] as const;
 
 export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId: string }) {
+  const t = useTranslations();
   const { data, error } = useSWR(
     ["counterparty-recent-transfers", counterpartyId],
     () =>
-      fetchTransfers({
-        pageSize: RECENT_TRANSFERS_MAX_ROWS,
-        counterpartyId,
-        statuses: SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
-      }),
+      fetchTransfers(
+        {
+          pageSize: RECENT_TRANSFERS_MAX_ROWS,
+          counterpartyId,
+          statuses: SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
+        },
+        t
+      ),
     { revalidateOnFocus: false, revalidateIfStale: false, keepPreviousData: false }
   );
 
   if (error) {
     return (
       <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
-        {error instanceof Error ? error.message : "Recent transfers request failed."}
+        {error instanceof Error
+          ? error.message
+          : t("DashboardPayments.ramps.recentTransfersRequestFailed")}
       </div>
     );
   }
@@ -62,15 +69,21 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
   if (data.length === 0) {
     return (
       <section className="space-y-3">
-        <h2 className="text-2xl font-medium text-primary">Recent Transfers</h2>
-        <p className="py-3 text-sm text-tertiary">No recent transactions.</p>
+        <h2 className="text-2xl font-medium text-primary">
+          {t("DashboardPayments.ramps.recentTransfers")}
+        </h2>
+        <p className="py-3 text-sm text-tertiary">
+          {t("DashboardPayments.ramps.noRecentTransactions")}
+        </p>
       </section>
     );
   }
 
   return (
     <section className="space-y-3">
-      <h2 className="text-2xl font-medium text-primary">Recent Transfers</h2>
+      <h2 className="text-2xl font-medium text-primary">
+        {t("DashboardPayments.ramps.recentTransfers")}
+      </h2>
       <div>
         {data.map((transfer) => {
           const flow = resolveTransferFlow(transfer);
@@ -92,7 +105,7 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
                 </>
               ) : null}
               <span className="min-w-0 flex-1 truncate text-sm text-secondary">
-                {resolveTransferTypeLabel(transfer.type)}
+                {resolveTransferTypeLabel(transfer.type, t)}
               </span>
               {flow.send || flow.receive ? (
                 <span className="flex shrink-0 items-center gap-1.5 text-sm">

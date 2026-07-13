@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 import { deactivateApiKeyInlineAction } from "./actions";
 
 interface DeleteApiKeyModalProps {
@@ -26,6 +27,7 @@ export function DeleteApiKeyModal({
   onOpenChange,
   onDeleted,
 }: DeleteApiKeyModalProps) {
+  const t = useTranslations();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -66,7 +68,7 @@ export function DeleteApiKeyModal({
     }
 
     setIsSubmitting(true);
-    const toastId = toast.loading("Deleting API key.", {
+    const toastId = toast.loading(t("DashboardCustody.deleting"), {
       position: "bottom-right",
     });
 
@@ -76,7 +78,7 @@ export function DeleteApiKeyModal({
       confirmation,
     }).catch((error) => ({
       ok: false,
-      message: error instanceof Error ? error.message : "Unable to delete API key.",
+      message: error instanceof Error ? error.message : t("DashboardCustody.deleteApiKey"),
     }));
 
     if (result.ok) {
@@ -102,39 +104,41 @@ export function DeleteApiKeyModal({
           className="border-destructive text-destructive hover:bg-destructive/10"
           onClick={openModal}
         >
-          Delete
+          {t("DashboardCustody.delete")}
         </Button>
       )}
 
       <Modal
         isOpen={isOpen}
         onClose={close}
-        ariaLabel="Delete API key"
-        closeLabel="Close confirmation modal"
+        ariaLabel={t("DashboardCustody.deleteApiKey")}
+        closeLabel={t("DashboardCustody.closeConfirmationModal")}
         closeDisabled={isSubmitting}
         contentClassName="rounded-xl p-5 text-left"
         size="sm"
       >
-        <p className="pr-10 text-sm font-medium text-primary">Delete API key</p>
+        <p className="pr-10 text-sm font-medium text-primary">
+          {t("DashboardCustody.deleteApiKey")}
+        </p>
         <p className="mt-2 text-sm text-secondary">
-          This removes the key without deleting the row.
+          {t("DashboardCustody.deleteApiKeyDescription")}
         </p>
         <p className="mt-2 text-sm">
-          Type <span className="font-mono font-medium">{keyName}</span> to confirm.
+          {t("DashboardCustody.typeKeyNameToConfirm", { name: keyName })}
         </p>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-3">
           <input type="hidden" name="keyId" value={keyId} />
           <input type="hidden" name="keyName" value={keyName} />
           <Label htmlFor={`confirm-${keyId}`} className="text-sm">
-            Confirm key name
+            {t("DashboardCustody.confirmKeyName")}
           </Label>
           <Input
             id={`confirm-${keyId}`}
             name="confirmation"
             value={confirmation}
             onChange={(event) => setConfirmation(event.currentTarget.value)}
-            placeholder="Paste exact key name"
+            placeholder={t("DashboardCustody.deleteApiKeyPlaceholder")}
             autoFocus
             autoComplete="off"
             disabled={isSubmitting}
@@ -144,6 +148,7 @@ export function DeleteApiKeyModal({
             canSubmit={canSubmit}
             onCancel={close}
             isSubmitting={isSubmitting}
+            t={t}
           />
         </form>
       </Modal>
@@ -155,15 +160,17 @@ function DeleteApiKeyFormActions({
   canSubmit,
   onCancel,
   isSubmitting,
+  t,
 }: {
   canSubmit: boolean;
   onCancel: () => void;
   isSubmitting: boolean;
+  t: ReturnType<typeof useTranslations>;
 }) {
   return (
     <div className="mt-4 flex justify-end gap-2">
       <Button type="button" variant="secondary" onClick={onCancel} disabled={isSubmitting}>
-        Cancel
+        {t("DashboardCustody.cancel")}
       </Button>
       <Button
         type="submit"
@@ -172,7 +179,7 @@ function DeleteApiKeyFormActions({
         aria-busy={isSubmitting}
         className="min-w-[104px]"
       >
-        {isSubmitting ? "Deleting..." : "Delete key"}
+        {isSubmitting ? t("DashboardCustody.deleting") : t("DashboardCustody.deleteKey")}
       </Button>
     </div>
   );

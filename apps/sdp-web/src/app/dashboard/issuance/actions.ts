@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { isValidTokenDecimals } from "./create-token-modal.utils";
 import { issuanceTemplateCatalog } from "./template-catalog";
@@ -27,7 +28,7 @@ function parseBoolean(value: FormDataEntryValue | null, fallback: boolean): bool
   return fallback;
 }
 
-function parseErrorMessage(body: string): string {
+function parseErrorMessage(body: string, fallback: string): string {
   try {
     const parsed = JSON.parse(body) as {
       error?: { message?: string };
@@ -43,7 +44,7 @@ function parseErrorMessage(body: string): string {
     // Fall through to raw body below.
   }
 
-  return body || "Unknown error";
+  return body || fallback;
 }
 
 /**
@@ -51,7 +52,10 @@ function parseErrorMessage(body: string): string {
  * JSON automatically. Returns an error message when a non-empty value is not a
  * valid http(s) URL, or null when the value is acceptable.
  */
-function validateOptionalMetadataUri(uri: string): string | null {
+function validateOptionalMetadataUri(
+  uri: string,
+  t: Awaited<ReturnType<typeof getTranslations>>
+): string | null {
   if (!uri) {
     return null;
   }
@@ -59,10 +63,10 @@ function validateOptionalMetadataUri(uri: string): string | null {
   try {
     const parsed = new URL(uri);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return "Metadata URI must use http or https.";
+      return t("DashboardIssuance.errors.metadataUriHttp");
     }
   } catch {
-    return "Metadata URI must be a valid URL.";
+    return t("DashboardIssuance.errors.metadataUriValid");
   }
 
   return null;
@@ -71,6 +75,7 @@ function validateOptionalMetadataUri(uri: string): string | null {
 export async function createIssuanceTokenAction(
   formData: FormData
 ): Promise<CreateIssuanceTokenResult> {
+  const t = await getTranslations();
   const uri = String(formData.get("uri") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim();
   const symbol = String(formData.get("symbol") ?? "").trim();
@@ -87,13 +92,13 @@ export async function createIssuanceTokenAction(
   if (!name) {
     return {
       state: "error",
-      message: "Token name is required.",
+      message: t("DashboardIssuance.errors.tokenNameRequired"),
       tokenId: null,
       tokenName: null,
     };
   }
 
-  const uriError = validateOptionalMetadataUri(uri);
+  const uriError = validateOptionalMetadataUri(uri, t);
   if (uriError) {
     return {
       state: "error",
@@ -106,7 +111,7 @@ export async function createIssuanceTokenAction(
   if (!symbol || !/^[A-Za-z0-9.]{1,10}$/.test(symbol)) {
     return {
       state: "error",
-      message: "Symbol must be 1-10 characters using letters, numbers, or periods.",
+      message: t("DashboardIssuance.errors.symbolFormat"),
       tokenId: null,
       tokenName: null,
     };
@@ -115,7 +120,7 @@ export async function createIssuanceTokenAction(
   if (!issuanceTemplateCatalog.some((entry) => entry.id === template)) {
     return {
       state: "error",
-      message: "Invalid template selection.",
+      message: t("DashboardIssuance.errors.invalidTemplate"),
       tokenId: null,
       tokenName: null,
     };
@@ -163,7 +168,7 @@ export async function createIssuanceTokenAction(
     if (!isValidTokenDecimals(decimalsRaw)) {
       return {
         state: "error",
-        message: "Decimals must be between 0 and 18.",
+        message: t("DashboardIssuance.errors.decimalsRange"),
         tokenId: null,
         tokenName: null,
       };
@@ -188,7 +193,10 @@ export async function createIssuanceTokenAction(
       const body = await response.text();
       return {
         state: "error",
-        message: `Create failed (${response.status}): ${parseErrorMessage(body)}`,
+        message: t("DashboardIssuance.errors.createFailed", {
+          status: response.status,
+          error: parseErrorMessage(body, t("DashboardIssuance.errors.unknown")),
+        }),
         tokenId: null,
         tokenName: null,
       };
@@ -210,14 +218,14 @@ export async function createIssuanceTokenAction(
 
     return {
       state: "success",
-      message: `Draft ${tokenName} created. Deploy it on-chain from the token page.`,
+      message: t("DashboardIssuance.errors.draftCreated", { name: tokenName }),
       tokenId,
       tokenName,
     };
   } catch (error) {
     return {
       state: "error",
-      message: error instanceof Error ? error.message : "Unexpected error",
+      message: error instanceof Error ? error.message : t("DashboardIssuance.errors.unexpected"),
       tokenId: null,
       tokenName: null,
     };

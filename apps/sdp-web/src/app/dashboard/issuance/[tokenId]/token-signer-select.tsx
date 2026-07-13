@@ -2,6 +2,7 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Select, SelectItem } from "@/components/ui/select";
+import { useTranslations } from "@/i18n/provider";
 import { getSignerWalletOptionLabel } from "./token-management-workspace.utils";
 import { TokenWalletIdentityCard } from "./token-wallet-identity-card";
 
@@ -25,11 +26,12 @@ export function TokenSignerSelect({
   signerWalletId,
   signerUnavailableReason,
   onSignerWalletIdChange,
-  label = "Signer",
+  label,
   helperText,
   showSelectionSummary = false,
   optional = false,
 }: TokenSignerSelectProps) {
+  const t = useTranslations();
   const hasReason = Boolean(signerUnavailableReason);
   const hasNoWallets = !hasReason && signerWallets.length === 0;
   const isUnavailable = hasReason || signerWallets.length === 0;
@@ -39,15 +41,15 @@ export function TokenSignerSelect({
   // is optional (draft creation) is expected, so it stays neutral.
   const isError = hasReason || (hasNoWallets && !optional);
   const defaultMessage = isLocked
-    ? "SDP will sign this action with the required authority wallet."
-    : "SDP will sign this transaction with the selected wallet.";
+    ? t("DashboardIssuance.signer.requiredAuthorityHint")
+    : t("DashboardIssuance.signer.selectedWalletHint");
   const availableMessage = helperText === undefined ? defaultMessage : helperText;
   const message = signerUnavailableReason
     ? signerUnavailableReason
     : hasNoWallets
       ? optional
-        ? "No signer wallets available — SDP will use the project's default signer."
-        : "No signer wallets available."
+        ? t("DashboardIssuance.signer.defaultSignerHint")
+        : t("DashboardIssuance.signer.noneAvailable")
       : availableMessage;
   const selectedWallet =
     signerWallets.find((wallet) => wallet.walletId === signerWalletId) ?? signerWallets[0] ?? null;
@@ -55,7 +57,7 @@ export function TokenSignerSelect({
   return (
     <div className="space-y-2">
       <span className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary">
-        {label}
+        {label ?? t("DashboardIssuance.signer.label")}
       </span>
       {isLocked && selectedWallet ? (
         <TokenWalletIdentityCard wallet={selectedWallet} />
@@ -63,12 +65,12 @@ export function TokenSignerSelect({
         <Select
           value={signerWalletId}
           disabled={isUnavailable}
-          placeholder="Select a signer wallet"
+          placeholder={t("DashboardIssuance.signer.select")}
           onValueChange={(value) => onSignerWalletIdChange(value === null ? "" : value)}
         >
           {signerWallets.map((wallet) => (
             <SelectItem key={wallet.id} value={wallet.walletId}>
-              {getSignerWalletOptionLabel(wallet)}
+              {getSignerWalletOptionLabel(wallet, t)}
             </SelectItem>
           ))}
         </Select>

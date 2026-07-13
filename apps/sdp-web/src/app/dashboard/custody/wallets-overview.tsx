@@ -5,6 +5,7 @@ import { Plus } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import {
+  CUSTODY_CAPABILITY_LABEL_KEYS,
   CUSTODY_PROVIDER_CATALOG,
   type CustodyProviderCatalogEntry,
   formatCustodyProviderName,
@@ -20,6 +21,7 @@ import { formatPurpose, formatWalletMeta } from "@/app/dashboard/custody/wallet-
 import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useTranslations } from "@/i18n/provider";
 import { WalletProviderMark } from "./wallet-provider-mark";
 
 type OpenCreateWallet = (provider: KnownCustodyProvider | null) => void;
@@ -50,12 +52,13 @@ function getEnabledProviderEntries(
 }
 
 function CreateWalletTile({ onClick }: { onClick: () => void }) {
+  const t = useTranslations();
   return (
     <button
       type="button"
       onClick={onClick}
       className="flex min-h-[340px] cursor-pointer items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default focus-visible:ring-offset-2"
-      aria-label="Create wallet"
+      aria-label={t("DashboardCustody.createWallet")}
     >
       <Plus className="h-6 w-6" />
     </button>
@@ -71,6 +74,7 @@ function ProviderChoiceCard({
   onCreateWallet: OpenCreateWallet;
   provider: CustodyProviderCatalogEntry;
 }) {
+  const t = useTranslations();
   return (
     <article className="flex min-h-[300px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]">
       <div className="flex items-start justify-between gap-3">
@@ -81,7 +85,7 @@ function ProviderChoiceCard({
         <h3 className="text-[30px] leading-[1.1] font-medium tracking-[-0.03em] text-primary">
           {provider.label}
         </h3>
-        <p className="text-sm leading-6 text-secondary">{provider.description}</p>
+        <p className="text-sm leading-6 text-secondary">{t(provider.descriptionKey)}</p>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -90,7 +94,7 @@ function ProviderChoiceCard({
             key={feature}
             className="rounded-full border border-border-default bg-fill-subtle px-2.5 py-1 text-[11px] font-medium text-secondary"
           >
-            {feature}
+            {t(CUSTODY_CAPABILITY_LABEL_KEYS[feature])}
           </span>
         ))}
       </div>
@@ -104,11 +108,13 @@ function ProviderChoiceCard({
           disabled={isDisabled}
           title={
             isDisabled
-              ? `${provider.label} is already connected, but additional wallets are not available yet.`
+              ? t("DashboardCustody.providerAdditionalWalletUnavailable", {
+                  provider: provider.label,
+                })
               : undefined
           }
         >
-          New wallet
+          {t("DashboardCustody.newWallet")}
         </Button>
       </div>
     </article>
@@ -122,8 +128,9 @@ function WalletCard({
   canManageCustody: boolean;
   item: WalletWithProvider;
 }) {
+  const t = useTranslations();
   const { wallet, provider } = item;
-  const purposeLabel = formatPurpose(wallet.purpose);
+  const purposeLabel = formatPurpose(wallet.purpose, t);
 
   return (
     <article className="flex min-h-[340px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]">
@@ -138,7 +145,7 @@ function WalletCard({
       </div>
 
       <p className="text-sm font-medium tracking-wide text-tertiary uppercase">
-        {provider ? formatCustodyProviderName(provider) : "Wallet"}
+        {provider ? formatCustodyProviderName(provider) : t("DashboardCustody.wallet")}
       </p>
       <div className="mt-1 min-w-0 text-[30px] leading-[1.1] font-medium tracking-[-0.03em] text-primary">
         <div className="min-w-0">
@@ -152,7 +159,7 @@ function WalletCard({
 
       <div className="mt-6 space-y-2 rounded-xl border border-border-subtle bg-fill-subtle p-3">
         <div className="flex items-center justify-between text-sm">
-          <span className="text-tertiary">Balance</span>
+          <span className="text-tertiary">{t("DashboardCustody.balance")}</span>
           <WalletCardBalanceValue
             walletId={wallet.walletId}
             initialBalances={wallet.balances ?? []}
@@ -160,12 +167,12 @@ function WalletCard({
         </div>
         {purposeLabel ? (
           <div className="flex items-center justify-between text-sm">
-            <span className="text-tertiary">Purpose</span>
+            <span className="text-tertiary">{t("DashboardCustody.purpose")}</span>
             <span className="font-medium text-primary">{purposeLabel}</span>
           </div>
         ) : null}
         <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="text-tertiary">Address</span>
+          <span className="text-tertiary">{t("DashboardCustody.address")}</span>
           <div className="flex min-w-0 items-center gap-2">
             <WalletMetaValue
               value={wallet.publicKey}
@@ -175,20 +182,25 @@ function WalletCard({
           </div>
         </div>
         <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="text-tertiary">Wallet ID</span>
+          <span className="text-tertiary">{t("DashboardCustody.walletId")}</span>
           <div className="flex min-w-0 items-center gap-2">
             <WalletMetaValue
               value={wallet.walletId}
               displayValue={formatWalletMeta(wallet.walletId, 10, 6)}
             />
-            <WalletMetadataCopyButton value={wallet.walletId} label="Wallet ID" />
+            <WalletMetadataCopyButton
+              value={wallet.walletId}
+              label={t("DashboardCustody.walletId")}
+            />
           </div>
         </div>
       </div>
 
       <div className="mt-auto pt-3">
         <Button asChild variant="outline" className="h-11 w-full rounded-[10px]">
-          <Link href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}>Manage</Link>
+          <Link href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}>
+            {t("DashboardCustody.manage")}
+          </Link>
         </Button>
       </div>
     </article>
@@ -222,6 +234,7 @@ export function WalletsOverview({
   walletsError,
   onCreateWallet,
 }: WalletsOverviewProps) {
+  const t = useTranslations();
   const enabledProviderEntries = getEnabledProviderEntries(enabledProviders);
   const walletsWithProvider = wallets.map((wallet) => ({
     wallet,
@@ -231,7 +244,7 @@ export function WalletsOverview({
   if (walletsError) {
     return (
       <div className="rounded-[20px] border border-destructive/15 bg-destructive/[0.04] px-5 py-4 text-sm text-destructive-strongest">
-        <p className="font-semibold">Unable to load wallets</p>
+        <p className="font-semibold">{t("DashboardCustody.unableToLoadWallets")}</p>
         <p className="mt-1">{walletsError}</p>
       </div>
     );
@@ -242,18 +255,18 @@ export function WalletsOverview({
       <div className="mx-auto flex max-w-6xl flex-col gap-6 py-8">
         <div className="max-w-2xl space-y-2">
           <h2 className="text-[32px] leading-[1.08] font-medium tracking-[-0.04em] text-primary">
-            {canManageCustody ? "Create your first wallet" : "No wallets available"}
+            {canManageCustody
+              ? t("DashboardCustody.createFirstWallet")
+              : t("DashboardCustody.noWalletsAvailable")}
           </h2>
           <p className="text-sm leading-6 text-secondary">
             {canManageCustody
-              ? "Choose the provider that will create and sign for the wallet."
-              : "Wallet creation is limited to admins. Once a wallet is created, you can still use it across the dashboard."}
+              ? t("DashboardCustody.createWalletDescription")
+              : t("DashboardCustody.walletCreationLimited")}
           </p>
           {configsError ? <p className="text-sm text-destructive-strong">{configsError}</p> : null}
           {canManageCustody && enabledProviderEntries.length === 0 ? (
-            <p className="text-sm text-secondary">
-              No wallet providers are enabled for this organization tier right now.
-            </p>
+            <p className="text-sm text-secondary">{t("DashboardCustody.noWalletProvidersTier")}</p>
           ) : null}
         </div>
 
@@ -284,7 +297,7 @@ export function WalletsOverview({
       {canManageCustody && enabledProviderEntries.length > 0 ? (
         <div className="flex justify-end">
           <Button type="button" className="w-full sm:w-auto" onClick={() => onCreateWallet(null)}>
-            Create Wallet
+            {t("DashboardCustody.createWallet")}
           </Button>
         </div>
       ) : null}

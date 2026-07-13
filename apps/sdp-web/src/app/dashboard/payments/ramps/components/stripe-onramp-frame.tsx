@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 
 const STRIPE_JS_URL = "https://js.stripe.com/dahlia/stripe.js";
 const STRIPE_CRYPTO_ONRAMP_URL = "https://crypto-js.stripe.com/crypto-onramp-outer.js";
@@ -94,6 +95,7 @@ export function StripeOnrampFrame({
   clientSecret: string;
   publishableKey: string;
 }) {
+  const t = useTranslations();
   const containerRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(false);
   const [failed, setFailed] = useState(false);
@@ -127,9 +129,11 @@ export function StripeOnrampFrame({
     <div className="flex min-h-[640px] flex-col items-center justify-center">
       {failed ? (
         <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
-          <p className="text-lg font-medium text-primary">Couldn't load Stripe checkout</p>
+          <p className="text-lg font-medium text-primary">
+            {t("DashboardPayments.ramps.stripeLoadError")}
+          </p>
           <p className="max-w-md text-sm leading-relaxed text-tertiary">
-            The Stripe checkout failed to load. Check your connection and try again.
+            {t("DashboardPayments.ramps.stripeLoadHelp")}
           </p>
           <Button
             type="button"
@@ -138,7 +142,7 @@ export function StripeOnrampFrame({
               void mountStripeWidget();
             }}
           >
-            Try again
+            {t("DashboardPayments.ramps.tryAgain")}
           </Button>
         </div>
       ) : null}

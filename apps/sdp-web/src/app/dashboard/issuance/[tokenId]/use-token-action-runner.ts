@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "@/i18n/provider";
 import type {
   ActionConfirmationState,
   ActionExecutionInput,
@@ -12,6 +13,7 @@ import type {
 import { executeActionRequest } from "./token-management-workspace.utils";
 
 export function useTokenActionRunner() {
+  const t = useTranslations();
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
   const [actionConfirmation, setActionConfirmation] = useState<ActionConfirmationState | null>(
@@ -22,15 +24,18 @@ export function useTokenActionRunner() {
     input: ActionExecutionInput,
     options: RunActionOptions = {}
   ): Promise<ActionExecutionResult> => {
-    const submitToast = options.submitToast ?? `Submitting ${input.label.toLowerCase()}...`;
-    const successToast = options.successToast ?? "Transaction finalized successfully.";
+    const submitToast =
+      options.submitToast ??
+      t("DashboardIssuance.management.submittingAction", { action: input.label.toLowerCase() });
+    const successToast =
+      options.successToast ?? t("DashboardIssuance.management.transactionFinalized");
     const toastId = toast.loading(submitToast, {
       position: "bottom-right",
     });
 
     setIsPending(true);
     try {
-      const result = await executeActionRequest(input);
+      const result = await executeActionRequest(input, t);
 
       if (result.ok) {
         setActionConfirmation(null);
@@ -47,7 +52,10 @@ export function useTokenActionRunner() {
       toast.error(result.message, { id: toastId, position: "bottom-right" });
       return result;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Transaction failed.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : t("DashboardIssuance.management.transactionFailed");
       toast.error(message, { id: toastId, position: "bottom-right" });
       return {
         ok: false,
@@ -65,13 +73,20 @@ export function useTokenActionRunner() {
       setActionConfirmation({
         input,
         options: {
-          confirmationTitle: options.confirmationTitle ?? "Send transaction?",
+          confirmationTitle:
+            options.confirmationTitle ?? t("DashboardIssuance.management.sendTransaction"),
           confirmationDescription:
             options.confirmationDescription ??
-            "This will submit an on-chain transaction. Do you want to continue?",
-          confirmButtonLabel: options.confirmButtonLabel ?? "Go ahead",
-          submitToast: options.submitToast ?? `Submitting ${input.label.toLowerCase()}...`,
-          successToast: options.successToast ?? "Transaction finalized successfully.",
+            t("DashboardIssuance.management.sendTransactionDescription"),
+          confirmButtonLabel:
+            options.confirmButtonLabel ?? t("DashboardIssuance.management.goAhead"),
+          submitToast:
+            options.submitToast ??
+            t("DashboardIssuance.management.submittingAction", {
+              action: input.label.toLowerCase(),
+            }),
+          successToast:
+            options.successToast ?? t("DashboardIssuance.management.transactionFinalized"),
           onSuccess: options.onSuccess,
         },
       });

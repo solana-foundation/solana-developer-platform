@@ -3,11 +3,13 @@
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Combobox } from "@/components/ui/combobox";
+import { useTranslations } from "@/i18n/provider";
 import type { OnchainReceiveWizard } from "../hooks/use-onchain-receive-wizard";
 import { walletComboboxOptions } from "../wallet-options";
 import { WalletReceiveCard } from "./wallet-receive-card";
 
 export function OnchainReceiveStepContent({ wizard }: { wizard: OnchainReceiveWizard }) {
+  const t = useTranslations();
   const { currentStepId, liveWallets, walletsLoading, selectedWallet, walletId, setWalletId } =
     wizard;
 
@@ -16,12 +18,12 @@ export function OnchainReceiveStepContent({ wizard }: { wizard: OnchainReceiveWi
   if (currentStepId === "WALLET") {
     return (
       <Combobox
-        label="Destination wallet"
+        label={t("DashboardPayments.ramps.destinationWallet")}
         value={walletId || null}
         onChange={setWalletId}
         options={walletOptions}
-        placeholder="Select a wallet"
-        searchPlaceholder="Search wallets"
+        placeholder={t("DashboardPayments.ramps.selectDestinationWallet")}
+        searchPlaceholder={t("DashboardPayments.ramps.searchWallets")}
         icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
         isLoading={walletsLoading}
       />

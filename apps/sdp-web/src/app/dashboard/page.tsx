@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
@@ -8,6 +9,7 @@ import { resolveTotalBalance } from "./payments/payments-overview.utils";
 import { fetchPaymentsAggregate, fetchPaymentsWallets } from "./payments/payments-page.data";
 
 export default async function DashboardPage() {
+  const t = await getTranslations();
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -33,7 +35,9 @@ export default async function DashboardPage() {
     const totalBalance = resolveTotalBalance(aggregateResult.data?.balances ?? []);
 
     const aggregateError =
-      aggregateResult.ok || isWalletEmptyState ? null : "Balance data is unavailable right now.";
+      aggregateResult.ok || isWalletEmptyState
+        ? null
+        : t("Shared.homeWorkspace.balanceDataUnavailable");
 
     trace.log({
       ok: true,

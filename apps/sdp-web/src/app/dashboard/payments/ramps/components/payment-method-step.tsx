@@ -2,6 +2,8 @@
 
 import { ArrowLeftRight, Banknote } from "lucide-react";
 import type { ReactNode } from "react";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 export type PaymentMethod = "onchain" | "ramp";
@@ -19,19 +21,21 @@ type MethodOption = {
   icon: ReactNode;
 };
 
-function buildOptions(mode: "send" | "receive"): MethodOption[] {
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+function buildOptions(t: Translate, mode: "send" | "receive"): MethodOption[] {
   if (mode === "send") {
     return [
       {
         id: "onchain",
-        title: "Onchain transfer",
-        description: "Send crypto from an SDP wallet to a counterparty's Solana address.",
+        title: t("DashboardPayments.paymentMethods.onchainTransfer"),
+        description: t("DashboardPayments.paymentMethods.onchainTransferDescription"),
         icon: <ArrowLeftRight className="size-5" />,
       },
       {
         id: "ramp",
-        title: "Pay with fiat",
-        description: "Convert crypto to fiat and pay out through a provider.",
+        title: t("DashboardPayments.paymentMethods.payWithFiat"),
+        description: t("DashboardPayments.paymentMethods.payWithFiatDescription"),
         icon: <Banknote className="size-5" />,
       },
     ];
@@ -39,23 +43,24 @@ function buildOptions(mode: "send" | "receive"): MethodOption[] {
   return [
     {
       id: "onchain",
-      title: "Onchain deposit",
-      description: "Receive crypto directly to an SDP wallet address.",
+      title: t("DashboardPayments.paymentMethods.onchainDeposit"),
+      description: t("DashboardPayments.paymentMethods.onchainDepositDescription"),
       icon: <ArrowLeftRight className="size-5" />,
     },
     {
       id: "ramp",
-      title: "Deposit with fiat",
-      description: "Buy crypto with fiat through a provider and deposit it into a wallet.",
+      title: t("DashboardPayments.paymentMethods.depositWithFiat"),
+      description: t("DashboardPayments.paymentMethods.depositWithFiatDescription"),
       icon: <Banknote className="size-5" />,
     },
   ];
 }
 
 export function PaymentMethodStep({ mode, value, onChange }: PaymentMethodStepProps) {
+  const t = useTranslations();
   return (
     <div className="space-y-3">
-      {buildOptions(mode).map((option) => (
+      {buildOptions(t, mode).map((option) => (
         <button
           key={option.id}
           type="button"

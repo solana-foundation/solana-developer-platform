@@ -5,6 +5,7 @@ import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { FormEvent } from "react";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 import type { CreateIssuanceTokenResult } from "./actions";
 import type { AccessControlMode, TemplateSelection, TokenDraft } from "./create-token-modal.types";
 import {
@@ -42,7 +43,8 @@ export function CreateTokenFeaturesStep({
   onBack,
   onSubmit,
 }: CreateTokenFeaturesStepProps) {
-  const accessControlOptions = getAccessControlOptions(template);
+  const t = useTranslations();
+  const accessControlOptions = getAccessControlOptions(template, t);
   const availableSignerWallets = signerWallets.filter(
     (wallet) => wallet.walletId.trim() && wallet.publicKey.trim()
   );
@@ -70,7 +72,7 @@ export function CreateTokenFeaturesStep({
       <div className="space-y-5 rounded-[28px] p-5">
         <div className="grid gap-2">
           <label htmlFor="issuance-token-main-signer" className="text-3xl font-medium text-primary">
-            Main Signer
+            {t("DashboardIssuance.create.mainSigner")}
           </label>
           {availableSignerWallets.length > 0 ? (
             <>
@@ -83,7 +85,7 @@ export function CreateTokenFeaturesStep({
                 className="h-12 w-full rounded-[14px] border border-border-default bg-white px-4 text-base text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
               >
                 <option value="" disabled>
-                  Select signer wallet
+                  {t("DashboardIssuance.create.selectSignerWallet")}
                 </option>
                 {availableSignerWallets.map((wallet) => (
                   <option key={wallet.id} value={wallet.walletId}>
@@ -92,13 +94,12 @@ export function CreateTokenFeaturesStep({
                 ))}
               </select>
               <p className="text-base text-secondary">
-                This wallet will be used as the token&apos;s main signer for deploy and later token
-                actions.
+                {t("DashboardIssuance.create.mainSignerHint")}
               </p>
             </>
           ) : signerWalletsLoading ? (
             <p className="rounded-2xl border border-border-subtle bg-fill-subtle px-4 py-3 text-base text-secondary">
-              Loading signer wallets…
+              {t("DashboardIssuance.create.loadingSignerWallets")}
             </p>
           ) : signerWalletsError ? (
             <p className="rounded-2xl border border-destructive/20 bg-destructive/[0.03] px-4 py-3 text-base text-destructive-strongest">
@@ -106,16 +107,17 @@ export function CreateTokenFeaturesStep({
             </p>
           ) : (
             <p className="rounded-2xl border border-border-subtle bg-fill-subtle px-4 py-3 text-base text-secondary">
-              No controlled wallets are available yet. The token will use the current default
-              signer.
+              {t("DashboardIssuance.create.noControlledWallets")}
             </p>
           )}
         </div>
 
         <div>
-          <p className="text-3xl font-medium text-primary">Transfer Controls</p>
+          <p className="text-3xl font-medium text-primary">
+            {t("DashboardIssuance.create.transferControls")}
+          </p>
           <p className="mt-2 text-lg text-secondary">
-            Choose how this token should treat approved or blocked destination addresses.
+            {t("DashboardIssuance.create.transferControlsHint")}
           </p>
         </div>
 
@@ -155,10 +157,10 @@ export function CreateTokenFeaturesStep({
 
       <div className="mt-5 flex items-center justify-between gap-3">
         <Button type="button" variant="secondary" onClick={onBack} className="flex-1">
-          Back
+          {t("DashboardIssuance.create.back")}
         </Button>
         <Button type="submit" disabled={!canSubmit} className="flex-1">
-          {isPending ? "Creating..." : getCreateButtonLabel(template)}
+          {isPending ? t("DashboardIssuance.create.creating") : getCreateButtonLabel(template, t)}
         </Button>
       </div>
     </motion.form>

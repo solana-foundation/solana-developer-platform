@@ -2,9 +2,11 @@
 
 import { ArrowLeftIcon, ArrowRightIcon, Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useTranslations } from "@/i18n/provider";
 import { useCounterpartyCreate } from "../counterparty-create-context";
 
 export function StepFooter() {
+  const t = useTranslations();
   const { step, currentStepId, goNext, goBack, submit, submitting } = useCounterpartyCreate();
 
   const isFirst = step === 0;
@@ -22,7 +24,7 @@ export function StepFooter() {
           disabled={submitting}
           iconLeft={<ArrowLeftIcon />}
         >
-          Back
+          {t("DashboardPayments.counterparty.back")}
         </Button>
       )}
 
@@ -33,11 +35,13 @@ export function StepFooter() {
           disabled={submitting}
           iconLeft={submitting ? <Loader2Icon className="animate-spin" /> : undefined}
         >
-          {submitting ? "Creating" : "Create"}
+          {submitting
+            ? t("DashboardPayments.counterparty.creating")
+            : t("DashboardPayments.counterparty.create")}
         </Button>
       ) : (
         <Button type="button" onClick={goNext} iconRight={<ArrowRightIcon />}>
-          Next
+          {t("DashboardPayments.counterparty.next")}
         </Button>
       )}
     </div>

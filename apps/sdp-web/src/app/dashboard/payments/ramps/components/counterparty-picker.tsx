@@ -1,6 +1,7 @@
 "use client";
 
 import { PlusIcon } from "lucide-react";
+import { useTranslations } from "@/i18n/provider";
 import type { CounterpartiesResult } from "../../payments-workspace.data";
 import { CounterpartySelector } from "./counterparty-selector";
 
@@ -19,6 +20,7 @@ export function CounterpartyPicker({
   onChange,
   onAddClick,
 }: CounterpartyPickerProps) {
+  const t = useTranslations();
   return (
     <div className="space-y-3">
       <button
@@ -30,11 +32,13 @@ export function CounterpartyPicker({
           <PlusIcon className="size-4" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium text-primary">Add counterparty</span>
+          <span className="block text-sm font-medium text-primary">
+            {t("DashboardPayments.counterparty.addCounterparty")}
+          </span>
           <span className="block text-sm text-tertiary">
             {mode === "send"
-              ? "Create a new payee if they aren't in the list yet."
-              : "Create a new buyer if they aren't in the list yet."}
+              ? t("DashboardPayments.ramps.newPayeeHint")
+              : t("DashboardPayments.ramps.newBuyerHint")}
           </span>
         </span>
       </button>

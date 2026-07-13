@@ -4,6 +4,7 @@ import { Maximize2Icon } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 
 const FRAME_ALLOW =
   "accelerometer; autoplay; camera; encrypted-media; fullscreen; geolocation; gyroscope; payment";
@@ -14,6 +15,7 @@ const FRAME_ALLOW =
  * escape hatch for the cramped steps.
  */
 export function MoonpayRampFrame({ title, src }: { title: string; src: string }) {
+  const t = useTranslations();
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -29,7 +31,7 @@ export function MoonpayRampFrame({ title, src }: { title: string; src: string })
             onClick={() => setExpanded(true)}
             className="shadow-sm"
           >
-            Open full screen
+            {t("DashboardPayments.ramps.openFullScreen")}
           </Button>
         </div>
       </div>

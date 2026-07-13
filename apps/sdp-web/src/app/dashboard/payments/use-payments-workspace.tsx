@@ -7,6 +7,7 @@ import type {
 } from "@sdp/types";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import {
   createTransfer,
@@ -79,6 +80,7 @@ export interface PaymentsWorkspaceState {
 }
 
 export function usePaymentsWorkspace(): PaymentsWorkspaceState {
+  const t = useTranslations();
   const {
     data: wallets = [],
     error: walletsFetchError,
@@ -100,7 +102,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     TransferRecord[]
   >(
     PAYMENTS_WORKSPACE_TRANSFERS_KEY,
-    () => fetchTransfers({ pageSize: 20 }),
+    () => fetchTransfers({ pageSize: 20 }, t),
     {
       revalidateOnFocus: true,
       refreshInterval: 10_000,
@@ -142,7 +144,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     walletsFetchError instanceof Error
       ? walletsFetchError.message
       : walletsFetchError
-        ? "Failed to load wallets."
+        ? t("DashboardPayments.workspace.walletsLoadFailed")
         : null;
 
   useEffect(() => {
@@ -170,9 +172,13 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
       setAddPolicyLoading(true);
       setAddError(null);
       try {
-        setAddPolicy(await fetchWalletPolicy(addWalletId));
+        setAddPolicy(await fetchWalletPolicy(addWalletId, t));
       } catch (error) {
-        setAddError(error instanceof Error ? error.message : "Failed to load wallet policy.");
+        setAddError(
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.workspace.walletPolicyLoadFailed")
+        );
         setAddPolicy(null);
       } finally {
         setAddPolicyLoading(false);
@@ -180,7 +186,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     };
 
     void loadPolicy();
-  }, [addWalletId]);
+  }, [addWalletId, t]);
 
   useEffect(() => {
     if (!transferSource) {
@@ -190,7 +196,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
 
     const loadTransferPolicy = async () => {
       try {
-        const policy = await fetchWalletPolicy(transferSource);
+        const policy = await fetchWalletPolicy(transferSource, t);
         setTransferPolicyAllowlist(policy.destinationAllowlist);
       } catch {
         setTransferPolicyAllowlist([]);
@@ -198,7 +204,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     };
 
     void loadTransferPolicy();
-  }, [transferSource]);
+  }, [transferSource, t]);
 
   const addAddressTrimmed = addAddress.trim();
   const transferDestinationTrimmed = transferDestination.trim();
@@ -249,7 +255,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
 
   const checkAddAddressCompliance = async () => {
     if (!addAddressTrimmed) {
-      setAddError("Address is required.");
+      setAddError(t("DashboardPayments.workspace.addressRequired"));
       return;
     }
 
@@ -261,7 +267,11 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
       setAddCompliance(await runComplianceCheck(addAddressTrimmed, "wallet_address_addition"));
     } catch (error) {
       setAddCompliance(null);
-      setAddError(error instanceof Error ? error.message : "Compliance check failed.");
+      setAddError(
+        error instanceof Error
+          ? error.message
+          : t("DashboardPayments.workspace.complianceCheckFailed")
+      );
     } finally {
       setAddComplianceLoading(false);
     }
@@ -269,12 +279,12 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
 
   const addDestinationAddress = async () => {
     if (!canAddAddress || !addPolicy) {
-      setAddError("Run compliance check before adding the address.");
+      setAddError(t("DashboardPayments.workspace.complianceCheckRequired"));
       return;
     }
 
     if (allowlistAddresses.includes(addAddressTrimmed)) {
-      setAddSuccess("Address is already in the destination allowlist.");
+      setAddSuccess(t("DashboardPayments.workspace.addressAlreadyAllowlisted"));
       return;
     }
 
@@ -282,18 +292,26 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     setAddError(null);
     setAddSuccess(null);
     try {
-      const updated = await updateWalletPolicy(addWalletId, {
-        ...addPolicy,
-        destinationAllowlist: [...allowlistAddresses, addAddressTrimmed],
-      });
+      const updated = await updateWalletPolicy(
+        addWalletId,
+        {
+          ...addPolicy,
+          destinationAllowlist: [...allowlistAddresses, addAddressTrimmed],
+        },
+        t
+      );
       setAddPolicy(updated);
       void mutateWallets();
       if (addWalletId === transferSource) {
         setTransferPolicyAllowlist(updated.destinationAllowlist);
       }
-      setAddSuccess("Address added to wallet destination allowlist.");
+      setAddSuccess(t("DashboardPayments.workspace.addressAddedToAllowlist"));
     } catch (error) {
-      setAddError(error instanceof Error ? error.message : "Failed to add destination address.");
+      setAddError(
+        error instanceof Error
+          ? error.message
+          : t("DashboardPayments.workspace.destinationAddressAddFailed")
+      );
     } finally {
       setIsAddingAddress(false);
     }
@@ -301,8 +319,8 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
 
   const checkTransferCompliance = async () => {
     if (!transferDestinationTrimmed) {
-      toast.error("Compliance check failed.", {
-        description: "Destination address is required.",
+      toast.error(t("DashboardPayments.workspace.complianceCheckFailed"), {
+        description: t("DashboardPayments.workspace.destinationRequired"),
         position: "bottom-right",
       });
       return;
@@ -316,8 +334,11 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
       );
     } catch (error) {
       setTransferCompliance(null);
-      toast.error("Compliance check failed.", {
-        description: error instanceof Error ? error.message : "Compliance check failed.",
+      toast.error(t("DashboardPayments.workspace.complianceCheckFailed"), {
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.workspace.complianceCheckFailed"),
         position: "bottom-right",
       });
     } finally {
@@ -327,26 +348,28 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
 
   const submitTransfer = async () => {
     if (!canSubmitTransfer) {
-      toast.error("Transfer blocked.", {
-        description:
-          "Run compliance check or use a destination already in the source wallet allowlist.",
+      toast.error(t("DashboardPayments.workspace.transferBlocked"), {
+        description: t("DashboardPayments.workspace.transferBlockedDescription"),
         position: "bottom-right",
       });
       return;
     }
 
     setIsSubmittingTransfer(true);
-    const toastId = toast.loading("Submitting transfer.", {
+    const toastId = toast.loading(t("DashboardPayments.onchainSend.submittingTransfer"), {
       position: "bottom-right",
     });
     try {
-      const transfer = await createTransfer({
-        source: transferSource,
-        destination: transferDestinationTrimmed,
-        token: transferToken.trim() || "SOL",
-        amount: transferAmount.trim(),
-        memo: transferMemo.trim() || undefined,
-      });
+      const transfer = await createTransfer(
+        {
+          source: transferSource,
+          destination: transferDestinationTrimmed,
+          token: transferToken.trim() || "SOL",
+          amount: transferAmount.trim(),
+          memo: transferMemo.trim() || undefined,
+        },
+        t
+      );
       await mutateTransfers(
         (current) =>
           [transfer, ...(current ?? []).filter((entry) => entry.id !== transfer.id)].slice(0, 20),
@@ -358,34 +381,39 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
       void mutateWallets();
 
       if (transfer.signature) {
-        toast.success("Transfer submitted.", {
+        toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
           id: toastId,
           description: (
             <span>
-              Transaction sent.{" "}
+              {t("DashboardPayments.workspace.transactionSent")}{" "}
               <a
                 href={getDevnetExplorerUrl(transfer.signature)}
                 target="_blank"
                 rel="noreferrer"
                 className="underline underline-offset-2"
               >
-                View on Solana Explorer
+                {t("DashboardPayments.workspace.viewOnSolanaExplorer")}
               </a>
             </span>
           ),
           position: "bottom-right",
         });
       } else {
-        toast.success("Transfer submitted.", {
+        toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
           id: toastId,
-          description: `Status: ${transfer.status}`,
+          description: t("DashboardPayments.onchainSend.transferStatus", {
+            status: transfer.status,
+          }),
           position: "bottom-right",
         });
       }
     } catch (error) {
-      toast.error("Transfer failed.", {
+      toast.error(t("DashboardPayments.onchainSend.transferFailed"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Transfer failed.",
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.onchainSend.transferFailed"),
         position: "bottom-right",
       });
     } finally {
@@ -395,7 +423,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
 
   const loadTransferAllowlist = async () => {
     if (!transferSource) {
-      setTransferAllowlistError("Select a source wallet first.");
+      setTransferAllowlistError(t("DashboardPayments.workspace.sourceWalletRequired"));
       return;
     }
 
@@ -403,13 +431,15 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     setTransferAllowlistDismissed(false);
     setTransferAllowlistError(null);
     try {
-      const policy = await fetchWalletPolicy(transferSource);
+      const policy = await fetchWalletPolicy(transferSource, t);
       setTransferPolicyAllowlist(policy.destinationAllowlist);
       setTransferAllowlist(policy.destinationAllowlist);
     } catch (error) {
       setTransferAllowlist(null);
       setTransferAllowlistError(
-        error instanceof Error ? error.message : "Failed to load destination allowlist."
+        error instanceof Error
+          ? error.message
+          : t("DashboardPayments.workspace.destinationAllowlistLoadFailed")
       );
     } finally {
       setTransferAllowlistLoading(false);

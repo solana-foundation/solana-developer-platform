@@ -24,18 +24,31 @@ import {
   estimateTransferBatch,
   fetchBatchRecipients,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import type { BulkImportRow } from "../bulk-import";
 import { batchSendSchema, MAX_BATCH_RECIPIENTS, ONCHAIN_AMOUNT_PATTERN } from "../schema";
 import { walletBalanceAssetOptions } from "../wallet-options";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
-export const BATCH_SEND_STEPS = [
-  { id: "RECIPIENTS", label: "Recipients", title: "Pay multiple recipients" },
-  { id: "REVIEW", label: "Review", title: "Review batch" },
-] as const satisfies readonly RampWizardStep[];
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+export type BatchSendStepId = "RECIPIENTS" | "REVIEW";
 
-export type BatchSendStepId = (typeof BATCH_SEND_STEPS)[number]["id"];
+export function getBatchSendSteps(t: Translate): readonly RampWizardStep<BatchSendStepId>[] {
+  return [
+    {
+      id: "RECIPIENTS",
+      label: t("DashboardPayments.batchSend.recipientsStep"),
+      title: t("DashboardPayments.batchSend.recipientsTitle"),
+    },
+    {
+      id: "REVIEW",
+      label: t("DashboardPayments.batchSend.reviewStep"),
+      title: t("DashboardPayments.batchSend.reviewTitle"),
+    },
+  ];
+}
 
 export type BatchEligibleRecipient = CounterpartyAccountSummary;
 
@@ -86,6 +99,8 @@ export function useBatchSendWizard({
   onExit,
 }: UseBatchSendWizardProps) {
   const router = useRouter();
+  const t = useTranslations();
+  const steps = getBatchSendSteps(t);
   const [stepIndex, setStepIndex] = useState(0);
   const [walletId, setWalletId] = useState("");
   const [asset, setAsset] = useState("");
@@ -104,11 +119,14 @@ export function useBatchSendWizard({
   const { data: recipientPage, isLoading: recipientsLoading } = useSWR(
     ["batch-recipients", page, trimmedSearch],
     () =>
-      fetchBatchRecipients({
-        page,
-        pageSize: RECIPIENTS_PAGE_SIZE,
-        search: trimmedSearch.length > 0 ? trimmedSearch : undefined,
-      }),
+      fetchBatchRecipients(
+        {
+          page,
+          pageSize: RECIPIENTS_PAGE_SIZE,
+          search: trimmedSearch.length > 0 ? trimmedSearch : undefined,
+        },
+        t
+      ),
     { revalidateOnFocus: false, keepPreviousData: true }
   );
   const pageRecipients = recipientPage ? recipientPage.accounts : [];
@@ -126,17 +144,17 @@ export function useBatchSendWizard({
   );
   const assetOptions = useMemo(
     () =>
-      walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint).map((option) => {
+      walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t).map((option) => {
         const known =
           WELL_KNOWN_TOKEN_BY_MINT.has(option.value) ||
           Boolean(issuedTokenSymbolsByMint[option.value]);
         return {
           value: option.value,
           label: option.label === option.value ? shortenAddress(option.value) : option.label,
-          description: known ? undefined : "Custom token",
+          description: known ? undefined : t("DashboardPayments.batchSend.customToken"),
         };
       }),
-    [issuedTokenSymbolsByMint, selectedWallet]
+    [issuedTokenSymbolsByMint, selectedWallet, t]
   );
   const selectedAssetBalance = useMemo(
     () => selectedWallet?.balances?.find((balance) => balance.mint === asset) ?? null,
@@ -147,7 +165,7 @@ export function useBatchSendWizard({
   const selectWallet = (nextWalletId: string) => {
     setWalletId(nextWalletId);
     const nextWallet = liveWallets.find((wallet) => wallet.walletId === nextWalletId) ?? null;
-    const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint);
+    const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint, t);
     if (!nextAssets.some((option) => option.value === asset)) {
       const preferred = nextAssets.find((option) => option.label === "USDC") ?? nextAssets[0];
       setAsset(preferred?.value ?? "");
@@ -192,7 +210,7 @@ export function useBatchSendWizard({
 
   const bulkImport = async (rows: BulkImportRow[]): Promise<{ unresolved: string[] }> => {
     const ids = [...new Set(rows.map((row) => row.accountId))];
-    const resolved = await fetchBatchRecipients({ ids });
+    const resolved = await fetchBatchRecipients({ ids }, t);
     const byId = new Map(
       resolved.accounts.map((recipient) => [recipient.counterpartyAccountId, recipient])
     );
@@ -213,13 +231,16 @@ export function useBatchSendWizard({
     const { currency } = rows[0];
     const mint = isWellKnownTokenSymbol(currency) ? wellKnownMint(currency, cluster) : currency;
     if (!mint) {
-      throw new Error(`${currency} is not available on this network.`);
+      throw new Error(t("DashboardPayments.batchSend.tokenUnavailableOnNetwork", { currency }));
     }
 
     const nextEntries = mint === asset ? { ...entries, ...additions } : additions;
     if (Object.keys(nextEntries).length > MAX_BATCH_RECIPIENTS) {
       throw new Error(
-        `A batch can have at most ${MAX_BATCH_RECIPIENTS} recipients. This import would bring the total to ${Object.keys(nextEntries).length}.`
+        t("DashboardPayments.batchSend.importExceedsMaximumRecipients", {
+          max: MAX_BATCH_RECIPIENTS,
+          total: Object.keys(nextEntries).length,
+        })
       );
     }
     setAsset(mint);
@@ -266,8 +287,8 @@ export function useBatchSendWizard({
   );
   const recipientsValid = batchSendSchema.safeParse({ walletId, asset, recipients }).success;
 
-  const currentStepId = BATCH_SEND_STEPS[stepIndex].id;
-  const isLastStep = stepIndex === BATCH_SEND_STEPS.length - 1;
+  const currentStepId = steps[stepIndex].id;
+  const isLastStep = stepIndex === steps.length - 1;
   const canProceed =
     currentStepId === "RECIPIENTS" ? recipientsValid && !exceedsBalance && hasMint : true;
 
@@ -275,38 +296,47 @@ export function useBatchSendWizard({
     currentStepId === "REVIEW" && canProceed && !batchResult
       ? ["batch-estimate", JSON.stringify(request)]
       : null,
-    () => estimateTransferBatch(request),
+    () => estimateTransferBatch(request, t),
     { revalidateOnFocus: false }
   );
 
   const submitBatch = async () => {
     setSubmitting(true);
-    const toastId = toast.loading("Submitting batch.", { position: "bottom-right" });
+    const toastId = toast.loading(t("DashboardPayments.batchSend.submitting"), {
+      position: "bottom-right",
+    });
     try {
-      const result = await createTransferBatch(request);
+      const result = await createTransferBatch(request, t);
       setBatchResult(result);
       const status = result.batch.status;
       if (status === "confirmed") {
-        toast.success("Batch sent.", { id: toastId, position: "bottom-right" });
-      } else if (status === "partially_failed") {
-        toast.warning("Batch partially failed.", {
+        toast.success(t("DashboardPayments.batchSend.resultConfirmed"), {
           id: toastId,
-          description: "Some recipients did not receive funds.",
+          position: "bottom-right",
+        });
+      } else if (status === "partially_failed") {
+        toast.warning(t("DashboardPayments.batchSend.resultPartiallyFailed"), {
+          id: toastId,
+          description: t("DashboardPayments.batchSend.someRecipientsDidNotReceiveFunds"),
           position: "bottom-right",
         });
       } else if (status === "failed") {
-        toast.error("Batch failed.", { id: toastId, position: "bottom-right" });
-      } else {
-        toast.success("Batch submitted.", {
+        toast.error(t("DashboardPayments.batchSend.resultFailed"), {
           id: toastId,
-          description: `Status: ${status}`,
+          position: "bottom-right",
+        });
+      } else {
+        toast.success(t("DashboardPayments.batchSend.resultSubmitted"), {
+          id: toastId,
+          description: t("DashboardPayments.batchSend.status", { status }),
           position: "bottom-right",
         });
       }
     } catch (error) {
-      toast.error("Batch failed.", {
+      toast.error(t("DashboardPayments.batchSend.resultFailed"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Batch failed.",
+        description:
+          error instanceof Error ? error.message : t("DashboardPayments.batchSend.resultFailed"),
         position: "bottom-right",
       });
     } finally {
@@ -366,6 +396,7 @@ export function useBatchSendWizard({
     setSearchQuery,
     recipients,
     entries,
+    steps,
     toggleRecipient,
     setManySelected,
     setRecipientAmount,
@@ -374,7 +405,7 @@ export function useBatchSendWizard({
     estimateError: estimateError
       ? estimateError instanceof Error
         ? estimateError.message
-        : "Estimate failed."
+        : t("DashboardPayments.batchSend.estimateFailed")
       : null,
     submitting,
     batchResult,

@@ -1,6 +1,7 @@
 import { ChevronDown } from "lucide-react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
+import { getTranslations } from "@/i18n/server";
 
 function SkeletonBlock({ className }: { className: string }) {
   return <div className={`animate-pulse rounded-[16px] bg-fill-strong ${className}`} />;
@@ -79,7 +80,8 @@ function BalancesSectionSkeleton() {
   );
 }
 
-function ActivitySectionSkeleton() {
+async function ActivitySectionSkeleton() {
+  const t = await getTranslations();
   return (
     <section className="rounded-2xl border border-border-default bg-white p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -88,7 +90,7 @@ function ActivitySectionSkeleton() {
           <SkeletonBlock className="h-4 w-72" />
         </div>
         <Button type="button" variant="secondary" size="sm" disabled>
-          Refresh
+          {t("DashboardCustody.refresh")}
         </Button>
       </div>
       <div className="mt-6 space-y-3">
@@ -100,7 +102,8 @@ function ActivitySectionSkeleton() {
   );
 }
 
-export default function WalletDetailLoading() {
+export default async function WalletDetailLoading() {
+  const t = await getTranslations();
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
       <div className="flex justify-end">
@@ -112,7 +115,7 @@ export default function WalletDetailLoading() {
           className="w-auto min-w-[132px] whitespace-nowrap"
           iconRight={<ChevronDown className="size-4" />}
         >
-          Actions
+          {t("DashboardCustody.actions")}
         </Button>
       </div>
 

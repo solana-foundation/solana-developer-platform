@@ -15,6 +15,7 @@ import {
   WalletsPageSkeleton,
 } from "@/app/dashboard/wallets/wallets-page-skeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -92,43 +93,42 @@ async function getClerkOrganizationSummary(
 }
 
 async function OnboardingGateSection({ orgId }: { orgId: string }) {
+  const t = await getTranslations();
   const organization = await getClerkOrganizationSummary(orgId);
 
   return (
     <Card className="rounded-[24px] border-border-subtle shadow-none">
       <CardHeader>
-        <CardTitle>Waiting for organization sync</CardTitle>
-        <CardDescription>
-          SDP is waiting for the Clerk webhook to create this organization mapping.
-        </CardDescription>
+        <CardTitle>{t("DashboardCustody.waitingForOrganizationSync")}</CardTitle>
+        <CardDescription>{t("DashboardCustody.organizationSyncDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="rounded-xl border border-border-default bg-fill-subtle p-4 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-secondary">Organization name</span>
-            <span className="font-medium text-primary">{organization.name ?? "Unavailable"}</span>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-secondary">Organization slug</span>
-            <span className="font-mono text-xs text-primary">
-              {organization.slug ?? "Unavailable"}
+            <span className="text-secondary">{t("DashboardCustody.organizationName")}</span>
+            <span className="font-medium text-primary">
+              {organization.name ?? t("DashboardCustody.unavailable")}
             </span>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-secondary">Clerk organization ID</span>
+            <span className="text-secondary">{t("DashboardCustody.organizationSlug")}</span>
+            <span className="font-mono text-xs text-primary">
+              {organization.slug ?? t("DashboardCustody.unavailable")}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 py-1">
+            <span className="text-secondary">{t("DashboardCustody.clerkOrganizationId")}</span>
             <span className="font-mono text-xs text-primary">{organization.id}</span>
           </div>
         </div>
-        <p className="text-sm text-secondary">
-          Organization creation and membership sync now happen from Clerk webhooks only. Refresh in
-          a moment; if this keeps showing, check the Clerk webhook delivery for this organization.
-        </p>
+        <p className="text-sm text-secondary">{t("DashboardCustody.organizationSyncHelp")}</p>
       </CardContent>
     </Card>
   );
 }
 
 export default async function CustodyPage() {
+  const t = await getTranslations();
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -188,12 +188,12 @@ export default async function CustodyPage() {
       ? null
       : configsResult.error instanceof Error
         ? configsResult.error.message
-        : "Unable to load wallet providers";
+        : t("DashboardCustody.unableToLoadWalletProviders");
     const walletsError = walletsResult.ok
       ? null
       : walletsResult.error instanceof Error
         ? walletsResult.error.message
-        : "Unable to load wallets";
+        : t("DashboardCustody.unableToLoadWallets");
     const apiKeys = apiKeysResult.ok ? (apiKeysResult.data ?? []) : [];
     const enabledProviders = providerAccessResult.ok
       ? providerAccessResult.value.enabledCustodyProviders

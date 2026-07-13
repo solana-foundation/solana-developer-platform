@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { Label } from "@/components/ui/label";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { getCategorySections } from "../../../create/asset-details-config";
 import { DocumentRows } from "../../../create/document-rows";
@@ -37,9 +38,9 @@ import type { TokenOperations } from "../use-token-operations";
 // Category detail sections keep their config-defined titles; the icon is a
 // presentation concern of this tab.
 const SECTION_ICONS: Record<string, LucideIcon> = {
-  "Financial details": DollarSign,
-  "Security details": ScrollText,
-  "Asset details": Boxes,
+  "DashboardIssuance.config.financialDetails": DollarSign,
+  "DashboardIssuance.config.securityDetails": ScrollText,
+  "DashboardIssuance.config.categoryAssetDetails": Boxes,
 };
 
 export function DetailsTab({
@@ -51,6 +52,7 @@ export function DetailsTab({
   form: AssetProfileForm;
   ops: TokenOperations;
 }) {
+  const t = useTranslations();
   const { draft, updateDraft, saving, errors, showErrors } = form;
   const [jsonOpen, setJsonOpen] = useState(false);
   const sections = getCategorySections(draft.assetCategory);
@@ -71,16 +73,15 @@ export function DetailsTab({
 
   const signerWallet = findWalletByWalletId(ops.authorityWallets, draft.signingWalletId);
   const signerLabel = signerWallet
-    ? getSignerWalletOptionLabel(signerWallet)
-    : draft.signingWalletId || "Project default signer";
+    ? getSignerWalletOptionLabel(signerWallet, t)
+    : draft.signingWalletId || t("DashboardIssuance.assetDetails.projectDefaultSigner");
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <p className="inline-flex items-center gap-1.5 text-sm text-tertiary">
           <Lock className="h-3.5 w-3.5 shrink-0" />
-          This information is private by default and won&apos;t be visible to the public unless you
-          choose to include it.
+          {t("DashboardIssuance.assetProfileDetails.privateByDefault")}
         </p>
         <MetadataJsonToggle open={jsonOpen} onToggle={() => setJsonOpen((prev) => !prev)} />
       </div>
@@ -88,36 +89,40 @@ export function DetailsTab({
       {jsonOpen ? <MetadataJsonPanel metadata={buildIssuanceMetadata(draft)} /> : null}
 
       <FormCard
-        title="About this asset"
-        description="Basic information that describes what this asset is."
+        title={t("DashboardIssuance.assetDetails.about")}
+        description={t("DashboardIssuance.assetDetails.aboutDescription")}
         icon={Tag}
       >
         <div className="grid items-start gap-4 sm:grid-cols-2">
           <TextField
-            label="Name"
+            label={t("DashboardIssuance.forms.name")}
             required
             disabled={saving}
             value={draft.name}
             onChange={(value) => updateDraft({ name: value })}
-            placeholder="e.g., Verde Dollar"
+            placeholder={t("DashboardIssuance.assetDetails.namePlaceholder")}
             error={nameError}
           />
           <div className="grid grid-cols-2 items-start gap-4">
-            <ReadOnlyField label="Symbol" value={token.symbol} lockReason="Locked after creation" />
             <ReadOnlyField
-              label="Decimals"
+              label={t("DashboardIssuance.create.symbol")}
+              value={token.symbol}
+              lockReason={t("DashboardIssuance.assetDetails.lockedAfterCreation")}
+            />
+            <ReadOnlyField
+              label={t("DashboardIssuance.create.decimals")}
               value={String(token.decimals)}
-              lockReason="Locked after creation"
+              lockReason={t("DashboardIssuance.assetDetails.lockedAfterCreation")}
             />
           </div>
         </div>
         <div className="mt-4 grid gap-1.5">
           <Label htmlFor="asset-description">
-            Description{" "}
+            {t("DashboardIssuance.assetDetails.descriptionLabel")}{" "}
             <span aria-hidden className="text-destructive">
               *
             </span>
-            <span className="sr-only"> (required)</span>
+            <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
           </Label>
           <textarea
             id="asset-description"
@@ -125,7 +130,7 @@ export function DetailsTab({
             value={draft.description}
             onChange={(event) => updateDraft({ description: event.currentTarget.value })}
             rows={3}
-            placeholder="Describe what this asset represents."
+            placeholder={t("DashboardIssuance.assetDetails.descriptionPlaceholder")}
             aria-invalid={descriptionError ? true : undefined}
             className={cn(
               "w-full rounded-[14px] border bg-white px-4 py-3 text-sm text-primary outline-none transition-[box-shadow,border-color] placeholder:text-muted",
@@ -142,20 +147,20 @@ export function DetailsTab({
         </div>
         <div className="mt-4 grid items-start gap-4 sm:grid-cols-2">
           <TextField
-            label="Website"
+            label={t("DashboardIssuance.assetDetails.website")}
             disabled={saving}
             value={draft.website}
             onChange={(value) => updateDraft({ website: value })}
-            placeholder="https://…"
+            placeholder={t("DashboardIssuance.assetDetails.websitePlaceholder")}
             error={fieldError("website")}
           />
           <TextField
-            label="Logo image URL"
+            label={t("DashboardIssuance.assetDetails.logoImageUrl")}
             disabled={saving}
             value={draft.imageUrl}
             onChange={(value) => updateDraft({ imageUrl: value })}
-            placeholder="https://…/logo.png"
-            help="Shown next to your token in wallets and explorers."
+            placeholder={t("DashboardIssuance.assetDetails.logoPlaceholder")}
+            help={t("DashboardIssuance.assetDetails.logoHint")}
             error={fieldError("imageUrl")}
           />
         </div>
@@ -163,10 +168,10 @@ export function DetailsTab({
 
       {sections.map((section) => (
         <FormCard
-          key={section.title}
-          title={section.title}
-          description={section.description}
-          icon={SECTION_ICONS[section.title]}
+          key={section.titleKey}
+          title={t(section.titleKey)}
+          description={section.descriptionKey ? t(section.descriptionKey) : undefined}
+          icon={SECTION_ICONS[section.titleKey]}
         >
           <div className="grid items-start gap-4 sm:grid-cols-2">
             {section.fields.map((field) => (
@@ -185,8 +190,8 @@ export function DetailsTab({
       ))}
 
       <FormCard
-        title="Documents & references"
-        description="Important documents and references related to this asset."
+        title={t("DashboardIssuance.assetDetails.documents")}
+        description={t("DashboardIssuance.assetDetails.documentsDescription")}
         icon={FileText}
       >
         <DocumentRows
@@ -197,8 +202,8 @@ export function DetailsTab({
       </FormCard>
 
       <FormCard
-        title="Custom fields"
-        description="Your own private fields, stored under custom.customer."
+        title={t("DashboardIssuance.assetDetails.customFields")}
+        description={t("DashboardIssuance.assetDetails.customFieldsDescription")}
         icon={Braces}
       >
         <CustomFieldRows
@@ -209,15 +214,15 @@ export function DetailsTab({
       </FormCard>
 
       <FormCard
-        title="Operational"
-        description="Operational settings for this asset."
+        title={t("DashboardIssuance.assetDetails.operational")}
+        description={t("DashboardIssuance.assetDetails.operationalDescription")}
         icon={SlidersHorizontal}
       >
         <div className="grid items-start gap-4 sm:grid-cols-2">
           <ReadOnlyField
-            label="Signing wallet"
+            label={t("DashboardIssuance.assetDetails.signingWallet")}
             value={signerLabel}
-            lockReason="Set at creation — individual operations can use a different signer."
+            lockReason={t("DashboardIssuance.assetDetails.signingWalletLockReason")}
           />
         </div>
       </FormCard>

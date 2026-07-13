@@ -2,6 +2,7 @@ import type { CoinbaseRampEvent } from "@sdp/types";
 import { toast } from "sonner";
 import { z } from "zod";
 import { postCoinbaseRampEvent } from "@/app/dashboard/payments/payments-workspace.data";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 
 const coinbaseFrameEventSchema = z.discriminatedUnion("eventName", [
   z.object({
@@ -31,6 +32,7 @@ const coinbaseFrameEventSchema = z.discriminatedUnion("eventName", [
 ]);
 
 type CoinbaseFrameEvent = z.infer<typeof coinbaseFrameEventSchema>;
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 /**
  * Parses a raw postMessage payload from the Coinbase payment-link iframe.
@@ -54,10 +56,11 @@ function parseCoinbaseFrameEvent(raw: unknown): CoinbaseFrameEvent | null {
   return parsed.success ? parsed.data : null;
 }
 
-function reportRampEvent(event: CoinbaseRampEvent): void {
-  postCoinbaseRampEvent(event).catch((error) => {
-    toast.error("Failed to record Coinbase event.", {
-      description: error instanceof Error ? error.message : "Event request failed.",
+function reportRampEvent(event: CoinbaseRampEvent, t: Translate): void {
+  postCoinbaseRampEvent(event, t).catch((error) => {
+    toast.error(t("DashboardPayments.ramps.coinbaseEventFailed"), {
+      description:
+        error instanceof Error ? error.message : t("DashboardPayments.ramps.eventRequestFailed"),
       position: "bottom-right",
     });
   });
@@ -84,17 +87,17 @@ function reportRampEvent(event: CoinbaseRampEvent): void {
  *
  * @see https://docs.cdp.coinbase.com/onramp/headless-onramp/overview#post-message-events
  */
-export function handleCoinbaseFrameEvent(orderId: string, raw: unknown): void {
+export function handleCoinbaseFrameEvent(orderId: string, raw: unknown, t: Translate): void {
   const event = parseCoinbaseFrameEvent(raw);
   if (!event) {
     return;
   }
   switch (event.eventName) {
     case "onramp_api.commit_success":
-      reportRampEvent({ kind: "committed", orderId });
+      reportRampEvent({ kind: "committed", orderId }, t);
       break;
     case "onramp_api.commit_error":
-      reportRampEvent({ kind: "errored", orderId, reason: event.data.errorMessage });
+      reportRampEvent({ kind: "errored", orderId, reason: event.data.errorMessage }, t);
       break;
     case "onramp_api.load_pending":
     case "onramp_api.load_success":

@@ -1,8 +1,11 @@
+"use client";
+
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import {
   formatTokenAmount,
   shortenAddress,
 } from "@/app/dashboard/payments/payments-overview.utils";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 export function AmountBalanceReadout({
@@ -16,10 +19,12 @@ export function AmountBalanceReadout({
   exceeds: boolean;
   onMax?: () => void;
 }) {
+  const t = useTranslations();
+  const locale = useLocale();
   const trimmedAssetLabel = assetLabel.trim();
   const displayAssetLabel =
     WELL_KNOWN_TOKEN_BY_MINT.get(trimmedAssetLabel)?.symbol ?? shortenAddress(trimmedAssetLabel);
-  const displayAvailable = formatTokenAmount(available);
+  const displayAvailable = formatTokenAmount(available, locale);
   const fullReadout = `${available} ${assetLabel}`;
   const displayReadout = `${displayAvailable} ${displayAssetLabel}`;
 
@@ -39,7 +44,7 @@ export function AmountBalanceReadout({
             className="shrink-0 rounded-md bg-fill-strong px-2 py-0.5 text-xs font-semibold text-secondary transition-colors hover:bg-border-strong"
             onClick={onMax}
           >
-            MAX
+            {t("DashboardPayments.ramps.max")}
           </button>
         </>
       ) : null}

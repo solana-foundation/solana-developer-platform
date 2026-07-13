@@ -18,6 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { ApiKeyActionsMenu } from "./api-key-actions-menu";
 
 const PREFIX_COLUMN_CLASS = "hidden @4xl/api-keys-table:table-cell";
@@ -43,21 +44,25 @@ export interface ApiKeyRecord {
   createdAt: string;
 }
 
-function formatDate(value: string | null): string {
-  if (!value) return "Never";
+function formatDate(
+  value: string | null,
+  locale: string,
+  t: ReturnType<typeof useTranslations>
+): string {
+  if (!value) return t("DashboardCustody.never");
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("en-US", {
+  return date.toLocaleDateString(locale, {
     month: "short",
     day: "2-digit",
     year: "numeric",
   });
 }
 
-function formatRole(role: ApiKeyRole): string {
-  if (role === "api_admin") return "Admin";
-  if (role === "api_readonly") return "Read only";
-  return "Developer";
+function formatRole(role: ApiKeyRole, t: ReturnType<typeof useTranslations>): string {
+  if (role === "api_admin") return t("DashboardCustody.admin");
+  if (role === "api_readonly") return t("DashboardCustody.readOnly");
+  return t("DashboardCustody.developer");
 }
 
 function formatWalletLabel(wallet: PaymentsDashboardWallet): string {
@@ -72,10 +77,11 @@ function shortId(value: string | null): string {
 
 function getWalletNames(
   key: ApiKeyRecord,
-  walletLabelById: Map<string, string>
+  walletLabelById: Map<string, string>,
+  t: ReturnType<typeof useTranslations>
 ): { label: string; title: string } {
   if (key.walletScope === "all") {
-    return { label: "All wallets", title: "All wallets" };
+    return { label: t("DashboardCustody.allWallets"), title: t("DashboardCustody.allWallets") };
   }
 
   const walletIds =
@@ -85,54 +91,72 @@ function getWalletNames(
   const walletNames = walletIds.map((walletId) => walletLabelById.get(walletId) ?? walletId);
 
   if (walletNames.length === 0) {
-    return { label: "Selected wallets", title: "Selected wallets" };
+    return {
+      label: t("DashboardCustody.selectedWallets"),
+      title: t("DashboardCustody.selectedWallets"),
+    };
   }
 
   return {
-    label: `${walletNames.length} selected`,
+    label: t("DashboardCustody.selected", { count: walletNames.length }),
     title: walletNames.join(", "),
   };
 }
 
-function formatPolicyBinding(binding: ApiKeyWalletPolicyBindingSummary): string {
+function formatPolicyBinding(
+  binding: ApiKeyWalletPolicyBindingSummary,
+  t: ReturnType<typeof useTranslations>
+): string {
   if (binding.apiKeyControlProfileId) {
     const revision = binding.apiKeyControlProfileRevisionId
-      ? ` rev ${shortId(binding.apiKeyControlProfileRevisionId)}`
+      ? t("DashboardCustody.revision", { id: shortId(binding.apiKeyControlProfileRevisionId) })
       : "";
-    return `API profile ${shortId(binding.apiKeyControlProfileId)}${revision}`;
+    return t("DashboardCustody.apiProfile", {
+      id: shortId(binding.apiKeyControlProfileId),
+      revision,
+    });
   }
 
   if (binding.walletControlProfileId) {
     const revision = binding.walletControlProfileRevisionId
-      ? ` rev ${shortId(binding.walletControlProfileRevisionId)}`
+      ? t("DashboardCustody.revision", { id: shortId(binding.walletControlProfileRevisionId) })
       : "";
-    return `Wallet profile ${shortId(binding.walletControlProfileId)}${revision}`;
+    return t("DashboardCustody.walletProfile", {
+      id: shortId(binding.walletControlProfileId),
+      revision,
+    });
   }
 
-  return "Policy binding";
+  return t("DashboardCustody.policyBinding");
 }
 
 function getPolicySummary(
   key: ApiKeyRecord,
-  walletLabelById: Map<string, string>
+  walletLabelById: Map<string, string>,
+  t: ReturnType<typeof useTranslations>
 ): { label: string; title: string } {
   if (key.policyBindings.length === 0) {
     return {
-      label: "No API-key policy",
-      title: "No additional API-key policy is attached.",
+      label: t("DashboardCustody.noApiKeyPolicy"),
+      title: t("DashboardCustody.noAdditionalApiKeyPolicy"),
     };
   }
 
   const policyLabels = key.policyBindings.map((binding) => {
     const walletLabel =
       binding.bindingScope === "all"
-        ? "All wallets"
-        : (walletLabelById.get(binding.walletId ?? "") ?? binding.walletId ?? "Selected wallet");
-    return `${walletLabel}: ${formatPolicyBinding(binding)}`;
+        ? t("DashboardCustody.allWallets")
+        : (walletLabelById.get(binding.walletId ?? "") ??
+          binding.walletId ??
+          t("DashboardCustody.selectedWallet"));
+    return `${walletLabel}: ${formatPolicyBinding(binding, t)}`;
   });
 
   return {
-    label: `${key.policyBindings.length} policy ${key.policyBindings.length === 1 ? "binding" : "bindings"}`,
+    label:
+      key.policyBindings.length === 1
+        ? t("DashboardCustody.policyBindingCount", { count: key.policyBindings.length })
+        : t("DashboardCustody.policyBindingsCount", { count: key.policyBindings.length }),
     title: policyLabels.join("; "),
   };
 }
@@ -144,12 +168,15 @@ function AccessSummary({
   apiKey: ApiKeyRecord;
   walletLabelById: Map<string, string>;
 }) {
-  const walletSummary = getWalletNames(apiKey, walletLabelById);
-  const policySummary = getPolicySummary(apiKey, walletLabelById);
+  const t = useTranslations();
+  const walletSummary = getWalletNames(apiKey, walletLabelById, t);
+  const policySummary = getPolicySummary(apiKey, walletLabelById, t);
 
   return (
     <div className="min-w-0">
-      <p className="truncate text-sm font-medium text-primary">{formatRole(apiKey.role)} access</p>
+      <p className="truncate text-sm font-medium text-primary">
+        {t("DashboardCustody.roleAccess", { role: formatRole(apiKey.role, t) })}
+      </p>
       <p
         className="mt-1 truncate text-xs text-secondary"
         title={`${walletSummary.title} · ${policySummary.title}`}
@@ -169,6 +196,8 @@ export function ApiKeysTableClient({
   canManageApiKeys: boolean;
   wallets: PaymentsDashboardWallet[];
 }) {
+  const t = useTranslations();
+  const locale = useLocale();
   const [apiKeys, setApiKeys] = useState(initialApiKeys);
 
   useEffect(() => {
@@ -186,22 +215,36 @@ export function ApiKeysTableClient({
   }, [wallets]);
 
   if (sortedApiKeys.length === 0) {
-    return <p className="text-sm text-secondary">No API keys found.</p>;
+    return <p className="text-sm text-secondary">{t("DashboardCustody.noApiKeysFound")}</p>;
   }
 
   return (
     <Table className="[&_table]:w-full [&_table]:min-w-0 [&_table]:table-fixed">
       <TableHeader>
         <TableRow>
-          <TableHead className="w-[24%] @4xl/api-keys-table:w-[17%]">Name</TableHead>
-          <TableHead className={`${PREFIX_COLUMN_CLASS} w-[10%]`}>Prefix</TableHead>
-          <TableHead className="w-[48%] @4xl/api-keys-table:w-[27%]">Access</TableHead>
-          <TableHead className={`${STATUS_COLUMN_CLASS} w-[8%]`}>Status</TableHead>
-          <TableHead className={`${LAST_USED_COLUMN_CLASS} w-[9%]`}>Last used</TableHead>
-          <TableHead className={`${EXPIRES_COLUMN_CLASS} w-[9%]`}>Expires</TableHead>
-          <TableHead className={`${CREATED_COLUMN_CLASS} w-[9%]`}>Created</TableHead>
+          <TableHead className="w-[24%] @4xl/api-keys-table:w-[17%]">
+            {t("DashboardCustody.name")}
+          </TableHead>
+          <TableHead className={`${PREFIX_COLUMN_CLASS} w-[10%]`}>
+            {t("DashboardCustody.prefix")}
+          </TableHead>
+          <TableHead className="w-[48%] @4xl/api-keys-table:w-[27%]">
+            {t("DashboardCustody.access")}
+          </TableHead>
+          <TableHead className={`${STATUS_COLUMN_CLASS} w-[8%]`}>
+            {t("DashboardCustody.status")}
+          </TableHead>
+          <TableHead className={`${LAST_USED_COLUMN_CLASS} w-[9%]`}>
+            {t("DashboardCustody.lastUsed")}
+          </TableHead>
+          <TableHead className={`${EXPIRES_COLUMN_CLASS} w-[9%]`}>
+            {t("DashboardCustody.expires")}
+          </TableHead>
+          <TableHead className={`${CREATED_COLUMN_CLASS} w-[9%]`}>
+            {t("DashboardCustody.created")}
+          </TableHead>
           <TableHead className="w-[18%] @4xl/api-keys-table:w-[14%] @7xl/api-keys-table:w-[11%]">
-            {canManageApiKeys ? "Actions" : ""}
+            {canManageApiKeys ? t("DashboardCustody.actions") : ""}
           </TableHead>
         </TableRow>
       </TableHeader>
@@ -229,13 +272,13 @@ export function ApiKeysTableClient({
                 <span className="block truncate">{key.status}</span>
               </TableCell>
               <TableCell className={`${LAST_USED_COLUMN_CLASS} text-xs text-secondary`}>
-                {formatDate(key.lastUsedAt)}
+                {formatDate(key.lastUsedAt, locale, t)}
               </TableCell>
               <TableCell className={`${EXPIRES_COLUMN_CLASS} text-xs text-secondary`}>
-                {formatDate(key.expiresAt)}
+                {formatDate(key.expiresAt, locale, t)}
               </TableCell>
               <TableCell className={`${CREATED_COLUMN_CLASS} text-xs text-secondary`}>
-                {formatDate(key.createdAt)}
+                {formatDate(key.createdAt, locale, t)}
               </TableCell>
               <TableCell>
                 {canManageApiKeys ? (
