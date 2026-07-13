@@ -1,6 +1,7 @@
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import Image from "next/image";
 import Link from "next/link";
+import { LanguagePicker } from "@/components/language-picker";
 import { getTranslations } from "@/i18n/server";
 
 const docsHref =
@@ -16,13 +17,14 @@ export default async function Home() {
       <header className="border-b border-[rgba(28,28,29,0.08)]">
         <div className="mx-auto flex h-[72px] max-w-[1200px] items-center justify-between px-6 xl:px-0">
           <Image src="/landing/solana-logo.svg" alt={t("Home.solanaLogo")} width={20} height={18} />
-          <div className="flex items-center gap-5">
+          <div className="flex items-center gap-2">
             <Link
               href={docsHref}
-              className="text-sm font-medium text-[rgba(28,28,29,0.72)] transition-colors hover:text-[#1c1c1d]"
+              className="mr-2 text-sm font-medium text-[rgba(28,28,29,0.72)] transition-colors hover:text-[#1c1c1d]"
             >
               {t("Home.docs")}
             </Link>
+            <LanguagePicker variant="landing" />
             <Link
               href="/sign-in"
               className="inline-flex h-9 items-center justify-center rounded-lg bg-[#0f0f10] px-3 text-sm font-semibold text-white transition-colors hover:bg-black"
