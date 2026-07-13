@@ -3,9 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": {
-    "./test-support": "./src/test/integration-support.ts"
-  },
   "scripts": {
     "dev": "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=${CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE:-${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}} wrangler dev",
     "dev:local": "node scripts/dev-local.mjs",

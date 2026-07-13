@@ -24,9 +24,10 @@ test("assigns subpath imports to the longest matching workspace package", () => 
   const workspacePackage = workspaceImportName("@sdp/api-integration/helpers", [
     "@sdp/api",
     "@sdp/api-integration",
+    "@sdp/api-integration/helpers",
   ]);
 
-  assert.equal(workspacePackage, "@sdp/api-integration");
+  assert.equal(workspacePackage, "@sdp/api-integration/helpers");
 });
 
 test("permits the explicit API test-support facade", () => {
@@ -82,6 +83,30 @@ test("requires imported workspace packages to be declared", () => {
   });
 
   assert.match(errors.join("\n"), /without declaring @sdp\/api/);
+});
+
+test("reports one error for a forbidden API test-support import", () => {
+  const otherPackage = {
+    name: "@sdp/other",
+    directory: "packages/sdp-other",
+    allowedDependencies: [],
+    declaredDependencies: [],
+  };
+  const errors = validateModuleBoundaries({
+    modules: [api, integration, otherPackage],
+    appSourceRoots: ["/repo/apps/sdp-api/src"],
+    sourceImports: [
+      {
+        module: otherPackage,
+        filePath: "/repo/packages/sdp-other/src/index.ts",
+        specifier: "@sdp/api/test-support",
+      },
+    ],
+  });
+
+  assert.deepEqual(errors, [
+    "/repo/packages/sdp-other/src/index.ts imports API source outside @sdp/api/test-support: @sdp/api/test-support.",
+  ]);
 });
 
 test("detects workspace dependency cycles", () => {

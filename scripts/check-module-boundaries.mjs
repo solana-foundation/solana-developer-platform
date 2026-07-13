@@ -283,18 +283,19 @@ export function validateModuleBoundaries({ modules, sourceImports, appSourceRoot
   }
 
   for (const sourceImport of sourceImports) {
+    const violation = forbiddenPackageSourceImport({ ...sourceImport, appSourceRoots });
     const importedWorkspace = workspaceImportName(sourceImport.specifier, moduleNames);
     if (
       importedWorkspace &&
       importedWorkspace !== sourceImport.module.name &&
-      !sourceImport.module.declaredDependencies.includes(importedWorkspace)
+      !sourceImport.module.declaredDependencies.includes(importedWorkspace) &&
+      !violation
     ) {
       errors.push(
         `${toPosixPath(sourceImport.filePath)} imports ${sourceImport.specifier} without declaring ${importedWorkspace}.`
       );
     }
 
-    const violation = forbiddenPackageSourceImport({ ...sourceImport, appSourceRoots });
     if (violation) {
       errors.push(`${toPosixPath(sourceImport.filePath)} ${violation}: ${sourceImport.specifier}.`);
     }
