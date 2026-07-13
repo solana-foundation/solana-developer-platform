@@ -1,7 +1,6 @@
-import { SigningError } from "@sdp/custody/signing";
-import { readStringFrom } from "@/lib/json";
-import type { Env } from "@/types/env";
-import { parseJsonResponse, readErrorResponseText } from "./provisioning.common";
+import { SigningError } from "../signing";
+import { parseJsonResponse, readErrorResponseText } from "./common";
+import type { CustodyProvisioningRuntime } from "./runtime";
 
 const DEFAULT_ANCHORAGE_API_BASE_URL = "https://api.anchorage.com";
 
@@ -18,7 +17,6 @@ interface AnchorageRequestParams {
 type AnchorageAuthStrategy = "api-key" | "bearer";
 
 export interface ProvisionAnchorageOptions {
-  apiBaseUrl?: string;
   walletId?: string;
   walletLabel?: string;
   network?: "solana" | "solana-devnet";
@@ -30,18 +28,23 @@ export interface ProvisionAnchorageResult {
 }
 
 export interface DeleteAnchorageOptions {
-  apiBaseUrl?: string;
   walletId: string;
 }
 
+export interface AnchorageProvisioningConfig {
+  apiKey?: string;
+  apiBaseUrl?: string;
+}
+
 export async function provisionAnchorageWallet(
-  env: Env,
+  runtime: CustodyProvisioningRuntime,
+  config: AnchorageProvisioningConfig,
   options: ProvisionAnchorageOptions
 ): Promise<ProvisionAnchorageResult> {
-  const { apiBaseUrl, apiKey } = resolveAnchorageConfig(env, options.apiBaseUrl);
+  const { apiBaseUrl, apiKey } = resolveAnchorageConfig(config);
 
   if (options.walletId) {
-    const existing = await anchorageRequest<unknown>({
+    const existing = await anchorageRequest<unknown>(runtime, {
       method: "GET",
       apiBaseUrl,
       apiKey,
@@ -50,7 +53,7 @@ export async function provisionAnchorageWallet(
     return extractAnchorageWallet(existing);
   }
 
-  const created = await anchorageRequest<unknown>({
+  const created = await anchorageRequest<unknown>(runtime, {
     method: "POST",
     apiBaseUrl,
     apiKey,
@@ -65,12 +68,13 @@ export async function provisionAnchorageWallet(
 }
 
 export async function deleteAnchorageWallet(
-  env: Env,
+  runtime: CustodyProvisioningRuntime,
+  config: AnchorageProvisioningConfig,
   options: DeleteAnchorageOptions
 ): Promise<void> {
-  const { apiBaseUrl, apiKey } = resolveAnchorageConfig(env, options.apiBaseUrl);
+  const { apiBaseUrl, apiKey } = resolveAnchorageConfig(config);
 
-  await anchorageRequest<void>({
+  await anchorageRequest<void>(runtime, {
     method: "DELETE",
     apiBaseUrl,
     apiKey,
@@ -78,14 +82,11 @@ export async function deleteAnchorageWallet(
   });
 }
 
-function resolveAnchorageConfig(
-  env: Env,
-  apiBaseUrlOverride?: string
-): {
+function resolveAnchorageConfig(config: AnchorageProvisioningConfig): {
   apiBaseUrl: string;
   apiKey: string;
 } {
-  const apiKey = env.ANCHORAGE_API_KEY;
+  const apiKey = config.apiKey;
   if (!apiKey) {
     throw new SigningError(
       "Anchorage environment variables not configured: ANCHORAGE_API_KEY",
@@ -94,15 +95,18 @@ function resolveAnchorageConfig(
   }
 
   return {
-    apiBaseUrl: apiBaseUrlOverride ?? env.ANCHORAGE_API_BASE_URL ?? DEFAULT_ANCHORAGE_API_BASE_URL,
+    apiBaseUrl: config.apiBaseUrl ?? DEFAULT_ANCHORAGE_API_BASE_URL,
     apiKey,
   };
 }
 
-async function anchorageRequest<T>(params: AnchorageRequestParams): Promise<T> {
+async function anchorageRequest<T>(
+  runtime: CustodyProvisioningRuntime,
+  params: AnchorageRequestParams
+): Promise<T> {
   try {
     const requestWithAuth = (authStrategy: AnchorageAuthStrategy) =>
-      fetch(`${params.apiBaseUrl}${params.path}`, {
+      runtime.fetch(`${params.apiBaseUrl}${params.path}`, {
         method: params.method,
         headers: buildAnchorageHeaders(params, authStrategy),
         body: params.body ? JSON.stringify(params.body) : undefined,
@@ -156,8 +160,8 @@ function buildAnchorageHeaders(
 
 function extractAnchorageWallet(payload: unknown): ProvisionAnchorageResult {
   const record = unwrapPayload(payload);
-  const walletId = readStringFrom(record, ["walletId", "wallet_id", "id"]);
-  const address = readStringFrom(record, ["address", "publicKey", "public_key"]);
+  const walletId = readString(record, ["walletId", "wallet_id", "id"]);
+  const address = readString(record, ["address", "publicKey", "public_key"]);
 
   if (!walletId || !address) {
     throw new SigningError(
@@ -180,4 +184,15 @@ function unwrapPayload(payload: unknown): Record<string, unknown> {
   }
 
   return {};
+}
+
+function readString(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+
+  return undefined;
 }

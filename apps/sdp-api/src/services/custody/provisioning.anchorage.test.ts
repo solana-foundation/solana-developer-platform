@@ -1,5 +1,9 @@
+import {
+  type CustodyProvisioningRuntime,
+  provisionAnchorageWallet as provisionAnchorageWalletInCustody,
+} from "@sdp/custody/provisioning";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { provisionAnchorageWallet } from "@/services/custody/provisioning.anchorage";
+import { provisionAnchorageWallet } from "@/services/custody/provisioning";
 import type { Env } from "@/types/env";
 
 describe("anchorage wallet provisioning", () => {
@@ -43,6 +47,27 @@ describe("anchorage wallet provisioning", () => {
     expect(result.walletId).toBe("wa_anch_2");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("accepts explicit configuration and runtime dependencies", async () => {
+    const fetchMock = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(jsonResponse({ walletId: "wa_anch_3", address: "anch_address_3" }, 200));
+
+    const result = await provisionAnchorageWalletInCustody(
+      createRuntime(fetchMock),
+      {
+        apiKey: "anchorage-explicit-key",
+        apiBaseUrl: "https://anchorage.example.test",
+      },
+      {}
+    );
+
+    expect(result).toEqual({ walletId: "wa_anch_3", address: "anch_address_3" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://anchorage.example.test/v1/wallets",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
 });
 
 function createAnchorageEnv(overrides?: Partial<Env>): Env {
@@ -77,4 +102,15 @@ function toHeaderRecord(headers: HeadersInit | undefined): Record<string, string
   }
 
   return headers as Record<string, string>;
+}
+
+function createRuntime(fetch: typeof globalThis.fetch): CustodyProvisioningRuntime {
+  return {
+    fetch,
+    sleep: async () => undefined,
+    now: () => 0,
+    randomUUID: () => "test-uuid",
+    getRandomValues: (values) => values,
+    sha256: (data) => crypto.subtle.digest("SHA-256", data),
+  };
 }

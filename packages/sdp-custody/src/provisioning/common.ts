@@ -1,6 +1,6 @@
-import { Buffer } from "node:buffer";
-import { redactCredentialString } from "@sdp/custody";
-import { SigningError } from "@sdp/custody/signing";
+import { redactCredentialString } from "../redaction";
+import { SigningError } from "../signing";
+import type { CustodyProvisioningRuntime } from "./runtime";
 
 function hasEmptyResponseBody(response: Response): boolean {
   return response.status === 204 || response.headers.get("content-length") === "0";
@@ -21,20 +21,19 @@ export async function parseJsonResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export async function sha256Hex(data: string): Promise<string> {
+export async function sha256Hex(
+  runtime: CustodyProvisioningRuntime,
+  data: string
+): Promise<string> {
   const encoder = new TextEncoder();
   const dataBuffer = encoder.encode(data);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", dataBuffer);
+  const hashBuffer = await runtime.sha256(dataBuffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function randomHex(byteLength: number): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
+export function randomHex(runtime: CustodyProvisioningRuntime, byteLength: number): string {
+  const bytes = runtime.getRandomValues(new Uint8Array(byteLength));
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
@@ -130,8 +129,14 @@ export function encodeBasicAuth(value: string): string {
     return btoa(value);
   }
 
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(value, "utf-8").toString("base64");
+  const globalWithBuffer = globalThis as {
+    Buffer?: {
+      from: (input: string, encoding: "utf-8") => { toString: (encoding: "base64") => string };
+    };
+  };
+
+  if (globalWithBuffer.Buffer) {
+    return globalWithBuffer.Buffer.from(value, "utf-8").toString("base64");
   }
 
   throw new SigningError("Unable to encode Basic auth header", "PROVIDER_NOT_CONFIGURED");
