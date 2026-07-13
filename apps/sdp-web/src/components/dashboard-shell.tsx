@@ -26,6 +26,7 @@ import PaymentsLoading from "@/app/dashboard/payments/loading";
 import WalletsLoading from "@/app/dashboard/wallets/loading";
 import { CounterpartyHeaderTabs } from "@/components/counterparty-header-tabs";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
+import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
@@ -211,6 +212,7 @@ function DashboardTopBar({
           </h1>
         </div>
         <div className="flex items-center justify-end gap-2">
+          <LanguagePicker />
           <UserButton />
           {sandboxBadge}
         </div>
@@ -233,6 +235,7 @@ function DashboardTopBar({
       </div>
 
       <div className="flex items-center gap-2">
+        <LanguagePicker />
         <UserButton />
         {sandboxBadge}
       </div>

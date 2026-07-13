@@ -1,6 +1,6 @@
+import { SigningError } from "@sdp/custody/signing";
 import type { SigningConfigRecord } from "@/services/adapters";
 import { createEncryptionService } from "@/services/encryption.service";
-import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 
 export interface LocalProviderConfig {

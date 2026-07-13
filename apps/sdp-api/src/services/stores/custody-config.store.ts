@@ -5,6 +5,7 @@
  * Supports DB-backed default resolution with project → organization fallback.
  */
 
+import { SigningError, type SignStatus } from "@sdp/custody/signing";
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
 import type {
   CreateSigningRequestParams,
@@ -14,7 +15,6 @@ import type {
   SigningRequestStore,
 } from "@/services/domain/signing.service";
 import { createEncryptionService, type EncryptionService } from "@/services/encryption.service";
-import { SigningError, type SignStatus } from "@/services/ports";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types

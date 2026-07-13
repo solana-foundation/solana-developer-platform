@@ -2,6 +2,7 @@
  * Wallet API Schemas
  */
 
+import { CUSTODY_PROVIDERS } from "@sdp/custody";
 import type {
   CustodyConfigResponse,
   CustodyConfigsResponse,
@@ -15,7 +16,6 @@ import type {
   SwitchProviderOptionsResponse,
 } from "@sdp/types";
 import { z } from "zod";
-import { CUSTODY_PROVIDERS } from "@/services/custody/providers";
 
 const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);
 

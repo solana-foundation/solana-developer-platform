@@ -1,10 +1,11 @@
+import { SigningError } from "@sdp/custody/signing";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, type SdpPlugin } from "@/app";
 import { AppError } from "@/lib/errors";
 import type { MonitorOptions, Observability, ObservabilityScope } from "@/runtime/observability";
-import { FeePaymentError, SigningError } from "@/services/ports";
+import { FeePaymentError } from "@/services/ports";
 import { env as baseEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 
