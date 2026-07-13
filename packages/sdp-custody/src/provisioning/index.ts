@@ -668,7 +668,14 @@ async function mintUtilaAccessToken(
 }
 
 function normalizeUtilaApiBaseUrl(value?: string): string {
-  return (value ?? DEFAULT_UTILA_API_BASE_URL).replace(/\/+$/, "");
+  const url = value ?? DEFAULT_UTILA_API_BASE_URL;
+  let end = url.length;
+
+  while (end > 0 && url.charCodeAt(end - 1) === 47) {
+    end -= 1;
+  }
+
+  return url.slice(0, end);
 }
 
 function normalizeUtilaVaultId(value: string): string {
