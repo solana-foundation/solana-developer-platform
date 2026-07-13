@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/app/dashboard/activity-format-utils";
 import { loadWalletActivity } from "@/app/dashboard/custody/wallet-activity.data";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { getTranslations } from "@/i18n/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 
@@ -10,9 +12,12 @@ interface VisibilityResult {
   error?: string;
 }
 
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
 async function verifyWalletVisibility(
   request: SdpApiClient["request"],
-  walletId: string
+  walletId: string,
+  t: Translate
 ): Promise<VisibilityResult> {
   try {
     const response = await request(`/v1/wallets/${encodeURIComponent(walletId)}`);
@@ -30,13 +35,17 @@ async function verifyWalletVisibility(
     return {
       ok: false,
       status: 503,
-      error: error instanceof Error ? error.message : "Unable to verify wallet visibility",
+      error:
+        error instanceof Error
+          ? error.message
+          : t("DashboardCustody.unableToVerifyWalletVisibility"),
     };
   }
 }
 
 export async function GET(request: Request, context: { params: Promise<{ walletId: string }> }) {
   const trace = createTimedTrace("route.dashboard.wallets.activity", request);
+  const t = await getTranslations();
   let resolvedWalletId = "";
 
   try {
@@ -45,7 +54,7 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
       resolvedWalletId = decodeURIComponent(walletId);
     } catch {
       const response = NextResponse.json(
-        { error: { message: "Invalid walletId route parameter" } },
+        { error: { message: t("DashboardCustody.invalidWalletId") } },
         {
           status: 400,
           headers: {
@@ -56,7 +65,7 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
       );
       logRouteResult(trace, 400, {
         walletId,
-        error: "Invalid walletId route parameter",
+        error: t("DashboardCustody.invalidWalletId"),
       });
       return response;
     }
@@ -66,12 +75,14 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
     );
 
     const visibility = await trace.step("verify_wallet_visibility", () =>
-      verifyWalletVisibility(apiClient.request, resolvedWalletId)
+      verifyWalletVisibility(apiClient.request, resolvedWalletId, t)
     );
     if (!visibility.ok) {
       const status = visibility.status ?? 500;
       const response = NextResponse.json(
-        { error: { message: visibility.error ?? "Wallet activity request failed" } },
+        {
+          error: { message: visibility.error ?? t("DashboardCustody.walletActivityRequestFailed") },
+        },
         {
           status,
           headers: {
@@ -83,13 +94,13 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
       logRouteResult(trace, status, {
         walletId: resolvedWalletId,
         activityRowCount: 0,
-        error: visibility.error ?? "Wallet activity request failed",
+        error: visibility.error ?? t("DashboardCustody.walletActivityRequestFailed"),
       });
       return response;
     }
 
     const result = await trace.step("load_wallet_activity", () =>
-      loadWalletActivity(apiClient.request, resolvedWalletId)
+      loadWalletActivity(apiClient.request, resolvedWalletId, t)
     );
     const status = result.ok ? 200 : (result.status ?? 500);
     const response = NextResponse.json(
@@ -101,7 +112,11 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
               activityNotice: null,
             },
           }
-        : { error: { message: result.error ?? "Wallet activity request failed" } },
+        : {
+            error: {
+              message: result.error ?? t("DashboardCustody.walletActivityRequestFailed"),
+            },
+          },
       {
         status,
         headers: {
@@ -114,7 +129,7 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
     logRouteResult(trace, status, {
       walletId: resolvedWalletId,
       activityRowCount: result.data?.activityRows?.length ?? 0,
-      error: result.ok ? null : (result.error ?? "Wallet activity request failed"),
+      error: result.ok ? null : (result.error ?? t("DashboardCustody.walletActivityRequestFailed")),
     });
 
     return response;
@@ -122,7 +137,10 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
     const response = NextResponse.json(
       {
         error: {
-          message: error instanceof Error ? error.message : "Wallet activity request failed",
+          message:
+            error instanceof Error
+              ? error.message
+              : t("DashboardCustody.walletActivityRequestFailed"),
         },
       },
       {
@@ -135,7 +153,8 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
     );
     logRouteResult(trace, 500, {
       walletId: resolvedWalletId || "unknown",
-      error: error instanceof Error ? error.message : "Wallet activity request failed",
+      error:
+        error instanceof Error ? error.message : t("DashboardCustody.walletActivityRequestFailed"),
     });
     return response;
   }

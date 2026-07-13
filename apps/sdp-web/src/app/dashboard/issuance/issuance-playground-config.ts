@@ -3,7 +3,8 @@ import type {
   ApiPlaygroundFieldConfig,
   ApiPlaygroundFieldOption,
 } from "@/components/api-playground-shell";
-import { TOKEN_AMOUNT_FIELD_DESCRIPTION } from "./[tokenId]/token-management-workspace.utils";
+import type { MessageKey } from "@/i18n/messages";
+import { getTokenAmountFieldDescription } from "./[tokenId]/token-management-workspace.utils";
 
 export interface IssuancePlaygroundTokenView {
   id: string;
@@ -20,31 +21,43 @@ export interface IssuancePlaygroundTemplateView {
 interface BuildIssuancePlaygroundConfigOptions {
   templates: IssuancePlaygroundTemplateView[];
   tokens: IssuancePlaygroundTokenView[];
+  t: (key: MessageKey) => string;
 }
 
-const priorityFeeOptions: ApiPlaygroundFieldOption[] = [
-  { label: "None", value: "none" },
-  { label: "Low", value: "low" },
-  { label: "Medium", value: "medium" },
-  { label: "High", value: "high" },
-];
+function buildPriorityFeeOptions(t: (key: MessageKey) => string): ApiPlaygroundFieldOption[] {
+  return [
+    { value: "none", label: t("DashboardIssuance.playground.none") },
+    { value: "low", label: t("DashboardIssuance.playground.low") },
+    { value: "medium", label: t("DashboardIssuance.playground.medium") },
+    { value: "high", label: t("DashboardIssuance.playground.high") },
+  ];
+}
 
-const simulateOptions: ApiPlaygroundFieldOption[] = [
-  { label: "True", value: "true" },
-  { label: "False", value: "false" },
-];
+function buildSimulateOptions(t: (key: MessageKey) => string): ApiPlaygroundFieldOption[] {
+  return [
+    { label: t("DashboardIssuance.playground.true"), value: "true" },
+    { label: t("DashboardIssuance.playground.false"), value: "false" },
+  ];
+}
 
-const tokenStatusOptions: ApiPlaygroundFieldOption[] = [
-  { label: "Active", value: "active" },
-  { label: "Paused", value: "paused" },
-];
+function buildTokenStatusOptions(t: (key: MessageKey) => string): ApiPlaygroundFieldOption[] {
+  return [
+    { label: t("DashboardIssuance.playground.active"), value: "active" },
+    { label: t("DashboardIssuance.playground.paused"), value: "paused" },
+  ];
+}
 
-const authorityRoleOptions: ApiPlaygroundFieldOption[] = [
-  { label: "Mint", value: "mint" },
-  { label: "Freeze", value: "freeze" },
-  { label: "Permanent Delegate", value: "permanentDelegate" },
-  { label: "Metadata", value: "metadata" },
-];
+function buildAuthorityRoleOptions(t: (key: MessageKey) => string): ApiPlaygroundFieldOption[] {
+  return [
+    { label: t("DashboardIssuance.playground.authorityRoleMint"), value: "mint" },
+    { label: t("DashboardIssuance.playground.authorityRoleFreeze"), value: "freeze" },
+    {
+      label: t("DashboardIssuance.playground.authorityRolePermanentDelegate"),
+      value: "permanentDelegate",
+    },
+    { label: t("DashboardIssuance.playground.authorityRoleMetadata"), value: "metadata" },
+  ];
+}
 
 const exampleTokenAccountAddress = "1".repeat(32);
 const exampleWalletAddress = "2".repeat(32);
@@ -52,14 +65,15 @@ const exampleWalletAddress = "2".repeat(32);
 function buildTokenAmountField(
   key: string,
   label: string,
+  t: (key: MessageKey) => string,
   defaultValue = "1000"
 ): ApiPlaygroundFieldConfig {
   return {
     key,
     label,
     defaultValue,
-    placeholder: "e.g. 1000",
-    description: TOKEN_AMOUNT_FIELD_DESCRIPTION,
+    placeholder: t("DashboardIssuance.playground.amountPlaceholder"),
+    description: getTokenAmountFieldDescription(t),
     required: true,
   };
 }
@@ -107,21 +121,21 @@ function buildSelectBackedField(
   };
 }
 
-function buildPriorityFields(): ApiPlaygroundFieldConfig[] {
+function buildPriorityFields(t: (key: MessageKey) => string): ApiPlaygroundFieldConfig[] {
   return [
     {
       key: "options.priorityFee",
       label: "options.priorityFee",
-      placeholder: "Select options priorityFee",
+      placeholder: t("DashboardIssuance.playground.selectPriorityFee"),
       kind: "select",
-      options: priorityFeeOptions,
+      options: buildPriorityFeeOptions(t),
     },
     {
       key: "options.simulate",
       label: "options.simulate",
-      placeholder: "Select options simulate",
+      placeholder: t("DashboardIssuance.playground.selectSimulate"),
       kind: "select",
-      options: simulateOptions,
+      options: buildSimulateOptions(t),
       valueType: "boolean",
     },
   ];
@@ -130,21 +144,23 @@ function buildPriorityFields(): ApiPlaygroundFieldConfig[] {
 export function buildIssuancePlaygroundEndpointConfigs({
   templates,
   tokens,
+  t,
 }: BuildIssuancePlaygroundConfigOptions): ApiPlaygroundEndpointConfig[] {
   const tokenOptions = buildTokenOptions(tokens);
   const templateOptions = buildTemplateOptions(templates);
+  const authorityRoleOptions = buildAuthorityRoleOptions(t);
   const firstToken = tokens[0];
   const firstTemplate = templates[0];
   const tokenIdField = buildSelectBackedField(
     "tokenId",
     "{tokenId}",
-    "Token ID (e.g. tok_abc123)",
+    t("DashboardIssuance.playground.tokenIdPlaceholder"),
     tokenOptions
   );
   const templateIdField = buildSelectBackedField(
     "templateId",
     "{templateId}",
-    "Template ID (e.g. stablecoin)",
+    t("DashboardIssuance.playground.templateIdPlaceholder"),
     templateOptions
   );
   const exampleTokenId = firstToken?.id ?? "tok_abc123";
@@ -156,7 +172,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
   return [
     {
       id: "list-templates",
-      title: "List Templates",
+      title: t("DashboardIssuance.playground.listTemplates"),
       method: "GET",
       path: "/v1/issuance/templates",
       pathFields: [],
@@ -180,7 +196,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "get-template",
-      title: "Get Template",
+      title: t("DashboardIssuance.playground.getTemplate"),
       method: "GET",
       path: "/v1/issuance/templates/{templateId}",
       pathFields: [templateIdField],
@@ -197,7 +213,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "create-token",
-      title: "Create Token",
+      title: t("DashboardIssuance.playground.createToken"),
       method: "POST",
       path: "/v1/issuance/tokens",
       pathFields: [],
@@ -205,21 +221,21 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "name",
           label: "name",
-          placeholder: "Acme Dollar",
+          placeholder: t("DashboardIssuance.playground.tokenNameExample"),
           defaultValue: exampleTokenName,
           required: true,
         },
         {
           key: "symbol",
           label: "symbol",
-          placeholder: "ACME",
+          placeholder: t("DashboardIssuance.playground.tokenSymbolExample"),
           defaultValue: exampleTokenSymbol,
           required: true,
         },
         {
           key: "template",
           label: "template",
-          placeholder: "Select template",
+          placeholder: t("DashboardIssuance.playground.selectTemplate"),
           kind: templateOptions.length > 0 ? "select" : "text",
           options: templateOptions,
           defaultValue: firstTemplate?.id ?? "custom",
@@ -234,13 +250,13 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "description",
           label: "description",
-          placeholder: "USD-backed settlement asset",
-          defaultValue: "USD-backed settlement asset",
+          placeholder: t("DashboardIssuance.playground.settlementAssetExample"),
+          defaultValue: t("DashboardIssuance.playground.settlementAssetExample"),
         },
         {
           key: "uri",
-          label: "uri (optional — SDP hosts if omitted)",
-          placeholder: "https://example.com/metadata/acme-usd.json",
+          label: t("DashboardIssuance.playground.optionalHostedUri"),
+          placeholder: t("DashboardIssuance.playground.metadataUriExample"),
         },
       ],
       expectedResponse: {
@@ -257,7 +273,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "list-tokens",
-      title: "List Tokens",
+      title: t("DashboardIssuance.playground.listTokens"),
       method: "GET",
       path: "/v1/issuance/tokens",
       pathFields: [],
@@ -283,7 +299,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "get-token",
-      title: "Get Token",
+      title: t("DashboardIssuance.playground.getToken"),
       method: "GET",
       path: "/v1/issuance/tokens/{tokenId}",
       pathFields: [tokenIdField],
@@ -301,7 +317,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "update-token",
-      title: "Update Token",
+      title: t("DashboardIssuance.playground.updateToken"),
       method: "PATCH",
       path: "/v1/issuance/tokens/{tokenId}",
       pathFields: [tokenIdField],
@@ -309,29 +325,29 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "name",
           label: "name",
-          placeholder: "Updated token name",
+          placeholder: t("DashboardIssuance.playground.updatedTokenName"),
         },
         {
           key: "description",
           label: "description",
-          placeholder: "Updated token description",
+          placeholder: t("DashboardIssuance.playground.updatedTokenDescription"),
         },
         {
           key: "uri",
           label: "uri",
-          placeholder: "https://example.com/updated-metadata.json",
+          placeholder: t("DashboardIssuance.playground.updatedMetadataUri"),
         },
         {
           key: "imageUrl",
           label: "imageUrl",
-          placeholder: "https://example.com/token.png",
+          placeholder: t("DashboardIssuance.playground.tokenImageUrl"),
         },
         {
           key: "status",
           label: "status",
-          placeholder: "Select status",
+          placeholder: t("DashboardIssuance.playground.selectStatus"),
           kind: "select",
-          options: tokenStatusOptions,
+          options: buildTokenStatusOptions(t),
         },
       ],
       expectedResponse: {
@@ -346,7 +362,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "list-transactions",
-      title: "List Token Transactions",
+      title: t("DashboardIssuance.playground.listTokenTransactions"),
       method: "GET",
       path: "/v1/issuance/tokens/{tokenId}/transactions",
       pathFields: [tokenIdField],
@@ -367,7 +383,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "refresh-supply",
-      title: "Refresh Total Supply",
+      title: t("DashboardIssuance.playground.refreshTotalSupply"),
       method: "POST",
       path: "/v1/issuance/tokens/{tokenId}/supply/refresh",
       pathFields: [tokenIdField],
@@ -384,7 +400,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "deploy-token",
-      title: "Deploy Token",
+      title: t("DashboardIssuance.playground.deployToken"),
       method: "POST",
       path: "/v1/issuance/tokens/{tokenId}/deploy",
       pathFields: [tokenIdField],
@@ -401,7 +417,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "mint-execute",
-      title: "Mint Tokens",
+      title: t("DashboardIssuance.playground.mintTokens"),
       method: "POST",
       path: "/v1/issuance/tokens/{tokenId}/mint",
       pathFields: [tokenIdField],
@@ -409,16 +425,16 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "mint.destination",
           label: "mint.destination",
-          placeholder: "Solana address (32-44 chars)",
+          placeholder: t("DashboardIssuance.playground.solanaAddressPlaceholder"),
           required: true,
         },
-        buildTokenAmountField("mint.amount", "mint.amount"),
+        buildTokenAmountField("mint.amount", "mint.amount", t),
         {
           key: "mint.memo",
           label: "mint.memo",
-          placeholder: "Optional memo",
+          placeholder: t("DashboardIssuance.playground.optionalMemo"),
         },
-        ...buildPriorityFields(),
+        ...buildPriorityFields(t),
       ],
       expectedResponse: {
         data: {
@@ -433,7 +449,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "burn-execute",
-      title: "Burn Tokens",
+      title: t("DashboardIssuance.playground.burnTokens"),
       method: "POST",
       path: "/v1/issuance/tokens/{tokenId}/burn",
       pathFields: [tokenIdField],
@@ -441,16 +457,16 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "burn.source",
           label: "burn.source",
-          placeholder: "Token account address (32-44 chars)",
+          placeholder: t("DashboardIssuance.playground.tokenAccountAddressPlaceholder"),
           required: true,
         },
-        buildTokenAmountField("burn.amount", "burn.amount"),
+        buildTokenAmountField("burn.amount", "burn.amount", t),
         {
           key: "burn.memo",
           label: "burn.memo",
-          placeholder: "Optional memo",
+          placeholder: t("DashboardIssuance.playground.optionalMemo"),
         },
-        ...buildPriorityFields(),
+        ...buildPriorityFields(t),
       ],
       expectedResponse: {
         data: {
@@ -465,7 +481,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "seize-execute",
-      title: "Seize Tokens",
+      title: t("DashboardIssuance.playground.seizeTokens"),
       method: "POST",
       path: "/v1/issuance/tokens/{tokenId}/seize",
       pathFields: [tokenIdField],
@@ -473,27 +489,27 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "seize.source",
           label: "seize.source",
-          placeholder: "Source token account address",
+          placeholder: t("DashboardIssuance.playground.sourceTokenAccountAddress"),
           required: true,
         },
         {
           key: "seize.destination",
           label: "seize.destination",
-          placeholder: "Destination token account address",
+          placeholder: t("DashboardIssuance.playground.destinationTokenAccountAddress"),
           required: true,
         },
-        buildTokenAmountField("seize.amount", "seize.amount", "250"),
+        buildTokenAmountField("seize.amount", "seize.amount", t, "250"),
         {
           key: "seize.delegateAuthority",
           label: "seize.delegateAuthority",
-          placeholder: "Delegate authority address",
+          placeholder: t("DashboardIssuance.playground.delegateAuthorityAddress"),
         },
         {
           key: "seize.memo",
           label: "seize.memo",
-          placeholder: "Optional memo",
+          placeholder: t("DashboardIssuance.playground.optionalMemo"),
         },
-        ...buildPriorityFields(),
+        ...buildPriorityFields(t),
       ],
       expectedResponse: {
         data: {
@@ -508,7 +524,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "force-burn-execute",
-      title: "Force Burn",
+      title: t("DashboardIssuance.playground.forceBurn"),
       method: "POST",
       path: "/v1/issuance/tokens/{tokenId}/force-burn",
       pathFields: [tokenIdField],
@@ -516,21 +532,21 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "forceBurn.source",
           label: "forceBurn.source",
-          placeholder: "Token account address",
+          placeholder: t("DashboardIssuance.playground.tokenAccountAddress"),
           required: true,
         },
-        buildTokenAmountField("forceBurn.amount", "forceBurn.amount", "250"),
+        buildTokenAmountField("forceBurn.amount", "forceBurn.amount", t, "250"),
         {
           key: "forceBurn.delegateAuthority",
           label: "forceBurn.delegateAuthority",
-          placeholder: "Delegate authority address",
+          placeholder: t("DashboardIssuance.playground.delegateAuthorityAddress"),
         },
         {
           key: "forceBurn.memo",
           label: "forceBurn.memo",
-          placeholder: "Optional memo",
+          placeholder: t("DashboardIssuance.playground.optionalMemo"),
         },
-        ...buildPriorityFields(),
+        ...buildPriorityFields(t),
       ],
       expectedResponse: {
         data: {
@@ -545,7 +561,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "authority-execute",
-      title: "Update Authority",
+      title: t("DashboardIssuance.playground.updateAuthority"),
       method: "POST",
       path: "/v1/issuance/tokens/{tokenId}/authority",
       pathFields: [tokenIdField],
@@ -553,7 +569,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "authority.role",
           label: "authority.role",
-          placeholder: "Select authority role",
+          placeholder: t("DashboardIssuance.playground.selectAuthorityRole"),
           kind: "select",
           options: authorityRoleOptions,
           defaultValue: authorityRoleOptions[0]?.value ?? "mint",
@@ -562,14 +578,14 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "authority.currentAuthority",
           label: "authority.currentAuthority",
-          placeholder: "Current authority address",
+          placeholder: t("DashboardIssuance.playground.currentAuthorityAddress"),
         },
         {
           key: "authority.newAuthority",
           label: "authority.newAuthority",
-          placeholder: "New authority address",
+          placeholder: t("DashboardIssuance.playground.newAuthorityAddress"),
         },
-        ...buildPriorityFields(),
+        ...buildPriorityFields(t),
       ],
       expectedResponse: {
         data: {
@@ -584,11 +600,11 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "pause-token",
-      title: "Pause Token",
+      title: t("DashboardIssuance.playground.pauseToken"),
       method: "POST",
       path: "/v1/issuance/tokens/{tokenId}/pause",
       pathFields: [tokenIdField],
-      bodyFields: buildPriorityFields(),
+      bodyFields: buildPriorityFields(t),
       expectedResponse: {
         data: {
           token: {
@@ -600,11 +616,11 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "unpause-token",
-      title: "Unpause Token",
+      title: t("DashboardIssuance.playground.unpauseToken"),
       method: "POST",
       path: "/v1/issuance/tokens/{tokenId}/unpause",
       pathFields: [tokenIdField],
-      bodyFields: buildPriorityFields(),
+      bodyFields: buildPriorityFields(t),
       expectedResponse: {
         data: {
           token: {
@@ -616,7 +632,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "freeze-account",
-      title: "Freeze Account",
+      title: t("DashboardIssuance.playground.freezeAccount"),
       method: "POST",
       path: "/v1/issuance/tokens/{tokenId}/freeze",
       pathFields: [tokenIdField],
@@ -624,13 +640,13 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "accountAddress",
           label: "accountAddress",
-          placeholder: "Wallet address to freeze",
+          placeholder: t("DashboardIssuance.playground.walletAddressToFreeze"),
           required: true,
         },
         {
           key: "reason",
           label: "reason",
-          placeholder: "Optional freeze reason",
+          placeholder: t("DashboardIssuance.playground.optionalFreezeReason"),
         },
       ],
       expectedResponse: {
@@ -642,7 +658,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "unfreeze-account",
-      title: "Unfreeze Account",
+      title: t("DashboardIssuance.playground.unfreezeAccount"),
       method: "POST",
       path: "/v1/issuance/tokens/{tokenId}/unfreeze",
       pathFields: [tokenIdField],
@@ -650,7 +666,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "accountAddress",
           label: "accountAddress",
-          placeholder: "Wallet address to unfreeze",
+          placeholder: t("DashboardIssuance.playground.walletAddressToUnfreeze"),
           required: true,
         },
       ],
@@ -663,7 +679,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "list-frozen-accounts",
-      title: "List Frozen Accounts",
+      title: t("DashboardIssuance.playground.listFrozenAccounts"),
       method: "GET",
       path: "/v1/issuance/tokens/{tokenId}/frozen",
       pathFields: [tokenIdField],
@@ -681,7 +697,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "list-allowlist",
-      title: "List Allowlist",
+      title: t("DashboardIssuance.playground.listAllowlist"),
       method: "GET",
       path: "/v1/issuance/tokens/{tokenId}/allowlist",
       pathFields: [tokenIdField],
@@ -692,7 +708,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
             {
               id: "allow_123",
               address: exampleTokenAccountAddress,
-              label: "Treasury",
+              label: t("DashboardIssuance.playground.treasuryExample"),
             },
           ],
         },
@@ -700,7 +716,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
     },
     {
       id: "add-allowlist-entry",
-      title: "Add Allowlist Entry",
+      title: t("DashboardIssuance.playground.addAllowlistEntry"),
       method: "POST",
       path: "/v1/issuance/tokens/{tokenId}/allowlist",
       pathFields: [tokenIdField],
@@ -708,13 +724,13 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "address",
           label: "address",
-          placeholder: "Address to allowlist",
+          placeholder: t("DashboardIssuance.playground.addressToAllowlist"),
           required: true,
         },
         {
           key: "label",
           label: "label",
-          placeholder: "Optional label",
+          placeholder: t("DashboardIssuance.playground.optionalLabel"),
         },
       ],
       expectedResponse: {
@@ -722,22 +738,22 @@ export function buildIssuancePlaygroundEndpointConfigs({
           entry: {
             id: "allow_123",
             address: exampleTokenAccountAddress,
-            label: "Treasury",
+            label: t("DashboardIssuance.playground.treasuryExample"),
           },
         },
       },
     },
     {
       id: "remove-allowlist-entry",
-      title: "Remove Allowlist Entry",
+      title: t("DashboardIssuance.playground.removeAllowlistEntry"),
       method: "DELETE",
       path: "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}",
       pathFields: [
         tokenIdField,
         {
           key: "entryId",
-          label: "{entryId}",
-          placeholder: "Allowlist entry ID (e.g. allow_123)",
+          label: "entryId",
+          placeholder: t("DashboardIssuance.playground.allowlistEntryIdPlaceholder"),
           required: true,
         },
       ],

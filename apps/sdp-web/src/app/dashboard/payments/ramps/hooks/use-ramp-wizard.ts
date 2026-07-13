@@ -18,6 +18,8 @@ import {
   fetchAllCounterparties,
   getApiError,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import {
   DEFAULT_RAMP_PAIR,
@@ -32,6 +34,7 @@ import { useCounterpartyRequirements } from "./use-counterparty-requirements";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 
 const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 export function isTerminalRampTransferStatus(status: string) {
   return (
@@ -85,7 +88,8 @@ export interface RampWizardConfig<TId extends string = string> {
 
 async function createRampQuote(
   endpoint: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  t: Translate
 ): Promise<PaymentRampQuote> {
   const response = await fetch(endpoint, {
     method: "POST",
@@ -98,11 +102,16 @@ async function createRampQuote(
   };
 
   if (!response.ok) {
-    throw new Error(getApiError(body, `Ramp quote request failed (${response.status}).`));
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.ramps.quoteRequestFailedStatus", { status: response.status })
+      )
+    );
   }
 
   if (!body.data?.quote) {
-    throw new Error("Ramp quote response is missing quote details.");
+    throw new Error(t("DashboardPayments.ramps.quoteResponseMissingDetails"));
   }
 
   return body.data.quote;
@@ -133,6 +142,7 @@ export function useRampWizard<TId extends string>(
   config: RampWizardConfig<TId>
 ) {
   const router = useRouter();
+  const t = useTranslations();
 
   const [stepIndex, setStepIndex] = useState(0);
   const [selectedRampPair, setSelectedRampPair] = useState<SelectedRampPair>(DEFAULT_RAMP_PAIR);
@@ -238,7 +248,9 @@ export function useRampWizard<TId extends string>(
     }
 
     setHostedQuoteLoading(true);
-    const toastId = toast.loading("Creating quote.", { position: "bottom-right" });
+    const toastId = toast.loading(t("DashboardPayments.ramps.creatingQuote"), {
+      position: "bottom-right",
+    });
 
     try {
       const created = await createRampQuote(
@@ -249,22 +261,29 @@ export function useRampWizard<TId extends string>(
           selectedRampPair,
           cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
           collectedData: requirements.collectedData,
-        })
+        }),
+        t
       );
 
       setQuote(created);
       config.onQuoteCreated?.(created);
       setStepIndex((current) => current + 1);
       setHostedQuoteLoading(false);
-      toast.success(created.deliveryMode === "hosted" ? "Widget ready." : "Quote ready.", {
-        id: toastId,
-        position: "bottom-right",
-      });
+      toast.success(
+        created.deliveryMode === "hosted"
+          ? t("DashboardPayments.ramps.widgetReady")
+          : t("DashboardPayments.ramps.quoteReady"),
+        {
+          id: toastId,
+          position: "bottom-right",
+        }
+      );
     } catch (error) {
       setHostedQuoteLoading(false);
-      toast.error("Unable to create quote.", {
+      toast.error(t("DashboardPayments.ramps.unableToCreateQuote"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Ramp quote request failed.",
+        description:
+          error instanceof Error ? error.message : t("DashboardPayments.ramps.quoteRequestFailed"),
         position: "bottom-right",
       });
     }
@@ -283,7 +302,8 @@ export function useRampWizard<TId extends string>(
           selectedRampPair,
           cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
           collectedData: requirements.collectedData,
-        })
+        }),
+        t
       );
       setQuote(created);
     } catch {}
@@ -304,7 +324,9 @@ export function useRampWizard<TId extends string>(
       return;
     }
     setHostedQuoteLoading(true);
-    const toastId = toast.loading("Setting up your account.", { position: "bottom-right" });
+    const toastId = toast.loading(t("DashboardPayments.ramps.settingUpAccount"), {
+      position: "bottom-right",
+    });
     try {
       const result = await requirements.submitRequirements({
         cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
@@ -316,7 +338,7 @@ export function useRampWizard<TId extends string>(
         toast.error(
           result.status === "unsupported"
             ? result.reason
-            : "We need a few more details before continuing.",
+            : t("DashboardPayments.ramps.moreDetailsNeeded"),
           { id: toastId, position: "bottom-right" }
         );
         return;
@@ -325,9 +347,12 @@ export function useRampWizard<TId extends string>(
       toast.dismiss(toastId);
     } catch (error) {
       setHostedQuoteLoading(false);
-      toast.error("Unable to start onboarding.", {
+      toast.error(t("DashboardPayments.ramps.unableToStartOnboarding"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Requirements request failed.",
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.ramps.requirementsRequestFailed"),
         position: "bottom-right",
       });
     }
@@ -346,7 +371,7 @@ export function useRampWizard<TId extends string>(
       return;
     }
     if (isLastStep) {
-      toast.info("Next step coming soon.");
+      toast.info(t("DashboardPayments.ramps.nextStepSoon"));
       return;
     }
     setStepIndex((current) => current + 1);
@@ -366,22 +391,28 @@ export function useRampWizard<TId extends string>(
 
   const cancelTransfer = async () => {
     if (!quote) {
-      throw new Error("Cannot cancel without an active quote.");
+      throw new Error(t("DashboardPayments.ramps.cannotCancelWithoutQuote"));
     }
     if (isCanceling) {
       return;
     }
     setIsCanceling(true);
-    const toastId = toast.loading("Canceling transaction.", { position: "bottom-right" });
+    const toastId = toast.loading(t("DashboardPayments.ramps.cancelingTransaction"), {
+      position: "bottom-right",
+    });
     try {
-      await cancelRampTransfer({ provider: quote.provider, providerReference: quote.id });
-      toast.success("Transaction canceled.", { id: toastId, position: "bottom-right" });
+      await cancelRampTransfer({ provider: quote.provider, providerReference: quote.id }, t);
+      toast.success(t("DashboardPayments.ramps.transactionCanceled"), {
+        id: toastId,
+        position: "bottom-right",
+      });
       finish();
     } catch (error) {
       setIsCanceling(false);
-      toast.error("Unable to cancel transaction.", {
+      toast.error(t("DashboardPayments.ramps.unableToCancelTransaction"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Cancellation failed.",
+        description:
+          error instanceof Error ? error.message : t("DashboardPayments.ramps.cancellationFailed"),
         position: "bottom-right",
       });
     }

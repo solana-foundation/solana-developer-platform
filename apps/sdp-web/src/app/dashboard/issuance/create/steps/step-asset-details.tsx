@@ -7,6 +7,7 @@ import { motion } from "motion/react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { TokenSignerSelect } from "../../[tokenId]/token-signer-select";
 import { AdvancedCapacities } from "../advanced-capacities";
@@ -22,12 +23,7 @@ import type { DraftState } from "../issuance-draft-wizard.types";
 import { MetadataJsonPanel, MetadataJsonToggle } from "../metadata-json";
 import { useIssuanceDraft } from "../use-issuance-draft";
 
-const TABS = [
-  { id: "overview", label: "Overview" },
-  { id: "compliance", label: "Compliance & Access" },
-  { id: "operational", label: "Operational" },
-  { id: "custom", label: "Custom fields" },
-] as const;
+const TAB_IDS = ["overview", "compliance", "operational", "custom"] as const;
 
 // Docs deep-links (mirrors the docsHref env pattern used in the dashboard shell).
 const DOCS_BASE =
@@ -58,12 +54,19 @@ export function StepAssetDetails({
   signerWalletsError: string | null;
   showErrors: boolean;
 }) {
+  const t = useTranslations();
+  const tabs = [
+    { id: TAB_IDS[0], label: t("DashboardIssuance.assetDetails.tabs.overview") },
+    { id: TAB_IDS[1], label: t("DashboardIssuance.assetDetails.tabs.compliance") },
+    { id: TAB_IDS[2], label: t("DashboardIssuance.assetDetails.tabs.operational") },
+    { id: TAB_IDS[3], label: t("DashboardIssuance.assetDetails.tabs.custom") },
+  ];
   const { draft, updateDraft } = useIssuanceDraft();
   const [tab, setTab] = useState<string>("overview");
   const [jsonOpen, setJsonOpen] = useState(false);
   const sections = getCategorySections(draft.assetCategory);
   const metadata = buildIssuanceMetadata(draft);
-  const errors = getAssetDetailsErrors(draft);
+  const errors = getAssetDetailsErrors(draft, t);
   const requiredKeys = getRequiredAssetDetailKeys(draft);
   const hasErrors = Object.keys(errors).length > 0;
 
@@ -98,9 +101,11 @@ export function StepAssetDetails({
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-medium text-[#1c1c1d]">Asset details</h2>
+          <h2 className="text-2xl font-medium text-[#1c1c1d]">
+            {t("DashboardIssuance.assetDetails.title")}
+          </h2>
           <p className="mt-1.5 text-sm text-[rgba(28,28,29,0.62)]">
-            Add the key information about this asset. You can update these details any time.
+            {t("DashboardIssuance.assetDetails.description")}
           </p>
         </div>
         <MetadataJsonToggle open={jsonOpen} onToggle={() => setJsonOpen((prev) => !prev)} />
@@ -110,7 +115,7 @@ export function StepAssetDetails({
 
       <Tabs bordered value={tab} onValueChange={(value) => setTab(value)}>
         <TabList className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {TABS.map((entry) => (
+          {tabs.map((entry) => (
             <Tab key={entry.id} value={entry.id} className="shrink-0 whitespace-nowrap">
               {entry.label}
             </Tab>
@@ -121,42 +126,42 @@ export function StepAssetDetails({
       {tab === "overview" ? (
         <div className="space-y-5">
           <FormCard
-            title="About this asset"
-            description="Basic information that describes what this asset is."
+            title={t("DashboardIssuance.assetDetails.about")}
+            description={t("DashboardIssuance.assetDetails.aboutDescription")}
           >
             <div className="grid items-start gap-4 sm:grid-cols-2">
               <TextField
-                label="Symbol"
+                label={t("DashboardIssuance.create.symbol")}
                 required
                 value={draft.symbol}
                 onChange={(value) => updateDraft({ symbol: value })}
-                placeholder="e.g., vUSD"
+                placeholder={t("DashboardIssuance.assetDetails.symbolPlaceholder")}
                 error={fieldError("symbol")}
               />
               <TextField
-                label="Decimals"
+                label={t("DashboardIssuance.create.decimals")}
                 required
                 type="number"
                 value={draft.decimals}
                 onChange={(value) => updateDraft({ decimals: value })}
-                placeholder="e.g., 6"
+                placeholder={t("DashboardIssuance.create.decimalsPlaceholder")}
                 error={fieldError("decimals")}
               />
             </div>
             <div className="mt-4 grid gap-1.5">
               <Label htmlFor="asset-description">
-                Description{" "}
+                {t("DashboardIssuance.assetDetails.descriptionLabel")}{" "}
                 <span aria-hidden className="text-[#c71f37]">
                   *
                 </span>
-                <span className="sr-only"> (required)</span>
+                <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
               </Label>
               <textarea
                 id="asset-description"
                 value={draft.description}
                 onChange={(event) => updateDraft({ description: event.currentTarget.value })}
                 rows={3}
-                placeholder="Describe what this asset represents."
+                placeholder={t("DashboardIssuance.assetDetails.descriptionPlaceholder")}
                 aria-invalid={descriptionError ? true : undefined}
                 className={cn(
                   "w-full rounded-[14px] border bg-white px-4 py-3 text-sm text-[#1c1c1d] outline-none transition-[box-shadow,border-color] placeholder:text-[rgba(28,28,29,0.4)]",
@@ -173,25 +178,29 @@ export function StepAssetDetails({
             </div>
             <div className="mt-4 grid items-start gap-4 sm:grid-cols-2">
               <TextField
-                label="Website"
+                label={t("DashboardIssuance.assetDetails.website")}
                 value={draft.website}
                 onChange={(value) => updateDraft({ website: value })}
-                placeholder="https://…"
+                placeholder={t("DashboardIssuance.assetDetails.websitePlaceholder")}
                 error={fieldError("website")}
               />
               <TextField
-                label="Logo image URL"
+                label={t("DashboardIssuance.assetDetails.logoImageUrl")}
                 value={draft.imageUrl}
                 onChange={(value) => updateDraft({ imageUrl: value })}
-                placeholder="https://…/logo.png"
-                help="Shown next to your token in wallets and explorers."
+                placeholder={t("DashboardIssuance.assetDetails.logoPlaceholder")}
+                help={t("DashboardIssuance.assetDetails.logoHint")}
                 error={fieldError("imageUrl")}
               />
             </div>
           </FormCard>
 
           {sections.map((section) => (
-            <FormCard key={section.title} title={section.title} description={section.description}>
+            <FormCard
+              key={section.titleKey}
+              title={t(section.titleKey)}
+              description={section.descriptionKey ? t(section.descriptionKey) : undefined}
+            >
               <div className="grid items-start gap-4 sm:grid-cols-2">
                 {section.fields.map((field) => (
                   <DetailField
@@ -208,8 +217,8 @@ export function StepAssetDetails({
           ))}
 
           <FormCard
-            title="Documents & references"
-            description="Important documents and references related to this asset."
+            title={t("DashboardIssuance.assetDetails.documents")}
+            description={t("DashboardIssuance.assetDetails.documentsDescription")}
           >
             <DocumentRows
               documents={draft.documents}
@@ -222,22 +231,22 @@ export function StepAssetDetails({
       {tab === "compliance" ? (
         <div className="space-y-5">
           <FormCard
-            title="Access control"
-            description="Choose how this token treats approved or blocked destination addresses."
+            title={t("DashboardIssuance.compliance.accessControl")}
+            description={t("DashboardIssuance.assetDetails.accessControlDescription")}
           >
             <div className="max-w-xs">
-              <Label>Access control</Label>
+              <Label>{t("DashboardIssuance.compliance.accessControl")}</Label>
               <div className="mt-1.5">
                 <Select
                   value={draft.accessControl || null}
                   onValueChange={(value) =>
                     updateDraft({ accessControl: (value ?? "") as DraftState["accessControl"] })
                   }
-                  placeholder="Select access control"
+                  placeholder={t("DashboardIssuance.compliance.selectAccessControl")}
                 >
                   {ACCESS_CONTROL_OPTIONS.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
-                      {option.label}
+                      {t(option.labelKey)}
                     </SelectItem>
                   ))}
                 </Select>
@@ -245,7 +254,7 @@ export function StepAssetDetails({
             </div>
             <div className="mt-3">
               <DocsLink href={ACCESS_CONTROL_DOCS_HREF}>
-                Learn how allow and block lists differ
+                {t("DashboardIssuance.assetDetails.learnLists")}
               </DocsLink>
             </div>
           </FormCard>
@@ -259,14 +268,17 @@ export function StepAssetDetails({
       ) : null}
 
       {tab === "operational" ? (
-        <FormCard title="Operational" description="Optional operational settings.">
+        <FormCard
+          title={t("DashboardIssuance.assetDetails.operational")}
+          description={t("DashboardIssuance.assetDetails.operationalDescription")}
+        >
           <div>
             <TokenSignerSelect
               signerWallets={signerWallets}
               signerWalletId={draft.signingWalletId}
               signerUnavailableReason={signerWalletsError}
               onSignerWalletIdChange={(value) => updateDraft({ signingWalletId: value })}
-              label="Signing wallet"
+              label={t("DashboardIssuance.assetDetails.signingWallet")}
               showSelectionSummary
               optional
             />
@@ -276,7 +288,7 @@ export function StepAssetDetails({
                 own message inside the field. */}
             {!signerWalletsError && signerWallets.length > 1 && !draft.signingWalletId.trim() ? (
               <p className="mt-1.5 text-xs text-[rgba(28,28,29,0.5)]">
-                Optional — leave unselected to use the project&apos;s default signer.
+                {t("DashboardIssuance.assetDetails.optionalSignerHint")}
               </p>
             ) : null}
           </div>
@@ -285,8 +297,8 @@ export function StepAssetDetails({
 
       {tab === "custom" ? (
         <FormCard
-          title="Custom fields"
-          description="Add your own private fields, stored under custom.customer."
+          title={t("DashboardIssuance.assetDetails.customFields")}
+          description={t("DashboardIssuance.assetDetails.customFieldsDescription")}
         >
           <CustomFieldRows
             fields={draft.customFields}

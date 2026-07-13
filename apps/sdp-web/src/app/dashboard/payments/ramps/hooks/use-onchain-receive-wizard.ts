@@ -3,15 +3,33 @@
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
-export const ONCHAIN_RECEIVE_STEPS = [
-  { id: "WALLET", label: "Wallet", title: "Which wallet should receive funds?" },
-  { id: "RECEIVE", label: "Receive", title: "Receive funds onchain" },
-] as const satisfies readonly RampWizardStep[];
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export type OnchainReceiveStepId = (typeof ONCHAIN_RECEIVE_STEPS)[number]["id"];
+export const ONCHAIN_RECEIVE_STEP_IDS = ["WALLET", "RECEIVE"] as const;
+
+export type OnchainReceiveStepId = (typeof ONCHAIN_RECEIVE_STEP_IDS)[number];
+
+export function getOnchainReceiveSteps(
+  t: Translate
+): readonly RampWizardStep<OnchainReceiveStepId>[] {
+  return [
+    {
+      id: "WALLET",
+      label: t("DashboardPayments.onchainReceive.wallet"),
+      title: t("DashboardPayments.onchainReceive.walletTitle"),
+    },
+    {
+      id: "RECEIVE",
+      label: t("DashboardPayments.onchainReceive.receive"),
+      title: t("DashboardPayments.onchainReceive.receiveTitle"),
+    },
+  ];
+}
 
 export interface UseOnchainReceiveWizardProps {
   wallets: PaymentsDashboardWallet[];
@@ -27,6 +45,8 @@ export function useOnchainReceiveWizard({
   onExit,
 }: UseOnchainReceiveWizardProps) {
   const router = useRouter();
+  const t = useTranslations();
+  const steps = getOnchainReceiveSteps(t);
   const [stepIndex, setStepIndex] = useState(0);
   const [walletId, setWalletId] = useState("");
 
@@ -40,8 +60,8 @@ export function useOnchainReceiveWizard({
     [liveWallets, walletId]
   );
 
-  const currentStepId = ONCHAIN_RECEIVE_STEPS[stepIndex].id;
-  const isLastStep = stepIndex === ONCHAIN_RECEIVE_STEPS.length - 1;
+  const currentStepId = steps[stepIndex].id;
+  const isLastStep = stepIndex === steps.length - 1;
   const canProceed = currentStepId === "WALLET" ? !!walletId : true;
 
   const handlePrimary = () => {
@@ -66,6 +86,7 @@ export function useOnchainReceiveWizard({
   return {
     counterpartyId,
     stepIndex,
+    steps,
     currentStepId,
     isLastStep,
     canProceed,

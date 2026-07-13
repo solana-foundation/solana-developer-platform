@@ -1,6 +1,8 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
+import type { MessageKey } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import { StepContent } from "./components/step-content";
 import { StepFooter } from "./components/step-footer";
 import { StepIndicator } from "./components/step-indicator";
@@ -8,28 +10,29 @@ import { useCounterpartyCreate } from "./counterparty-create-context";
 import type { StepId } from "./counterparty-create-schemas";
 import { CryptoAccountsPhase } from "./crypto-accounts-phase";
 
-const stepMeta: Record<StepId, { label: string; title: string; description: string }> = {
-  basics: {
-    label: "Basics",
-    title: "Basic info",
-    description: "Enter the counterparty's name and contact details.",
-  },
-  identity: {
-    label: "Personal",
-    title: "Personal details",
-    description: "Identity information for this individual.",
-  },
-  address: {
-    label: "Address",
-    title: "Location",
-    description: "Helps us verify who they are and where they're based.",
-  },
-  review: {
-    label: "Review",
-    title: "Review & create",
-    description: "Confirm everything looks right before creating.",
-  },
-};
+const stepMeta: Record<StepId, { label: MessageKey; title: MessageKey; description: MessageKey }> =
+  {
+    basics: {
+      label: "DashboardPayments.counterparty.basics",
+      title: "DashboardPayments.counterparty.basicInfo",
+      description: "DashboardPayments.counterparty.basicInfoDescription",
+    },
+    identity: {
+      label: "DashboardPayments.counterparty.personal",
+      title: "DashboardPayments.counterparty.personalDetails",
+      description: "DashboardPayments.counterparty.personalDetailsDescription",
+    },
+    address: {
+      label: "DashboardPayments.counterparty.address",
+      title: "DashboardPayments.counterparty.location",
+      description: "DashboardPayments.counterparty.locationDescription",
+    },
+    review: {
+      label: "DashboardPayments.counterparty.review",
+      title: "DashboardPayments.counterparty.reviewCreate",
+      description: "DashboardPayments.counterparty.reviewCreateDescription",
+    },
+  };
 
 const variants = {
   initial: (direction: number) => ({ x: direction * 32, opacity: 0 }),
@@ -38,6 +41,7 @@ const variants = {
 };
 
 export function CounterpartyCreatePage() {
+  const t = useTranslations();
   const { step, steps, currentStepId, direction, createdCounterparty } = useCounterpartyCreate();
 
   if (createdCounterparty) {
@@ -62,9 +66,9 @@ export function CounterpartyCreatePage() {
           >
             <div className="space-y-1">
               <h2 className="text-2xl font-medium tracking-tight text-text-extra-high">
-                {stepMeta[currentStepId].title}
+                {t(stepMeta[currentStepId].title)}
               </h2>
-              <p className="text-sm text-text-medium">{stepMeta[currentStepId].description}</p>
+              <p className="text-sm text-text-medium">{t(stepMeta[currentStepId].description)}</p>
             </div>
             <StepContent stepId={currentStepId} />
           </motion.div>

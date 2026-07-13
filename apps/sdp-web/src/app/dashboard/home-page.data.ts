@@ -1,4 +1,5 @@
 import type { PaymentTransferSummary, TokenTransaction } from "@sdp/types";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { parseErrorMessage, readTransactionParam, toTitleCase } from "./activity-format-utils";
 import type { FetchResult } from "./payments/payments-page.data";
@@ -8,6 +9,8 @@ interface HomeIssuanceToken {
   name: string;
   symbol: string;
 }
+
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 export interface HomeActivityRow {
   id: string;
@@ -45,16 +48,16 @@ function resolveIssuanceAddress(transaction: TokenTransaction): string {
   return "—";
 }
 
-function resolvePaymentsType(transfer: PaymentTransferSummary): string {
+function resolvePaymentsType(transfer: PaymentTransferSummary, t: Translate): string {
   if (transfer.direction === "outbound") {
-    return "Send";
+    return t("Shared.homeWorkspace.send");
   }
 
   if (transfer.direction === "inbound") {
-    return "Receive";
+    return t("Shared.homeWorkspace.receive");
   }
 
-  return transfer.type ? toTitleCase(transfer.type) : "Transfer";
+  return transfer.type ? toTitleCase(transfer.type) : t("Shared.homeWorkspace.transfer");
 }
 
 function resolvePaymentsAddress(transfer: PaymentTransferSummary): string {
@@ -102,7 +105,8 @@ export function buildHomeActivityRows(
     tokenName: string;
     tokenSymbol: string;
     transaction: TokenTransaction;
-  }>
+  }>,
+  t: Translate
 ): HomeActivityRow[] {
   const paymentRows = transfers
     .filter(
@@ -112,7 +116,7 @@ export function buildHomeActivityRows(
     .map((transfer) => ({
       id: `payment-${transfer.id}`,
       createdAt: transfer.createdAt,
-      type: resolvePaymentsType(transfer),
+      type: resolvePaymentsType(transfer, t),
       token: transfer.token ?? "—",
       amount: transfer.amount ?? "—",
       address: resolvePaymentsAddress(transfer),
@@ -146,6 +150,7 @@ export function buildHomeActivityRows(
 
 export async function fetchIssuanceTokens(
   request: SdpApiClient["request"],
+  t: Translate,
   pageSize = 100
 ): Promise<FetchResult<HomeIssuanceToken[]>> {
   try {
@@ -184,7 +189,7 @@ export async function fetchIssuanceTokens(
       )
       .map((token) => ({
         id: token.id,
-        name: token.name ?? "Untitled token",
+        name: token.name ?? t("Shared.homeWorkspace.untitledToken"),
         symbol: token.symbol ?? "—",
       }));
 
@@ -192,14 +197,18 @@ export async function fetchIssuanceTokens(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unable to load issuance tokens",
+      error:
+        error instanceof Error
+          ? error.message
+          : t("Shared.homeWorkspace.unableToLoadIssuanceTokens"),
     };
   }
 }
 
 export async function fetchOrgIssuanceActivity(
   request: SdpApiClient["request"],
-  tokens: HomeIssuanceToken[]
+  tokens: HomeIssuanceToken[],
+  t: Translate
 ): Promise<{
   rows: Array<{
     tokenName: string;
@@ -252,6 +261,6 @@ export async function fetchOrgIssuanceActivity(
 
   return {
     rows,
-    error: hasFailure ? "Some issuance activity could not be loaded." : null,
+    error: hasFailure ? t("Shared.homeWorkspace.someIssuanceActivityUnavailable") : null,
   };
 }

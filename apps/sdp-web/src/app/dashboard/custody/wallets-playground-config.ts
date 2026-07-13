@@ -5,6 +5,7 @@ import type {
   ApiPlaygroundFieldConfig,
   ApiPlaygroundFieldOption,
 } from "@/components/api-playground-shell";
+import type { useTranslations } from "@/i18n/provider";
 
 export interface WalletsPlaygroundWalletView {
   walletId: string;
@@ -16,15 +17,18 @@ export interface WalletsPlaygroundWalletView {
 interface BuildWalletsPlaygroundConfigOptions {
   connectedProviders: KnownCustodyProvider[];
   wallets: WalletsPlaygroundWalletView[];
+  t: ReturnType<typeof useTranslations>;
 }
 
-const PURPOSE_OPTIONS: ApiPlaygroundFieldOption[] = [
-  { label: "Root wallet", value: "root" },
-  { label: "Mint authority", value: "mint_authority" },
-  { label: "Freeze authority", value: "freeze_authority" },
-  { label: "Fee payer", value: "fee_payer" },
-  { label: "Transfers", value: "transfer" },
-];
+function buildPurposeOptions(t: ReturnType<typeof useTranslations>): ApiPlaygroundFieldOption[] {
+  return [
+    { label: t("DashboardCustody.rootWallet"), value: "root" },
+    { label: t("DashboardCustody.mintAuthority"), value: "mint_authority" },
+    { label: t("DashboardCustody.freezeAuthority"), value: "freeze_authority" },
+    { label: t("DashboardCustody.feePayer"), value: "fee_payer" },
+    { label: t("DashboardCustody.transfers"), value: "transfer" },
+  ];
+}
 
 function buildWalletOptions(wallets: WalletsPlaygroundWalletView[]): ApiPlaygroundFieldOption[] {
   return wallets.map((wallet) => ({
@@ -65,19 +69,20 @@ function buildSelectOrTextField(
 export function buildWalletsPlaygroundEndpointConfigs({
   connectedProviders,
   wallets,
+  t,
 }: BuildWalletsPlaygroundConfigOptions): ApiPlaygroundEndpointConfig[] {
   const walletOptions = buildWalletOptions(wallets);
   const providerOptions = buildProviderOptions(connectedProviders);
   const firstWallet = wallets[0];
   const exampleWalletId = firstWallet?.walletId ?? "privy_wallet_123";
-  const exampleWalletLabel = firstWallet?.label?.trim() || "Main wallet";
+  const exampleWalletLabel = firstWallet?.label?.trim() || t("DashboardCustody.mainWallet");
   // biome-ignore lint/security/noSecrets: Playground sample public key for example responses only.
   const examplePublicKey = firstWallet?.publicKey ?? "11111111111111111111111111111111";
 
   return [
     {
       id: "list-wallets",
-      title: "List Wallets",
+      title: t("DashboardCustody.playgroundListWallets"),
       method: "GET",
       // biome-ignore lint/security/noSecrets: Public API path with static query flags.
       path: "/v1/wallets?includeAllProviders=true",
@@ -106,7 +111,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
     },
     {
       id: "list-wallet-configs",
-      title: "List Wallet Configs",
+      title: t("DashboardCustody.playgroundListWalletConfigs"),
       method: "GET",
       path: "/v1/wallets/configs",
       pathFields: [],
@@ -125,10 +130,17 @@ export function buildWalletsPlaygroundEndpointConfigs({
     },
     {
       id: "get-wallet",
-      title: "Get Wallet",
+      title: t("DashboardCustody.playgroundGetWallet"),
       method: "GET",
       path: "/v1/wallets/{walletId}",
-      pathFields: [buildSelectOrTextField("walletId", "{walletId}", "Wallet ID", walletOptions)],
+      pathFields: [
+        buildSelectOrTextField(
+          "walletId",
+          "{walletId}",
+          t("DashboardCustody.walletId"),
+          walletOptions
+        ),
+      ],
       bodyFields: [],
       expectedResponse: {
         data: {
@@ -142,11 +154,18 @@ export function buildWalletsPlaygroundEndpointConfigs({
     },
     {
       id: "get-wallet-public-key",
-      title: "Get Wallet Public Key",
+      title: t("DashboardCustody.playgroundGetWalletPublicKey"),
       method: "GET",
       // biome-ignore lint/security/noSecrets: Public API path with a documented query parameter.
       path: "/v1/wallets/public-key?walletId={walletId}",
-      pathFields: [buildSelectOrTextField("walletId", "walletId", "Wallet ID", walletOptions)],
+      pathFields: [
+        buildSelectOrTextField(
+          "walletId",
+          "walletId",
+          t("DashboardCustody.walletId"),
+          walletOptions
+        ),
+      ],
       bodyFields: [],
       expectedResponse: {
         data: {
@@ -156,7 +175,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
     },
     {
       id: "aggregate-balances",
-      title: "Aggregate Wallet Balances",
+      title: t("DashboardCustody.playgroundAggregateBalances"),
       method: "GET",
       // biome-ignore lint/security/noSecrets: Public API path with static query flags.
       path: "/v1/wallets/aggregate?includeAllProviders=true",
@@ -176,25 +195,30 @@ export function buildWalletsPlaygroundEndpointConfigs({
     },
     {
       id: "create-wallet",
-      title: "Create Wallet",
+      title: t("DashboardCustody.playgroundCreateWallet"),
       method: "POST",
       path: "/v1/wallets",
       pathFields: [],
       bodyFields: [
-        buildSelectOrTextField("provider", "provider", "Provider", providerOptions),
+        buildSelectOrTextField(
+          "provider",
+          t("DashboardCustody.playgroundProviderField"),
+          t("DashboardCustody.rpcProvider"),
+          providerOptions
+        ),
         {
           key: "label",
-          label: "label",
-          placeholder: "Main settlement wallet",
+          label: t("DashboardCustody.playgroundLabelField"),
+          placeholder: t("DashboardCustody.mainSettlementWallet"),
           defaultValue: exampleWalletLabel,
           required: true,
         },
         {
           key: "purpose",
-          label: "purpose",
-          placeholder: "Select wallet purpose",
+          label: t("DashboardCustody.playgroundPurposeField"),
+          placeholder: t("DashboardCustody.selectWalletPurpose"),
           kind: "select",
-          options: PURPOSE_OPTIONS,
+          options: buildPurposeOptions(t),
           defaultValue: "root",
         },
       ],
@@ -211,17 +235,22 @@ export function buildWalletsPlaygroundEndpointConfigs({
     },
     {
       id: "signer-check",
-      title: "Signer Check",
+      title: t("DashboardCustody.playgroundSignerCheck"),
       method: "POST",
       path: "/v1/wallets/signer-check",
       pathFields: [],
       bodyFields: [
-        buildSelectOrTextField("walletId", "walletId", "Wallet ID", walletOptions),
+        buildSelectOrTextField(
+          "walletId",
+          "walletId",
+          t("DashboardCustody.walletId"),
+          walletOptions
+        ),
         {
           key: "memo",
-          label: "memo",
-          placeholder: "Ownership proof from the wallet playground",
-          defaultValue: "Ownership proof from the wallet playground",
+          label: t("DashboardCustody.playgroundMemoField"),
+          placeholder: t("DashboardCustody.ownershipProof"),
+          defaultValue: t("DashboardCustody.ownershipProof"),
         },
       ],
       expectedResponse: {

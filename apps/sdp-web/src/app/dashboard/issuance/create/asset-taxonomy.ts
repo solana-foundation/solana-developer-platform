@@ -18,6 +18,9 @@ import {
   ScrollText,
   TrendingUp,
 } from "lucide-react";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 // Presentation-only layer for the create-asset wizard. It annotates the shared
 // registry codes from `@sdp/types` (ASSET_TYPES / ASSET_TYPE_REGISTRY) with
@@ -28,15 +31,15 @@ import {
 
 export interface SubAssetTypePresentation {
   type: string;
-  label: string;
-  description: string;
+  labelKey: MessageKey;
+  descriptionKey: MessageKey;
   icon: LucideIcon;
 }
 
 export interface CategoryPresentation {
   category: AssetCategory;
-  label: string;
-  description: string;
+  labelKey: MessageKey;
+  descriptionKey: MessageKey;
   icon: LucideIcon;
   subTypes: SubAssetTypePresentation[];
 }
@@ -44,74 +47,72 @@ export interface CategoryPresentation {
 export const ASSET_TAXONOMY: readonly CategoryPresentation[] = [
   {
     category: "stablecoin",
-    label: "Stablecoin",
-    description:
-      "Assets designed to maintain a stable value, typically backed by fiat or other liquid assets.",
+    labelKey: "DashboardIssuance.taxonomy.stablecoin",
+    descriptionKey: "DashboardIssuance.taxonomy.stablecoinDescription",
     icon: Landmark,
     subTypes: [
       {
         type: "fiat_backed",
-        label: "Fiat-backed",
-        description:
-          "Backed 1:1 by fiat currency reserves held in regulated financial institutions.",
+        labelKey: "DashboardIssuance.taxonomy.fiatBacked",
+        descriptionKey: "DashboardIssuance.taxonomy.fiatBackedDescription",
         icon: Banknote,
       },
       {
         type: "crypto_backed",
-        label: "Crypto-backed",
-        description: "Collateralized by crypto assets held in custody to maintain the peg.",
+        labelKey: "DashboardIssuance.taxonomy.cryptoBacked",
+        descriptionKey: "DashboardIssuance.taxonomy.cryptoBackedDescription",
         icon: Bitcoin,
       },
     ],
   },
   {
     category: "tokenized_security",
-    label: "Tokenized Security",
-    description: "Regulated financial instruments or digital representations of securities.",
+    labelKey: "DashboardIssuance.taxonomy.tokenizedSecurity",
+    descriptionKey: "DashboardIssuance.taxonomy.tokenizedSecurityDescription",
     icon: ScrollText,
     subTypes: [
       {
         type: "equity",
-        label: "Equity",
-        description: "Tokenized shares or equity-like interests in a company.",
+        labelKey: "DashboardIssuance.taxonomy.equity",
+        descriptionKey: "DashboardIssuance.taxonomy.equityDescription",
         icon: TrendingUp,
       },
       {
         type: "debt",
-        label: "Debt / Bond",
-        description: "Bonds, notes, or other debt instruments.",
+        labelKey: "DashboardIssuance.taxonomy.debt",
+        descriptionKey: "DashboardIssuance.taxonomy.debtDescription",
         icon: Layers,
       },
       {
         type: "fund",
-        label: "Fund / ETF",
-        description: "Fund interests or exchange-traded fund shares.",
+        labelKey: "DashboardIssuance.taxonomy.fund",
+        descriptionKey: "DashboardIssuance.taxonomy.fundDescription",
         icon: PieChart,
       },
     ],
   },
   {
     category: "generic",
-    label: "Non-Security Digital Asset",
-    description: "Other tokenized assets that don't fit the above categories.",
+    labelKey: "DashboardIssuance.taxonomy.generic",
+    descriptionKey: "DashboardIssuance.taxonomy.genericDescription",
     icon: Boxes,
     subTypes: [
       {
         type: "commodity",
-        label: "Commodities",
-        description: "Claims on physical commodities or natural resources.",
+        labelKey: "DashboardIssuance.taxonomy.commodities",
+        descriptionKey: "DashboardIssuance.taxonomy.commoditiesDescription",
         icon: Package,
       },
       {
         type: "real_estate",
-        label: "Real Estate",
-        description: "Tokenized real-estate interests or property.",
+        labelKey: "DashboardIssuance.taxonomy.realEstate",
+        descriptionKey: "DashboardIssuance.taxonomy.realEstateDescription",
         icon: Building2,
       },
       {
         type: "collectible",
-        label: "Collectibles",
-        description: "Unique or limited collectible assets.",
+        labelKey: "DashboardIssuance.taxonomy.collectibles",
+        descriptionKey: "DashboardIssuance.taxonomy.collectiblesDescription",
         icon: Gem,
       },
     ],
@@ -155,23 +156,31 @@ export function getSubTypePresentation(
 
 // Friendly label for the summary rail / review. Prefers the short card label,
 // falls back to the shared registry's canonical label, then the raw code.
-export function getCategoryLabel(category: AssetCategory | null): string | null {
+export function getCategoryLabelKey(category: AssetCategory | null): MessageKey | null {
   if (!category) {
     return null;
   }
-  return getCategoryPresentation(category)?.label ?? category;
+  return getCategoryPresentation(category)?.labelKey ?? null;
+}
+
+function getAssetTypeLabelKey(
+  category: AssetCategory | null,
+  type: string | null
+): MessageKey | null {
+  if (!category || !type) {
+    return null;
+  }
+  return getSubTypePresentation(category, type)?.labelKey ?? null;
 }
 
 export function getAssetTypeLabel(
   category: AssetCategory | null,
-  type: string | null
+  type: string | null,
+  t: Translate
 ): string | null {
   if (!category || !type) {
     return null;
   }
-  return (
-    getSubTypePresentation(category, type)?.label ??
-    getAssetTypeRegistryEntry(category, type)?.label ??
-    type
-  );
+  const labelKey = getAssetTypeLabelKey(category, type);
+  return labelKey ? t(labelKey) : (getAssetTypeRegistryEntry(category, type)?.label ?? type);
 }

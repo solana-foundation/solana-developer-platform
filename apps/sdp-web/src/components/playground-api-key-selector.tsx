@@ -4,6 +4,7 @@ import { KeyRound } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useTranslations } from "@/i18n/provider";
 
 function formatKeyIdentifier(keyPrefix: string): string {
   const trimmed = keyPrefix.trim();
@@ -27,6 +28,7 @@ function formatApiKeyLabel(name: string, keyPrefix: string): string {
 }
 
 export function PlaygroundApiKeySelector() {
+  const t = useTranslations();
   const {
     dashboardAccess,
     playgroundApiKeys,
@@ -44,7 +46,7 @@ export function PlaygroundApiKeySelector() {
 
     return (
       <Button asChild className="h-11 rounded-[14px] px-4 whitespace-nowrap">
-        <Link href="/dashboard/api-keys">Create API key</Link>
+        <Link href="/dashboard/api-keys">{t("Shared.SharedComponents.createApiKey")}</Link>
       </Button>
     );
   }
@@ -58,13 +60,13 @@ export function PlaygroundApiKeySelector() {
             <span className="truncate text-left text-sm font-medium text-[#1c1c1d]">
               {selectedApiKey
                 ? formatApiKeyLabel(selectedApiKey.name, selectedApiKey.keyPrefix)
-                : "Select API key"}
+                : t("Shared.SharedComponents.selectApiKey")}
             </span>
           </span>
         </div>
 
         <select
-          aria-label="Select API key"
+          aria-label={t("Shared.SharedComponents.selectApiKey")}
           className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-[14px] opacity-0"
           value={selectedPlaygroundApiKeyId ?? playgroundApiKeys[0].id}
           onChange={(event) => setSelectedPlaygroundApiKeyId(event.currentTarget.value)}

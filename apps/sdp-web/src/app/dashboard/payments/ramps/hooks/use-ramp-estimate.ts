@@ -4,6 +4,7 @@ import type { RampDirection, RampProviderEstimateResult } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { useMemo } from "react";
 import useSWR from "swr";
+import { useTranslations } from "@/i18n/provider";
 import type { SelectedRampPair } from "@/lib/ramps";
 import { useDebounce } from "@/lib/use-debounce";
 import { fetchRampEstimates } from "../../payments-workspace.data";
@@ -26,6 +27,7 @@ export function useRampEstimate({
   amount,
   enabled,
 }: UseRampEstimateArgs): UseRampEstimateResult {
+  const t = useTranslations();
   const debouncedAmount = useDebounce(amount.trim(), 300);
   const hasAmount = enabled && debouncedAmount.length > 0 && /[1-9]/.test(debouncedAmount);
 
@@ -40,12 +42,15 @@ export function useRampEstimate({
         ] as const)
       : null,
     () =>
-      fetchRampEstimates({
-        direction,
-        assetRail: selectedPair.assetRail,
-        fiatCurrency: selectedPair.fiatCurrency,
-        amount: debouncedAmount,
-      }),
+      fetchRampEstimates(
+        {
+          direction,
+          assetRail: selectedPair.assetRail,
+          fiatCurrency: selectedPair.fiatCurrency,
+          amount: debouncedAmount,
+        },
+        t
+      ),
     { keepPreviousData: true }
   );
 

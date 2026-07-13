@@ -1,5 +1,21 @@
 import { COUNTERPARTY_ENTITY_TYPES, COUNTRY_CODES } from "@sdp/types";
 import { z } from "zod";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+export function resolveCounterpartyValidationMessage(t: Translate, code: string): string {
+  const keys: Record<string, MessageKey> = {
+    required: "DashboardPayments.counterparty.validation.required",
+    invalidEmail: "DashboardPayments.counterparty.validation.invalidEmail",
+    invalidDate: "DashboardPayments.counterparty.validation.invalidDate",
+    dateMustBePast: "DashboardPayments.counterparty.validation.dateMustBePast",
+    invalidPhone: "DashboardPayments.counterparty.validation.invalidPhone",
+    selectCountry: "DashboardPayments.counterparty.validation.selectCountry",
+    selectState: "DashboardPayments.counterparty.validation.selectState",
+  };
+  return t(keys[code] ?? "DashboardPayments.counterparty.validation.required");
+}
 
 // Empty string -> undefined, with bounds applied when present.
 function optionalString(max: number, min = 1) {
@@ -34,44 +50,40 @@ function todayIsoDate(): string {
 
 export const basicsSchema = z.object({
   entityType: z.enum(COUNTERPARTY_ENTITY_TYPES),
-  displayName: z.string().trim().min(1, "Required").max(512),
-  email: z.string().trim().toLowerCase().pipe(z.email("Invalid email").max(512)),
+  displayName: z.string().trim().min(1, "required").max(512),
+  email: z.string().trim().toLowerCase().pipe(z.email("invalidEmail").max(512)),
   externalId: optionalString(256),
 });
 
 export const identitySchema = z.object({
-  firstName: z.string().trim().min(1, "Required").max(256),
-  lastName: z.string().trim().min(1, "Required").max(256),
+  firstName: z.string().trim().min(1, "required").max(256),
+  lastName: z.string().trim().min(1, "required").max(256),
   dateOfBirth: z
     .string()
     .trim()
     .pipe(
       z.iso
-        .date("Must be a date (YYYY-MM-DD)")
-        .refine((value) => value < todayIsoDate(), { message: "Must be in the past" })
+        .date("invalidDate")
+        .refine((value) => value < todayIsoDate(), { message: "dateMustBePast" })
     ),
-  phone: z
-    .string()
-    .trim()
-    .regex(E164_PHONE_PATTERN, "Must be in E.164 format (e.g. +14155551234)")
-    .max(64),
+  phone: z.string().trim().regex(E164_PHONE_PATTERN, "invalidPhone").max(64),
 });
 
 export const addressSchema = z
   .object({
-    line1: z.string().trim().min(1, "Required").max(512),
+    line1: z.string().trim().min(1, "required").max(512),
     line2: optionalString(512, 0),
-    city: z.string().trim().min(1, "Required").max(256),
+    city: z.string().trim().min(1, "required").max(256),
     postalCode: optionalString(32, 0),
-    countryCode: enumField(COUNTRY_CODES, "Select a country"),
+    countryCode: enumField(COUNTRY_CODES, "selectCountry"),
     subdivisionCode: optionalUppercase(16),
   })
   .refine((v) => v.countryCode !== "US" || (v.subdivisionCode ?? "").length === 2, {
-    message: "Select a state",
+    message: "selectState",
     path: ["subdivisionCode"],
   });
 
-function enumField<const T extends readonly string[]>(values: T, message = "Required") {
+function enumField<const T extends readonly string[]>(values: T, message = "required") {
   return z
     .string()
     .refine((v): v is T[number] => (values as readonly string[]).includes(v), message);
@@ -84,7 +96,7 @@ export type CryptoAccountNetwork = (typeof CRYPTO_ACCOUNT_NETWORKS)[number];
 export const cryptoAccountSchema = z.object({
   label: optionalString(256),
   network: z.enum(CRYPTO_ACCOUNT_NETWORKS),
-  address: z.string().trim().min(1, "Required").max(256),
+  address: z.string().trim().min(1, "required").max(256),
 });
 
 export type CryptoAccountData = z.input<typeof cryptoAccountSchema>;

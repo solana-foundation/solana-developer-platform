@@ -26,12 +26,14 @@ import PaymentsLoading from "@/app/dashboard/payments/loading";
 import WalletsLoading from "@/app/dashboard/wallets/loading";
 import { CounterpartyHeaderTabs } from "@/components/counterparty-header-tabs";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
+import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useTranslations } from "@/i18n/provider";
 import { isRecurringPaymentsDashboardEnabled } from "@/lib/recurring-payments-feature";
 import { cn } from "@/lib/utils";
 
@@ -54,42 +56,46 @@ type NavSection = {
   items: NavItem[];
 };
 
-const PAYMENTS_ACTIONS: readonly SubNavItem[] = [
-  { label: "Counterparty", href: "/dashboard/payments/counterparty" },
-  { label: "Pay", href: "/dashboard/payments/pay" },
-  { label: "Deposit", href: "/dashboard/payments/deposit" },
-  { label: "Requests", href: "/dashboard/payments/requests" },
-];
-
-function getPaymentsActions(): SubNavItem[] {
+function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[] {
   return [
-    ...PAYMENTS_ACTIONS,
+    { label: t("Shared.dashboardShell.counterparty"), href: "/dashboard/payments/counterparty" },
+    { label: t("Shared.dashboardShell.pay"), href: "/dashboard/payments/pay" },
+    { label: t("Shared.dashboardShell.deposit"), href: "/dashboard/payments/deposit" },
+    { label: t("Shared.dashboardShell.requests"), href: "/dashboard/payments/requests" },
     ...(isRecurringPaymentsDashboardEnabled()
-      ? [{ label: "Recurring", href: "/dashboard/payments/recurring" }]
+      ? [{ label: t("Shared.dashboardShell.recurring"), href: "/dashboard/payments/recurring" }]
       : []),
   ];
 }
 
-function getNavSections(): NavSection[] {
+function getNavSections(t: ReturnType<typeof useTranslations>): NavSection[] {
   return [
     {
-      title: "Create",
+      title: t("Shared.dashboardShell.create"),
       items: [
-        { label: "Home", href: "/dashboard", icon: LayoutDashboardIcon },
-        { label: "Wallets", href: "/dashboard/wallets", icon: WalletIcon },
+        { label: t("Shared.dashboardShell.home"), href: "/dashboard", icon: LayoutDashboardIcon },
+        { label: t("Shared.dashboardShell.wallets"), href: "/dashboard/wallets", icon: WalletIcon },
       ],
     },
     {
-      title: "Manage",
+      title: t("Shared.dashboardShell.manage"),
       items: [
-        { label: "Issuance", href: "/dashboard/issuance", icon: CoinsIcon },
         {
-          label: "Payments",
+          label: t("Shared.dashboardShell.issuance"),
+          href: "/dashboard/issuance",
+          icon: CoinsIcon,
+        },
+        {
+          label: t("Shared.dashboardShell.payments"),
           href: "/dashboard/payments",
           icon: ArrowLeftRightIcon,
-          children: getPaymentsActions(),
+          children: getPaymentsActions(t),
         },
-        { label: "API keys", href: "/dashboard/api-keys", icon: KeyRoundIcon },
+        {
+          label: t("Shared.dashboardShell.apiKeys"),
+          href: "/dashboard/api-keys",
+          icon: KeyRoundIcon,
+        },
       ],
     },
   ];
@@ -156,10 +162,11 @@ function SidebarToggle({
   isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
 }) {
+  const t = useTranslations();
   return (
     <button
       type="button"
-      aria-label="Open navigation"
+      aria-label={t("Shared.dashboardShell.openNavigation")}
       onClick={() => setMobileSidebarOpen(true)}
       className={[
         "inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light lg:hidden",
@@ -179,12 +186,13 @@ function DashboardTopBar({
   centeredTitle,
   topBarLeadingContent,
 }: DashboardTopBarProps) {
+  const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
   const isSandbox = sdpEnvironment === "sandbox";
   const sandboxBadge = isSandbox ? (
     <>
       <span aria-hidden="true" className="h-4 w-px bg-border-light" />
-      <Badge>Sandbox</Badge>
+      <Badge>{t("Shared.dashboardShell.sandbox")}</Badge>
     </>
   ) : null;
 
@@ -204,6 +212,7 @@ function DashboardTopBar({
           </h1>
         </div>
         <div className="flex items-center justify-end gap-2">
+          <LanguagePicker />
           <UserButton />
           {sandboxBadge}
         </div>
@@ -226,6 +235,7 @@ function DashboardTopBar({
       </div>
 
       <div className="flex items-center gap-2">
+        <LanguagePicker />
         <UserButton />
         {sandboxBadge}
       </div>
@@ -251,77 +261,86 @@ function actionPageConfig(config: {
   };
 }
 
-function getCounterpartyRoutePageConfig(pathname: string): DashboardPageConfig | null {
+function getCounterpartyRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
   if (pathname === "/dashboard/payments/counterparty/create") {
     return actionPageConfig({
-      centeredTitle: "New Counterparty",
+      centeredTitle: t("Shared.dashboardShell.newCounterparty"),
       backHref: "/dashboard/payments/counterparty",
-      backLabel: "Back to Counterparty",
+      backLabel: t("Shared.dashboardShell.backToCounterparty"),
       contentWidthClass: "max-w-xl",
     });
   }
   if (pathname.startsWith("/dashboard/payments/counterparty/")) {
     return {
-      title: "Manage Counterparty",
+      title: t("Shared.dashboardShell.manageCounterparty"),
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/payments/counterparty",
-        label: "Back to Counterparty",
+        label: t("Shared.dashboardShell.backToCounterparty"),
       },
     };
   }
   return null;
 }
 
-function getWalletBackAction(pathname: string): DashboardPageConfig["backAction"] {
+function getWalletBackAction(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig["backAction"] {
   const walletPolicyRouteMatch = pathname.match(
     /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/
   );
   if (!walletPolicyRouteMatch) {
     return {
       href: "/dashboard/wallets",
-      label: "Back to wallets",
+      label: t("Shared.dashboardShell.backToWallets"),
     };
   }
 
   const [, section, walletId] = walletPolicyRouteMatch;
   return {
     href: `/dashboard/${section}/${walletId}`,
-    label: "Back to wallet detail",
+    label: t("Shared.dashboardShell.backToWalletDetail"),
   };
 }
 
-function getDashboardPageConfig(pathname: string): DashboardPageConfig {
+function getDashboardPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig {
   if (pathname === "/dashboard") {
     return {
-      title: "Home",
+      title: t("Shared.dashboardShell.home"),
       contentWidthClass: "max-w-none",
     };
   }
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
-      title: "Wallets",
+      title: t("Shared.dashboardShell.wallets"),
       headerNav: <IssuanceHeaderTabs />,
       contentWidthClass: "max-w-none",
     };
   }
   if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
     return {
-      title: "Create wallet",
+      title: t("Shared.dashboardShell.createWallet"),
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/wallets",
-        label: "Back to wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
       },
     };
   }
   if (pathname === "/dashboard/wallets/switch" || pathname === "/dashboard/custody/switch") {
     return {
-      title: "Activate provider",
+      title: t("Shared.dashboardShell.activateProvider"),
       contentWidthClass: "max-w-3xl",
       backAction: {
         href: "/dashboard/wallets",
-        label: "Back to wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
       },
     };
   }
@@ -330,109 +349,109 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
     (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup")
   ) {
     return {
-      title: "Wallets",
+      title: t("Shared.dashboardShell.wallets"),
       contentWidthClass: "max-w-none",
-      backAction: getWalletBackAction(pathname),
+      backAction: getWalletBackAction(pathname, t),
     };
   }
   if (pathname === "/dashboard/api-keys") {
     return {
-      title: "API keys",
+      title: t("Shared.dashboardShell.apiKeys"),
       showHeaderNavRow: true,
       contentWidthClass: "max-w-none",
     };
   }
   if (pathname === "/dashboard/issuance") {
     return {
-      title: "Issuance",
+      title: t("Shared.dashboardShell.issuance"),
       headerNav: <IssuanceHeaderTabs />,
       contentWidthClass: "max-w-none",
     };
   }
   if (pathname === "/dashboard/issuance/create") {
     return actionPageConfig({
-      centeredTitle: "New asset",
+      centeredTitle: t("Shared.dashboardShell.newAsset"),
       backHref: "/dashboard/issuance",
-      backLabel: "Back to overview",
+      backLabel: t("Shared.dashboardShell.backToOverview"),
       contentWidthClass: "max-w-none",
     });
   }
   if (pathname.startsWith("/dashboard/issuance/")) {
     return {
-      title: "Issuance",
+      title: t("Shared.dashboardShell.issuance"),
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/issuance",
-        label: "Back to overview",
+        label: t("Shared.dashboardShell.backToOverview"),
       },
     };
   }
   if (pathname === "/dashboard/payments/counterparty") {
     return {
-      title: "Counterparty",
+      title: t("Shared.dashboardShell.counterparty"),
       headerNav: <CounterpartyHeaderTabs />,
       contentWidthClass: "max-w-none",
     };
   }
-  const counterpartyRouteConfig = getCounterpartyRoutePageConfig(pathname);
+  const counterpartyRouteConfig = getCounterpartyRoutePageConfig(pathname, t);
   if (counterpartyRouteConfig) {
     return counterpartyRouteConfig;
   }
   if (pathname === "/dashboard/payments") {
     return {
-      title: "Payments",
+      title: t("Shared.dashboardShell.payments"),
       headerNav: <IssuanceHeaderTabs />,
       contentWidthClass: "max-w-none",
     };
   }
   if (pathname === "/dashboard/payments/requests") {
     return {
-      title: "Requests",
+      title: t("Shared.dashboardShell.requests"),
       headerNav: <CounterpartyHeaderTabs />,
       contentWidthClass: "max-w-none",
     };
   }
   if (pathname === "/dashboard/payments/recurring") {
     return {
-      title: "Recurring payments",
+      title: t("Shared.dashboardShell.recurringPayments"),
       contentWidthClass: "max-w-none",
     };
   }
   if (pathname.startsWith("/dashboard/payments/recurring/")) {
     return {
-      title: "Recurring payment",
+      title: t("Shared.dashboardShell.recurringPayment"),
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/payments/recurring",
-        label: "Back to recurring payments",
+        label: t("Shared.dashboardShell.backToRecurringPayments"),
       },
     };
   }
   if (pathname.startsWith("/dashboard/payments/")) {
-    const action = PAYMENTS_ACTIONS.find((item) => pathname.startsWith(item.href));
+    const action = getPaymentsActions(t).find((item) => pathname.startsWith(item.href));
     const centeredTitle = action
       ? action.label
       : pathname.endsWith("/receive")
-        ? "Receive"
-        : "Send";
+        ? t("Shared.dashboardShell.receive")
+        : t("Shared.dashboardShell.send");
 
     return actionPageConfig({
       centeredTitle,
       backHref: "/dashboard/payments",
-      backLabel: "Back to payments",
+      backLabel: t("Shared.dashboardShell.backToPayments"),
       contentWidthClass: "max-w-none",
     });
   }
   if (pathname.startsWith("/dashboard/members")) {
-    return { title: "Members" };
+    return { title: t("Shared.dashboardShell.members") };
   }
   if (pathname.startsWith("/dashboard/settings")) {
-    return { title: "Settings" };
+    return { title: t("Shared.dashboardShell.settings") };
   }
   if (pathname.startsWith("/dashboard/allowlist")) {
-    return { title: "Allowlist" };
+    return { title: t("Shared.dashboardShell.allowlist") };
   }
-  return { title: "Home" };
+  return { title: t("Shared.dashboardShell.home") };
 }
 
 function resolvePageLoadingComponent(pathname: string): React.ComponentType {
@@ -578,6 +597,7 @@ function DashboardSidebarContent({
   isCollapsed: boolean;
   variant: "desktop" | "mobile";
 }) {
+  const t = useTranslations();
   const showMobileClose = variant === "mobile";
   return (
     <>
@@ -588,7 +608,7 @@ function DashboardSidebarContent({
               <WorkspaceSwitcher collapsed={false} />
               <button
                 type="button"
-                aria-label="Close navigation"
+                aria-label={t("Shared.dashboardShell.closeNavigation")}
                 onClick={onClose}
                 className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light"
               >
@@ -641,6 +661,7 @@ function DashboardSidebarContent({
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
 export function DashboardShell({ children }: { children: ReactNode }) {
+  const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
   const { dashboardAccess, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
@@ -650,12 +671,23 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const previousPathnameRef = useRef(pathname);
   const sidebarExpandedWidth = 296;
   const sidebarCollapsedWidth = 64;
-  const pageConfig = getDashboardPageConfig(pathname);
-  const navSections = getNavSections();
+  const pageConfig = getDashboardPageConfig(pathname, t);
+  const navSections = getNavSections(t);
   const bottomNavItems: NavItem[] = [
-    { label: "API Docs", href: docsHref, icon: LibraryIcon, external: true },
+    {
+      label: t("Shared.dashboardShell.apiDocs"),
+      href: docsHref,
+      icon: LibraryIcon,
+      external: true,
+    },
     ...(dashboardAccess.capabilities.canManageOrgSettings
-      ? [{ label: "Settings", href: "/dashboard/settings", icon: Settings2Icon }]
+      ? [
+          {
+            label: t("Shared.dashboardShell.settings"),
+            href: "/dashboard/settings",
+            icon: Settings2Icon,
+          },
+        ]
       : []),
   ];
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
@@ -705,7 +737,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     return (
       <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
         <div className="mx-auto max-w-5xl border border-border-extra-light bg-white/70 p-6">
-          <p className="text-sm text-text-low">Loading dashboard...</p>
+          <p className="text-sm text-text-low">{t("Shared.dashboardShell.loadingDashboard")}</p>
         </div>
       </main>
     );
@@ -716,10 +748,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
         <div className="mx-auto max-w-3xl border border-border-extra-light bg-white/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
-            Sign in to continue
+            {t("Shared.dashboardShell.signInToContinue")}
           </h1>
           <p className="mt-3 text-sm text-text-low">
-            Access your organization workspace and wallet controls.
+            {t("Shared.dashboardShell.signInDescription")}
           </p>
           <div className="mt-6">
             <SignInButton mode="modal">
@@ -727,7 +759,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 type="button"
                 className="inline-flex h-10 items-center justify-center rounded-[var(--button-radius-lg)] bg-gray-1400 px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
               >
-                Sign in
+                {t("Shared.dashboardShell.signIn")}
               </button>
             </SignInButton>
           </div>
@@ -741,9 +773,11 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
         <div className="mx-auto max-w-3xl border border-border-extra-light bg-white/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
-            Select an organization
+            {t("Shared.dashboardShell.selectOrganization")}
           </h1>
-          <p className="mt-3 text-sm text-text-low">You need an organization to continue.</p>
+          <p className="mt-3 text-sm text-text-low">
+            {t("Shared.dashboardShell.selectOrganizationDescription")}
+          </p>
           <div className="mt-6">
             <OrganizationSwitcher hidePersonal />
           </div>
@@ -784,7 +818,11 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           <button
             type="button"
             onClick={() => setSidebarOpen(!isSidebarOpen)}
-            aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            aria-label={
+              isSidebarOpen
+                ? t("Shared.dashboardShell.collapseSidebar")
+                : t("Shared.dashboardShell.expandSidebar")
+            }
             className="group absolute top-1/2 right-0 z-10 flex h-24 w-5 -translate-y-1/2 translate-x-3/4 cursor-pointer items-center justify-center"
           >
             <span className="block h-8 w-0.5 rounded-full bg-border-medium group-hover:bg-text-low" />
@@ -795,7 +833,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           <div className="fixed inset-0 z-50 flex lg:hidden">
             <button
               type="button"
-              aria-label="Close navigation overlay"
+              aria-label={t("Shared.dashboardShell.closeNavigationOverlay")}
               className="absolute inset-0 bg-gray-1400/30"
               onClick={() => setMobileSidebarOpen(false)}
             />

@@ -2,6 +2,7 @@
 
 import type { Token } from "@sdp/types";
 import { Button } from "@/components/ui/button";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatDisplayLabel } from "@/lib/utils";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import { formatDate } from "./token-management-workspace.utils";
@@ -23,13 +24,15 @@ export function TokenOverviewSection({
   refreshDisabled = false,
   refreshDisabledReason = null,
 }: TokenOverviewSectionProps) {
+  const t = useTranslations();
+  const locale = useLocale();
   return (
     <section className="space-y-3">
       {showTitle || onRefreshSupply ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
           {showTitle ? (
             <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
-              Token Overview
+              {t("DashboardIssuance.overview.title")}
             </h3>
           ) : (
             <div />
@@ -43,19 +46,36 @@ export function TokenOverviewSection({
                 onClick={onRefreshSupply}
                 disabled={refreshDisabled}
               >
-                Refresh supply
+                {t("DashboardIssuance.management.refreshSupply")}
               </Button>
             </TokenDisabledActionTooltip>
           ) : null}
         </div>
       ) : null}
       <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
-        <OverviewRow label="Token Address" value={token.mintAddress ?? "Not deployed"} monospace />
-        <OverviewRow label="Mint Authority" value={mintAuthorityValue ?? "None"} monospace />
-        <OverviewRow label="Supply" value={token.totalSupply} />
-        <OverviewRow label="Created" value={formatDate(token.createdAt)} />
-        <OverviewRow label="Template" value={formatDisplayLabel(token.template)} />
-        <OverviewRow label="Decimals" value={String(token.decimals)} />
+        <OverviewRow
+          label={t("DashboardIssuance.overview.tokenAddress")}
+          value={token.mintAddress ?? t("DashboardIssuance.header.notDeployed")}
+          monospace
+        />
+        <OverviewRow
+          label={t("DashboardIssuance.overview.mintAuthority")}
+          value={mintAuthorityValue ?? t("DashboardIssuance.wallet.none")}
+          monospace
+        />
+        <OverviewRow label={t("DashboardIssuance.overview.supply")} value={token.totalSupply} />
+        <OverviewRow
+          label={t("DashboardIssuance.transactions.created")}
+          value={formatDate(token.createdAt, locale)}
+        />
+        <OverviewRow
+          label={t("DashboardIssuance.overview.template")}
+          value={formatDisplayLabel(token.template)}
+        />
+        <OverviewRow
+          label={t("DashboardIssuance.create.decimals")}
+          value={String(token.decimals)}
+        />
       </div>
     </section>
   );

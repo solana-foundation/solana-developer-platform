@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { CAPACITY_META } from "./asset-details-config";
 import { CAPACITY_KEYS, type CapacityKey } from "./issuance-draft-wizard.types";
@@ -14,14 +15,17 @@ interface AdvancedCapacitiesProps {
 // Collapsible "Advanced" panel — capacity checkboxes pre-selected based on the
 // chosen asset profile (see getRecommendedCapacities). Not a tab.
 export function AdvancedCapacities({ value, onChange, disabled }: AdvancedCapacitiesProps) {
+  const t = useTranslations();
   return (
     <details className="group rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-4" open>
       <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-        <span className="text-sm font-semibold text-[#1c1c1d]">Advanced</span>
+        <span className="text-sm font-semibold text-[#1c1c1d]">
+          {t("DashboardIssuance.config.advanced")}
+        </span>
         <ChevronDown className="ml-auto h-4 w-4 text-[rgba(28,28,29,0.5)] transition-transform group-open:rotate-180" />
       </summary>
       <p className="mt-2 text-sm text-[rgba(28,28,29,0.58)]">
-        Recommended capacities are pre-selected based on the asset profile.
+        {t("DashboardIssuance.config.advancedCapacitiesDescription")}
       </p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         {CAPACITY_KEYS.map((key) => {
@@ -45,8 +49,10 @@ export function AdvancedCapacities({ value, onChange, disabled }: AdvancedCapaci
                 className="mt-0.5 h-4 w-4 accent-[#1c1c1d]"
               />
               <span className="min-w-0">
-                <span className="block text-sm font-medium text-[#1c1c1d]">{meta.label}</span>
-                <span className="block text-xs text-[rgba(28,28,29,0.58)]">{meta.description}</span>
+                <span className="block text-sm font-medium text-[#1c1c1d]">{t(meta.labelKey)}</span>
+                <span className="block text-xs text-[rgba(28,28,29,0.58)]">
+                  {t(meta.descriptionKey)}
+                </span>
               </span>
             </label>
           );

@@ -5,6 +5,7 @@ import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
+import { useTranslations } from "@/i18n/provider";
 import { AdvancedCapacities } from "../../../create/advanced-capacities";
 import { ACCESS_CONTROL_OPTIONS, accessControlLabel } from "../../../create/asset-details-config";
 import { FormCard, ReadOnlyField } from "../../../create/form-primitives";
@@ -27,6 +28,7 @@ export function ComplianceTab({
   ops: TokenOperations;
   canManageTokenAdmin: boolean;
 }) {
+  const t = useTranslations();
   const { draft, updateDraft, saving } = form;
   const isDeployed = Boolean(token.mintAddress);
 
@@ -36,10 +38,10 @@ export function ComplianceTab({
       : []),
     ...(canManageTokenAdmin
       ? [
-          { id: "seize" as const, label: "Force transfer" },
-          { id: "force-burn" as const, label: "Force burn" },
-          { id: "freeze" as const, label: "Freeze" },
-          { id: "pause" as const, label: "Pause" },
+          { id: "seize" as const, label: t("DashboardIssuance.compliance.forceTransfer") },
+          { id: "force-burn" as const, label: t("DashboardIssuance.compliance.forceBurn") },
+          { id: "freeze" as const, label: t("DashboardIssuance.compliance.freeze") },
+          { id: "pause" as const, label: t("DashboardIssuance.compliance.pause") },
         ]
       : []),
   ];
@@ -50,20 +52,23 @@ export function ComplianceTab({
   return (
     <div className="space-y-5">
       <FormCard
-        title="Access policy"
-        description="Documents the intended access policy for this asset."
+        title={t("DashboardIssuance.compliance.accessPolicy")}
+        description={t("DashboardIssuance.compliance.accessPolicyDescription")}
         icon={ShieldCheck}
       >
         <div className="grid items-start gap-4 sm:grid-cols-2">
           {isDeployed ? (
             <ReadOnlyField
-              label="Access control"
-              value={accessControlLabel(draft.accessControl) ?? "Not set"}
-              lockReason="Locked after deployment — on-chain enforcement can't be changed."
+              label={t("DashboardIssuance.compliance.accessControl")}
+              value={
+                accessControlLabel(draft.accessControl, t) ??
+                t("DashboardIssuance.compliance.notSet")
+              }
+              lockReason={t("DashboardIssuance.compliance.lockReason")}
             />
           ) : (
             <div className="max-w-xs">
-              <Label>Access control</Label>
+              <Label>{t("DashboardIssuance.compliance.accessControl")}</Label>
               <div className="mt-1.5">
                 <Select
                   disabled={saving}
@@ -73,17 +78,17 @@ export function ComplianceTab({
                       accessControl: (value ?? "") as DraftState["accessControl"],
                     })
                   }
-                  placeholder="Select access control"
+                  placeholder={t("DashboardIssuance.compliance.selectAccessControl")}
                 >
                   {ACCESS_CONTROL_OPTIONS.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
-                      {option.label}
+                      {t(option.labelKey)}
                     </SelectItem>
                   ))}
                 </Select>
               </div>
               <p className="mt-1.5 text-xs text-[rgba(28,28,29,0.5)]">
-                Applied on-chain when the token deploys.
+                {t("DashboardIssuance.compliance.appliedOnDeploy")}
               </p>
             </div>
           )}
@@ -101,9 +106,11 @@ export function ComplianceTab({
       {availableActions.length > 0 ? (
         <div className="space-y-4 pt-2">
           <div>
-            <p className="text-base font-medium text-[#1c1c1d]">Compliance controls</p>
+            <p className="text-base font-medium text-[#1c1c1d]">
+              {t("DashboardIssuance.compliance.controls")}
+            </p>
             <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.58)]">
-              On-chain actions for this token — these take effect immediately.
+              {t("DashboardIssuance.compliance.controlsDescription")}
             </p>
           </div>
           <ActionPills

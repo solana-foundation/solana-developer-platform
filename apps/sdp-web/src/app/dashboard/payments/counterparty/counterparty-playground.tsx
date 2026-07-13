@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { ApiPlaygroundShell } from "@/components/api-playground-shell";
 import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";
+import { useTranslations } from "@/i18n/provider";
 import {
   buildCounterpartyPlaygroundEndpointConfigs,
   type CounterpartyPlaygroundView,
@@ -21,14 +22,15 @@ export function CounterpartyPlayground({
   hasActiveApiKeys,
   counterparties,
 }: CounterpartyPlaygroundProps) {
+  const t = useTranslations();
   const endpoints = useMemo(
-    () => buildCounterpartyPlaygroundEndpointConfigs(counterparties),
-    [counterparties]
+    () => buildCounterpartyPlaygroundEndpointConfigs(counterparties, t),
+    [counterparties, t]
   );
 
   return (
     <ApiPlaygroundShell
-      productName="Counterparty"
+      productName={t("DashboardPayments.counterparty.playgroundProductName")}
       endpoints={endpoints}
       defaultEndpointId="list-counterparties"
       apiBaseUrl={apiBaseUrl}

@@ -9,6 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useTranslations } from "@/i18n/provider";
 import { rotateApiKeyAction } from "./actions";
 import { DeleteApiKeyModal } from "./delete-api-key-modal";
 
@@ -27,6 +28,7 @@ export function ApiKeyActionsMenu({
   canRotate,
   onDeleted,
 }: ApiKeyActionsMenuProps) {
+  const t = useTranslations();
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const rotateFormRef = useRef<HTMLFormElement | null>(null);
 
@@ -46,7 +48,7 @@ export function ApiKeyActionsMenu({
             className="rounded-full px-5 whitespace-nowrap"
             iconRight={<ChevronDown className="size-4" />}
           >
-            Actions
+            {t("DashboardCustody.actions")}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-[200px]">
@@ -58,13 +60,13 @@ export function ApiKeyActionsMenu({
             }}
             disabled={!canRotate}
           >
-            Rotate key ({DEFAULT_ROTATION_GRACE_HOURS}h grace)
+            {t("DashboardCustody.rotateKey", { hours: DEFAULT_ROTATION_GRACE_HOURS })}
           </DropdownMenuItem>
           <DropdownMenuItem
             className="text-[#c71f37] focus:bg-[#c71f37]/10 focus:text-[#c71f37]"
             onSelect={() => setIsDeleteModalOpen(true)}
           >
-            Delete key
+            {t("DashboardCustody.deleteKey")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

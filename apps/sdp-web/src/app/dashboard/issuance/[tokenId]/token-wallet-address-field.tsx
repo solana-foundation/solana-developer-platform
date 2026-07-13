@@ -4,6 +4,7 @@ import type { PaymentsDashboardWallet } from "@sdp/types";
 import { ChevronDown, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
+import { useTranslations } from "@/i18n/provider";
 import { TokenValidationMessage } from "./token-validation-message";
 
 interface TokenWalletAddressFieldProps {
@@ -29,6 +30,7 @@ export function TokenWalletAddressField({
   placeholder,
   error,
 }: TokenWalletAddressFieldProps) {
+  const t = useTranslations();
   const inputId = useId();
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -79,7 +81,7 @@ export function TokenWalletAddressField({
           required={required}
           pattern={pattern}
           title={title}
-          placeholder={placeholder ?? "Choose a wallet or paste a Solana address"}
+          placeholder={placeholder ?? t("DashboardIssuance.wallet.chooseOrPaste")}
           autoComplete="off"
           aria-invalid={Boolean(error)}
           onFocus={() => {
@@ -98,7 +100,7 @@ export function TokenWalletAddressField({
         {value.trim() ? (
           <button
             type="button"
-            aria-label={`Clear ${label.toLowerCase()}`}
+            aria-label={t("DashboardIssuance.wallet.clear", { label: label.toLowerCase() })}
             onClick={() => {
               onChange("");
               setIsOpen(false);
@@ -111,7 +113,7 @@ export function TokenWalletAddressField({
         {availableWallets.length > 0 ? (
           <button
             type="button"
-            aria-label="Select an existing wallet"
+            aria-label={t("DashboardIssuance.wallet.selectExisting")}
             onClick={() => setIsOpen((current) => !current)}
             className="absolute top-1/2 right-3 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[8px] text-[rgba(28,28,29,0.62)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
           >
@@ -145,7 +147,7 @@ export function TokenWalletAddressField({
       </div>
       {availableWallets.length > 0 ? (
         <p className="text-sm text-[rgba(28,28,29,0.64)]">
-          Type to filter existing wallets, use the dropdown, or paste any Solana address.
+          {t("DashboardIssuance.wallet.filterHint")}
         </p>
       ) : null}
       <TokenValidationMessage message={error ?? null} />

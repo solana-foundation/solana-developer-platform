@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { ApiPlaygroundShell } from "@/components/api-playground-shell";
 import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";
+import { useTranslations } from "@/i18n/provider";
 import {
   buildIssuancePlaygroundEndpointConfigs,
   type IssuancePlaygroundTemplateView,
@@ -26,14 +27,15 @@ export function IssuancePlayground({
   templatesError,
   tokens,
 }: IssuancePlaygroundProps) {
+  const t = useTranslations();
   const endpoints = useMemo(
-    () => buildIssuancePlaygroundEndpointConfigs({ templates, tokens }),
-    [templates, tokens]
+    () => buildIssuancePlaygroundEndpointConfigs({ templates, tokens, t }),
+    [templates, tokens, t]
   );
 
   return (
     <ApiPlaygroundShell
-      productName="Issuance"
+      productName={t("DashboardIssuance.playground.productName")}
       endpoints={endpoints}
       defaultEndpointId="mint-execute"
       apiBaseUrl={apiBaseUrl}

@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useTranslations } from "@/i18n/provider";
 import type { IdentityValidation, TemplateSelection, TokenDraft } from "./create-token-modal.types";
 import { getDecimalsHelperText, normalizeSymbol } from "./create-token-modal.utils";
 
@@ -26,6 +27,7 @@ export function CreateTokenIdentityStep({
   onBack,
   onContinue,
 }: CreateTokenIdentityStepProps) {
+  const t = useTranslations();
   return (
     <motion.div
       key="identity-step"
@@ -35,33 +37,35 @@ export function CreateTokenIdentityStep({
       className="px-6 pb-6"
     >
       <div className="space-y-5 rounded-[28px] bg-white p-5">
-        <p className="text-sm text-[rgba(28,28,29,0.62)]">Fields marked * are required.</p>
+        <p className="text-sm text-[rgba(28,28,29,0.62)]">
+          {t("DashboardIssuance.create.requiredFields")}
+        </p>
 
         <div className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="issuance-token-name">
-              Token Name{" "}
+              {t("DashboardIssuance.create.tokenName")}{" "}
               <span aria-hidden className="text-[#c71f37]">
                 *
               </span>
-              <span className="sr-only"> (required)</span>
+              <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
             </Label>
             <Input
               id="issuance-token-name"
               value={draft.name}
               onChange={(event) => onDraftChange({ name: event.currentTarget.value })}
-              placeholder="e.g., USD Coin"
+              placeholder={t("DashboardIssuance.create.tokenNamePlaceholder")}
               required
             />
           </div>
 
           <div className="grid gap-2">
             <Label htmlFor="issuance-token-symbol">
-              Symbol{" "}
+              {t("DashboardIssuance.create.symbol")}{" "}
               <span aria-hidden className="text-[#c71f37]">
                 *
               </span>
-              <span className="sr-only"> (required)</span>
+              <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
             </Label>
             <Input
               id="issuance-token-symbol"
@@ -69,18 +73,18 @@ export function CreateTokenIdentityStep({
               onChange={(event) =>
                 onDraftChange({ symbol: normalizeSymbol(event.currentTarget.value) })
               }
-              placeholder="e.g., USDC"
+              placeholder={t("DashboardIssuance.create.symbolPlaceholder")}
               required
             />
           </div>
 
           <div className="grid gap-2">
             <Label htmlFor="issuance-token-decimals">
-              Decimals{" "}
+              {t("DashboardIssuance.create.decimals")}{" "}
               <span aria-hidden className="text-[#c71f37]">
                 *
               </span>
-              <span className="sr-only"> (required)</span>
+              <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
             </Label>
             <Input
               id="issuance-token-decimals"
@@ -91,27 +95,27 @@ export function CreateTokenIdentityStep({
               inputMode="numeric"
               value={draft.decimals}
               onChange={(event) => onDraftChange({ decimals: event.currentTarget.value })}
-              placeholder="e.g., 6"
+              placeholder={t("DashboardIssuance.create.decimalsPlaceholder")}
               aria-invalid={draft.decimals.length > 0 && !validation.decimalsValid}
               required
             />
             {draft.decimals.length > 0 && !validation.decimalsValid ? (
               <p className="text-sm text-[#c71f37]" role="alert">
-                Enter a whole number between 0 and 18.
+                {t("DashboardIssuance.create.decimalsError")}
               </p>
             ) : null}
             <p className="text-base text-[rgba(28,28,29,0.62)]">
-              {getDecimalsHelperText(template)}
+              {getDecimalsHelperText(template, t)}
             </p>
           </div>
         </div>
 
         <div className="mt-5 flex items-center justify-between gap-3">
           <Button type="button" variant="secondary" onClick={onBack} className="flex-1">
-            Back
+            {t("DashboardIssuance.create.back")}
           </Button>
           <Button type="button" onClick={onContinue} disabled={!canContinue} className="flex-1">
-            Continue
+            {t("DashboardIssuance.create.continue")}
           </Button>
         </div>
       </div>

@@ -1,13 +1,18 @@
 import type { RampProviderId } from "@sdp/types";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import type { LucideIcon } from "lucide-react";
-import { BVNK_ONBOARDING_COPY, BVNK_PROVISIONING_DETAIL, BVNK_SIMULATE_LABELS } from "./bvnk";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { getBvnkOnboardingCopy, getBvnkProvisioningDetail, getBvnkSimulateLabels } from "./bvnk";
 import {
-  LIGHTSPARK_ONBOARDING_COPY,
-  LIGHTSPARK_PROVISIONING_DETAIL,
-  LIGHTSPARK_SIMULATE_LABELS,
+  getLightsparkOnboardingCopy,
+  getLightsparkProvisioningDetail,
+  getLightsparkSimulateLabels,
 } from "./lightspark";
-import { MURAL_ONBOARDING_COPY, MURAL_PROVISIONING_DETAIL, MURAL_SIMULATE_LABELS } from "./mural";
+import {
+  getMuralOnboardingCopy,
+  getMuralProvisioningDetail,
+  getMuralSimulateLabels,
+} from "./mural";
 
 export interface OnboardingCopy {
   title: string;
@@ -32,6 +37,8 @@ export interface SimulateActionLabels {
   done: string;
 }
 
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
 /**
  * Providers with a counterparty onboarding/provisioning lifecycle (and thus panel copy).
  * Widget providers (moonpay, moneygram) report `ready` and go straight to a quote — they
@@ -43,26 +50,27 @@ export function hasOnboardingLifecycle(provider: RampProviderId): boolean {
 
 export function onboardingCopy(
   provider: RampProviderId,
-  status: OnboardingPanelStatus
+  status: OnboardingPanelStatus,
+  t: Translate
 ): OnboardingCopy {
   switch (provider) {
     case "bvnk": {
       if (status === "terms_of_service_required") {
         throw new Error(`No onboarding copy for ramp provider/status: ${provider}/${status}`);
       }
-      return BVNK_ONBOARDING_COPY[status];
+      return getBvnkOnboardingCopy(t)[status];
     }
     case "lightspark": {
       if (status === "terms_of_service_required") {
         throw new Error(`No onboarding copy for ramp provider/status: ${provider}/${status}`);
       }
-      return LIGHTSPARK_ONBOARDING_COPY[status];
+      return getLightsparkOnboardingCopy(t)[status];
     }
     case "mural": {
       if (status === "provisioning_failed") {
         throw new Error(`No onboarding copy for ramp provider/status: ${provider}/${status}`);
       }
-      return MURAL_ONBOARDING_COPY[status];
+      return getMuralOnboardingCopy(t)[status];
     }
     default:
       throw new Error(`No onboarding copy for ramp provider: ${provider}`);
@@ -70,28 +78,35 @@ export function onboardingCopy(
 }
 
 /** Sandbox simulate-action labels for providers that support the simulate flow; null otherwise (caller hides the action). */
-export function simulateActionLabels(provider: RampProviderId): SimulateActionLabels | null {
+export function simulateActionLabels(
+  provider: RampProviderId,
+  t: Translate
+): SimulateActionLabels | null {
   switch (provider) {
     case "bvnk":
-      return BVNK_SIMULATE_LABELS;
+      return getBvnkSimulateLabels(t);
     case "lightspark":
-      return LIGHTSPARK_SIMULATE_LABELS;
+      return getLightsparkSimulateLabels(t);
     case "mural":
-      return MURAL_SIMULATE_LABELS;
+      return getMuralSimulateLabels(t);
     default:
       return null;
   }
 }
 
 /** One-line "what we're setting up under the hood" — varies by provider and direction. */
-export function provisioningDetail(provider: RampProviderId, direction: RampDirection): string {
+export function provisioningDetail(
+  provider: RampProviderId,
+  direction: RampDirection,
+  t: Translate
+): string {
   switch (provider) {
     case "bvnk":
-      return BVNK_PROVISIONING_DETAIL[direction];
+      return getBvnkProvisioningDetail(t)[direction];
     case "lightspark":
-      return LIGHTSPARK_PROVISIONING_DETAIL[direction];
+      return getLightsparkProvisioningDetail(t)[direction];
     case "mural":
-      return MURAL_PROVISIONING_DETAIL[direction];
+      return getMuralProvisioningDetail(t)[direction];
     default:
       throw new Error(`No provisioning detail for ramp provider: ${provider}`);
   }

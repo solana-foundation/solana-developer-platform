@@ -1,8 +1,11 @@
+"use client";
+
 import { Shield, WalletMinimal } from "lucide-react";
 import {
   WALLET_PROVIDER_CATEGORY_DETAILS,
   type WalletProviderCategory,
 } from "@/app/dashboard/custody/provider-catalog";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 interface WalletCategoryBadgeProps {
@@ -26,8 +29,9 @@ export function WalletCategoryBadge({
   compact = false,
   className,
 }: WalletCategoryBadgeProps) {
+  const t = useTranslations();
   const Icon = category === "server" ? WalletMinimal : Shield;
-  const label = WALLET_PROVIDER_CATEGORY_DETAILS[category].label;
+  const label = t(WALLET_PROVIDER_CATEGORY_DETAILS[category].labelKey);
 
   return (
     <span

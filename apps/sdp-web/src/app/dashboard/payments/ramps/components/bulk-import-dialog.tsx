@@ -4,6 +4,7 @@ import { PlusIcon, XIcon } from "lucide-react";
 import { type ClipboardEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
 import {
   type BulkImportRow,
   emptyBulkRow,
@@ -22,6 +23,7 @@ const INPUT_CLASS =
   "h-10 w-full rounded-lg border border-border-light bg-[var(--input-bg-idle)] px-3 text-sm text-text-extra-high placeholder:text-text-low focus:border-[var(--input-border-focus)] focus:outline-none";
 
 export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogProps) {
+  const t = useTranslations();
   const [rows, setRows] = useState<BulkImportRow[]>([emptyBulkRow()]);
   const [errors, setErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -57,15 +59,17 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
 
   const handleImport = async () => {
     const { valid, errors: rowErrors } = validateBulkRows(rows);
-    const messages = rowErrors.map((error) => `Row ${error.row}: ${error.message}`);
+    const messages = rowErrors.map((error) =>
+      t("DashboardPayments.batchSend.rowError", { row: error.row, message: error.message })
+    );
     if (valid.length === 0 && messages.length === 0) {
-      setErrors(["Add at least one recipient."]);
+      setErrors([t("DashboardPayments.batchSend.addAtLeastOneRecipient")]);
       return;
     }
     const currencies = [...new Set(valid.map((row) => row.currency))];
     if (currencies.length > 1) {
       messages.push(
-        `All rows must use one currency or mint address (found ${currencies.join(", ")}).`
+        t("DashboardPayments.batchSend.oneCurrencyRequired", { currencies: currencies.join(", ") })
       );
     }
     if (messages.length > 0) {
@@ -77,30 +81,35 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
     try {
       const { unresolved } = await onImport(valid);
       if (unresolved.length > 0) {
-        setErrors(unresolved.map((id) => `Wallet not found: ${id}`));
+        setErrors(unresolved.map((id) => t("DashboardPayments.batchSend.walletNotFound", { id })));
         return;
       }
       handleClose();
     } catch (error) {
-      setErrors([error instanceof Error ? error.message : "Import failed."]);
+      setErrors([
+        error instanceof Error ? error.message : t("DashboardPayments.batchSend.importFailed"),
+      ]);
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <Modal isOpen={open} onClose={handleClose} ariaLabel="Bulk import recipients" size="xl">
+    <Modal
+      isOpen={open}
+      onClose={handleClose}
+      ariaLabel={t("DashboardPayments.batchSend.bulkImportAriaLabel")}
+      size="xl"
+    >
       <div className="space-y-5 p-6">
         <div className="space-y-1">
           <p className="text-xl font-medium tracking-tight text-text-extra-high">
-            Bulk import recipients
+            {t("DashboardPayments.batchSend.bulkImportTitle")}
           </p>
           <p className="text-sm text-text-low">
-            Paste rows of{" "}
-            <span className="font-mono">
-              counterparty_wallet_id, well-known currency or mint address, amount
-            </span>{" "}
-            into any field, or add them one at a time.
+            {t("DashboardPayments.batchSend.bulkImportDescriptionBefore")}
+            <span className="font-mono">{t("DashboardPayments.batchSend.bulkImportFields")}</span>
+            {t("DashboardPayments.batchSend.bulkImportDescriptionAfter")}
           </p>
         </div>
 
@@ -112,28 +121,28 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
                 value={row.accountId}
                 onChange={(event) => updateRow(index, "accountId", event.currentTarget.value)}
                 onPaste={handlePaste}
-                placeholder="counterparty_wallet_id"
+                placeholder={t("DashboardPayments.batchSend.counterpartyWalletIdPlaceholder")}
                 className={INPUT_CLASS}
               />
               <input
                 value={row.currency}
                 onChange={(event) => updateRow(index, "currency", event.currentTarget.value)}
                 onPaste={handlePaste}
-                placeholder="currency or mint"
+                placeholder={t("DashboardPayments.batchSend.currencyOrMintPlaceholder")}
                 className={INPUT_CLASS}
               />
               <input
                 value={row.amount}
                 onChange={(event) => updateRow(index, "amount", event.currentTarget.value)}
                 onPaste={handlePaste}
-                placeholder="amount"
+                placeholder={t("DashboardPayments.batchSend.amountPlaceholder")}
                 inputMode="decimal"
                 className={INPUT_CLASS}
               />
               <button
                 type="button"
                 onClick={() => removeRow(index)}
-                aria-label={`Remove row ${index + 1}`}
+                aria-label={t("DashboardPayments.batchSend.removeRow", { row: index + 1 })}
                 className="flex size-9 items-center justify-center rounded-lg text-text-low transition-colors hover:bg-border-extra-light hover:text-text-extra-high"
               >
                 <XIcon className="size-4" />
@@ -148,7 +157,7 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
           className="flex items-center gap-1.5 text-sm font-medium text-text-low transition-colors hover:text-text-extra-high"
         >
           <PlusIcon className="size-4" />
-          Add recipient
+          {t("DashboardPayments.batchSend.addRecipientRow")}
         </button>
 
         {errors.length > 0 ? (
@@ -162,10 +171,12 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
 
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleClose} disabled={submitting}>
-            Cancel
+            {t("DashboardPayments.batchSend.cancel")}
           </Button>
           <Button type="button" onClick={() => void handleImport()} disabled={submitting}>
-            {submitting ? "Importing…" : "Import"}
+            {submitting
+              ? t("DashboardPayments.batchSend.importing")
+              : t("DashboardPayments.batchSend.import")}
           </Button>
         </div>
       </div>

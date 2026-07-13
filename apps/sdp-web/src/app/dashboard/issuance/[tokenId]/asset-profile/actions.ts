@@ -2,6 +2,7 @@
 
 import type { AssetProfile } from "@sdp/types";
 import { revalidatePath } from "next/cache";
+import { getTranslations } from "@/i18n/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { sdpApiRequest } from "@/lib/sdp-api";
 import {
@@ -22,6 +23,7 @@ import {
 export async function updateAssetProfileAction(
   input: UpdateAssetProfileActionInput
 ): Promise<UpdateAssetProfileActionResult> {
+  const t = await getTranslations();
   const { tokenId, profileId, rebuiltMetadata, tokenPatch } = input;
 
   try {
@@ -32,7 +34,10 @@ export async function updateAssetProfileAction(
       const body = await profileResponse.text();
       return {
         state: "error",
-        message: `Couldn't load the asset profile (${profileResponse.status}): ${parseErrorMessage(body)}`,
+        message: t("DashboardIssuance.errors.assetProfileLoadFailed", {
+          status: profileResponse.status,
+          error: parseErrorMessage(body),
+        }),
         assetProfile: null,
       };
     }
@@ -43,7 +48,7 @@ export async function updateAssetProfileAction(
     if (!currentProfile) {
       return {
         state: "error",
-        message: "Asset profile not found.",
+        message: t("DashboardIssuance.errors.assetProfileNotFound"),
         assetProfile: null,
       };
     }
@@ -63,7 +68,10 @@ export async function updateAssetProfileAction(
       const body = await tokenResponse.text();
       return {
         state: "error",
-        message: `Couldn't save token details (${tokenResponse.status}): ${parseErrorMessage(body)}`,
+        message: t("DashboardIssuance.errors.tokenDetailsSaveFailed", {
+          status: tokenResponse.status,
+          error: parseErrorMessage(body),
+        }),
         assetProfile: null,
       };
     }
@@ -76,7 +84,10 @@ export async function updateAssetProfileAction(
       const body = await updateResponse.text();
       return {
         state: "error",
-        message: `Token details were saved, but the asset profile update failed (${updateResponse.status}): ${parseErrorMessage(body)}. Please retry.`,
+        message: t("DashboardIssuance.errors.assetProfileUpdateFailed", {
+          status: updateResponse.status,
+          error: parseErrorMessage(body),
+        }),
         assetProfile: null,
       };
     }
@@ -90,13 +101,14 @@ export async function updateAssetProfileAction(
 
     return {
       state: "success",
-      message: "Changes saved.",
+      message: t("DashboardIssuance.errors.changesSaved"),
       assetProfile: updateJson?.data?.assetProfile ?? null,
     };
   } catch (error) {
     return {
       state: "error",
-      message: error instanceof Error ? error.message : "Unable to save changes.",
+      message:
+        error instanceof Error ? error.message : t("DashboardIssuance.errors.unableToSaveChanges"),
       assetProfile: null,
     };
   }

@@ -13,19 +13,36 @@ import {
   createTransfer,
   fetchCounterpartyAccounts,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import { useZodForm } from "@/lib/use-zod-form";
 import { onchainDestinationSchema, onchainDetailsSchema, onchainSendSchema } from "../schema";
 import { walletBalanceAssetOptions } from "../wallet-options";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
-export const ONCHAIN_SEND_STEPS = [
-  { id: "DESTINATION", label: "Destination", title: "Where should the funds go?" },
-  { id: "DETAILS", label: "Details", title: "What would you like to send?" },
-  { id: "REVIEW", label: "Review", title: "Review transfer" },
-] as const satisfies readonly RampWizardStep[];
+export type OnchainSendStepId = "DESTINATION" | "DETAILS" | "REVIEW";
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export type OnchainSendStepId = (typeof ONCHAIN_SEND_STEPS)[number]["id"];
+export function getOnchainSendSteps(t: Translate): readonly RampWizardStep[] {
+  return [
+    {
+      id: "DESTINATION",
+      label: t("DashboardPayments.onchainSend.destination"),
+      title: t("DashboardPayments.onchainSend.destinationTitle"),
+    },
+    {
+      id: "DETAILS",
+      label: t("DashboardPayments.onchainSend.details"),
+      title: t("DashboardPayments.onchainSend.detailsTitle"),
+    },
+    {
+      id: "REVIEW",
+      label: t("DashboardPayments.onchainSend.review"),
+      title: t("DashboardPayments.onchainSend.reviewTitle"),
+    },
+  ];
+}
 
 function resolveAccountAddress(account: CounterpartyAccount | null): string {
   if (!account) {
@@ -51,6 +68,8 @@ export function useOnchainSendWizard({
   onExit,
 }: UseOnchainSendWizardProps) {
   const router = useRouter();
+  const t = useTranslations();
+  const steps = getOnchainSendSteps(t);
   const [stepIndex, setStepIndex] = useState(0);
   const { values: fields, setField } = useZodForm(onchainSendSchema, {
     accountId: "",
@@ -74,7 +93,7 @@ export function useOnchainSendWizard({
     mutate: mutateAccounts,
   } = useSWR(
     counterpartyId ? ["counterparty-accounts", counterpartyId] : null,
-    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id),
+    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
     { revalidateOnFocus: false }
   );
   const cryptoAccounts = useMemo(
@@ -99,8 +118,8 @@ export function useOnchainSendWizard({
   const destinationAddress = resolveAccountAddress(selectedAccount);
 
   const assetOptions = useMemo(
-    () => walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint),
-    [issuedTokenSymbolsByMint, selectedWallet]
+    () => walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t),
+    [issuedTokenSymbolsByMint, selectedWallet, t]
   );
   const selectedAsset = useMemo(
     () => assetOptions.find((asset) => asset.value === fields.asset) ?? null,
@@ -110,7 +129,7 @@ export function useOnchainSendWizard({
   const selectWallet = (walletId: string) => {
     setField("walletId", walletId);
     const nextWallet = liveWallets.find((wallet) => wallet.walletId === walletId) ?? null;
-    const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint);
+    const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint, t);
     if (!nextAssets.some((asset) => asset.value === fields.asset)) {
       setField("asset", nextAssets[0]?.value ?? "");
     }
@@ -129,8 +148,8 @@ export function useOnchainSendWizard({
   const exceedsBalance =
     fields.amount.length > 0 && availableAmount !== null && numericAmount > availableAmount;
 
-  const currentStepId = ONCHAIN_SEND_STEPS[stepIndex].id;
-  const isLastStep = stepIndex === ONCHAIN_SEND_STEPS.length - 1;
+  const currentStepId = steps[stepIndex].id as OnchainSendStepId;
+  const isLastStep = stepIndex === steps.length - 1;
 
   const canProceed = useMemo(() => {
     if (currentStepId === "DESTINATION") {
@@ -161,27 +180,35 @@ export function useOnchainSendWizard({
       return;
     }
     setSubmitting(true);
-    const toastId = toast.loading("Submitting transfer.", { position: "bottom-right" });
+    const toastId = toast.loading(t("DashboardPayments.onchainSend.submittingTransfer"), {
+      position: "bottom-right",
+    });
     try {
-      const transfer = await createTransfer({
-        source: fields.walletId,
-        destination: destinationAddress,
-        token: selectedAssetBalance.mint,
-        amount: fields.amount,
-        ...(fields.memo.trim() ? { memo: fields.memo.trim() } : {}),
-      });
+      const transfer = await createTransfer(
+        {
+          source: fields.walletId,
+          destination: destinationAddress,
+          token: selectedAssetBalance.mint,
+          amount: fields.amount,
+          ...(fields.memo.trim() ? { memo: fields.memo.trim() } : {}),
+        },
+        t
+      );
       setTransferResult(transfer);
-      toast.success("Transfer submitted.", {
+      toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
         id: toastId,
         description: transfer.signature
-          ? "Transaction sent successfully."
-          : `Status: ${transfer.status}`,
+          ? t("DashboardPayments.onchainSend.transactionSent")
+          : t("DashboardPayments.onchainSend.transferStatus", { status: transfer.status }),
         position: "bottom-right",
       });
     } catch (error) {
-      toast.error("Transfer failed.", {
+      toast.error(t("DashboardPayments.onchainSend.transferFailed"), {
         id: toastId,
-        description: error instanceof Error ? error.message : "Transfer failed.",
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.onchainSend.transferFailed"),
         position: "bottom-right",
       });
     } finally {

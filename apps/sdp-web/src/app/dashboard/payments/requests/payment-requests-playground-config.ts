@@ -3,6 +3,7 @@ import type {
   ApiPlaygroundEndpointConfig,
   ApiPlaygroundFieldConfig,
 } from "@/components/api-playground-shell";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import type { PaymentRequestTokenOption } from "./payment-requests-page.data";
 
 const exampleRequest = {
@@ -19,7 +20,8 @@ const exampleRequest = {
 
 export function buildPaymentRequestsPlaygroundEndpointConfigs(
   wallets: PaymentsDashboardWallet[],
-  tokens: PaymentRequestTokenOption[]
+  tokens: PaymentRequestTokenOption[],
+  t: (key: MessageKey, values?: TranslationValues) => string
 ): ApiPlaygroundEndpointConfig[] {
   const walletOptions = wallets.map((wallet) => ({
     value: wallet.walletId,
@@ -37,7 +39,12 @@ export function buildPaymentRequestsPlaygroundEndpointConfigs(
         defaultValue: firstWallet.value,
         required: true,
       }
-    : { key: "walletId", label: "walletId", placeholder: "Destination wallet ID", required: true };
+    : {
+        key: "walletId",
+        label: "walletId",
+        placeholder: t("DashboardPayments.requests.destinationWalletId"),
+        required: true,
+      };
 
   const firstToken = tokenOptions.at(0);
   const tokenField: ApiPlaygroundFieldConfig = firstToken
@@ -49,12 +56,17 @@ export function buildPaymentRequestsPlaygroundEndpointConfigs(
         defaultValue: firstToken.value,
         required: true,
       }
-    : { key: "token", label: "token", placeholder: "SPL mint address", required: true };
+    : {
+        key: "token",
+        label: "token",
+        placeholder: t("DashboardPayments.requests.splMintAddress"),
+        required: true,
+      };
 
   return [
     {
       id: "list-payment-requests",
-      title: "List Payment Requests",
+      title: t("DashboardPayments.requests.listRequests"),
       method: "GET",
       path: "/v1/payments/requests",
       pathFields: [],
@@ -63,7 +75,7 @@ export function buildPaymentRequestsPlaygroundEndpointConfigs(
     },
     {
       id: "create-payment-request",
-      title: "Create Payment Request",
+      title: t("DashboardPayments.requests.createRequest"),
       method: "POST",
       path: "/v1/payments/requests",
       pathFields: [],

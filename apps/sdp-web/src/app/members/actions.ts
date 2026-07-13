@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getTranslations } from "@/i18n/server";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
 
 export interface Member {
@@ -22,11 +23,12 @@ export async function listMembers(): Promise<Member[]> {
 }
 
 export async function inviteMember(formData: FormData) {
+  const t = await getTranslations();
   const email = String(formData.get("email") ?? "").trim();
   const role = String(formData.get("role") ?? "member").trim();
 
   if (!email) {
-    throw new Error("Email is required");
+    throw new Error(t("Shared.validation.emailRequired"));
   }
 
   const client = await createOrgSdpApiClient();

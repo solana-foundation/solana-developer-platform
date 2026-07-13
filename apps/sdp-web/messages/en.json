@@ -1,0 +1,28 @@
+{
+  "Metadata": {
+    "title": "Solana Developer Platform",
+    "description": "SDP dashboard"
+  },
+  "Home": {
+    "solanaLogo": "Solana",
+    "docs": "Docs",
+    "dashboard": "Dashboard",
+    "title": "Build any financial product, without worrying about the infrastructure",
+    "description": "Whether you're issuing a stablecoin, orchestrating cross-border payments, or tokenizing real-world assets, SDP provides the most reliable APIs and infrastructure to make it happen.",
+    "joinWaitlist": "Join the waitlist"
+  },
+  "NotFound": {
+    "solanaLogo": "Solana",
+    "title": "Page not found",
+    "description": "The page you're looking for doesn't exist or may have moved.",
+    "backToDashboard": "Back to dashboard",
+    "goHome": "Go home"
+  },
+  "Feedback": {
+    "label": "Feedback"
+  },
+  "Error": {
+    "tryAgain": "Try again",
+    "reportIssue": "Report this issue"
+  }
+}

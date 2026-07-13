@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { stepIndex, WIZARD_STEP_META, type WizardStep } from "./issuance-draft-wizard.types";
 
@@ -11,6 +12,7 @@ interface WizardProgressProps {
 // a compact row of dashes plus a "Step X of Y" caption. The dashes are passive —
 // back/forward navigation is driven by the footer controls, matching Payments.
 export function WizardProgress({ currentStep }: WizardProgressProps) {
+  const t = useTranslations();
   const currentIdx = stepIndex(currentStep);
 
   return (
@@ -31,7 +33,10 @@ export function WizardProgress({ currentStep }: WizardProgressProps) {
         ))}
       </div>
       <span className="text-xs text-text-extra-low">
-        Step {currentIdx + 1} of {WIZARD_STEP_META.length}
+        {t("DashboardIssuance.wizard.stepOf", {
+          current: currentIdx + 1,
+          total: WIZARD_STEP_META.length,
+        })}
       </span>
     </div>
   );
