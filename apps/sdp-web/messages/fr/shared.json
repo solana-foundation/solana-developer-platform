@@ -189,7 +189,7 @@
     "address": "Adresse",
     "send": "Envoyer",
     "receive": "Recevoir",
-    "transfer": "Transfer",
+    "transfer": "Transfert",
     "untitledToken": "Token sans titre",
     "unableToLoadIssuanceTokens": "Impossible de charger les Tokens d’émission",
     "someIssuanceActivityUnavailable": "Une partie de l’activité d’émission n’a pas pu être chargée.",
