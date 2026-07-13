@@ -34,6 +34,8 @@
     "build:api": "turbo run build --filter=@sdp/api",
     "check:env-contract": "node scripts/check-env-contract.mjs",
     "check:env-configurator-drift": "node scripts/check-env-configurator-drift.mjs",
+    "check:module-boundaries": "node scripts/check-module-boundaries.mjs",
+    "generate:module-map": "node scripts/check-module-boundaries.mjs --write",
     "typecheck": "turbo run typecheck",
     "typecheck:all": "turbo run typecheck",
     "lint": "biome check .",

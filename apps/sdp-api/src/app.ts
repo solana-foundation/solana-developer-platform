@@ -12,6 +12,7 @@
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
 import { SdpPaymentsError } from "@sdp/payments/errors";
+import { FeePaymentError } from "@sdp/payments/fee-payment/port";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
 import { logger } from "hono/logger";
@@ -46,7 +47,6 @@ import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
 import { isSentryEnabled, type Observability } from "@/runtime/observability";
-import { FeePaymentError } from "@/services/ports";
 import type { Env } from "@/types/env";
 
 export interface SdpPlugin {

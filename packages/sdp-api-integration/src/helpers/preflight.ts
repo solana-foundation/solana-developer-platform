@@ -1,10 +1,18 @@
-import { KoraClient } from "@sdp/api/services/adapters";
+import { apiTestSupport } from "@sdp/api/test-support";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
+
+const { KoraClient } = apiTestSupport;
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
   | { jsonrpc: "2.0"; id: number; error: { code: number; message: string; data?: unknown } };
+
+type KoraConfig = {
+  validation_config?: {
+    allowed_programs?: string[];
+  };
+};
 
 const PRECHECK_CACHE_KEY = "__sdp_integration_preflight__";
 // biome-ignore lint/security/noSecrets: Public Solana program ID, not a secret.
@@ -71,13 +79,16 @@ async function runPreflight(): Promise<void> {
     ...(env.KORA_API_KEY ? { apiKey: env.KORA_API_KEY } : {}),
   });
 
-  const config = await withLabel("Kora.getConfig", () => koraClient.getConfig());
-  if (!config?.validation_config?.allowed_programs) {
+  const config = await withLabel("Kora.getConfig", async () => {
+    return (await koraClient.getConfig()) as KoraConfig;
+  });
+  const allowedPrograms = config.validation_config?.allowed_programs;
+  if (!allowedPrograms) {
     throw new Error("Kora preflight failed: missing validation_config.allowed_programs");
   }
   const requiredAllowedPrograms = getRequiredKoraAllowedPrograms();
   const missingAllowedPrograms = requiredAllowedPrograms.filter(
-    (program) => !config.validation_config.allowed_programs.includes(program)
+    (program) => !allowedPrograms.includes(program)
   );
   if (missingAllowedPrograms.length > 0) {
     throw new Error(

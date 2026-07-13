@@ -4,8 +4,7 @@
     "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"],
     "paths": {
       "@/*": ["../../apps/sdp-api/src/*"],
-      "@sdp/api/*": ["../../apps/sdp-api/src/*"],
-      "@sdp/api-test/*": ["../../apps/sdp-api/src/test/*"]
+      "@sdp/api/test-support": ["../../apps/sdp-api/src/test/integration-support.ts"]
     }
   },
   "include": ["src/**/*.ts"]
