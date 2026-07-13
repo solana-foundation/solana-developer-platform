@@ -1003,6 +1003,9 @@ async function getOrCreateLifecycleAttempt(input: {
   projectId: string;
   nowIso: string;
 }): Promise<PaymentRecurringPaymentLifecycleAttemptRow> {
+  const { claimableStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(
+    input.operation
+  );
   const existing = await input.recurringRepo.getLatestLifecycleAttempt({
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -1036,8 +1039,8 @@ async function getOrCreateLifecycleAttempt(input: {
       recurringPaymentId: input.claimed.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      status: getRecurringPaymentLifecycleStatuses(input.operation).claimableStatus,
-      expectedStatus: getRecurringPaymentLifecycleStatuses(input.operation).processingStatus,
+      status: claimableStatus,
+      expectedStatus: processingStatus,
       updatedAt: new Date().toISOString(),
     });
     throw error;
@@ -1048,8 +1051,8 @@ async function getOrCreateLifecycleAttempt(input: {
       recurringPaymentId: input.claimed.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      status: getRecurringPaymentLifecycleStatuses(input.operation).claimableStatus,
-      expectedStatus: getRecurringPaymentLifecycleStatuses(input.operation).processingStatus,
+      status: claimableStatus,
+      expectedStatus: processingStatus,
       updatedAt: new Date().toISOString(),
     });
     throw new AppError("INTERNAL_ERROR", "Failed to journal recurring payment lifecycle");
@@ -1080,12 +1083,15 @@ async function recordLifecycleFailure(input: {
   });
 
   if (input.resetClaim) {
+    const { claimableStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(
+      input.operation
+    );
     await input.recurringRepo.updateRecurringPaymentLifecycle({
       recurringPaymentId: input.attempt.recurring_payment_id,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      status: getRecurringPaymentLifecycleStatuses(input.operation).claimableStatus,
-      expectedStatus: getRecurringPaymentLifecycleStatuses(input.operation).processingStatus,
+      status: claimableStatus,
+      expectedStatus: processingStatus,
       updatedAt: input.failedAt,
     });
   }
