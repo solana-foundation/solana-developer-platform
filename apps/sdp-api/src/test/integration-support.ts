@@ -5,7 +5,7 @@
 import { closeDatabasePools, getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
-import { KoraAdapter, KoraClient, createFeePaymentAdapter } from "@/services/adapters";
+import { createFeePaymentAdapter, KoraAdapter, KoraClient } from "@/services/adapters";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner, createToken2022Service } from "@/services/solana";

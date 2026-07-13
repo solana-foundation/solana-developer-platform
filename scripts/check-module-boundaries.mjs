@@ -277,9 +277,7 @@ export function validateModuleBoundaries({ modules, sourceImports, appSourceRoot
         continue;
       }
       if (!module.allowedDependencies.includes(dependencyName)) {
-        errors.push(
-          `${module.name} declares disallowed workspace dependency ${dependencyName}.`
-        );
+        errors.push(`${module.name} declares disallowed workspace dependency ${dependencyName}.`);
       }
     }
   }
@@ -404,7 +402,9 @@ function main() {
 
   const errors = checkModuleBoundaries(REPOSITORY_ROOT, { write: args.has("--write") });
   if (errors.length > 0) {
-    throw new Error(`Module boundary check failed:\n${errors.map((error) => `- ${error}`).join("\n")}`);
+    throw new Error(
+      `Module boundary check failed:\n${errors.map((error) => `- ${error}`).join("\n")}`
+    );
   }
 
   console.log("Module boundary check passed.");
