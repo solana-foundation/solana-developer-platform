@@ -1003,7 +1003,9 @@ async function getOrCreateLifecycleAttempt(input: {
   projectId: string;
   nowIso: string;
 }): Promise<PaymentRecurringPaymentLifecycleAttemptRow> {
-  const { claimableStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(input.operation);
+  const { claimableStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(
+    input.operation
+  );
   const existing = await input.recurringRepo.getLatestLifecycleAttempt({
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -1070,7 +1072,9 @@ async function recordLifecycleFailure(input: {
   failedAt: string;
   resetClaim: boolean;
 }): Promise<void> {
-  const { claimableStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(input.operation);
+  const { claimableStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(
+    input.operation
+  );
   await input.recurringRepo.updateLifecycleAttempt({
     attemptId: input.attempt.id,
     organizationId: input.organizationId,
