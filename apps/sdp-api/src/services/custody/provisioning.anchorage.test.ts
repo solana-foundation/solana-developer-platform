@@ -68,6 +68,22 @@ describe("anchorage wallet provisioning", () => {
       expect.objectContaining({ method: "POST" })
     );
   });
+
+  it("trims wallet fields returned by Anchorage", async () => {
+    const fetchMock = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        jsonResponse({ walletId: " wa_anch_4 ", address: " anch_address_4 " }, 200)
+      );
+
+    await expect(
+      provisionAnchorageWalletInCustody(
+        createRuntime(fetchMock),
+        { apiKey: "anchorage-explicit-key" },
+        {}
+      )
+    ).resolves.toEqual({ walletId: "wa_anch_4", address: "anch_address_4" });
+  });
 });
 
 function createAnchorageEnv(overrides?: Partial<Env>): Env {

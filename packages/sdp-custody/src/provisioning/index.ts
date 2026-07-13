@@ -17,10 +17,12 @@ import {
 import {
   encodeBasicAuth,
   normalizePem,
+  normalizeProviderNameFragment,
   parseJsonResponse,
   randomHex,
   readErrorResponseText,
   sha256Hex,
+  trimTrailingHyphens,
 } from "./common";
 import {
   buildParaUserIdentifier,
@@ -607,7 +609,11 @@ export async function provisionUtilaWallet(
   // Create a new Solana sub-wallet inside the configured vault. Passing `networks`
   // makes Utila derive the Solana address as part of wallet creation.
   const apiBaseUrl = normalizeUtilaApiBaseUrl(config.apiBaseUrl);
-  const token = await mintUtilaAccessToken(serviceAccountEmail, serviceAccountPrivateKeyPem);
+  const token = await mintUtilaAccessToken(
+    runtime,
+    serviceAccountEmail,
+    serviceAccountPrivateKeyPem
+  );
 
   const response = await runtime.fetch(
     `${apiBaseUrl}/v2/vaults/${encodeURIComponent(vaultId)}/wallets`,
@@ -655,15 +661,18 @@ const DEFAULT_UTILA_API_BASE_URL = "https://api.utila.io";
 
 /** Mint a short-lived Utila service-account JWT for the REST API. */
 async function mintUtilaAccessToken(
+  runtime: CustodyProvisioningRuntime,
   serviceAccountEmail: string,
   serviceAccountPrivateKeyPem: string
 ): Promise<string> {
   const privateKey = await importPKCS8(normalizePem(serviceAccountPrivateKeyPem), "RS256");
+  const now = Math.floor(runtime.now() / 1000);
   return new SignJWT({})
     .setProtectedHeader({ alg: "RS256" })
     .setSubject(serviceAccountEmail)
     .setAudience(UTILA_API_AUDIENCE)
-    .setExpirationTime("5m")
+    .setIssuedAt(now)
+    .setExpirationTime(now + 5 * 60)
     .sign(privateKey);
 }
 
@@ -904,18 +913,14 @@ async function turnkeyRequest<T>(
 
 function buildTurnkeyPrivateKeyName(runtime: CustodyProvisioningRuntime, value: string): string {
   const suffix = randomHex(runtime, 2);
-  let normalized = value
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  let normalized = normalizeProviderNameFragment(value);
 
   if (!normalized) {
     normalized = "org";
   }
 
   let name = `sdp-${normalized}-${suffix}`.slice(0, 60);
-  name = name.replace(/-+$/g, "");
+  name = trimTrailingHyphens(name);
 
   if (!name) {
     name = `sdp-${randomHex(runtime, 3)}`;

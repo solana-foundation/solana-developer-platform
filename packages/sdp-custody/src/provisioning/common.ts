@@ -124,6 +124,42 @@ export function normalizePem(value: string): string {
   return value.replace(/\\n/g, "\n").trim();
 }
 
+export function normalizeProviderNameFragment(value: string): string {
+  const lowercase = value.toLowerCase();
+  let normalized = "";
+  let appendHyphen = false;
+
+  for (let index = 0; index < lowercase.length; index += 1) {
+    const character = lowercase[index];
+    const code = lowercase.charCodeAt(index);
+    const isAsciiLetter = code >= 97 && code <= 122;
+    const isDigit = code >= 48 && code <= 57;
+
+    if (isAsciiLetter || isDigit) {
+      if (appendHyphen) {
+        normalized += "-";
+      }
+      normalized += character;
+      appendHyphen = false;
+      continue;
+    }
+
+    if (normalized) {
+      appendHyphen = true;
+    }
+  }
+
+  return normalized;
+}
+
+export function trimTrailingHyphens(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 45) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
 export function encodeBasicAuth(value: string): string {
   if (typeof btoa === "function") {
     return btoa(value);

@@ -3,12 +3,14 @@ import { SigningError } from "../signing";
 import {
   decodeBase64ToBytes,
   encodePkcs8Pem,
+  normalizeProviderNameFragment,
   parseJsonResponse,
   randomHex,
   readErrorResponseText,
   sha256Hex,
   sortJsonKeys,
   toBase64Url,
+  trimTrailingHyphens,
 } from "./common";
 import type { CustodyProvisioningRuntime } from "./runtime";
 
@@ -197,26 +199,16 @@ export function buildCoinbaseCdpAccountName(
   value: string,
   scope?: string
 ): string {
-  let normalized = value
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  let normalized = normalizeProviderNameFragment(value);
 
   if (!normalized) {
     normalized = "org";
   }
 
-  const normalizedScope = scope
-    ? scope
-        .toLowerCase()
-        .replace(/[^a-z0-9-]+/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-+|-+$/g, "")
-    : "";
+  const normalizedScope = scope ? normalizeProviderNameFragment(scope) : "";
 
   let name = `${normalizedScope ? `sdp-${normalizedScope}` : "sdp"}-${normalized}`.slice(0, 36);
-  name = name.replace(/-+$/g, "");
+  name = trimTrailingHyphens(name);
 
   if (!/^[a-z0-9]/.test(name)) {
     name = `s${name}`;

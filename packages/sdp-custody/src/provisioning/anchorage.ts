@@ -189,8 +189,11 @@ function unwrapPayload(payload: unknown): Record<string, unknown> {
 function readString(record: Record<string, unknown>, keys: string[]): string | undefined {
   for (const key of keys) {
     const value = record[key];
-    if (typeof value === "string" && value.length > 0) {
-      return value;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) {
+        return trimmed;
+      }
     }
   }
 
