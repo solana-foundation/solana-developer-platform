@@ -47,7 +47,9 @@ export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("directi
     direction: z.literal("onramp"),
     cryptoToken: rampCurrencyCodeSchema,
     fiatCurrency: rampFiatCurrencySchema,
-    destinationWallet: z.string().min(1),
+    destinationWallet: z
+      .string({ error: "destinationWallet is required for onramp requirements" })
+      .min(1, { error: "destinationWallet is required for onramp requirements" }),
   }),
   z.object({
     provider: z.enum(["moonpay", "lightspark", "bvnk", "moneygram", "mural"], {

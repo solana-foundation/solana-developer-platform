@@ -20,6 +20,7 @@ import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
+import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
@@ -274,6 +275,9 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   // Request ID for tracing
   app.use("*", requestIdMiddleware());
+
+  // Idempotency-Key validation + response echo (public API only)
+  app.use("/v1/*", idempotencyKeyMiddleware());
 
   // Request trace + duration logging
   app.use("*", requestTracingMiddleware());
