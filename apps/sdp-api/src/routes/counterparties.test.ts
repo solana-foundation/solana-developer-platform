@@ -341,10 +341,16 @@ describe("Counterparties Routes", () => {
 
       expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.error).toMatchObject({
-        code: "BAD_REQUEST",
-        message: "destinationWallet is required for onramp requirements",
-      });
+      expect(body.error.code).toBe("BAD_REQUEST");
+      expect(body.error.message).toContain("destinationWallet is required for onramp requirements");
+      expect(body.error.details.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ["destinationWallet"],
+            message: "destinationWallet is required for onramp requirements",
+          }),
+        ])
+      );
     });
   });
 
