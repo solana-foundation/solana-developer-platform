@@ -71,10 +71,7 @@ export function CreateTokenFeaturesStep({
 
       <div className="space-y-5 rounded-[28px] p-5">
         <div className="grid gap-2">
-          <label
-            htmlFor="issuance-token-main-signer"
-            className="text-3xl font-medium text-[#1c1c1d]"
-          >
+          <label htmlFor="issuance-token-main-signer" className="text-3xl font-medium text-primary">
             {t("DashboardIssuance.create.mainSigner")}
           </label>
           {availableSignerWallets.length > 0 ? (
@@ -85,7 +82,7 @@ export function CreateTokenFeaturesStep({
                 value={draft.signingWalletId}
                 onChange={(event) => onSigningWalletChange(event.currentTarget.value)}
                 required
-                className="h-12 w-full rounded-[14px] border border-[rgba(28,28,29,0.14)] bg-white px-4 text-base text-[#1c1c1d] shadow-none outline-none transition-[box-shadow,border-color] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)]"
+                className="h-12 w-full rounded-[14px] border border-border-default bg-white px-4 text-base text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
               >
                 <option value="" disabled>
                   {t("DashboardIssuance.create.selectSignerWallet")}
@@ -96,30 +93,30 @@ export function CreateTokenFeaturesStep({
                   </option>
                 ))}
               </select>
-              <p className="text-base text-[rgba(28,28,29,0.62)]">
+              <p className="text-base text-secondary">
                 {t("DashboardIssuance.create.mainSignerHint")}
               </p>
             </>
           ) : signerWalletsLoading ? (
-            <p className="rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-4 py-3 text-base text-[rgba(28,28,29,0.62)]">
+            <p className="rounded-2xl border border-border-subtle bg-fill-subtle px-4 py-3 text-base text-secondary">
               {t("DashboardIssuance.create.loadingSignerWallets")}
             </p>
           ) : signerWalletsError ? (
-            <p className="rounded-2xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] px-4 py-3 text-base text-[#8a1f2a]">
+            <p className="rounded-2xl border border-destructive/20 bg-destructive/[0.03] px-4 py-3 text-base text-destructive-strongest">
               {signerWalletsError}
             </p>
           ) : (
-            <p className="rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-4 py-3 text-base text-[rgba(28,28,29,0.62)]">
+            <p className="rounded-2xl border border-border-subtle bg-fill-subtle px-4 py-3 text-base text-secondary">
               {t("DashboardIssuance.create.noControlledWallets")}
             </p>
           )}
         </div>
 
         <div>
-          <p className="text-3xl font-medium text-[#1c1c1d]">
+          <p className="text-3xl font-medium text-primary">
             {t("DashboardIssuance.create.transferControls")}
           </p>
-          <p className="mt-2 text-lg text-[rgba(28,28,29,0.64)]">
+          <p className="mt-2 text-lg text-secondary">
             {t("DashboardIssuance.create.transferControlsHint")}
           </p>
         </div>
@@ -132,9 +129,9 @@ export function CreateTokenFeaturesStep({
               description={option.description}
               icon={
                 option.mode === "allowlist" ? (
-                  <ShieldCheck className="h-6 w-6 text-[#1c1c1d]" />
+                  <ShieldCheck className="h-6 w-6 text-primary" />
                 ) : (
-                  <ShieldAlert className="h-6 w-6 text-[#1c1c1d]" />
+                  <ShieldAlert className="h-6 w-6 text-primary" />
                 )
               }
               note={option.note}
@@ -151,7 +148,7 @@ export function CreateTokenFeaturesStep({
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 6 }}
-            className="mt-4 rounded-2xl border border-[#c71f37]/30 bg-[#c71f37]/6 px-4 py-3 text-base text-[#8a1f2a]"
+            className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/6 px-4 py-3 text-base text-destructive-strongest"
           >
             {submitState.message}
           </motion.div>
@@ -191,16 +188,14 @@ function AccessControlOption({
       onClick={onSelect}
       className={[
         "rounded-3xl border p-5 text-left transition-colors",
-        isSelected
-          ? "border-[#1c1c1d] bg-[rgba(28,28,29,0.05)]"
-          : "border-[rgba(28,28,29,0.14)] bg-white",
-        "cursor-pointer hover:bg-[rgba(28,28,29,0.03)]",
+        isSelected ? "border-primary bg-fill-subtle" : "border-border-default bg-white",
+        "cursor-pointer hover:bg-fill-subtle",
       ].join(" ")}
     >
       {icon}
-      <p className="mt-4 text-2xl font-semibold text-[#1c1c1d]">{title}</p>
-      <p className="mt-2 text-base text-[rgba(28,28,29,0.66)]">{description}</p>
-      <p className="mt-2 text-sm text-[rgba(28,28,29,0.58)]">{note}</p>
+      <p className="mt-4 text-2xl font-semibold text-primary">{title}</p>
+      <p className="mt-2 text-base text-secondary">{description}</p>
+      <p className="mt-2 text-sm text-tertiary">{note}</p>
     </button>
   );
 }

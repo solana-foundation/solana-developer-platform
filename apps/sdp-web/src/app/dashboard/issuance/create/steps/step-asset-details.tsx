@@ -37,7 +37,7 @@ function DocsLink({ href, children }: { href: string; children: ReactNode }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-xs font-medium text-[rgba(28,28,29,0.6)] underline-offset-2 transition-colors hover:text-[#1c1c1d] hover:underline"
+      className="inline-flex items-center gap-1 text-xs font-medium text-tertiary underline-offset-2 transition-colors hover:text-primary hover:underline"
     >
       {children}
       <ExternalLink className="h-3 w-3" />
@@ -101,10 +101,10 @@ export function StepAssetDetails({
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-medium text-[#1c1c1d]">
+          <h2 className="text-2xl font-medium text-primary">
             {t("DashboardIssuance.assetDetails.title")}
           </h2>
-          <p className="mt-1.5 text-sm text-[rgba(28,28,29,0.62)]">
+          <p className="mt-1.5 text-sm text-secondary">
             {t("DashboardIssuance.assetDetails.description")}
           </p>
         </div>
@@ -151,7 +151,7 @@ export function StepAssetDetails({
             <div className="mt-4 grid gap-1.5">
               <Label htmlFor="asset-description">
                 {t("DashboardIssuance.assetDetails.descriptionLabel")}{" "}
-                <span aria-hidden className="text-[#c71f37]">
+                <span aria-hidden className="text-destructive">
                   *
                 </span>
                 <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
@@ -164,14 +164,14 @@ export function StepAssetDetails({
                 placeholder={t("DashboardIssuance.assetDetails.descriptionPlaceholder")}
                 aria-invalid={descriptionError ? true : undefined}
                 className={cn(
-                  "w-full rounded-[14px] border bg-white px-4 py-3 text-sm text-[#1c1c1d] outline-none transition-[box-shadow,border-color] placeholder:text-[rgba(28,28,29,0.4)]",
+                  "w-full rounded-[14px] border bg-white px-4 py-3 text-sm text-primary outline-none transition-[box-shadow,border-color] placeholder:text-muted",
                   descriptionError
-                    ? "border-[#c71f37] focus:border-[#c71f37] focus:ring-2 focus:ring-[rgba(199,31,55,0.15)]"
-                    : "border-[rgba(28,28,29,0.14)] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)]"
+                    ? "border-destructive focus:border-destructive focus:ring-2 focus:ring-destructive-border"
+                    : "border-border-default focus:border-border-strong focus:ring-2 focus:ring-border-default"
                 )}
               />
               {descriptionError ? (
-                <p className="text-xs text-[#c71f37]" role="alert">
+                <p className="text-xs text-destructive" role="alert">
                   {descriptionError}
                 </p>
               ) : null}
@@ -287,7 +287,7 @@ export function StepAssetDetails({
                 none is made. The 0-wallet and single-wallet cases show their
                 own message inside the field. */}
             {!signerWalletsError && signerWallets.length > 1 && !draft.signingWalletId.trim() ? (
-              <p className="mt-1.5 text-xs text-[rgba(28,28,29,0.5)]">
+              <p className="mt-1.5 text-xs text-tertiary">
                 {t("DashboardIssuance.assetDetails.optionalSignerHint")}
               </p>
             ) : null}

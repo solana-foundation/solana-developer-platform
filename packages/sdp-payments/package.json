@@ -29,6 +29,11 @@
       "import": "./src/json.ts",
       "default": "./src/json.ts"
     },
+    "./recurring-payment-lifecycle": {
+      "types": "./src/recurring-payment-lifecycle.ts",
+      "import": "./src/recurring-payment-lifecycle.ts",
+      "default": "./src/recurring-payment-lifecycle.ts"
+    },
     "./fee-payment": {
       "types": "./src/fee-payment/index.ts",
       "import": "./src/fee-payment/index.ts",

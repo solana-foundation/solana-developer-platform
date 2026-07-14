@@ -15,8 +15,6 @@ export {
   KoraClient,
   NativeAdapter,
 } from "@sdp/payments/fee-payment";
-// RPC adapters (blockchain interaction)
-export { SolanaRpcAdapter } from "./rpc";
 // Signing adapters (custody providers via @solana/keychain)
 export {
   createSigningAdapter,

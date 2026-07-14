@@ -15,13 +15,13 @@ interface WalletCategoryBadgeProps {
 }
 
 const categoryTextClassNames: Record<WalletProviderCategory, string> = {
-  server: "text-[#1c1c1d]",
-  institutional: "text-[#1c1c1d]",
+  server: "text-primary",
+  institutional: "text-primary",
 };
 
 const compactCategoryBackgroundClassNames: Record<WalletProviderCategory, string> = {
-  server: "bg-[#f4f1ea]",
-  institutional: "bg-[#f4f1ea]",
+  server: "bg-surface-sunken",
+  institutional: "bg-surface-sunken",
 };
 
 export function WalletCategoryBadge({

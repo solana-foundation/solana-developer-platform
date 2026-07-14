@@ -78,26 +78,26 @@ function Select({
           )}
         />
         {iconLeft && (
-          <span className="pointer-events-none relative shrink-0 text-text-medium [&_svg]:size-5">
+          <span className="pointer-events-none relative shrink-0 text-secondary [&_svg]:size-5">
             {iconLeft}
           </span>
         )}
         <BaseSelect.Value
-          className="relative min-w-0 flex-1 truncate text-sm text-text-extra-high"
+          className="relative min-w-0 flex-1 truncate text-sm text-primary"
           placeholder={<span className="text-[var(--input-placeholder-color)]">{placeholder}</span>}
         />
         {trailing && (
-          <span className="pointer-events-none relative shrink-0 text-xs text-text-low">
+          <span className="pointer-events-none relative shrink-0 text-xs text-tertiary">
             {trailing}
           </span>
         )}
-        <BaseSelect.Icon className="relative inline-flex shrink-0 items-center justify-center text-text-medium transition-transform duration-150 group-[[data-popup-open]]/select:rotate-180">
+        <BaseSelect.Icon className="relative inline-flex shrink-0 items-center justify-center text-secondary transition-transform duration-150 group-[[data-popup-open]]/select:rotate-180">
           <ChevronDownIcon className="size-4" />
         </BaseSelect.Icon>
       </BaseSelect.Trigger>
       <BaseSelect.Portal>
         <BaseSelect.Positioner className="z-50" sideOffset={4} alignItemWithTrigger={false}>
-          <BaseSelect.Popup className="max-h-[var(--available-height)] min-w-[var(--anchor-width)] overflow-y-auto rounded-xl border border-border-light bg-white p-1 shadow-lg outline-none">
+          <BaseSelect.Popup className="max-h-[var(--available-height)] min-w-[var(--anchor-width)] overflow-y-auto rounded-xl border border-border-default bg-white p-1 shadow-lg outline-none">
             {children}
           </BaseSelect.Popup>
         </BaseSelect.Positioner>
@@ -112,13 +112,13 @@ function SelectItem({ value, children, className, disabled }: UiSelectItemProps)
       value={value}
       disabled={disabled}
       className={cn(
-        "flex cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm text-text-extra-high outline-none",
+        "flex cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm text-primary outline-none",
         "data-[highlighted]:bg-[var(--input-bg-hover)] data-[disabled]:pointer-events-none data-[disabled]:opacity-40",
         className
       )}
     >
       <BaseSelect.ItemText className="min-w-0 truncate">{children}</BaseSelect.ItemText>
-      <BaseSelect.ItemIndicator className="shrink-0 text-text-medium">
+      <BaseSelect.ItemIndicator className="shrink-0 text-secondary">
         <CheckIcon className="size-4" />
       </BaseSelect.ItemIndicator>
     </BaseSelect.Item>

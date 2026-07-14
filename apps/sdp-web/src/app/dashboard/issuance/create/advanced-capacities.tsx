@@ -17,14 +17,14 @@ interface AdvancedCapacitiesProps {
 export function AdvancedCapacities({ value, onChange, disabled }: AdvancedCapacitiesProps) {
   const t = useTranslations();
   return (
-    <details className="group rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white p-4" open>
+    <details className="group rounded-2xl border border-border-default bg-white p-4" open>
       <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-        <span className="text-sm font-semibold text-[#1c1c1d]">
+        <span className="text-sm font-semibold text-primary">
           {t("DashboardIssuance.config.advanced")}
         </span>
-        <ChevronDown className="ml-auto h-4 w-4 text-[rgba(28,28,29,0.5)] transition-transform group-open:rotate-180" />
+        <ChevronDown className="ml-auto h-4 w-4 text-tertiary transition-transform group-open:rotate-180" />
       </summary>
-      <p className="mt-2 text-sm text-[rgba(28,28,29,0.58)]">
+      <p className="mt-2 text-sm text-tertiary">
         {t("DashboardIssuance.config.advancedCapacitiesDescription")}
       </p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -37,8 +37,8 @@ export function AdvancedCapacities({ value, onChange, disabled }: AdvancedCapaci
               className={cn(
                 "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors",
                 checked
-                  ? "border-[#1c1c1d] bg-[rgba(28,28,29,0.03)]"
-                  : "border-[rgba(28,28,29,0.12)] bg-white hover:bg-[rgba(28,28,29,0.02)]"
+                  ? "border-primary bg-fill-subtle"
+                  : "border-border-default bg-white hover:bg-fill-subtle"
               )}
             >
               <input
@@ -46,13 +46,11 @@ export function AdvancedCapacities({ value, onChange, disabled }: AdvancedCapaci
                 checked={checked}
                 disabled={disabled}
                 onChange={(event) => onChange(key, event.currentTarget.checked)}
-                className="mt-0.5 h-4 w-4 accent-[#1c1c1d]"
+                className="mt-0.5 h-4 w-4 accent-primary"
               />
               <span className="min-w-0">
-                <span className="block text-sm font-medium text-[#1c1c1d]">{t(meta.labelKey)}</span>
-                <span className="block text-xs text-[rgba(28,28,29,0.58)]">
-                  {t(meta.descriptionKey)}
-                </span>
+                <span className="block text-sm font-medium text-primary">{t(meta.labelKey)}</span>
+                <span className="block text-xs text-tertiary">{t(meta.descriptionKey)}</span>
               </span>
             </label>
           );

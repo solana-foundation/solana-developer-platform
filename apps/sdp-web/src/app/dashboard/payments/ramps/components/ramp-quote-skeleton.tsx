@@ -14,7 +14,7 @@ export function RampQuoteSkeleton() {
         <SkeletonBlock className="h-16 rounded-xl" />
         <SkeletonBlock className="h-16 rounded-xl" />
       </div>
-      <div className="mt-6 border-t border-border-light pt-5">
+      <div className="mt-6 border-t border-border-default pt-5">
         <SkeletonBlock className="h-4 w-40" />
       </div>
     </div>

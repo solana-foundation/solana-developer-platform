@@ -47,14 +47,14 @@ function formatTimestamp(value: string | undefined, locale: string): string {
 
 function statusClassName(status: string): string {
   if (status === "confirmed") {
-    return "border-[rgba(12,128,76,0.18)] bg-[rgba(12,128,76,0.08)] text-[#0c804c]";
+    return "border-success-border bg-success-bg text-success";
   }
 
   if (status === "failed") {
-    return "border-[rgba(199,31,55,0.16)] bg-[rgba(199,31,55,0.08)] text-[#9e2b38]";
+    return "border-destructive-border bg-destructive-bg text-destructive-strong";
   }
 
-  return "border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] text-[rgba(28,28,29,0.72)]";
+  return "border-border-default bg-fill-subtle text-secondary";
 }
 
 function TruncatedText({ value, className }: { value: string; className?: string }) {
@@ -115,21 +115,19 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
       </CardHeader>
       <CardContent>
         {liveActivityError ? (
-          <p className="text-sm text-[#9e2b38]">{liveActivityError}</p>
+          <p className="text-sm text-destructive-strong">{liveActivityError}</p>
         ) : liveRows.length === 0 ? (
           <div className="space-y-2">
-            <p className="text-sm text-[rgba(28,28,29,0.72)]">
-              {t("DashboardCustody.noWalletActivity")}
-            </p>
+            <p className="text-sm text-secondary">{t("DashboardCustody.noWalletActivity")}</p>
             {liveActivityNotice ? (
-              <p className="text-xs text-[rgba(28,28,29,0.56)]">{liveActivityNotice}</p>
+              <p className="text-xs text-tertiary">{liveActivityNotice}</p>
             ) : null}
           </div>
         ) : (
           <TooltipProvider>
             <div className="min-w-0 space-y-3">
               {liveActivityNotice ? (
-                <p className="text-xs text-[rgba(28,28,29,0.56)]">{liveActivityNotice}</p>
+                <p className="text-xs text-tertiary">{liveActivityNotice}</p>
               ) : null}
               <Table className="[&_table]:table-fixed">
                 <TableHeader>
@@ -174,17 +172,17 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
                         <TableCell className="min-w-0 font-medium">
                           <div className="min-w-0">
                             <TruncatedText value={assetLabel} className="truncate" />
-                            <div className="mt-1 text-xs font-normal text-[rgba(28,28,29,0.56)] md:hidden">
+                            <div className="mt-1 text-xs font-normal text-tertiary md:hidden">
                               <span>{row.operationLabel}</span>
                               <span className="mx-1.5">·</span>
                               <span>{createdLabel}</span>
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="hidden text-[rgba(28,28,29,0.72)] md:table-cell">
+                        <TableCell className="hidden text-secondary md:table-cell">
                           {row.operationLabel}
                         </TableCell>
-                        <TableCell className="hidden min-w-0 font-mono text-xs text-[rgba(28,28,29,0.72)] md:table-cell">
+                        <TableCell className="hidden min-w-0 font-mono text-xs text-secondary md:table-cell">
                           <TruncatedText value={address} className="truncate" />
                         </TableCell>
                         <TableCell className="hidden min-w-0 font-mono text-xs md:table-cell">
@@ -195,7 +193,7 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
                                   href={getDevnetExplorerUrl(row.signature)}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="flex min-w-0 items-center gap-1 text-[#1c1c1d] underline underline-offset-2"
+                                  className="flex min-w-0 items-center gap-1 text-primary underline underline-offset-2"
                                 >
                                   <span className="block min-w-0 truncate">{row.signature}</span>
                                   <ExternalLink className="size-3 shrink-0" />
@@ -210,12 +208,10 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
                               </TooltipContent>
                             </Tooltip>
                           ) : (
-                            <span className="text-[rgba(28,28,29,0.52)]">
-                              {t("DashboardCustody.pending")}
-                            </span>
+                            <span className="text-tertiary">{t("DashboardCustody.pending")}</span>
                           )}
                         </TableCell>
-                        <TableCell className="hidden text-[rgba(28,28,29,0.72)] md:table-cell">
+                        <TableCell className="hidden text-secondary md:table-cell">
                           {createdLabel}
                         </TableCell>
                       </TableRow>

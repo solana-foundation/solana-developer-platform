@@ -189,7 +189,9 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
   const query = counterpartyRequirementsQuerySchema.safeParse(c.req.query());
 
   if (!query.success) {
-    throw badRequestQuery({ errors: z.treeifyError(query.error) });
+    throw badRequest(z.prettifyError(query.error), {
+      errors: query.error.issues,
+    });
   }
 
   const repo = getCounterpartiesRepository(c);

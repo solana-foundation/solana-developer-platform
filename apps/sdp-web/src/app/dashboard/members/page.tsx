@@ -10,7 +10,7 @@ export default async function DashboardMembersPage() {
         <CardHeader>
           <CardTitle>{t("Shared.members.comingSoon")}</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-[rgba(28,28,29,0.72)]">
+        <CardContent className="text-sm text-secondary">
           {t("Shared.members.description")}
         </CardContent>
       </Card>

@@ -37,15 +37,13 @@ export function CreateTokenIdentityStep({
       className="px-6 pb-6"
     >
       <div className="space-y-5 rounded-[28px] bg-white p-5">
-        <p className="text-sm text-[rgba(28,28,29,0.62)]">
-          {t("DashboardIssuance.create.requiredFields")}
-        </p>
+        <p className="text-sm text-secondary">{t("DashboardIssuance.create.requiredFields")}</p>
 
         <div className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="issuance-token-name">
               {t("DashboardIssuance.create.tokenName")}{" "}
-              <span aria-hidden className="text-[#c71f37]">
+              <span aria-hidden className="text-destructive">
                 *
               </span>
               <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
@@ -62,7 +60,7 @@ export function CreateTokenIdentityStep({
           <div className="grid gap-2">
             <Label htmlFor="issuance-token-symbol">
               {t("DashboardIssuance.create.symbol")}{" "}
-              <span aria-hidden className="text-[#c71f37]">
+              <span aria-hidden className="text-destructive">
                 *
               </span>
               <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
@@ -81,7 +79,7 @@ export function CreateTokenIdentityStep({
           <div className="grid gap-2">
             <Label htmlFor="issuance-token-decimals">
               {t("DashboardIssuance.create.decimals")}{" "}
-              <span aria-hidden className="text-[#c71f37]">
+              <span aria-hidden className="text-destructive">
                 *
               </span>
               <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
@@ -100,13 +98,11 @@ export function CreateTokenIdentityStep({
               required
             />
             {draft.decimals.length > 0 && !validation.decimalsValid ? (
-              <p className="text-sm text-[#c71f37]" role="alert">
+              <p className="text-sm text-destructive" role="alert">
                 {t("DashboardIssuance.create.decimalsError")}
               </p>
             ) : null}
-            <p className="text-base text-[rgba(28,28,29,0.62)]">
-              {getDecimalsHelperText(template, t)}
-            </p>
+            <p className="text-base text-secondary">{getDecimalsHelperText(template, t)}</p>
           </div>
         </div>
 

@@ -10,7 +10,7 @@ export default async function DashboardAllowlistPage() {
         <CardHeader>
           <CardTitle>{t("Shared.allowlist.comingSoon")}</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-[rgba(28,28,29,0.72)]">
+        <CardContent className="text-sm text-secondary">
           {t("Shared.allowlist.description")}
         </CardContent>
       </Card>

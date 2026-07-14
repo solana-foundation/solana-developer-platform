@@ -40,10 +40,10 @@ export function DeleteCounterpartyDialog({
     >
       <div className="space-y-5 p-6">
         <div className="space-y-1">
-          <h2 className="text-lg font-medium tracking-tight text-text-extra-high">
+          <h2 className="text-lg font-medium tracking-tight text-primary">
             {t("DashboardPayments.counterparty.deleteCounterparty")}
           </h2>
-          <p className="text-sm text-text-medium">
+          <p className="text-sm text-secondary">
             {displayName
               ? t("DashboardPayments.counterparty.deleteNamedCounterparty", { name: displayName })
               : t("DashboardPayments.counterparty.deleteThisCounterparty")}

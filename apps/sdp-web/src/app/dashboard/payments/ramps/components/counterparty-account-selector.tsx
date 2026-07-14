@@ -49,7 +49,7 @@ export function CounterpartyAccountSelector({
             : t("DashboardPayments.ramps.selectDestinationAccount")
       }
       searchPlaceholder={t("DashboardPayments.ramps.searchAccounts")}
-      icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
+      icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
       isLoading={isLoading}
       disabled={disabled || options.length === 0}
     />

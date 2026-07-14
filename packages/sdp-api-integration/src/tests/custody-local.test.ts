@@ -1,4 +1,4 @@
-import { getDb } from "@sdp/api/db";
+import { apiTestSupport } from "@sdp/api/test-support";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { TokenApiResponse } from "../helpers/api-types";
 import {
@@ -12,6 +12,8 @@ import {
   resetIntegrationState,
   SOLANA_CONFIGURED,
 } from "../helpers/integration";
+
+const { getDb } = apiTestSupport;
 
 const describeIfIntegrationConfigured = describe.skipIf(
   !SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS

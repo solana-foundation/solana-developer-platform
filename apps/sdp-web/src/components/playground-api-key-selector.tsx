@@ -54,10 +54,10 @@ export function PlaygroundApiKeySelector() {
   return (
     <div className="w-full min-w-[260px] lg:max-w-[360px]">
       <div className="relative">
-        <div className="pointer-events-none flex h-11 w-full items-center rounded-[14px] border border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none">
+        <div className="pointer-events-none flex h-11 w-full items-center rounded-[14px] border border-border-default bg-white px-4 shadow-none">
           <span className="flex min-w-0 items-center gap-2 pr-8">
-            <KeyRound className="h-4 w-4 text-[rgba(28,28,29,0.58)]" />
-            <span className="truncate text-left text-sm font-medium text-[#1c1c1d]">
+            <KeyRound className="h-4 w-4 text-tertiary" />
+            <span className="truncate text-left text-sm font-medium text-primary">
               {selectedApiKey
                 ? formatApiKeyLabel(selectedApiKey.name, selectedApiKey.keyPrefix)
                 : t("Shared.SharedComponents.selectApiKey")}
@@ -81,7 +81,7 @@ export function PlaygroundApiKeySelector() {
         <svg
           aria-hidden="true"
           viewBox="0 0 16 16"
-          className="pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2 text-[rgba(28,28,29,0.42)]"
+          className="pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2 text-muted"
           fill="none"
           stroke="currentColor"
           strokeWidth="1.75"

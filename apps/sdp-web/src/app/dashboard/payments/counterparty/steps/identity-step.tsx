@@ -24,9 +24,7 @@ export function IdentityStep() {
             value={values.firstName}
             onChange={(e) => setField("firstName", e.target.value)}
           />
-          {errors.firstName && (
-            <p className="mt-1 text-xs text-status-error-text">{errors.firstName}</p>
-          )}
+          {errors.firstName && <p className="mt-1 text-xs text-error">{errors.firstName}</p>}
         </div>
         <div className="space-y-2">
           <Label htmlFor="lastName">{t("DashboardPayments.counterparty.lastName")}</Label>
@@ -38,9 +36,7 @@ export function IdentityStep() {
             value={values.lastName}
             onChange={(e) => setField("lastName", e.target.value)}
           />
-          {errors.lastName && (
-            <p className="mt-1 text-xs text-status-error-text">{errors.lastName}</p>
-          )}
+          {errors.lastName && <p className="mt-1 text-xs text-error">{errors.lastName}</p>}
         </div>
       </div>
 
@@ -55,9 +51,7 @@ export function IdentityStep() {
             value={values.dateOfBirth}
             onChange={(e) => setField("dateOfBirth", e.target.value)}
           />
-          {errors.dateOfBirth && (
-            <p className="mt-1 text-xs text-status-error-text">{errors.dateOfBirth}</p>
-          )}
+          {errors.dateOfBirth && <p className="mt-1 text-xs text-error">{errors.dateOfBirth}</p>}
         </div>
         <div className="space-y-2">
           <Label htmlFor="phone">{t("DashboardPayments.counterparty.phone")}</Label>
@@ -70,7 +64,7 @@ export function IdentityStep() {
             value={values.phone}
             onChange={(e) => setField("phone", e.target.value)}
           />
-          {errors.phone && <p className="mt-1 text-xs text-status-error-text">{errors.phone}</p>}
+          {errors.phone && <p className="mt-1 text-xs text-error">{errors.phone}</p>}
         </div>
       </div>
     </div>

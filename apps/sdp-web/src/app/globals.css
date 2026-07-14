@@ -1,5 +1,8 @@
 @import "tailwindcss";
 @import "@solana/design-system/styles";
+/* SDP color theme (primitives → semantic tokens → package retheme).
+   Imported after the package so its Tier 3 retheme wins. */
+@import "./sdp-theme.css";
 
 /* Ensure Tailwind scans app source files */
 @source "../**/*.{ts,tsx}";
