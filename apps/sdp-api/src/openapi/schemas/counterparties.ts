@@ -1,10 +1,11 @@
-import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES, RAMP_PROVIDERS } from "@sdp/types";
 import {
   counterpartyAddressSchema as counterpartyAddressSchemaBase,
   counterpartyBusinessIdentitySchema as counterpartyBusinessIdentitySchemaBase,
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
   counterpartyIdentitySchema as counterpartyIdentitySchemaBase,
   counterpartyIdParamsSchema as counterpartyIdParamsSchemaBase,
+  counterpartyRequirementsQuerySchema as counterpartyRequirementsQuerySchemaBase,
   counterpartyStatusSchema as counterpartyStatusSchemaBase,
   createBusinessCounterpartySchema as createBusinessCounterpartySchemaBase,
   createIndividualCounterpartySchema as createIndividualCounterpartySchemaBase,
@@ -18,6 +19,7 @@ import {
   listCounterpartyAccountsQuerySchema as listCounterpartyAccountsQuerySchemaBase,
   updateCounterpartyAccountObjectSchema as updateCounterpartyAccountSchemaBase,
 } from "../../routes/counterparty-accounts/schemas";
+import { rampDirectionSchema as rampDirectionSchemaBase } from "../../routes/payments/schemas";
 import {
   isoDateSchema,
   isoDateTimeSchema,
@@ -45,6 +47,133 @@ export const counterpartyStatusSchema = withOpenApi(counterpartyStatusSchemaBase
   description: "Counterparty status.",
   example: "active",
 });
+
+const [onrampRequirementsQuerySchema, offrampRequirementsQuerySchema] =
+  counterpartyRequirementsQuerySchemaBase.options;
+
+export const counterpartyRequirementsQuerySchema = z
+  .object({
+    provider: withOpenApi(
+      z.union([
+        onrampRequirementsQuerySchema.shape.provider,
+        offrampRequirementsQuerySchema.shape.provider,
+      ]),
+      { description: "Ramp provider to evaluate.", example: "moonpay" }
+    ),
+    direction: withOpenApi(rampDirectionSchemaBase, {
+      description: "Ramp direction.",
+      example: "onramp",
+    }),
+    cryptoToken: withOpenApi(onrampRequirementsQuerySchema.shape.cryptoToken, {
+      description: "Crypto asset symbol.",
+      example: "USDC",
+    }),
+    fiatCurrency: withOpenApi(onrampRequirementsQuerySchema.shape.fiatCurrency, {
+      description: "Fiat currency code.",
+      example: "USD",
+    }),
+    destinationWallet: withOpenApi(
+      onrampRequirementsQuerySchema.shape.destinationWallet.optional(),
+      {
+        description: "Destination wallet ID. Required when direction is onramp.",
+        example: "privy_wallet_123",
+      }
+    ),
+  })
+  .openapi({
+    description:
+      "Ramp provider, direction, asset pair, and (for onramps) destination wallet used to evaluate counterparty requirements.",
+  });
+
+const requirementFieldSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("text"),
+    key: z.string(),
+    label: z.string(),
+    required: z.boolean(),
+    pattern: z.string().optional(),
+    minLength: z.number().int().nonnegative().optional(),
+    maxLength: z.number().int().nonnegative().optional(),
+    placeholder: z.string().optional(),
+    mask: z.string().optional(),
+  }),
+  z.object({
+    kind: z.literal("select"),
+    key: z.string(),
+    label: z.string(),
+    required: z.boolean(),
+    options: z.array(z.object({ value: z.string(), label: z.string() })),
+  }),
+]);
+
+const requirementBase = {
+  direction: withOpenApi(rampDirectionSchemaBase, {
+    description: "Ramp direction evaluated for this counterparty.",
+    example: "onramp",
+  }),
+};
+
+/**
+ * Provider/status combinations intentionally mirror the runtime
+ * `CounterpartyRequirements` union. Keep this schema aligned with that model
+ * when providers gain or lose requirement states.
+ */
+export const counterpartyRequirementsResponseSchema = withOpenApi(
+  z.union([
+    z.object({
+      ...requirementBase,
+      provider: z.enum(RAMP_PROVIDERS),
+      status: z.literal("ready"),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.enum(RAMP_PROVIDERS),
+      status: z.literal("collect"),
+      fields: z.array(requirementFieldSchema),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.enum(RAMP_PROVIDERS),
+      status: z.literal("unsupported"),
+      reason: z.string(),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.enum(["lightspark", "bvnk", "mural"]),
+      status: z.literal("onboarding_not_started"),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("mural"),
+      status: z.literal("terms_of_service_required"),
+      termsOfServiceUrl: z.url(),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.enum(["bvnk", "mural"]),
+      status: z.literal("customer_verification_required"),
+      verificationUrl: z.url(),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.enum(["bvnk", "mural"]),
+      status: z.enum([
+        "customer_verifying",
+        "customer_verification_failed",
+        "funding_account_provisioning",
+      ]),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("bvnk"),
+      status: z.literal("provisioning_failed"),
+    }),
+  ]),
+  {
+    description:
+      "Current provider-specific readiness state and any fields or actions required before creating a ramp quote.",
+  }
+);
 
 export const counterpartyAccountKindSchema = withOpenApi(counterpartyAccountKindSchemaBase, {
   description: "Counterparty account kind.",
