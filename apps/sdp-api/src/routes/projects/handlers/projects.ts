@@ -3,96 +3,14 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
-import { created, noContent, success } from "@/lib/response";
+import { badRequest, notFound } from "@/lib/errors";
+import { noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { ProjectService, ProjectServiceError } from "@/services/project.service";
+import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
-import { createProjectSchema, updateProjectSchema } from "../schemas";
+import { updateProjectSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
-
-export const createProject = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const orgId = auth.organizationId;
-
-  const body = await c.req.json();
-  const parsed = createProjectSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const resolveCreatorUserId = async (): Promise<string | null> => {
-    if (auth.userId) {
-      return auth.userId;
-    }
-
-    if (!auth.apiKeyId) {
-      return null;
-    }
-
-    const creator = await getDb(c.env)
-      .prepare("SELECT created_by FROM api_keys WHERE id = ?")
-      .bind(auth.apiKeyId)
-      .first<{ created_by: string }>();
-
-    return creator?.created_by ?? null;
-  };
-
-  const creatorUserId = await resolveCreatorUserId();
-
-  if (!creatorUserId) {
-    throw new AppError("UNAUTHORIZED", "Could not resolve authenticated user for project creation");
-  }
-
-  // API keys are scoped to a project with a fixed environment; projects created
-  // through them must inherit that same environment.
-  let resolvedEnvironment = parsed.data.environment;
-  if (auth.authType === "api_key") {
-    const keyEnv = auth.environment;
-    if (keyEnv !== "sandbox" && keyEnv !== "production") {
-      throw forbidden("API key has an unrecognised environment");
-    }
-    if (resolvedEnvironment && resolvedEnvironment !== keyEnv) {
-      throw forbidden(`A ${keyEnv} API key can only create ${keyEnv} projects`);
-    }
-    resolvedEnvironment = keyEnv;
-  }
-
-  const projectService = new ProjectService(getDb(c.env));
-
-  try {
-    const project = await projectService.createProject({
-      organizationId: orgId,
-      createdBy: creatorUserId,
-      name: parsed.data.name,
-      slug: parsed.data.slug,
-      description: parsed.data.description,
-      environment: resolvedEnvironment,
-      settings: parsed.data.settings,
-    });
-
-    // Audit log
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "create",
-      resourceType: "project",
-      resourceId: project.id,
-      metadata: { name: project.name, slug: project.slug },
-    });
-
-    const response: ProjectResponse = { project };
-    return created(c, response);
-  } catch (error) {
-    if (error instanceof ProjectServiceError && error.code === "DUPLICATE_SLUG") {
-      throw badRequest("A project with this slug already exists");
-    }
-    throw error;
-  }
-};
 
 export const listProjects = async (c: AppContext) => {
   const auth = getAuth(c);

@@ -1,7 +1,6 @@
 import { PROJECT_RPC_PROVIDERS } from "@sdp/types";
 import {
   addMemberSchema as addMemberSchemaBase,
-  createProjectSchema as createProjectSchemaBase,
   updateMemberSchema as updateMemberSchemaBase,
   updateProjectSchema as updateProjectSchemaBase,
 } from "../../routes/projects/schemas";
@@ -141,35 +140,6 @@ export const listProjectApiKeysResponseSchema = z
     apiKeys: z.array(apiKeyListItemSchema).openapi({ description: "Project API keys." }),
   })
   .openapi({ description: "List of project API keys." });
-
-export const createProjectRequestSchema = createProjectSchemaBase
-  .extend({
-    name: withOpenApi(createProjectSchemaBase.shape.name, {
-      description: "Project name.",
-      example: "Payments",
-    }),
-    slug: withOpenApi(createProjectSchemaBase.shape.slug, {
-      description: "Optional URL-friendly slug.",
-      example: "payments",
-    }),
-    description: withOpenApi(createProjectSchemaBase.shape.description, {
-      description: "Optional project description.",
-      example: "Project for payments workflows.",
-    }),
-    environment: withOpenApi(createProjectSchemaBase.shape.environment, {
-      description: "Project environment.",
-      example: "sandbox",
-    }),
-    settings: withOpenApi(createProjectSchemaBase.shape.settings, {
-      description: "Optional project settings.",
-      example: {
-        rpcProvider: "default",
-        webhookUrl: "https://example.com/webhook",
-        metadata: { region: "us" },
-      },
-    }),
-  })
-  .openapi({ description: "Create project request body." });
 
 export const updateProjectRequestSchema = updateProjectSchemaBase
   .extend({

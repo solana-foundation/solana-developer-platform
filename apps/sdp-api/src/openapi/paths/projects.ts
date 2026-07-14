@@ -4,7 +4,6 @@ import { z } from "zod";
 import {
   addProjectMemberRequestSchema,
   createApiKeyRequestSchema,
-  createProjectRequestSchema,
   errorResponseSchema,
   includeArchivedQuerySchema,
   memberIdParamSchema,
@@ -23,29 +22,6 @@ import {
 } from "./responses";
 
 export function registerProjectPaths(registry: OpenAPIRegistry) {
-  registry.registerPath({
-    method: "post",
-    path: "/v1/projects",
-    tags: ["Projects"],
-    summary: "Create project",
-    operationId: "createProject",
-    description: "Creates a project within the organization.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      body: {
-        required: true,
-        content: jsonContent(createProjectRequestSchema),
-      },
-    },
-    responses: {
-      201: {
-        description: "Project created",
-        content: jsonContent(projectResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
-    },
-  });
-
   registry.registerPath({
     method: "get",
     path: "/v1/projects",
