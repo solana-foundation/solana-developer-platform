@@ -328,6 +328,26 @@ describe("Counterparties Routes", () => {
     });
   });
 
+  describe("GET /v1/counterparties/:counterpartyId/requirements", () => {
+    it("surfaces the missing destination wallet for onramp requirements", async () => {
+      const created = await createCounterparty();
+      const cp = (await created.json()).data.counterparty;
+
+      const res = await app.request(
+        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&cryptoToken=USDC&fiatCurrency=USD`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toMatchObject({
+        code: "BAD_REQUEST",
+        message: "destinationWallet is required for onramp requirements",
+      });
+    });
+  });
+
   describe("counterparty accounts", () => {
     it("creates, lists, updates, gets, and archives a crypto wallet account", async () => {
       const created = await createCounterparty({ externalId: "account_parent_1" });
