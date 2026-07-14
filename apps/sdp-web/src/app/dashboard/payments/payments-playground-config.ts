@@ -90,13 +90,13 @@ export function buildPaymentsPlaygroundEndpointConfigs(
   const transferOptions = buildTransferOptions(transfers);
   const walletIdField = buildSelectBackedField(
     "walletId",
-    t("DashboardPayments.playground.walletIdPathLabel"),
+    "{walletId}",
     t("DashboardPayments.playground.walletIdPlaceholder"),
     walletOptions
   );
   const transferIdField = buildSelectBackedField(
     "transferId",
-    t("DashboardPayments.playground.transferIdPathLabel"),
+    "{transferId}",
     t("DashboardPayments.playground.transferIdPlaceholder"),
     transferOptions
   );

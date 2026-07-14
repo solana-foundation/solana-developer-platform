@@ -790,12 +790,12 @@ function FieldRow({
       <RoundCheck checked={checked} interactive={hasToggle && !disabled} disabled={disabled} />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-primary">{label}</p>
-        {value ? <p className="mt-0.5 break-words text-sm text-tertiary">{value}</p> : null}
+        {value ? <p className="mt-0.5 wrap-anywhere text-sm text-tertiary">{value}</p> : null}
       </div>
       {locked ? (
         <span
           title={t("DashboardIssuance.publicInfo.alwaysPublic")}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-fill text-tertiary"
+          className="flex h-7 w-7 shrink-0 items-center justify-center self-center rounded-full bg-fill text-tertiary"
         >
           <Lock className="h-3.5 w-3.5" />
         </span>
