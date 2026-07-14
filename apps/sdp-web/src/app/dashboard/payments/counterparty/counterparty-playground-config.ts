@@ -19,7 +19,7 @@ type Translate = (key: MessageKey, values?: TranslationValues) => string;
 function buildCounterpartyIdField(t: Translate): ApiPlaygroundFieldConfig {
   return {
     key: "counterpartyId",
-    label: t("DashboardPayments.counterparty.counterpartyIdPathPlaceholder"),
+    label: "{counterpartyId}",
     placeholder: t("DashboardPayments.counterparty.playgroundCounterpartyIdPlaceholder"),
     required: true,
   };
@@ -45,7 +45,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
     counterpartyOptions.length > 0
       ? {
           key: "counterpartyId",
-          label: t("DashboardPayments.counterparty.counterpartyIdPathPlaceholder"),
+          label: "{counterpartyId}",
           placeholder: t("DashboardPayments.counterparty.playgroundCounterpartyIdPlaceholder"),
           kind: "select",
           options: counterpartyOptions,
@@ -79,7 +79,6 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
       id: "get-counterparty",
       title: t("DashboardPayments.counterparty.getCounterparty"),
       method: "GET",
-      // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
       path: "/v1/counterparties/{counterpartyId}",
       pathFields: [counterpartyIdField],
       bodyFields: [],
@@ -144,7 +143,6 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
       id: "update-counterparty",
       title: t("DashboardPayments.counterparty.updateCounterparty"),
       method: "PATCH",
-      // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
       path: "/v1/counterparties/{counterpartyId}",
       pathFields: [counterpartyIdField],
       bodyFields: [
@@ -185,7 +183,6 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
       id: "delete-counterparty",
       title: t("DashboardPayments.counterparty.deleteCounterparty"),
       method: "DELETE",
-      // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
       path: "/v1/counterparties/{counterpartyId}",
       pathFields: [counterpartyIdField],
       bodyFields: [],

@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   counterpartyAccountPathParamsSchema,
   counterpartyIdParamSchema,
+  counterpartyRequirementsQuerySchema,
   createCounterpartyAccountRequestSchema,
   createCounterpartyRequestSchema,
   errorResponseSchema,
@@ -16,6 +17,7 @@ import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
   counterpartyAccountResponse,
   counterpartyFieldOptionsResponse,
+  counterpartyRequirementsResponse,
   counterpartyResponse,
   listCounterpartiesResponse,
   listCounterpartyAccountsResponse,
@@ -137,6 +139,31 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
         content: jsonContent(counterpartyResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/counterparties/{counterpartyId}/requirements",
+    tags: ["Counterparties"],
+    summary: "Get counterparty ramp requirements",
+    operationId: "getCounterpartyRequirements",
+    description:
+      "Evaluates whether a counterparty is ready to create a quote with the selected ramp provider and returns any fields or provider-hosted actions still required.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        counterpartyId: counterpartyIdParamSchema,
+      }),
+      query: counterpartyRequirementsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Counterparty ramp requirements",
+        content: jsonContent(counterpartyRequirementsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 
