@@ -13,23 +13,12 @@ import type {
   ProjectSettings,
 } from "@sdp/types";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
+import { badRequest, internalError, notFound } from "@/lib/errors";
 
 export interface UpdateProjectInput {
   name?: string;
   description?: string | null;
   settings?: ProjectSettings | null;
-}
-
-export type ProjectServiceErrorCode = "ALREADY_MEMBER" | "NOT_FOUND";
-
-export class ProjectServiceError extends Error {
-  constructor(
-    public readonly code: ProjectServiceErrorCode,
-    message?: string
-  ) {
-    super(message ?? code);
-    this.name = "ProjectServiceError";
-  }
 }
 
 export class ProjectService {
@@ -173,7 +162,7 @@ export class ProjectService {
   async updateProject(projectId: string, input: UpdateProjectInput): Promise<Project> {
     const existing = await this.getProject(projectId);
     if (!existing) {
-      throw new ProjectServiceError("NOT_FOUND");
+      throw notFound("Project");
     }
 
     const now = new Date().toISOString();
@@ -216,7 +205,7 @@ export class ProjectService {
 
     const updated = await this.getProject(projectId);
     if (!updated) {
-      throw new ProjectServiceError("NOT_FOUND");
+      throw internalError("Failed to load project after update");
     }
 
     return updated;
@@ -269,10 +258,7 @@ export class ProjectService {
       .first<{ id: string }>();
 
     if (!project) {
-      throw new ProjectServiceError(
-        "NOT_FOUND",
-        `Failed to provision default ${environment} project`
-      );
+      throw internalError(`Failed to provision default ${environment} project`);
     }
 
     await this.db
@@ -298,7 +284,7 @@ export class ProjectService {
     // Check if already a member
     const existing = await this.getMembership(projectId, userId);
     if (existing) {
-      throw new ProjectServiceError("ALREADY_MEMBER");
+      throw badRequest("User is already a member of this project");
     }
 
     const id = `pm_${crypto.randomUUID()}`;

@@ -206,7 +206,7 @@ describe("ProjectService", () => {
     it("throws for non-existent project", async () => {
       await expect(
         projectService.updateProject("prj_nonexistent", { name: "Test" })
-      ).rejects.toThrow("NOT_FOUND");
+      ).rejects.toThrow("Project not found");
     });
   });
 
@@ -255,7 +255,7 @@ describe("ProjectService", () => {
 
         await expect(
           projectService.addMember(projectId, "usr_dup123", "developer")
-        ).rejects.toThrow("ALREADY_MEMBER");
+        ).rejects.toThrow("User is already a member of this project");
       });
     });
 
