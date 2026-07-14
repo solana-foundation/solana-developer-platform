@@ -489,6 +489,9 @@ importers:
       '@solana/transactions':
         specifier: 'catalog:'
         version: 6.8.0(typescript@6.0.3)
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.3
 
   packages/sdp-env-config:
     devDependencies:
