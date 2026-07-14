@@ -113,6 +113,11 @@ const requirementBase = {
   }),
 };
 
+/**
+ * Provider/status combinations intentionally mirror the runtime
+ * `CounterpartyRequirements` union. Keep this schema aligned with that model
+ * when providers gain or lose requirement states.
+ */
 export const counterpartyRequirementsResponseSchema = withOpenApi(
   z.union([
     z.object({
