@@ -14,7 +14,7 @@ export {
   KoraAdapter,
   KoraClient,
   NativeAdapter,
-} from "./fee-payment";
+} from "@sdp/payments/fee-payment";
 // Signing adapters (custody providers via @solana/keychain)
 export {
   createSigningAdapter,

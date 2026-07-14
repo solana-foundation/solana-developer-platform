@@ -2,9 +2,10 @@
  * The only API implementation boundary consumed by @sdp/api-integration.
  * Keep this facade intentionally small and integration-test specific.
  */
+import { hashString } from "@sdp/payments/hash";
+
 import { closeDatabasePools, getDb } from "@/db";
 import app from "@/index";
-import { hashString } from "@/lib/hash";
 import { createFeePaymentAdapter, KoraAdapter, KoraClient } from "@/services/adapters";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createMosaicService } from "@/services/mosaic";

@@ -82,8 +82,9 @@ async function computeApiKeyHash(): Promise<string> {
   }
 
   const pepper = (env as { API_KEY_PEPPER: string }).API_KEY_PEPPER;
-  cachedKeyHash = await hashString(TEST_PROJECT_API_KEY.raw, pepper);
-  return cachedKeyHash;
+  const hash = await hashString(TEST_PROJECT_API_KEY.raw, pepper);
+  cachedKeyHash = hash;
+  return hash;
 }
 
 export async function initIntegrationSuite() {

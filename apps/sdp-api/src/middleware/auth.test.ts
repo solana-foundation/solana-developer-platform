@@ -2,10 +2,10 @@
  * Authentication middleware tests
  */
 
+import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { hashString } from "@/lib/hash";
 import {
   TEST_API_KEY,
   TEST_CACHED_API_KEY,
