@@ -83,7 +83,6 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
       id: "get-counterparty",
       title: t("DashboardPayments.counterparty.getCounterparty"),
       method: "GET",
-      // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
       path: "/v1/counterparties/{counterpartyId}",
       pathFields: [counterpartyIdField],
       bodyFields: [],
@@ -148,7 +147,6 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
       id: "update-counterparty",
       title: t("DashboardPayments.counterparty.updateCounterparty"),
       method: "PATCH",
-      // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
       path: "/v1/counterparties/{counterpartyId}",
       pathFields: [counterpartyIdField],
       bodyFields: [
@@ -189,7 +187,6 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
       id: "delete-counterparty",
       title: t("DashboardPayments.counterparty.deleteCounterparty"),
       method: "DELETE",
-      // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
       path: "/v1/counterparties/{counterpartyId}",
       pathFields: [counterpartyIdField],
       bodyFields: [],
