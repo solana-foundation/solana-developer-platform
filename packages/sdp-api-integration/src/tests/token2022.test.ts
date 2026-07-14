@@ -1,5 +1,4 @@
-import { createOrgSigner } from "@sdp/api/services/solana";
-import type { Env } from "@sdp/api/types/env";
+import { type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
@@ -12,6 +11,8 @@ import {
   TEST_ORG,
   TEST_PROJECT,
 } from "../helpers/integration";
+
+const { createOrgSigner } = apiTestSupport;
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token2022Service Direct", () => {
   let apiKeyHash: string;
@@ -30,8 +31,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token2022Service 
   });
 
   it("creates mint using service directly", { timeout: 60000 }, async () => {
-    const signer = await createOrgSigner(env as Env, TEST_ORG.id, TEST_PROJECT.id);
-    const token2022 = createToken2022Service(env as Env, signer);
+    const signer = await createOrgSigner(env as ApiTestEnv, TEST_ORG.id, TEST_PROJECT.id);
+    const token2022 = createToken2022Service(env as ApiTestEnv, signer);
 
     const result = await token2022.createMint({
       metadata: {

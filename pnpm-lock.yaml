@@ -429,6 +429,9 @@ importers:
         specifier: 'catalog:'
         version: 6.8.0(typescript@6.0.3)
     devDependencies:
+      '@sdp/api':
+        specifier: workspace:*
+        version: link:../../apps/sdp-api
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.16.14
         version: 0.16.14(@cloudflare/workers-types@4.20260609.1)(@vitest/runner@4.1.8)(@vitest/snapshot@4.1.8)(vitest@4.1.8)

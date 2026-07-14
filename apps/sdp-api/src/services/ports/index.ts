@@ -12,16 +12,3 @@ export type {
   FeePaymentPort,
 } from "./fee-payment.port";
 export { FeePaymentError } from "./fee-payment.port";
-// RPC port - Solana blockchain interaction
-export type {
-  AccountInfo,
-  BlockhashWithExpiry,
-  ConfirmTransactionOptions,
-  RpcErrorCode,
-  RpcPort,
-  SendTransactionOptions,
-  SimulateTransactionOptions,
-  SimulationResult,
-  TransactionConfirmation,
-} from "./rpc.port";
-export { RpcError } from "./rpc.port";

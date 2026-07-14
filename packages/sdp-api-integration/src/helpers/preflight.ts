@@ -1,6 +1,8 @@
-import { KoraClient } from "@sdp/api/services/adapters";
+import { apiTestSupport } from "@sdp/api/test-support";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
+
+const { KoraClient } = apiTestSupport;
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
