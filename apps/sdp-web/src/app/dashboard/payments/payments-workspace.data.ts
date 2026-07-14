@@ -177,15 +177,15 @@ export function getHighRiskProviders(snapshot: ComplianceSnapshot): CompliancePr
 export function riskToneClassName(result: ComplianceProviderResult): string {
   const tone = resolveRiskTone(result);
   if (tone === "green") {
-    return "border-[rgba(17,94,61,0.18)] bg-[rgba(16,185,129,0.1)] text-[#115e3d]";
+    return "border-success-border bg-success-bg text-success";
   }
   if (tone === "yellow") {
-    return "border-[rgba(180,83,9,0.22)] bg-[rgba(245,158,11,0.12)] text-[#8a5a00]";
+    return "border-warning-border bg-warning-bg text-warning";
   }
   if (tone === "red") {
-    return "border-[rgba(158,43,56,0.2)] bg-[rgba(158,43,56,0.08)] text-[#9e2b38]";
+    return "border-destructive-border bg-destructive-bg text-destructive-strong";
   }
-  return "border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.72)]";
+  return "border-border-default bg-fill-subtle text-secondary";
 }
 
 export async function fetchWallets(

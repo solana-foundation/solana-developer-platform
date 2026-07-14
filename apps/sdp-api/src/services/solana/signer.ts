@@ -16,6 +16,7 @@
  * 2. Organization-level config
  */
 
+import { isFullSigningPort, SigningError } from "@sdp/custody/signing";
 import { getBase58Codec } from "@solana/codecs";
 import {
   type Address,
@@ -25,7 +26,6 @@ import {
 } from "@solana/kit";
 import { createSigningAdapterFromEnv } from "@/services/adapters";
 import { createSigningService } from "@/services/domain/signing.service";
-import { isFullSigningPort, SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 
 const base58 = getBase58Codec();

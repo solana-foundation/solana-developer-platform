@@ -58,16 +58,16 @@ export function CreateDraftConfirmDialog({
     >
       <div className="space-y-6 p-6">
         <div className="space-y-2">
-          <p className="text-xl font-medium tracking-tight text-text-extra-high">
+          <p className="text-xl font-medium tracking-tight text-primary">
             {t("DashboardIssuance.confirmDraft.title")}
           </p>
-          <p className="text-sm text-text-low">
+          <p className="text-sm text-tertiary">
             {t("DashboardIssuance.confirmDraft.descriptionStart")}
             {name ? (
               <>
                 {" "}
                 {t("DashboardIssuance.confirmDraft.of")}{" "}
-                <span className="font-medium text-text-high">{name}</span>
+                <span className="font-medium text-primary">{name}</span>
               </>
             ) : null}
             {t("DashboardIssuance.confirmDraft.descriptionEnd")}

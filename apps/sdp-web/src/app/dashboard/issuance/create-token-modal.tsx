@@ -222,12 +222,12 @@ export function CreateIssuanceTokenModal({
         contentClassName="overflow-hidden rounded-3xl shadow-[0_24px_64px_rgba(28,28,29,0.28)]"
         size="xl"
       >
-        <div className="border-b border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-8 py-7 pr-20">
+        <div className="border-b border-border-default bg-fill-subtle px-8 py-7 pr-20">
           <div>
             <p className="text-4xl leading-none font-semibold">
               {template ? getTemplateTitle(template, t) : t("DashboardIssuance.create.title")}
             </p>
-            <p className="mt-2 text-lg text-[rgba(28,28,29,0.62)]">
+            <p className="mt-2 text-lg text-secondary">
               {template
                 ? t("DashboardIssuance.create.configureDraft")
                 : t("DashboardIssuance.create.chooseTemplate")}

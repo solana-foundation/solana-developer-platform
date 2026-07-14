@@ -27,10 +27,10 @@ export function StepClassification() {
       className="space-y-6"
     >
       <div>
-        <h2 className="text-xl font-medium text-[#1c1c1d]">
+        <h2 className="text-xl font-medium text-primary">
           {t("DashboardIssuance.classification.title")}
         </h2>
-        <p className="mt-1 text-sm text-[rgba(28,28,29,0.62)]">
+        <p className="mt-1 text-sm text-secondary">
           {t("DashboardIssuance.classification.description")}
         </p>
       </div>
@@ -43,9 +43,7 @@ export function StepClassification() {
           onChange={(event) => updateDraft({ name: event.currentTarget.value })}
           placeholder={t("DashboardIssuance.classification.namePlaceholder")}
         />
-        <p className="text-sm text-[rgba(28,28,29,0.55)]">
-          {t("DashboardIssuance.classification.nameHint")}
-        </p>
+        <p className="text-sm text-tertiary">{t("DashboardIssuance.classification.nameHint")}</p>
       </div>
 
       <div className="space-y-3">
@@ -55,7 +53,7 @@ export function StepClassification() {
             href="https://platform.solana.com/docs"
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 text-sm font-medium text-[#1c1c1d] hover:underline"
+            className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
           >
             {t("DashboardIssuance.classification.notSure")}
             <ArrowRight className="h-3.5 w-3.5" />

@@ -66,18 +66,18 @@ export function PaymentMethodStep({ mode, value, onChange }: PaymentMethodStepPr
           type="button"
           onClick={() => onChange(option.id)}
           className={cn(
-            "flex w-full items-center gap-3 rounded-2xl bg-border-extra-light px-4 py-4 text-left outline outline-2 -outline-offset-2 transition-colors focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50",
+            "flex w-full items-center gap-3 rounded-2xl bg-fill-subtle px-4 py-4 text-left outline outline-2 -outline-offset-2 transition-colors focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50",
             value === option.id
-              ? "outline-border-medium ring-2 ring-text-low ring-offset-2 ring-offset-white"
-              : "outline-transparent hover:bg-border-light"
+              ? "outline-border-strong ring-2 ring-tertiary ring-offset-2 ring-offset-white"
+              : "outline-transparent hover:bg-fill-strong"
           )}
         >
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white text-text-extra-high">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white text-primary">
             {option.icon}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-base font-medium text-text-extra-high">{option.title}</span>
-            <span className="block text-sm text-text-low">{option.description}</span>
+            <span className="block text-base font-medium text-primary">{option.title}</span>
+            <span className="block text-sm text-tertiary">{option.description}</span>
           </span>
         </button>
       ))}

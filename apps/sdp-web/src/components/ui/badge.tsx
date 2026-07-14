@@ -12,11 +12,11 @@ type BadgeProps = Omit<SolanaBadgeProps, "variant"> & {
 };
 
 const variantClassNames: Record<BadgeVariant, string> = {
-  default: "bg-[rgba(28,28,29,0.08)] text-text-extra-high",
-  success: "bg-status-success-bg text-status-success-text",
-  warning: "bg-status-warning-bg text-status-warning-text",
-  danger: "bg-status-error-bg text-status-error-text",
-  info: "bg-[var(--sdp-color-info-bg)] text-[color:var(--sdp-color-info-text)]",
+  default: "bg-fill text-primary",
+  success: "bg-success-bg text-success",
+  warning: "bg-warning-bg text-warning",
+  danger: "bg-error-bg text-error",
+  info: "bg-info-bg text-info",
 };
 
 function Badge({ className, variant = "default", ...props }: BadgeProps) {

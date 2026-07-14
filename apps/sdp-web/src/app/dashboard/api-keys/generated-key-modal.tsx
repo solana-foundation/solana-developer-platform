@@ -66,10 +66,10 @@ function GeneratedApiKeyModal({
       contentClassName="p-6 text-left"
       size="md"
     >
-      <p className="pr-12 text-sm font-semibold text-[#1c1c1d]">
+      <p className="pr-12 text-sm font-semibold text-primary">
         {t("DashboardCustody.apiKeyGenerated")}
       </p>
-      <p className="mt-2 text-sm text-[rgba(28,28,29,0.72)]">{message}</p>
+      <p className="mt-2 text-sm text-secondary">{message}</p>
 
       {keyPrefix ? (
         <div className="mt-4 space-y-2">
@@ -86,9 +86,7 @@ function GeneratedApiKeyModal({
       <div className="mt-4 space-y-2">
         <Label htmlFor="generated-key-value">{t("DashboardCustody.fullKeyShownOnce")}</Label>
         <GeneratedApiKeyInput value={keyValue} />
-        <p className="text-xs text-[rgba(28,28,29,0.58)]">
-          {t("DashboardCustody.apiKeyPlaygroundSession")}
-        </p>
+        <p className="text-xs text-tertiary">{t("DashboardCustody.apiKeyPlaygroundSession")}</p>
       </div>
 
       <div className="mt-5 flex items-center justify-end gap-2">

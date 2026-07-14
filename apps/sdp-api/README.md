@@ -41,8 +41,8 @@ The API exposes these public REST endpoints (all require API key or session toke
 
 ### Prerequisites
 
-- **Node.js 20+**
-- **pnpm 10.15.1+**
+- **Node.js 22+**
+- **pnpm 10.16+**
 - **Doppler CLI** — Required to run dev and test commands. Install: `brew install dopplerhq/cli/doppler`
 - **Local Postgres 16** (deployed environments use managed Postgres via Hyperdrive)
 

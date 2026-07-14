@@ -15,6 +15,7 @@ import type {
   ApiKeyWalletPolicyBindingResolutionRow,
   ApiKeyWalletPolicyBindingRow,
   ApiKeyWalletPolicyTargetRow,
+  ApprovalRequestDetailRow,
   ApprovalRequestRow,
   CreateApiKeyControlProfileInput,
   CreateApiKeyControlProfileRevisionInput,
@@ -23,6 +24,8 @@ import type {
   CreateWalletControlProfileInput,
   CreateWalletControlProfileRevisionInput,
   CreateWalletOperationInput,
+  GetApprovalRequestDetailInput,
+  ListApprovalRequestDetailsInput,
   ListWalletPolicyEvaluationAuditsInput,
   PolicyEvaluationRow,
   PolicyRepository,
@@ -246,6 +249,49 @@ function mapApprovalRequestRow(row: Record<string, unknown>): ApprovalRequestRow
   };
 }
 
+function mapApprovalRequestDetailRow(row: Record<string, unknown>): ApprovalRequestDetailRow {
+  return {
+    approval_request_id: row.approval_request_id as string,
+    organization_id: row.organization_id as string,
+    project_id: (row.project_id as string | null | undefined) ?? null,
+    wallet_operation_id: row.wallet_operation_id as string,
+    approval_group_id: (row.approval_group_id as string | null | undefined) ?? null,
+    approval_status: row.approval_status as ApprovalRequestDetailRow["approval_status"],
+    provider: (row.provider as string | null | undefined) ?? null,
+    provider_reference: (row.provider_reference as string | null | undefined) ?? null,
+    requested_by: (row.requested_by as string | null | undefined) ?? null,
+    resolved_by: (row.resolved_by as string | null | undefined) ?? null,
+    expires_at: (row.expires_at as string | null | undefined) ?? null,
+    resolved_at: (row.resolved_at as string | null | undefined) ?? null,
+    approval_created_at: row.approval_created_at as string,
+    approval_updated_at: row.approval_updated_at as string,
+    custody_wallet_id: (row.custody_wallet_id as string | null | undefined) ?? null,
+    wallet_id: row.wallet_id as string,
+    wallet_public_key: (row.wallet_public_key as string | null | undefined) ?? null,
+    wallet_label: (row.wallet_label as string | null | undefined) ?? null,
+    api_key_id: (row.api_key_id as string | null | undefined) ?? null,
+    source: row.source as string,
+    operation_family: row.operation_family as ApprovalRequestDetailRow["operation_family"],
+    operation_type: row.operation_type as string,
+    asset: (row.asset as string | null | undefined) ?? null,
+    amount: (row.amount as string | null | undefined) ?? null,
+    destination: (row.destination as string | null | undefined) ?? null,
+    operation_status: row.operation_status as ApprovalRequestDetailRow["operation_status"],
+    operation_created_at: row.operation_created_at as string,
+    operation_updated_at: row.operation_updated_at as string,
+    policy_evaluation_id: (row.policy_evaluation_id as string | null | undefined) ?? null,
+    decision: (row.decision as ApprovalRequestDetailRow["decision"] | null | undefined) ?? null,
+    reason_code: (row.reason_code as string | null | undefined) ?? null,
+    reason: (row.reason as string | null | undefined) ?? null,
+    matched_rules: asPostgresJsonArray(row.matched_rules),
+    requires_approval:
+      row.requires_approval === null || row.requires_approval === undefined
+        ? null
+        : Boolean(row.requires_approval),
+    evaluated_at: (row.evaluated_at as string | null | undefined) ?? null,
+  };
+}
+
 function mapPolicyEvaluationContext(value: unknown): PolicyEvaluationRow["evaluation_context"] {
   const context = parseOptionalPostgresJson<Record<string, unknown>>(value);
   if (
@@ -301,6 +347,85 @@ async function getWalletControlProfileById(
     .first<Record<string, unknown>>();
 
   return row ? mapWalletControlProfileRow(row) : null;
+}
+
+async function listApprovalRequestDetailsInternal(
+  db: AppDb,
+  input: ListApprovalRequestDetailsInput & { approvalRequestId?: string }
+): Promise<ApprovalRequestDetailRow[]> {
+  const limit = Math.min(Math.max(input.limit ?? 50, 1), 100);
+  const conditions = ["ar.organization_id = ?"];
+  const params: unknown[] = [input.organizationId];
+
+  if (input.projectId) {
+    conditions.push("ar.project_id = ?");
+    params.push(input.projectId);
+  }
+  if (input.status) {
+    conditions.push("ar.status = ?");
+    params.push(input.status);
+  }
+  if (input.approvalRequestId) {
+    conditions.push("ar.id = ?");
+    params.push(input.approvalRequestId);
+  }
+
+  const rows = await db
+    .prepare(
+      `SELECT
+         ar.id AS approval_request_id,
+         ar.organization_id,
+         ar.project_id,
+         ar.wallet_operation_id,
+         ar.approval_group_id,
+         ar.status AS approval_status,
+         ar.provider,
+         ar.provider_reference,
+         ar.requested_by,
+         ar.resolved_by,
+         ar.expires_at,
+         ar.resolved_at,
+         ar.created_at AS approval_created_at,
+         ar.updated_at AS approval_updated_at,
+         wo.custody_wallet_id,
+         wo.wallet_id,
+         cw.public_key AS wallet_public_key,
+         cw.label AS wallet_label,
+         wo.api_key_id,
+         wo.source,
+         wo.operation_family,
+         wo.operation_type,
+         wo.asset,
+         wo.amount,
+         wo.destination,
+         wo.status AS operation_status,
+         wo.created_at AS operation_created_at,
+         wo.updated_at AS operation_updated_at,
+         pe.id AS policy_evaluation_id,
+         pe.decision,
+         pe.reason_code,
+         pe.reason,
+         pe.matched_rules,
+         pe.requires_approval,
+         pe.created_at AS evaluated_at
+       FROM approval_requests ar
+       INNER JOIN wallet_operations wo ON wo.id = ar.wallet_operation_id
+       LEFT JOIN custody_wallets cw ON cw.id = wo.custody_wallet_id
+       LEFT JOIN LATERAL (
+         SELECT *
+         FROM policy_evaluations pe
+         WHERE pe.approval_request_id = ar.id
+         ORDER BY pe.created_at DESC
+         LIMIT 1
+       ) pe ON TRUE
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY ar.created_at DESC, ar.id DESC
+       LIMIT ?`
+    )
+    .bind(...params, limit)
+    .all<Record<string, unknown>>();
+
+  return rows.results.map(mapApprovalRequestDetailRow);
 }
 
 async function getWalletControlProfileRevisionById(
@@ -1128,11 +1253,16 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
       const resolvedAt = input.resolvedAt ?? new Date().toISOString();
 
       const row = await db.transaction(async (tx) => {
+        const conditions = ["id = ?", "organization_id = ?"];
+        const params: unknown[] = [input.approvalRequestId, input.organizationId];
+        if (input.projectId) {
+          conditions.push("project_id = ?");
+          params.push(input.projectId);
+        }
+
         const current = await tx
-          .prepare(
-            "SELECT * FROM approval_requests WHERE id = ? AND organization_id = ? FOR UPDATE"
-          )
-          .bind(input.approvalRequestId, input.organizationId)
+          .prepare(`SELECT * FROM approval_requests WHERE ${conditions.join(" AND ")} FOR UPDATE`)
+          .bind(...params)
           .first<Record<string, unknown>>();
 
         if (!current) {
@@ -1195,6 +1325,20 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
       });
 
       return row ? mapApprovalRequestRow(row) : null;
+    },
+
+    async listApprovalRequestDetails(input: ListApprovalRequestDetailsInput) {
+      return listApprovalRequestDetailsInternal(db, input);
+    },
+
+    async getApprovalRequestDetail(input: GetApprovalRequestDetailInput) {
+      const rows = await listApprovalRequestDetailsInternal(db, {
+        ...input,
+        approvalRequestId: input.approvalRequestId,
+        limit: 1,
+      });
+
+      return rows[0] ?? null;
     },
   };
 }

@@ -53,14 +53,14 @@ function statusClassName(status: string): string {
   switch (status.toLowerCase()) {
     case "confirmed":
     case "finalized":
-      return "border-[rgba(17,94,61,0.18)] bg-[rgba(16,185,129,0.1)] text-[#115e3d]";
+      return "border-success-border bg-success-bg text-success";
     case "processing":
     case "pending":
-      return "border-[rgba(180,83,9,0.22)] bg-[rgba(245,158,11,0.12)] text-[#8a5a00]";
+      return "border-warning-border bg-warning-bg text-warning";
     case "failed":
-      return "border-[rgba(158,43,56,0.2)] bg-[rgba(158,43,56,0.08)] text-[#9e2b38]";
+      return "border-destructive-border bg-destructive-bg text-destructive-strong";
     default:
-      return "border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.72)]";
+      return "border-border-default bg-fill-subtle text-secondary";
   }
 }
 
@@ -200,15 +200,15 @@ export function PaymentsOverview({
     <div className="grid min-w-0 gap-6 overflow-x-hidden">
       <SectionEntry delay={0.04}>
         <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,1fr)]">
-          <div className="flex min-h-[244px] flex-col justify-center rounded-[4px] bg-[rgba(28,28,29,0.04)] px-8 py-10 sm:px-14">
+          <div className="flex min-h-[244px] flex-col justify-center rounded-[4px] bg-fill-subtle px-8 py-10 sm:px-14">
             <div className="space-y-3">
-              <p className="text-[15px] font-medium tracking-[0.01em] text-[#1c1c1d]">
+              <p className="text-[15px] font-medium tracking-[0.01em] text-primary">
                 {t("DashboardPayments.totalSdpBalance")}
               </p>
-              <p className="text-[38px] leading-none font-medium tracking-[-0.05em] text-[#1c1c1d] sm:text-[54px]">
+              <p className="text-[38px] leading-none font-medium tracking-[-0.05em] text-primary sm:text-[54px]">
                 {formatCurrencyAmount(totalBalance, locale)}
               </p>
-              <p className="text-sm text-[rgba(28,28,29,0.56)]">
+              <p className="text-sm text-tertiary">
                 {t("DashboardPayments.aggregatedAcrossWallets", {
                   count: walletCount,
                   walletLabel: t(
@@ -231,16 +231,16 @@ export function PaymentsOverview({
                 return (
                   <div
                     key={`${balance.token}-${balance.mint}`}
-                    className="flex min-h-[78px] min-w-0 items-center justify-between gap-4 overflow-hidden rounded-[4px] bg-[rgba(28,28,29,0.04)] px-6 py-5"
+                    className="flex min-h-[78px] min-w-0 items-center justify-between gap-4 overflow-hidden rounded-[4px] bg-fill-subtle px-6 py-5"
                   >
                     <p
-                      className="min-w-0 truncate text-[18px] font-medium tracking-[0.04em] text-[#1c1c1d] uppercase"
+                      className="min-w-0 truncate text-[18px] font-medium tracking-[0.04em] text-primary uppercase"
                       title={displayToken}
                     >
                       {displayToken}
                     </p>
                     <p
-                      className="min-w-0 max-w-[40%] truncate text-right text-[18px] font-medium tracking-[0.01em] text-[#1c1c1d] sm:text-[20px]"
+                      className="min-w-0 max-w-[40%] truncate text-right text-[18px] font-medium tracking-[0.01em] text-primary sm:text-[20px]"
                       title={formatCurrencyAmount(usdValue, locale)}
                     >
                       {formatCurrencyAmount(usdValue, locale)}
@@ -249,7 +249,7 @@ export function PaymentsOverview({
                 );
               })
             ) : (
-              <div className="flex min-h-[78px] items-center rounded-[4px] bg-[rgba(28,28,29,0.04)] px-6 py-5 text-sm text-[rgba(28,28,29,0.64)]">
+              <div className="flex min-h-[78px] items-center rounded-[4px] bg-fill-subtle px-6 py-5 text-sm text-secondary">
                 {t("DashboardPayments.noUsdValuedAssets")}
               </div>
             )}
@@ -257,7 +257,7 @@ export function PaymentsOverview({
         </div>
 
         {liveAggregateError ? (
-          <p className="mt-4 text-sm text-[#9e2b38]">{liveAggregateError}</p>
+          <p className="mt-4 text-sm text-destructive-strong">{liveAggregateError}</p>
         ) : null}
       </SectionEntry>
 
@@ -283,11 +283,9 @@ export function PaymentsOverview({
           </CardHeader>
           <CardContent>
             {liveTransfersError ? (
-              <p className="text-sm text-[#9e2b38]">{liveTransfersError}</p>
+              <p className="text-sm text-destructive-strong">{liveTransfersError}</p>
             ) : liveTransfers.length === 0 ? (
-              <p className="text-sm text-[rgba(28,28,29,0.72)]">
-                {t("DashboardPayments.noTransactions")}
-              </p>
+              <p className="text-sm text-secondary">{t("DashboardPayments.noTransactions")}</p>
             ) : (
               <TooltipProvider>
                 <Table className="min-w-0 [&_table]:table-fixed">
@@ -338,17 +336,17 @@ export function PaymentsOverview({
                                 value={assetLabel}
                                 className="block max-w-full truncate"
                               />
-                              <div className="mt-1 text-xs font-normal text-[rgba(28,28,29,0.56)] lg:hidden">
+                              <div className="mt-1 text-xs font-normal text-tertiary lg:hidden">
                                 <span>{directionLabel}</span>
                                 <span className="mx-1.5">·</span>
                                 <span>{createdLabel}</span>
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="hidden text-[rgba(28,28,29,0.72)] lg:table-cell">
+                          <TableCell className="hidden text-secondary lg:table-cell">
                             {directionLabel}
                           </TableCell>
-                          <TableCell className="hidden min-w-0 max-w-0 font-mono text-xs text-[rgba(28,28,29,0.72)] xl:table-cell">
+                          <TableCell className="hidden min-w-0 max-w-0 font-mono text-xs text-secondary xl:table-cell">
                             <TruncatedTableText
                               value={counterparty}
                               displayValue={truncateHash(counterparty)}
@@ -363,7 +361,7 @@ export function PaymentsOverview({
                                     href={getDevnetExplorerUrl(transfer.signature)}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="flex min-w-0 max-w-full items-center gap-1 text-[#1c1c1d] underline underline-offset-2"
+                                    className="flex min-w-0 max-w-full items-center gap-1 text-primary underline underline-offset-2"
                                   >
                                     <span className="block min-w-0 max-w-full truncate">
                                       {truncateHash(transfer.signature)}
@@ -380,12 +378,12 @@ export function PaymentsOverview({
                                 </TooltipContent>
                               </Tooltip>
                             ) : (
-                              <span className="text-[rgba(28,28,29,0.52)]">
+                              <span className="text-tertiary">
                                 {t("DashboardPayments.pending")}
                               </span>
                             )}
                           </TableCell>
-                          <TableCell className="hidden text-[rgba(28,28,29,0.72)] lg:table-cell">
+                          <TableCell className="hidden text-secondary lg:table-cell">
                             {createdLabel}
                           </TableCell>
                         </TableRow>

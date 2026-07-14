@@ -35,7 +35,7 @@ export function CounterpartySelector({
       placeholder={t("DashboardPayments.ramps.selectCounterparty")}
       searchPlaceholder={t("DashboardPayments.ramps.searchCounterparties")}
       variant="dialog"
-      icon={<UsersIcon className="size-5 shrink-0 text-text-low" />}
+      icon={<UsersIcon className="size-5 shrink-0 text-tertiary" />}
       error={
         counterpartiesResult.ok
           ? undefined

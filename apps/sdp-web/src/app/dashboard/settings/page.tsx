@@ -129,13 +129,13 @@ export default async function SettingsPage() {
         <CardContent className="space-y-6">
           <div className="w-full space-y-6">
             {loadError ? (
-              <div className="rounded-xl border border-[rgba(158,43,56,0.2)] bg-[rgba(158,43,56,0.06)] px-3 py-2 text-sm text-[#9e2b38]">
+              <div className="rounded-xl border border-destructive-border bg-destructive-bg px-3 py-2 text-sm text-destructive-strong">
                 {t("DashboardCustody.failedToLoadOrganizationSettings")}
               </div>
             ) : null}
 
             {!loadError && !organization && isLinked ? (
-              <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-3 py-2 text-sm text-[rgba(28,28,29,0.68)]">
+              <div className="rounded-xl border border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
                 {t("DashboardCustody.organizationNotFound")}
               </div>
             ) : null}
@@ -149,7 +149,7 @@ export default async function SettingsPage() {
             ) : null}
 
             {!loadError && !organization && !isLinked ? (
-              <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-3 py-2 text-sm text-[rgba(28,28,29,0.68)]">
+              <div className="rounded-xl border border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
                 {t("DashboardCustody.organizationNotLinked")}
               </div>
             ) : null}

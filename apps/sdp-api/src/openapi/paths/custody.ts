@@ -27,6 +27,8 @@ import {
   custodyWalletByIdResponse,
   custodyWalletResponse,
   custodyWalletsResponse,
+  walletApprovalRequestResponse,
+  walletApprovalRequestsResponse,
 } from "./responses";
 
 export function registerCustodyPaths(registry: OpenAPIRegistry) {
@@ -312,6 +314,91 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 502]),
     },
   });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/wallets/approval-requests",
+    tags: ["Wallets"],
+    summary: "List wallet approval requests",
+    operationId: "listWalletApprovalRequests",
+    description:
+      "Lists wallet operation approval requests for the authenticated organization or project scope.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: z.object({
+        status: z
+          .enum(["pending", "approved", "rejected", "canceled", "expired", "failed"])
+          .optional()
+          .openapi({ description: "Filter by approval request status.", example: "pending" }),
+        limit: z.number().int().min(1).max(100).optional().openapi({
+          description: "Maximum approval requests to return.",
+          example: 50,
+        }),
+      }),
+    },
+    responses: {
+      200: {
+        description: "Wallet approval requests",
+        content: jsonContent(walletApprovalRequestsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/wallets/approval-requests/{approvalRequestId}",
+    tags: ["Wallets"],
+    summary: "Get wallet approval request",
+    operationId: "getWalletApprovalRequest",
+    description: "Returns one wallet operation approval request with operation and policy context.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        approvalRequestId: z.string().openapi({
+          description: "Approval request ID.",
+          example: "appr_example",
+        }),
+      }),
+    },
+    responses: {
+      200: {
+        description: "Wallet approval request",
+        content: jsonContent(walletApprovalRequestResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  for (const action of ["approve", "reject", "cancel"] as const) {
+    registry.registerPath({
+      method: "post",
+      path: `/v1/wallets/approval-requests/{approvalRequestId}/${action}`,
+      tags: ["Wallets"],
+      summary: `${action[0].toUpperCase()}${action.slice(1)} wallet approval request`,
+      operationId: `${action}WalletApprovalRequest`,
+      description: `${action[0].toUpperCase()}${action.slice(1)}s a pending wallet operation approval request.`,
+      security: [{ apiKeyAuth: [] }],
+      request: {
+        headers: projectScopeHeaders,
+        params: z.object({
+          approvalRequestId: z.string().openapi({
+            description: "Approval request ID.",
+            example: "appr_example",
+          }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Wallet approval request",
+          content: jsonContent(walletApprovalRequestResponse),
+        },
+        ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      },
+    });
+  }
 
   registry.registerPath({
     method: "get",

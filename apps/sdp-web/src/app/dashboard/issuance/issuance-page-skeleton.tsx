@@ -12,11 +12,11 @@ const ISSUANCE_SKELETON_IDS = [
 
 function IssuanceTokenCardSkeleton() {
   return (
-    <article className="flex min-h-[340px] flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)] animate-pulse">
-      <div className="mb-4 h-14 w-14 rounded-full bg-[rgba(28,28,29,0.08)]" />
+    <article className="flex min-h-[340px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)] animate-pulse">
+      <div className="mb-4 h-14 w-14 rounded-full bg-fill" />
       <SkeletonBlock className="h-4 w-16" />
       <SkeletonBlock className="mt-3 h-8 w-3/4" />
-      <div className="mt-6 space-y-3 rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] p-3">
+      <div className="mt-6 space-y-3 rounded-xl border border-border-subtle bg-fill-subtle p-3">
         <SkeletonBlock className="h-4 w-full" />
         <SkeletonBlock className="h-4 w-[86%]" />
         <SkeletonBlock className="h-4 w-[78%]" />

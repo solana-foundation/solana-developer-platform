@@ -33,8 +33,8 @@ export function RampOnboardingPanel({
   return (
     <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
       <Icon className={`size-10 ${copy.iconClassName}`} />
-      <p className="text-lg font-medium text-text-extra-high">{copy.title}</p>
-      <p className="max-w-md text-sm leading-relaxed text-text-low">{copy.description}</p>
+      <p className="text-lg font-medium text-primary">{copy.title}</p>
+      <p className="max-w-md text-sm leading-relaxed text-tertiary">{copy.description}</p>
       {hostedAction ? (
         <Button
           type="button"
@@ -45,9 +45,9 @@ export function RampOnboardingPanel({
         </Button>
       ) : null}
       {status === "funding_account_provisioning" ? (
-        <div className="flex items-center gap-2 rounded-full bg-border-extra-light px-3 py-1.5">
-          <span className="size-2 shrink-0 animate-pulse rounded-full bg-text-medium" />
-          <span className="text-xs text-text-low">
+        <div className="flex items-center gap-2 rounded-full bg-fill-subtle px-3 py-1.5">
+          <span className="size-2 shrink-0 animate-pulse rounded-full bg-secondary" />
+          <span className="text-xs text-tertiary">
             {provisioningDetail(provider, direction, t)}
           </span>
         </div>

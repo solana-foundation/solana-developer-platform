@@ -31,7 +31,7 @@ export function TokenOverviewSection({
       {showTitle || onRefreshSupply ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
           {showTitle ? (
-            <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
+            <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
               {t("DashboardIssuance.overview.title")}
             </h3>
           ) : (
@@ -52,7 +52,7 @@ export function TokenOverviewSection({
           ) : null}
         </div>
       ) : null}
-      <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+      <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
         <OverviewRow
           label={t("DashboardIssuance.overview.tokenAddress")}
           value={token.mintAddress ?? t("DashboardIssuance.header.notDeployed")}
@@ -96,12 +96,12 @@ function OverviewRow({
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/(^-|-$)/g, "")}`}
-      className="flex items-center justify-between gap-4 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0"
+      className="flex items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0"
     >
-      <p className="text-[15px] text-[rgba(28,28,29,0.68)]">{label}</p>
+      <p className="text-[15px] text-secondary">{label}</p>
       <p
         className={[
-          "text-right text-[15px] text-[#1c1c1d]",
+          "text-right text-[15px] text-primary",
           monospace ? "font-mono text-xs" : "",
         ].join(" ")}
       >

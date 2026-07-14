@@ -97,39 +97,31 @@ async function OnboardingGateSection({ orgId }: { orgId: string }) {
   const organization = await getClerkOrganizationSummary(orgId);
 
   return (
-    <Card className="rounded-[24px] border-[rgba(28,28,29,0.08)] shadow-none">
+    <Card className="rounded-[24px] border-border-subtle shadow-none">
       <CardHeader>
         <CardTitle>{t("DashboardCustody.waitingForOrganizationSync")}</CardTitle>
         <CardDescription>{t("DashboardCustody.organizationSyncDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] p-4 text-sm">
+        <div className="rounded-xl border border-border-default bg-fill-subtle p-4 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-[rgba(28,28,29,0.72)]">
-              {t("DashboardCustody.organizationName")}
-            </span>
-            <span className="font-medium text-[#1c1c1d]">
+            <span className="text-secondary">{t("DashboardCustody.organizationName")}</span>
+            <span className="font-medium text-primary">
               {organization.name ?? t("DashboardCustody.unavailable")}
             </span>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-[rgba(28,28,29,0.72)]">
-              {t("DashboardCustody.organizationSlug")}
-            </span>
-            <span className="font-mono text-xs text-[#1c1c1d]">
+            <span className="text-secondary">{t("DashboardCustody.organizationSlug")}</span>
+            <span className="font-mono text-xs text-primary">
               {organization.slug ?? t("DashboardCustody.unavailable")}
             </span>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-[rgba(28,28,29,0.72)]">
-              {t("DashboardCustody.clerkOrganizationId")}
-            </span>
-            <span className="font-mono text-xs text-[#1c1c1d]">{organization.id}</span>
+            <span className="text-secondary">{t("DashboardCustody.clerkOrganizationId")}</span>
+            <span className="font-mono text-xs text-primary">{organization.id}</span>
           </div>
         </div>
-        <p className="text-sm text-[rgba(28,28,29,0.72)]">
-          {t("DashboardCustody.organizationSyncHelp")}
-        </p>
+        <p className="text-sm text-secondary">{t("DashboardCustody.organizationSyncHelp")}</p>
       </CardContent>
     </Card>
   );

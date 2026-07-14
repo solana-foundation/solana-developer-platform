@@ -3,8 +3,8 @@ import {
   canProviderCreateWallet,
   canProviderDeleteWallet,
   canProviderSign,
-} from "@/services/custody/providers";
-import { SigningError } from "@/services/ports";
+} from "@sdp/custody";
+import { SigningError } from "@sdp/custody/signing";
 
 export function custodyProviderCanSign(provider: CustodyProvider): boolean {
   return canProviderSign(provider);
