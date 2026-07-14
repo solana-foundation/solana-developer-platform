@@ -238,7 +238,7 @@ function DashboardTopBar({
           />
           {topBarLeadingContent}
         </div>
-        <div className="flex items-center justify-center">
+        <div className="flex items-start justify-center">
           <h1 className="text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
             {centeredTitle}
           </h1>

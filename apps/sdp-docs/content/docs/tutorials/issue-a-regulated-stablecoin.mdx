@@ -51,17 +51,25 @@ From the dashboard, mint an org-scoped API key with **Role: Admin**, **Environme
 
 <Step>
 
-With the Admin key, call `POST /v1/projects` to create your project (`{ name, slug, environment: "sandbox" }`). The response carries the project ID you'll need in the next step:
+With the Admin key, call `GET /v1/projects` and pick the project with slug `default-sandbox`. Every organization is provisioned with exactly one sandbox and one production project automatically — isolation between workloads comes from separate organizations, not additional projects. The project ID is what you'll need in the next step:
 
 ```json
 {
   "data": {
-    "project": {
-      "id": "prj_3bc13bcb-...",
-      "slug": "treasury-pilot-usd",
-      "environment": "sandbox",
-      "status": "active"
-    }
+    "projects": [
+      {
+        "id": "prj_3bc13bcb-...",
+        "slug": "default-sandbox",
+        "environment": "sandbox",
+        "status": "active"
+      },
+      {
+        "id": "prj_8a201d47-...",
+        "slug": "default-production",
+        "environment": "production",
+        "status": "active"
+      }
+    ]
   }
 }
 ```
@@ -742,7 +750,7 @@ The work between `sk_test_` and `sk_live_` is not a flag flip. It is the moment 
 
 Your sandbox setup is built around six artifacts that all swap for production equivalents:
 
-- **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys minted from a production project. Use the Section 2 bootstrap pattern with a fresh Admin key, a fresh `POST /v1/projects` call against `environment: "production"`, and fresh project-scoped keys minted under it.
+- **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys minted from your production project. Use the Section 2 bootstrap pattern with a fresh Admin key, selecting the `default-production` project from `GET /v1/projects` instead of `default-sandbox`, and fresh project-scoped keys minted under it.
 - **Custody provider**. Production reads `provider` as your federally chartered custodian (Anchorage Digital Bank for most US institutional issuers), bound to your organization through the Anchorage onboarding flow. The Privy sandbox wallets do not carry over.
 - **Solana network**. Mainnet-beta replaces devnet. The custody address gets funded by your custody bank as part of standard operational support, not by a faucet.
 - **API base URL**. `https://api.solana.com` is the canonical production base. While the custom domain is in rollout, requests route through `https://sdp-api-production.solana.workers.dev`. Code paths are identical; only the hostname changes.

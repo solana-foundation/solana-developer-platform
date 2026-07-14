@@ -2,12 +2,47 @@
  * Project Service Unit Tests
  */
 
+import type { ProjectSettings } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { ProjectService } from "@/services/project.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+
+/**
+ * Inserts a project row plus a creator admin membership, mirroring what
+ * default-project provisioning produces.
+ */
+async function seedProject(
+  id: string,
+  name: string,
+  slug: string,
+  settings: ProjectSettings | null
+): Promise<void> {
+  const db = getDb(env);
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, settings, status, created_by)
+         VALUES (?, ?, ?, ?, 'sandbox', ?, 'active', ?)`
+      )
+      .bind(
+        id,
+        TEST_ORG.id,
+        name,
+        slug,
+        settings === null ? null : JSON.stringify(settings),
+        TEST_USER.id
+      ),
+    db
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role, created_at)
+         VALUES (?, ?, ?, 'admin', ?)`
+      )
+      .bind(`pm_${id}`, id, TEST_USER.id, new Date().toISOString()),
+  ]);
+}
 
 describe("ProjectService", () => {
   let projectService: ProjectService;
@@ -51,101 +86,14 @@ describe("ProjectService", () => {
       .run();
   });
 
-  describe("createProject", () => {
-    it("creates a project with auto-generated slug", async () => {
-      const project = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "My Test Project",
-      });
-
-      expect(project.id).toMatch(/^prj_/);
-      expect(project.name).toBe("My Test Project");
-      expect(project.slug).toBe("my-test-project");
-      expect(project.status).toBe("active");
-      expect(project.organizationId).toBe(TEST_ORG.id);
-    });
-
-    it("creates a project with custom slug", async () => {
-      const project = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "Custom",
-        slug: "my-custom-slug",
-      });
-
-      expect(project.slug).toBe("my-custom-slug");
-    });
-
-    it("defaults rpc provider to round robin when settings are omitted", async () => {
-      const project = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "Default RPC Provider",
-      });
-
-      expect(project.settings?.rpcProvider).toBe("default");
-    });
-
-    it("creates a project with settings", async () => {
-      const project = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "With Settings",
-        settings: {
-          rpcEndpoint: "https://api.mainnet-beta.solana.com",
-          webhookUrl: "https://example.com/webhook",
-        },
-      });
-
-      expect(project.settings).not.toBeNull();
-      expect(project.settings?.rpcEndpoint).toBe("https://api.mainnet-beta.solana.com");
-    });
-
-    it("adds creator as admin member", async () => {
-      const project = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "Creator Test",
-      });
-
-      const membership = await projectService.getMembership(project.id, TEST_USER.id);
-
-      expect(membership).not.toBeNull();
-      expect(membership?.role).toBe("admin");
-    });
-
-    it("throws on duplicate slug", async () => {
-      await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "First",
-        slug: "duplicate-slug",
-      });
-
-      await expect(
-        projectService.createProject({
-          organizationId: TEST_ORG.id,
-          createdBy: TEST_USER.id,
-          name: "Second",
-          slug: "duplicate-slug",
-        })
-      ).rejects.toThrow("DUPLICATE_SLUG");
-    });
-  });
-
   describe("getProject", () => {
     it("returns project by ID", async () => {
-      const created = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "Get Test",
-      });
+      await seedProject("prj_get_test", "Get Test", "get-test", null);
 
-      const project = await projectService.getProject(created.id);
+      const project = await projectService.getProject("prj_get_test");
 
       expect(project).not.toBeNull();
-      expect(project?.id).toBe(created.id);
+      expect(project?.id).toBe("prj_get_test");
       expect(project?.name).toBe("Get Test");
     });
 
@@ -158,12 +106,7 @@ describe("ProjectService", () => {
 
   describe("getProjectBySlug", () => {
     it("returns project by slug within organization", async () => {
-      await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "Slug Test",
-        slug: "slug-test",
-      });
+      await seedProject("prj_slug_test", "Slug Test", "slug-test", null);
 
       const project = await projectService.getProjectBySlug(TEST_ORG.id, "slug-test");
 
@@ -174,16 +117,8 @@ describe("ProjectService", () => {
 
   describe("listProjects", () => {
     it("lists all active projects for organization", async () => {
-      await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "Project 1",
-      });
-      await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "Project 2",
-      });
+      await seedProject("prj_list_1", "Project 1", "project-1", null);
+      await seedProject("prj_list_2", "Project 2", "project-2", null);
 
       const projects = await projectService.listProjects(TEST_ORG.id);
 
@@ -191,43 +126,31 @@ describe("ProjectService", () => {
     });
 
     it("excludes archived projects by default", async () => {
-      const project = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "To Archive",
-      });
-      await projectService.archiveProject(project.id);
+      await seedProject("prj_archive_default", "To Archive", "to-archive-default", null);
+      await projectService.archiveProject("prj_archive_default");
 
       const projects = await projectService.listProjects(TEST_ORG.id);
 
-      expect(projects.find((p) => p.id === project.id)).toBeUndefined();
+      expect(projects.find((p) => p.id === "prj_archive_default")).toBeUndefined();
     });
 
     it("includes archived projects when requested", async () => {
-      const project = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "Archived One",
-      });
-      await projectService.archiveProject(project.id);
+      await seedProject("prj_archived_one", "Archived One", "archived-one", null);
+      await projectService.archiveProject("prj_archived_one");
 
       const projects = await projectService.listProjects(TEST_ORG.id, {
         includeArchived: true,
       });
 
-      expect(projects.find((p) => p.id === project.id)).toBeDefined();
+      expect(projects.find((p) => p.id === "prj_archived_one")).toBeDefined();
     });
   });
 
   describe("updateProject", () => {
     it("updates project name", async () => {
-      const project = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "Original Name",
-      });
+      await seedProject("prj_update_name", "Original Name", "original-name", null);
 
-      const updated = await projectService.updateProject(project.id, {
+      const updated = await projectService.updateProject("prj_update_name", {
         name: "New Name",
       });
 
@@ -235,30 +158,31 @@ describe("ProjectService", () => {
     });
 
     it("updates project settings", async () => {
-      const project = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "Settings Update",
-      });
+      await seedProject("prj_update_settings", "Settings Update", "settings-update", null);
 
-      const updated = await projectService.updateProject(project.id, {
+      const updated = await projectService.updateProject("prj_update_settings", {
         settings: { webhookUrl: "https://new.example.com/webhook" },
       });
 
       expect(updated.settings?.webhookUrl).toBe("https://new.example.com/webhook");
     });
 
-    it("preserves existing rpc provider when settings update omits it", async () => {
-      const project = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "Preserve RPC Provider",
-        settings: {
-          rpcProvider: "triton",
-        },
+    it("defaults rpc provider to round robin when settings are omitted", async () => {
+      await seedProject("prj_default_rpc", "Default RPC Provider", "default-rpc-provider", null);
+
+      const updated = await projectService.updateProject("prj_default_rpc", {
+        name: "Default RPC Provider Renamed",
       });
 
-      const updated = await projectService.updateProject(project.id, {
+      expect(updated.settings?.rpcProvider).toBe("default");
+    });
+
+    it("preserves existing rpc provider when settings update omits it", async () => {
+      await seedProject("prj_preserve_rpc", "Preserve RPC Provider", "preserve-rpc-provider", {
+        rpcProvider: "triton",
+      });
+
+      const updated = await projectService.updateProject("prj_preserve_rpc", {
         settings: { webhookUrl: "https://updated.example.com/webhook" },
       });
 
@@ -266,17 +190,12 @@ describe("ProjectService", () => {
     });
 
     it("switches provider to default and clears custom endpoint", async () => {
-      const project = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "Switch RPC Provider",
-        settings: {
-          rpcProvider: "custom",
-          rpcEndpoint: "https://rpc.custom.example.com",
-        },
+      await seedProject("prj_switch_rpc", "Switch RPC Provider", "switch-rpc-provider", {
+        rpcProvider: "custom",
+        rpcEndpoint: "https://rpc.custom.example.com",
       });
 
-      const updated = await projectService.updateProject(project.id, {
+      const updated = await projectService.updateProject("prj_switch_rpc", {
         settings: { rpcProvider: "default" },
       });
 
@@ -287,35 +206,26 @@ describe("ProjectService", () => {
     it("throws for non-existent project", async () => {
       await expect(
         projectService.updateProject("prj_nonexistent", { name: "Test" })
-      ).rejects.toThrow("NOT_FOUND");
+      ).rejects.toThrow("Project not found");
     });
   });
 
   describe("archiveProject", () => {
     it("sets project status to archived", async () => {
-      const project = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "To Archive",
-      });
+      await seedProject("prj_to_archive", "To Archive", "to-archive", null);
 
-      await projectService.archiveProject(project.id);
+      await projectService.archiveProject("prj_to_archive");
 
-      const archived = await projectService.getProject(project.id);
+      const archived = await projectService.getProject("prj_to_archive");
       expect(archived?.status).toBe("archived");
     });
   });
 
   describe("Project Members", () => {
-    let projectId: string;
+    const projectId = "prj_member_test";
 
     beforeEach(async () => {
-      const project = await projectService.createProject({
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        name: "Member Test Project",
-      });
-      projectId = project.id;
+      await seedProject(projectId, "Member Test Project", "member-test-project", null);
     });
 
     describe("addMember", () => {
@@ -345,7 +255,7 @@ describe("ProjectService", () => {
 
         await expect(
           projectService.addMember(projectId, "usr_dup123", "developer")
-        ).rejects.toThrow("ALREADY_MEMBER");
+        ).rejects.toThrow("User is already a member of this project");
       });
     });
 

@@ -47,14 +47,6 @@ export interface ProjectMember {
 }
 
 // API Request/Response types
-export interface CreateProjectRequest {
-  name: string;
-  slug?: string; // Auto-generated from name if not provided
-  description?: string;
-  environment?: ProjectEnvironment;
-  settings?: ProjectSettings;
-}
-
 export interface UpdateProjectRequest {
   name?: string;
   description?: string;
