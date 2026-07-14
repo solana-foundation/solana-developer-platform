@@ -1,3 +1,4 @@
+import { NativeAdapter } from "@sdp/payments/fee-payment/native";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   type Address,
@@ -20,7 +21,6 @@ import {
 import { getTransferSolInstruction } from "@solana-program/system";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
-import { NativeAdapter } from "./native.adapter";
 
 const base58 = getBase58Codec();
 const decoder = getTransactionDecoder();

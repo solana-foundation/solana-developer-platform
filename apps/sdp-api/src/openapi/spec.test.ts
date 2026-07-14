@@ -25,6 +25,15 @@ describe("OpenAPI spec", () => {
     expect(refreshPath?.operationId).toBe("refreshTokenSupply");
   });
 
+  it("documents counterparty ramp requirements", () => {
+    const doc = createOpenApiDocument();
+
+    const requirementsPath = doc.paths?.["/v1/counterparties/{counterpartyId}/requirements"]?.get;
+    expect(requirementsPath).toBeDefined();
+    expect(requirementsPath?.operationId).toBe("getCounterpartyRequirements");
+    expect(requirementsPath?.responses?.["200"]).toMatchSnapshot();
+  });
+
   it("limits the public document to supported public API families", () => {
     const doc = createPublicOpenApiDocument();
 

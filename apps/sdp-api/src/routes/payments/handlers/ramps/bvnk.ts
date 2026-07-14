@@ -1,22 +1,12 @@
-import type { BvnkPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
-import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
-import { z } from "zod";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import type {
-  PaymentTransferRow,
-  PaymentTransferStatus,
-} from "@/db/repositories/payments.repository";
-import { AppError, badRequest, counterpartyNotProvisioned, internalError } from "@/lib/errors";
-import { hashString } from "@/lib/hash";
-import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
-import type { BvnkFiatWallet } from "@/lib/ramps/providers/bvnk/client";
+import { hashString } from "@sdp/payments/hash";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import type { BvnkFiatWallet } from "@sdp/payments/ramps/providers/bvnk/client";
 import {
   buildBvnkIndividualPayload,
   bvnkOfframpAccountType,
   bvnkOfframpFields,
   isBvnkOfframpCurrency,
-} from "@/lib/ramps/providers/bvnk/counterparty";
+} from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import {
   type BvnkCustomerResolution,
   type BvnkOfframpBeneficiary,
@@ -44,10 +34,20 @@ import {
   readBvnkOfframpWallets,
   readBvnkOnrampPaymentRuleState,
   readBvnkWallets,
-} from "@/lib/ramps/providers/bvnk/provider-data";
-import { buildRequirementSchema } from "@/lib/ramps/requirements";
-import { rampId } from "@/lib/ramps/shared";
-import type { RampRuntimeContext } from "@/lib/ramps/types";
+} from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { buildRequirementSchema } from "@sdp/payments/ramps/requirements";
+import { rampId } from "@sdp/payments/ramps/shared";
+import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
+import type { BvnkPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
+import { z } from "zod";
+import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import type {
+  PaymentTransferRow,
+  PaymentTransferStatus,
+} from "@/db/repositories/payments.repository";
+import { AppError, badRequest, counterpartyNotProvisioned, internalError } from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import {
   type AppContext,

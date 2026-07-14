@@ -11,6 +11,7 @@ import {
   assetProfileResponseSchema,
   counterpartyAccountResponseSchema,
   counterpartyFieldOptionsResponseSchema,
+  counterpartyRequirementsResponseSchema,
   counterpartyResponseSchema,
   currentUserResponseSchema,
   custodyConfigResponseSchema,
@@ -116,6 +117,9 @@ export const listAssetProfilesResponse = successResponseSchema(listAssetProfiles
 export const counterpartyResponse = successResponseSchema(counterpartyResponseSchema);
 export const counterpartyFieldOptionsResponse = successResponseSchema(
   counterpartyFieldOptionsResponseSchema
+);
+export const counterpartyRequirementsResponse = successResponseSchema(
+  counterpartyRequirementsResponseSchema
 );
 export const listCounterpartiesResponse = successResponseSchema(listCounterpartiesResponseSchema);
 export const counterpartyAccountResponse = successResponseSchema(counterpartyAccountResponseSchema);

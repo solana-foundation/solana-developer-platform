@@ -1,4 +1,5 @@
 import { CUSTODY_PROVIDERS, type CustodyProvider, redactCredentialString } from "@sdp/custody";
+import { normalizePem } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -7,7 +8,6 @@ import { created, success } from "@/lib/response";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { AuditService } from "@/services/audit.service";
 import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
-import { normalizePem } from "@/services/custody/provisioning.common";
 import {
   type FireblocksProviderConfig,
   parseConfigRecord,

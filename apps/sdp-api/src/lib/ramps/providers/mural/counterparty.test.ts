@@ -1,9 +1,12 @@
 import { SdpPaymentsError } from "@sdp/payments";
+import {
+  muralCounterpartyRequirements,
+  muralOnboardingRequirements,
+} from "@sdp/payments/ramps/providers/mural/counterparty";
+import type { MuralOrganizationResolution } from "@sdp/payments/ramps/providers/mural/provider-data";
 import type { Counterparty, CounterpartyProviderData } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import { describe, expect, it } from "vitest";
-import { muralCounterpartyRequirements, muralOnboardingRequirements } from "./counterparty";
-import type { MuralOrganizationResolution } from "./provider-data";
 
 type IndividualCounterparty = Extract<Counterparty, { entityType: "individual" }>;
 

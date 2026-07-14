@@ -1,11 +1,6 @@
-import type { MuralPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
-import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { badRequest, counterpartyNotProvisioned } from "@/lib/errors";
-import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
-import type { MuralCreateOrganizationRequest } from "@/lib/ramps/providers/mural/client";
-import { muralOnboardingRequirements } from "@/lib/ramps/providers/mural/counterparty";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import type { MuralCreateOrganizationRequest } from "@sdp/payments/ramps/providers/mural/client";
+import { muralOnboardingRequirements } from "@sdp/payments/ramps/providers/mural/counterparty";
 import {
   isMuralKycApproved,
   isMuralTosAccepted,
@@ -14,9 +9,14 @@ import {
   type MuralPayinMethod,
   readMuralData,
   readMuralOrganization,
-} from "@/lib/ramps/providers/mural/provider-data";
-import { readyCounterparty } from "@/lib/ramps/requirements";
-import { rampId } from "@/lib/ramps/shared";
+} from "@sdp/payments/ramps/providers/mural/provider-data";
+import { readyCounterparty } from "@sdp/payments/ramps/requirements";
+import { rampId } from "@sdp/payments/ramps/shared";
+import type { MuralPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import { badRequest, counterpartyNotProvisioned } from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { type AppContext, rampRuntime } from "../../context";
 

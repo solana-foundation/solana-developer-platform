@@ -111,8 +111,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "../../apps/sdp-api/src"),
-      "@sdp/api": path.resolve(__dirname, "../../apps/sdp-api/src"),
-      "@sdp/api-test": path.resolve(__dirname, "../../apps/sdp-api/src/test"),
+      "@sdp/api/test-support": path.resolve(
+        __dirname,
+        "../../apps/sdp-api/src/test/integration-support.ts"
+      ),
     },
   },
   test: {

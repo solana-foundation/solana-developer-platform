@@ -1,7 +1,7 @@
+import type { RampSettlementEvent } from "@sdp/payments/ramps";
 import type { Context } from "hono";
 import type { PaymentTransferStatus, UpdatePaymentTransferInput } from "@/db/repositories";
 import { createPaymentsRepository, isRampTransferType } from "@/db/repositories";
-import type { RampSettlementEvent } from "@/lib/ramps";
 import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;

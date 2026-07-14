@@ -1,8 +1,8 @@
+import { extractProviderErrorMessage } from "@sdp/payments/ramps/fetch";
+import { requireEnv } from "@sdp/payments/ramps/shared";
 import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types";
 import { z } from "zod";
 import { providerUnavailable } from "@/lib/errors";
-import { extractProviderErrorMessage } from "@/lib/ramps/fetch";
-import { requireEnv } from "@/lib/ramps/shared";
 
 const PLACES_API_BASE_URL = "https://places.googleapis.com/v1";
 const STATIC_MAPS_API_BASE_URL = "https://maps.googleapis.com/maps/api/staticmap";

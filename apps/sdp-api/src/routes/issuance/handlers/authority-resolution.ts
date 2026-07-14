@@ -1,10 +1,10 @@
+import { getTemplateInfo } from "@sdp/issuance/templates";
 import { getSolanaConfig } from "@sdp/rpc";
 import type { Address, TransactionSigner } from "@solana/kit";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
-import { getTemplateInfo } from "@/services/issuance/templates";
 import * as solanaServices from "@/services/solana";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { TokenService } from "@/services/token.service";
