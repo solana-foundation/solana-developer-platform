@@ -1,6 +1,6 @@
+import { StripeRampClient } from "@sdp/payments/ramps/providers/stripe/client";
+import type { RampOnrampQuoteInput } from "@sdp/payments/ramps/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RampOnrampQuoteInput } from "@/lib/ramps/types";
-import { StripeRampClient } from "./client";
 
 const STRIPE_CONTEXT = {
   env: {

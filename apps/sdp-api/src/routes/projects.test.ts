@@ -2,10 +2,10 @@
  * Projects Routes E2E Tests
  */
 
+import { hashString } from "@sdp/payments/hash";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { hashString } from "@/lib/hash";
 import { createKVStoreSet } from "@/runtime/factory";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -16,6 +16,28 @@ const TEST_PROJECT = {
   id: "prj_test_projects",
   slug: "test-test-org-projects",
 };
+
+/**
+ * Inserts a project row plus a creator admin membership, mirroring what
+ * default-project provisioning produces.
+ */
+async function seedProject(id: string, name: string, slug: string) {
+  const db = getDb(env);
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
+      )
+      .bind(id, TEST_ORG.id, name, slug, TEST_USER.id),
+    db
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role, created_at)
+         VALUES (?, ?, ?, 'admin', ?)`
+      )
+      .bind(`pm_${id}`, id, TEST_USER.id, new Date().toISOString()),
+  ]);
+}
 
 describe("Projects Routes", () => {
   let apiKeyHash: string;
@@ -102,119 +124,23 @@ describe("Projects Routes", () => {
   });
 
   describe("POST /v1/projects", () => {
-    it("creates a new project", async () => {
+    it("is not routable", async () => {
       const res = await app.request(
         "/v1/projects",
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            name: "My Project",
-            description: "A test project",
-            environment: "sandbox",
-          }),
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
         },
         env
       );
 
-      expect(res.status).toBe(201);
-      const body = await res.json();
-      expect(body.data.project).toBeDefined();
-      expect(body.data.project.name).toBe("My Project");
-      expect(body.data.project.slug).toBe("my-project");
-      expect(body.data.project.id).toMatch(/^prj_/);
-      expect(body.data.project.status).toBe("active");
-    });
-
-    it("creates project with custom slug", async () => {
-      const res = await app.request(
-        "/v1/projects",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            name: "Custom Slug Project",
-            slug: "custom-slug",
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(201);
-      const body = await res.json();
-      expect(body.data.project.slug).toBe("custom-slug");
-    });
-
-    it("returns 400 for duplicate slug", async () => {
-      // Create first project
-      await app.request(
-        "/v1/projects",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ name: "First Project", slug: "duplicate" }),
-        },
-        env
-      );
-
-      // Try to create another with same slug
-      const res = await app.request(
-        "/v1/projects",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ name: "Second Project", slug: "duplicate" }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(400);
-      const body = await res.json();
-      expect(body.error.message).toContain("slug already exists");
-    });
-
-    it("returns 401 without auth", async () => {
-      const res = await app.request(
-        "/v1/projects",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "Test" }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(404);
     });
   });
 
   describe("GET /v1/projects", () => {
     it("lists projects for organization", async () => {
-      // Create a project first
-      await app.request(
-        "/v1/projects",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ name: "Listed Project" }),
-        },
-        env
-      );
+      await seedProject("prj_listed123", "Listed Project", "listed-project");
 
       const res = await app.request(
         "/v1/projects",
@@ -226,9 +152,8 @@ describe("Projects Routes", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.data.projects).toBeInstanceOf(Array);
-      expect(body.data.projects.length).toBeGreaterThan(0);
-      expect(body.data.projects[0].name).toBe("Listed Project");
+      const listed = body.data.projects.find((p: { id: string }) => p.id === "prj_listed123");
+      expect(listed.name).toBe("Listed Project");
     });
 
     it("excludes archived projects by default", async () => {
@@ -262,24 +187,10 @@ describe("Projects Routes", () => {
 
   describe("GET /v1/projects/:projectId", () => {
     it("returns project details", async () => {
-      // Create a project first
-      const createRes = await app.request(
-        "/v1/projects",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ name: "Detail Project" }),
-        },
-        env
-      );
-      const created = await createRes.json();
-      const projectId = created.data.project.id;
+      await seedProject("prj_detail123", "Detail Project", "detail-project");
 
       const res = await app.request(
-        `/v1/projects/${projectId}`,
+        "/v1/projects/prj_detail123",
         {
           headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
         },
@@ -288,7 +199,7 @@ describe("Projects Routes", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.data.project.id).toBe(projectId);
+      expect(body.data.project.id).toBe("prj_detail123");
       expect(body.data.project.name).toBe("Detail Project");
     });
 
@@ -307,24 +218,10 @@ describe("Projects Routes", () => {
 
   describe("PATCH /v1/projects/:projectId", () => {
     it("updates project details", async () => {
-      // Create a project first
-      const createRes = await app.request(
-        "/v1/projects",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ name: "Update Me" }),
-        },
-        env
-      );
-      const created = await createRes.json();
-      const projectId = created.data.project.id;
+      await seedProject("prj_update123", "Update Me", "update-me");
 
       const res = await app.request(
-        `/v1/projects/${projectId}`,
+        "/v1/projects/prj_update123",
         {
           method: "PATCH",
           headers: {
@@ -348,24 +245,10 @@ describe("Projects Routes", () => {
 
   describe("DELETE /v1/projects/:projectId", () => {
     it("archives a project", async () => {
-      // Create a project first
-      const createRes = await app.request(
-        "/v1/projects",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ name: "Delete Me" }),
-        },
-        env
-      );
-      const created = await createRes.json();
-      const projectId = created.data.project.id;
+      await seedProject("prj_delete123", "Delete Me", "delete-me");
 
       const res = await app.request(
-        `/v1/projects/${projectId}`,
+        "/v1/projects/prj_delete123",
         {
           method: "DELETE",
           headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
@@ -379,31 +262,17 @@ describe("Projects Routes", () => {
       const db = getDb(env);
       const project = await db
         .prepare("SELECT status FROM projects WHERE id = ?")
-        .bind(projectId)
+        .bind("prj_delete123")
         .first<{ status: string }>();
       expect(project?.status).toBe("archived");
     });
   });
 
   describe("Project Members", () => {
-    let projectId: string;
+    const projectId = "prj_members123";
 
     beforeEach(async () => {
-      // Create a project for member tests
-      const createRes = await app.request(
-        "/v1/projects",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ name: "Member Test Project" }),
-        },
-        env
-      );
-      const created = await createRes.json();
-      projectId = created.data.project.id;
+      await seedProject(projectId, "Member Test Project", "member-test-project");
     });
 
     it("lists project members", async () => {

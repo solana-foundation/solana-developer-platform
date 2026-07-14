@@ -1,7 +1,7 @@
+import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { Context } from "hono";
-import type { RampWebhookValidationContext } from "@/lib/ramps/types";
 import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;

@@ -35,6 +35,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 
 - Docs integrity: `pnpm --filter sdp-docs check:links`
 - Docs build: `pnpm --filter sdp-docs build`
+- Module boundaries: `pnpm check:module-boundaries`
 - API typecheck: `pnpm --filter @sdp/api typecheck`
 - API tests: `pnpm --filter @sdp/api test`
 - Full workspace typecheck: `pnpm typecheck`
@@ -44,6 +45,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Prefer reusing generated docs/OpenAPI metadata instead of duplicating route inventories by hand.
 - Keep public URLs coherent with the shared site constants in `@sdp/types/site`.
 - When changing docs URLs or discovery resources, update both the docs site and any product links that point at it.
+- Update `docs/architecture/module-map.md` with `pnpm generate:module-map`; do not edit it by hand.
 
 ## Repo-local skills
 

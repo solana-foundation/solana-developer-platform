@@ -1,9 +1,5 @@
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
-import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { badRequest, notFound } from "@/lib/errors";
-import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
-import { buildLightsparkAccountInfo } from "@/lib/ramps/providers/lightspark/counterparty";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import { buildLightsparkAccountInfo } from "@sdp/payments/ramps/providers/lightspark/counterparty";
 import {
   isLightsparkExternalAccountActive,
   type LightsparkPayoutAccount,
@@ -14,8 +10,12 @@ import {
   readLightsparkData,
   readLightsparkPayoutAccountByKey,
   readLightsparkPayoutAccounts,
-} from "@/lib/ramps/providers/lightspark/provider-data";
-import type { LightsparkCustomerResolution } from "@/lib/ramps/types";
+} from "@sdp/payments/ramps/providers/lightspark/provider-data";
+import type { LightsparkCustomerResolution } from "@sdp/payments/ramps/types";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
+import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import { badRequest, notFound } from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { type AppContext, rampRuntime } from "../../context";
 

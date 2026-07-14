@@ -1,7 +1,7 @@
+import { hashString } from "@sdp/payments/hash";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { hashString } from "@/lib/hash";
 import { createKVStoreSet } from "@/runtime/factory";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -325,6 +325,32 @@ describe("Counterparties Routes", () => {
         env
       );
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("GET /v1/counterparties/:counterpartyId/requirements", () => {
+    it("surfaces the missing destination wallet for onramp requirements", async () => {
+      const created = await createCounterparty();
+      const cp = (await created.json()).data.counterparty;
+
+      const res = await app.request(
+        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&cryptoToken=USDC&fiatCurrency=USD`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("BAD_REQUEST");
+      expect(body.error.message).toContain("destinationWallet is required for onramp requirements");
+      expect(body.error.details.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ["destinationWallet"],
+            message: "destinationWallet is required for onramp requirements",
+          }),
+        ])
+      );
     });
   });
 

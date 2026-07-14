@@ -12,7 +12,8 @@
   },
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "vitest run --typecheck.enabled --typecheck.only --typecheck.include='src/**/*.test.ts' --passWithNoTests"
   },
   "dependencies": {
     "@sdp/rpc": "workspace:*",
@@ -23,6 +24,7 @@
     "@solana/kit": "catalog:"
   },
   "devDependencies": {
+    "@sdp/api": "workspace:*",
     "@cloudflare/vitest-pool-workers": "^0.16.14",
     "@cloudflare/workers-types": "^4.20260609.1",
     "@solana/surfpool": "^1.4.0",

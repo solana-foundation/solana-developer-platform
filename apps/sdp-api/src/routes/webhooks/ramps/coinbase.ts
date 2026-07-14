@@ -1,6 +1,6 @@
+import type { RampSettlementEvent, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
-import type { RampSettlementEvent, RampWebhookValidationContext } from "@/lib/ramps/types";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import type { AppContext, WebhookProcessor } from "./processor";
 import { applyRampSettlementEvent } from "./settlements";

@@ -13,34 +13,12 @@ import type {
   ProjectSettings,
 } from "@sdp/types";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
-
-export interface CreateProjectInput {
-  organizationId: string;
-  createdBy: string;
-  name: string;
-  slug?: string;
-  description?: string;
-  environment?: ProjectEnvironment;
-  settings?: ProjectSettings;
-}
+import { badRequest, internalError, notFound } from "@/lib/errors";
 
 export interface UpdateProjectInput {
   name?: string;
   description?: string | null;
   settings?: ProjectSettings | null;
-}
-
-export type ProjectServiceErrorCode = "DUPLICATE_SLUG" | "ALREADY_MEMBER" | "NOT_FOUND";
-
-export class ProjectServiceError extends Error {
-  constructor(
-    public readonly code: ProjectServiceErrorCode,
-    message?: string
-  ) {
-    super(message ?? code);
-    // biome-ignore lint/security/noSecrets: error name constant
-    this.name = "ProjectServiceError";
-  }
 }
 
 export class ProjectService {
@@ -49,71 +27,6 @@ export class ProjectService {
   // ═══════════════════════════════════════════════════════════════════════════
   // Project CRUD
   // ═══════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Create a new project
-   */
-  async createProject(input: CreateProjectInput): Promise<Project> {
-    const id = `prj_${crypto.randomUUID()}`;
-    const now = new Date().toISOString();
-    const slug = input.slug ?? this.generateSlug(input.name);
-
-    // Check for slug uniqueness within organization
-    const existing = await this.db
-      .prepare("SELECT id FROM projects WHERE organization_id = ? AND slug = ?")
-      .bind(input.organizationId, slug)
-      .first();
-
-    if (existing) {
-      throw new ProjectServiceError("DUPLICATE_SLUG");
-    }
-
-    const project: Project = {
-      id,
-      organizationId: input.organizationId,
-      name: input.name,
-      slug,
-      description: input.description ?? null,
-      environment: input.environment ?? "sandbox",
-      settings: this.resolveProjectSettings(input.settings),
-      status: "active",
-      createdBy: input.createdBy,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    const memberId = `pm_${crypto.randomUUID()}`;
-    const memberRole: ProjectRole = "admin";
-
-    await this.db.batch([
-      this.db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, description, environment, settings, status, created_by, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          project.id,
-          project.organizationId,
-          project.name,
-          project.slug,
-          project.description,
-          project.environment,
-          project.settings ? JSON.stringify(project.settings) : null,
-          project.status,
-          project.createdBy,
-          project.createdAt,
-          project.updatedAt
-        ),
-      this.db
-        .prepare(
-          `INSERT INTO project_members (id, project_id, user_id, role, created_at)
-           VALUES (?, ?, ?, ?, ?)`
-        )
-        .bind(memberId, id, input.createdBy, memberRole, now),
-    ]);
-
-    return project;
-  }
 
   /**
    * Get a project by ID
@@ -249,7 +162,7 @@ export class ProjectService {
   async updateProject(projectId: string, input: UpdateProjectInput): Promise<Project> {
     const existing = await this.getProject(projectId);
     if (!existing) {
-      throw new ProjectServiceError("NOT_FOUND");
+      throw notFound("Project");
     }
 
     const now = new Date().toISOString();
@@ -292,7 +205,7 @@ export class ProjectService {
 
     const updated = await this.getProject(projectId);
     if (!updated) {
-      throw new ProjectServiceError("NOT_FOUND");
+      throw internalError("Failed to load project after update");
     }
 
     return updated;
@@ -345,10 +258,7 @@ export class ProjectService {
       .first<{ id: string }>();
 
     if (!project) {
-      throw new ProjectServiceError(
-        "NOT_FOUND",
-        `Failed to provision default ${environment} project`
-      );
+      throw internalError(`Failed to provision default ${environment} project`);
     }
 
     await this.db
@@ -374,7 +284,7 @@ export class ProjectService {
     // Check if already a member
     const existing = await this.getMembership(projectId, userId);
     if (existing) {
-      throw new ProjectServiceError("ALREADY_MEMBER");
+      throw badRequest("User is already a member of this project");
     }
 
     const id = `pm_${crypto.randomUUID()}`;
@@ -494,14 +404,6 @@ export class ProjectService {
   // ═══════════════════════════════════════════════════════════════════════════
   // Helpers
   // ═══════════════════════════════════════════════════════════════════════════
-
-  private generateSlug(name: string): string {
-    return name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 50);
-  }
 
   private mapRowToProject(row: {
     id: string;

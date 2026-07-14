@@ -1,6 +1,6 @@
+import { LightsparkRampClient } from "@sdp/payments/ramps/providers/lightspark/client";
+import { lightsparkPayoutAccountKey } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LightsparkRampClient } from "./client";
-import { lightsparkPayoutAccountKey } from "./provider-data";
 
 const LIGHTSPARK_GRID_API_BASE_URL = "https://api.lightspark.com/grid/2025-10-13";
 const LIGHTSPARK_CONTEXT = {

@@ -2,6 +2,10 @@
  * Issuance Routes E2E Tests
  */
 
+import * as Mosaic from "@sdp/issuance/mosaic";
+import { MosaicService } from "@sdp/issuance/mosaic/service";
+import * as FeePaymentAdapters from "@sdp/payments/fee-payment";
+import { hashString } from "@sdp/payments/hash";
 import * as SolanaRpc from "@sdp/rpc/solana";
 import type { Address } from "@sdp/solana/address";
 import * as MosaicSdk from "@solana/mosaic-sdk";
@@ -10,12 +14,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { getDb } from "@/db";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
-import { hashString } from "@/lib/hash";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { createKVStoreSet } from "@/runtime/factory";
-import * as FeePaymentAdapters from "@/services/adapters/fee-payment";
-import * as Mosaic from "@/services/mosaic";
-import { MosaicService } from "@/services/mosaic";
 import * as SolanaServices from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
