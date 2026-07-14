@@ -3,7 +3,12 @@ import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { badRequest, notFound } from "@/lib/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
-import { buildLightsparkAccountInfo } from "@/lib/ramps/providers/lightspark/counterparty";
+import type { CreateLightsparkCustomerInput } from "@/lib/ramps/providers/lightspark/client";
+import {
+  buildLightsparkAccountInfo,
+  buildLightsparkBusinessInfo,
+  lightsparkPayoutCollectedData,
+} from "@/lib/ramps/providers/lightspark/counterparty";
 import {
   isLightsparkExternalAccountActive,
   type LightsparkPayoutAccount,
@@ -61,23 +66,40 @@ async function persistLightsparkData(
 /**
  * Returns the Grid customer id for a counterparty, lazily creating the native
  * Lightspark customer (via the provider) and persisting it into provider_data
- * on first use.
+ * on first use. Business counterparties require collected businessInfo fields;
+ * the collected values flow to Grid only and are never persisted.
  */
 export async function ensureLightsparkCustomer(
   c: AppContext,
-  { counterparty, projectId }: { counterparty: CounterpartyRow; projectId: string }
+  {
+    counterparty,
+    projectId,
+    collectedData,
+  }: { counterparty: CounterpartyRow; projectId: string; collectedData?: CollectedFieldData }
 ): Promise<LightsparkCustomerResolution> {
   const existing = readLightsparkCustomerId(counterparty.provider_data);
   if (existing) {
     return { customerId: existing };
   }
 
-  const customer = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateCustomer(rampRuntime(c), {
-    platformCustomerId: counterparty.id,
-    customerType: counterparty.entity_type === "business" ? "BUSINESS" : "INDIVIDUAL",
-    fullName: counterparty.display_name,
-    email: counterparty.email,
-  });
+  const input: CreateLightsparkCustomerInput =
+    counterparty.entity_type === "business"
+      ? {
+          platformCustomerId: counterparty.id,
+          customerType: "BUSINESS",
+          businessInfo: buildLightsparkBusinessInfo(collectedData),
+          email: counterparty.email,
+        }
+      : {
+          platformCustomerId: counterparty.id,
+          customerType: "INDIVIDUAL",
+          fullName: counterparty.display_name,
+          email: counterparty.email,
+        };
+  const customer = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateCustomer(
+    rampRuntime(c),
+    input
+  );
 
   const row = await freshCounterpartyRow(c, counterparty, projectId);
   await persistLightsparkData(c, row, projectId, { customerId: customer.id });
@@ -152,11 +174,14 @@ export async function ensureLightsparkPayoutAccount(
   c: AppContext,
   input: PayoutAccountContext & { collectedData?: CollectedFieldData }
 ): Promise<LightsparkPayoutAccount> {
-  // The wizard always sends collectedData; an empty object means nothing was collected.
-  const collected =
-    input.collectedData !== undefined && Object.keys(input.collectedData).length > 0
-      ? input.collectedData
-      : undefined;
+  // The wizard always sends collectedData; scope it to payout-spec fields so
+  // business onboarding fields don't perturb the content hash. An empty result
+  // means no bank details were collected.
+  const payoutData =
+    input.collectedData === undefined
+      ? undefined
+      : lightsparkPayoutCollectedData(input.fiatCurrency, input.collectedData);
+  const collected = payoutData && Object.keys(payoutData).length > 0 ? payoutData : undefined;
 
   if (!collected) {
     let entry = latestLightsparkPayoutAccount(input.counterparty.provider_data, input.fiatCurrency);
