@@ -1,0 +1,430 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
+{
+  "content": {
+    "application/json": {
+      "schema": {
+        "description": "Standard success response envelope.",
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "properties": {
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
+                  "provider": {
+                    "enum": [
+                      "moonpay",
+                      "lightspark",
+                      "bvnk",
+                      "moneygram",
+                      "coinbase",
+                      "mural",
+                      "stripe",
+                    ],
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "ready",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
+                  "fields": {
+                    "items": {
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "text",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "mask": {
+                              "type": "string",
+                            },
+                            "maxLength": {
+                              "minimum": 0,
+                              "type": "integer",
+                            },
+                            "minLength": {
+                              "minimum": 0,
+                              "type": "integer",
+                            },
+                            "pattern": {
+                              "type": "string",
+                            },
+                            "placeholder": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "select",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "options": {
+                              "items": {
+                                "properties": {
+                                  "label": {
+                                    "type": "string",
+                                  },
+                                  "value": {
+                                    "type": "string",
+                                  },
+                                },
+                                "required": [
+                                  "value",
+                                  "label",
+                                ],
+                                "type": "object",
+                              },
+                              "type": "array",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                            "options",
+                          ],
+                          "type": "object",
+                        },
+                      ],
+                    },
+                    "type": "array",
+                  },
+                  "provider": {
+                    "enum": [
+                      "moonpay",
+                      "lightspark",
+                      "bvnk",
+                      "moneygram",
+                      "coinbase",
+                      "mural",
+                      "stripe",
+                    ],
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "collect",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
+                  "fields",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
+                  "provider": {
+                    "enum": [
+                      "moonpay",
+                      "lightspark",
+                      "bvnk",
+                      "moneygram",
+                      "coinbase",
+                      "mural",
+                      "stripe",
+                    ],
+                    "type": "string",
+                  },
+                  "reason": {
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "unsupported",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
+                  "reason",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
+                  "provider": {
+                    "enum": [
+                      "lightspark",
+                      "bvnk",
+                      "mural",
+                    ],
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "onboarding_not_started",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
+                  "provider": {
+                    "enum": [
+                      "mural",
+                    ],
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "terms_of_service_required",
+                    ],
+                    "type": "string",
+                  },
+                  "termsOfServiceUrl": {
+                    "format": "uri",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
+                  "termsOfServiceUrl",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
+                  "provider": {
+                    "enum": [
+                      "bvnk",
+                      "mural",
+                    ],
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "customer_verification_required",
+                    ],
+                    "type": "string",
+                  },
+                  "verificationUrl": {
+                    "format": "uri",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
+                  "verificationUrl",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
+                  "provider": {
+                    "enum": [
+                      "bvnk",
+                      "mural",
+                    ],
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "customer_verifying",
+                      "customer_verification_failed",
+                      "funding_account_provisioning",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
+                  "provider": {
+                    "enum": [
+                      "bvnk",
+                    ],
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "provisioning_failed",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
+                ],
+                "type": "object",
+              },
+            ],
+            "description": "Current provider-specific readiness state and any fields or actions required before creating a ramp quote.",
+          },
+          "meta": {
+            "description": "Response metadata.",
+            "properties": {
+              "requestId": {
+                "description": "Request identifier for tracing.",
+                "example": "req_example",
+                "minLength": 1,
+                "type": "string",
+              },
+              "timestamp": {
+                "description": "ISO 8601 timestamp.",
+                "example": "2025-01-01T00:00:00.000Z",
+                "format": "date-time",
+                "type": "string",
+              },
+            },
+            "required": [
+              "requestId",
+              "timestamp",
+            ],
+            "type": "object",
+          },
+        },
+        "required": [
+          "data",
+          "meta",
+        ],
+        "type": "object",
+      },
+    },
+  },
+  "description": "Counterparty ramp requirements",
+}
+`;

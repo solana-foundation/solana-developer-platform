@@ -55,6 +55,8 @@ export function corsMiddleware(env: Env["ENVIRONMENT"]) {
     allowHeaders: ["Content-Type", "Authorization", "X-Request-ID", "Idempotency-Key"],
     exposeHeaders: [
       "X-Request-ID",
+      "Idempotency-Key",
+      "Server-Timing",
       "X-RateLimit-Limit",
       "X-RateLimit-Remaining",
       "X-RateLimit-Reset",

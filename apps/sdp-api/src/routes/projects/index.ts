@@ -12,13 +12,7 @@ import {
   removeProjectMember,
   updateProjectMember,
 } from "./handlers/members";
-import {
-  archiveProject,
-  createProject,
-  getProject,
-  listProjects,
-  updateProject,
-} from "./handlers/projects";
+import { archiveProject, getProject, listProjects, updateProject } from "./handlers/projects";
 
 const projects = new Hono<{ Bindings: Env }>();
 
@@ -29,7 +23,6 @@ projects.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }
 // Project CRUD
 // ═══════════════════════════════════════════════════════════════════════════
 
-projects.post("/", requirePermissions("projects:write"), createProject);
 projects.get("/", requirePermissions("projects:read"), listProjects);
 projects.get("/:projectId", requirePermissions("projects:read"), getProject);
 projects.patch("/:projectId", requirePermissions("projects:write"), updateProject);

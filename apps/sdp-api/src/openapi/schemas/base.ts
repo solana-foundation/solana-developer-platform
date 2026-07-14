@@ -6,6 +6,7 @@ import {
   SOLANA_CRYPTO_RAILS,
 } from "@sdp/types";
 import { z } from "zod";
+import { IDEMPOTENCY_KEY_PATTERN } from "../../middleware/idempotency-key";
 
 extendZodWithOpenApi(z);
 
@@ -32,8 +33,9 @@ export const isoDateSchema = z.iso.date().openapi({
   example: "1990-01-15",
 });
 
-export const idempotencyKeyHeaderSchema = z.string().min(1).openapi({
-  description: "Idempotency key for safely retrying mutating requests.",
+export const idempotencyKeyHeaderSchema = z.string().regex(IDEMPOTENCY_KEY_PATTERN).openapi({
+  description:
+    "Idempotency key for safely retrying mutating requests. 1-255 printable ASCII characters; echoed back on the response.",
   example: "idempotency_example_12345",
 });
 
