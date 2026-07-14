@@ -174,14 +174,10 @@ export async function ensureLightsparkPayoutAccount(
   c: AppContext,
   input: PayoutAccountContext & { collectedData?: CollectedFieldData }
 ): Promise<LightsparkPayoutAccount> {
-  // The wizard always sends collectedData; scope it to payout-spec fields so
-  // business onboarding fields don't perturb the content hash. An empty result
-  // means no bank details were collected.
-  const payoutData =
+  const collected =
     input.collectedData === undefined
       ? undefined
       : lightsparkPayoutCollectedData(input.fiatCurrency, input.collectedData);
-  const collected = payoutData && Object.keys(payoutData).length > 0 ? payoutData : undefined;
 
   if (!collected) {
     let entry = latestLightsparkPayoutAccount(input.counterparty.provider_data, input.fiatCurrency);

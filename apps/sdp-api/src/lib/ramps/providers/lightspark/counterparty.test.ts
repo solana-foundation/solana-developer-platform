@@ -259,6 +259,16 @@ describe("lightsparkPayoutCollectedData", () => {
       accountNumber: "12345678901",
     });
   });
+
+  it("returns undefined when no payout fields were collected", () => {
+    expect(
+      lightsparkPayoutCollectedData("USD", {
+        businessLegalName: "Acme Corporation, Inc.",
+        businessTaxId: "47-1234567",
+        businessIncorporatedOn: "2018-03-14",
+      })
+    ).toBeUndefined();
+  });
 });
 
 describe("buildLightsparkAccountInfo", () => {

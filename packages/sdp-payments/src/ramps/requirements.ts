@@ -1,11 +1,13 @@
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
+  CollectedFieldData,
   CounterpartyRequirements,
   RampDirection,
   RequirementField,
   RequirementOption,
 } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
+import { SdpPaymentsError } from "../errors";
 
 export function readyCounterparty(
   provider: RampProviderId,
@@ -83,4 +85,20 @@ export function buildRequirementSchema(fields: readonly RequirementField[]) {
     shape[field.key] = fieldToZod(field);
   }
   return z.object(shape);
+}
+
+/**
+ * Validates collected requirement-field data and returns the parsed values,
+ * throwing a BAD_REQUEST with the zod error tree when validation fails.
+ */
+export function parseCollectedFields(
+  fields: readonly RequirementField[],
+  collectedData: CollectedFieldData,
+  message: string
+): Record<string, unknown> {
+  const result = buildRequirementSchema(fields).safeParse(collectedData);
+  if (!result.success) {
+    throw new SdpPaymentsError("BAD_REQUEST", message, { errors: z.treeifyError(result.error) });
+  }
+  return result.data;
 }

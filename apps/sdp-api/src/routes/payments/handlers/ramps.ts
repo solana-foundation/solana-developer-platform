@@ -285,23 +285,18 @@ export async function advanceCounterpartyRequirements(
     case "moneygram":
       return readyCounterparty("moneygram", input.direction);
     case "lightspark": {
+      const customer = await ensureLightsparkCustomer(c, {
+        counterparty: input.counterparty,
+        projectId: input.projectId,
+        collectedData: input.direction === "offramp" ? input.collectedData : undefined,
+      });
       if (input.direction === "offramp") {
-        const customer = await ensureLightsparkCustomer(c, {
-          counterparty: input.counterparty,
-          projectId: input.projectId,
-          collectedData: input.collectedData,
-        });
         await ensureLightsparkPayoutAccount(c, {
           counterparty: input.counterparty,
           projectId: input.projectId,
           customer,
           fiatCurrency: input.fiatCurrency,
           collectedData: input.collectedData,
-        });
-      } else {
-        await ensureLightsparkCustomer(c, {
-          counterparty: input.counterparty,
-          projectId: input.projectId,
         });
       }
       return readyCounterparty("lightspark", input.direction);

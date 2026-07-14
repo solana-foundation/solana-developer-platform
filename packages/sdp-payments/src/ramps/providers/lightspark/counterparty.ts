@@ -6,11 +6,10 @@ import type {
   RequirementField,
   RequirementOption,
 } from "@sdp/types/ramp-requirements";
-import { z } from "zod";
 import type { CounterpartyRow } from "../../../counterparty";
-import { badRequest, SdpPaymentsError, unsupportedCounterparty } from "../../../errors";
+import { badRequest, unsupportedCounterparty } from "../../../errors";
 import {
-  buildRequirementSchema,
+  parseCollectedFields,
   readyCounterparty,
   selectField,
   textField,
@@ -425,15 +424,11 @@ export function buildLightsparkBusinessInfo(
       "collectedData with business details is required to onboard a business counterparty with Lightspark."
     );
   }
-  const result = buildRequirementSchema(LIGHTSPARK_BUSINESS_INFO_FIELDS).safeParse(collectedData);
-  if (!result.success) {
-    throw new SdpPaymentsError(
-      "BAD_REQUEST",
-      "Missing or invalid business details for Lightspark onboarding.",
-      { errors: z.treeifyError(result.error) }
-    );
-  }
-  const supplied: Record<string, unknown> = result.data;
+  const supplied = parseCollectedFields(
+    LIGHTSPARK_BUSINESS_INFO_FIELDS,
+    collectedData,
+    "Missing or invalid business details for Lightspark onboarding."
+  );
   const legalName = supplied.businessLegalName;
   const taxId = supplied.businessTaxId;
   const incorporatedOn = supplied.businessIncorporatedOn;
@@ -450,15 +445,19 @@ export function buildLightsparkBusinessInfo(
 /**
  * Narrows collected data to the payout-spec fields so business onboarding
  * fields don't leak into the external-account payload or its content hash.
+ * Returns undefined when no payout fields were collected.
  */
 export function lightsparkPayoutCollectedData(
   fiatCurrency: string,
   collectedData: CollectedFieldData
-): CollectedFieldData {
+): CollectedFieldData | undefined {
   const payoutKeys = new Set(
     lightsparkPayoutFields(lightsparkPayoutSpec(fiatCurrency)).map((field) => field.key)
   );
-  return Object.fromEntries(Object.entries(collectedData).filter(([key]) => payoutKeys.has(key)));
+  const payoutData = Object.fromEntries(
+    Object.entries(collectedData).filter(([key]) => payoutKeys.has(key))
+  );
+  return Object.keys(payoutData).length > 0 ? payoutData : undefined;
 }
 
 export function lightsparkPayoutFields(spec: LightsparkPayoutSpec): RequirementField[] {
@@ -539,15 +538,11 @@ export function buildLightsparkAccountInfo(
   if (!collectedData) {
     throw badRequest("collectedData with payout bank details is required for Lightspark off-ramp.");
   }
-  const result = buildRequirementSchema(lightsparkPayoutFields(spec)).safeParse(collectedData);
-  if (!result.success) {
-    throw new SdpPaymentsError(
-      "BAD_REQUEST",
-      "Missing or invalid payout bank details for Lightspark off-ramp.",
-      { errors: z.treeifyError(result.error) }
-    );
-  }
-  const supplied: Record<string, unknown> = result.data;
+  const supplied = parseCollectedFields(
+    lightsparkPayoutFields(spec),
+    collectedData,
+    "Missing or invalid payout bank details for Lightspark off-ramp."
+  );
 
   const rail = spec.rails.length > 1 ? supplied.paymentRails : spec.rails[0];
   if (typeof rail !== "string") {
