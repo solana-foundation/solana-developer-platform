@@ -31,6 +31,7 @@ describe("OpenAPI spec", () => {
     const requirementsPath = doc.paths?.["/v1/counterparties/{counterpartyId}/requirements"]?.get;
     expect(requirementsPath).toBeDefined();
     expect(requirementsPath?.operationId).toBe("getCounterpartyRequirements");
+    expect(requirementsPath?.responses?.["200"]).toMatchSnapshot();
   });
 
   it("limits the public document to supported public API families", () => {
