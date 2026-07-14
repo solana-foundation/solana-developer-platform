@@ -19,7 +19,9 @@ type Translate = (key: MessageKey, values?: TranslationValues) => string;
 function buildCounterpartyIdField(t: Translate): ApiPlaygroundFieldConfig {
   return {
     key: "counterpartyId",
-    label: t("DashboardPayments.counterparty.counterpartyIdPathPlaceholder"),
+    label: t("DashboardPayments.counterparty.counterpartyIdPathPlaceholder", {
+      counterpartyId: "{counterpartyId}",
+    }),
     placeholder: t("DashboardPayments.counterparty.playgroundCounterpartyIdPlaceholder"),
     required: true,
   };
@@ -45,7 +47,9 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
     counterpartyOptions.length > 0
       ? {
           key: "counterpartyId",
-          label: t("DashboardPayments.counterparty.counterpartyIdPathPlaceholder"),
+          label: t("DashboardPayments.counterparty.counterpartyIdPathPlaceholder", {
+            counterpartyId: "{counterpartyId}",
+          }),
           placeholder: t("DashboardPayments.counterparty.playgroundCounterpartyIdPlaceholder"),
           kind: "select",
           options: counterpartyOptions,
