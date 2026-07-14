@@ -22,12 +22,18 @@ test("docker emits KEY=VALUE for committed and secret keys", () => {
   const result = run("docker", {
     SDP_RUNTIME: "node",
     SOLANA_NETWORK: "mainnet-beta",
+    PAYMENTS_RECURRING_COLLECTION_ENABLED: "true",
+    PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE: "7",
+    PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES: "45",
     CLERK_SECRET_KEY: "sk_test_clerk",
     PRIVY_APP_SECRET: "privy_secret",
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^SDP_RUNTIME=node$/m);
   assert.match(result.stdout, /^SOLANA_NETWORK=mainnet-beta$/m);
+  assert.match(result.stdout, /^PAYMENTS_RECURRING_COLLECTION_ENABLED=true$/m);
+  assert.match(result.stdout, /^PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE=7$/m);
+  assert.match(result.stdout, /^PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES=45$/m);
   assert.match(result.stdout, /^CLERK_SECRET_KEY=sk_test_clerk$/m);
   assert.match(result.stdout, /^PRIVY_APP_SECRET=privy_secret$/m);
 });
@@ -68,6 +74,10 @@ test("cloudflare output stays valid JSON without committed or local-only keys", 
   const result = run("cloudflare", {
     SDP_RUNTIME: "workers",
     SOLANA_NETWORK: "mainnet-beta",
+    PAYMENTS_RECURRING_ENABLED: "true",
+    PAYMENTS_RECURRING_COLLECTION_ENABLED: "true",
+    PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE: "7",
+    PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES: "45",
     DATABASE_URL: "postgresql://localhost/sdp",
     CLERK_SECRET_KEY: "sk_test_clerk",
     MONEYGRAM_SANDBOX_PUBLIC_KEY: "moneygram_public",
@@ -80,6 +90,10 @@ test("cloudflare output stays valid JSON without committed or local-only keys", 
   assert.equal(payload.MONEYGRAM_SANDBOX_SECRET_KEY, "moneygram_secret");
   assert.equal(payload.SDP_RUNTIME, undefined);
   assert.equal(payload.SOLANA_NETWORK, undefined);
+  assert.equal(payload.PAYMENTS_RECURRING_ENABLED, undefined);
+  assert.equal(payload.PAYMENTS_RECURRING_COLLECTION_ENABLED, undefined);
+  assert.equal(payload.PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE, undefined);
+  assert.equal(payload.PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES, undefined);
   assert.equal(payload.DATABASE_URL, undefined);
 });
 
