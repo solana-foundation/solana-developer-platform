@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.41.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.40.0...v0.41.0) (2026-07-14)
+
+### Features
+
+* add counterparty requirements endpoint to public openapi spec ([#698](https://github.com/solana-foundation/solana-developer-platform/pull/698)) ([8e8df25](https://github.com/solana-foundation/solana-developer-platform/commit/8e8df2543521d2a79e4235fbb3854b862d53099d))
+* return idempotency key and server-timing for the response ([#681](https://github.com/solana-foundation/solana-developer-platform/pull/681)) ([bde2698](https://github.com/solana-foundation/solana-developer-platform/commit/bde26980fac1d41f96aa32417ac8e5bfed9ffa40))
+
+### Bug Fixes
+
+* minor ui fixes ([#669](https://github.com/solana-foundation/solana-developer-platform/pull/669)) ([d529bb4](https://github.com/solana-foundation/solana-developer-platform/commit/d529bb44ddeb234b7f3cf36c999c45f64248f8d5))
+* api playground crashing due to i18n mis-interpolation ([#699](https://github.com/solana-foundation/solana-developer-platform/pull/699)) ([e26302f](https://github.com/solana-foundation/solana-developer-platform/commit/e26302ff54bfd031a1c337be543afdf4daac21e0))
+
+### Refactors
+
+* **payments:** extract recurring payment lifecycle ([#689](https://github.com/solana-foundation/solana-developer-platform/pull/689)) ([369ff70](https://github.com/solana-foundation/solana-developer-platform/commit/369ff70b66b90a2a3790527703d391c738a27155))
+
 ## [0.40.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.39.0...v0.40.0) (2026-07-11)
 
 ### Features
