@@ -66,7 +66,7 @@ export function PaymentMethodStep({ mode, value, onChange }: PaymentMethodStepPr
           type="button"
           onClick={() => onChange(option.id)}
           className={cn(
-            "flex w-full items-center gap-3 rounded-2xl bg-fill-subtle px-4 py-4 text-left outline outline-2 -outline-offset-2 transition-colors focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50",
+            "flex w-full items-center gap-3 rounded-2xl bg-fill-subtle px-4 py-4 text-left outline outline-2 -outline-offset-2 transition-colors focus-visible:ring-2 focus-visible:ring-primary/50",
             value === option.id
               ? "outline-border-strong ring-2 ring-tertiary ring-offset-2 ring-offset-white"
               : "outline-transparent hover:bg-fill-strong"

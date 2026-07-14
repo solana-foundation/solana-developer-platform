@@ -6,6 +6,7 @@ import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useTheme } from "@/contexts/theme-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
@@ -481,6 +482,18 @@ const codeBlockDefaultLightVars: CSSProperties = {
   "--shiki-token-variable-lang": "oklch(0.44 0.14 310)",
 } as CSSProperties;
 
+// Dark code block surfaces (soft inset, not pitch-black).
+const codeBlockDefaultDarkVars: CSSProperties = {
+  "--code-block-bg": "#1c1c1d",
+  "--code-block-border": "color-mix(in srgb, white 8%, transparent)",
+  "--code-block-header-bg": "color-mix(in srgb, white 4%, transparent)",
+  "--code-block-header-text": "var(--text-medium)",
+  "--code-block-header-border": "var(--code-block-border)",
+  "--code-block-line-number": "var(--text-low)",
+  "--code-block-line-highlight": "color-mix(in srgb, white 6%, transparent)",
+  "--code-block-scrollbar-thumb": "color-mix(in srgb, white 18%, transparent)",
+} as CSSProperties;
+
 let shikiModulePromise: Promise<typeof import("shiki")> | null = null;
 
 function getShikiModule() {
@@ -557,6 +570,7 @@ export function ApiPlaygroundShell({
   rightMessages = [],
 }: ApiPlaygroundShellProps) {
   const t = useTranslations();
+  const { theme } = useTheme();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const initialEndpoint =
     endpoints.find((endpoint) => endpoint.id === defaultEndpointId) ?? endpoints[0];
@@ -987,7 +1001,7 @@ export function ApiPlaygroundShell({
             <div
               className="code-block-line-numbers group relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--button-radius-md)]"
               style={{
-                ...codeBlockDefaultLightVars,
+                ...(theme === "dark" ? codeBlockDefaultDarkVars : codeBlockDefaultLightVars),
                 border: "1px solid var(--code-block-border)",
                 background: "var(--code-block-bg)",
                 fontFamily: "var(--font-berkeley-mono), ui-monospace, monospace",

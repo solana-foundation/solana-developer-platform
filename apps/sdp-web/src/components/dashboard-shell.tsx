@@ -1,6 +1,11 @@
 "use client";
 
-import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
+import {
+  OrganizationSwitcher,
+  SignInButton,
+  UserButton,
+  useAuth,
+} from "@clerk/nextjs";
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -30,6 +35,7 @@ import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -56,14 +62,30 @@ type NavSection = {
   items: NavItem[];
 };
 
-function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[] {
+function getPaymentsActions(
+  t: ReturnType<typeof useTranslations>,
+): SubNavItem[] {
   return [
-    { label: t("Shared.dashboardShell.counterparty"), href: "/dashboard/payments/counterparty" },
+    {
+      label: t("Shared.dashboardShell.counterparty"),
+      href: "/dashboard/payments/counterparty",
+    },
     { label: t("Shared.dashboardShell.pay"), href: "/dashboard/payments/pay" },
-    { label: t("Shared.dashboardShell.deposit"), href: "/dashboard/payments/deposit" },
-    { label: t("Shared.dashboardShell.requests"), href: "/dashboard/payments/requests" },
+    {
+      label: t("Shared.dashboardShell.deposit"),
+      href: "/dashboard/payments/deposit",
+    },
+    {
+      label: t("Shared.dashboardShell.requests"),
+      href: "/dashboard/payments/requests",
+    },
     ...(isRecurringPaymentsDashboardEnabled()
-      ? [{ label: t("Shared.dashboardShell.recurring"), href: "/dashboard/payments/recurring" }]
+      ? [
+          {
+            label: t("Shared.dashboardShell.recurring"),
+            href: "/dashboard/payments/recurring",
+          },
+        ]
       : []),
   ];
 }
@@ -73,8 +95,16 @@ function getNavSections(t: ReturnType<typeof useTranslations>): NavSection[] {
     {
       title: t("Shared.dashboardShell.create"),
       items: [
-        { label: t("Shared.dashboardShell.home"), href: "/dashboard", icon: LayoutDashboardIcon },
-        { label: t("Shared.dashboardShell.wallets"), href: "/dashboard/wallets", icon: WalletIcon },
+        {
+          label: t("Shared.dashboardShell.home"),
+          href: "/dashboard",
+          icon: LayoutDashboardIcon,
+        },
+        {
+          label: t("Shared.dashboardShell.wallets"),
+          href: "/dashboard/wallets",
+          icon: WalletIcon,
+        },
       ],
     },
     {
@@ -103,7 +133,9 @@ function getNavSections(t: ReturnType<typeof useTranslations>): NavSection[] {
 
 const docsHref =
   process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
-  (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
+  (process.env.NODE_ENV === "development"
+    ? "http://localhost:3001/docs"
+    : DEFAULT_SDP_DOCS_URL);
 
 type DashboardPageConfig = {
   title: string;
@@ -198,7 +230,7 @@ function DashboardTopBar({
 
   if (centeredTitle) {
     return (
-      <div className="grid min-h-[40px] grid-cols-[1fr_auto_1fr] items-start gap-3">
+      <div className="relative grid min-h-[40px] grid-cols-[1fr_auto_1fr] items-center gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <SidebarToggle
             isMobileSidebarOpen={isMobileSidebarOpen}
@@ -206,22 +238,35 @@ function DashboardTopBar({
           />
           {topBarLeadingContent}
         </div>
-        <div className="flex items-start justify-center">
+        <div className="flex items-center justify-center">
           <h1 className="text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
             {centeredTitle}
           </h1>
         </div>
-        <div className="flex items-center justify-end gap-2">
+        {/* translate-y nudges the icon controls onto the large title's optical
+            centerline (the 36px glyphs sit below the line-box center). */}
+        <div className="flex translate-y-[3px] items-center justify-end gap-2">
+          {/* Inline from sm up; on mobile it moves to the floating row below. */}
+          <div className="hidden sm:flex sm:items-center">
+            <ThemeToggle variant="header" />
+          </div>
           <LanguagePicker />
           <UserButton />
           {sandboxBadge}
+        </div>
+
+        {/* Mobile: theme toggle on a second row, right-aligned. Absolutely
+            positioned so it overlays the space below the top row instead of
+            adding to the header height. */}
+        <div className="absolute top-full right-0 z-10 mt-2 sm:hidden">
+          <ThemeToggle variant="header" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex items-start justify-between gap-3">
+    <div className="relative flex items-center justify-between gap-3">
       <div className="flex min-w-0 items-center gap-3">
         <SidebarToggle
           isMobileSidebarOpen={isMobileSidebarOpen}
@@ -234,10 +279,23 @@ function DashboardTopBar({
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      {/* translate-y nudges the icon controls onto the large title's optical
+          centerline (the 36px glyphs sit below the line-box center). */}
+      <div className="flex translate-y-[3px] items-center gap-2">
+        {/* Inline from sm up; on mobile it moves to the floating row below. */}
+        <div className="hidden sm:flex sm:items-center">
+          <ThemeToggle variant="header" />
+        </div>
         <LanguagePicker />
         <UserButton />
         {sandboxBadge}
+      </div>
+
+      {/* Mobile: theme toggle on a second row, right-aligned. Absolutely
+          positioned so it overlays the space below the top row instead of
+          adding to the header height. */}
+      <div className="absolute top-full right-0 z-10 mt-2 sm:hidden">
+        <ThemeToggle variant="header" />
       </div>
     </div>
   );
@@ -255,7 +313,11 @@ function actionPageConfig(config: {
     showHeaderNavRow: true,
     centeredTitle: config.centeredTitle,
     topBarLeadingContent: (
-      <HeaderBackAction href={config.backHref} label={config.backLabel} compactOnMobile />
+      <HeaderBackAction
+        href={config.backHref}
+        label={config.backLabel}
+        compactOnMobile
+      />
     ),
     contentWidthClass: config.contentWidthClass,
   };
@@ -263,7 +325,7 @@ function actionPageConfig(config: {
 
 function getCounterpartyRoutePageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/payments/counterparty/create") {
     return actionPageConfig({
@@ -288,10 +350,10 @@ function getCounterpartyRoutePageConfig(
 
 function getWalletBackAction(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
 ): DashboardPageConfig["backAction"] {
   const walletPolicyRouteMatch = pathname.match(
-    /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/
+    /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/,
   );
   if (!walletPolicyRouteMatch) {
     return {
@@ -309,7 +371,7 @@ function getWalletBackAction(
 
 function getDashboardPageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
 ): DashboardPageConfig {
   if (pathname === "/dashboard") {
     return {
@@ -324,7 +386,10 @@ function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     };
   }
-  if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
+  if (
+    pathname === "/dashboard/wallets/setup" ||
+    pathname === "/dashboard/custody/setup"
+  ) {
     return {
       title: t("Shared.dashboardShell.createWallet"),
       contentWidthClass: "max-w-none",
@@ -334,7 +399,10 @@ function getDashboardPageConfig(
       },
     };
   }
-  if (pathname === "/dashboard/wallets/switch" || pathname === "/dashboard/custody/switch") {
+  if (
+    pathname === "/dashboard/wallets/switch" ||
+    pathname === "/dashboard/custody/switch"
+  ) {
     return {
       title: t("Shared.dashboardShell.activateProvider"),
       contentWidthClass: "max-w-3xl",
@@ -345,8 +413,10 @@ function getDashboardPageConfig(
     };
   }
   if (
-    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
-    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup")
+    (pathname.startsWith("/dashboard/wallets/") &&
+      pathname !== "/dashboard/wallets/setup") ||
+    (pathname.startsWith("/dashboard/custody/") &&
+      pathname !== "/dashboard/custody/setup")
   ) {
     return {
       title: t("Shared.dashboardShell.wallets"),
@@ -428,7 +498,9 @@ function getDashboardPageConfig(
     };
   }
   if (pathname.startsWith("/dashboard/payments/")) {
-    const action = getPaymentsActions(t).find((item) => pathname.startsWith(item.href));
+    const action = getPaymentsActions(t).find((item) =>
+      pathname.startsWith(item.href),
+    );
     const centeredTitle = action
       ? action.label
       : pathname.endsWith("/receive")
@@ -455,9 +527,13 @@ function getDashboardPageConfig(
 }
 
 function resolvePageLoadingComponent(pathname: string): React.ComponentType {
-  if (pathname.startsWith("/dashboard/payments/counterparty")) return CounterpartyLoading;
+  if (pathname.startsWith("/dashboard/payments/counterparty"))
+    return CounterpartyLoading;
   if (pathname.startsWith("/dashboard/payments")) return PaymentsLoading;
-  if (pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody"))
+  if (
+    pathname.startsWith("/dashboard/wallets") ||
+    pathname.startsWith("/dashboard/custody")
+  )
     return WalletsLoading;
   if (pathname.startsWith("/dashboard/issuance")) return IssuancePageSkeleton;
   return DashboardLoading;
@@ -468,7 +544,10 @@ function isItemActive(pathname: string, href: string): boolean {
     return pathname === "/dashboard";
   }
   if (href === "/dashboard/wallets") {
-    return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
+    return (
+      pathname.startsWith("/dashboard/wallets") ||
+      pathname.startsWith("/dashboard/custody")
+    );
   }
   if (href === "/dashboard/payments") {
     if (pathname.startsWith("/dashboard/payments/counterparty")) return false;
@@ -480,7 +559,8 @@ function isItemActive(pathname: string, href: string): boolean {
 const navItemBase =
   "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors";
 const navItemActive = "border border-border-subtle bg-white text-primary";
-const navItemInactive = "text-secondary hover:bg-fill-strong hover:text-primary";
+const navItemInactive =
+  "text-secondary hover:bg-fill-strong hover:text-primary";
 
 function SidebarGroup({
   title,
@@ -502,7 +582,7 @@ function SidebarGroup({
       <p
         className={cn(
           "relative px-3 text-xs uppercase leading-normal tracking-wide",
-          isCollapsed ? "text-transparent" : "text-muted"
+          isCollapsed ? "text-transparent" : "text-muted",
         )}
       >
         {title}
@@ -528,11 +608,13 @@ function SidebarGroup({
                 className={cn(
                   navItemBase,
                   active ? navItemActive : navItemInactive,
-                  isCollapsed && "justify-center"
+                  isCollapsed && "justify-center",
                 )}
               >
                 <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
-                {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
+                {isCollapsed ? null : (
+                  <span className="whitespace-nowrap">{item.label}</span>
+                )}
               </Link>
               {!isCollapsed && item.children && item.children.length > 0 && (
                 <div className="ml-5 mt-2">
@@ -547,7 +629,7 @@ function SidebarGroup({
                             "w-0.5 shrink-0 self-stretch transition-colors",
                             isFirst && "mt-1",
                             isLast && "mb-1",
-                            childActive ? "bg-secondary" : "bg-fill-strong"
+                            childActive ? "bg-secondary" : "bg-fill-strong",
                           )}
                         />
                         {child.disabled ? (
@@ -561,7 +643,7 @@ function SidebarGroup({
                             onClick={onNavigate}
                             className={cn(
                               "flex h-9 flex-1 items-center rounded-lg px-3 text-sm transition-colors",
-                              childActive ? navItemActive : navItemInactive
+                              childActive ? navItemActive : navItemInactive,
                             )}
                           >
                             {child.label}
@@ -646,14 +728,17 @@ function DashboardSidebarContent({
               aria-label={isCollapsed ? item.label : undefined}
               className={cn(
                 "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-secondary transition-colors hover:bg-fill-strong hover:text-primary",
-                isCollapsed && "justify-center"
+                isCollapsed && "justify-center",
               )}
             >
               <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
-              {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
+              {isCollapsed ? null : (
+                <span className="whitespace-nowrap">{item.label}</span>
+              )}
             </Link>
           );
         })}
+        <ThemeToggle collapsed={isCollapsed} />
       </div>
     </>
   );
@@ -692,14 +777,18 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   ];
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
   const backAction = pageConfig.backAction ? (
-    <HeaderBackAction href={pageConfig.backAction.href} label={pageConfig.backAction.label} />
+    <HeaderBackAction
+      href={pageConfig.backAction.href}
+      label={pageConfig.backAction.label}
+    />
   ) : null;
   const headerNav = pageConfig.headerNav;
   const centeredTitle = pageConfig.centeredTitle;
   const topBarLeadingContent = pageConfig.topBarLeadingContent;
   const shouldRenderHeaderNavRow =
     pageConfig.showHeaderNavRow || Boolean(backAction) || Boolean(headerNav);
-  const shouldRenderTopBarBorder = Boolean(centeredTitle) && !shouldRenderHeaderNavRow;
+  const shouldRenderTopBarBorder =
+    Boolean(centeredTitle) && !shouldRenderHeaderNavRow;
   const shouldClipHorizontalOverflow =
     pathname === "/dashboard/payments" ||
     (pathname.startsWith("/dashboard/payments/") &&
@@ -724,7 +813,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     pathname === "/dashboard/payments/recurring" ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
-  const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
+  const shouldLockShellViewport =
+    shouldLockViewportScroll || isMobileSidebarOpen;
 
   useEffect(() => {
     if (previousPathnameRef.current !== pathname) {
@@ -737,7 +827,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     return (
       <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
         <div className="mx-auto max-w-5xl border border-border-subtle bg-white/70 p-6">
-          <p className="text-sm text-tertiary">{t("Shared.dashboardShell.loadingDashboard")}</p>
+          <p className="text-sm text-tertiary">
+            {t("Shared.dashboardShell.loadingDashboard")}
+          </p>
         </div>
       </main>
     );
@@ -803,7 +895,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         ].join(" ")}
       >
         <aside
-          style={{ width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth }}
+          style={{
+            width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
+          }}
           className="relative z-10 hidden bg-[var(--sdp-shell-bg)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between"
         >
           <DashboardSidebarContent
@@ -854,13 +948,17 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         <section
           className={[
             "relative min-w-0 rounded-2xl border border-border-subtle bg-white/80 lg:rounded-tl-[16px]",
-            shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "px-3 py-5 md:p-6",
+            shouldLockViewportScroll
+              ? "flex min-h-0 flex-col overflow-hidden"
+              : "px-3 py-5 md:p-6",
           ].join(" ")}
         >
           <div
             className={[
               "min-w-0 w-full",
-              shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col" : "space-y-6",
+              shouldLockViewportScroll
+                ? "flex min-h-0 flex-1 flex-col"
+                : "space-y-6",
             ].join(" ")}
           >
             <div className="shrink-0 space-y-4">
@@ -883,7 +981,11 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   />
                 </div>
               ) : (
-                <div className={shouldLockViewportScroll ? "px-3 pt-5 md:px-6 md:pt-6" : ""}>
+                <div
+                  className={
+                    shouldLockViewportScroll ? "px-3 pt-5 md:px-6 md:pt-6" : ""
+                  }
+                >
                   <DashboardTopBar
                     isMobileSidebarOpen={isMobileSidebarOpen}
                     setMobileSidebarOpen={setMobileSidebarOpen}
@@ -914,8 +1016,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   >
                     {backAction && headerNav ? (
                       <>
-                        <div className="flex items-center justify-start">{backAction}</div>
-                        <div className="flex items-center justify-center">{headerNav}</div>
+                        <div className="flex items-center justify-start">
+                          {backAction}
+                        </div>
+                        <div className="flex items-center justify-center">
+                          {headerNav}
+                        </div>
                         <div />
                       </>
                     ) : (
@@ -932,7 +1038,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 shouldClipHorizontalOverflow && !shouldLockViewportScroll
                   ? "overflow-x-hidden"
                   : "",
-                shouldLockViewportScroll ? "min-h-0 flex-1 overflow-hidden" : "",
+                shouldLockViewportScroll
+                  ? "min-h-0 flex-1 overflow-hidden"
+                  : "",
               ].join(" ")}
             >
               {isProjectSwitching ? <PageLoadingComponent /> : children}

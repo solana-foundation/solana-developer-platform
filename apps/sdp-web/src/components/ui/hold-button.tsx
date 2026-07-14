@@ -69,7 +69,7 @@ export function HoldButton({
         <span className="inline-flex items-center gap-[var(--button-gap-lg)]">{content}</span>
         <motion.span
           aria-hidden="true"
-          className="absolute inset-0 inline-flex items-center justify-center gap-[var(--button-gap-lg)] bg-error text-white"
+          className="absolute inset-0 inline-flex items-center justify-center gap-[var(--button-gap-lg)] bg-error text-on-primary"
           initial={{ clipPath: "inset(0 100% 0 0)" }}
           animate={{ clipPath: holding ? "inset(0 0% 0 0)" : "inset(0 100% 0 0)" }}
           transition={{ duration: holding ? holdMs / 1000 : 0.2, ease: "linear" }}

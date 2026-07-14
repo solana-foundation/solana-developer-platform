@@ -10,50 +10,41 @@
 
    ─────────────────────────────────────────────────────────────────────────── */
 
-/* ── Tier 1: primitives ──────────────────────────────────────────────────────
-   The color values this app actually consumes, sourced from
-   `.agents/skills/sdp-ui-designer/sdp-design-system.css` (the SDP design source
-   of truth) — keep in sync; do not diverge. The skill file remains the complete
-   palette; only tokens a tier below consumes live here (no orphans). This is the
-   only place literal color values live; every tier below refers to them by var(). */
+/* ── Tier 1: primitives (keep in sync with sdp-ui-designer skill) ──────────────────────────────────────────────────────── */
 :root {
-  /* Surfaces (sand) */
-  --sand-100: #f0ede6;
-  --sand-200: #e9e7de; /* app shell background — always use this */
-  --paper: #fcfcfa; /* raised card white — app-specific, not in skill */
+  /* Surfaces — role-named, not by hue: neutrals invert between light and dark,
+     so a color name like "sand"/"paper" would lie once flipped in .dark. Values
+     mirror the skill's sand ramp; dark-mode values live in the .dark block. */
+  --surface: #e9e7de; /* app shell background — always use this (skill: sand-200) */
+  --surface-sunken: #f0ede6; /* sunken wells (skill: sand-100) */
+  --surface-raised: #fcfcfa; /* raised card white — app-specific, not in skill */
 
-  /* Ink emphasis scale — text & icons on sand/white */
-  --emph-xh: #1c1c1d; /* headings, high-contrast labels */
-  --emph-m: rgba(28, 28, 29, 0.72); /* secondary text, icons */
-  --emph-l: rgba(28, 28, 29, 0.56); /* labels, placeholders */
-  --emph-xl: rgba(28, 28, 29, 0.44); /* disabled, hint text */
+  --emph-xh: #1c1c1d;
+  --emph-m: rgba(28, 28, 29, 0.72);
+  --emph-l: rgba(28, 28, 29, 0.56);
+  --emph-xl: rgba(28, 28, 29, 0.44);
 
-  /* Ink alpha tints — fills */
   --t4: rgba(28, 28, 29, 0.04);
   --t8: rgba(28, 28, 29, 0.08);
   --t12: rgba(28, 28, 29, 0.12);
 
-  /* Borders (ink) */
-  --border-xl: rgba(28, 28, 29, 0.08); /* card edges, subtle dividers */
-  --border-l: rgba(28, 28, 29, 0.12); /* table dividers, section lines */
-  --border-m: rgba(28, 28, 29, 0.2); /* active inputs, stronger dividers */
+  --border-xl: rgba(28, 28, 29, 0.08);
+  --border-l: rgba(28, 28, 29, 0.12);
+  --border-m: rgba(28, 28, 29, 0.2);
 
-  /* Semantic — success / warning / error / info */
   --green-tx: #00a066;
   --green-bg: rgba(0, 160, 102, 0.08);
-  --green-brd: rgba(0, 160, 102, 0.2); /* derived, not in skill */
+  --green-brd: rgba(0, 160, 102, 0.2);
   --amber-tx: #92400e;
   --amber-bg: rgba(234, 179, 8, 0.08);
   --amber-brd: rgba(234, 179, 8, 0.2);
   --red-tx: #dc2626;
   --red-bg: rgba(220, 38, 38, 0.08);
-  --red-brd: rgba(220, 38, 38, 0.2); /* derived, not in skill */
+  --red-brd: rgba(220, 38, 38, 0.2);
   --blue-tx: #2563eb;
   --blue-bg: rgba(37, 99, 235, 0.08);
-  --blue-brd: rgba(37, 99, 235, 0.2); /* derived, not in skill */
+  --blue-brd: rgba(37, 99, 235, 0.2);
 
-  /* Destructive (delete/danger) — app-specific crimson ramp, not in skill.
-     Base accent + two darker shades used for legible destructive text. */
   --crimson: #c71f37;
   --crimson-strong: #9e2b38;
   --crimson-strongest: #8a1f2a;
@@ -61,31 +52,26 @@
   --crimson-brd: rgba(199, 31, 55, 0.2);
 }
 
-/* ── Tier 2: semantic tokens (generate the utilities) ─────────────────────────
-   Friendly names → primitives, by var() reference.  */
+/* ── Tier 2: semantic tokens ──────────────────────────────────────────────── */
 @theme inline {
   --color-primary: var(--emph-xh);
   --color-secondary: var(--emph-m);
   --color-tertiary: var(--emph-l);
   --color-muted: var(--emph-xl);
-  --color-on-primary: #fff; /* text/icons on a primary fill */
+  --color-on-primary: #fff;
 
-  /* Surfaces */
-  --color-surface: var(--sand-200);
-  --color-surface-raised: var(--paper);
-  --color-surface-sunken: var(--sand-100);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
 
-  /* Fills (ink tints) */
   --color-fill-subtle: var(--t4);
   --color-fill: var(--t8);
   --color-fill-strong: var(--t12);
 
-  /* Borders */
   --color-border-subtle: var(--border-xl);
   --color-border-default: var(--border-l);
   --color-border-strong: var(--border-m);
 
-  /* Status — success / warning / error / info */
   --color-success: var(--green-tx);
   --color-success-bg: var(--green-bg);
   --color-success-border: var(--green-brd);
@@ -99,7 +85,6 @@
   --color-info-bg: var(--blue-bg);
   --color-info-border: var(--blue-brd);
 
-  /* Destructive (delete/danger) — base + darker text shades */
   --color-destructive: var(--crimson);
   --color-destructive-strong: var(--crimson-strong);
   --color-destructive-strongest: var(--crimson-strongest);
@@ -107,15 +92,11 @@
   --color-destructive-border: var(--crimson-brd);
 }
 
-/* ── Tier 3: retheme @solana/design-system ────────────────────────────────────
-   Point the package's runtime custom properties at our primitives so package
-   components (Badge, TextInput, …) render the SDP palette. No package edits. */
+/* ── Tier 3: @solana/design-system retheme ──────────────────────────────────────────────────────────────────────────── */
 :root {
-  /* Ink ladder + buttons + borders all derive from these two grays */
   --gray-1400: var(--emph-xh);
   --gray-1300: var(--emph-xh);
 
-  /* Status */
   --status-success-text: var(--green-tx);
   --status-success-bg: var(--green-bg);
   --status-success-border: var(--green-brd);
@@ -129,7 +110,6 @@
   --status-info-bg: var(--blue-bg);
   --status-info-border: var(--blue-brd);
 
-  /* Package Badge palette */
   --badge-success-bg: var(--green-bg);
   --badge-success-text: var(--green-tx);
   --badge-success-dot: var(--green-tx);
@@ -142,4 +122,201 @@
   --badge-info-bg: var(--blue-bg);
   --badge-info-text: var(--blue-tx);
   --badge-info-dot: var(--blue-tx);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --surface: #1c1c1d;
+  --surface-sunken: color-mix(in oklab, #1c1c1d 94%, #fcfcfa);
+  --surface-raised: color-mix(in oklab, #1c1c1d 87%, #fcfcfa);
+
+  /* Lifted alphas: white-on-dark washes out faster, needs more opacity. */
+  --emph-xh: #fcfcfa;
+  --emph-m: rgba(252, 252, 250, 0.84);
+  --emph-l: rgba(252, 252, 250, 0.72);
+  --emph-xl: rgba(252, 252, 250, 0.6);
+
+  --t4: rgba(252, 252, 250, 0.04);
+  --t8: rgba(252, 252, 250, 0.08);
+  --t12: rgba(252, 252, 250, 0.12);
+
+  --border-xl: rgba(252, 252, 250, 0.08);
+  --border-l: rgba(252, 252, 250, 0.12);
+  --border-m: rgba(252, 252, 250, 0.2);
+
+  /* Tailwind primitives: bg-white → raised surface, text-black → light. */
+  --color-white: color-mix(in oklab, #1c1c1d 87%, #fcfcfa);
+  --color-black: #fcfcfa;
+
+  /* Status brighter for dark mode; red stays mid-tone (used as destructive fill). */
+  --green-tx: #34d399;
+  --green-bg: rgba(52, 211, 153, 0.12);
+  --green-brd: rgba(52, 211, 153, 0.26);
+  --amber-tx: #fbbf24;
+  --amber-bg: rgba(251, 191, 36, 0.12);
+  --amber-brd: rgba(251, 191, 36, 0.26);
+  --red-tx: #ef4444;
+  --red-bg: rgba(239, 68, 68, 0.12);
+  --red-brd: rgba(239, 68, 68, 0.26);
+  --blue-tx: #60a5fa;
+  --blue-bg: rgba(96, 165, 250, 0.12);
+  --blue-brd: rgba(96, 165, 250, 0.26);
+
+  --crimson: #fb7185;
+  --crimson-strong: #fb7185;
+  --crimson-strongest: #fda4af;
+  --crimson-bg: rgba(251, 113, 133, 0.12);
+  --crimson-brd: rgba(251, 113, 133, 0.26);
+}
+
+/* Chrome autofill box-shadow override for Clerk inputs (opaque fill). */
+.dark :is(.cl-rootBox, .cl-modalContent, .cl-userButtonPopoverCard, .cl-organizationSwitcherPopoverCard) :is(
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus,
+    input:-webkit-autofill:active
+  ) {
+  -webkit-box-shadow: 0 0 0 1000px #1c1c1d inset;
+  box-shadow: 0 0 0 1000px #1c1c1d inset;
+  -webkit-text-fill-color: #fcfcfa;
+  caret-color: #fcfcfa;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+/* Autofill text color in @layer utilities (must override DS utility's layered !important). */
+@layer utilities {
+  .dark input:-webkit-autofill,
+  .dark input:-webkit-autofill:hover,
+  .dark input:-webkit-autofill:focus,
+  .dark input:-webkit-autofill:active {
+    -webkit-text-fill-color: #fcfcfa !important;
+    caret-color: #fcfcfa;
+  }
+
+  /* Autofill preview uses :-internal-autofill-previewed (separate to not break above). */
+  .dark input:-internal-autofill-previewed {
+    -webkit-text-fill-color: #fcfcfa !important;
+    caret-color: #fcfcfa;
+  }
+}
+
+/* Native date/time inputs: color-scheme:light on body makes picker/glyph light. Flip to dark. */
+.dark input[type="date"],
+.dark input[type="datetime-local"],
+.dark input[type="time"],
+.dark input[type="month"],
+.dark input[type="week"] {
+  color-scheme: dark;
+}
+
+/* Calendar indicator: muted tone, clickable on hover. */
+.dark input[type="date"]::-webkit-calendar-picker-indicator,
+.dark input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+.dark input[type="time"]::-webkit-calendar-picker-indicator,
+.dark input[type="month"]::-webkit-calendar-picker-indicator,
+.dark input[type="week"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 150ms ease;
+}
+.dark input[type="date"]::-webkit-calendar-picker-indicator:hover,
+.dark input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+.dark input[type="time"]::-webkit-calendar-picker-indicator:hover,
+.dark input[type="month"]::-webkit-calendar-picker-indicator:hover,
+.dark input[type="week"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+/* ---- Clerk widgets: dark-mode text (two paths: data-color attr + element match) ----
+
+/* Primary text. */
+.dark :is(.cl-rootBox, .cl-modalContent, .cl-userButtonPopoverCard, .cl-organizationSwitcherPopoverCard) :is(
+    h1, h2, h3, label,
+    .cl-headerTitle,
+    .cl-navbarButton,
+    .cl-tabButton,
+    .cl-userButtonPopoverActionButton,
+    .cl-userPreviewMainIdentifier,
+    .cl-organizationPreviewMainIdentifier,
+    [data-color="inherit"]:not([data-clerk-dev-mode-notice])
+  ) {
+  color: #fcfcfa !important;
+}
+
+/* Secondary text. */
+.dark :is(.cl-rootBox, .cl-modalContent, .cl-userButtonPopoverCard, .cl-organizationSwitcherPopoverCard) :is(
+    th, [role="columnheader"],
+    .cl-headerSubtitle,
+    .cl-dividerText,
+    .cl-footerActionText,
+    .cl-lastAuthenticationStrategyBadge,
+    .cl-userPreviewSecondaryIdentifier,
+    .cl-organizationPreviewSecondaryIdentifier,
+    [data-color="secondary"]
+  ) {
+  color: rgba(252, 252, 250, 0.72) !important;
+}
+
+/* Table body cells text. */
+.dark :is(.cl-rootBox, .cl-modalContent, .cl-userButtonPopoverCard, .cl-organizationSwitcherPopoverCard)
+  :is(.cl-tableBodyCell, .cl-tableBodyCell span) {
+  color: #fcfcfa !important;
+}
+
+/* Solid primary buttons: dark text on near-white fill. */
+.dark :is(.cl-rootBox, .cl-modalContent, .cl-userButtonPopoverCard, .cl-organizationSwitcherPopoverCard)
+  .cl-button[data-variant="solid"][data-color="primary"],
+.dark :is(.cl-rootBox, .cl-modalContent, .cl-userButtonPopoverCard, .cl-organizationSwitcherPopoverCard)
+  .cl-button[data-variant="solid"][data-color="primary"] * {
+  color: #1c1c1d !important;
+}
+
+/* Search/select search inputs. */
+.dark :is(.cl-rootBox, .cl-modalContent, .cl-userButtonPopoverCard, .cl-organizationSwitcherPopoverCard)
+  :is(.cl-searchInput, .cl-selectSearchInput) {
+  background-color: #1c1c1d !important;
+  color: #fcfcfa !important;
+}
+.dark :is(.cl-rootBox, .cl-modalContent, .cl-userButtonPopoverCard, .cl-organizationSwitcherPopoverCard)
+  :is(.cl-searchInput, .cl-selectSearchInput)::placeholder {
+  color: rgba(252, 252, 250, 0.5) !important;
+}
+/* Search & select icons: muted light color. */
+.dark :is(.cl-rootBox, .cl-modalContent, .cl-userButtonPopoverCard, .cl-organizationSwitcherPopoverCard)
+  :is([class*="SearchInputIcon"], .cl-selectButtonIcon) {
+  color: rgba(252, 252, 250, 0.5) !important;
+}
+
+/* Select trigger value. */
+.dark :is(.cl-rootBox, .cl-modalContent, .cl-userButtonPopoverCard, .cl-organizationSwitcherPopoverCard)
+  .cl-selectButton [data-color="body"] {
+  color: #fcfcfa !important;
+}
+
+/* Tag input (org invite email). */
+.dark :is(.cl-rootBox, .cl-modalContent, .cl-userButtonPopoverCard, .cl-organizationSwitcherPopoverCard)
+  :is(.cl-tagInputContainer, .cl-tagInputContainer input) {
+  background-color: #1c1c1d !important;
+  color: #fcfcfa !important;
+  border-color: rgba(252, 252, 250, 0.12) !important;
+}
+.dark :is(.cl-rootBox, .cl-modalContent, .cl-userButtonPopoverCard, .cl-organizationSwitcherPopoverCard)
+  .cl-tagInputContainer input::placeholder {
+  color: rgba(252, 252, 250, 0.5) !important;
+}
+
+/* Popover/menu icons. */
+.dark :is(.cl-userButtonPopoverActionButton, .cl-menuItem) svg {
+  color: rgba(252, 252, 250, 0.72) !important;
+}
+
+/* Clerk branding footer. */
+.dark .cl-footerItem [data-color="inherit"]:not([data-clerk-dev-mode-notice]),
+.dark .cl-footerItem a[aria-label="Clerk logo"] {
+  color: rgba(252, 252, 250, 0.6) !important;
+}
+.dark .cl-footerItem a[aria-label="Clerk logo"] svg,
+.dark .cl-footerItem a[aria-label="Clerk logo"] svg path {
+  fill: currentColor !important;
 }

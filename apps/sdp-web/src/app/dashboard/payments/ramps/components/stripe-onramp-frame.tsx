@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { useTheme } from "@/contexts/theme-context";
 import { useTranslations } from "@/i18n/provider";
 
 const STRIPE_JS_URL = "https://js.stripe.com/dahlia/stripe.js";
@@ -96,6 +97,7 @@ export function StripeOnrampFrame({
   publishableKey: string;
 }) {
   const t = useTranslations();
+  const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(false);
   const [failed, setFailed] = useState(false);
@@ -108,14 +110,16 @@ export function StripeOnrampFrame({
         return;
       }
       containerRef.current.replaceChildren();
-      factory(publishableKey).createSession({ clientSecret }).mount(containerRef.current);
+      factory(publishableKey)
+        .createSession({ clientSecret, appearance: { theme } })
+        .mount(containerRef.current);
     } catch (error) {
       console.error("[stripe onramp] failed to mount widget", error);
       if (mountedRef.current) {
         setFailed(true);
       }
     }
-  }, [clientSecret, publishableKey]);
+  }, [clientSecret, publishableKey, theme]);
 
   useEffect(() => {
     mountedRef.current = true;

@@ -20,7 +20,7 @@ const slotBaseClassName =
 
 const variantClassNames: Record<ButtonVariant, string | undefined> = {
   default: undefined,
-  destructive: "bg-error text-white hover:opacity-90 focus-visible:ring-error-border",
+  destructive: "bg-error text-on-primary hover:opacity-90 focus-visible:ring-error-border",
   outline: "border border-border-default bg-white text-primary hover:bg-surface-sunken",
   secondary: undefined,
   ghost: "bg-transparent text-secondary hover:bg-fill-subtle hover:text-primary",
@@ -53,7 +53,7 @@ const sizeClassNames: Record<ButtonSize, string | undefined> = {
 
 const slotVariantClassNames: Record<ButtonVariant, string> = {
   default: "bg-primary !text-white hover:opacity-90 visited:!text-white",
-  destructive: "bg-error text-white hover:opacity-90 focus-visible:ring-error-border",
+  destructive: "bg-error text-on-primary hover:opacity-90 focus-visible:ring-error-border",
   outline: "border border-border-default bg-white text-primary hover:bg-surface-sunken",
   secondary: "bg-fill text-primary hover:bg-fill-strong",
   ghost: "bg-transparent text-secondary hover:bg-fill-subtle hover:text-primary",

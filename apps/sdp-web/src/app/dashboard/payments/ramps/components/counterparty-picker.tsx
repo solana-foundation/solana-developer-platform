@@ -26,7 +26,7 @@ export function CounterpartyPicker({
       <button
         type="button"
         onClick={onAddClick}
-        className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
+        className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
       >
         <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary">
           <PlusIcon className="size-4" />

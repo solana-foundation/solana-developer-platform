@@ -8,7 +8,7 @@
 @source "../**/*.{ts,tsx}";
 
 :root {
-  --sdp-shell-bg: #e9e7de;
+  --sdp-shell-bg: var(--surface);
   --sdp-field-radius: var(--input-radius-xl, 12px);
   --sdp-surface-radius: var(--radius-xl, 12px);
   --sdp-color-info-bg: rgba(33, 99, 182, 0.12);
@@ -34,6 +34,16 @@ body {
 * {
   scrollbar-width: thin;
   scrollbar-color: gray transparent;
+}
+
+/* Chrome autofill: defer its box-shadow via long transition so field background shows through. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--emph-xh);
+  caret-color: var(--emph-xh);
+  transition: background-color 100000s ease-in-out 0s;
 }
 
 vercel-live-feedback {

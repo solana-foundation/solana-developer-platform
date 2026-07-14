@@ -16,7 +16,13 @@ export default async function Home() {
     <main className="min-h-screen bg-gradient-to-b from-surface to-surface-sunken text-primary">
       <header className="border-b border-border-subtle">
         <div className="mx-auto flex h-[72px] max-w-[1200px] items-center justify-between px-6 xl:px-0">
-          <Image src="/landing/solana-logo.svg" alt={t("Home.solanaLogo")} width={20} height={18} />
+          <Image
+            src="/landing/solana-logo.svg"
+            alt={t("Home.solanaLogo")}
+            width={20}
+            height={18}
+            className="dark:invert"
+          />
           <div className="flex items-center gap-2">
             <Link
               href={docsHref}

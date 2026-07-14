@@ -24,7 +24,7 @@ if (sentryDsn) {
         autoInject: false,
         showBranding: false,
         enableScreenshot: true,
-        colorScheme: "light",
+        colorScheme: "system",
         showName: false,
         showEmail: false,
         useSentryUser: {
