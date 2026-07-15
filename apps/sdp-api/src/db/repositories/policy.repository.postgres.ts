@@ -38,6 +38,7 @@ import type {
   WalletOperationRow,
   WalletPolicyEvaluationAuditRow,
 } from "./policy.repository";
+
 import {
   generateApiKeyControlProfileId,
   generateApiKeyControlProfileRevisionId,
@@ -48,6 +49,8 @@ import {
   generateWalletControlProfileRevisionId,
   generateWalletOperationId,
 } from "./policy.repository";
+
+const WALLET_CONTROL_PROFILE_REVISION_HISTORY_LIMIT = 100;
 
 function mapWalletControlProfileRow(row: Record<string, unknown>): WalletControlProfileRow {
   return {
@@ -781,9 +784,10 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
           `SELECT *
            FROM wallet_control_profile_revisions
            WHERE profile_id = ?
-           ORDER BY revision_number DESC`
+           ORDER BY revision_number DESC
+           LIMIT ?`
         )
-        .bind(mappedProfile.id)
+        .bind(mappedProfile.id, WALLET_CONTROL_PROFILE_REVISION_HISTORY_LIMIT)
         .all<Record<string, unknown>>();
 
       return {

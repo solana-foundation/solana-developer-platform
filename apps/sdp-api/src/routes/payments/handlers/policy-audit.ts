@@ -65,14 +65,30 @@ function publicEvaluationContext(
     return null;
   }
 
-  const operation: Record<string, unknown> = { ...context.operation };
-  delete operation.rawPayload;
-  delete operation.providerExtensions;
+  const publicContext: PublicPolicyEvaluationContext = {
+    walletPolicy: context.walletPolicy,
+    apiKeyPolicy: context.apiKeyPolicy,
+    operation: {
+      id: context.operation.id,
+      organizationId: context.operation.organizationId,
+      projectId: context.operation.projectId,
+      custodyWalletId: context.operation.custodyWalletId,
+      walletId: context.operation.walletId,
+      apiKeyId: context.operation.apiKeyId,
+      actor: context.operation.actor,
+      source: context.operation.source,
+      operationFamily: context.operation.operationFamily,
+      operationType: context.operation.operationType,
+      asset: context.operation.asset,
+      amount: context.operation.amount,
+      destination: context.operation.destination,
+      context: context.operation.context,
+      idempotencyKey: context.operation.idempotencyKey,
+      createdAt: context.operation.createdAt,
+    },
+  };
 
-  return redactCredentialSecrets({
-    ...context,
-    operation,
-  }) as PublicPolicyEvaluationContext;
+  return redactCredentialSecrets(publicContext);
 }
 
 function mapPolicyEvaluation(row: WalletPolicyEvaluationAuditRow): WalletPolicyEvaluationDetail {

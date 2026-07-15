@@ -9,6 +9,7 @@ import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG_ID = "org_policy_audit_routes";
+const OTHER_ORG_ID = "org_policy_audit_other";
 const TEST_PROJECT_ID = "prj_policy_audit_routes";
 const OTHER_PROJECT_ID = "prj_policy_audit_other";
 const TEST_USER_ID = "usr_policy_audit_routes";
@@ -44,6 +45,7 @@ const evaluationIds = {
   deny: "",
   review: "",
   foreign: "",
+  crossOrganization: "",
 };
 
 function authHeaders() {
@@ -52,6 +54,7 @@ function authHeaders() {
 
 function evaluationContext(input: {
   operationId: string;
+  organizationId?: string;
   projectId: string;
   family: WalletOperationFamily;
   operationType: string;
@@ -61,7 +64,7 @@ function evaluationContext(input: {
   return {
     operation: {
       id: input.operationId,
-      organizationId: TEST_ORG_ID,
+      organizationId: input.organizationId ?? TEST_ORG_ID,
       projectId: input.projectId,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
@@ -115,8 +118,22 @@ async function seedAuthAndWallet() {
 
   await getDb(env).batch([
     getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG_ID, "Policy Audit Org", "policy-audit-org", "enterprise", "active"),
+      .prepare(
+        `INSERT INTO organizations (id, name, slug, tier, status)
+         VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)`
+      )
+      .bind(
+        TEST_ORG_ID,
+        "Policy Audit Org",
+        "policy-audit-org",
+        "enterprise",
+        "active",
+        OTHER_ORG_ID,
+        "Other Policy Audit Org",
+        "other-policy-audit-org",
+        "enterprise",
+        "active"
+      ),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER_ID, "policy-audit@example.com", 1, "active"),
@@ -388,6 +405,30 @@ async function seedPoliciesAndEvaluations() {
     }),
   });
   evaluationIds.foreign = foreignEvaluation?.id ?? "";
+
+  const crossOrganizationOperation = await repository.createWalletOperation({
+    organizationId: OTHER_ORG_ID,
+    projectId: TEST_PROJECT_ID,
+    custodyWalletId: TEST_CUSTODY_WALLET_ID,
+    walletId: TEST_WALLET_ID,
+    operationFamily: "payment",
+    operationType: "foreign_organization_payment",
+  });
+  const crossOrganizationEvaluation = await repository.createPolicyEvaluation({
+    walletOperationId: crossOrganizationOperation?.id ?? "",
+    decision: "allow",
+    reasonCode: "implicit_default_allow",
+    evaluationContext: evaluationContext({
+      operationId: crossOrganizationOperation?.id ?? "",
+      organizationId: OTHER_ORG_ID,
+      projectId: TEST_PROJECT_ID,
+      family: "payment",
+      operationType: "foreign_organization_payment",
+      walletRevisionId: null,
+      apiKeyRevisionId: null,
+    }),
+  });
+  evaluationIds.crossOrganization = crossOrganizationEvaluation?.id ?? "";
 }
 
 describe("Wallet policy audit detail routes", () => {
@@ -490,7 +531,7 @@ describe("Wallet policy audit detail routes", () => {
     expect(filteredBody.meta.total).toBe(1);
   });
 
-  it("rejects unauthenticated reads and hides another project's evaluation", async () => {
+  it("rejects unauthenticated reads and hides cross-project and cross-organization evaluations", async () => {
     const unauthenticated = await app.request(
       `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations`,
       undefined,
@@ -504,6 +545,13 @@ describe("Wallet policy audit detail routes", () => {
       env
     );
     expect(crossProject.status).toBe(404);
+
+    const crossOrganization = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations/${evaluationIds.crossOrganization}`,
+      { headers: authHeaders() },
+      env
+    );
+    expect(crossOrganization.status).toBe(404);
   });
 
   it("redacts credential fields and never returns raw or provider payloads", async () => {

@@ -73,14 +73,14 @@ export const tokenAmountSchema = z.string().openapi({
 export const policyRuleSchema = withOpenApi(
   updateWalletPolicySchemaBase.shape.rules.unwrap().element,
   {
-  description:
-    "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
-  example: {
-    id: "deny-raw-signing",
-    kind: "operation_family",
-    family: "raw_sign",
-    action: "deny",
-  },
+    description:
+      "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
+    example: {
+      id: "deny-raw-signing",
+      kind: "operation_family",
+      family: "raw_sign",
+      action: "deny",
+    },
   }
 );
 
