@@ -44,36 +44,15 @@ if [ "${DOPPLER_RUN_ACTIVE:-}" = "1" ]; then
   exec "$@"
 fi
 
-if [ -t 2 ]; then
-  bold=$'\033[1m' dim=$'\033[2m' yellow=$'\033[33m' cyan=$'\033[36m' reset=$'\033[0m'
-else
-  bold="" dim="" yellow="" cyan="" reset=""
-fi
-
 if ! command -v doppler >/dev/null 2>&1; then
-  echo "${bold}Solana Developer Platform${reset} recommends using a secrets manager like ${cyan}Doppler${reset} over plain environment files to share your keys: https://docs.doppler.com/docs/install-cli" >&2
-
   if [ "${#env_files[@]}" -gt 0 ]; then
-    echo "Loading environment secrets from ${cyan}${env_files[*]}${reset}." >&2
     load_env_files "${env_files[@]}"
-  else
-    echo "${yellow}No local environment files found.${reset} Copy the examples to get started:" >&2
-    echo "  cp apps/sdp-api/.dev.vars.example apps/sdp-api/.dev.vars" >&2
-    echo "  cp apps/sdp-web/.env.local.example apps/sdp-web/.env.local" >&2
   fi
-
   exec "$@"
 fi
 
 project="${DOPPLER_PROJECT:-solana-developer-platform}"
 config="${DOPPLER_CONFIG:-dev}"
-
-overrides=""
-if [ "${#env_files[@]}" -gt 0 ]; then
-  overrides=" with local overrides from ${cyan}${env_files[*]}${reset}${dim}"
-fi
-
-echo "${dim}Loading environment secrets from Doppler (${project}/${config})${overrides}.${reset}" >&2
 
 # Explicit opt-in for callers (CI jobs) whose exported vars must beat Doppler.
 # Never defaulted: locally the env files above are the only override path.

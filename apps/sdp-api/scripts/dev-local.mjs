@@ -160,7 +160,24 @@ function run(command, args, options = {}) {
 
 const devArgs = ["dev", "--local", `--persist-to=${persistTo}`, "--port", port, ...wranglerVarArgs];
 
+/**
+ * One-line summary of where env came from, printed inside the task pane —
+ * output the wrapper prints before exec'ing turbo is hidden by the TUI.
+ */
+function describeEnvSource() {
+  const hasDevVars = fs.existsSync(localEnvPath);
+  if (isDopplerRun) {
+    const config = process.env.DOPPLER_CONFIG ?? "unknown";
+    return hasDevVars ? `Doppler (${config}) with .dev.vars overrides` : `Doppler (${config})`;
+  }
+  if (hasDevVars) {
+    return ".dev.vars only — SDP recommends a secrets manager like Doppler to share keys (https://docs.doppler.com/docs/install-cli)";
+  }
+  return "none found — copy apps/sdp-api/.dev.vars.example to apps/sdp-api/.dev.vars to get started (or install the Doppler CLI)";
+}
+
 try {
+  console.log(`Environment secrets: ${describeEnvSource()}`);
   if (shouldResetLocalState) {
     fs.rmSync(path.resolve(appDir, persistTo), { recursive: true, force: true });
   }
