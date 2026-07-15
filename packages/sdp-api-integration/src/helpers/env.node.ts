@@ -1,11 +1,12 @@
-import { getDb } from "@sdp/api/db";
-import type { Env } from "@sdp/api/types/env";
+import { type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
 
-function readEnvFromProcess(): Env {
+const { getDb } = apiTestSupport;
+
+function readEnvFromProcess(): ApiTestEnv {
   const proc: Record<string, string | undefined> = { ...process.env };
   proc.DATABASE_URL = proc.TEST_DATABASE_URL ?? proc.DATABASE_URL;
   proc.SDP_RUNTIME = "node";
-  return proc as unknown as Env;
+  return proc as unknown as ApiTestEnv;
 }
 
 const providedEnv = readEnvFromProcess();

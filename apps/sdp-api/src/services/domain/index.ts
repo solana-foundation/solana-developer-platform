@@ -14,13 +14,3 @@ export {
   type SigningRequestStore,
   SigningService,
 } from "./signing.service";
-// Transaction service - builds and submits gasless transactions
-export {
-  type BuildTransactionParams,
-  type BuiltTransaction,
-  type PreparedTransaction,
-  type SignAndSendResult,
-  TransactionError,
-  type TransactionErrorCode,
-  TransactionService,
-} from "./transaction.service";

@@ -1,3 +1,9 @@
+import {
+  addDecimalAmounts,
+  compareDecimalAmounts,
+  getUtcDayWindow,
+  sumDecimalAmounts,
+} from "@sdp/payments/decimal";
 import { isDecimalString } from "@sdp/solana/amount";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import type {
@@ -6,12 +12,6 @@ import type {
 } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import {
-  addDecimalAmounts,
-  compareDecimalAmounts,
-  getUtcDayWindow,
-  sumDecimalAmounts,
-} from "./decimal";
 
 export const PAYMENT_POLICY_VERSION = 1;
 export const DESTINATION_ALLOWLIST_POLICY_TYPE = "destination_allowlist";

@@ -1,7 +1,7 @@
 import { createSign, generateKeyPairSync } from "node:crypto";
+import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
-import type { RampWebhookValidationContext } from "@/lib/ramps/types";
 import { MuralWebhookProcessor } from "./mural";
 
 function context(input: {

@@ -1,5 +1,6 @@
-import { SigningError } from "@sdp/custody/signing";
-import { parseJsonResponse, readErrorResponseText, sleep } from "./provisioning.common";
+import { SigningError } from "../signing";
+import { parseJsonResponse, readErrorResponseText } from "./common";
+import type { CustodyProvisioningRuntime } from "./runtime";
 
 const PARA_WALLET_READY_MAX_ATTEMPTS = 8;
 const PARA_WALLET_READY_DELAY_MS = 500;
@@ -21,9 +22,12 @@ export interface ParaWalletResponse {
   publicKey?: string;
 }
 
-export async function paraRequest<T>(params: ParaRequestParams): Promise<T> {
+export async function paraRequest<T>(
+  runtime: CustodyProvisioningRuntime,
+  params: ParaRequestParams
+): Promise<T> {
   try {
-    const response = await fetch(`${params.apiBaseUrl}${params.path}`, {
+    const response = await runtime.fetch(`${params.apiBaseUrl}${params.path}`, {
       method: params.method,
       headers: {
         "X-API-Key": params.apiKey,
@@ -59,18 +63,21 @@ export async function paraRequest<T>(params: ParaRequestParams): Promise<T> {
   }
 }
 
-export async function waitForParaWalletReady(params: {
-  apiBaseUrl: string;
-  apiKey: string;
-  walletId: string;
-}): Promise<ParaWalletResponse> {
+export async function waitForParaWalletReady(
+  runtime: CustodyProvisioningRuntime,
+  params: {
+    apiBaseUrl: string;
+    apiKey: string;
+    walletId: string;
+  }
+): Promise<ParaWalletResponse> {
   let latestWallet: ParaWalletResponse | null = null;
   let latestTransientError: string | null = null;
 
   for (let attempt = 1; attempt <= PARA_WALLET_READY_MAX_ATTEMPTS; attempt += 1) {
     let wallet: ParaWalletResponse;
     try {
-      wallet = await paraRequest<ParaWalletResponse>({
+      wallet = await paraRequest<ParaWalletResponse>(runtime, {
         apiBaseUrl: params.apiBaseUrl,
         apiKey: params.apiKey,
         method: "GET",
@@ -82,7 +89,7 @@ export async function waitForParaWalletReady(params: {
       }
 
       latestTransientError = error.message;
-      await sleep(PARA_WALLET_READY_DELAY_MS);
+      await runtime.sleep(PARA_WALLET_READY_DELAY_MS);
       continue;
     }
 
@@ -92,7 +99,7 @@ export async function waitForParaWalletReady(params: {
     }
 
     if (attempt < PARA_WALLET_READY_MAX_ATTEMPTS) {
-      await sleep(PARA_WALLET_READY_DELAY_MS);
+      await runtime.sleep(PARA_WALLET_READY_DELAY_MS);
     }
   }
 
@@ -139,9 +146,12 @@ export function validateParaWallet(
   };
 }
 
-export function buildParaUserIdentifier(params: { orgId: string; projectId?: string }): string {
+export function buildParaUserIdentifier(
+  runtime: CustodyProvisioningRuntime,
+  params: { orgId: string; projectId?: string }
+): string {
   const scope = params.projectId
     ? `org:${params.orgId}:project:${params.projectId}`
     : `org:${params.orgId}`;
-  return `sdp:${scope}:wallet:${crypto.randomUUID()}`;
+  return `sdp:${scope}:wallet:${runtime.randomUUID()}`;
 }

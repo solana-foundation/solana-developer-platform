@@ -1,16 +1,18 @@
-import { SigningError } from "@sdp/custody/signing";
 import { importJWK, importPKCS8, SignJWT } from "jose";
-import type { Env } from "@/types/env";
+import { SigningError } from "../signing";
 import {
   decodeBase64ToBytes,
   encodePkcs8Pem,
+  normalizeProviderNameFragment,
   parseJsonResponse,
   randomHex,
   readErrorResponseText,
   sha256Hex,
   sortJsonKeys,
   toBase64Url,
-} from "./provisioning.common";
+  trimTrailingHyphens,
+} from "./common";
+import type { CustodyProvisioningRuntime } from "./runtime";
 
 export interface CoinbaseCdpRequestParams {
   method: "GET" | "POST" | "PUT" | "DELETE";
@@ -39,13 +41,16 @@ interface CoinbaseCdpWalletJwtParams {
   requestData: Record<string, unknown>;
 }
 
-export async function coinbaseCdpRequest<T>(params: CoinbaseCdpRequestParams): Promise<T> {
+export async function coinbaseCdpRequest<T>(
+  runtime: CustodyProvisioningRuntime,
+  params: CoinbaseCdpRequestParams
+): Promise<T> {
   const { requestPath, url } = resolveCoinbaseCdpRequestUrl(params.apiBaseUrl, params.path);
   const normalizedBody = params.body ? sortJsonKeys(params.body) : undefined;
   const bodyJson = normalizedBody ? JSON.stringify(normalizedBody) : undefined;
 
   try {
-    const bearerToken = await createCoinbaseCdpBearerJwt({
+    const bearerToken = await createCoinbaseCdpBearerJwt(runtime, {
       apiKeyId: params.apiKeyId,
       apiKeySecret: params.apiKeySecret,
       requestMethod: params.method,
@@ -60,7 +65,7 @@ export async function coinbaseCdpRequest<T>(params: CoinbaseCdpRequestParams): P
     };
 
     if (requiresCoinbaseCdpWalletAuth(params.method, requestPath)) {
-      const walletAuthToken = await createCoinbaseCdpWalletJwt({
+      const walletAuthToken = await createCoinbaseCdpWalletJwt(runtime, {
         walletSecret: params.walletSecret,
         requestMethod: params.method,
         requestHost: url.host,
@@ -70,7 +75,7 @@ export async function coinbaseCdpRequest<T>(params: CoinbaseCdpRequestParams): P
       headers["X-Wallet-Auth"] = walletAuthToken;
     }
 
-    const response = await fetch(url.toString(), {
+    const response = await runtime.fetch(url.toString(), {
       method: params.method,
       headers,
       body: bodyJson,
@@ -112,9 +117,12 @@ function resolveCoinbaseCdpRequestUrl(
   };
 }
 
-async function createCoinbaseCdpBearerJwt(params: CoinbaseCdpBearerJwtParams): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  const nonce = randomHex(16);
+async function createCoinbaseCdpBearerJwt(
+  runtime: CustodyProvisioningRuntime,
+  params: CoinbaseCdpBearerJwtParams
+): Promise<string> {
+  const now = Math.floor(runtime.now() / 1000);
+  const nonce = randomHex(runtime, 16);
   const uri = `${params.requestMethod} ${params.requestHost}${params.requestPath}`;
 
   const payload = new SignJWT({ uris: [uri] })
@@ -150,8 +158,11 @@ async function createCoinbaseCdpBearerJwt(params: CoinbaseCdpBearerJwtParams): P
   return payload.setProtectedHeader({ alg: "EdDSA", kid: params.apiKeyId, nonce }).sign(key);
 }
 
-async function createCoinbaseCdpWalletJwt(params: CoinbaseCdpWalletJwtParams): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
+async function createCoinbaseCdpWalletJwt(
+  runtime: CustodyProvisioningRuntime,
+  params: CoinbaseCdpWalletJwtParams
+): Promise<string> {
+  const now = Math.floor(runtime.now() / 1000);
   const uri = `${params.requestMethod} ${params.requestHost}${params.requestPath}`;
   const payload: Record<string, unknown> = { uris: [uri] };
 
@@ -160,7 +171,7 @@ async function createCoinbaseCdpWalletJwt(params: CoinbaseCdpWalletJwtParams): P
     Object.values(params.requestData).some((value) => value !== undefined);
 
   if (shouldIncludeReqHash) {
-    payload.reqHash = await sha256Hex(JSON.stringify(sortJsonKeys(params.requestData)));
+    payload.reqHash = await sha256Hex(runtime, JSON.stringify(sortJsonKeys(params.requestData)));
   }
 
   const pkcs8DerBytes = decodeBase64ToBytes(params.walletSecret);
@@ -171,7 +182,7 @@ async function createCoinbaseCdpWalletJwt(params: CoinbaseCdpWalletJwtParams): P
     .setProtectedHeader({ alg: "ES256", typ: "JWT" })
     .setIssuedAt(now)
     .setNotBefore(now)
-    .setJti(randomHex(16))
+    .setJti(randomHex(runtime, 16))
     .sign(key);
 }
 
@@ -183,27 +194,21 @@ function requiresCoinbaseCdpWalletAuth(method: string, requestPath: string): boo
   return requestPath.includes("/accounts") || requestPath.includes("/spend-permissions");
 }
 
-export function buildCoinbaseCdpAccountName(value: string, scope?: string): string {
-  let normalized = value
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
+export function buildCoinbaseCdpAccountName(
+  runtime: CustodyProvisioningRuntime,
+  value: string,
+  scope?: string
+): string {
+  let normalized = normalizeProviderNameFragment(value);
 
   if (!normalized) {
     normalized = "org";
   }
 
-  const normalizedScope = scope
-    ? scope
-        .toLowerCase()
-        .replace(/[^a-z0-9-]+/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-+|-+$/g, "")
-    : "";
+  const normalizedScope = scope ? normalizeProviderNameFragment(scope) : "";
 
   let name = `${normalizedScope ? `sdp-${normalizedScope}` : "sdp"}-${normalized}`.slice(0, 36);
-  name = name.replace(/-+$/g, "");
+  name = trimTrailingHyphens(name);
 
   if (!/^[a-z0-9]/.test(name)) {
     name = `s${name}`;
@@ -214,15 +219,10 @@ export function buildCoinbaseCdpAccountName(value: string, scope?: string): stri
   }
 
   if (name.length < 2) {
-    name = `sdp-${randomHex(2)}`.slice(0, 36);
+    name = `sdp-${randomHex(runtime, 2)}`.slice(0, 36);
   }
 
   return name;
-}
-
-export function resolveCoinbaseCdpAccountScope(env: Env): string {
-  const explicitNamespace = env.COINBASE_CDP_ACCOUNT_NAMESPACE?.trim();
-  return explicitNamespace || env.ENVIRONMENT;
 }
 
 export function extractCoinbaseCdpAccountAddress(response: unknown): string | null {

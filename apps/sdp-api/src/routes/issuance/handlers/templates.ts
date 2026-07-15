@@ -4,11 +4,11 @@
  * Provides endpoints for listing available token templates and their configuration.
  */
 
+import { getPublicTemplateInfo, listTemplates } from "@sdp/issuance/templates";
 import type { ListTemplatesResponse, TokenTemplateResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { getPublicTemplateInfo, listTemplates } from "@/services/issuance/templates";
 import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;
