@@ -195,7 +195,14 @@ const writeSelectedApiKeyPolicyBindingSchema = z
       description: "Optional active API-key control profile for this wallet.",
     }),
   })
-  .openapi({ description: "Selected-wallet policy binding replacement." });
+  .refine(
+    (binding) => binding.walletControlProfileId || binding.apiKeyControlProfileId,
+    "Selected-wallet policy bindings must reference at least one control profile"
+  )
+  .openapi({
+    description:
+      "Selected-wallet policy binding replacement. At least one control profile ID is required.",
+  });
 
 const writeAllApiKeyPolicyBindingSchema = z
   .object({

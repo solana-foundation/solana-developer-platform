@@ -667,6 +667,65 @@ describe("API key wallet scope routes", () => {
     }
   });
 
+  it("rejects revision authoring and activation for archived profiles", async () => {
+    const apiKeyId = await createManagedApiKey({
+      name: "Archived policy key",
+      walletScope: "all",
+    });
+    const profileResponse = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-profiles`,
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({ name: "Archived controls" }),
+      },
+      env
+    );
+    expect(profileResponse.status).toBe(201);
+    const profileBody = (await profileResponse.json()) as { data: { profile: { id: string } } };
+    const profileId = profileBody.data.profile.id;
+
+    const revisionResponse = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-profiles/${profileId}/revisions`,
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({ rules: [], defaultAction: "deny" }),
+      },
+      env
+    );
+    expect(revisionResponse.status).toBe(201);
+    const revisionBody = (await revisionResponse.json()) as {
+      data: { revision: { id: string } };
+    };
+
+    await getDb(env)
+      .prepare("UPDATE api_key_control_profiles SET status = 'archived' WHERE id = ?")
+      .bind(profileId)
+      .run();
+
+    const appendResponse = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-profiles/${profileId}/revisions`,
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({ rules: [], defaultAction: "allow" }),
+      },
+      env
+    );
+    expect(appendResponse.status).toBe(404);
+
+    const activationResponse = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-profiles/${profileId}/revisions/${revisionBody.data.revision.id}/activate`,
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders(),
+      },
+      env
+    );
+    expect(activationResponse.status).toBe(404);
+  });
+
   it("authors revisions, activates and clears an all-wallet policy binding explicitly", async () => {
     const apiKeyId = await createManagedApiKey({
       name: "All-wallet policy key",

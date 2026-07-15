@@ -440,7 +440,8 @@ export class PolicyFoundationService {
       !profile ||
       profile.api_key_id !== subject.api_key_id ||
       profile.organization_id !== subject.organization_id ||
-      profile.project_id !== subject.project_id
+      profile.project_id !== subject.project_id ||
+      profile.status === "archived"
     ) {
       throw notFound("API key control profile");
     }

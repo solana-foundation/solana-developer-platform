@@ -947,9 +947,10 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
         const rows: ApiKeyWalletPolicyBindingRow[] = [];
         for (const binding of input.bindings) {
           const row = await upsertApiKeyWalletPolicyBindingInternal(tx, binding);
-          if (row) {
-            rows.push(row);
+          if (!row) {
+            throw new Error("Failed to upsert API key wallet policy binding");
           }
+          rows.push(row);
         }
         return rows;
       });
