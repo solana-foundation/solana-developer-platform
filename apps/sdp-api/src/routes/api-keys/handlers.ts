@@ -4,11 +4,16 @@ import type {
   CreateApiKeyResponse,
   ListApiKeysResponse,
   Permission,
+  PolicyRule,
   RotateApiKeyResponse,
 } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
+import {
+  createPolicyRepository,
+  type UpsertApiKeyWalletPolicyBindingInput,
+} from "@/db/repositories";
 import { requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -21,10 +26,18 @@ import {
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
 import { createSigningService } from "@/services/domain/signing.service";
+import { PolicyFoundationService } from "@/services/policy-foundation.service";
 import type { WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { buildApiKeyAccessSummaries } from "./access-response";
-import { apiKeyCreateSchema, apiKeyRotateSchema, apiKeyUpdateSchema } from "./schemas";
+import {
+  apiKeyControlProfileCreateSchema,
+  apiKeyControlProfileRevisionCreateSchema,
+  apiKeyCreateSchema,
+  apiKeyPolicyBindingsWriteSchema,
+  apiKeyRotateSchema,
+  apiKeyUpdateSchema,
+} from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -393,6 +406,143 @@ export const updateApiKey = async (c: AppContext) => {
   });
 
   return success(c, { success: true });
+};
+
+export const createApiKeyControlProfile = async (c: AppContext) => {
+  const { keyId } = c.req.param();
+  const actor = resolveActor(c);
+  const projectId = requireProjectId(c);
+  const parsed = apiKeyControlProfileCreateSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  const profile = await new PolicyFoundationService(
+    createPolicyRepository(c.env)
+  ).createApiKeyControlProfile({
+    organizationId: actor.organizationId,
+    projectId,
+    apiKeyId: keyId,
+    name: parsed.data.name,
+    createdBy: actor.userId ?? actor.apiKeyId,
+  });
+
+  await new AuditService(getDb(c.env)).log(c, {
+    action: "create",
+    resourceType: "api_key",
+    resourceId: keyId,
+    metadata: { action: "create_control_profile", profileId: profile.id, name: profile.name },
+  });
+
+  return created(c, { profile });
+};
+
+export const createApiKeyControlProfileRevision = async (c: AppContext) => {
+  const { keyId, profileId } = c.req.param();
+  const actor = resolveActor(c);
+  const projectId = requireProjectId(c);
+  const parsed = apiKeyControlProfileRevisionCreateSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  const revision = await new PolicyFoundationService(
+    createPolicyRepository(c.env)
+  ).createApiKeyControlProfileRevision({
+    organizationId: actor.organizationId,
+    projectId,
+    apiKeyId: keyId,
+    profileId,
+    rules: parsed.data.rules as PolicyRule[],
+    defaultAction: parsed.data.defaultAction,
+    createdBy: actor.userId ?? actor.apiKeyId,
+  });
+
+  await new AuditService(getDb(c.env)).log(c, {
+    action: "create",
+    resourceType: "api_key",
+    resourceId: keyId,
+    metadata: {
+      action: "create_control_profile_revision",
+      profileId,
+      revisionId: revision.id,
+      revisionNumber: revision.revisionNumber,
+    },
+  });
+
+  return created(c, { revision });
+};
+
+export const activateApiKeyControlProfileRevision = async (c: AppContext) => {
+  const { keyId, profileId, revisionId } = c.req.param();
+  const actor = resolveActor(c);
+  const projectId = requireProjectId(c);
+  const active = await new PolicyFoundationService(
+    createPolicyRepository(c.env)
+  ).activateApiKeyControlProfileRevision({
+    organizationId: actor.organizationId,
+    projectId,
+    apiKeyId: keyId,
+    profileId,
+    revisionId,
+  });
+
+  await new AuditService(getDb(c.env)).log(c, {
+    action: "update",
+    resourceType: "api_key",
+    resourceId: keyId,
+    metadata: { action: "activate_control_profile_revision", profileId, revisionId },
+  });
+
+  return success(c, active);
+};
+
+export const writeApiKeyPolicyBindings = async (c: AppContext) => {
+  const { keyId } = c.req.param();
+  const actor = resolveActor(c);
+  const projectId = requireProjectId(c);
+  const parsed = apiKeyPolicyBindingsWriteSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  const bindings: UpsertApiKeyWalletPolicyBindingInput[] =
+    parsed.data.mode === "clear"
+      ? []
+      : parsed.data.bindings.map((binding) => ({
+          apiKeyId: keyId,
+          ...binding,
+        }));
+
+  await new PolicyFoundationService(
+    createPolicyRepository(c.env)
+  ).replaceApiKeyWalletPolicyBindings({
+    organizationId: actor.organizationId,
+    projectId,
+    apiKeyId: keyId,
+    bindings,
+  });
+
+  const accessSummary = (await buildApiKeyAccessSummaries(c.env, getDb(c.env), [keyId])).get(keyId);
+  const policyBindings = accessSummary?.policyBindings ?? [];
+
+  await new AuditService(getDb(c.env)).log(c, {
+    action: "update",
+    resourceType: "api_key",
+    resourceId: keyId,
+    metadata: {
+      action: `${parsed.data.mode}_policy_bindings`,
+      bindingCount: policyBindings.length,
+    },
+  });
+
+  return success(c, { policyBindings });
 };
 
 export const rotateApiKey = async (c: AppContext) => {

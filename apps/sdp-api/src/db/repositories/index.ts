@@ -153,6 +153,7 @@ export type {
   PolicyEvaluationRow,
   PolicyRepository,
   PolicyRepositoryContext,
+  ReplaceApiKeyWalletPolicyBindingsInput,
   UpdateApprovalRequestStatusInput,
   UpsertApiKeyWalletPolicyBindingInput,
   WalletControlProfileRevisionHistoryRow,

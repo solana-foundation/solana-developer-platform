@@ -7,12 +7,16 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
+  activateApiKeyControlProfileRevision,
   createApiKey,
+  createApiKeyControlProfile,
+  createApiKeyControlProfileRevision,
   getApiKey,
   listApiKeys,
   revokeApiKey,
   rotateApiKey,
   updateApiKey,
+  writeApiKeyPolicyBindings,
 } from "./handlers";
 
 const apiKeys = new Hono<{ Bindings: Env }>();
@@ -25,6 +29,26 @@ apiKeys.get("/", requirePermissions("api-keys:read"), listApiKeys);
 apiKeys.post("/", requirePermissions("api-keys:write"), createApiKey);
 apiKeys.get("/:keyId", requirePermissions("api-keys:read"), getApiKey);
 apiKeys.patch("/:keyId", requirePermissions("api-keys:write"), updateApiKey);
+apiKeys.post(
+  "/:keyId/policy-profiles",
+  requirePermissions("api-keys:write"),
+  createApiKeyControlProfile
+);
+apiKeys.post(
+  "/:keyId/policy-profiles/:profileId/revisions",
+  requirePermissions("api-keys:write"),
+  createApiKeyControlProfileRevision
+);
+apiKeys.post(
+  "/:keyId/policy-profiles/:profileId/revisions/:revisionId/activate",
+  requirePermissions("api-keys:write"),
+  activateApiKeyControlProfileRevision
+);
+apiKeys.put(
+  "/:keyId/policy-bindings",
+  requirePermissions("api-keys:write"),
+  writeApiKeyPolicyBindings
+);
 apiKeys.post("/:keyId/rotate", requirePermissions("api-keys:write"), rotateApiKey);
 apiKeys.delete("/:keyId", requirePermissions("api-keys:write"), revokeApiKey);
 
