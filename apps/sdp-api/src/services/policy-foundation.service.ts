@@ -4,7 +4,9 @@ import type {
   ApiKeyWalletPolicyBinding,
   EffectiveApiKeyPolicy,
   EffectiveWalletPolicy,
+  PolicyDefaultAction,
   PolicyEvaluation,
+  PolicyRule,
   WalletControlProfile,
   WalletControlProfileRevision,
   WalletOperationActor,
@@ -29,7 +31,7 @@ import type {
   WalletControlProfileRow,
   WalletOperationRow,
 } from "@/db/repositories";
-import { badRequest, forbidden } from "@/lib/errors";
+import { badRequest, forbidden, notFound } from "@/lib/errors";
 import {
   createPolicyEvaluationInput,
   evaluateWalletOperationPolicies,
@@ -69,8 +71,116 @@ export interface ResolvedApiKeyWalletPolicyScope {
   apiKeyPolicy: EffectiveApiKeyPolicy;
 }
 
+interface ApiKeyPolicyAuthoringScope {
+  organizationId: string;
+  projectId: string;
+  apiKeyId: string;
+}
+
+interface CreateApiKeyControlProfileInput extends ApiKeyPolicyAuthoringScope {
+  name: string;
+  createdBy?: string | null;
+}
+
+interface CreateApiKeyControlProfileRevisionInput extends ApiKeyPolicyAuthoringScope {
+  profileId: string;
+  rules: PolicyRule[];
+  defaultAction: PolicyDefaultAction;
+  createdBy?: string | null;
+}
+
+interface ActivateApiKeyControlProfileRevisionInput extends ApiKeyPolicyAuthoringScope {
+  profileId: string;
+  revisionId: string;
+}
+
+interface ReplaceApiKeyWalletPolicyBindingsInput extends ApiKeyPolicyAuthoringScope {
+  bindings: UpsertApiKeyWalletPolicyBindingInput[];
+}
+
 export class PolicyFoundationService {
   constructor(private readonly repository: PolicyRepository) {}
+
+  async createApiKeyControlProfile(
+    input: CreateApiKeyControlProfileInput
+  ): Promise<ApiKeyControlProfile> {
+    await this.assertScopedApiKeyPolicySubject(input);
+    const row = await this.repository.createApiKeyControlProfile({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      apiKeyId: input.apiKeyId,
+      name: input.name,
+      createdBy: input.createdBy,
+    });
+
+    if (!row) {
+      throw new Error("Failed to create API key control profile");
+    }
+    return mapApiKeyControlProfile(row);
+  }
+
+  async createApiKeyControlProfileRevision(
+    input: CreateApiKeyControlProfileRevisionInput
+  ): Promise<ApiKeyControlProfileRevision> {
+    const subject = await this.assertScopedApiKeyPolicySubject(input);
+    await this.assertScopedApiKeyControlProfile(input.profileId, subject);
+    const row = await this.repository.createApiKeyControlProfileRevision({
+      profileId: input.profileId,
+      rules: input.rules,
+      defaultAction: input.defaultAction,
+      createdBy: input.createdBy,
+    });
+
+    if (!row) {
+      throw notFound("API key control profile");
+    }
+    return mapApiKeyControlProfileRevision(row);
+  }
+
+  async activateApiKeyControlProfileRevision(
+    input: ActivateApiKeyControlProfileRevisionInput
+  ): Promise<{ profile: ApiKeyControlProfile; revision: ApiKeyControlProfileRevision }> {
+    const subject = await this.assertScopedApiKeyPolicySubject(input);
+    await this.assertScopedApiKeyControlProfile(input.profileId, subject);
+    const revision = await this.repository.getApiKeyControlProfileRevisionById(input.revisionId);
+    if (!revision || revision.profile_id !== input.profileId) {
+      throw notFound("API key control profile revision");
+    }
+
+    const active = await this.repository.activateApiKeyControlProfileRevision({
+      profileId: input.profileId,
+      revisionId: input.revisionId,
+    });
+    if (!active?.revision) {
+      throw notFound("API key control profile revision");
+    }
+
+    return {
+      profile: mapApiKeyControlProfile(active.profile),
+      revision: mapApiKeyControlProfileRevision(active.revision),
+    };
+  }
+
+  async replaceApiKeyWalletPolicyBindings(
+    input: ReplaceApiKeyWalletPolicyBindingsInput
+  ): Promise<ApiKeyWalletPolicyBinding[]> {
+    await this.assertScopedApiKeyPolicySubject(input);
+    this.assertUniquePolicyBindingTargets(input.bindings);
+
+    const bindings: UpsertApiKeyWalletPolicyBindingInput[] = [];
+    for (const binding of input.bindings) {
+      if (binding.apiKeyId !== input.apiKeyId) {
+        throw badRequest("Policy bindings must target the requested API key");
+      }
+      bindings.push(await this.validateApiKeyWalletPolicyBinding(binding));
+    }
+
+    const rows = await this.repository.replaceApiKeyWalletPolicyBindings({
+      apiKeyId: input.apiKeyId,
+      bindings,
+    });
+    return rows.map(mapApiKeyWalletPolicyBinding);
+  }
 
   async resolveEffectiveWalletPolicy(custodyWalletId: string): Promise<EffectiveWalletPolicy> {
     const active =
@@ -111,6 +221,21 @@ export class PolicyFoundationService {
   async upsertApiKeyWalletPolicyBinding(
     input: UpsertApiKeyWalletPolicyBindingInput
   ): Promise<ApiKeyWalletPolicyBinding> {
+    const normalized = await this.validateApiKeyWalletPolicyBinding(input);
+    const row = await this.repository.upsertApiKeyWalletPolicyBinding(normalized);
+    if (!row) {
+      throw new Error("Failed to upsert API key wallet policy binding");
+    }
+    return mapApiKeyWalletPolicyBinding(row);
+  }
+
+  private async validateApiKeyWalletPolicyBinding(
+    input: UpsertApiKeyWalletPolicyBindingInput
+  ): Promise<UpsertApiKeyWalletPolicyBindingInput> {
+    if (!input.apiKeyControlProfileId && !input.walletControlProfileId) {
+      throw badRequest("Policy bindings must reference at least one control profile");
+    }
+
     if (input.bindingScope === "selected") {
       const target = await this.assertApiKeyWalletPolicyTarget({
         apiKeyId: input.apiKeyId,
@@ -129,14 +254,10 @@ export class PolicyFoundationService {
         await this.resolveWalletPolicyProfileForBinding(input.walletControlProfileId, target);
       }
 
-      const row = await this.repository.upsertApiKeyWalletPolicyBinding({
+      return {
         ...input,
         custodyWalletId: target.custody_wallet_id,
-      });
-      if (!row) {
-        throw new Error("Failed to upsert API key wallet policy binding");
-      }
-      return mapApiKeyWalletPolicyBinding(row);
+      };
     }
 
     const subject = await this.assertApiKeyPolicySubject(input.apiKeyId);
@@ -152,11 +273,7 @@ export class PolicyFoundationService {
       );
     }
 
-    const row = await this.repository.upsertApiKeyWalletPolicyBinding(input);
-    if (!row) {
-      throw new Error("Failed to upsert API key wallet policy binding");
-    }
-    return mapApiKeyWalletPolicyBinding(row);
+    return input;
   }
 
   async resolveApiKeyWalletPolicyScope(
@@ -298,6 +415,48 @@ export class PolicyFoundationService {
     }
 
     return subject;
+  }
+
+  private async assertScopedApiKeyPolicySubject(
+    input: ApiKeyPolicyAuthoringScope
+  ): Promise<ApiKeyPolicySubjectRow> {
+    const subject = await this.repository.getApiKeyPolicySubject(input.apiKeyId);
+    if (
+      !subject ||
+      subject.organization_id !== input.organizationId ||
+      subject.project_id !== input.projectId
+    ) {
+      throw notFound("API key");
+    }
+    return subject;
+  }
+
+  private async assertScopedApiKeyControlProfile(
+    profileId: string,
+    subject: ApiKeyPolicySubjectRow
+  ): Promise<ApiKeyControlProfileRow> {
+    const profile = await this.repository.getApiKeyControlProfileById(profileId);
+    if (
+      !profile ||
+      profile.api_key_id !== subject.api_key_id ||
+      profile.organization_id !== subject.organization_id ||
+      profile.project_id !== subject.project_id ||
+      profile.status === "archived"
+    ) {
+      throw notFound("API key control profile");
+    }
+    return profile;
+  }
+
+  private assertUniquePolicyBindingTargets(bindings: UpsertApiKeyWalletPolicyBindingInput[]): void {
+    const targets = new Set<string>();
+    for (const binding of bindings) {
+      const target = binding.bindingScope === "all" ? "all" : `selected:${binding.walletId}`;
+      if (targets.has(target)) {
+        throw badRequest("Policy binding targets must be unique");
+      }
+      targets.add(target);
+    }
   }
 
   private assertApplicablePolicyBindingExists(

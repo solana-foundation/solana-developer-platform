@@ -1,4 +1,4 @@
-import type { AppDb } from "@/db";
+import type { AppDb, DatabaseExecutor } from "@/db";
 import {
   asPostgresJsonArray,
   asPostgresJsonObject,
@@ -29,6 +29,7 @@ import type {
   ListWalletPolicyEvaluationAuditsInput,
   PolicyEvaluationRow,
   PolicyRepository,
+  ReplaceApiKeyWalletPolicyBindingsInput,
   UpdateApprovalRequestStatusInput,
   UpsertApiKeyWalletPolicyBindingInput,
   WalletControlProfileRevisionRow,
@@ -464,6 +465,49 @@ async function getApiKeyControlProfileRevisionById(
   return row ? mapApiKeyControlProfileRevisionRow(row) : null;
 }
 
+async function upsertApiKeyWalletPolicyBindingInternal(
+  db: DatabaseExecutor,
+  input: UpsertApiKeyWalletPolicyBindingInput
+): Promise<ApiKeyWalletPolicyBindingRow | null> {
+  const id = generateApiKeyWalletPolicyBindingId();
+  const conflictTarget =
+    input.bindingScope === "all"
+      ? "(api_key_id) WHERE binding_scope = 'all'"
+      : "(api_key_id, wallet_id) WHERE binding_scope = 'selected'";
+
+  const row = await db
+    .prepare(
+      `INSERT INTO api_key_wallet_policy_bindings (
+         id,
+         api_key_id,
+         binding_scope,
+         wallet_id,
+         custody_wallet_id,
+         wallet_control_profile_id,
+         api_key_control_profile_id
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT ${conflictTarget}
+       DO UPDATE SET
+         custody_wallet_id = EXCLUDED.custody_wallet_id,
+         wallet_control_profile_id = EXCLUDED.wallet_control_profile_id,
+         api_key_control_profile_id = EXCLUDED.api_key_control_profile_id,
+         updated_at = sdp_iso_now()
+       RETURNING *`
+    )
+    .bind(
+      id,
+      input.apiKeyId,
+      input.bindingScope,
+      input.walletId ?? null,
+      input.custodyWalletId ?? null,
+      input.walletControlProfileId ?? null,
+      input.apiKeyControlProfileId ?? null
+    )
+    .first<Record<string, unknown>>();
+
+  return row ? mapApiKeyWalletPolicyBindingRow(row) : null;
+}
+
 async function getWalletOperationByIdInternal(
   db: AppDb,
   walletOperationId: string
@@ -710,6 +754,10 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
       return getApiKeyControlProfileById(db, id);
     },
 
+    async getApiKeyControlProfileById(profileId: string) {
+      return getApiKeyControlProfileById(db, profileId);
+    },
+
     async createApiKeyControlProfileRevision(input: CreateApiKeyControlProfileRevisionInput) {
       const id = generateApiKeyControlProfileRevisionId();
       const row = await db.transaction(async (tx) => {
@@ -755,6 +803,10 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
       });
 
       return row ? mapApiKeyControlProfileRevisionRow(row) : null;
+    },
+
+    async getApiKeyControlProfileRevisionById(revisionId: string) {
+      return getApiKeyControlProfileRevisionById(db, revisionId);
     },
 
     async activateApiKeyControlProfileRevision(input: ActivateApiKeyControlProfileRevisionInput) {
@@ -875,44 +927,33 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
 
     async upsertApiKeyWalletPolicyBinding(input: UpsertApiKeyWalletPolicyBindingInput) {
       validateApiKeyWalletPolicyBindingInput(input);
+      return upsertApiKeyWalletPolicyBindingInternal(db, input);
+    },
 
-      const id = generateApiKeyWalletPolicyBindingId();
-      const conflictTarget =
-        input.bindingScope === "all"
-          ? "(api_key_id) WHERE binding_scope = 'all'"
-          : "(api_key_id, wallet_id) WHERE binding_scope = 'selected'";
+    async replaceApiKeyWalletPolicyBindings(input: ReplaceApiKeyWalletPolicyBindingsInput) {
+      if (input.bindings.some((binding) => binding.apiKeyId !== input.apiKeyId)) {
+        throw badRequest("Policy bindings must target the requested API key");
+      }
+      for (const binding of input.bindings) {
+        validateApiKeyWalletPolicyBindingInput(binding);
+      }
 
-      const row = await db
-        .prepare(
-          `INSERT INTO api_key_wallet_policy_bindings (
-             id,
-             api_key_id,
-             binding_scope,
-             wallet_id,
-             custody_wallet_id,
-             wallet_control_profile_id,
-             api_key_control_profile_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT ${conflictTarget}
-           DO UPDATE SET
-             custody_wallet_id = EXCLUDED.custody_wallet_id,
-             wallet_control_profile_id = EXCLUDED.wallet_control_profile_id,
-             api_key_control_profile_id = EXCLUDED.api_key_control_profile_id,
-             updated_at = sdp_iso_now()
-           RETURNING *`
-        )
-        .bind(
-          id,
-          input.apiKeyId,
-          input.bindingScope,
-          input.walletId ?? null,
-          input.custodyWalletId ?? null,
-          input.walletControlProfileId ?? null,
-          input.apiKeyControlProfileId ?? null
-        )
-        .first<Record<string, unknown>>();
+      return db.transaction(async (tx) => {
+        await tx
+          .prepare("DELETE FROM api_key_wallet_policy_bindings WHERE api_key_id = ?")
+          .bind(input.apiKeyId)
+          .run();
 
-      return row ? mapApiKeyWalletPolicyBindingRow(row) : null;
+        const rows: ApiKeyWalletPolicyBindingRow[] = [];
+        for (const binding of input.bindings) {
+          const row = await upsertApiKeyWalletPolicyBindingInternal(tx, binding);
+          if (!row) {
+            throw new Error("Failed to upsert API key wallet policy binding");
+          }
+          rows.push(row);
+        }
+        return rows;
+      });
     },
 
     async listApiKeyWalletPolicyBindings(apiKeyId: string) {
