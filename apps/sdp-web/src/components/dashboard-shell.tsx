@@ -286,24 +286,35 @@ function getCounterpartyRoutePageConfig(
   return null;
 }
 
-function getWalletBackAction(
+function getWalletRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
-): DashboardPageConfig["backAction"] {
+): DashboardPageConfig | null {
   const walletPolicyRouteMatch = pathname.match(
     /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/
   );
-  if (!walletPolicyRouteMatch) {
-    return {
-      href: "/dashboard/wallets",
-      label: t("Shared.dashboardShell.backToWallets"),
-    };
+  if (walletPolicyRouteMatch) {
+    const [, section, walletId] = walletPolicyRouteMatch;
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.walletControls"),
+      backHref: `/dashboard/${section}/${walletId}`,
+      backLabel: t("Shared.dashboardShell.backToWallet"),
+      contentWidthClass: "max-w-none",
+    });
   }
 
-  const [, section, walletId] = walletPolicyRouteMatch;
+  const isWalletDetail =
+    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
+    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
+  if (!isWalletDetail) return null;
+
   return {
-    href: `/dashboard/${section}/${walletId}`,
-    label: t("Shared.dashboardShell.backToWalletDetail"),
+    title: t("Shared.dashboardShell.wallets"),
+    contentWidthClass: "max-w-none",
+    backAction: {
+      href: "/dashboard/wallets",
+      label: t("Shared.dashboardShell.backToWallets"),
+    },
   };
 }
 
@@ -344,16 +355,8 @@ function getDashboardPageConfig(
       },
     };
   }
-  if (
-    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
-    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup")
-  ) {
-    return {
-      title: t("Shared.dashboardShell.wallets"),
-      contentWidthClass: "max-w-none",
-      backAction: getWalletBackAction(pathname, t),
-    };
-  }
+  const walletRoutePageConfig = getWalletRoutePageConfig(pathname, t);
+  if (walletRoutePageConfig) return walletRoutePageConfig;
   if (pathname === "/dashboard/api-keys") {
     return {
       title: t("Shared.dashboardShell.apiKeys"),
