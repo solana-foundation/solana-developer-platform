@@ -6135,6 +6135,170 @@ describe("Payments routes", () => {
       }
     });
 
+    it("does not re-run MagicBlock preparation on an idempotent replay", async () => {
+      env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createRpcMock.mockReturnValue({
+        getTokenSupply: () => ({ send: async () => ({ value: { decimals: 6 } }) }),
+      } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+      createOrgSignerMock.mockResolvedValue(sourceSigner);
+      const signAndSendMock = vi
+        .fn()
+        .mockResolvedValue(
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+        );
+      createFeePaymentAdapterMock.mockReturnValue({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            kind: "transfer",
+            version: "v0",
+            transactionBase64: buildMagicBlockTestTransactionBase64({
+              source: sourceSigner.address,
+            }),
+            sendTo: "base",
+            recentBlockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+            lastValidBlockHeight: 123456,
+            instructionCount: 3,
+            requiredSigners: [sourceSigner.address, sourceSigner.address],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+
+      try {
+        const headers = {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": "confidential-replay-key",
+        };
+        const body = JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: DEVNET_USDC_MINT,
+          amount: "1",
+          privateTransfer: {
+            provider: "magicblock",
+            magicBlock: { split: 2, minDelayMs: "0", maxDelayMs: "1000" },
+          },
+        });
+
+        const first = await app.request(
+          "/v1/payments/transfers",
+          { method: "POST", headers, body },
+          env
+        );
+        const second = await app.request(
+          "/v1/payments/transfers",
+          { method: "POST", headers, body },
+          env
+        );
+
+        expect(first.status).toBe(200);
+        expect(second.status).toBe(200);
+        const firstBody = (await first.json()) as {
+          data: { transfer: { id: string }; privateTransfer: unknown };
+        };
+        const secondBody = (await second.json()) as {
+          data: { transfer: { id: string }; privateTransfer: unknown };
+        };
+        expect(secondBody.data.transfer.id).toBe(firstBody.data.transfer.id);
+        expect(secondBody.data.privateTransfer).toEqual(firstBody.data.privateTransfer);
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(signAndSendMock).toHaveBeenCalledTimes(1);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it("rejects a confidential replay when magicBlock options differ", async () => {
+      env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createRpcMock.mockReturnValue({
+        getTokenSupply: () => ({ send: async () => ({ value: { decimals: 6 } }) }),
+      } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+      createOrgSignerMock.mockResolvedValue(sourceSigner);
+      const signAndSendMock = vi
+        .fn()
+        .mockResolvedValue(
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+        );
+      createFeePaymentAdapterMock.mockReturnValue({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            kind: "transfer",
+            version: "v0",
+            transactionBase64: buildMagicBlockTestTransactionBase64({
+              source: sourceSigner.address,
+            }),
+            sendTo: "base",
+            recentBlockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+            lastValidBlockHeight: 123456,
+            instructionCount: 3,
+            requiredSigners: [sourceSigner.address, sourceSigner.address],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+
+      try {
+        const headers = {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": "confidential-opts-key",
+        };
+        const bodyA = JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: DEVNET_USDC_MINT,
+          amount: "1",
+          privateTransfer: {
+            provider: "magicblock",
+            magicBlock: { split: 2, minDelayMs: "0", maxDelayMs: "1000" },
+          },
+        });
+        const bodyB = JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: DEVNET_USDC_MINT,
+          amount: "1",
+          privateTransfer: {
+            provider: "magicblock",
+            magicBlock: { split: 3, minDelayMs: "0", maxDelayMs: "1000" },
+          },
+        });
+        const first = await app.request(
+          "/v1/payments/transfers",
+          { method: "POST", headers, body: bodyA },
+          env
+        );
+        const conflict = await app.request(
+          "/v1/payments/transfers",
+          { method: "POST", headers, body: bodyB },
+          env
+        );
+        expect(first.status).toBe(200);
+        expect(conflict.status).toBe(409);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
     it("replaces a MagicBlock gasless sponsor signer with Kora during execution", async () => {
       env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
       const sourceSigner = await generateKeyPairSigner();
@@ -6400,6 +6564,223 @@ describe("Payments routes", () => {
         .first<{ status: string; signature: string | null }>();
       expect(row?.status).toBe("confirmed");
       expect(row?.signature).toBeTruthy();
+    });
+
+    it("replays a transfer when the same Idempotency-Key + body is retried", async () => {
+      const signAndSendMock = vi
+        .fn()
+        .mockResolvedValue(
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+        );
+      createFeePaymentAdapterMock.mockReturnValue({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const headers = {
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": "xfer-key-1",
+      };
+      const body = JSON.stringify({
+        source: TEST_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      });
+
+      const first = await app.request(
+        "/v1/payments/transfers",
+        { method: "POST", headers, body },
+        env
+      );
+      const second = await app.request(
+        "/v1/payments/transfers",
+        { method: "POST", headers, body },
+        env
+      );
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      const firstJson = (await first.json()) as { data: { transfer: { id: string } } };
+      const secondJson = (await second.json()) as { data: { transfer: { id: string } } };
+      expect(secondJson.data.transfer.id).toBe(firstJson.data.transfer.id);
+      expect(signAndSendMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("replays a failed transfer on retry without submitting again", async () => {
+      const signAndSendMock = vi.fn().mockRejectedValue(new Error("rpc down"));
+      createFeePaymentAdapterMock.mockReturnValue({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const headers = {
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": "failed-retry-key",
+      };
+      const body = JSON.stringify({
+        source: TEST_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "0.001",
+      });
+
+      const first = await app.request(
+        "/v1/payments/transfers",
+        { method: "POST", headers, body },
+        env
+      );
+      const second = await app.request(
+        "/v1/payments/transfers",
+        { method: "POST", headers, body },
+        env
+      );
+
+      expect(first.status).toBeGreaterThanOrEqual(400);
+      expect(second.status).toBe(200);
+      const secondBody = (await second.json()) as { data: { transfer: { status: string } } };
+      expect(secondBody.data.transfer.status).toBe("failed");
+      expect(signAndSendMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not re-run policy enforcement on an idempotent replay", async () => {
+      const signAndSendMock = vi
+        .fn()
+        .mockResolvedValue(
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+        );
+      createFeePaymentAdapterMock.mockReturnValue({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const headers = {
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": "xfer-policy-replay-key",
+      };
+      const body = JSON.stringify({
+        source: TEST_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      });
+
+      const countWalletOperations = async () => {
+        const row = await getDb(env)
+          .prepare("SELECT COUNT(*) AS count FROM wallet_operations WHERE organization_id = ?")
+          .bind(TEST_ORG.id)
+          .first<{ count: number }>();
+        return Number(row?.count ?? 0);
+      };
+
+      const before = await countWalletOperations();
+
+      const first = await app.request(
+        "/v1/payments/transfers",
+        { method: "POST", headers, body },
+        env
+      );
+      expect(first.status).toBe(200);
+      const afterFirst = await countWalletOperations();
+      expect(afterFirst).toBe(before + 1);
+
+      const second = await app.request(
+        "/v1/payments/transfers",
+        { method: "POST", headers, body },
+        env
+      );
+      expect(second.status).toBe(200);
+      const afterSecond = await countWalletOperations();
+
+      const firstJson = (await first.json()) as { data: { transfer: { id: string } } };
+      const secondJson = (await second.json()) as { data: { transfer: { id: string } } };
+      expect(secondJson.data.transfer.id).toBe(firstJson.data.transfer.id);
+      expect(afterSecond).toBe(afterFirst);
+      expect(signAndSendMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects the same Idempotency-Key with a different body", async () => {
+      const headers = {
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": "xfer-key-2",
+      };
+
+      const first = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+      expect(first.status).toBe(200);
+
+      const conflict = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "2",
+          }),
+        },
+        env
+      );
+      expect(conflict.status).toBe(409);
+    });
+
+    it("does not dedup when no Idempotency-Key is supplied", async () => {
+      const signAndSendMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
+        )
+        .mockResolvedValueOnce(
+          "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV"
+        );
+      createFeePaymentAdapterMock.mockReturnValue({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const headers = {
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        "Content-Type": "application/json",
+      };
+      const body = JSON.stringify({
+        source: TEST_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      });
+
+      const a = await app.request("/v1/payments/transfers", { method: "POST", headers, body }, env);
+      const b = await app.request("/v1/payments/transfers", { method: "POST", headers, body }, env);
+
+      const aJson = (await a.json()) as { data: { transfer: { id: string } } };
+      const bJson = (await b.json()) as { data: { transfer: { id: string } } };
+      expect(bJson.data.transfer.id).not.toBe(aJson.data.transfer.id);
     });
 
     it("marks the transfer as failed when execution throws and returns 502", async () => {

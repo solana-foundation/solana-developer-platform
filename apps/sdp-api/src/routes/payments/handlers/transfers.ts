@@ -31,6 +31,7 @@ import {
 } from "@solana-program/token-2022";
 import { z } from "zod";
 import { getDb } from "@/db";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   isRampTransferType,
   RAMP_TRANSFER_TYPES,
@@ -42,6 +43,7 @@ import {
 } from "@/db/repositories/payments.repository";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
+import { buildPaymentTransferFingerprint } from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import {
   assertApiKeyWalletAccess,
@@ -192,6 +194,27 @@ export async function resolveWalletFromParams(
   };
 }
 
+async function resolveTransferIdempotencyReplay(
+  repository: ReturnType<typeof getPaymentsRepository>,
+  organizationId: string,
+  projectId: string | null,
+  idempotencyKey: string,
+  fingerprint: string
+): Promise<TransferRow | null> {
+  const existing = await repository.findTransferByIdempotency({
+    organizationId,
+    projectId,
+    idempotencyKey,
+  });
+  if (!existing) {
+    return null;
+  }
+  if (existing.idempotency_fingerprint === fingerprint) {
+    return existing;
+  }
+  throw new AppError("CONFLICT", "Idempotency key already used with different request payload");
+}
+
 async function createTransferRecord(
   c: AppContext,
   input: {
@@ -208,40 +231,87 @@ async function createTransferRecord(
     status?: TransferStatus;
     serializedTx?: string;
     initiatedByKeyId?: string;
+    idempotencyKey?: string | null;
+    privateTransfer?: unknown;
+    providerData?: Record<string, unknown>;
   }
-): Promise<TransferRow> {
+): Promise<{ row: TransferRow; replayed: boolean }> {
   const repository = getPaymentsRepository(c);
 
-  const createdRow = await repository.createTransfer({
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    walletId: input.walletId,
-    counterpartyId: null,
-    sourceAddress: input.sourceAddress,
-    destinationAddress: input.destinationAddress,
-    token: input.token,
-    amount: input.amount,
-    memo: input.memo ?? null,
-    type: input.type ?? "transfer",
-    direction: input.direction ?? "outbound",
-    status: input.status ?? "pending",
-    provider: null,
-    providerReference: null,
-    deliveryMode: null,
-    fiatCurrency: null,
-    fiatAmount: null,
-    providerData: {},
-    serializedTx: input.serializedTx ?? null,
-    signature: null,
-    slot: null,
-    initiatedByKeyId: input.initiatedByKeyId ?? null,
-  });
+  const idempotencyKey = input.idempotencyKey ?? null;
+  const idempotencyFingerprint = idempotencyKey
+    ? buildPaymentTransferFingerprint({
+        sourceAddress: input.sourceAddress,
+        destinationAddress: input.destinationAddress,
+        token: input.token,
+        amount: input.amount,
+        memo: input.memo,
+        type: input.type ?? "transfer",
+        privateTransfer: input.privateTransfer,
+      })
+    : null;
 
-  if (!createdRow) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create payment transfer record");
+  if (idempotencyKey && idempotencyFingerprint) {
+    const existing = await resolveTransferIdempotencyReplay(
+      repository,
+      input.organizationId,
+      input.projectId,
+      idempotencyKey,
+      idempotencyFingerprint
+    );
+    if (existing) {
+      return { row: existing, replayed: true };
+    }
   }
 
-  return createdRow;
+  try {
+    const createdRow = await repository.createTransfer({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      walletId: input.walletId,
+      counterpartyId: null,
+      sourceAddress: input.sourceAddress,
+      destinationAddress: input.destinationAddress,
+      token: input.token,
+      amount: input.amount,
+      memo: input.memo ?? null,
+      type: input.type ?? "transfer",
+      direction: input.direction ?? "outbound",
+      status: input.status ?? "pending",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: input.providerData ?? {},
+      serializedTx: input.serializedTx ?? null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: input.initiatedByKeyId ?? null,
+      idempotencyKey,
+      idempotencyFingerprint,
+    });
+
+    if (!createdRow) {
+      throw new AppError("INTERNAL_ERROR", "Failed to create payment transfer record");
+    }
+
+    return { row: createdRow, replayed: false };
+  } catch (error) {
+    if (idempotencyKey && idempotencyFingerprint && isPostgresUniqueViolation(error)) {
+      const existing = await resolveTransferIdempotencyReplay(
+        repository,
+        input.organizationId,
+        input.projectId,
+        idempotencyKey,
+        idempotencyFingerprint
+      );
+      if (existing) {
+        return { row: existing, replayed: true };
+      }
+    }
+    throw error;
+  }
 }
 
 async function enforcePaymentTransferOperationPolicy(
@@ -1219,6 +1289,8 @@ function buildObservedTransferRows(
         fee: parsedTransaction.meta?.fee ?? null,
         error: null,
         initiated_by_key_id: null,
+        idempotency_key: null,
+        idempotency_fingerprint: null,
         created_at: timestamp,
         updated_at: timestamp,
       });
@@ -1296,6 +1368,8 @@ function buildObservedTransferRows(
         fee: parsedTransaction.meta?.fee ?? null,
         error: null,
         initiated_by_key_id: null,
+        idempotency_key: null,
+        idempotency_fingerprint: null,
         created_at: timestamp,
         updated_at: timestamp,
       });
@@ -1382,6 +1456,8 @@ function buildObservedTransferRows(
       fee: parsedTransaction.meta?.fee ?? null,
       error: null,
       initiated_by_key_id: null,
+      idempotency_key: null,
+      idempotency_fingerprint: null,
       created_at: timestamp,
       updated_at: timestamp,
     });
@@ -1414,6 +1490,14 @@ async function buildObservedTransfersForSignatures(
   return settled.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
 }
 
+function buildTransferReplayPayload(replay: TransferRow) {
+  const storedPrivateTransfer = (replay.provider_data as Record<string, unknown> | null | undefined)
+    ?.privateTransfer;
+  return storedPrivateTransfer
+    ? { transfer: mapTransferRow(replay), privateTransfer: storedPrivateTransfer }
+    : { transfer: mapTransferRow(replay) };
+}
+
 export async function createTransfer(c: AppContext) {
   const body = await c.req.json();
   const parsed = createTransferSchema.safeParse(body);
@@ -1438,6 +1522,29 @@ export async function createTransfer(c: AppContext) {
   });
 
   const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
+
+  const idempotencyKey = c.req.header("Idempotency-Key") ?? null;
+  if (idempotencyKey) {
+    const replay = await resolveTransferIdempotencyReplay(
+      getPaymentsRepository(c),
+      scope.auth.organizationId,
+      scope.auth.projectId,
+      idempotencyKey,
+      buildPaymentTransferFingerprint({
+        sourceAddress: operation.sourceWallet.publicKey,
+        destinationAddress: parsed.data.destination,
+        token: operation.token,
+        amount: operation.amount,
+        memo: parsed.data.memo,
+        type: privateTransfer ? "transfer_confidential" : "transfer",
+        privateTransfer,
+      })
+    );
+    if (replay) {
+      return success(c, buildTransferReplayPayload(replay));
+    }
+  }
+
   const enforcement = await enforcePaymentTransferOperationPolicy(c, scope, operation, {
     operationType: "payment_transfer_execute",
     memo: parsed.data.memo,
@@ -1475,7 +1582,7 @@ export async function createTransfer(c: AppContext) {
       koraSponsoredExecution: true,
     });
     const transferType: TransferType = "transfer_confidential";
-    const transfer = await createTransferRecord(c, {
+    const { row: transfer, replayed } = await createTransferRecord(c, {
       organizationId: scope.auth.organizationId,
       projectId: scope.auth.projectId,
       walletId: operation.sourceWallet.walletId,
@@ -1488,7 +1595,14 @@ export async function createTransfer(c: AppContext) {
       status: "processing",
       serializedTx: mapped.prepared.serializedTx,
       initiatedByKeyId: scope.auth.id,
+      idempotencyKey,
+      privateTransfer,
+      providerData: { privateTransfer: mapped.metadata },
     });
+
+    if (replayed) {
+      return success(c, buildTransferReplayPayload(transfer));
+    }
 
     try {
       const result = await executePreparedPrivateTransfer(
@@ -1525,7 +1639,7 @@ export async function createTransfer(c: AppContext) {
     }
   }
 
-  const transfer = await createTransferRecord(c, {
+  const { row: transfer, replayed } = await createTransferRecord(c, {
     organizationId: scope.auth.organizationId,
     projectId: scope.auth.projectId,
     walletId: operation.sourceWallet.walletId,
@@ -1536,7 +1650,12 @@ export async function createTransfer(c: AppContext) {
     memo: parsed.data.memo,
     status: "processing",
     initiatedByKeyId: scope.auth.id,
+    idempotencyKey,
   });
+
+  if (replayed) {
+    return success(c, buildTransferReplayPayload(transfer));
+  }
 
   try {
     if (operation.token === "SOL") {
