@@ -18,6 +18,9 @@ const sendTransactionTimeoutMs = Number.parseInt(
   process.env.KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS ?? "30000",
   10
 );
+const sendTransactionStatusWaitMs = 3_000;
+const sendTransactionStatusPollMs = 250;
+const resubmissionTimeoutMs = 3_000;
 const privateKey = process.env.SIGNER_PRIVATE_KEY;
 
 if (!privateKey) {
@@ -112,18 +115,7 @@ async function handleRpc(method, params) {
     }
     case "signAndSendTransaction": {
       const signedTransaction = await signTransaction(params.transaction);
-      const signature = await solanaRpc(
-        "sendTransaction",
-        [
-          signedTransaction,
-          {
-            encoding: "base64",
-            skipPreflight: true,
-            preflightCommitment: "confirmed",
-          },
-        ],
-        { timeoutMs: sendTransactionTimeoutMs }
-      );
+      const signature = await sendTransactionWithRetry(signedTransaction);
       return {
         signature,
         signed_transaction: signedTransaction,
@@ -133,6 +125,54 @@ async function handleRpc(method, params) {
     default:
       throw new Error(`Unsupported Kora shim method: ${method}`);
   }
+}
+
+async function sendTransactionWithRetry(signedTransaction) {
+  const params = [
+    signedTransaction,
+    {
+      encoding: "base64",
+      skipPreflight: true,
+      preflightCommitment: "confirmed",
+    },
+  ];
+  const signature = await solanaRpc("sendTransaction", params, {
+    timeoutMs: sendTransactionTimeoutMs,
+  });
+
+  if (await waitForTransactionStatus(signature)) {
+    return signature;
+  }
+
+  console.warn(
+    `Transaction ${signature} was not observed after ${sendTransactionStatusWaitMs}ms; resubmitting.`
+  );
+  try {
+    const resentSignature = await solanaRpc("sendTransaction", params, {
+      timeoutMs: resubmissionTimeoutMs,
+    });
+    if (resentSignature !== signature) {
+      throw new Error("Resubmitted transaction returned a different signature");
+    }
+  } catch (error) {
+    console.warn("Transaction resubmission did not complete; continuing confirmation.", error);
+  }
+
+  return signature;
+}
+
+async function waitForTransactionStatus(signature) {
+  const deadline = Date.now() + sendTransactionStatusWaitMs;
+
+  while (Date.now() < deadline) {
+    const statuses = await solanaRpc("getSignatureStatuses", [[signature]]);
+    if (statuses?.value?.[0]) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, sendTransactionStatusPollMs));
+  }
+
+  return false;
 }
 
 async function signTransaction(base64Transaction) {
