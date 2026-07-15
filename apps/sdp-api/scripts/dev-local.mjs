@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { API_LOCAL_ENV_KEYS } from "../../../scripts/secret-keys.mjs";
@@ -61,8 +62,8 @@ const localDatabaseUrl = new URL("postgresql://127.0.0.1:5432/sdp");
 localDatabaseUrl.username = "sdp";
 localDatabaseUrl.password = "sdp";
 const databaseUrl =
-  process.env.DATABASE_URL ?? localEnv.DATABASE_URL ?? localDatabaseUrl.toString();
-const wranglerVarArgs = isDopplerRun ? collectWranglerVars(process.env) : [];
+  localEnv.DATABASE_URL ?? process.env.DATABASE_URL ?? localDatabaseUrl.toString();
+const wranglerVarArgs = isDopplerRun ? collectWranglerVars({ ...process.env, ...localEnv }) : [];
 let activeChild = null;
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -73,14 +74,67 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   });
 }
 
+/**
+ * Blocks until the Postgres port accepts TCP connections, so the API task can
+ * start in parallel with the `dev:db` compose task without losing the race.
+ */
+async function waitForPostgres(url) {
+  const parsed = new URL(url);
+  const port = parsed.port === "" ? 5432 : Number(parsed.port);
+  const startedAt = Date.now();
+  const deadline = startedAt + 60_000;
+  let lastLogAt = 0;
+
+  while (true) {
+    const connected = await new Promise((resolve) => {
+      const socket = net.connect({ host: parsed.hostname, port, timeout: 1_000 });
+      socket.once("connect", () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once("error", () => resolve(false));
+      socket.once("timeout", () => {
+        socket.destroy();
+        resolve(false);
+      });
+    });
+
+    if (connected) {
+      if (lastLogAt > 0) {
+        console.log("Postgres is up.");
+      }
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastLogAt >= 10_000) {
+      const elapsed = Math.round((now - startedAt) / 1000);
+      console.log(
+        lastLogAt === 0
+          ? `Waiting for Postgres at ${parsed.hostname}:${port} — under \`pnpm dev\` the dev:db task is starting it; if nothing is, run \`pnpm db:postgres:up\`...`
+          : `Still waiting for Postgres at ${parsed.hostname}:${port} (${elapsed}s)...`
+      );
+      lastLogAt = now;
+    }
+
+    if (now > deadline) {
+      throw new Error(
+        `Postgres did not become reachable at ${parsed.hostname}:${port} within 60s. Start it with \`pnpm db:postgres:up\` (or check DATABASE_URL if it points elsewhere).`
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: appDir,
       stdio: "inherit",
       env: {
-        ...localEnv,
         ...process.env,
+        ...localEnv,
         ...options.env,
       },
     });
@@ -107,15 +161,10 @@ function run(command, args, options = {}) {
 const devArgs = ["dev", "--local", `--persist-to=${persistTo}`, "--port", port, ...wranglerVarArgs];
 
 try {
-  if (isDopplerRun && fs.existsSync(localEnvPath)) {
-    throw new Error(
-      "Legacy apps/sdp-api/.dev.vars detected while running under Doppler. Remove or rename it so Wrangler can inject Doppler-backed bindings with `--var`."
-    );
-  }
-
   if (shouldResetLocalState) {
     fs.rmSync(path.resolve(appDir, persistTo), { recursive: true, force: true });
   }
+  await waitForPostgres(databaseUrl);
   await run("node", ["scripts/migrate-postgres.mjs"], {
     env: {
       DATABASE_URL: databaseUrl,
