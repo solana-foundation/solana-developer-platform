@@ -38,10 +38,11 @@ function groupedCounts(entries) {
   return [...counts.entries()].sort(([left], [right]) => left.localeCompare(right));
 }
 
-function localeExistsAtRef(ref, locale) {
+function localeExistsAtRef(ref, locale, messagesDir) {
+  const messagesRelativeDir = path.relative(process.cwd(), messagesDir);
   for (const relativePath of [
-    `apps/sdp-web/messages/${locale}.json`,
-    `apps/sdp-web/messages/${locale}`,
+    path.join(messagesRelativeDir, `${locale}.json`),
+    path.join(messagesRelativeDir, locale),
   ]) {
     try {
       execFileSync("git", ["cat-file", "-e", `${ref}:${relativePath}`], { stdio: "ignore" });
@@ -61,7 +62,7 @@ function classifyLocales(locales) {
     return { newLocales: [], existingLocales: locales };
   }
 
-  const newLocales = locales.filter((locale) => !localeExistsAtRef(baseRef, locale));
+  const newLocales = locales.filter((locale) => !localeExistsAtRef(baseRef, locale, messagesDir));
   return {
     newLocales,
     existingLocales: locales.filter((locale) => !newLocales.includes(locale)),

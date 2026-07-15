@@ -75,6 +75,22 @@ test("applies only generated leaves and validates the complete catalogs", () => 
   );
 });
 
+test("allows stale locale keys after a source string is removed", () => {
+  const messagesDir = createFixture();
+  const inventory = collectMissingTranslations({ messagesDir });
+
+  applyTranslations({
+    messagesDir,
+    translations: inventory.missing.map((entry) => ({
+      ...entry,
+      value: entry.locale === "es" ? "Hola {name}" : "Enregistrer",
+    })),
+  });
+  fs.writeFileSync(path.join(messagesDir, "en", "dashboard.json"), "{}\n");
+
+  assert.doesNotThrow(() => validateCatalogs({ messagesDir }));
+});
+
 test("requires the model to preserve placeholders and return every requested key", async () => {
   const missing = [
     {

@@ -164,12 +164,6 @@ function validateCatalogFile({ sourceFile, targetFile, locale, targetRelativePat
     }
   }
 
-  for (const key of targetLeaves.keys()) {
-    if (!sourceLeaves.has(key)) {
-      errors.push(`${locale}/${targetRelativePath}: unexpected ${key}`);
-    }
-  }
-
   for (const [key, source] of sourceLeaves) {
     const translation = targetLeaves.get(key);
     if (translation !== undefined) {
