@@ -50,8 +50,7 @@ else
   bold="" dim="" yellow="" cyan="" reset=""
 fi
 
-# SDP_NO_DOPPLER=1 forces the env-file path, e.g. to test contributor onboarding.
-if [ "${SDP_NO_DOPPLER:-}" = "1" ] || ! command -v doppler >/dev/null 2>&1; then
+if ! command -v doppler >/dev/null 2>&1; then
   echo "${bold}Solana Developer Platform${reset} recommends using a secrets manager like ${cyan}Doppler${reset} over plain environment files to share your keys: https://docs.doppler.com/docs/install-cli" >&2
 
   if [ "${#env_files[@]}" -gt 0 ]; then
