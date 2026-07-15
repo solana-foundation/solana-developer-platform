@@ -55,9 +55,7 @@ const localEnv = loadLocalEnvFile(localEnvPath);
 const persistTo = process.env.SDP_API_LOCAL_PERSIST_PATH ?? ".wrangler/state";
 const port = process.env.SDP_API_PORT ?? "8787";
 const shouldResetLocalState = process.env.SDP_API_RESET_LOCAL_STATE === "1";
-const isDopplerRun = Boolean(
-  process.env.DOPPLER_CONFIG || process.env.DOPPLER_ENVIRONMENT || process.env.DOPPLER_TOKEN
-);
+const isDopplerRun = false;
 const localDatabaseUrl = new URL("postgresql://127.0.0.1:5432/sdp");
 localDatabaseUrl.username = "sdp";
 localDatabaseUrl.password = "sdp";
@@ -70,7 +68,9 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     if (activeChild && !activeChild.killed) {
       activeChild.kill(signal);
+      return;
     }
+    process.exit(1);
   });
 }
 
