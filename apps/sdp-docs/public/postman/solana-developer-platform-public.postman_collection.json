@@ -371,6 +371,51 @@
           }
         },
         {
+          "name": "List wallet approval requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests",
+            "description": "Lists wallet operation approval requests for the authenticated organization or project scope."
+          }
+        },
+        {
+          "name": "Get wallet approval request",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}",
+            "description": "Returns one wallet operation approval request with operation and policy context."
+          }
+        },
+        {
+          "name": "Approve wallet approval request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/approve",
+            "description": "Approves a pending wallet operation approval request."
+          }
+        },
+        {
+          "name": "Reject wallet approval request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/reject",
+            "description": "Rejects a pending wallet operation approval request."
+          }
+        },
+        {
+          "name": "Cancel wallet approval request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/cancel",
+            "description": "Cancels a pending wallet operation approval request."
+          }
+        },
+        {
           "name": "Get wallet by ID",
           "request": {
             "method": "GET",
@@ -1166,6 +1211,33 @@
                 }
               }
             }
+          }
+        },
+        {
+          "name": "List wallet policy revisions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/revisions",
+            "description": "Returns immutable revisions for the wallet control profile in newest-first order, including the currently active revision reference."
+          }
+        },
+        {
+          "name": "List wallet policy evaluations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/evaluations",
+            "description": "Returns paginated, filterable policy audit history for one wallet. Evaluation context is redacted and excludes raw provider payloads."
+          }
+        },
+        {
+          "name": "Get wallet policy evaluation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/evaluations/{{policyEvaluationId}}",
+            "description": "Returns one policy evaluation with matched rules, redacted evaluation context, revision references, decision, status, reason, and approval linkage."
           }
         },
         {

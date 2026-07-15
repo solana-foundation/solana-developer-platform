@@ -24,6 +24,8 @@ import {
   paymentTransferBatchIdParamsSchema,
   paymentTransferIdParamsSchema,
   paymentWalletIdParamsSchema,
+  paymentWalletPolicyEvaluationListQuerySchema,
+  paymentWalletPolicyEvaluationParamsSchema,
   prepareSubscriptionAuthorizationRequestSchema,
   prepareSubscriptionCollectionRequestSchema,
   prepareSubscriptionLifecycleRequestSchema,
@@ -59,6 +61,9 @@ import {
   transferListResponse,
   transferResponse,
   walletBalancesResponse,
+  walletControlProfileRevisionHistoryResponse,
+  walletPolicyEvaluationListResponse,
+  walletPolicyEvaluationResponse,
   walletPolicyResponse,
 } from "./responses";
 
@@ -108,6 +113,73 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(walletPolicyResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/wallets/{walletId}/policies/revisions",
+    tags: ["Payments"],
+    summary: "List wallet policy revisions",
+    operationId: "listPaymentWalletPolicyRevisions",
+    description:
+      "Returns immutable revisions for the wallet control profile in newest-first order, including the currently active revision reference.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentWalletIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Wallet policy revision history",
+        content: jsonContent(walletControlProfileRevisionHistoryResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/wallets/{walletId}/policies/evaluations",
+    tags: ["Payments"],
+    summary: "List wallet policy evaluations",
+    operationId: "listPaymentWalletPolicyEvaluations",
+    description:
+      "Returns paginated, filterable policy audit history for one wallet. Evaluation context is redacted and excludes raw provider payloads.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentWalletIdParamsSchema,
+      query: paymentWalletPolicyEvaluationListQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Wallet policy evaluation history",
+        content: jsonContent(walletPolicyEvaluationListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/wallets/{walletId}/policies/evaluations/{policyEvaluationId}",
+    tags: ["Payments"],
+    summary: "Get wallet policy evaluation",
+    operationId: "getPaymentWalletPolicyEvaluation",
+    description:
+      "Returns one policy evaluation with matched rules, redacted evaluation context, revision references, decision, status, reason, and approval linkage.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentWalletPolicyEvaluationParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Wallet policy evaluation detail",
+        content: jsonContent(walletPolicyEvaluationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 
