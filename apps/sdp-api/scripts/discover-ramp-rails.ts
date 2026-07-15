@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-
+import {
+  type ProviderRailSupportSnapshot,
+  providerRailSupportSnapshotSchema,
+  RAMP_PROVIDER_CLIENTS,
+  RampClient,
+  type RampDiscoveryResponseDump,
+} from "@sdp/payments/ramps";
 import {
   type CryptoRailId,
   OFFRAMP_CRYPTO_RAILS,
@@ -12,14 +18,6 @@ import {
 } from "@sdp/types/payment-rails";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
-
-import {
-  type ProviderRailSupportSnapshot,
-  providerRailSupportSnapshotSchema,
-  RAMP_PROVIDER_CLIENTS,
-  RampClient,
-  type RampDiscoveryResponseDump,
-} from "../src/lib/ramps";
 
 const RAIL_ROOT_DIR = path.resolve(process.cwd(), ".ramp-rails");
 const RAW_DUMP_DIR = path.join(RAIL_ROOT_DIR, "raw");

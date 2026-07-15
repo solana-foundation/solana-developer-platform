@@ -1,17 +1,13 @@
 import { SdpPaymentsError } from "@sdp/payments";
 import {
   buildLightsparkAccountInfo,
+  buildLightsparkBusinessInfo,
   lightsparkCounterpartyRequirements,
+  lightsparkPayoutCollectedData,
 } from "@sdp/payments/ramps/providers/lightspark/counterparty";
 import type { Counterparty } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import {
-  buildLightsparkAccountInfo,
-  buildLightsparkBusinessInfo,
-  lightsparkCounterpartyRequirements,
-  lightsparkPayoutCollectedData,
-} from "./counterparty";
 
 type IndividualCounterparty = Extract<Counterparty, { entityType: "individual" }>;
 type BusinessCounterparty = Extract<Counterparty, { entityType: "business" }>;

@@ -1,15 +1,10 @@
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
-import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { badRequest, notFound } from "@/lib/errors";
-import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
-import type { CreateLightsparkCustomerInput } from "@/lib/ramps/providers/lightspark/client";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import type { CreateLightsparkCustomerInput } from "@sdp/payments/ramps/providers/lightspark/client";
 import {
   buildLightsparkAccountInfo,
   buildLightsparkBusinessInfo,
   lightsparkPayoutCollectedData,
-} from "@/lib/ramps/providers/lightspark/counterparty";
-import { buildLightsparkAccountInfo } from "@sdp/payments/ramps/providers/lightspark/counterparty";
+} from "@sdp/payments/ramps/providers/lightspark/counterparty";
 import {
   isLightsparkExternalAccountActive,
   type LightsparkPayoutAccount,
