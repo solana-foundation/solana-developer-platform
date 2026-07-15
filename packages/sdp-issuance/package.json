@@ -29,6 +29,11 @@
       "import": "./src/mosaic/utils.ts",
       "default": "./src/mosaic/utils.ts"
     },
+    "./capabilities": {
+      "types": "./src/capabilities/index.ts",
+      "import": "./src/capabilities/index.ts",
+      "default": "./src/capabilities/index.ts"
+    },
     "./templates": {
       "types": "./src/templates/index.ts",
       "import": "./src/templates/index.ts",
@@ -42,7 +47,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "biome check src/"
+    "lint": "biome check src/",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@sdp/payments": "workspace:*",
@@ -55,5 +61,9 @@
     "@solana/mosaic-sdk": "catalog:",
     "@solana/signers": "catalog:",
     "@solana/token-acl-gate-sdk": "0.2.0"
+  },
+  "devDependencies": {
+    "tsx": "4.22.4",
+    "typescript": "^6.0.3"
   }
 }
