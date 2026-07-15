@@ -129,7 +129,6 @@ FEE_PAYMENT_PROVIDER=kora
 # PRIVY_API_BASE_URL=https://api.privy.io
 # PRIVY_REQUEST_DELAY_MS=0
 # PRIVY_WALLET_ID=YOUR_DEFAULT_PRIVY_WALLET_ID
-# PRIVY_CONFIG_ID=YOUR_PRIVY_CONFIG_ID
 
 # Fireblocks platform signer (required for fireblocks custody provider)
 # SIGNING_PROVIDER=fireblocks
@@ -138,7 +137,6 @@ FEE_PAYMENT_PROVIDER=kora
 # FIREBLOCKS_API_BASE_URL=https://api.fireblocks.io
 # FIREBLOCKS_ASSET_ID=SOL_TEST
 # FIREBLOCKS_VAULT_ID=YOUR_FIREBLOCKS_VAULT_ID
-# FIREBLOCKS_CUSTODY_CONFIG=YOUR_FIREBLOCKS_CUSTODY_CONFIG
 
 # Dfns platform signer (required for dfns custody provider)
 # SIGNING_PROVIDER=dfns
@@ -147,7 +145,6 @@ FEE_PAYMENT_PROVIDER=kora
 # DFNS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
 # DFNS_API_BASE_URL=https://api.dfns.io
 # DFNS_WALLET_ID=YOUR_DEFAULT_DFNS_WALLET_ID
-# DFNS_CONFIG_ID=YOUR_DFNS_CONFIG_ID
 
 # --- Clerk auth + webhook ---
 # See docs/self-hosting/clerk-setup.md for the end-to-end walkthrough
