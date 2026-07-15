@@ -25,6 +25,8 @@ import type {
   CreateWalletControlProfileRevisionInput,
   CreateWalletOperationInput,
   GetApprovalRequestDetailInput,
+  GetWalletControlProfileRevisionHistoryInput,
+  GetWalletPolicyEvaluationAuditInput,
   ListApprovalRequestDetailsInput,
   ListWalletPolicyEvaluationAuditsInput,
   PolicyEvaluationRow,
@@ -218,9 +220,18 @@ function mapWalletPolicyEvaluationAuditRow(
     amount: (row.amount as string | null | undefined) ?? null,
     destination: (row.destination as string | null | undefined) ?? null,
     operation_status: row.operation_status as WalletPolicyEvaluationAuditRow["operation_status"],
+    wallet_policy_revision_id: (row.wallet_policy_revision_id as string | null | undefined) ?? null,
+    active_wallet_policy_revision_id:
+      (row.active_wallet_policy_revision_id as string | null | undefined) ?? null,
+    api_key_policy_revision_id:
+      (row.api_key_policy_revision_id as string | null | undefined) ?? null,
+    active_api_key_policy_revision_id:
+      (row.active_api_key_policy_revision_id as string | null | undefined) ?? null,
     decision: row.decision as WalletPolicyEvaluationAuditRow["decision"],
     reason_code: row.reason_code as string,
     reason: (row.reason as string | null | undefined) ?? null,
+    matched_rules: asPostgresJsonArray(row.matched_rules),
+    evaluation_context: mapPolicyEvaluationContext(row.evaluation_context),
     requires_approval: row.requires_approval as boolean,
     approval_request_id: (row.approval_request_id as string | null | undefined) ?? null,
     operation_created_at: row.operation_created_at as string,
@@ -505,6 +516,67 @@ async function getPolicyEvaluationByIdInternal(
   return row ? mapPolicyEvaluationRow(row) : null;
 }
 
+const walletPolicyEvaluationAuditSelect = `SELECT
+  wo.id AS wallet_operation_id,
+  pe.id AS policy_evaluation_id,
+  wo.operation_family,
+  wo.operation_type,
+  wo.asset,
+  wo.amount,
+  wo.destination,
+  wo.status AS operation_status,
+  pe.wallet_policy_revision_id,
+  wcp.active_revision_id AS active_wallet_policy_revision_id,
+  pe.api_key_policy_revision_id,
+  akcp.active_revision_id AS active_api_key_policy_revision_id,
+  pe.decision,
+  pe.reason_code,
+  pe.reason,
+  pe.matched_rules,
+  pe.evaluation_context,
+  pe.requires_approval,
+  pe.approval_request_id,
+  wo.created_at AS operation_created_at,
+  wo.updated_at AS operation_updated_at,
+  pe.created_at AS evaluated_at
+FROM policy_evaluations pe
+INNER JOIN wallet_operations wo ON wo.id = pe.wallet_operation_id
+LEFT JOIN wallet_control_profile_revisions wcpr ON wcpr.id = pe.wallet_policy_revision_id
+LEFT JOIN wallet_control_profiles wcp ON wcp.id = wcpr.profile_id
+LEFT JOIN api_key_control_profile_revisions akcpr ON akcpr.id = pe.api_key_policy_revision_id
+LEFT JOIN api_key_control_profiles akcp ON akcp.id = akcpr.profile_id`;
+
+function walletPolicyEvaluationAuditFilters(input: ListWalletPolicyEvaluationAuditsInput): {
+  conditions: string[];
+  params: unknown[];
+} {
+  const conditions = [
+    "wo.organization_id = ?",
+    "wo.project_id IS NOT DISTINCT FROM ?",
+    "wo.custody_wallet_id = ?",
+  ];
+  const params: unknown[] = [input.organizationId, input.projectId, input.custodyWalletId];
+
+  if (input.decision) {
+    conditions.push("pe.decision = ?");
+    params.push(input.decision);
+  }
+  if (input.status) {
+    conditions.push("wo.status = ?");
+    params.push(input.status);
+  }
+  if (input.operationFamily) {
+    conditions.push("wo.operation_family = ?");
+    params.push(input.operationFamily);
+  }
+  if (input.reasonCode) {
+    conditions.push("pe.reason_code = ?");
+    params.push(input.reasonCode);
+  }
+
+  return { conditions, params };
+}
+
 export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
   return {
     async createWalletControlProfile(input: CreateWalletControlProfileInput) {
@@ -678,6 +750,45 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
       return {
         profile: mappedProfile,
         revision,
+      };
+    },
+
+    async getWalletControlProfileRevisionHistory(
+      input: GetWalletControlProfileRevisionHistoryInput
+    ) {
+      const profile = await db
+        .prepare(
+          `SELECT *
+           FROM wallet_control_profiles
+           WHERE organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
+             AND custody_wallet_id = ?
+           ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+                    updated_at DESC,
+                    id DESC
+           LIMIT 1`
+        )
+        .bind(input.organizationId, input.projectId, input.custodyWalletId)
+        .first<Record<string, unknown>>();
+
+      if (!profile) {
+        return null;
+      }
+
+      const mappedProfile = mapWalletControlProfileRow(profile);
+      const revisions = await db
+        .prepare(
+          `SELECT *
+           FROM wallet_control_profile_revisions
+           WHERE profile_id = ?
+           ORDER BY revision_number DESC`
+        )
+        .bind(mappedProfile.id)
+        .all<Record<string, unknown>>();
+
+      return {
+        profile: mappedProfile,
+        revisions: revisions.results.map(mapWalletControlProfileRevisionRow),
       };
     },
 
@@ -1177,37 +1288,53 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async listWalletPolicyEvaluationAudits(input: ListWalletPolicyEvaluationAuditsInput) {
-      const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
-      const rows = await db
+      const page = Math.max(input.page ?? 1, 1);
+      const pageSize = Math.min(Math.max(input.pageSize ?? 25, 1), 100);
+      const offset = (page - 1) * pageSize;
+      const { conditions, params } = walletPolicyEvaluationAuditFilters(input);
+      const where = conditions.join(" AND ");
+
+      const count = await db
         .prepare(
-          `SELECT
-             wo.id AS wallet_operation_id,
-             pe.id AS policy_evaluation_id,
-             wo.operation_family,
-             wo.operation_type,
-             wo.asset,
-             wo.amount,
-             wo.destination,
-             wo.status AS operation_status,
-             pe.decision,
-             pe.reason_code,
-             pe.reason,
-             pe.requires_approval,
-             pe.approval_request_id,
-             wo.created_at AS operation_created_at,
-             wo.updated_at AS operation_updated_at,
-             pe.created_at AS evaluated_at
+          `SELECT COUNT(*) AS total
            FROM policy_evaluations pe
            INNER JOIN wallet_operations wo ON wo.id = pe.wallet_operation_id
-           WHERE wo.organization_id = ?
-             AND wo.custody_wallet_id = ?
-           ORDER BY pe.created_at DESC, wo.created_at DESC
-           LIMIT ?`
+           WHERE ${where}`
         )
-        .bind(input.organizationId, input.custodyWalletId, limit)
+        .bind(...params)
+        .first<{ total: number | string }>();
+
+      const rows = await db
+        .prepare(
+          `${walletPolicyEvaluationAuditSelect}
+           WHERE ${where}
+           ORDER BY pe.created_at DESC, pe.id DESC
+           LIMIT ? OFFSET ?`
+        )
+        .bind(...params, pageSize, offset)
         .all<Record<string, unknown>>();
 
-      return rows.results.map(mapWalletPolicyEvaluationAuditRow);
+      return {
+        rows: rows.results.map(mapWalletPolicyEvaluationAuditRow),
+        total: Number(count?.total ?? 0),
+      };
+    },
+
+    async getWalletPolicyEvaluationAudit(input: GetWalletPolicyEvaluationAuditInput) {
+      const { conditions, params } = walletPolicyEvaluationAuditFilters(input);
+      conditions.push("pe.id = ?");
+      params.push(input.policyEvaluationId);
+
+      const row = await db
+        .prepare(
+          `${walletPolicyEvaluationAuditSelect}
+           WHERE ${conditions.join(" AND ")}
+           LIMIT 1`
+        )
+        .bind(...params)
+        .first<Record<string, unknown>>();
+
+      return row ? mapWalletPolicyEvaluationAuditRow(row) : null;
     },
 
     async createApprovalRequest(input: CreateApprovalRequestInput) {

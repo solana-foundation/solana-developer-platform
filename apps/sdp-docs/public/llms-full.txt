@@ -2034,7 +2034,7 @@ Build the request body:
 
 ```typescript
 const body = {
-  source: "wal_example",              // SDP custody wallet ID
+  source: "privy_wallet_123",              // `walletId` from GET /v1/wallets
   destination: "7xKXz...9fGh",         // recipient wallet (owner) address
   token: "9aBCd...4eEf",               // onchain mint address
   amount: "100.00",                    // human-readable units
@@ -2072,7 +2072,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "source": "wal_example",
+    "source": "privy_wallet_123",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
     "amount": "100.00",
@@ -2091,7 +2091,7 @@ const response = await fetch(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      source: "wal_example",
+      source: "privy_wallet_123",
       destination: "7xKXz...9fGh",
       token: "9aBCd...4eEf",
       amount: "100.00",
@@ -2111,7 +2111,7 @@ HttpRequest request = HttpRequest.newBuilder()
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
-          "source": "wal_example",
+          "source": "privy_wallet_123",
           "destination": "7xKXz...9fGh",
           "token": "9aBCd...4eEf",
           "amount": "100.00",
@@ -2210,7 +2210,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "source": "wal_example",
+    "source": "privy_wallet_123",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
     "amount": "100.00",
@@ -2229,7 +2229,7 @@ const response = await fetch(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      source: "wal_example",
+      source: "privy_wallet_123",
       destination: "7xKXz...9fGh",
       token: "9aBCd...4eEf",
       amount: "100.00",
@@ -2248,7 +2248,7 @@ HttpRequest request = HttpRequest.newBuilder()
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
-          "source": "wal_example",
+          "source": "privy_wallet_123",
           "destination": "7xKXz...9fGh",
           "token": "9aBCd...4eEf",
           "amount": "100.00",
@@ -2330,7 +2330,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "source": "wal_example",
+    "source": "privy_wallet_123",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
     "amount": "150.00",
@@ -3354,17 +3354,25 @@ From the dashboard, mint an org-scoped API key with **Role: Admin**, **Environme
 
 <Step>
 
-With the Admin key, call `POST /v1/projects` to create your project (`{ name, slug, environment: "sandbox" }`). The response carries the project ID you'll need in the next step:
+With the Admin key, call `GET /v1/projects` and pick the project with slug `default-sandbox`. Every organization is provisioned with exactly one sandbox and one production project automatically — isolation between workloads comes from separate organizations, not additional projects. The project ID is what you'll need in the next step:
 
 ```json
 {
   "data": {
-    "project": {
-      "id": "prj_3bc13bcb-...",
-      "slug": "treasury-pilot-usd",
-      "environment": "sandbox",
-      "status": "active"
-    }
+    "projects": [
+      {
+        "id": "prj_3bc13bcb-...",
+        "slug": "default-sandbox",
+        "environment": "sandbox",
+        "status": "active"
+      },
+      {
+        "id": "prj_8a201d47-...",
+        "slug": "default-production",
+        "environment": "production",
+        "status": "active"
+      }
+    ]
   }
 }
 ```
@@ -4043,7 +4051,7 @@ The work between `sk_test_` and `sk_live_` is not a flag flip. It is the moment 
 
 Your sandbox setup is built around six artifacts that all swap for production equivalents:
 
-- **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys minted from a production project. Use the Section 2 bootstrap pattern with a fresh Admin key, a fresh `POST /v1/projects` call against `environment: "production"`, and fresh project-scoped keys minted under it.
+- **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys minted from your production project. Use the Section 2 bootstrap pattern with a fresh Admin key, selecting the `default-production` project from `GET /v1/projects` instead of `default-sandbox`, and fresh project-scoped keys minted under it.
 - **Custody provider**. Production reads `provider` as your federally chartered custodian (Anchorage Digital Bank for most US institutional issuers), bound to your organization through the Anchorage onboarding flow. The Privy sandbox wallets do not carry over.
 - **Solana network**. Mainnet-beta replaces devnet. The custody address gets funded by your custody bank as part of standard operational support, not by a faucet.
 - **API base URL**. `https://api.solana.com` is the canonical production base. While the custom domain is in rollout, requests route through `https://sdp-api-production.solana.workers.dev`. Code paths are identical; only the hostname changes.
@@ -5027,6 +5035,11 @@ Source: https://platform.solana.com/docs/reference/api/wallets
 | `GET` | `/v1/wallets/{walletId}` | Get wallet by ID |
 | `PATCH` | `/v1/wallets/{walletId}` | Update wallet |
 | `GET` | `/v1/wallets/aggregate` | Aggregate wallet balances |
+| `GET` | `/v1/wallets/approval-requests` | List wallet approval requests |
+| `GET` | `/v1/wallets/approval-requests/{approvalRequestId}` | Get wallet approval request |
+| `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/approve` | Approve wallet approval request |
+| `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/cancel` | Cancel wallet approval request |
+| `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/reject` | Reject wallet approval request |
 | `GET` | `/v1/wallets/config` | Get wallet signing config |
 | `GET` | `/v1/wallets/configs` | List wallet signing configs |
 | `POST` | `/v1/wallets/default-wallet` | Set default wallet |
@@ -5046,7 +5059,6 @@ Source: https://platform.solana.com/docs/reference/api/projects
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `GET` | `/v1/projects` | List projects |
-| `POST` | `/v1/projects` | Create project |
 | `DELETE` | `/v1/projects/{projectId}` | Archive project |
 | `GET` | `/v1/projects/{projectId}` | Get project |
 | `PATCH` | `/v1/projects/{projectId}` | Update project |
@@ -5145,6 +5157,9 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/wallets/{walletId}/balances` | Get wallet balances |
 | `GET` | `/v1/payments/wallets/{walletId}/policies` | Get wallet policy |
 | `PUT` | `/v1/payments/wallets/{walletId}/policies` | Update wallet policy |
+| `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations` | List wallet policy evaluations |
+| `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations/{policyEvaluationId}` | Get wallet policy evaluation |
+| `GET` | `/v1/payments/wallets/{walletId}/policies/revisions` | List wallet policy revisions |
 
 ---
 
@@ -5166,12 +5181,13 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `GET` | `/v1/asset-profiles` | List asset profiles |
-| `POST` | `/v1/asset-profiles` | Create asset profile |
-| `DELETE` | `/v1/asset-profiles/{profileId}` | Archive asset profile |
-| `GET` | `/v1/asset-profiles/{profileId}` | Get asset profile |
-| `PATCH` | `/v1/asset-profiles/{profileId}` | Update asset profile |
-| `GET` | `/v1/asset-profiles/metadata` | Get asset profile field options |
+| `GET` | `/v1/issuance/asset-profiles` | List asset profiles |
+| `POST` | `/v1/issuance/asset-profiles` | Create token with asset profile |
+| `DELETE` | `/v1/issuance/asset-profiles/{profileId}` | Archive asset profile |
+| `GET` | `/v1/issuance/asset-profiles/{profileId}` | Get asset profile |
+| `PATCH` | `/v1/issuance/asset-profiles/{profileId}` | Update asset profile |
+| `GET` | `/v1/issuance/asset-profiles/by-token/{tokenId}` | Get asset profile by token |
+| `GET` | `/v1/issuance/asset-profiles/field-options` | Get asset profile field options |
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.

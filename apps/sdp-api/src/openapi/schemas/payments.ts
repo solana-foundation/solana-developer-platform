@@ -53,6 +53,8 @@ import {
   cryptoRailNetworkSchema,
   isoDateTimeSchema,
   orgIdParamSchema,
+  pageQuerySchema,
+  pageSizeQuerySchema,
   projectIdParamSchema,
   solanaAddressSchema,
   transferIdParamSchema,
@@ -68,7 +70,9 @@ export const tokenAmountSchema = z.string().openapi({
   example: "100.00",
 });
 
-const policyRuleSchema = withOpenApi(updateWalletPolicySchemaBase.shape.rules.unwrap().element, {
+export const policyRuleSchema = withOpenApi(
+  updateWalletPolicySchemaBase.shape.rules.unwrap().element,
+  {
   description:
     "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
   example: {
@@ -77,7 +81,8 @@ const policyRuleSchema = withOpenApi(updateWalletPolicySchemaBase.shape.rules.un
     family: "raw_sign",
     action: "deny",
   },
-});
+  }
+);
 
 const walletControlProfileSummarySchema = z
   .object({
@@ -107,6 +112,35 @@ const walletControlProfileSummarySchema = z
   })
   .openapi({ description: "Wallet control profile summary." });
 
+const policyDecisionSchema = z.enum([
+  "allow",
+  "deny",
+  "approval_required",
+  "provider_approval_required",
+  "review",
+  "not_evaluated",
+]);
+
+const walletOperationFamilySchema = z.enum([
+  "transfer",
+  "payment",
+  "ramp",
+  "issuance",
+  "raw_sign",
+  "program",
+  "provider_admin",
+]);
+
+const walletOperationStatusSchema = z.enum([
+  "created",
+  "evaluated",
+  "pending_approval",
+  "executing",
+  "completed",
+  "failed",
+  "canceled",
+]);
+
 const walletPolicyAuditEntrySchema = z
   .object({
     walletOperationId: z.string().openapi({
@@ -117,9 +151,9 @@ const walletPolicyAuditEntrySchema = z
       description: "Policy evaluation record ID.",
       example: "peval_example",
     }),
-    operationFamily: z
-      .enum(["transfer", "payment", "ramp", "issuance", "raw_sign", "program", "provider_admin"])
-      .openapi({ description: "Normalized wallet operation family." }),
+    operationFamily: walletOperationFamilySchema.openapi({
+      description: "Normalized wallet operation family.",
+    }),
     operationType: z.string().openapi({
       description: "Normalized wallet operation type.",
       example: "payment_transfer_execute",
@@ -136,27 +170,12 @@ const walletPolicyAuditEntrySchema = z
       description: "Destination address or counterparty when available.",
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
-    status: z
-      .enum([
-        "created",
-        "evaluated",
-        "pending_approval",
-        "executing",
-        "completed",
-        "failed",
-        "canceled",
-      ])
-      .openapi({ description: "Current wallet operation status." }),
-    decision: z
-      .enum([
-        "allow",
-        "deny",
-        "approval_required",
-        "provider_approval_required",
-        "review",
-        "not_evaluated",
-      ])
-      .openapi({ description: "Policy decision for this operation." }),
+    status: walletOperationStatusSchema.openapi({
+      description: "Current wallet operation status.",
+    }),
+    decision: policyDecisionSchema.openapi({
+      description: "Policy decision for this operation.",
+    }),
     reasonCode: z.string().openapi({
       description: "Stable reason code explaining the decision.",
       example: "wallet_policy_match",
@@ -191,6 +210,124 @@ const walletPolicyAuditSchema = z
     }),
   })
   .openapi({ description: "Wallet policy audit summary." });
+
+const walletControlProfileRevisionSchema = z
+  .object({
+    id: z.string().openapi({ description: "Immutable wallet policy revision ID." }),
+    profileId: z.string().openapi({ description: "Wallet control profile ID." }),
+    revisionNumber: z.number().int().positive().openapi({
+      description: "Monotonically increasing profile revision number.",
+    }),
+    rules: z.array(policyRuleSchema).openapi({ description: "Rules stored in this revision." }),
+    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]),
+    createdBy: z.string().nullable(),
+    createdAt: isoDateTimeSchema,
+    activatedAt: isoDateTimeSchema.nullable(),
+    isActive: z.boolean().openapi({
+      description: "Whether this is the profile's currently active revision.",
+    }),
+  })
+  .openapi({ description: "Immutable wallet control profile revision." });
+
+const walletControlProfileHistoryProfileSchema = z
+  .object({
+    id: z.string(),
+    organizationId: z.string(),
+    projectId: z.string().nullable(),
+    custodyWalletId: z.string(),
+    name: z.string(),
+    status: z.enum(["draft", "active", "disabled", "archived"]),
+    activeRevisionId: z.string().nullable(),
+    createdBy: z.string().nullable(),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+    activatedAt: isoDateTimeSchema.nullable(),
+    archivedAt: isoDateTimeSchema.nullable(),
+  })
+  .openapi({ description: "Wallet control profile owning the returned revisions." });
+
+export const walletControlProfileRevisionHistorySchema = z
+  .object({
+    profile: walletControlProfileHistoryProfileSchema.nullable(),
+    revisions: z.array(walletControlProfileRevisionSchema),
+  })
+  .openapi({ description: "Wallet control profile and its immutable revision history." });
+
+const policyEvaluationPolicyContextSchema = z.object({
+  source: z.enum(["implicit_default_allow", "customer_profile"]),
+  profileId: z.string().nullable(),
+  revisionId: z.string().nullable(),
+  defaultAction: z.enum(["allow", "deny", "approval_required", "review"]),
+  decision: policyDecisionSchema,
+  requiresApproval: z.boolean(),
+});
+
+const publicPolicyEvaluationContextSchema = z
+  .object({
+    operation: z.object({
+      id: z.string(),
+      organizationId: z.string(),
+      projectId: z.string().nullable(),
+      custodyWalletId: z.string().nullable(),
+      walletId: z.string(),
+      apiKeyId: z.string().nullable(),
+      actor: z.record(z.string(), z.unknown()).nullable(),
+      source: z.string(),
+      operationFamily: walletOperationFamilySchema,
+      operationType: z.string(),
+      asset: z.string().nullable(),
+      amount: z.string().nullable(),
+      destination: z.string().nullable(),
+      context: z.record(z.string(), z.unknown()),
+      idempotencyKey: z.string().nullable(),
+      createdAt: isoDateTimeSchema,
+    }),
+    walletPolicy: policyEvaluationPolicyContextSchema,
+    apiKeyPolicy: policyEvaluationPolicyContextSchema.nullable(),
+  })
+  .openapi({
+    description:
+      "Redacted evaluation snapshot. Raw operation payloads and provider extensions are never returned.",
+  });
+
+export const walletPolicyEvaluationDetailSchema = z
+  .object({
+    id: z.string().openapi({ description: "Policy evaluation ID." }),
+    walletOperation: z.object({
+      id: z.string(),
+      operationFamily: walletOperationFamilySchema,
+      operationType: z.string(),
+      asset: z.string().nullable(),
+      amount: z.string().nullable(),
+      destination: z.string().nullable(),
+      status: walletOperationStatusSchema,
+      createdAt: isoDateTimeSchema,
+      updatedAt: isoDateTimeSchema,
+    }),
+    policyRevisions: z.object({
+      wallet: z.object({
+        evaluatedRevisionId: z.string().nullable(),
+        activeRevisionId: z.string().nullable(),
+      }),
+      apiKey: z.object({
+        evaluatedRevisionId: z.string().nullable(),
+        activeRevisionId: z.string().nullable(),
+      }),
+    }),
+    decision: policyDecisionSchema,
+    reasonCode: z.string(),
+    reason: z.string().nullable(),
+    matchedRules: z.array(z.record(z.string(), z.unknown())),
+    evaluationContext: publicPolicyEvaluationContextSchema.nullable(),
+    requiresApproval: z.boolean(),
+    approvalRequestId: z.string().nullable(),
+    evaluatedAt: isoDateTimeSchema,
+  })
+  .openapi({ description: "Inspectable, redacted policy evaluation detail." });
+
+export const walletPolicyEvaluationResponseSchema = z.object({
+  policyEvaluation: walletPolicyEvaluationDetailSchema,
+});
 
 export const walletPolicySchema = z
   .object({
@@ -244,6 +381,26 @@ export const paymentWalletIdParamsSchema = walletIdParamsSchemaBase
     }),
   })
   .openapi({ description: "Payment wallet path parameters." });
+
+export const paymentWalletPolicyEvaluationParamsSchema = paymentWalletIdParamsSchema
+  .extend({
+    policyEvaluationId: z.string().min(1).openapi({ description: "Policy evaluation ID." }),
+  })
+  .openapi({ description: "Wallet policy evaluation path parameters." });
+
+export const paymentWalletPolicyEvaluationListQuerySchema = z
+  .object({
+    page: pageQuerySchema.optional().openapi({ description: "Page number (default 1)." }),
+    pageSize: pageSizeQuerySchema
+      .max(100)
+      .optional()
+      .openapi({ description: "Items per page (default 25, maximum 100)." }),
+    decision: policyDecisionSchema.optional(),
+    status: walletOperationStatusSchema.optional(),
+    operationFamily: walletOperationFamilySchema.optional(),
+    reasonCode: z.string().min(1).max(100).optional(),
+  })
+  .openapi({ description: "Wallet policy evaluation history filters." });
 
 export const paymentTransferIdParamsSchema = transferIdParamsSchemaBase
   .extend({

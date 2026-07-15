@@ -197,6 +197,15 @@ export interface WalletControlProfileRevision {
   activatedAt: string | null;
 }
 
+export interface WalletControlProfileRevisionSummary extends WalletControlProfileRevision {
+  isActive: boolean;
+}
+
+export interface WalletControlProfileRevisionHistory {
+  profile: WalletControlProfile | null;
+  revisions: WalletControlProfileRevisionSummary[];
+}
+
 export interface ApiKeyControlProfile {
   id: string;
   organizationId: string;
@@ -327,6 +336,43 @@ export interface PolicyEvaluationContext {
   };
   walletPolicy: PolicyEvaluationPolicyContext;
   apiKeyPolicy: PolicyEvaluationPolicyContext | null;
+}
+
+export type PublicPolicyEvaluationContext = Omit<PolicyEvaluationContext, "operation"> & {
+  operation: Omit<PolicyEvaluationContext["operation"], "providerExtensions" | "rawPayload">;
+};
+
+export interface WalletPolicyEvaluationDetail {
+  id: string;
+  walletOperation: {
+    id: string;
+    operationFamily: WalletOperationFamily;
+    operationType: string;
+    asset: string | null;
+    amount: string | null;
+    destination: string | null;
+    status: WalletOperationStatus;
+    createdAt: string;
+    updatedAt: string;
+  };
+  policyRevisions: {
+    wallet: {
+      evaluatedRevisionId: string | null;
+      activeRevisionId: string | null;
+    };
+    apiKey: {
+      evaluatedRevisionId: string | null;
+      activeRevisionId: string | null;
+    };
+  };
+  decision: PolicyDecision;
+  reasonCode: string;
+  reason: string | null;
+  matchedRules: Record<string, unknown>[];
+  evaluationContext: PublicPolicyEvaluationContext | null;
+  requiresApproval: boolean;
+  approvalRequestId: string | null;
+  evaluatedAt: string;
 }
 
 export interface PolicyEvaluationPolicyContext {
