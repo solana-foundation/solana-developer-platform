@@ -26,6 +26,15 @@ import frDashboardPayments from "../../messages/fr/dashboard-payments.json";
 import frDashboardPolicies from "../../messages/fr/dashboard-policies.json";
 import frShared from "../../messages/fr/shared.json";
 import fr from "../../messages/fr.json";
+import kkDashboardApprovals from "../../messages/kk/dashboard-approvals.json";
+import kkDashboardCustody from "../../messages/kk/dashboard-custody.json";
+import kkDashboardEarn from "../../messages/kk/dashboard-earn.json";
+import kkDashboardIssuance from "../../messages/kk/dashboard-issuance.json";
+import kkDashboardPayments from "../../messages/kk/dashboard-payments.json";
+import kkDashboardPolicies from "../../messages/kk/dashboard-policies.json";
+import kkDashboardPrivateChannels from "../../messages/kk/dashboard-private-channels.json";
+import kkShared from "../../messages/kk/shared.json";
+import kk from "../../messages/kk.json";
 import ptDashboardApprovals from "../../messages/pt/dashboard-approvals.json";
 import ptDashboardCustody from "../../messages/pt/dashboard-custody.json";
 import ptDashboardIssuance from "../../messages/pt/dashboard-issuance.json";
@@ -34,6 +43,15 @@ import ptDashboardPolicies from "../../messages/pt/dashboard-policies.json";
 import ptDashboardPrivateChannels from "../../messages/pt/dashboard-private-channels.json";
 import ptShared from "../../messages/pt/shared.json";
 import pt from "../../messages/pt.json";
+import ruDashboardApprovals from "../../messages/ru/dashboard-approvals.json";
+import ruDashboardCustody from "../../messages/ru/dashboard-custody.json";
+import ruDashboardEarn from "../../messages/ru/dashboard-earn.json";
+import ruDashboardIssuance from "../../messages/ru/dashboard-issuance.json";
+import ruDashboardPayments from "../../messages/ru/dashboard-payments.json";
+import ruDashboardPolicies from "../../messages/ru/dashboard-policies.json";
+import ruDashboardPrivateChannels from "../../messages/ru/dashboard-private-channels.json";
+import ruShared from "../../messages/ru/shared.json";
+import ru from "../../messages/ru.json";
 
 const enMessages = {
   ...en,
@@ -105,6 +123,20 @@ const frCatalog = {
 
 const frMessages = mergeLocalizedMessages(enMessages, frCatalog);
 
+const kkCatalog = {
+  ...kk,
+  ...kkDashboardApprovals,
+  ...kkDashboardCustody,
+  ...kkDashboardEarn,
+  ...kkDashboardIssuance,
+  ...kkDashboardPayments,
+  ...kkDashboardPolicies,
+  ...kkDashboardPrivateChannels,
+  Shared: kkShared,
+} satisfies LocalizedMessages<Messages>;
+
+const kkMessages = mergeLocalizedMessages(enMessages, kkCatalog);
+
 const ptCatalog = {
   ...pt,
   ...ptDashboardApprovals,
@@ -117,6 +149,20 @@ const ptCatalog = {
 } satisfies LocalizedMessages<Messages>;
 
 const ptMessages = mergeLocalizedMessages(enMessages, ptCatalog);
+
+const ruCatalog = {
+  ...ru,
+  ...ruDashboardApprovals,
+  ...ruDashboardCustody,
+  ...ruDashboardEarn,
+  ...ruDashboardIssuance,
+  ...ruDashboardPayments,
+  ...ruDashboardPolicies,
+  ...ruDashboardPrivateChannels,
+  Shared: ruShared,
+} satisfies LocalizedMessages<Messages>;
+
+const ruMessages = mergeLocalizedMessages(enMessages, ruCatalog);
 
 export type MessageKeyFor<TValue> = TValue extends string
   ? ""
@@ -133,7 +179,9 @@ const messagesByLocale: Record<AppLocale, Messages> = {
   en: enMessages,
   es: esMessages,
   fr: frMessages,
+  kk: kkMessages,
   pt: ptMessages,
+  ru: ruMessages,
 };
 
 export function getMessages(locale: AppLocale): Messages {

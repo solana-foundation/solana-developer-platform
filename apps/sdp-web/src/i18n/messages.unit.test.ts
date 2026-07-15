@@ -16,13 +16,14 @@ function flattenKeys(value: unknown, prefix = ""): string[] {
     return flattenKeys(nested, next);
   });
 }
-
 describe("i18n messages", () => {
   it("only accepts configured locales", () => {
     expect(isAppLocale("en")).toBe(true);
     expect(isAppLocale("es")).toBe(true);
     expect(isAppLocale("fr")).toBe(true);
+    expect(isAppLocale("kk")).toBe(true);
     expect(isAppLocale("pt")).toBe(true);
+    expect(isAppLocale("ru")).toBe(true);
     expect(isAppLocale("de")).toBe(false);
   });
 
@@ -31,6 +32,10 @@ describe("i18n messages", () => {
     expect(translate(getMessages("es"), "Home.contactUs")).toBe("Contáctanos");
     expect(translate(getMessages("fr"), "Home.contactUs")).toBe("Nous contacter");
     expect(translate(getMessages("pt"), "Home.contactUs")).toBe("Fale conosco");
+    expect(translate(getMessages("kk"), "Home.joinWaitlist")).toBe("Күту тізіміне қосылу");
+    expect(translate(getMessages("ru"), "Home.joinWaitlist")).toBe(
+      "Присоединиться к списку ожидания"
+    );
   });
 
   it("keeps non-English catalogs inventory-matched to English", () => {

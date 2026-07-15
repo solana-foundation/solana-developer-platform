@@ -2,7 +2,7 @@
 
 The dashboard keeps its supported BCP-47 locales in `config.ts` and its English source catalog in `../../messages/en.json`.
 
-Supported locales today: `en`, `es`, `fr`, `pt`. Latin American Spanish catalogs live under `../../messages/es/`, French catalogs under `../../messages/fr/`, and Brazilian Portuguese catalogs under `../../messages/pt/`. The release workflow restores 100% key parity with English before release; at runtime, a temporarily missing localized key falls back to its English source value.
+Supported locales today: `en`, `es`, `fr`, `kk`, `pt`, `ru`. Latin American Spanish catalogs live under `../../messages/es/`, French catalogs under `../../messages/fr/`, Kazakh catalogs under `../../messages/kk/`, Brazilian Portuguese catalogs under `../../messages/pt/`, and Russian catalogs under `../../messages/ru/`. The release workflow restores 100% key parity with English before release; at runtime, a temporarily missing localized key falls back to its English source value.
 
 Product PRs add or change copy only in the English source catalogs. Do not update localized catalogs in the same PR: the release workflow asks Eve to fill missing locale keys on the repository-owned `codex/release-main` branch. The catalog policy verifies both that branch name and its source repository before allowing mixed catalog changes. A dedicated translation-quality PR may change localized catalogs as long as it does not also introduce English source changes.
 
