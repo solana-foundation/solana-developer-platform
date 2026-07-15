@@ -72,12 +72,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.release-app.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          TRANSLATION_LLM_API_KEY: ${{ secrets.TRANSLATION_LLM_API_KEY }}
-          TRANSLATION_LLM_BASE_URL: ${{ vars.TRANSLATION_LLM_BASE_URL }}
-          TRANSLATION_LLM_MODEL: ${{ vars.TRANSLATION_LLM_MODEL }}
-          TRANSLATION_LLM_MAX_KEYS: ${{ vars.TRANSLATION_LLM_MAX_KEYS }}
-          TRANSLATION_LLM_BATCH_SIZE: ${{ vars.TRANSLATION_LLM_BATCH_SIZE }}
-          TRANSLATION_LLM_MAX_RETRIES: ${{ vars.TRANSLATION_LLM_MAX_RETRIES }}
+          TRANSLATION_AGENT_URL: ${{ vars.TRANSLATION_AGENT_URL }}
+          TRANSLATION_AGENT_USERNAME: ${{ secrets.TRANSLATION_AGENT_USERNAME }}
+          TRANSLATION_AGENT_PASSWORD: ${{ secrets.TRANSLATION_AGENT_PASSWORD }}
+          TRANSLATION_AGENT_MODEL: ${{ vars.TRANSLATION_AGENT_MODEL }}
+          TRANSLATION_AGENT_MAX_KEYS: ${{ vars.TRANSLATION_AGENT_MAX_KEYS }}
+          TRANSLATION_AGENT_BATCH_SIZE: ${{ vars.TRANSLATION_AGENT_BATCH_SIZE }}
+          TRANSLATION_AGENT_MAX_RETRIES: ${{ vars.TRANSLATION_AGENT_MAX_RETRIES }}
         run: |
           if ! git ls-remote --exit-code origin refs/heads/codex/release-main >/dev/null 2>&1; then
             echo "No release branch was created; skipping translation sync."

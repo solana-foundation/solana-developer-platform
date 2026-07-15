@@ -298,25 +298,7 @@ export function extractPlaceholderTokens(value) {
   return tokens.sort();
 }
 
-function parseModelContent(payload) {
-  const content = payload?.choices?.[0]?.message?.content;
-  if (typeof content !== "string") {
-    throw new Error("Translation provider returned no text content");
-  }
-
-  const unfenced = content
-    .trim()
-    .replace(/^```[^\s`]*\s*/i, "")
-    .replace(/\s*```$/, "");
-  const parsed = JSON.parse(unfenced);
-  const translations = Array.isArray(parsed) ? parsed : parsed?.translations;
-  if (!Array.isArray(translations)) {
-    throw new Error("Translation provider response must contain a translations array");
-  }
-  return translations;
-}
-
-function validateModelTranslations(entries, translations) {
+function validateAgentTranslations(entries, translations) {
   const expected = new Map(
     entries.map((entry) => [`${entry.sourceFile}\u0000${entry.key}`, entry])
   );
@@ -325,25 +307,25 @@ function validateModelTranslations(entries, translations) {
 
   for (const translation of translations) {
     if (!isRecord(translation)) {
-      throw new Error("Translation provider returned a non-object item");
+      throw new Error("Translation agent returned a non-object item");
     }
 
     const { file, key, translation: value } = translation;
     const entry = expected.get(`${file}\u0000${key}`);
     if (!entry) {
-      throw new Error(`Translation provider returned an unexpected key: ${file}:${key}`);
+      throw new Error(`Translation agent returned an unexpected key: ${file}:${key}`);
     }
     if (seen.has(`${file}\u0000${key}`)) {
-      throw new Error(`Translation provider returned a duplicate key: ${file}:${key}`);
+      throw new Error(`Translation agent returned a duplicate key: ${file}:${key}`);
     }
     if (typeof value !== "string" || value.trim() === "") {
-      throw new Error(`Translation provider returned an empty translation: ${file}:${key}`);
+      throw new Error(`Translation agent returned an empty translation: ${file}:${key}`);
     }
 
     const sourceTokens = extractPlaceholderTokens(entry.source);
     const translationTokens = extractPlaceholderTokens(value);
     if (sourceTokens.join("\u0000") !== translationTokens.join("\u0000")) {
-      throw new Error(`Translation provider changed placeholders: ${file}:${key}`);
+      throw new Error(`Translation agent changed placeholders: ${file}:${key}`);
     }
 
     seen.add(`${file}\u0000${key}`);
@@ -352,62 +334,130 @@ function validateModelTranslations(entries, translations) {
 
   if (seen.size !== expected.size) {
     const missing = [...expected.keys()].filter((key) => !seen.has(key));
-    throw new Error(`Translation provider omitted keys: ${missing.join(", ")}`);
+    throw new Error(`Translation agent omitted keys: ${missing.join(", ")}`);
   }
 
   return result;
 }
 
+function translationOutputSchema(entries) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      translations: {
+        type: "array",
+        minItems: entries.length,
+        maxItems: entries.length,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            file: {
+              type: "string",
+              enum: [...new Set(entries.map((entry) => entry.sourceFile))],
+            },
+            key: {
+              type: "string",
+              enum: [...new Set(entries.map((entry) => entry.key))],
+            },
+            translation: { type: "string", minLength: 1 },
+          },
+          required: ["file", "key", "translation"],
+        },
+      },
+    },
+    required: ["translations"],
+  };
+}
+
+function parseAgentResult(body) {
+  const events = body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+
+  const failure = events.find(
+    (event) => event.type === "session.failed" || event.type === "turn.failed"
+  );
+  if (failure) {
+    throw new Error(`Translation agent failed: ${failure.data?.message ?? "unknown error"}`);
+  }
+
+  const completed = [...events].reverse().find((event) => event.type === "result.completed");
+  const translations = completed?.data?.result?.translations;
+  if (!Array.isArray(translations)) {
+    throw new Error("Translation agent returned no structured translations");
+  }
+  return translations;
+}
+
 async function requestTranslations({
   locale,
   entries,
-  apiKey,
-  baseUrl,
-  model,
+  agentUrl,
+  agentUsername,
+  agentPassword,
   fetchImpl = fetch,
   maxRetries = 2,
 }) {
-  const endpoint = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
+  const endpoint = agentUrl.replace(/\/$/, "");
+  const authorization = `Basic ${Buffer.from(`${agentUsername}:${agentPassword}`).toString("base64")}`;
   const body = {
-    model,
-    temperature: 0,
-    messages: [
-      {
-        role: "system",
-        content:
-          "You translate software UI catalogs. Return only JSON with a translations array. Preserve every placeholder, ICU token, markup token, and key exactly. Do not add commentary.",
-      },
-      {
-        role: "user",
-        content: JSON.stringify({
-          targetLocale: locale,
-          translations: entries.map(({ sourceFile, key, source }) => ({
-            file: sourceFile,
-            key,
-            source,
-          })),
-          outputShape: [{ file: "same file", key: "same key", translation: "translated value" }],
-        }),
-      },
-    ],
+    message: JSON.stringify({
+      targetLocale: locale,
+      translations: entries.map(({ sourceFile, key, source }) => ({
+        file: sourceFile,
+        key,
+        source,
+      })),
+      outputShape: [{ file: "same file", key: "same key", translation: "translated value" }],
+    }),
+    outputSchema: translationOutputSchema(entries),
   };
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
-      const response = await fetchImpl(endpoint, {
+      const response = await fetchImpl(`${endpoint}/eve/v1/session`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: authorization,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
       });
 
       if (!response.ok) {
-        throw new Error(`Translation provider returned HTTP ${response.status}`);
+        throw new Error(`Translation agent returned HTTP ${response.status}`);
       }
 
-      return validateModelTranslations(entries, parseModelContent(await response.json()));
+      const session = await response.json();
+      if (typeof session?.sessionId !== "string") {
+        throw new Error("Translation agent did not return a session id");
+      }
+
+      const stream = await fetchImpl(
+        `${endpoint}/eve/v1/session/${encodeURIComponent(session.sessionId)}/stream`,
+        {
+          headers: {
+            Accept: "application/x-ndjson",
+            Authorization: authorization,
+          },
+        }
+      );
+      if (!stream.ok) {
+        throw new Error(`Translation agent stream returned HTTP ${stream.status}`);
+      }
+
+      return validateAgentTranslations(entries, parseAgentResult(await stream.text()));
     } catch (error) {
       if (attempt >= maxRetries) {
         throw error;
@@ -416,14 +466,14 @@ async function requestTranslations({
     }
   }
 
-  throw new Error("Translation provider request failed");
+  throw new Error("Translation agent request failed");
 }
 
 export async function translateMissingEntries({
   missing,
-  apiKey,
-  baseUrl,
-  model,
+  agentUrl,
+  agentUsername,
+  agentPassword,
   maxKeys = 500,
   batchSize = 50,
   maxRetries = 2,
@@ -432,14 +482,13 @@ export async function translateMissingEntries({
   if (missing.length === 0) {
     return { translations: [], batches: 0 };
   }
-  if (!apiKey) {
-    throw new Error("TRANSLATION_LLM_API_KEY is required when translations are missing");
+  if (!agentUrl) {
+    throw new Error("TRANSLATION_AGENT_URL is required when translations are missing");
   }
-  if (!baseUrl) {
-    throw new Error("TRANSLATION_LLM_BASE_URL is required when translations are missing");
-  }
-  if (!model) {
-    throw new Error("TRANSLATION_LLM_MODEL is required when translations are missing");
+  if (!agentUsername || !agentPassword) {
+    throw new Error(
+      "TRANSLATION_AGENT_USERNAME and TRANSLATION_AGENT_PASSWORD are required when translations are missing"
+    );
   }
   if (!Number.isInteger(maxKeys) || maxKeys < 1) {
     throw new Error("Translation budget must be a positive integer");
@@ -472,9 +521,9 @@ export async function translateMissingEntries({
         ...(await requestTranslations({
           locale,
           entries: batch,
-          apiKey,
-          baseUrl,
-          model,
+          agentUrl,
+          agentUsername,
+          agentPassword,
           fetchImpl,
           maxRetries,
         }))
@@ -504,12 +553,12 @@ export function applyTranslations({ messagesDir, translations }) {
   }
 }
 
-export function providerHost(baseUrl) {
-  if (!baseUrl) {
+export function agentHost(agentUrl) {
+  if (!agentUrl) {
     return "not configured";
   }
   try {
-    return new URL(baseUrl).host;
+    return new URL(agentUrl).host;
   } catch {
     return "configured endpoint";
   }

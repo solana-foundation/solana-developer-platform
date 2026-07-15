@@ -2,9 +2,9 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  agentHost,
   applyTranslations,
   collectMissingTranslations,
-  providerHost,
   translateMissingEntries,
   validateCatalogs,
 } from "./missing-translations.mjs";
@@ -17,8 +17,8 @@ const messagesDir = path.resolve(
 );
 const sourceLocale = process.env.I18N_SOURCE_LOCALE ?? "en";
 const dryRun = process.argv.includes("--dry-run");
-const model = process.env.TRANSLATION_LLM_MODEL;
-const baseUrl = process.env.TRANSLATION_LLM_BASE_URL;
+const agentUrl = process.env.TRANSLATION_AGENT_URL;
+const agentModel = process.env.TRANSLATION_AGENT_MODEL;
 
 function git(args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -89,7 +89,7 @@ function summaryMarkdown({
   const files = [...new Set(translations.map((entry) => entry.targetFile))].sort();
   const lines = [
     "<!-- sdp-translation-summary -->",
-    "## LLM translation sync",
+    "## Eve translation sync",
     "",
     `- Status: **${noOp ? "no-op" : "generated"}**`,
     `- Impacted locales: ${impacted}`,
@@ -97,8 +97,8 @@ function summaryMarkdown({
     `- Existing locales updated: ${formatLocales(existingLocales)}`,
     `- Missing strings: ${missing.length}`,
     `- Generated strings: ${translations.length}`,
-    `- Provider: \`${providerHost(baseUrl)}\``,
-    `- Model: \`${model ?? "not configured"}\``,
+    `- Eve agent: \`${agentHost(agentUrl)}\``,
+    `- Model: \`${agentModel ?? "configured by Eve"}\``,
     `- Requests: ${batches}`,
     `- Generated files: ${files.length === 0 ? "None" : files.map((file) => `\`${file}\``).join(", ")}`,
     "",
@@ -195,12 +195,12 @@ async function main() {
 
   const result = await translateMissingEntries({
     missing: inventory.missing,
-    apiKey: process.env.TRANSLATION_LLM_API_KEY,
-    baseUrl,
-    model,
-    maxKeys: Number(process.env.TRANSLATION_LLM_MAX_KEYS || 500),
-    batchSize: Number(process.env.TRANSLATION_LLM_BATCH_SIZE || 50),
-    maxRetries: Number(process.env.TRANSLATION_LLM_MAX_RETRIES || 2),
+    agentUrl,
+    agentUsername: process.env.TRANSLATION_AGENT_USERNAME,
+    agentPassword: process.env.TRANSLATION_AGENT_PASSWORD,
+    maxKeys: Number(process.env.TRANSLATION_AGENT_MAX_KEYS || 500),
+    batchSize: Number(process.env.TRANSLATION_AGENT_BATCH_SIZE || 50),
+    maxRetries: Number(process.env.TRANSLATION_AGENT_MAX_RETRIES || 2),
   });
 
   applyTranslations({ messagesDir, translations: result.translations });

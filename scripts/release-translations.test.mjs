@@ -91,7 +91,7 @@ test("allows stale locale keys after a source string is removed", () => {
   assert.doesNotThrow(() => validateCatalogs({ messagesDir }));
 });
 
-test("requires the model to preserve placeholders and return every requested key", async () => {
+test("uses the Eve structured session API and preserves placeholders", async () => {
   const missing = [
     {
       locale: "fr",
@@ -104,33 +104,47 @@ test("requires the model to preserve placeholders and return every requested key
 
   const result = await translateMissingEntries({
     missing,
-    apiKey: "test-key",
-    baseUrl: "https://llm.example.test/v1",
-    model: "test-model",
-    fetchImpl: async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content: `\`\`\`text
-${JSON.stringify({
-  translations: [{ file: "en.json", key: "Home.title", translation: "Bonjour {name}" }],
-})}
-\`\`\``,
+    agentUrl: "https://translation.example.test",
+    agentUsername: "test-user",
+    agentPassword: "test-password",
+    fetchImpl: async (url, options) => {
+      if (url.endsWith("/eve/v1/session")) {
+        assert.equal(
+          options.headers.Authorization,
+          `Basic ${Buffer.from("test-user:test-password").toString("base64")}`
+        );
+        const request = JSON.parse(options.body);
+        assert.equal(request.outputSchema.properties.translations.minItems, 1);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ sessionId: "session-1" }),
+        };
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          `${JSON.stringify({
+            type: "result.completed",
+            data: {
+              result: {
+                translations: [
+                  { file: "en.json", key: "Home.title", translation: "Bonjour {name}" },
+                ],
+              },
             },
-          },
-        ],
-      }),
-    }),
+          })}\n`,
+      };
+    },
   });
 
   assert.equal(result.batches, 1);
   assert.equal(result.translations[0].value, "Bonjour {name}");
 });
 
-test("rejects a provider response that changes placeholders", async () => {
+test("rejects an Eve result that changes placeholders", async () => {
   await assert.rejects(
     translateMissingEntries({
       missing: [
@@ -142,24 +156,31 @@ test("rejects a provider response that changes placeholders", async () => {
           source: "Hello {name}",
         },
       ],
-      apiKey: "test-key",
-      baseUrl: "https://llm.example.test/v1",
-      model: "test-model",
-      fetchImpl: async () => ({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  translations: [{ file: "en.json", key: "Home.title", translation: "Bonjour" }],
-                }),
-              },
+      agentUrl: "https://translation.example.test",
+      agentUsername: "test-user",
+      agentPassword: "test-password",
+      fetchImpl: async (url) =>
+        url.endsWith("/eve/v1/session")
+          ? {
+              ok: true,
+              status: 200,
+              json: async () => ({ sessionId: "session-1" }),
+            }
+          : {
+              ok: true,
+              status: 200,
+              text: async () =>
+                `${JSON.stringify({
+                  type: "result.completed",
+                  data: {
+                    result: {
+                      translations: [
+                        { file: "en.json", key: "Home.title", translation: "Bonjour" },
+                      ],
+                    },
+                  },
+                })}\n`,
             },
-          ],
-        }),
-      }),
     }),
     /changed placeholders/
   );
