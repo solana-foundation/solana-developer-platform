@@ -1,3 +1,4 @@
+import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
 import { getAssetTypeRegistryEntry, type TokenWithAssetProfileResponse } from "@sdp/types";
 import { z } from "zod";
 import { asTransactionalClient, getDb } from "@/db";
@@ -9,7 +10,6 @@ import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { created } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { normalizeTemplateId, resolveTemplateConfig } from "@/services/issuance/templates";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import { createTokenWithAssetProfileSchema } from "../issuance/schemas";

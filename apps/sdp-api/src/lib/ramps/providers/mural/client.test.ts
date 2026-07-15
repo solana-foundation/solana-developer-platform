@@ -1,8 +1,8 @@
 import { SdpPaymentsError } from "@sdp/payments";
+import { MuralRampClient } from "@sdp/payments/ramps/providers/mural/client";
+import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RampRuntimeContext } from "../../types";
-import { MuralRampClient } from "./client";
 
 const client = new MuralRampClient();
 

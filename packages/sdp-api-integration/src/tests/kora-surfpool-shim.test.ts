@@ -1,4 +1,4 @@
-import { KoraAdapter } from "@sdp/api/services/adapters";
+import { apiTestSupport } from "@sdp/api/test-support";
 import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
 import {
   type Address,
@@ -12,6 +12,8 @@ import {
 } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { env, RUN_INTEGRATION_TESTS } from "../helpers/integration";
+
+const { KoraAdapter } = apiTestSupport;
 
 const koraSurfpoolShim = (env as { KORA_SURFPOOL_SHIM?: string }).KORA_SURFPOOL_SHIM;
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;

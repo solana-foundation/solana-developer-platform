@@ -1,4 +1,4 @@
-import { TEST_PROJECT } from "@sdp/api-test/fixtures/tokens";
+import { apiTestSupport } from "@sdp/api/test-support";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
@@ -9,6 +9,8 @@ import {
   resetIntegrationState,
   SOLANA_CONFIGURED,
 } from "../helpers/integration";
+
+const { TEST_PROJECT } = apiTestSupport;
 
 type WalletListResponse = {
   data: {

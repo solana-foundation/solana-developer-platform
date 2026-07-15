@@ -11,13 +11,15 @@
  *   KORA_RPC_URL=http://kora:8080 pnpm --filter @sdp/api-integration test
  */
 
-import { KoraAdapter, KoraClient } from "@sdp/api/services/adapters";
+import { apiTestSupport } from "@sdp/api/test-support";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { env, KORA_CONFIGURED, RUN_INTEGRATION_TESTS } from "../helpers/integration";
 
+const { KoraAdapter, KoraClient } = apiTestSupport;
+
 describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", () => {
-  let adapter: KoraAdapter;
-  let client: KoraClient;
+  let adapter: InstanceType<typeof KoraAdapter>;
+  let client: InstanceType<typeof KoraClient>;
 
   beforeAll(() => {
     const koraUrl = env.KORA_RPC_URL ?? "http://localhost:8080";

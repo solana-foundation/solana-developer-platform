@@ -4,6 +4,7 @@
  * Shared data access for API key operations.
  */
 
+import { hashString } from "@sdp/payments/hash";
 import type {
   ApiKeyEnvironment,
   ApiKeyRole,
@@ -14,7 +15,6 @@ import type {
 import type { DatabaseExecutor } from "@/db";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
-import { hashString } from "@/lib/hash";
 import { createApiKeyMaterial } from "./api-key.utils";
 import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
 
