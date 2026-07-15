@@ -44,6 +44,8 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
     fee: (row.fee as number | null | undefined) ?? null,
     error: (row.error as string | null | undefined) ?? null,
     initiated_by_key_id: (row.initiated_by_key_id as string | null | undefined) ?? null,
+    idempotency_key: (row.idempotency_key as string | null | undefined) ?? null,
+    idempotency_fingerprint: (row.idempotency_fingerprint as string | null | undefined) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -134,9 +136,11 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
              signature,
              slot,
              initiated_by_key_id,
+             idempotency_key,
+             idempotency_fingerprint,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, sdp_iso_now(), sdp_iso_now())
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, sdp_iso_now(), sdp_iso_now())
            RETURNING *`
         )
         .bind(
@@ -162,8 +166,24 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
           input.serializedTx,
           input.signature,
           input.slot,
-          input.initiatedByKeyId
+          input.initiatedByKeyId,
+          input.idempotencyKey ?? null,
+          input.idempotencyFingerprint ?? null
         )
+        .first<Record<string, unknown>>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async findTransferByIdempotency({ organizationId, projectId, idempotencyKey }) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM payment_transfers
+           WHERE organization_id = ?
+             AND COALESCE(project_id, '') = COALESCE(?, '')
+             AND idempotency_key = ?`
+        )
+        .bind(organizationId, projectId, idempotencyKey)
         .first<Record<string, unknown>>();
 
       return row ? mapTransferRow(row) : null;
