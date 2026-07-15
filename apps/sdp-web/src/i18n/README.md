@@ -2,6 +2,8 @@
 
 The dashboard keeps its supported BCP-47 locales in `config.ts` and its English source catalog in `../../messages/en.json`.
 
+Supported locales today: `en`, `kk`, `ru`. Kazakh and Russian catalogs live under `../../messages/kk/` and `../../messages/ru/` and must keep a 100% matching key inventory with English.
+
 Use `await getTranslations()` in Server Components and `useTranslations()` in Client Components. Both accept only keys that exist in the English catalog. For dates, numbers, lists, and relative time, construct the native `Intl` formatter with the resolved locale rather than pinning it to `en-US`.
 
 To add a locale, add its BCP-47 tag to `supportedLocales`, add a same-shaped catalog, and register it in `messagesByLocale`. The request resolver gives a valid locale cookie priority, then uses `Accept-Language`, falling back to English. A future language picker should persist its selection in the `sdp-locale` cookie.
