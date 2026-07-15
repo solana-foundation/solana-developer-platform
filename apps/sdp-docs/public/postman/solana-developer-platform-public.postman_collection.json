@@ -371,6 +371,51 @@
           }
         },
         {
+          "name": "List wallet approval requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests",
+            "description": "Lists wallet operation approval requests for the authenticated organization or project scope."
+          }
+        },
+        {
+          "name": "Get wallet approval request",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}",
+            "description": "Returns one wallet operation approval request with operation and policy context."
+          }
+        },
+        {
+          "name": "Approve wallet approval request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/approve",
+            "description": "Approves a pending wallet operation approval request."
+          }
+        },
+        {
+          "name": "Reject wallet approval request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/reject",
+            "description": "Rejects a pending wallet operation approval request."
+          }
+        },
+        {
+          "name": "Cancel wallet approval request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/cancel",
+            "description": "Cancels a pending wallet operation approval request."
+          }
+        },
+        {
           "name": "Get wallet by ID",
           "request": {
             "method": "GET",

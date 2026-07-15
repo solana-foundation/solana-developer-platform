@@ -366,6 +366,9 @@ jobs:
           pnpm --filter sdp-docs generate:api
           pnpm --filter sdp-docs generate:ai
 
+      - name: Committed docs artifacts match generated output
+        run: git diff --exit-code apps/sdp-docs/public
+
       - name: Check docs links
         run: pnpm --filter sdp-docs check:links
 
