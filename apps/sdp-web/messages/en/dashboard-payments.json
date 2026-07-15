@@ -577,6 +577,7 @@
       "createCounterparty": "Create Counterparty",
       "playgroundEmailPlaceholder": "contact@acme.com",
       "playgroundIndividualOnly": "Required when entityType is individual; leave blank for business.",
+      "playgroundAddressRequired": "Required for all entity types.",
       "playgroundDateOfBirthPlaceholder": "1990-01-15",
       "playgroundPhonePlaceholder": "+14155551234",
       "selectEntityType": "Select entity type",

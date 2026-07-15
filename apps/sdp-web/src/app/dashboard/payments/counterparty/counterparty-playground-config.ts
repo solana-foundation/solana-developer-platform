@@ -48,6 +48,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
     label: cp.displayName,
   }));
   const individualOnlyDescription = t("DashboardPayments.counterparty.playgroundIndividualOnly");
+  const addressRequiredDescription = t("DashboardPayments.counterparty.playgroundAddressRequired");
 
   const counterpartyIdField: ApiPlaygroundFieldConfig =
     counterpartyOptions.length > 0
@@ -158,6 +159,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
           key: "identity.address.line1",
           label: "identity.address.line1",
           defaultValue: exampleAddress.line1,
+          description: addressRequiredDescription,
           required: true,
         },
         {
@@ -168,6 +170,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
           key: "identity.address.city",
           label: "identity.address.city",
           defaultValue: exampleAddress.city,
+          description: addressRequiredDescription,
           required: true,
         },
         {
@@ -179,6 +182,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
           key: "identity.address.countryCode",
           label: "identity.address.countryCode",
           defaultValue: exampleAddress.countryCode,
+          description: addressRequiredDescription,
           required: true,
         },
         {
