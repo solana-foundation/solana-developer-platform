@@ -321,6 +321,11 @@ export type UpsertApiKeyWalletPolicyBindingInput = UpsertApiKeyWalletPolicyBindi
       }
   );
 
+export interface ReplaceApiKeyWalletPolicyBindingsInput {
+  apiKeyId: string;
+  bindings: UpsertApiKeyWalletPolicyBindingInput[];
+}
+
 export interface CreateWalletOperationInput {
   organizationId: string;
   projectId: string | null;
@@ -419,8 +424,12 @@ export interface PolicyRepository {
   createApiKeyControlProfile(
     input: CreateApiKeyControlProfileInput
   ): Promise<ApiKeyControlProfileRow | null>;
+  getApiKeyControlProfileById(profileId: string): Promise<ApiKeyControlProfileRow | null>;
   createApiKeyControlProfileRevision(
     input: CreateApiKeyControlProfileRevisionInput
+  ): Promise<ApiKeyControlProfileRevisionRow | null>;
+  getApiKeyControlProfileRevisionById(
+    revisionId: string
   ): Promise<ApiKeyControlProfileRevisionRow | null>;
   activateApiKeyControlProfileRevision(
     input: ActivateApiKeyControlProfileRevisionInput
@@ -436,6 +445,9 @@ export interface PolicyRepository {
   upsertApiKeyWalletPolicyBinding(
     input: UpsertApiKeyWalletPolicyBindingInput
   ): Promise<ApiKeyWalletPolicyBindingRow | null>;
+  replaceApiKeyWalletPolicyBindings(
+    input: ReplaceApiKeyWalletPolicyBindingsInput
+  ): Promise<ApiKeyWalletPolicyBindingRow[]>;
   listApiKeyWalletPolicyBindings(apiKeyId: string): Promise<ApiKeyWalletPolicyBindingRow[]>;
   listApiKeyWalletPolicyBindingsForApiKeys(
     apiKeyIds: string[]

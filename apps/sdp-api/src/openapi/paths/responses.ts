@@ -5,7 +5,11 @@ import {
   addressScreeningResponseSchema,
   allowlistEntriesResponseSchema,
   allowlistEntrySchema,
+  apiKeyControlProfileActivationResponseSchema,
+  apiKeyControlProfileResponseSchema,
+  apiKeyControlProfileRevisionResponseSchema,
   apiKeyDetailSchema,
+  apiKeyPolicyBindingsResponseSchema,
   apiKeyResponseSchema,
   assetProfileFieldOptionsResponseSchema,
   assetProfileResponseSchema,
@@ -107,6 +111,18 @@ export const apiKeyDetailResponse = successResponseSchema(apiKeyDetailSchema);
 export const apiKeyCreateResponse = successResponseSchema(apiKeyResponseSchema);
 export const apiKeyRotateResponse = successResponseSchema(rotateApiKeyResponseSchema);
 export const apiKeyRevokeResponse = successResponseSchema(revokeApiKeyResponseSchema);
+export const apiKeyControlProfileResponse = successResponseSchema(
+  apiKeyControlProfileResponseSchema
+);
+export const apiKeyControlProfileRevisionResponse = successResponseSchema(
+  apiKeyControlProfileRevisionResponseSchema
+);
+export const apiKeyControlProfileActivationResponse = successResponseSchema(
+  apiKeyControlProfileActivationResponseSchema
+);
+export const apiKeyPolicyBindingsResponse = successResponseSchema(
+  apiKeyPolicyBindingsResponseSchema
+);
 
 export const assetProfileResponse = successResponseSchema(assetProfileResponseSchema);
 export const assetProfileFieldOptionsResponse = successResponseSchema(
