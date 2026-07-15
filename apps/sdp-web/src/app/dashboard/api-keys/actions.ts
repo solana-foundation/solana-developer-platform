@@ -1,10 +1,28 @@
 "use server";
 
+import type {
+  ApiKeyControlProfile,
+  ApiKeyControlProfileRevision,
+  ApiKeyRole,
+  ApiKeyWalletPolicyBindingSummary,
+  ApiKeyWalletScope,
+} from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import {
+  type ApiKeyAuthoringDraft,
+  type ApiKeyAuthoringMode,
+  type BindingConfirmation,
+  buildApiKeyPolicyRules,
+  buildEndpointWalletPayload,
+  buildPolicyBindingTargets,
+  getPolicyBindingIntent,
+  isPositiveDecimal,
+  requiredBindingConfirmation,
+} from "./api-key-authoring";
 import { API_KEY_FLASH_COOKIE, API_KEYS_PAGE_PATH, type ApiKeyFlash } from "./api-key-flash";
 
 function parsePositiveInt(value: FormDataEntryValue | null, fallback: number): number {
@@ -28,6 +46,101 @@ function extractErrorMessage(error: unknown): string {
     return error.message;
   }
   return "Unknown error";
+}
+
+interface ApiKeyDetail {
+  id: string;
+  name: string;
+  role: ApiKeyRole;
+  walletScope: ApiKeyWalletScope;
+  signingWalletIds: string[];
+  policyBindings: ApiKeyWalletPolicyBindingSummary[];
+}
+
+export interface SaveApiKeyAuthoringInput {
+  mode: ApiKeyAuthoringMode;
+  keyId?: string;
+  draft: ApiKeyAuthoringDraft;
+  bindingConfirmation?: BindingConfirmation;
+}
+
+export type SaveApiKeyAuthoringResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
+function parseOptionalExpiration(value: string): string | null {
+  if (!value.trim()) {
+    return null;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("invalid_expiration");
+  }
+  return parsed.toISOString();
+}
+
+function validateAuthoringDraft(draft: ApiKeyAuthoringDraft): "name" | "wallet" | "amount" | null {
+  if (!draft.name.trim()) {
+    return "name";
+  }
+  if (draft.walletScope === "selected" && draft.selectedWalletIds.length === 0) {
+    return "wallet";
+  }
+  if (draft.restrictionsEnabled && draft.maximumAmount && !isPositiveDecimal(draft.maximumAmount)) {
+    return "amount";
+  }
+  return null;
+}
+
+async function createAndActivateRestrictionProfile(
+  client: SdpApiClient,
+  keyId: string,
+  draft: ApiKeyAuthoringDraft
+): Promise<string> {
+  const { profile } = await client.fetch<{ profile: ApiKeyControlProfile }>(
+    `/v1/api-keys/${encodeURIComponent(keyId)}/policy-profiles`,
+    {
+      method: "POST",
+      body: JSON.stringify({ name: `${draft.name.trim()} additional restrictions` }),
+    }
+  );
+  const { revision } = await client.fetch<{ revision: ApiKeyControlProfileRevision }>(
+    `/v1/api-keys/${encodeURIComponent(keyId)}/policy-profiles/${encodeURIComponent(profile.id)}/revisions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        rules: buildApiKeyPolicyRules(draft),
+        defaultAction: draft.defaultAction,
+      }),
+    }
+  );
+  await client.fetch(
+    `/v1/api-keys/${encodeURIComponent(keyId)}/policy-profiles/${encodeURIComponent(profile.id)}/revisions/${encodeURIComponent(revision.id)}/activate`,
+    { method: "POST" }
+  );
+  return profile.id;
+}
+
+async function replacePolicyBindings(
+  client: SdpApiClient,
+  keyId: string,
+  draft: ApiKeyAuthoringDraft,
+  profileId: string
+) {
+  await client.fetch(`/v1/api-keys/${encodeURIComponent(keyId)}/policy-bindings`, {
+    method: "PUT",
+    body: JSON.stringify({
+      mode: "replace",
+      bindings: buildPolicyBindingTargets(draft, profileId),
+    }),
+  });
+}
+
+async function clearPolicyBindings(client: SdpApiClient, keyId: string) {
+  await client.fetch(`/v1/api-keys/${encodeURIComponent(keyId)}/policy-bindings`, {
+    method: "PUT",
+    body: JSON.stringify({ mode: "clear" }),
+  });
 }
 
 function normalizeDeactivateApiKeyInput(input: {
@@ -103,105 +216,155 @@ async function deactivateApiKeyRequest(input: {
   }
 }
 
-export async function createApiKeyAction(formData: FormData) {
+export async function saveApiKeyAuthoringAction(
+  input: SaveApiKeyAuthoringInput
+): Promise<SaveApiKeyAuthoringResult> {
   const t = await getTranslations();
-  const name = String(formData.get("name") ?? "").trim();
-  const role = String(formData.get("role") ?? "api_developer");
-  const walletScope = String(formData.get("walletScope") ?? "").trim();
-  const defaultWalletId = String(formData.get("signingWalletId") ?? "").trim();
-  const signingWalletIds = formData
-    .getAll("signingWalletIds")
-    .map((value) => String(value).trim())
-    .filter(Boolean);
-  const expiresAtRaw = String(formData.get("expiresAt") ?? "").trim();
-
-  if (!name) {
-    await setFlash({
-      level: "error",
-      message: t("DashboardCustody.apiKeyNameRequired"),
-    });
-    redirect(API_KEYS_PAGE_PATH);
+  const validationError = validateAuthoringDraft(input.draft);
+  if (validationError === "name") {
+    return { ok: false, message: t("DashboardCustody.apiKeyNameRequired") };
+  }
+  if (validationError === "wallet") {
+    return { ok: false, message: t("DashboardCustody.apiKeyWalletRequired") };
+  }
+  if (validationError === "amount") {
+    return { ok: false, message: t("DashboardCustody.apiKeyRestrictionAmountInvalid") };
   }
 
-  if (walletScope !== "all" && walletScope !== "selected") {
-    await setFlash({
-      level: "error",
-      message: t("DashboardCustody.apiKeyWalletScopeRequired"),
-    });
-    redirect(API_KEYS_PAGE_PATH);
+  let expiresAt: string | null;
+  try {
+    expiresAt = parseOptionalExpiration(input.draft.expiresAt);
+  } catch {
+    return { ok: false, message: t("DashboardCustody.invalidExpirationDate") };
   }
 
-  if (walletScope === "selected" && signingWalletIds.length === 0) {
-    await setFlash({
-      level: "error",
-      message: t("DashboardCustody.apiKeyWalletRequired"),
-    });
-    redirect(API_KEYS_PAGE_PATH);
-  }
-
-  const payload: {
-    name: string;
-    role: "api_admin" | "api_developer" | "api_readonly";
-    walletScope: "all" | "selected";
-    expiresAt?: string;
-    signingWalletId?: string;
-    signingWalletIds?: string[];
-  } = {
-    name,
-    role:
-      role === "api_admin" || role === "api_readonly" || role === "api_developer"
-        ? role
-        : "api_developer",
-    walletScope: walletScope === "selected" ? "selected" : "all",
-  };
-
-  if (walletScope === "selected") {
-    payload.signingWalletIds = signingWalletIds;
-    payload.signingWalletId = defaultWalletId || signingWalletIds[0];
-  }
-
-  if (expiresAtRaw) {
-    const parsedDate = new Date(expiresAtRaw);
-    if (Number.isNaN(parsedDate.getTime())) {
-      await setFlash({
-        level: "error",
-        message: t("DashboardCustody.invalidExpirationDate"),
-      });
-      redirect(API_KEYS_PAGE_PATH);
-    }
-    payload.expiresAt = parsedDate.toISOString();
-  }
+  const walletPayload = buildEndpointWalletPayload(input.draft);
 
   try {
     const client = await createSdpApiClient();
-    const response = await client.fetch<{
-      apiKey: {
-        id: string;
-        name: string;
-        key: string;
-        keyPrefix: string;
+
+    if (input.mode === "create") {
+      const created = await client.fetch<{
+        apiKey: { id: string; name: string; key: string; keyPrefix: string };
+      }>("/v1/api-keys", {
+        method: "POST",
+        body: JSON.stringify({
+          name: input.draft.name.trim(),
+          role: input.draft.role,
+          ...walletPayload,
+          ...(expiresAt ? { expiresAt } : {}),
+        }),
+      });
+
+      try {
+        if (input.draft.restrictionsEnabled) {
+          const profileId = await createAndActivateRestrictionProfile(
+            client,
+            created.apiKey.id,
+            input.draft
+          );
+          await replacePolicyBindings(client, created.apiKey.id, input.draft, profileId);
+        }
+      } catch (error) {
+        await client
+          .fetch(`/v1/api-keys/${encodeURIComponent(created.apiKey.id)}`, {
+            method: "DELETE",
+            body: JSON.stringify({ confirmation: created.apiKey.name }),
+          })
+          .catch(() => undefined);
+        throw error;
+      }
+
+      await setFlash({
+        level: "success",
+        message: t("DashboardCustody.apiKeyCreated", { name: created.apiKey.name }),
+        key: created.apiKey.key,
+        apiKeyId: created.apiKey.id,
+        keyPrefix: created.apiKey.keyPrefix,
+      });
+      revalidatePath(API_KEYS_PAGE_PATH, "page");
+      return {
+        ok: true,
+        message: t("DashboardCustody.apiKeyCreated", { name: created.apiKey.name }),
       };
-    }>("/v1/api-keys", {
-      method: "POST",
-      body: JSON.stringify(payload),
+    }
+
+    const keyId = input.keyId?.trim();
+    if (!keyId) {
+      return { ok: false, message: t("DashboardCustody.apiKeyEditMissingId") };
+    }
+
+    const apiKey = await client.fetch<ApiKeyDetail>(`/v1/api-keys/${encodeURIComponent(keyId)}`);
+    const bindingIntent = getPolicyBindingIntent(
+      "edit",
+      {
+        walletScope: apiKey.walletScope,
+        selectedWalletIds: apiKey.signingWalletIds,
+        policyBindings: apiKey.policyBindings,
+      },
+      input.draft
+    );
+
+    if (bindingIntent.mode === "blocked") {
+      return {
+        ok: false,
+        message: t("DashboardCustody.apiKeyRestrictionReplacementRequired"),
+      };
+    }
+
+    const confirmation = requiredBindingConfirmation(bindingIntent);
+    if (confirmation && input.bindingConfirmation !== confirmation) {
+      return {
+        ok: false,
+        message:
+          confirmation === "clear"
+            ? t("DashboardCustody.apiKeyClearBindingsConfirmationRequired")
+            : t("DashboardCustody.apiKeyReplaceBindingsConfirmationRequired"),
+      };
+    }
+
+    let profileId: string | undefined;
+    if (bindingIntent.mode === "replace") {
+      profileId =
+        bindingIntent.profile === "new"
+          ? await createAndActivateRestrictionProfile(client, keyId, input.draft)
+          : bindingIntent.existingProfileId;
+    }
+
+    await client.fetch(`/v1/api-keys/${encodeURIComponent(keyId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: input.draft.name.trim(),
+        expiresAt,
+        ...walletPayload,
+        ...(input.draft.walletScope === "all"
+          ? { signingWalletId: null, signingWalletIds: null, walletBindings: null }
+          : {}),
+      }),
     });
+
+    if (bindingIntent.mode === "replace" && profileId) {
+      await replacePolicyBindings(client, keyId, input.draft, profileId);
+    } else if (bindingIntent.mode === "clear") {
+      await clearPolicyBindings(client, keyId);
+    }
 
     await setFlash({
       level: "success",
-      message: t("DashboardCustody.apiKeyCreated", { name: response.apiKey.name }),
-      key: response.apiKey.key,
-      apiKeyId: response.apiKey.id,
-      keyPrefix: response.apiKey.keyPrefix,
+      message: t("DashboardCustody.apiKeyUpdated", { name: input.draft.name.trim() }),
     });
+    revalidatePath(API_KEYS_PAGE_PATH, "page");
+    revalidatePath(`${API_KEYS_PAGE_PATH}/${encodeURIComponent(keyId)}/edit`, "page");
+    return {
+      ok: true,
+      message: t("DashboardCustody.apiKeyUpdated", { name: input.draft.name.trim() }),
+    };
   } catch (error) {
-    await setFlash({
-      level: "error",
-      message: t("DashboardCustody.apiKeyCreateFailed", { error: extractErrorMessage(error) }),
-    });
+    return {
+      ok: false,
+      message: t("DashboardCustody.apiKeySaveFailed", { error: extractErrorMessage(error) }),
+    };
   }
-
-  revalidatePath(API_KEYS_PAGE_PATH, "page");
-  redirect(API_KEYS_PAGE_PATH);
 }
 
 export async function rotateApiKeyAction(formData: FormData) {
