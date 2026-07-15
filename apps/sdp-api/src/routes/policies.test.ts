@@ -578,6 +578,15 @@ describe("GET /v1/policies", () => {
       },
     });
 
+    const unboundApiKey = body.data.controls.find(
+      (control) => control.targetId === "key_policy_inventory_default"
+    );
+    expect(unboundApiKey).toMatchObject({
+      targetType: "api_key",
+      bindingScope: null,
+      selectedWalletCount: 0,
+    });
+
     const serialized = JSON.stringify(body);
     expect(serialized).not.toContain("hash_policy_inventory_active");
     expect(serialized).not.toContain("must-not-leak");

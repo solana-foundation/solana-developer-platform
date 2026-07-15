@@ -63,20 +63,28 @@ function mapInventoryItem(row: PolicyControlInventoryRow): PolicyControlInventor
   };
 
   if (row.target_type === "wallet") {
+    if (!row.wallet_id || !row.wallet_address) {
+      throw new AppError("INTERNAL_ERROR", "Wallet inventory target is incomplete");
+    }
+
     return {
       ...base,
       targetType: "wallet",
-      walletId: row.wallet_id ?? row.target_id,
-      walletAddress: row.wallet_address ?? "",
+      walletId: row.wallet_id,
+      walletAddress: row.wallet_address,
       providerMappingStatus: row.provider_mapping_status ?? "not_applicable",
     };
+  }
+
+  if (!row.api_key_prefix) {
+    throw new AppError("INTERNAL_ERROR", "API-key inventory target is incomplete");
   }
 
   return {
     ...base,
     targetType: "api_key",
-    apiKeyPrefix: row.api_key_prefix ?? "",
-    bindingScope: row.binding_scope ?? "all",
+    apiKeyPrefix: row.api_key_prefix,
+    bindingScope: row.binding_scope,
     selectedWalletCount: row.selected_wallet_count ?? 0,
   };
 }

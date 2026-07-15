@@ -71,8 +71,8 @@ const apiKeyPolicyControlInventoryItemSchema = z
     apiKeyPrefix: z.string().openapi({
       description: "Redacted API-key prefix. Secret key material is never returned.",
     }),
-    bindingScope: z.enum(["all", "selected"]).openapi({
-      description: "Whether policy bindings apply to all or selected wallets.",
+    bindingScope: z.enum(["all", "selected"]).nullable().openapi({
+      description: "Whether policy bindings apply to all or selected wallets, when configured.",
     }),
     selectedWalletCount: z.number().int().nonnegative().openapi({
       description: "Number of selected-wallet policy bindings.",

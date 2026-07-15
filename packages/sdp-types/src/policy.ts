@@ -275,7 +275,7 @@ export interface WalletPolicyControlInventoryItem extends PolicyControlInventory
 export interface ApiKeyPolicyControlInventoryItem extends PolicyControlInventoryItemBase {
   targetType: "api_key";
   apiKeyPrefix: string;
-  bindingScope: ApiKeyWalletPolicyBindingScope;
+  bindingScope: ApiKeyWalletPolicyBindingScope | null;
   selectedWalletCount: number;
 }
 

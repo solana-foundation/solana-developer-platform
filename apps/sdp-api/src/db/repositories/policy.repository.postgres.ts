@@ -266,7 +266,7 @@ inventory AS (
     CASE
       WHEN COALESCE(bindings.has_all_scope, false) THEN 'all'
       WHEN COALESCE(bindings.selected_wallet_count, 0) > 0 THEN 'selected'
-      ELSE 'all'
+      ELSE NULL::text
     END AS binding_scope,
     COALESCE(bindings.selected_wallet_count, 0)::integer AS selected_wallet_count,
     COALESCE(bindings.binding_count, 0) AS api_key_binding_count,
