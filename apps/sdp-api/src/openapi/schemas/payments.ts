@@ -68,30 +68,16 @@ export const tokenAmountSchema = z.string().openapi({
   example: "100.00",
 });
 
-const policyRuleSchema = z
-  .object({
-    id: z.string().optional().openapi({ description: "Stable client-side rule identifier." }),
-    name: z.string().optional().openapi({ description: "Human-readable rule name." }),
-    description: z.string().optional().openapi({ description: "Rule description." }),
-    action: z
-      .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
-      .optional()
-      .openapi({ description: "Decision to apply when this rule matches." }),
-    kind: z
-      .enum(["operation_family", "destination", "amount", "approval", "always"])
-      .openapi({ description: "Policy rule kind." }),
-  })
-  .passthrough()
-  .openapi({
-    description:
-      "Wallet control profile rule. Supported kinds include operation_family, destination, amount, approval, and always.",
-    example: {
-      id: "deny-raw-signing",
-      kind: "operation_family",
-      family: "raw_sign",
-      action: "deny",
-    },
-  });
+const policyRuleSchema = withOpenApi(updateWalletPolicySchemaBase.shape.rules.unwrap().element, {
+  description:
+    "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
+  example: {
+    id: "deny-raw-signing",
+    kind: "operation_family",
+    family: "raw_sign",
+    action: "deny",
+  },
+});
 
 const walletControlProfileSummarySchema = z
   .object({
