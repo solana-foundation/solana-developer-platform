@@ -145,13 +145,19 @@ async function updateReleasePrComment(markdown) {
     return;
   }
 
-  const comments = await githubRequest(
-    "GET",
-    `/repos/${repo}/issues/${pullRequest.number}/comments?per_page=100`
-  );
-  const existing = comments?.find((comment) =>
-    comment.body?.includes("<!-- sdp-translation-summary -->")
-  );
+  let existing;
+  for (let page = 1; ; page += 1) {
+    const comments = await githubRequest(
+      "GET",
+      `/repos/${repo}/issues/${pullRequest.number}/comments?per_page=100&page=${page}`
+    );
+    existing = comments?.find((comment) =>
+      comment.body?.includes("<!-- sdp-translation-summary -->")
+    );
+    if (existing || !comments || comments.length < 100) {
+      break;
+    }
+  }
   if (existing) {
     await githubRequest("PATCH", `/repos/${repo}/issues/comments/${existing.id}`, {
       body: markdown,
@@ -191,15 +197,20 @@ async function main() {
     apiKey: process.env.TRANSLATION_LLM_API_KEY,
     baseUrl,
     model,
-    maxKeys: Number(process.env.TRANSLATION_LLM_MAX_KEYS ?? 500),
-    batchSize: Number(process.env.TRANSLATION_LLM_BATCH_SIZE ?? 50),
-    maxRetries: Number(process.env.TRANSLATION_LLM_MAX_RETRIES ?? 2),
+    maxKeys: Number(process.env.TRANSLATION_LLM_MAX_KEYS || 500),
+    batchSize: Number(process.env.TRANSLATION_LLM_BATCH_SIZE || 50),
+    maxRetries: Number(process.env.TRANSLATION_LLM_MAX_RETRIES || 2),
   });
 
   applyTranslations({ messagesDir, translations: result.translations });
   validateCatalogs({ messagesDir, sourceLocale });
 
-  const files = [...new Set(result.translations.map((entry) => entry.targetFile))].sort();
+  const messagesRelativeDir = path.relative(process.cwd(), messagesDir);
+  const files = [
+    ...new Set(
+      result.translations.map((entry) => path.join(messagesRelativeDir, entry.targetFile))
+    ),
+  ].sort();
   git(["add", ...files]);
   git(["config", "user.name", process.env.GIT_COMMIT_NAME ?? "github-actions[bot]"]);
   git([

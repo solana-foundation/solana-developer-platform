@@ -312,7 +312,7 @@ function parseModelContent(payload) {
 
   const unfenced = content
     .trim()
-    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/^```[^\s`]*\s*/i, "")
     .replace(/\s*```$/, "");
   const parsed = JSON.parse(unfenced);
   const translations = Array.isArray(parsed) ? parsed : parsed?.translations;

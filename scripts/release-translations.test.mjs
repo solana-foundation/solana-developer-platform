@@ -98,11 +98,11 @@ test("requires the model to preserve placeholders and return every requested key
         choices: [
           {
             message: {
-              content: JSON.stringify({
-                translations: [
-                  { file: "en.json", key: "Home.title", translation: "Bonjour {name}" },
-                ],
-              }),
+              content: `\`\`\`text
+${JSON.stringify({
+  translations: [{ file: "en.json", key: "Home.title", translation: "Bonjour {name}" }],
+})}
+\`\`\``,
             },
           },
         ],
