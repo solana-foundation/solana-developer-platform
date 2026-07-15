@@ -60,6 +60,7 @@ import {
   paymentSubscriptionPlanListResponseSchema,
   paymentSubscriptionPlanResponseSchema,
   paymentSubscriptionResponseSchema,
+  policyControlInventoryResponseSchema,
   prepareBurnResponseSchema,
   prepareDeployMetadataResponseSchema,
   prepareDeployResponseSchema,
@@ -221,6 +222,9 @@ export const listTemplatesResponse = successResponseSchema(listTemplatesResponse
 export const onboardingStatusResponse = successResponseSchema(onboardingStatusResponseSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
 export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSchema);
+export const policyControlInventoryResponse = successResponseSchema(
+  policyControlInventoryResponseSchema
+);
 export const walletControlProfileRevisionHistoryResponse = successResponseSchema(
   walletControlProfileRevisionHistorySchema
 );
