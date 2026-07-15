@@ -61,6 +61,7 @@ Add to repository (not environment-specific):
 - `DOPPLER_TOKEN_CI` — Doppler API token for CI workflows with read access to `dev_ci` config
 - `RELEASE_APP_ID` — GitHub App ID for release automation
 - `RELEASE_APP_PRIVATE_KEY` — GitHub App private key for release automation
+- `TRANSLATION_LLM_API_KEY` — API key for the configured OpenAI-compatible translation provider
 
   ⚠️ **Important**: The default `GITHUB_TOKEN` is insufficient. The release tag must trigger the production deploy workflow, and the release commit must be pushed by automation instead of a personal user token. The GitHub App needs `contents: write` permission and must be allowed to push release commits to protected `main`.
 
@@ -80,6 +81,17 @@ Secrets are managed centrally in Doppler. GitHub/Vercel environments map to Dopp
 ### Secret Coverage
 
 See [`docs/ops/doppler-secrets.md`](doppler-secrets.md) for the complete list of secrets that must be present in each Doppler config (Cloudflare credentials, database URLs, API keys, etc.).
+
+### Automated UI Translations
+
+The release workflow discovers locale catalogs under `apps/sdp-web/messages` whenever it prepares a release PR. Configure these repository variables for the translation provider:
+
+- `TRANSLATION_LLM_BASE_URL` — OpenAI-compatible API base URL, such as `https://api.openai.com/v1`
+- `TRANSLATION_LLM_MODEL` — model identifier used for UI translation
+
+Optional repository variables cap the work performed by one release: `TRANSLATION_LLM_MAX_KEYS` (default `500`), `TRANSLATION_LLM_BATCH_SIZE` (default `50`), and `TRANSLATION_LLM_MAX_RETRIES` (default `2`). The action translates only missing keys, preserves existing catalog values, validates keys/placeholders/markup, and commits generated values to the release PR. If no locale is missing strings, it reports a no-op. Missing provider configuration or invalid generated output fails the workflow instead of producing an incomplete catalog.
+
+Adding a new locale in a normal pull request is enough for it to be picked up on the next release; no workflow edit is required. The release job writes an idempotent summary comment and GitHub Actions step summary listing impacted locales, string counts, model/provider, and whether each locale was newly discovered or already established. LLM-generated values remain subject to normal review.
 
 ---
 

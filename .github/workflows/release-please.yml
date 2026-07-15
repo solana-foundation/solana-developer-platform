@@ -68,6 +68,28 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node .github/scripts/release-flow.mjs prepare
 
+      - name: Translate missing UI strings
+        env:
+          GITHUB_TOKEN: ${{ steps.release-app.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TRANSLATION_LLM_API_KEY: ${{ secrets.TRANSLATION_LLM_API_KEY }}
+          TRANSLATION_LLM_BASE_URL: ${{ vars.TRANSLATION_LLM_BASE_URL }}
+          TRANSLATION_LLM_MODEL: ${{ vars.TRANSLATION_LLM_MODEL }}
+          TRANSLATION_LLM_MAX_KEYS: ${{ vars.TRANSLATION_LLM_MAX_KEYS }}
+          TRANSLATION_LLM_BATCH_SIZE: ${{ vars.TRANSLATION_LLM_BATCH_SIZE }}
+          TRANSLATION_LLM_MAX_RETRIES: ${{ vars.TRANSLATION_LLM_MAX_RETRIES }}
+        run: |
+          if ! git ls-remote --exit-code origin refs/heads/codex/release-main >/dev/null 2>&1; then
+            echo "No release branch was created; skipping translation sync."
+            exit 0
+          fi
+
+          git reset --hard
+          git fetch origin codex/release-main
+          git checkout -B codex/release-main origin/codex/release-main
+          node .github/scripts/translate-missing.mjs
+          git push origin HEAD:codex/release-main
+
   publish-release:
     if: "${{ startsWith(github.event.head_commit.message, 'chore(main): release ') }}"
     runs-on: ubuntu-latest
