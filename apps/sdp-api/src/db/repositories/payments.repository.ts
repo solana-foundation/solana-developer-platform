@@ -62,6 +62,8 @@ export interface PaymentTransferRow {
   fee: number | null;
   error: string | null;
   initiated_by_key_id: string | null;
+  idempotency_key: string | null;
+  idempotency_fingerprint: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -93,6 +95,8 @@ export interface CreatePaymentTransferInput {
   signature: string | null;
   slot: number | null;
   initiatedByKeyId: string | null;
+  idempotencyKey?: string | null;
+  idempotencyFingerprint?: string | null;
 }
 
 export interface UpdatePaymentTransferInput {
@@ -175,6 +179,11 @@ export interface PaymentsRepositoryContext {
 
 export interface PaymentsRepository {
   createTransfer(input: CreatePaymentTransferInput): Promise<PaymentTransferRow | null>;
+  findTransferByIdempotency(params: {
+    organizationId: string;
+    projectId: string | null;
+    idempotencyKey: string;
+  }): Promise<PaymentTransferRow | null>;
   updateTransfer(input: UpdatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   /**
    * Atomically transitions a transfer's status only if it is currently one of

@@ -13,6 +13,13 @@ export interface CounterpartyPlaygroundView {
 const exampleCounterpartyId = "cpty_abc123";
 const exampleDisplayName = "Acme Corp";
 const exampleEmail = "contact@acme.com";
+const exampleAddress = {
+  line1: "123 Main St",
+  city: "San Francisco",
+  postalCode: "94105",
+  countryCode: "US",
+  subdivisionCode: "CA",
+};
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -40,6 +47,8 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
     value: cp.id,
     label: cp.displayName,
   }));
+  const individualOnlyDescription = t("DashboardPayments.counterparty.playgroundIndividualOnly");
+  const addressRequiredDescription = t("DashboardPayments.counterparty.playgroundAddressRequired");
 
   const counterpartyIdField: ApiPlaygroundFieldConfig =
     counterpartyOptions.length > 0
@@ -123,6 +132,65 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
           required: true,
         },
         {
+          key: "identity.firstName",
+          label: "identity.firstName",
+          placeholder: t("DashboardPayments.counterparty.firstNamePlaceholder"),
+          description: individualOnlyDescription,
+        },
+        {
+          key: "identity.lastName",
+          label: "identity.lastName",
+          placeholder: t("DashboardPayments.counterparty.lastNamePlaceholder"),
+          description: individualOnlyDescription,
+        },
+        {
+          key: "identity.dateOfBirth",
+          label: "identity.dateOfBirth",
+          placeholder: t("DashboardPayments.counterparty.playgroundDateOfBirthPlaceholder"),
+          description: individualOnlyDescription,
+        },
+        {
+          key: "identity.phone",
+          label: "identity.phone",
+          placeholder: t("DashboardPayments.counterparty.playgroundPhonePlaceholder"),
+          description: individualOnlyDescription,
+        },
+        {
+          key: "identity.address.line1",
+          label: "identity.address.line1",
+          defaultValue: exampleAddress.line1,
+          description: addressRequiredDescription,
+          required: true,
+        },
+        {
+          key: "identity.address.line2",
+          label: "identity.address.line2",
+        },
+        {
+          key: "identity.address.city",
+          label: "identity.address.city",
+          defaultValue: exampleAddress.city,
+          description: addressRequiredDescription,
+          required: true,
+        },
+        {
+          key: "identity.address.postalCode",
+          label: "identity.address.postalCode",
+          defaultValue: exampleAddress.postalCode,
+        },
+        {
+          key: "identity.address.countryCode",
+          label: "identity.address.countryCode",
+          defaultValue: exampleAddress.countryCode,
+          description: addressRequiredDescription,
+          required: true,
+        },
+        {
+          key: "identity.address.subdivisionCode",
+          label: "identity.address.subdivisionCode",
+          defaultValue: exampleAddress.subdivisionCode,
+        },
+        {
           key: "externalId",
           label: "externalId",
           placeholder: t("DashboardPayments.counterparty.externalIdPlaceholder"),
@@ -134,6 +202,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
           displayName: exampleDisplayName,
           email: exampleEmail,
           entityType: "business",
+          identity: { address: exampleAddress },
           status: "active",
           createdAt: new Date().toISOString(),
         },

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
@@ -162,5 +163,122 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
 
     expect(updated).toBeNull();
     expect(await readStatus("xfr_guard_project")).toBe("awaiting_payment");
+  });
+
+  it("persists idempotency metadata and looks it up by (org, key)", async () => {
+    const repo = createPostgresPaymentsRepository(getDb(env));
+    const created = await repo.createTransfer({
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      walletId: TEST_WALLET_ID,
+      counterpartyId: null,
+      sourceAddress: "Source111",
+      destinationAddress: "Dest111",
+      token: "SOL",
+      amount: "1",
+      memo: null,
+      type: "transfer",
+      direction: "outbound",
+      status: "processing",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {},
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: null,
+      idempotencyKey: "key-abc",
+      idempotencyFingerprint: "fp-1",
+    });
+    expect(created?.idempotency_key).toBe("key-abc");
+
+    const found = await repo.findTransferByIdempotency({
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      idempotencyKey: "key-abc",
+    });
+    expect(found?.id).toBe(created?.id);
+    expect(found?.idempotency_fingerprint).toBe("fp-1");
+  });
+
+  it("scopes idempotency to project — same org+key in different projects do not collide", async () => {
+    const repo = createPostgresPaymentsRepository(getDb(env));
+    const base = {
+      organizationId: TEST_ORG.id,
+      walletId: TEST_WALLET_ID,
+      counterpartyId: null,
+      sourceAddress: "Source111",
+      destinationAddress: "Dest111",
+      token: "SOL",
+      amount: "1",
+      memo: null,
+      type: "transfer" as const,
+      direction: "outbound" as const,
+      status: "processing" as const,
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {},
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: null,
+      idempotencyFingerprint: "fp-1",
+      idempotencyKey: "shared-key",
+    };
+    const orgLevel = await repo.createTransfer({ ...base, projectId: null });
+    const projectScoped = await repo.createTransfer({ ...base, projectId: TEST_PROJECT_ID });
+    expect(orgLevel?.id).not.toBe(projectScoped?.id);
+
+    const foundOrg = await repo.findTransferByIdempotency({
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      idempotencyKey: "shared-key",
+    });
+    const foundProject = await repo.findTransferByIdempotency({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      idempotencyKey: "shared-key",
+    });
+    expect(foundOrg?.id).toBe(orgLevel?.id);
+    expect(foundProject?.id).toBe(projectScoped?.id);
+  });
+
+  it("rejects a second transfer with the same (org, idempotency_key)", async () => {
+    const repo = createPostgresPaymentsRepository(getDb(env));
+    const base = {
+      organizationId: TEST_ORG.id,
+      projectId: null,
+      walletId: TEST_WALLET_ID,
+      counterpartyId: null,
+      sourceAddress: "Source111",
+      destinationAddress: "Dest111",
+      token: "SOL",
+      amount: "1",
+      memo: null,
+      type: "transfer" as const,
+      direction: "outbound" as const,
+      status: "processing" as const,
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {},
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: null,
+      idempotencyFingerprint: "fp-1",
+    };
+    await repo.createTransfer({ ...base, idempotencyKey: "dup-key" });
+    await expect(repo.createTransfer({ ...base, idempotencyKey: "dup-key" })).rejects.toSatisfy(
+      (err: unknown) => isPostgresUniqueViolation(err)
+    );
   });
 });
