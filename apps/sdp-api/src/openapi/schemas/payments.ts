@@ -78,13 +78,21 @@ const policyRuleSchema = z
       .optional()
       .openapi({ description: "Decision to apply when this rule matches." }),
     kind: z
-      .enum(["operation_family", "destination", "amount", "approval", "always"])
+      .enum([
+        "operation_family",
+        "operation_type",
+        "asset",
+        "destination",
+        "amount",
+        "approval",
+        "always",
+      ])
       .openapi({ description: "Policy rule kind." }),
   })
   .passthrough()
   .openapi({
     description:
-      "Wallet control profile rule. Supported kinds include operation_family, destination, amount, approval, and always.",
+      "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
     example: {
       id: "deny-raw-signing",
       kind: "operation_family",

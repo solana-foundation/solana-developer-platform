@@ -34,6 +34,24 @@ describe("OpenAPI spec", () => {
     expect(requirementsPath?.responses?.["200"]).toMatchSnapshot();
   });
 
+  it("documents every supported public wallet policy rule kind", () => {
+    const doc = createPublicOpenApiDocument();
+    const updatePolicy = doc.paths?.["/v1/payments/wallets/{walletId}/policies"]?.put;
+    const serializedOperation = JSON.stringify(updatePolicy);
+
+    for (const kind of [
+      "operation_family",
+      "operation_type",
+      "asset",
+      "destination",
+      "amount",
+      "approval",
+      "always",
+    ]) {
+      expect(serializedOperation).toContain(`"${kind}"`);
+    }
+  });
+
   it("limits the public document to supported public API families", () => {
     const doc = createPublicOpenApiDocument();
 
