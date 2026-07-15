@@ -1,6 +1,6 @@
+import { KoraAdapter } from "@sdp/payments/fee-payment/kora";
 import type { KoraClient } from "@solana/kora";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { KoraAdapter } from "./kora.adapter";
 
 const signTransaction = vi.fn();
 const signAndSendTransaction = vi.fn();

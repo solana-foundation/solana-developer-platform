@@ -1,4 +1,4 @@
-import { TEST_PROJECT } from "@sdp/api-test/fixtures/tokens";
+import { apiTestSupport } from "@sdp/api/test-support";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { MintApiResponse, TokenApiResponse } from "../helpers/api-types";
 import {
@@ -9,6 +9,8 @@ import {
   resetIntegrationState,
   SOLANA_CONFIGURED,
 } from "../helpers/integration";
+
+const { TEST_PROJECT } = apiTestSupport;
 
 type WalletListResponse = {
   data: {
@@ -40,7 +42,6 @@ type TransferApiResponse = {
   };
 };
 
-// biome-ignore lint/security/noSecrets: Test Solana address, not a secret.
 const DESTINATION_WALLET = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integration Flow", () => {
@@ -66,7 +67,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
   it("onboarded actor creates a key and uses it to issue, mint, and transfer", {
     timeout: 240000,
   }, async () => {
-    // biome-ignore lint/security/noSecrets: Internal API route test path, not a secret.
     const walletsRes = await adminRequest("/v1/wallets?includeAllProviders=true");
     expect(walletsRes.status).toBe(200);
     const walletsBody = (await walletsRes.json()) as WalletListResponse;

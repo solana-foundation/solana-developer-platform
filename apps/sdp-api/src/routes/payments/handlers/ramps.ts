@@ -1,4 +1,23 @@
 import { SdpPaymentsError } from "@sdp/payments";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import {
+  buildBvnkOnrampPaymentRuleKey,
+  buildBvnkPartyDetails,
+  bvnkOnboardingRequirements,
+  isBvnkWalletActive,
+  latestBvnkOfframpBeneficiary,
+  normalizeBvnkCurrencyAndNetwork,
+  readBvnkOfframpWallet,
+  readBvnkOnrampPaymentRuleState,
+} from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import {
+  isLightsparkExternalAccountActive,
+  latestLightsparkPayoutAccount,
+  readLightsparkCustomerId,
+} from "@sdp/payments/ramps/providers/lightspark/provider-data";
+import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
+import { readyCounterparty } from "@sdp/payments/ramps/requirements";
+import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { PaymentRampEstimate, PaymentRampQuote, RampProviderEstimateResult } from "@sdp/types";
 import {
@@ -28,25 +47,6 @@ import {
   internalError,
   notFound,
 } from "@/lib/errors";
-import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
-import {
-  buildBvnkOnrampPaymentRuleKey,
-  buildBvnkPartyDetails,
-  bvnkOnboardingRequirements,
-  isBvnkWalletActive,
-  latestBvnkOfframpBeneficiary,
-  normalizeBvnkCurrencyAndNetwork,
-  readBvnkOfframpWallet,
-  readBvnkOnrampPaymentRuleState,
-} from "@/lib/ramps/providers/bvnk/provider-data";
-import {
-  isLightsparkExternalAccountActive,
-  latestLightsparkPayoutAccount,
-  readLightsparkCustomerId,
-} from "@/lib/ramps/providers/lightspark/provider-data";
-import { readMuralOrganization } from "@/lib/ramps/providers/mural/provider-data";
-import { readyCounterparty } from "@/lib/ramps/requirements";
-import type { RampRuntimeContext } from "@/lib/ramps/types";
 import { success } from "@/lib/response";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import {

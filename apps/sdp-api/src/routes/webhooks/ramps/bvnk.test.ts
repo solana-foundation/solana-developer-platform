@@ -1,5 +1,5 @@
+import { buildBvnkOnrampWalletName } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { describe, expect, it } from "vitest";
-import { buildBvnkOnrampWalletName } from "@/lib/ramps/providers/bvnk/provider-data";
 import { BvnkWebhookProcessor } from "./bvnk";
 
 const ONRAMP_KEY = "USD:USDC_SOLANA:dest";

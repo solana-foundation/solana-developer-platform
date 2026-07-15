@@ -1,8 +1,8 @@
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import type { StripeCustomerInfo } from "@sdp/payments/ramps/providers/stripe/client";
 import type { PaymentRampQuote } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
-import type { StripeCustomerInfo } from "@/lib/ramps/providers/stripe/client";
 import { type AppContext, rampRuntime } from "../../context";
 
 function parseDob(value: string): StripeCustomerInfo["dob"] {

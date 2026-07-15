@@ -1,8 +1,8 @@
+import { isRampEventProvider } from "@sdp/payments/ramps/shared";
 import { z } from "zod";
 import type { PaymentTransferRow, PaymentTransferStatus } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
-import { isRampEventProvider } from "@/lib/ramps/shared";
 import { success } from "@/lib/response";
 import { type AppContext, getPaymentsRepository } from "../../context";
 import { mapTransferRow } from "../../mappers";
