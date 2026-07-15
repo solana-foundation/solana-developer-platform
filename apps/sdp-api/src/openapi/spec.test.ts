@@ -36,8 +36,9 @@ describe("OpenAPI spec", () => {
 
   it("documents every supported public wallet policy rule kind", () => {
     const doc = createPublicOpenApiDocument();
-    const updatePolicy = doc.paths?.["/v1/payments/wallets/{walletId}/policies"]?.put;
-    const serializedOperation = JSON.stringify(updatePolicy);
+    const policyPath = doc.paths?.["/v1/payments/wallets/{walletId}/policies"];
+    const serializedUpdate = JSON.stringify(policyPath?.put);
+    const serializedResponse = JSON.stringify(policyPath?.get?.responses?.["200"]);
 
     for (const kind of [
       "operation_family",
@@ -48,7 +49,12 @@ describe("OpenAPI spec", () => {
       "approval",
       "always",
     ]) {
-      expect(serializedOperation).toContain(`"${kind}"`);
+      expect(serializedUpdate).toContain(`"${kind}"`);
+      expect(serializedResponse).toContain(`"${kind}"`);
+    }
+
+    for (const field of ["operationType", "operationTypes", "asset", "assets"]) {
+      expect(serializedResponse).toContain(`"${field}"`);
     }
   });
 
