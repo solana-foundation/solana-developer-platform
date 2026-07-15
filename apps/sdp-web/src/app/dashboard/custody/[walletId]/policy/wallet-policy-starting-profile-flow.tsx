@@ -841,6 +841,10 @@ function AssetEditor({
           asset.mint.toLowerCase().includes(normalizedQuery))
     )
     .slice(0, 5);
+  const canAddCustomMint =
+    isValidSolanaAddress(query) &&
+    !assets.includes(query.trim()) &&
+    !matchingWalletAssets.some((asset) => asset.mint === query.trim());
 
   function addAsset(mint: string) {
     const normalized = mint.trim();
@@ -881,7 +885,7 @@ function AssetEditor({
         />
       </div>
 
-      {query.trim() ? (
+      {query.trim() && (matchingWalletAssets.length > 0 || canAddCustomMint) ? (
         <div className="mt-2 overflow-hidden rounded-lg border border-border-default bg-white">
           {matchingWalletAssets.map((asset) => (
             <button
@@ -897,8 +901,7 @@ function AssetEditor({
               <span className="shrink-0 text-xs text-secondary">{asset.uiAmount}</span>
             </button>
           ))}
-          {isValidSolanaAddress(query) &&
-          !matchingWalletAssets.some((asset) => asset.mint === query.trim()) ? (
+          {canAddCustomMint ? (
             <button
               type="button"
               className="flex w-full items-center gap-2 border-t border-border-default px-3 py-2.5 text-left text-sm font-medium text-primary hover:bg-surface-sunken first:border-t-0"

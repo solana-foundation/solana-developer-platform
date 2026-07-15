@@ -203,4 +203,45 @@ describe("wallet policy authoring", () => {
       ])
     );
   });
+
+  it("preserves conflicting destination modes without merging their semantics", () => {
+    const existing: PaymentWalletPolicy = {
+      walletId: WALLET_ID,
+      destinationAllowlist: [ADDRESS_A],
+      rules: [
+        {
+          id: "allowed-destinations",
+          kind: "destination",
+          allowlist: [ADDRESS_A],
+          action: "allow",
+        },
+        {
+          id: "blocked-destinations",
+          kind: "destination",
+          blocklist: [ADDRESS_B],
+          action: "deny",
+        },
+      ],
+    };
+
+    const rebuilt = buildPolicyPayload(WALLET_ID, createPolicyAuthoringState(existing));
+
+    expect(rebuilt.destinationAllowlist).toEqual([ADDRESS_A]);
+    expect(rebuilt.rules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "destination", allowlist: [ADDRESS_A], action: "allow" }),
+        expect.objectContaining({
+          id: "blocked-destinations",
+          kind: "destination",
+          blocklist: [ADDRESS_B],
+          action: "deny",
+        }),
+      ])
+    );
+    expect(rebuilt.rules).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "destination", blocklist: [ADDRESS_A] }),
+      ])
+    );
+  });
 });

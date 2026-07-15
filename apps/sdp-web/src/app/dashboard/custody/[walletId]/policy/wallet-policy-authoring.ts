@@ -220,6 +220,7 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
   const approvalFamilies: WalletOperationFamily[] = [];
   const passthroughRules: PolicyRule[] = [];
   let destinationMode: DestinationMode = "allowlist";
+  let editableDestinationMode: DestinationMode | null = null;
   let maxTransferAmount = policy.maxTransferAmount ?? "";
 
   for (const rule of rules) {
@@ -265,19 +266,27 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
           ...(rule.destination ? [rule.destination] : []),
         ]);
         const blocklist = uniqueValues(rule.blocklist ?? []);
+        const ruleMode =
+          allowlist.length > 0 && blocklist.length === 0
+            ? "allowlist"
+            : blocklist.length > 0 && allowlist.length === 0
+              ? "blocklist"
+              : null;
+        const hasEditableAction =
+          !rule.action ||
+          (ruleMode === "allowlist" && rule.action === "allow") ||
+          (ruleMode === "blocklist" && rule.action === "deny");
+
         if (
-          (allowlist.length > 0 && blocklist.length > 0) ||
-          rule.action === "provider_approval_required"
+          !ruleMode ||
+          !hasEditableAction ||
+          (editableDestinationMode !== null && editableDestinationMode !== ruleMode)
         ) {
           passthroughRules.push(rule);
-        } else if (blocklist.length > 0) {
-          destinationMode = "blocklist";
-          destinations.push(...blocklist);
-        } else if (allowlist.length > 0) {
-          destinationMode = "allowlist";
-          destinations.push(...allowlist);
         } else {
-          passthroughRules.push(rule);
+          editableDestinationMode = ruleMode;
+          destinationMode = ruleMode;
+          destinations.push(...(ruleMode === "allowlist" ? allowlist : blocklist));
         }
         addCategory(categories, "destinations");
         break;
