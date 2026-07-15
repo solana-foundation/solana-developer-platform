@@ -80,6 +80,8 @@ jobs:
           TRANSLATION_AGENT_BATCH_SIZE: ${{ vars.TRANSLATION_AGENT_BATCH_SIZE }}
           TRANSLATION_AGENT_MAX_RETRIES: ${{ vars.TRANSLATION_AGENT_MAX_RETRIES }}
         run: |
+          set -euo pipefail
+
           if ! git ls-remote --exit-code origin refs/heads/codex/release-main >/dev/null 2>&1; then
             echo "No release branch was created; skipping translation sync."
             exit 0
