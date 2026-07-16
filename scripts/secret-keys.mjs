@@ -167,9 +167,10 @@ export const LOCAL_ONLY_API_ENV_KEYS = new Set([
 ]);
 
 /**
- * Keys committed as plain vars in wrangler.toml [env.*.vars], so they are
- * excluded from the Cloudflare secret sync. Everything else Doppler defines
- * reaches deployed Workers as a secret.
+ * Keys deployed as plain Wrangler vars (committed defaults for dev and
+ * rendered from Doppler for production), so they are excluded from the
+ * Cloudflare secret sync. Everything else Doppler defines reaches deployed
+ * Workers as a secret.
  */
 export const COMMITTED_WORKER_VAR_KEYS = new Set([
   "SDP_RUNTIME",
