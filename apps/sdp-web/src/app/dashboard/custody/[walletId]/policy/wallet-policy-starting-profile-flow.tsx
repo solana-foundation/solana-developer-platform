@@ -1,10 +1,11 @@
 "use client";
 
-import type {
-  PaymentWalletPolicy,
-  PolicyDefaultAction,
-  PolicyProfileStatus,
-  WalletOperationFamily,
+import {
+  DEFAULT_SDP_DOCS_URL,
+  type PaymentWalletPolicy,
+  type PolicyDefaultAction,
+  type PolicyProfileStatus,
+  type WalletOperationFamily,
 } from "@sdp/types";
 import {
   ArrowLeft,
@@ -12,6 +13,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  ExternalLink,
   MoreHorizontal,
   Plus,
   Search,
@@ -83,6 +85,11 @@ const FLOW_STEPS = [
   "destinations-operations",
   "review",
 ] as const satisfies readonly PolicyFlowStep[];
+
+const DOCS_BASE =
+  process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
+  (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
+const POLICY_OPERATION_PERMISSIONS_DOCS_HREF = `${DOCS_BASE}/payments/wallet-policies#operation-permissions`;
 
 const CATEGORY_OPTIONS = [
   {
@@ -1279,6 +1286,15 @@ function OperationEditor({
             )}
           />
         </button>
+        <a
+          href={POLICY_OPERATION_PERMISSIONS_DOCS_HREF}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mb-3 inline-flex items-center gap-1 text-xs font-medium text-tertiary underline-offset-2 transition-colors hover:text-primary hover:underline"
+        >
+          {t("DashboardCustody.policyViewOperationPermissions")}
+          <ExternalLink className="size-3" />
+        </a>
         {advancedOpen ? (
           <div className="pb-1">
             <div className="flex gap-2">
