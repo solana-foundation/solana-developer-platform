@@ -6,20 +6,20 @@ import type {
   RequirementField,
   RequirementOption,
 } from "@sdp/types/ramp-requirements";
-import { z } from "zod";
 import type { CounterpartyRow } from "../../../counterparty";
-import { badRequest, SdpPaymentsError, unsupportedCounterparty } from "../../../errors";
+import { badRequest, unsupportedCounterparty } from "../../../errors";
 import {
-  buildRequirementSchema,
+  parseCollectedFields,
   readyCounterparty,
   selectField,
   textField,
 } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
-import { latestLightsparkPayoutAccount } from "./provider-data";
+import { latestLightsparkPayoutAccount, readLightsparkCustomerId } from "./provider-data";
 
 const SWIFT_BIC_PATTERN = "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$";
 const INTERNATIONAL_PHONE_PATTERN = "^\\+[0-9]{6,14}$";
+const ISO_DATE_PATTERN = "^\\d{4}-\\d{2}-\\d{2}$";
 
 const LIGHTSPARK_RAIL_LABELS = {
   ACH: "ACH",
@@ -376,6 +376,90 @@ export function lightsparkPayoutSpec(fiatCurrency: string): LightsparkPayoutSpec
   return LIGHTSPARK_PAYOUT_SPECS[fiatCurrency];
 }
 
+/**
+ * Grid requires businessInfo (legalName, taxId, incorporatedOn) to create a
+ * BUSINESS customer. Keys are prefixed to avoid colliding with payout-spec
+ * fields (BRL collects its own `taxId`).
+ */
+export const LIGHTSPARK_BUSINESS_INFO_FIELDS: readonly RequirementField[] = [
+  textField({
+    key: "businessLegalName",
+    label: "Legal business name",
+    required: true,
+    maxLength: 256,
+    placeholder: "Acme Corporation, Inc.",
+  }),
+  textField({
+    key: "businessTaxId",
+    label: "Business tax ID",
+    required: true,
+    maxLength: 32,
+    placeholder: "47-1234567",
+  }),
+  textField({
+    key: "businessIncorporatedOn",
+    label: "Date of incorporation",
+    required: true,
+    pattern: ISO_DATE_PATTERN,
+    placeholder: "2018-03-14",
+  }),
+];
+
+export interface LightsparkBusinessInfo {
+  legalName: string;
+  taxId: string;
+  incorporatedOn: string;
+}
+
+/**
+ * Maps collected business onboarding fields into the Grid createCustomer
+ * businessInfo payload. Collected values pass through to Grid and are never
+ * persisted.
+ */
+export function buildLightsparkBusinessInfo(
+  collectedData: CollectedFieldData | undefined
+): LightsparkBusinessInfo {
+  if (!collectedData) {
+    throw badRequest(
+      "collectedData with business details is required to onboard a business counterparty with Lightspark."
+    );
+  }
+  const supplied = parseCollectedFields(
+    LIGHTSPARK_BUSINESS_INFO_FIELDS,
+    collectedData,
+    "Missing or invalid business details for Lightspark onboarding."
+  );
+  const legalName = supplied.businessLegalName;
+  const taxId = supplied.businessTaxId;
+  const incorporatedOn = supplied.businessIncorporatedOn;
+  if (
+    typeof legalName !== "string" ||
+    typeof taxId !== "string" ||
+    typeof incorporatedOn !== "string"
+  ) {
+    throw badRequest("Missing required business details for Lightspark onboarding.");
+  }
+  return { legalName, taxId, incorporatedOn };
+}
+
+/**
+ * Narrows collected data to the payout-spec fields so business onboarding
+ * fields don't leak into the external-account payload or its content hash.
+ * Returns undefined when no payout fields were collected.
+ */
+export function lightsparkPayoutCollectedData(
+  fiatCurrency: string,
+  collectedData: CollectedFieldData
+): CollectedFieldData | undefined {
+  const payoutKeys = new Set(
+    lightsparkPayoutFields(lightsparkPayoutSpec(fiatCurrency)).map((field) => field.key)
+  );
+  const payoutData = Object.fromEntries(
+    Object.entries(collectedData).filter(([key]) => payoutKeys.has(key))
+  );
+  return Object.keys(payoutData).length > 0 ? payoutData : undefined;
+}
+
 export function lightsparkPayoutFields(spec: LightsparkPayoutSpec): RequirementField[] {
   const railField =
     spec.rails.length > 1
@@ -392,12 +476,23 @@ export function lightsparkPayoutFields(spec: LightsparkPayoutSpec): RequirementF
 }
 
 export function lightsparkCounterpartyRequirements(
-  _counterparty: Counterparty,
+  counterparty: Counterparty,
   { direction, providerData, fiatCurrency }: ValidateCounterpartyOptions
 ): CounterpartyRequirements {
   if (direction === "onramp") {
+    if (counterparty.entityType === "business") {
+      return unsupportedCounterparty(
+        "lightspark",
+        direction,
+        "Lightspark on-ramp does not support business counterparties."
+      );
+    }
     return readyCounterparty("lightspark", direction);
   }
+  const businessInfoFields =
+    counterparty.entityType === "business" && !readLightsparkCustomerId(providerData)
+      ? LIGHTSPARK_BUSINESS_INFO_FIELDS
+      : [];
   if (!fiatCurrency) {
     throw badRequest("fiatCurrency is required for Lightspark off-ramp requirements.");
   }
@@ -415,7 +510,10 @@ export function lightsparkCounterpartyRequirements(
     provider: "lightspark",
     direction,
     status: "collect",
-    fields: lightsparkPayoutFields(LIGHTSPARK_PAYOUT_SPECS[fiatCurrency]),
+    fields: [
+      ...businessInfoFields,
+      ...lightsparkPayoutFields(LIGHTSPARK_PAYOUT_SPECS[fiatCurrency]),
+    ],
   };
 }
 
@@ -440,15 +538,11 @@ export function buildLightsparkAccountInfo(
   if (!collectedData) {
     throw badRequest("collectedData with payout bank details is required for Lightspark off-ramp.");
   }
-  const result = buildRequirementSchema(lightsparkPayoutFields(spec)).safeParse(collectedData);
-  if (!result.success) {
-    throw new SdpPaymentsError(
-      "BAD_REQUEST",
-      "Missing or invalid payout bank details for Lightspark off-ramp.",
-      { errors: z.treeifyError(result.error) }
-    );
-  }
-  const supplied: Record<string, unknown> = result.data;
+  const supplied = parseCollectedFields(
+    lightsparkPayoutFields(spec),
+    collectedData,
+    "Missing or invalid payout bank details for Lightspark off-ramp."
+  );
 
   const rail = spec.rails.length > 1 ? supplied.paymentRails : spec.rails[0];
   if (typeof rail !== "string") {
