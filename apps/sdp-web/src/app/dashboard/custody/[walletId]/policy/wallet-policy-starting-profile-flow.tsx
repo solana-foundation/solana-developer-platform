@@ -7,7 +7,6 @@ import type {
   WalletOperationFamily,
 } from "@sdp/types";
 import {
-  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Check,
@@ -36,7 +35,7 @@ import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Select, SelectItem } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
   AUTHORING_RULE_ACTIONS,
@@ -44,11 +43,8 @@ import {
   buildDisabledPolicyPayload,
   buildPolicyPayload,
   clearPolicyDraft,
-  countConfiguredRules,
   createPolicyAuthoringState,
   DESTINATION_MODES,
-  formatProviderMappingLabel,
-  isProviderMappingWarning,
   isValidSolanaAddress,
   loadPolicyDraft,
   type PolicyAuthoringState,
@@ -206,7 +202,6 @@ export function WalletPolicyStartingProfileFlow({
   policyError,
 }: WalletPolicyStartingProfileFlowProps) {
   const t = useTranslations();
-  const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
   const initialState = useMemo(() => createPolicyAuthoringState(initialPolicy), [initialPolicy]);
@@ -218,14 +213,13 @@ export function WalletPolicyStartingProfileFlow({
   const [stepIndex, setStepIndex] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [validationRequestedSteps, setValidationRequestedSteps] = useState<PolicyFlowStep[]>([]);
   const [disableOpen, setDisableOpen] = useState(false);
 
   useEffect(() => {
     const draft = loadPolicyDraft(window.localStorage, projectId, wallet.walletId);
     if (draft) {
       setState(draft.state);
-      setLastSavedAt(draft.updatedAt);
       const savedStepIndex = FLOW_STEPS.indexOf(draft.step);
       setStepIndex(savedStepIndex < 0 ? 0 : savedStepIndex);
     }
@@ -235,6 +229,7 @@ export function WalletPolicyStartingProfileFlow({
   const currentStep = FLOW_STEPS[stepIndex] ?? "intent";
   const currentStepCopy = STEP_COPY[currentStep];
   const validation = useMemo(() => validatePolicyState(state), [state]);
+  const visibleValidation = validationRequestedSteps.includes(currentStep) ? validation : {};
   const destinationParse = useMemo(
     () => parseDestinationText(state.destinationText),
     [state.destinationText]
@@ -260,7 +255,6 @@ export function WalletPolicyStartingProfileFlow({
     const draft = createDraft();
     try {
       savePolicyDraft(window.localStorage, draft);
-      setLastSavedAt(draft.updatedAt);
       if (notify) {
         toast.success(t("DashboardCustody.policyDraftSaved"), {
           description: t("DashboardCustody.policyDraftSavedDescription"),
@@ -288,7 +282,6 @@ export function WalletPolicyStartingProfileFlow({
     const timeout = window.setTimeout(() => {
       try {
         savePolicyDraft(window.localStorage, draft);
-        setLastSavedAt(draft.updatedAt);
       } catch {
         // Manual Save draft surfaces storage failures without interrupting editing on every keystroke.
       }
@@ -322,7 +315,12 @@ export function WalletPolicyStartingProfileFlow({
   }
 
   function goNext() {
-    if (stepHasErrors(currentStep)) return;
+    if (stepHasErrors(currentStep)) {
+      setValidationRequestedSteps((steps) =>
+        steps.includes(currentStep) ? steps : [...steps, currentStep]
+      );
+      return;
+    }
     persistDraft();
     setStepIndex((current) => Math.min(FLOW_STEPS.length - 1, current + 1));
   }
@@ -348,7 +346,6 @@ export function WalletPolicyStartingProfileFlow({
       setState(returnedState);
       setActiveFingerprint(policyStateFingerprint(wallet.walletId, returnedState));
       clearPolicyDraft(window.localStorage, projectId, wallet.walletId);
-      setLastSavedAt(null);
       toast.success(t("DashboardCustody.policyActive"), {
         id: toastId,
         description: t("DashboardCustody.policyActiveDescription"),
@@ -382,7 +379,6 @@ export function WalletPolicyStartingProfileFlow({
       setState(returnedState);
       setActiveFingerprint(policyStateFingerprint(wallet.walletId, returnedState));
       setStepIndex(0);
-      setLastSavedAt(null);
       clearPolicyDraft(window.localStorage, projectId, wallet.walletId);
       setDisableOpen(false);
       toast.success(t("DashboardCustody.policyDisabled"), {
@@ -402,10 +398,6 @@ export function WalletPolicyStartingProfileFlow({
     }
   }
 
-  const providerMappingLabel = formatProviderMappingLabel(
-    currentPolicy.controlProfile?.providerMappingStatus ?? null,
-    Boolean(wallet.provider)
-  );
   const canActivate =
     isDirty && !isSubmitting && !policyError && Object.keys(validation).length === 0;
   const hasActiveControls =
@@ -413,7 +405,7 @@ export function WalletPolicyStartingProfileFlow({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
-      <div className="shrink-0 border-b border-border-default px-4 py-5 md:px-6">
+      <div className="shrink-0 px-4 py-5 md:px-6">
         <div className="mx-auto w-full max-w-6xl">
           <StepIndicator stepIndex={stepIndex} />
         </div>
@@ -427,13 +419,6 @@ export function WalletPolicyStartingProfileFlow({
               <p className="mt-1.5 max-w-2xl text-sm leading-6 text-secondary">
                 {t(currentStepCopy.descriptionKey)}
               </p>
-              {lastSavedAt ? (
-                <p className="mt-2 text-xs text-muted">
-                  {t("DashboardCustody.policyDraftStoredLocally", {
-                    date: formatSavedAt(lastSavedAt, locale),
-                  })}
-                </p>
-              ) : null}
             </div>
 
             {policyError ? (
@@ -455,7 +440,7 @@ export function WalletPolicyStartingProfileFlow({
                   <IntentStep
                     state={state}
                     setPolicyState={setPolicyState}
-                    error={validation.intent}
+                    error={visibleValidation.intent}
                   />
                 ) : null}
                 {isLoaded && currentStep === "limits-assets" ? (
@@ -463,7 +448,7 @@ export function WalletPolicyStartingProfileFlow({
                     state={state}
                     setPolicyState={setPolicyState}
                     walletAssets={walletAssets}
-                    errors={validation}
+                    errors={visibleValidation}
                   />
                 ) : null}
                 {isLoaded && currentStep === "destinations-operations" ? (
@@ -471,13 +456,12 @@ export function WalletPolicyStartingProfileFlow({
                     state={state}
                     setPolicyState={setPolicyState}
                     destinationParse={destinationParse}
-                    errors={validation}
+                    errors={visibleValidation}
                   />
                 ) : null}
                 {isLoaded && currentStep === "review" ? (
                   <ReviewStep
                     state={state}
-                    providerMappingLabel={providerMappingLabel}
                     onEdit={(step) => setStepIndex(FLOW_STEPS.indexOf(step))}
                   />
                 ) : null}
@@ -489,8 +473,8 @@ export function WalletPolicyStartingProfileFlow({
             wallet={wallet}
             policy={currentPolicy}
             state={state}
+            stepIndex={stepIndex}
             destinationCount={destinationParse.valid.length}
-            providerMappingLabel={providerMappingLabel}
           />
         </div>
       </div>
@@ -554,7 +538,7 @@ export function WalletPolicyStartingProfileFlow({
               <Button
                 type="button"
                 onClick={goNext}
-                disabled={stepHasErrors(currentStep) || isSubmitting}
+                disabled={isSubmitting}
                 iconRight={<ArrowRight className="size-4" />}
               >
                 {t("DashboardCustody.continue")}
@@ -620,7 +604,7 @@ function FormSection({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-border-default bg-white p-5">
+    <section>
       <h2 className="text-base font-semibold text-primary">{title}</h2>
       <p className="mt-1 text-sm leading-5 text-secondary">{description}</p>
       <div className="mt-5">{children}</div>
@@ -639,29 +623,30 @@ function IntentStep({
 }) {
   const t = useTranslations();
   return (
-    <div className="space-y-5">
+    <div className="space-y-8">
       <FormSection
         title={t("DashboardCustody.policyDefaultAction")}
         description={t("DashboardCustody.policyDefaultActionDescription")}
       >
-        <div className="grid rounded-full bg-fill p-1 sm:grid-cols-2 lg:grid-cols-4">
+        <Select
+          ariaLabel={t("DashboardCustody.policyDefaultAction")}
+          value={state.defaultAction}
+          onValueChange={(value) => {
+            if (!value) return;
+            setPolicyState((current) => ({
+              ...current,
+              defaultAction: value as PolicyDefaultAction,
+            }));
+          }}
+          size="xl"
+          iconLeft={<ShieldCheck />}
+        >
           {(Object.keys(DEFAULT_ACTION_LABEL_KEYS) as PolicyDefaultAction[]).map((action) => (
-            <button
-              key={action}
-              type="button"
-              aria-pressed={state.defaultAction === action}
-              onClick={() => setPolicyState((current) => ({ ...current, defaultAction: action }))}
-              className={cn(
-                "min-h-10 rounded-full px-3 text-center text-xs font-semibold transition-colors",
-                state.defaultAction === action
-                  ? "bg-white text-primary shadow-sm"
-                  : "text-secondary hover:text-primary"
-              )}
-            >
+            <SelectItem key={action} value={action}>
               {t(DEFAULT_ACTION_LABEL_KEYS[action])}
-            </button>
+            </SelectItem>
           ))}
-        </div>
+        </Select>
       </FormSection>
 
       <FormSection
@@ -737,7 +722,7 @@ function LimitsAndAssetsStep({
   if (!showLimits && !showAssets) return <EmptyStepState />;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-8">
       {showLimits ? (
         <FormSection
           title={t("DashboardCustody.policyTransferLimits")}
@@ -1391,7 +1376,7 @@ function ApprovalEditor({
 function EmptyStepState() {
   const t = useTranslations();
   return (
-    <div className="rounded-lg border border-border-default bg-surface-sunken px-5 py-8 text-center text-sm text-secondary">
+    <div className="rounded-lg bg-surface-sunken px-5 py-8 text-center text-sm text-secondary">
       {t("DashboardCustody.policyNoStepControls")}
     </div>
   );
@@ -1399,11 +1384,9 @@ function EmptyStepState() {
 
 function ReviewStep({
   state,
-  providerMappingLabel,
   onEdit,
 }: {
   state: PolicyAuthoringState;
-  providerMappingLabel: string;
   onEdit: (step: PolicyFlowStep) => void;
 }) {
   const t = useTranslations();
@@ -1464,15 +1447,10 @@ function ReviewStep({
         : "",
       step: "destinations-operations" as const,
     },
-    {
-      label: t("DashboardCustody.policyReviewProviderMapping"),
-      value: providerMappingLabel,
-      step: null,
-    },
   ];
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border-default bg-white">
+    <div className="overflow-hidden">
       {reviewRows.map((row) => (
         <div
           key={row.label}
@@ -1506,20 +1484,26 @@ function PolicySummaryRail({
   wallet,
   policy,
   state,
+  stepIndex,
   destinationCount,
-  providerMappingLabel,
 }: {
   wallet: WalletPolicyStartingProfileFlowProps["wallet"];
   policy: PaymentWalletPolicy;
   state: PolicyAuthoringState;
+  stepIndex: number;
   destinationCount: number;
-  providerMappingLabel: string;
 }) {
   const t = useTranslations();
   const status = policy.controlProfile?.status ?? null;
-  const providerStatus = policy.controlProfile?.providerMappingStatus ?? null;
-  const warning = isProviderMappingWarning(providerStatus);
-  const rows = [
+  const limits = [
+    state.maxTransferAmount
+      ? t("DashboardCustody.policyReviewPerTransaction", { amount: state.maxTransferAmount })
+      : null,
+    state.maxDailyAmount
+      ? t("DashboardCustody.policyReviewDailyTotal", { amount: state.maxDailyAmount })
+      : null,
+  ].filter((value): value is string => Boolean(value));
+  const rows: Array<{ label: string; value: string }> = [
     { label: t("DashboardCustody.policySummaryStatus"), value: formatProfileStatus(status, t) },
     {
       label: t("DashboardCustody.policyRevision"),
@@ -1532,16 +1516,43 @@ function PolicySummaryRail({
       value: t(DEFAULT_ACTION_LABEL_KEYS[state.defaultAction]),
     },
     {
-      label: t("DashboardCustody.policySummaryRules"),
-      value: String(countConfiguredRules(state)),
-    },
-    { label: t("DashboardCustody.policySummaryAllowedAssets"), value: String(state.assets.length) },
-    { label: t("DashboardCustody.policySummaryDestinations"), value: String(destinationCount) },
-    {
-      label: t("DashboardCustody.policySummaryApprovals"),
-      value: String(approvalCheckCount(state)),
+      label: t("DashboardCustody.policySummaryControlAreas"),
+      value: t("DashboardCustody.policySummarySelectedCount", {
+        count: state.categories.length,
+      }),
     },
   ];
+
+  if (stepIndex >= 1 && state.categories.includes("limits")) {
+    rows.push({
+      label: t("DashboardCustody.policyReviewTransferLimits"),
+      value: limits.join(" / ") || t("DashboardCustody.policyNotConfigured"),
+    });
+  }
+  if (stepIndex >= 1 && state.categories.includes("assets")) {
+    rows.push({
+      label: t("DashboardCustody.policySummaryAllowedAssets"),
+      value: String(state.assets.length),
+    });
+  }
+  if (stepIndex >= 2 && state.categories.includes("destinations")) {
+    rows.push({
+      label: t("DashboardCustody.policySummaryDestinations"),
+      value: String(destinationCount),
+    });
+  }
+  if (stepIndex >= 2 && state.categories.includes("operations")) {
+    rows.push({
+      label: t("DashboardCustody.policyReviewOperationControls"),
+      value: String(operationControlCount(state)),
+    });
+  }
+  if (stepIndex >= 2 && state.categories.includes("approvals")) {
+    rows.push({
+      label: t("DashboardCustody.policySummaryApprovals"),
+      value: String(approvalCheckCount(state)),
+    });
+  }
 
   async function copyAddress() {
     try {
@@ -1591,24 +1602,6 @@ function PolicySummaryRail({
             <dd className="max-w-48 text-right text-sm font-medium text-primary">{row.value}</dd>
           </div>
         ))}
-        <div className="flex items-center justify-between gap-4 py-3">
-          <dt className="text-sm text-muted">{t("DashboardCustody.policySummaryProvider")}</dt>
-          <dd className="flex max-w-52 items-center gap-1.5 text-right text-sm font-medium text-primary">
-            {warning ? (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger>
-                    <AlertTriangle className="size-4 text-warning" />
-                  </TooltipTrigger>
-                  <TooltipContent>{t("DashboardCustody.policyProviderWarning")}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            ) : (
-              <ShieldCheck className="size-4 text-muted" />
-            )}
-            <span>{providerMappingLabel}</span>
-          </dd>
-        </div>
       </dl>
     </aside>
   );
@@ -1626,17 +1619,6 @@ function formatProfileStatus(
     archived: "DashboardCustody.policyStatusArchived",
   } as const;
   return t(labels[status]);
-}
-
-function formatSavedAt(value: string, locale: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(locale, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
 }
 
 function DisableControlsDialog({
