@@ -7,7 +7,11 @@ import { Button } from "@/components/ui/button";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { fetchPolicyAuditContext, PolicyAuditRequestError } from "../policy-audit.data";
+import {
+  fetchPolicyAuditContext,
+  firstSearchParam,
+  PolicyAuditRequestError,
+} from "../policy-audit.data";
 import { PolicyAuditLoadError, PolicyPageHeader } from "../policy-audit.shared";
 import { PolicyRevisionExplorer } from "../policy-revision-explorer";
 
@@ -34,7 +38,7 @@ export default async function WalletPolicyRevisionsPage({
   const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
   const revisionsHref = `${policyHref}/revisions`;
   const auditHref = `${policyHref}/audit`;
-  const selectedRevisionId = first(resolvedSearchParams.revision);
+  const selectedRevisionId = firstSearchParam(resolvedSearchParams.revision);
 
   try {
     const apiClient = await createSdpApiClient();
@@ -83,8 +87,4 @@ export default async function WalletPolicyRevisionsPage({
       </DashboardWorkspaceOverviewPanel>
     );
   }
-}
-
-function first(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
 }

@@ -98,7 +98,7 @@ export class PolicyAuditRequestError extends Error {
   }
 }
 
-function first(value: string | string[] | undefined): string | undefined {
+export function firstSearchParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
@@ -118,18 +118,18 @@ function dateValue(value: string | undefined): string | undefined {
 }
 
 export function parsePolicyAuditFilters(searchParams: SearchParams): PolicyAuditFilters {
-  const parsedPage = Number.parseInt(first(searchParams.page) ?? "1", 10);
+  const parsedPage = Number.parseInt(firstSearchParam(searchParams.page) ?? "1", 10);
   return {
     page: Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1,
-    decision: enumValue(first(searchParams.decision), POLICY_DECISIONS),
-    status: enumValue(first(searchParams.status), POLICY_AUDIT_OPERATION_STATUSES),
+    decision: enumValue(firstSearchParam(searchParams.decision), POLICY_DECISIONS),
+    status: enumValue(firstSearchParam(searchParams.status), POLICY_AUDIT_OPERATION_STATUSES),
     operationFamily: enumValue(
-      first(searchParams.operationFamily),
+      firstSearchParam(searchParams.operationFamily),
       POLICY_AUDIT_OPERATION_FAMILIES
     ),
-    reasonCode: first(searchParams.reasonCode)?.trim().slice(0, 100) || undefined,
-    from: dateValue(first(searchParams.from)),
-    to: dateValue(first(searchParams.to)),
+    reasonCode: firstSearchParam(searchParams.reasonCode)?.trim().slice(0, 100) || undefined,
+    from: dateValue(firstSearchParam(searchParams.from)),
+    to: dateValue(firstSearchParam(searchParams.to)),
   };
 }
 

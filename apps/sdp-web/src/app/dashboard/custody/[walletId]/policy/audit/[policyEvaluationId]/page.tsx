@@ -8,6 +8,7 @@ import {
   fetchPolicyAuditContext,
   fetchPolicyEvaluation,
   fetchPolicyEvaluationNeighbors,
+  firstSearchParam,
   PolicyAuditRequestError,
   parsePolicyAuditFilters,
 } from "../../policy-audit.data";
@@ -38,7 +39,7 @@ export default async function WalletPolicyAuditDetailPage({
   const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
   const filters = parsePolicyAuditFilters(resolvedSearchParams);
   const tab = parseDetailTab(resolvedSearchParams.tab);
-  const selectedRevisionId = first(resolvedSearchParams.revision);
+  const selectedRevisionId = firstSearchParam(resolvedSearchParams.revision);
 
   try {
     const apiClient = await createSdpApiClient();
@@ -74,11 +75,7 @@ export default async function WalletPolicyAuditDetailPage({
   }
 }
 
-function first(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
 function parseDetailTab(value: string | string[] | undefined): PolicyAuditDetailTab {
-  const tab = first(value);
+  const tab = firstSearchParam(value);
   return tab === "request" || tab === "revisions" ? tab : "decision";
 }
