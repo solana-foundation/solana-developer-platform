@@ -15,9 +15,10 @@ import {
   WalletIcon,
   XIcon,
 } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,6 +65,7 @@ interface PoliciesOverviewSurfaceProps extends PoliciesOverviewProps {
   searchValue: string;
   onSearchChange?: (value: string) => void;
   onStateChange?: (changes: Partial<PoliciesUrlState>) => void;
+  onTabPreload?: (tab: PoliciesTab) => void;
   onRetry?: () => void;
 }
 
@@ -179,7 +181,10 @@ function TargetIdentity({ item }: { item: PolicyControlInventoryItem }) {
   const Icon = item.targetType === "wallet" ? WalletIcon : KeyRoundIcon;
   const detail = item.targetType === "wallet" ? shorten(item.walletAddress) : item.apiKeyPrefix;
   return (
-    <Link href={targetHref(item)} className="flex min-w-0 items-center gap-3 rounded-lg group">
+    <Link
+      href={targetHref(item)}
+      className="group flex min-w-0 items-center gap-3 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-black/40 focus-visible:ring-offset-2"
+    >
       <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary transition-colors group-hover:bg-fill-strong group-hover:text-primary">
         <Icon className="size-4" />
       </span>
@@ -338,8 +343,8 @@ function InventoryTable({
     );
   }
   return (
-    <div data-desktop-inventory className="hidden overflow-x-auto lg:block">
-      <Table className="[&_table]:min-w-[900px] [&_table]:table-fixed">
+    <div data-desktop-inventory className="hidden lg:block">
+      <Table className="rounded-none border-0 [&_table]:min-w-[900px] [&_table]:table-fixed">
         <TableHeader>
           <TableRow>
             <TableHead className="w-[24%]">{t("DashboardPolicies.target")}</TableHead>
@@ -484,10 +489,10 @@ function SummaryRail({
     : [];
   return (
     <aside
-      className="border-t border-border-default p-5 lg:border-t-0 lg:border-l"
+      className="border-t border-border-default bg-fill-subtle p-5 lg:border-t-0 lg:border-l"
       data-summary-rail
     >
-      <h2 className="text-lg font-medium text-primary">{t("DashboardPolicies.policySummary")}</h2>
+      <h2 className="text-sm font-semibold text-primary">{t("DashboardPolicies.policySummary")}</h2>
       <p className="mt-2 text-sm leading-5 text-secondary">
         {t("DashboardPolicies.summaryDescription")}
       </p>
@@ -510,7 +515,7 @@ function SummaryRail({
               <dd
                 className={cn(
                   "text-lg font-medium text-primary",
-                  id === "active" && "text-success"
+                  id === "active" && value > 0 && "text-success"
                 )}
               >
                 {value}
@@ -531,9 +536,11 @@ export function PoliciesOverviewSurface({
   searchValue,
   onSearchChange = () => undefined,
   onStateChange = () => undefined,
+  onTabPreload = () => undefined,
   onRetry = () => undefined,
 }: PoliciesOverviewSurfaceProps) {
   const t = useTranslations();
+  const reducedMotion = useReducedMotion();
   const filtered = state.tab !== "all" || Boolean(state.query || state.status);
   const clearFilters = () => {
     onSearchChange("");
@@ -545,30 +552,45 @@ export function PoliciesOverviewSurface({
 
   return (
     <div className="h-full min-h-0 overflow-y-auto px-3 pt-5 pb-6 md:px-6">
-      <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
-        <div className="border-b border-border-default p-4 md:p-5">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-            <nav className="flex gap-6 overflow-x-auto" aria-label={t("DashboardPolicies.target")}>
+      <div className="overflow-hidden rounded-lg border border-border-default bg-white">
+        <div className="border-b border-border-default px-4">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-stretch xl:justify-between xl:gap-6">
+            <div
+              className="flex h-12 shrink-0 gap-6 overflow-x-auto xl:h-16"
+              aria-label={t("DashboardPolicies.target")}
+              role="tablist"
+            >
               {TABS.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
-                  aria-current={state.tab === tab.id ? "page" : undefined}
+                  role="tab"
+                  aria-selected={state.tab === tab.id}
                   onClick={() => onStateChange({ tab: tab.id, page: 1 })}
+                  onFocus={() => onTabPreload(tab.id)}
+                  onPointerEnter={() => onTabPreload(tab.id)}
                   className={cn(
-                    "relative h-10 whitespace-nowrap text-sm font-medium transition-colors",
+                    "relative h-full whitespace-nowrap rounded-sm text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-black/40 focus-visible:ring-offset-2",
                     state.tab === tab.id ? "text-primary" : "text-secondary hover:text-primary"
                   )}
                 >
                   {t(tab.labelKey)}
                   {state.tab === tab.id ? (
-                    <span className="absolute right-0 bottom-0 left-0 h-0.5 bg-primary" />
+                    <motion.span
+                      layoutId="policies-active-tab"
+                      className="absolute right-0 bottom-0 left-0 h-0.5 bg-primary"
+                      transition={
+                        reducedMotion
+                          ? { duration: 0 }
+                          : { type: "spring", stiffness: 520, damping: 42, mass: 0.7 }
+                      }
+                    />
                   ) : null}
                 </button>
               ))}
-            </nav>
+            </div>
 
-            <div className="grid gap-2 sm:grid-cols-[minmax(240px,1fr)_180px_auto] xl:w-[700px]">
+            <div className="grid gap-2 pb-4 sm:grid-cols-[minmax(240px,1fr)_180px_auto] xl:w-[680px] xl:py-3">
               <Input
                 value={searchValue}
                 onChange={(event) => onSearchChange(event.target.value)}
@@ -608,7 +630,14 @@ export function PoliciesOverviewSurface({
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-[minmax(0,1fr)_340px]">
+        <motion.div
+          key={state.tab}
+          initial={reducedMotion ? false : { opacity: 0.94, y: 3 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={reducedMotion ? { duration: 0 } : { duration: 0.16, ease: "easeOut" }}
+          className="grid lg:grid-cols-[minmax(0,1fr)_300px]"
+          aria-busy={loading}
+        >
           <section className="min-w-0">
             {error ? (
               <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
@@ -669,7 +698,7 @@ export function PoliciesOverviewSurface({
             )}
           </section>
           <SummaryRail inventory={inventory} loading={loading} error={error} />
-        </div>
+        </motion.div>
       </div>
     </div>
   );
@@ -678,37 +707,62 @@ export function PoliciesOverviewSurface({
 export function PoliciesOverview({ inventory, error, state }: PoliciesOverviewProps) {
   const router = useRouter();
   const stateRef = useRef(state);
+  const [displayState, setDisplayState] = useState(state);
   const [searchValue, setSearchValue] = useState(state.query);
+  const [isPending, startTransition] = useTransition();
   const debouncedSearch = useDebounce(searchValue.trim(), 300);
 
   useEffect(() => {
     stateRef.current = state;
+    setDisplayState(state);
   }, [state]);
   useEffect(() => setSearchValue(state.query), [state.query]);
   useEffect(() => {
     const currentState = stateRef.current;
     if (debouncedSearch !== currentState.query) {
-      stateRef.current = { ...currentState, query: debouncedSearch, page: 1 };
-      router.replace(buildPoliciesHref(currentState, { query: debouncedSearch, page: 1 }), {
-        scroll: false,
+      const nextState = { ...currentState, query: debouncedSearch, page: 1 };
+      stateRef.current = nextState;
+      setDisplayState(nextState);
+      startTransition(() => {
+        router.replace(buildPoliciesHref(currentState, { query: debouncedSearch, page: 1 }), {
+          scroll: false,
+        });
       });
     }
   }, [debouncedSearch, router]);
 
+  const preloadTab = useCallback(
+    (tab: PoliciesTab) => {
+      if (tab === stateRef.current.tab) return;
+      router.prefetch(buildPoliciesHref(stateRef.current, { tab, page: 1 }));
+    },
+    [router]
+  );
+
+  useEffect(() => {
+    for (const tab of TABS) preloadTab(tab.id);
+  }, [preloadTab]);
+
   const updateState = (changes: Partial<PoliciesUrlState>) => {
     const currentState = stateRef.current;
-    stateRef.current = { ...currentState, ...changes };
-    router.replace(buildPoliciesHref(currentState, changes), { scroll: false });
+    const nextState = { ...currentState, ...changes };
+    stateRef.current = nextState;
+    setDisplayState(nextState);
+    startTransition(() => {
+      router.replace(buildPoliciesHref(currentState, changes), { scroll: false });
+    });
   };
 
   return (
     <PoliciesOverviewSurface
       inventory={inventory}
-      error={error}
-      state={state}
+      error={isPending ? false : error}
+      state={displayState}
+      loading={isPending}
       searchValue={searchValue}
       onSearchChange={setSearchValue}
       onStateChange={updateState}
+      onTabPreload={preloadTab}
       onRetry={() => router.refresh()}
     />
   );
