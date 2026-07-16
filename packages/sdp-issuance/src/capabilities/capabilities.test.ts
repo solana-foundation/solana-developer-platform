@@ -5,12 +5,14 @@ import { ASSET_TYPES } from "@sdp/types";
 
 import {
   ADVANCED_SETTINGS,
+  ADVANCED_SETTINGS_VERSION,
   ASSET_CAPABILITIES,
   getRecommendedSettings,
   isSettingAllowed,
   listSettingsForType,
   resolveAssetCapability,
   SETTING_KEYS,
+  validateSelectedSettings,
 } from "./index";
 
 describe("advanced settings capability registry", () => {
@@ -67,5 +69,29 @@ describe("advanced settings capability registry", () => {
       assert.equal(entry.setting, ADVANCED_SETTINGS[entry.key]);
       assert.match(entry.setting.labelKey, /^DashboardIssuance\.config\./);
     }
+  });
+
+  it("validates a selection against a type's capability", () => {
+    // all-allowed selection ⇒ no errors.
+    assert.deepEqual(
+      validateSelectedSettings("stablecoin", "fiat_backed", ["freezeTransfers", "transferFee"]),
+      []
+    );
+    // unknown key and unsupported key are reported with their reasons.
+    assert.deepEqual(
+      validateSelectedSettings("stablecoin", "fiat_backed", ["nonTransferable", "made_up"]),
+      [
+        { settingKey: "nonTransferable", reason: "unsupported" },
+        { settingKey: "made_up", reason: "unknown" },
+      ]
+    );
+    // an unknown asset type rejects every key as unsupported.
+    assert.deepEqual(validateSelectedSettings("stablecoin", "not_a_type", ["freezeTransfers"]), [
+      { settingKey: "freezeTransfers", reason: "unsupported" },
+    ]);
+  });
+
+  it("exposes a positive settings version for persistence stamping", () => {
+    assert.ok(Number.isInteger(ADVANCED_SETTINGS_VERSION) && ADVANCED_SETTINGS_VERSION > 0);
   });
 });

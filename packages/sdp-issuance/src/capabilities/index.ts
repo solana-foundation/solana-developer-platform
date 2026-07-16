@@ -74,6 +74,41 @@ export function listSettingsForType(category: AssetCategory, type: string): Grou
   }));
 }
 
+// --- Persistence contract --------------------------------------------------
+
+// The version stamped onto a stored advanced-settings payload. Bump when the
+// SHAPE of the settings selection changes (independent of asset_type_version,
+// which tracks the asset type's metadata shape). Persistence stamps this so a
+// stored selection records the schema it was written under.
+export const ADVANCED_SETTINGS_VERSION = 1;
+
+export type SettingRejectionReason = "unknown" | "unsupported";
+
+export interface SettingValidationError {
+  settingKey: string;
+  reason: SettingRejectionReason;
+}
+
+// Validate a set of selected setting keys against an asset type's capability.
+// "unknown" ⇒ not a catalog setting; "unsupported" ⇒ the type forbids it. An
+// empty result means every key is allowed. This is the single gate the API
+// calls to reject a bad selection early (persistence ticket C).
+export function validateSelectedSettings(
+  category: AssetCategory,
+  type: string,
+  settingKeys: readonly string[]
+): SettingValidationError[] {
+  const errors: SettingValidationError[] = [];
+  for (const key of settingKeys) {
+    if (!(key in ADVANCED_SETTINGS)) {
+      errors.push({ settingKey: key, reason: "unknown" });
+    } else if (!isSettingAllowed(category, type, key)) {
+      errors.push({ settingKey: key, reason: "unsupported" });
+    }
+  }
+  return errors;
+}
+
 // --- Dev-time completeness assertion ---------------------------------------
 //
 // Fail fast in development if the registry drifts. Mirrors the guard in

@@ -37,6 +37,24 @@ const visibilityMetadataSchema = z.object({
   public: z.array(z.string()).optional(),
 });
 
+// Advanced settings selection persisted under `settings`. This validates SHAPE
+// only; whether each selected key is allowed for the asset type is checked
+// against the capability registry in the create/update handlers (that check
+// needs the effective category/type, which the schema does not have). `version`
+// is server-stamped, so it is optional on input.
+const settingSelectionSchema = z
+  .object({
+    params: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
+  })
+  .strict();
+
+const advancedSettingsSchema = z
+  .object({
+    version: z.number().int().positive().optional(),
+    selected: z.record(z.string(), settingSelectionSchema),
+  })
+  .strict();
+
 // Strict on the SDP-owned namespaces, but loose *within* them for v1 (the PRD
 // defers instrument-specific field modelling). `z.looseObject` allows unknown
 // top-level namespaces to pass through without a schema change.
@@ -46,6 +64,7 @@ export const issuanceMetadataSchema = z.looseObject({
   chain: jsonObjectSchema.optional(),
   custom: customMetadataSchema.optional(),
   visibility: visibilityMetadataSchema.optional(),
+  settings: advancedSettingsSchema.optional(),
 });
 
 export function assertAssetTypeSupported(

@@ -19,6 +19,10 @@ import {
   internalError,
   notFound,
 } from "@/lib/errors";
+import {
+  stampAdvancedSettingsVersion,
+  validateAdvancedSettings,
+} from "@/lib/issuance/advanced-settings";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
@@ -180,7 +184,26 @@ export const updateAssetProfile = async (c: AppContext) => {
 
   const typeChanged = nextCategory !== current.asset_category || nextType !== current.asset_type;
   const metadataChanged = parsed.data.issuanceMetadata !== undefined;
-  const nextMetadata = parsed.data.issuanceMetadata ?? current.issuance_metadata;
+
+  // Reject any advanced setting the effective asset type does not support. Runs
+  // whenever the settings OR the type could invalidate the selection — so a type
+  // change that makes an existing selection unsupported is caught even when the
+  // patch does not touch metadata.
+  if (metadataChanged || typeChanged) {
+    const effectiveMetadata = parsed.data.issuanceMetadata ?? current.issuance_metadata;
+    const settingErrors = validateAdvancedSettings(nextCategory, nextType, effectiveMetadata);
+    if (settingErrors.length > 0) {
+      throw badRequest("Unsupported advanced settings", { errors: settingErrors });
+    }
+  }
+
+  // Stamp the settings version only on metadata we actually persist. Checking
+  // the value directly (not the boolean) narrows away `undefined` for the helper.
+  const persistedMetadata =
+    parsed.data.issuanceMetadata !== undefined
+      ? stampAdvancedSettingsVersion(parsed.data.issuanceMetadata)
+      : undefined;
+  const nextMetadata = persistedMetadata ?? current.issuance_metadata;
 
   // Recompute the cached public projection whenever its inputs change.
   const publicMetadata =
@@ -195,7 +218,7 @@ export const updateAssetProfile = async (c: AppContext) => {
     assetCategory: parsed.data.assetCategory,
     assetType: parsed.data.assetType,
     assetTypeVersion: typeChanged ? registryEntry.version : undefined,
-    issuanceMetadata: parsed.data.issuanceMetadata,
+    issuanceMetadata: persistedMetadata,
     publicMetadata,
   });
 

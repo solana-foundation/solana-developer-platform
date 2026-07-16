@@ -6,6 +6,10 @@ import { createPostgresAssetProfilesRepository } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, internalError } from "@/lib/errors";
+import {
+  stampAdvancedSettingsVersion,
+  validateAdvancedSettings,
+} from "@/lib/issuance/advanced-settings";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { created } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
@@ -71,7 +75,14 @@ export const createTokenWithAssetProfile = async (c: AppContext) => {
     await createOrgSigner(c.env, orgId, projectId, signingWalletId);
   }
 
-  const metadata = issuanceMetadata ?? {};
+  // Reject any selected advanced setting the asset type does not support before
+  // opening a transaction, then stamp the server-owned settings version.
+  const settingErrors = validateAdvancedSettings(assetCategory, assetType, issuanceMetadata ?? {});
+  if (settingErrors.length > 0) {
+    throw badRequest("Unsupported advanced settings", { errors: settingErrors });
+  }
+
+  const metadata = stampAdvancedSettingsVersion(issuanceMetadata ?? {});
   const publicMetadata = projectPublicMetadata(assetCategory, assetType, metadata);
   const createdBy = await resolveCreatorUserId(c);
 

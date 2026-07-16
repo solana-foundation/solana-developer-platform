@@ -69,3 +69,20 @@ export interface AssetCapability {
   // dev-time completeness assertion in @sdp/issuance/capabilities.
   settings: Record<string, SettingAvailability>;
 }
+
+// --- Stored selection (persistence, ticket C) ------------------------------
+
+// One selected setting. Presence of the key in `StoredAdvancedSettings.selected`
+// means the setting is enabled; `params` carries the expert-override values for
+// parametric settings (validated against the catalog's ParamFieldSpec).
+export interface SelectedSetting {
+  params?: Record<string, string | number>;
+}
+
+// The manager's advanced-settings selection as persisted under
+// `issuance_metadata.settings`. `version` is server-stamped
+// (ADVANCED_SETTINGS_VERSION); clients need not send it.
+export interface StoredAdvancedSettings {
+  version: number;
+  selected: Record<string, SelectedSetting>;
+}
