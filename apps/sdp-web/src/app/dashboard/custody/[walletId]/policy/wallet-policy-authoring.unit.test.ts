@@ -5,6 +5,7 @@ import {
   buildPolicyPayload,
   createPolicyAuthoringState,
   formatProviderMappingLabel,
+  hasLimitsAndAssetsControls,
   loadPolicyDraft,
   parseDestinationText,
   policyDraftStorageKey,
@@ -50,6 +51,17 @@ describe("wallet policy authoring", () => {
       { value: "issuance_update_authority_execute", family: "issuance" },
       { value: "custody_signer_check", family: "raw_sign" },
     ]);
+  });
+
+  it("identifies whether the limits and assets step has selected controls", () => {
+    const state = createPolicyAuthoringState(emptyPolicy());
+    expect(hasLimitsAndAssetsControls(state)).toBe(false);
+
+    state.categories = ["limits"];
+    expect(hasLimitsAndAssetsControls(state)).toBe(true);
+
+    state.categories = ["assets"];
+    expect(hasLimitsAndAssetsControls(state)).toBe(true);
   });
 
   it("validates restriction intent, decimal values, and the daily limit relationship", () => {
@@ -127,7 +139,7 @@ describe("wallet policy authoring", () => {
   it("builds an activation payload for every public authoring capability", () => {
     const state = createPolicyAuthoringState(emptyPolicy());
     state.defaultAction = "approval_required";
-    state.categories = ["limits", "assets", "destinations", "operations", "approvals"];
+    state.categories = ["limits", "assets", "destinations", "operations"];
     state.maxTransferAmount = "100";
     state.maxDailyAmount = "500";
     state.assets = [ADDRESS_A];
@@ -135,7 +147,6 @@ describe("wallet policy authoring", () => {
     state.destinationText = ADDRESS_B;
     state.familyActions = { transfer: "deny", payment: "approval_required" };
     state.operationTypeRules = [{ value: "payment.create", action: "approval_required" }];
-    state.approvalFamilies = ["ramp"];
 
     const payload = buildPolicyPayload(WALLET_ID, state);
 
@@ -166,7 +177,6 @@ describe("wallet policy authoring", () => {
         expect.objectContaining({ kind: "asset", assets: [ADDRESS_A], action: "allow" }),
         expect.objectContaining({ kind: "destination", allowlist: [ADDRESS_B] }),
         expect.objectContaining({ kind: "amount", max: "100" }),
-        expect.objectContaining({ kind: "approval", families: ["ramp"] }),
       ])
     );
   });
@@ -229,9 +239,8 @@ describe("wallet policy authoring", () => {
       assets: [ADDRESS_A],
       destinationMode: "blocklist",
       destinationText: ADDRESS_B,
-      familyActions: { transfer: "deny", payment: "deny" },
+      familyActions: { transfer: "deny", payment: "deny", ramp: "approval_required" },
       operationTypeRules: [{ value: "payment.create", action: "approval_required" }],
-      approvalFamilies: ["ramp"],
     });
     expect(rebuilt.destinationAllowlist).toEqual([]);
     expect(rebuilt.rules).toEqual(
@@ -239,7 +248,11 @@ describe("wallet policy authoring", () => {
         expect.objectContaining({ id: "asset-limit", kind: "amount", assets: [ADDRESS_A] }),
         expect.objectContaining({ id: "always-review", kind: "always", action: "review" }),
         expect.objectContaining({ kind: "destination", blocklist: [ADDRESS_B] }),
-        expect.objectContaining({ kind: "approval", families: ["ramp"] }),
+        expect.objectContaining({
+          kind: "operation_family",
+          families: ["ramp"],
+          action: "approval_required",
+        }),
       ])
     );
   });

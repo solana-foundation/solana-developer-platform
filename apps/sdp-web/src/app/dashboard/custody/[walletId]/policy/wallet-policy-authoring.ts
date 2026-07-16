@@ -9,7 +9,7 @@ import type {
 
 export type PolicyFlowStep = "intent" | "limits-assets" | "destinations-operations" | "review";
 
-export type RestrictionCategory = "limits" | "assets" | "destinations" | "operations" | "approvals";
+export type RestrictionCategory = "limits" | "assets" | "destinations" | "operations";
 
 export type AuthoringRuleAction = Exclude<
   PolicyRuleAction,
@@ -33,7 +33,6 @@ export interface PolicyAuthoringState {
   destinationText: string;
   familyActions: Partial<Record<WalletOperationFamily, AuthoringRuleAction>>;
   operationTypeRules: OperationTypeRuleInput[];
-  approvalFamilies: WalletOperationFamily[];
   passthroughRules: PolicyRule[];
 }
 
@@ -53,7 +52,6 @@ export interface PolicyValidationErrors {
   assets?: "asset_required" | "invalid_asset";
   destinations?: "destination_required" | "invalid_destination";
   operations?: "operation_required" | "invalid_operation_type";
-  approvals?: "approval_required";
 }
 
 export interface ParsedDestinationEntry {
@@ -120,7 +118,6 @@ const RESTRICTION_CATEGORIES = [
   "assets",
   "destinations",
   "operations",
-  "approvals",
 ] as const satisfies readonly RestrictionCategory[];
 
 const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -178,9 +175,8 @@ function categoryForRule(rule: PolicyRule): RestrictionCategory | null {
       return "destinations";
     case "operation_family":
     case "operation_type":
-      return "operations";
     case "approval":
-      return "approvals";
+      return "operations";
     default:
       return null;
   }
@@ -192,6 +188,12 @@ function addCategory(categories: RestrictionCategory[], category: RestrictionCat
 
 export function isValidSolanaAddress(value: string): boolean {
   return SOLANA_ADDRESS_PATTERN.test(value.trim());
+}
+
+export function hasLimitsAndAssetsControls(
+  state: Pick<PolicyAuthoringState, "categories">
+): boolean {
+  return state.categories.includes("limits") || state.categories.includes("assets");
 }
 
 export function isValidDecimal(value: string): boolean {
@@ -245,7 +247,6 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
   const destinations: string[] = [];
   const familyActions: PolicyAuthoringState["familyActions"] = {};
   const operationTypeRules: OperationTypeRuleInput[] = [];
-  const approvalFamilies: WalletOperationFamily[] = [];
   const passthroughRules: PolicyRule[] = [];
   let destinationMode: DestinationMode = "allowlist";
   let editableDestinationMode: DestinationMode | null = null;
@@ -342,11 +343,13 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
           !rule.approvalGroupId &&
           (!rule.action || rule.action === "approval_required");
         if (isFamilyOnly) {
-          approvalFamilies.push(...(rule.families ?? []).filter(isWalletOperationFamily));
+          for (const family of rule.families ?? []) {
+            if (isWalletOperationFamily(family)) familyActions[family] = "approval_required";
+          }
         } else {
           passthroughRules.push(rule);
         }
-        addCategory(categories, "approvals");
+        addCategory(categories, "operations");
         break;
       }
       default:
@@ -375,7 +378,6 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
     operationTypeRules: operationTypeRules.filter(
       (entry, index, values) => values.findIndex((item) => item.value === entry.value) === index
     ),
-    approvalFamilies: uniqueValues(approvalFamilies).filter(isWalletOperationFamily),
     passthroughRules,
   };
 }
@@ -460,16 +462,6 @@ export function buildPolicyPayload(
     });
   }
 
-  if (categories.has("approvals") && state.approvalFamilies.length > 0) {
-    rules.push({
-      id: "approval-checks",
-      kind: "approval",
-      families: state.approvalFamilies,
-      action: "approval_required",
-      name: "Approval checks",
-    });
-  }
-
   return {
     walletId,
     destinationAllowlist:
@@ -551,14 +543,6 @@ export function validatePolicyState(state: PolicyAuthoringState): PolicyValidati
     }
   }
 
-  if (
-    categories.has("approvals") &&
-    state.approvalFamilies.length === 0 &&
-    !hasPreservedRule("approvals")
-  ) {
-    errors.approvals = "approval_required";
-  }
-
   return errors;
 }
 
@@ -598,7 +582,6 @@ function isStoredPolicyDraft(
     typeof state.destinationText === "string" &&
     Boolean(state.familyActions) &&
     Array.isArray(state.operationTypeRules) &&
-    Array.isArray(state.approvalFamilies) &&
     Array.isArray(state.passthroughRules)
   );
 }

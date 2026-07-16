@@ -47,6 +47,7 @@ import {
   clearPolicyDraft,
   createPolicyAuthoringState,
   DESTINATION_MODES,
+  hasLimitsAndAssetsControls,
   isValidSolanaAddress,
   loadPolicyDraft,
   type PolicyAuthoringState,
@@ -112,11 +113,6 @@ const CATEGORY_OPTIONS = [
     id: "operations",
     titleKey: "DashboardCustody.policyOperationControls",
     descriptionKey: "DashboardCustody.policyOperationControlsDescription",
-  },
-  {
-    id: "approvals",
-    titleKey: "DashboardCustody.policyApprovalChecks",
-    descriptionKey: "DashboardCustody.policyApprovalChecksAuthoringDescription",
   },
 ] as const satisfies readonly {
   id: RestrictionCategory;
@@ -186,14 +182,6 @@ function operationControlCount(state: PolicyAuthoringState): number {
   );
 }
 
-function approvalCheckCount(state: PolicyAuthoringState): number {
-  return (
-    state.approvalFamilies.length +
-    Object.values(state.familyActions).filter((action) => action === "approval_required").length +
-    state.operationTypeRules.filter((rule) => rule.action === "approval_required").length
-  );
-}
-
 function hasActiveRestrictions(policy: PaymentWalletPolicy): boolean {
   return Boolean(
     policy.destinationAllowlist.length ||
@@ -230,7 +218,13 @@ export function WalletPolicyStartingProfileFlow({
     if (draft) {
       setState(draft.state);
       const savedStepIndex = FLOW_STEPS.indexOf(draft.step);
-      setStepIndex(savedStepIndex < 0 ? 0 : savedStepIndex);
+      setStepIndex(
+        savedStepIndex === 1 && !hasLimitsAndAssetsControls(draft.state)
+          ? 2
+          : savedStepIndex < 0
+            ? 0
+            : savedStepIndex
+      );
     }
     setIsLoaded(true);
   }, [projectId, wallet.walletId]);
@@ -310,7 +304,7 @@ export function WalletPolicyStartingProfileFlow({
       );
     }
     if (step === "destinations-operations") {
-      return Boolean(validation.destinations || validation.operations || validation.approvals);
+      return Boolean(validation.destinations || validation.operations);
     }
     return Object.keys(validation).length > 0;
   }
@@ -318,6 +312,10 @@ export function WalletPolicyStartingProfileFlow({
   function goBack() {
     if (stepIndex === 0) {
       router.push(walletDetailHref(pathname, wallet.walletId));
+      return;
+    }
+    if (currentStep === "destinations-operations" && !hasLimitsAndAssetsControls(state)) {
+      setStepIndex(0);
       return;
     }
     setStepIndex((current) => Math.max(0, current - 1));
@@ -331,7 +329,11 @@ export function WalletPolicyStartingProfileFlow({
       return;
     }
     persistDraft();
-    setStepIndex((current) => Math.min(FLOW_STEPS.length - 1, current + 1));
+    setStepIndex((current) =>
+      currentStep === "intent" && !hasLimitsAndAssetsControls(state)
+        ? 2
+        : Math.min(FLOW_STEPS.length - 1, current + 1)
+    );
   }
 
   async function activateControls() {
@@ -1055,9 +1057,8 @@ function DestinationsAndOperationsStep({
 }) {
   const showDestinations = state.categories.includes("destinations");
   const showOperations = state.categories.includes("operations");
-  const showApprovals = state.categories.includes("approvals");
 
-  if (!showDestinations && !showOperations && !showApprovals) return <EmptyStepState />;
+  if (!showDestinations && !showOperations) return <EmptyStepState />;
 
   return (
     <div className="space-y-5">
@@ -1071,15 +1072,6 @@ function DestinationsAndOperationsStep({
       ) : null}
       {showOperations ? (
         <OperationEditor state={state} error={errors.operations} setPolicyState={setPolicyState} />
-      ) : null}
-      {showApprovals ? (
-        <ApprovalEditor
-          values={state.approvalFamilies}
-          error={errors.approvals}
-          onChange={(approvalFamilies) =>
-            setPolicyState((current) => ({ ...current, approvalFamilies }))
-          }
-        />
       ) : null}
     </div>
   );
@@ -1486,61 +1478,6 @@ function OperationEditor({
   );
 }
 
-function ApprovalEditor({
-  values,
-  error,
-  onChange,
-}: {
-  values: WalletOperationFamily[];
-  error?: "approval_required";
-  onChange: (values: WalletOperationFamily[]) => void;
-}) {
-  const t = useTranslations();
-  return (
-    <FormSection
-      title={t("DashboardCustody.policyApprovalChecks")}
-      description={t("DashboardCustody.policyApprovalChecksAuthoringDescription")}
-    >
-      <div className="grid gap-2 sm:grid-cols-2">
-        {WALLET_OPERATION_FAMILIES.map((family) => {
-          const selected = values.includes(family);
-          return (
-            <button
-              key={family}
-              type="button"
-              aria-pressed={selected}
-              onClick={() => onChange(toggleValue(values, family))}
-              className={cn(
-                "flex min-h-11 items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm font-medium transition-colors",
-                selected
-                  ? "border-primary bg-fill-subtle text-primary"
-                  : "border-border-default bg-white text-secondary hover:bg-surface-sunken"
-              )}
-            >
-              <span
-                className={cn(
-                  "flex size-5 shrink-0 items-center justify-center rounded border",
-                  selected
-                    ? "border-primary bg-primary text-white"
-                    : "border-border-strong bg-white text-transparent"
-                )}
-              >
-                <Check className="size-3.5" />
-              </span>
-              {t(FAMILY_LABEL_KEYS[family])}
-            </button>
-          );
-        })}
-      </div>
-      {error ? (
-        <p className="mt-3 text-sm text-error">
-          {t("DashboardCustody.policyApprovalRequiredAuthoring")}
-        </p>
-      ) : null}
-    </FormSection>
-  );
-}
-
 function EmptyStepState() {
   const t = useTranslations();
   return (
@@ -1605,13 +1542,6 @@ function ReviewStep({
         ? t("DashboardCustody.policyReviewOperationCount", {
             count: operationControlCount(state),
           })
-        : "",
-      step: "destinations-operations" as const,
-    },
-    {
-      label: t("DashboardCustody.policyReviewApprovalChecks"),
-      value: approvalCheckCount(state)
-        ? t("DashboardCustody.policyReviewApprovalCount", { count: approvalCheckCount(state) })
         : "",
       step: "destinations-operations" as const,
     },
@@ -1713,12 +1643,6 @@ function PolicySummaryRail({
     rows.push({
       label: t("DashboardCustody.policyReviewOperationControls"),
       value: String(operationControlCount(state)),
-    });
-  }
-  if (stepIndex >= 2 && state.categories.includes("approvals")) {
-    rows.push({
-      label: t("DashboardCustody.policySummaryApprovals"),
-      value: String(approvalCheckCount(state)),
     });
   }
 
