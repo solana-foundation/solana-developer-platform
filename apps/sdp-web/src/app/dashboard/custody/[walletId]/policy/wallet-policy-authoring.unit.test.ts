@@ -50,6 +50,13 @@ describe("wallet policy authoring", () => {
 
     state.maxTransferAmount = "1.2.3";
     expect(validatePolicyState(state).maxTransferAmount).toBe("invalid_decimal");
+
+    state.maxTransferAmount = "0.5";
+    state.maxDailyAmount = "0.75";
+    expect(validatePolicyState(state).maxDailyAmount).toBeUndefined();
+
+    state.maxDailyAmount = "0.49";
+    expect(validatePolicyState(state).maxDailyAmount).toBe("daily_below_transaction");
   });
 
   it("trims destinations, preserves first-seen order, de-duplicates, and reports invalid lines", () => {

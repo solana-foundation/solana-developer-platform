@@ -178,8 +178,10 @@ function compareDecimals(left: string, right: string): number {
   const [leftWhole, leftFraction = ""] = left.split(".");
   const [rightWhole, rightFraction = ""] = right.split(".");
   const scale = Math.max(leftFraction.length, rightFraction.length);
-  const leftValue = BigInt(`${leftWhole}${leftFraction.padEnd(scale, "0")}`);
-  const rightValue = BigInt(`${rightWhole}${rightFraction.padEnd(scale, "0")}`);
+  const multiplier = 10n ** BigInt(scale);
+  const leftValue = BigInt(leftWhole) * multiplier + BigInt(leftFraction.padEnd(scale, "0") || "0");
+  const rightValue =
+    BigInt(rightWhole) * multiplier + BigInt(rightFraction.padEnd(scale, "0") || "0");
   return leftValue === rightValue ? 0 : leftValue > rightValue ? 1 : -1;
 }
 
