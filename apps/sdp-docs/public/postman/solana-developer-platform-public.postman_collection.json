@@ -1885,6 +1885,20 @@
       ]
     },
     {
+      "name": "Policies",
+      "item": [
+        {
+          "name": "List policy controls",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/policies",
+            "description": "Lists wallet and API-key control targets in one paginated inventory. Every target, profile, binding, and evaluation is scoped to the authenticated organization and exact project."
+          }
+        }
+      ]
+    },
+    {
       "name": "Compliance",
       "item": [
         {
