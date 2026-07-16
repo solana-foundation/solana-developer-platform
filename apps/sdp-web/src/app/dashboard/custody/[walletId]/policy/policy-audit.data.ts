@@ -262,15 +262,33 @@ async function collectPolicyEvaluations(
   return evaluations;
 }
 
+function needsLocalPolicyAuditPagination(filters: PolicyAuditFilters): boolean {
+  return Boolean(filters.from || filters.to || filters.decision === "approval_required");
+}
+
+async function collectLocallyPaginatedPolicyEvaluations(
+  request: SdpApiClient["request"],
+  walletId: string,
+  filters: PolicyAuditFilters
+): Promise<WalletPolicyEvaluationDetail[]> {
+  const decisions: Array<PolicyDecision | undefined> =
+    filters.decision === "approval_required"
+      ? ["approval_required", "provider_approval_required"]
+      : [filters.decision];
+  const pages = await Promise.all(
+    decisions.map((decision) => collectPolicyEvaluations(request, walletId, filters, decision))
+  );
+  return pages
+    .flat()
+    .sort((left, right) => Date.parse(right.evaluatedAt) - Date.parse(left.evaluatedAt));
+}
+
 export async function fetchPolicyAuditList(
   request: SdpApiClient["request"],
   walletId: string,
   filters: PolicyAuditFilters
 ): Promise<PolicyAuditListResult> {
-  const needsLocalPagination = Boolean(
-    filters.from || filters.to || filters.decision === "approval_required"
-  );
-  if (!needsLocalPagination) {
+  if (!needsLocalPolicyAuditPagination(filters)) {
     const result = await requestAuditPage(
       request,
       walletId,
@@ -286,16 +304,7 @@ export async function fetchPolicyAuditList(
     };
   }
 
-  const decisions: Array<PolicyDecision | undefined> =
-    filters.decision === "approval_required"
-      ? ["approval_required", "provider_approval_required"]
-      : [filters.decision];
-  const pages = await Promise.all(
-    decisions.map((decision) => collectPolicyEvaluations(request, walletId, filters, decision))
-  );
-  const evaluations = pages
-    .flat()
-    .sort((left, right) => Date.parse(right.evaluatedAt) - Date.parse(left.evaluatedAt));
+  const evaluations = await collectLocallyPaginatedPolicyEvaluations(request, walletId, filters);
   const pageCount = Math.max(1, Math.ceil(evaluations.length / POLICY_AUDIT_PAGE_SIZE));
   const page = Math.min(filters.page, pageCount);
   const start = (page - 1) * POLICY_AUDIT_PAGE_SIZE;
@@ -386,6 +395,31 @@ export async function fetchPolicyEvaluationNeighbors(
   policyEvaluationId: string,
   filters: PolicyAuditFilters
 ): Promise<PolicyAuditNeighbors> {
+  if (needsLocalPolicyAuditPagination(filters)) {
+    const evaluations = await collectLocallyPaginatedPolicyEvaluations(request, walletId, filters);
+    const index = evaluations.findIndex((item) => item.id === policyEvaluationId);
+    if (index === -1) return { previous: null, next: null };
+
+    const previousIndex = index - 1;
+    const nextIndex = index + 1;
+    return {
+      previous:
+        previousIndex >= 0
+          ? {
+              id: evaluations[previousIndex].id,
+              page: Math.floor(previousIndex / POLICY_AUDIT_PAGE_SIZE) + 1,
+            }
+          : null,
+      next:
+        nextIndex < evaluations.length
+          ? {
+              id: evaluations[nextIndex].id,
+              page: Math.floor(nextIndex / POLICY_AUDIT_PAGE_SIZE) + 1,
+            }
+          : null,
+    };
+  }
+
   const current = await fetchPolicyAuditList(request, walletId, filters);
   const index = current.evaluations.findIndex((item) => item.id === policyEvaluationId);
   if (index === -1) return { previous: null, next: null };

@@ -8,6 +8,7 @@ import { getMessages, translate } from "@/i18n/messages";
 import {
   buildPolicyAuditSearchParams,
   fetchPolicyAuditList,
+  fetchPolicyEvaluationNeighbors,
   parsePolicyAuditFilters,
 } from "./policy-audit.data";
 import {
@@ -223,6 +224,27 @@ describe("policy audit data", () => {
       })
     ).rejects.toThrow("Policy audit history exceeds the local filtering limit");
     expect(request).toHaveBeenCalledTimes(50);
+  });
+
+  it("computes date-filtered neighbors from one bounded history scan", async () => {
+    const evaluations = Array.from({ length: 30 }, (_, index) =>
+      evaluation("allow", {
+        id: `evaluation-${index}`,
+        evaluatedAt: new Date(Date.UTC(2026, 6, 30, 0, 0, 30 - index)).toISOString(),
+      })
+    );
+    const request = vi.fn(async () => apiPage(evaluations));
+
+    const result = await fetchPolicyEvaluationNeighbors(request, "wallet-1", "evaluation-24", {
+      page: 1,
+      from: "2026-07-01",
+    });
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      previous: { id: "evaluation-23", page: 1 },
+      next: { id: "evaluation-25", page: 2 },
+    });
   });
 
   it("returns the empty audit state without manufacturing rows", async () => {
