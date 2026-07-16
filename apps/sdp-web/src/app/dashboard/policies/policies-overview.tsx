@@ -680,12 +680,15 @@ export function PoliciesOverview({ inventory, error, state }: PoliciesOverviewPr
   const stateRef = useRef(state);
   const [searchValue, setSearchValue] = useState(state.query);
   const debouncedSearch = useDebounce(searchValue.trim(), 300);
-  stateRef.current = state;
 
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
   useEffect(() => setSearchValue(state.query), [state.query]);
   useEffect(() => {
     const currentState = stateRef.current;
     if (debouncedSearch !== currentState.query) {
+      stateRef.current = { ...currentState, query: debouncedSearch, page: 1 };
       router.replace(buildPoliciesHref(currentState, { query: debouncedSearch, page: 1 }), {
         scroll: false,
       });
@@ -693,7 +696,9 @@ export function PoliciesOverview({ inventory, error, state }: PoliciesOverviewPr
   }, [debouncedSearch, router]);
 
   const updateState = (changes: Partial<PoliciesUrlState>) => {
-    router.replace(buildPoliciesHref(state, changes), { scroll: false });
+    const currentState = stateRef.current;
+    stateRef.current = { ...currentState, ...changes };
+    router.replace(buildPoliciesHref(currentState, changes), { scroll: false });
   };
 
   return (
