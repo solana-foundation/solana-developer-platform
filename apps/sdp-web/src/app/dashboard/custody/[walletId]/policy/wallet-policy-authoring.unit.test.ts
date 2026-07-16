@@ -126,7 +126,7 @@ describe("wallet policy authoring", () => {
 
   it("builds an activation payload for every public authoring capability", () => {
     const state = createPolicyAuthoringState(emptyPolicy());
-    state.defaultAction = "review";
+    state.defaultAction = "approval_required";
     state.categories = ["limits", "assets", "destinations", "operations", "approvals"];
     state.maxTransferAmount = "100";
     state.maxDailyAmount = "500";
@@ -134,7 +134,7 @@ describe("wallet policy authoring", () => {
     state.destinationMode = "allowlist";
     state.destinationText = ADDRESS_B;
     state.familyActions = { transfer: "deny", payment: "approval_required" };
-    state.operationTypeRules = [{ value: "payment.create", action: "review" }];
+    state.operationTypeRules = [{ value: "payment.create", action: "approval_required" }];
     state.approvalFamilies = ["ramp"];
 
     const payload = buildPolicyPayload(WALLET_ID, state);
@@ -144,7 +144,7 @@ describe("wallet policy authoring", () => {
       destinationAllowlist: [ADDRESS_B],
       maxTransferAmount: "100",
       maxDailyAmount: "500",
-      defaultAction: "review",
+      defaultAction: "approval_required",
     });
     expect(payload.rules).toEqual(
       expect.arrayContaining([
@@ -161,7 +161,7 @@ describe("wallet policy authoring", () => {
         expect.objectContaining({
           kind: "operation_type",
           operationTypes: ["payment.create"],
-          action: "review",
+          action: "approval_required",
         }),
         expect.objectContaining({ kind: "asset", assets: [ADDRESS_A], action: "allow" }),
         expect.objectContaining({ kind: "destination", allowlist: [ADDRESS_B] }),
@@ -223,14 +223,14 @@ describe("wallet policy authoring", () => {
     const rebuilt = buildPolicyPayload(WALLET_ID, state);
 
     expect(state).toMatchObject({
-      defaultAction: "review",
+      defaultAction: "approval_required",
       maxTransferAmount: "250",
       maxDailyAmount: "1000",
       assets: [ADDRESS_A],
       destinationMode: "blocklist",
       destinationText: ADDRESS_B,
       familyActions: { transfer: "deny", payment: "deny" },
-      operationTypeRules: [{ value: "payment.create", action: "review" }],
+      operationTypeRules: [{ value: "payment.create", action: "approval_required" }],
       approvalFamilies: ["ramp"],
     });
     expect(rebuilt.destinationAllowlist).toEqual([]);

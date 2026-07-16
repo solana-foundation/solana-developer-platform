@@ -3,7 +3,6 @@
 import {
   DEFAULT_SDP_DOCS_URL,
   type PaymentWalletPolicy,
-  type PolicyDefaultAction,
   type PolicyProfileStatus,
   type WalletOperationFamily,
 } from "@sdp/types";
@@ -41,6 +40,7 @@ import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
   AUTHORING_RULE_ACTIONS,
+  type AuthoringDefaultAction,
   type AuthoringRuleAction,
   buildDisabledPolicyPayload,
   buildPolicyPayload,
@@ -146,15 +146,16 @@ const STEP_COPY = {
 const DEFAULT_ACTION_LABEL_KEYS = {
   allow: "DashboardCustody.policyDefaultAllow",
   approval_required: "DashboardCustody.policyDefaultApproval",
-  review: "DashboardCustody.policyDefaultReview",
   deny: "DashboardCustody.policyDefaultDeny",
-} as const satisfies Record<PolicyDefaultAction, Parameters<ReturnType<typeof useTranslations>>[0]>;
+} as const satisfies Record<
+  AuthoringDefaultAction,
+  Parameters<ReturnType<typeof useTranslations>>[0]
+>;
 
 const RULE_ACTION_LABEL_KEYS = {
   allow: "DashboardCustody.policyActionAllow",
   deny: "DashboardCustody.policyActionDeny",
   approval_required: "DashboardCustody.policyActionApproval",
-  review: "DashboardCustody.policyActionReview",
 } as const satisfies Record<AuthoringRuleAction, Parameters<ReturnType<typeof useTranslations>>[0]>;
 
 const FAMILY_LABEL_KEYS = {
@@ -648,13 +649,13 @@ function IntentStep({
             if (!value) return;
             setPolicyState((current) => ({
               ...current,
-              defaultAction: value as PolicyDefaultAction,
+              defaultAction: value as AuthoringDefaultAction,
             }));
           }}
           size="xl"
           iconLeft={<ShieldCheck />}
         >
-          {(Object.keys(DEFAULT_ACTION_LABEL_KEYS) as PolicyDefaultAction[]).map((action) => (
+          {(Object.keys(DEFAULT_ACTION_LABEL_KEYS) as AuthoringDefaultAction[]).map((action) => (
             <SelectItem key={action} value={action}>
               {t(DEFAULT_ACTION_LABEL_KEYS[action])}
             </SelectItem>

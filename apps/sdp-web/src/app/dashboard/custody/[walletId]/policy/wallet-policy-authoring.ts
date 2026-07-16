@@ -11,7 +11,11 @@ export type PolicyFlowStep = "intent" | "limits-assets" | "destinations-operatio
 
 export type RestrictionCategory = "limits" | "assets" | "destinations" | "operations" | "approvals";
 
-export type AuthoringRuleAction = Exclude<PolicyRuleAction, "provider_approval_required">;
+export type AuthoringRuleAction = Exclude<
+  PolicyRuleAction,
+  "provider_approval_required" | "review"
+>;
+export type AuthoringDefaultAction = Exclude<PolicyDefaultAction, "review">;
 export type DestinationMode = "allowlist" | "blocklist";
 
 export interface OperationTypeRuleInput {
@@ -20,7 +24,7 @@ export interface OperationTypeRuleInput {
 }
 
 export interface PolicyAuthoringState {
-  defaultAction: PolicyDefaultAction;
+  defaultAction: AuthoringDefaultAction;
   categories: RestrictionCategory[];
   maxTransferAmount: string;
   maxDailyAmount: string;
@@ -91,15 +95,13 @@ export const AUTHORING_RULE_ACTIONS = [
   "allow",
   "deny",
   "approval_required",
-  "review",
 ] as const satisfies readonly AuthoringRuleAction[];
 
 export const POLICY_DEFAULT_ACTIONS = [
   "allow",
   "approval_required",
-  "review",
   "deny",
-] as const satisfies readonly PolicyDefaultAction[];
+] as const satisfies readonly AuthoringDefaultAction[];
 
 export const DESTINATION_MODES = [
   "allowlist",
@@ -131,6 +133,19 @@ function uniqueValues(values: readonly string[]): string[] {
 
 function isAuthoringRuleAction(value: unknown): value is AuthoringRuleAction {
   return AUTHORING_RULE_ACTIONS.includes(value as AuthoringRuleAction);
+}
+
+function normalizeAuthoringRuleAction(
+  action: PolicyRuleAction | undefined
+): AuthoringRuleAction | null {
+  const normalized = action === "review" ? "approval_required" : (action ?? "allow");
+  return isAuthoringRuleAction(normalized) ? normalized : null;
+}
+
+function normalizeAuthoringDefaultAction(
+  action: PolicyDefaultAction | undefined
+): AuthoringDefaultAction {
+  return action === "review" ? "approval_required" : (action ?? "allow");
 }
 
 function isWalletOperationFamily(value: unknown): value is WalletOperationFamily {
@@ -240,8 +255,8 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
     switch (rule.kind) {
       case "operation_family": {
         const families = operationFamiliesFromRule(rule);
-        const action = rule.action ?? "allow";
-        if (families.length === 0 || !isAuthoringRuleAction(action)) {
+        const action = normalizeAuthoringRuleAction(rule.action);
+        if (families.length === 0 || !action) {
           passthroughRules.push(rule);
           addCategory(categories, "operations");
           break;
@@ -252,8 +267,8 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
       }
       case "operation_type": {
         const values = operationTypesFromRule(rule);
-        const action = rule.action ?? "allow";
-        if (values.length === 0 || !isAuthoringRuleAction(action)) {
+        const action = normalizeAuthoringRuleAction(rule.action);
+        if (values.length === 0 || !action) {
           passthroughRules.push(rule);
           addCategory(categories, "operations");
           break;
@@ -347,7 +362,9 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
   if (policy.maxTransferAmount || policy.maxDailyAmount) addCategory(categories, "limits");
 
   return {
-    defaultAction: policy.defaultAction ?? policy.controlProfile?.defaultAction ?? "allow",
+    defaultAction: normalizeAuthoringDefaultAction(
+      policy.defaultAction ?? policy.controlProfile?.defaultAction
+    ),
     categories,
     maxTransferAmount,
     maxDailyAmount: policy.maxDailyAmount ?? "",
