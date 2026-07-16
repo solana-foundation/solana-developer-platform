@@ -29,6 +29,7 @@ import {
   getTransferBatch,
   getWalletBalances,
   getWalletPolicy,
+  getWalletPolicyEvaluation,
   listOfframpCurrencies,
   listOnrampCurrencies,
   listPaymentRequests,
@@ -38,6 +39,8 @@ import {
   listSubscriptions,
   listTransferBatches,
   listTransfers,
+  listWalletControlProfileRevisions,
+  listWalletPolicyEvaluations,
   prepareCancelSubscription,
   prepareCreateSubscriptionPlan,
   prepareResumeSubscription,
@@ -80,6 +83,21 @@ payments.get(
   "/wallets/:walletId/policies",
   requirePermissions("wallets:read", "payments:read"),
   getWalletPolicy
+);
+payments.get(
+  "/wallets/:walletId/policies/revisions",
+  requirePermissions("wallets:read", "payments:read"),
+  listWalletControlProfileRevisions
+);
+payments.get(
+  "/wallets/:walletId/policies/evaluations",
+  requirePermissions("wallets:read", "payments:read"),
+  listWalletPolicyEvaluations
+);
+payments.get(
+  "/wallets/:walletId/policies/evaluations/:policyEvaluationId",
+  requirePermissions("wallets:read", "payments:read"),
+  getWalletPolicyEvaluation
 );
 payments.put(
   "/wallets/:walletId/policies",

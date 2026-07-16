@@ -1214,6 +1214,33 @@
           }
         },
         {
+          "name": "List wallet policy revisions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/revisions",
+            "description": "Returns immutable revisions for the wallet control profile in newest-first order, including the currently active revision reference."
+          }
+        },
+        {
+          "name": "List wallet policy evaluations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/evaluations",
+            "description": "Returns paginated, filterable policy audit history for one wallet. Evaluation context is redacted and excludes raw provider payloads."
+          }
+        },
+        {
+          "name": "Get wallet policy evaluation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/evaluations/{{policyEvaluationId}}",
+            "description": "Returns one policy evaluation with matched rules, redacted evaluation context, revision references, decision, status, reason, and approval linkage."
+          }
+        },
+        {
           "name": "List transfers",
           "request": {
             "method": "GET",

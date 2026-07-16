@@ -5157,6 +5157,9 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/wallets/{walletId}/balances` | Get wallet balances |
 | `GET` | `/v1/payments/wallets/{walletId}/policies` | Get wallet policy |
 | `PUT` | `/v1/payments/wallets/{walletId}/policies` | Update wallet policy |
+| `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations` | List wallet policy evaluations |
+| `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations/{policyEvaluationId}` | Get wallet policy evaluation |
+| `GET` | `/v1/payments/wallets/{walletId}/policies/revisions` | List wallet policy revisions |
 
 ---
 

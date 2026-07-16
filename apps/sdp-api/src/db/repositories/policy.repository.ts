@@ -159,9 +159,15 @@ export interface WalletPolicyEvaluationAuditRow {
   amount: string | null;
   destination: string | null;
   operation_status: WalletOperationStatus;
+  wallet_policy_revision_id: string | null;
+  active_wallet_policy_revision_id: string | null;
+  api_key_policy_revision_id: string | null;
+  active_api_key_policy_revision_id: string | null;
   decision: PolicyDecision;
   reason_code: string;
   reason: string | null;
+  matched_rules: Record<string, unknown>[];
+  evaluation_context: PolicyEvaluationContext | null;
   requires_approval: boolean;
   approval_request_id: string | null;
   operation_created_at: string;
@@ -321,6 +327,11 @@ export type UpsertApiKeyWalletPolicyBindingInput = UpsertApiKeyWalletPolicyBindi
       }
   );
 
+export interface ReplaceApiKeyWalletPolicyBindingsInput {
+  apiKeyId: string;
+  bindings: UpsertApiKeyWalletPolicyBindingInput[];
+}
+
 export interface CreateWalletOperationInput {
   organizationId: string;
   projectId: string | null;
@@ -389,10 +400,39 @@ export interface GetApprovalRequestDetailInput {
   approvalRequestId: string;
 }
 
+export interface GetWalletControlProfileRevisionHistoryInput {
+  organizationId: string;
+  projectId: string | null;
+  custodyWalletId: string;
+}
+
+export interface WalletControlProfileRevisionHistoryRow {
+  profile: WalletControlProfileRow;
+  revisions: WalletControlProfileRevisionRow[];
+}
+
 export interface ListWalletPolicyEvaluationAuditsInput {
   organizationId: string;
+  projectId: string | null;
   custodyWalletId: string;
-  limit?: number;
+  page?: number;
+  pageSize?: number;
+  decision?: PolicyDecision;
+  status?: WalletOperationStatus;
+  operationFamily?: WalletOperationFamily;
+  reasonCode?: string;
+}
+
+export interface ListWalletPolicyEvaluationAuditsResult {
+  rows: WalletPolicyEvaluationAuditRow[];
+  total: number;
+}
+
+export interface GetWalletPolicyEvaluationAuditInput {
+  organizationId: string;
+  projectId: string | null;
+  custodyWalletId: string;
+  policyEvaluationId: string;
 }
 
 export interface PolicyRepositoryContext {
@@ -415,12 +455,19 @@ export interface PolicyRepository {
   getActiveWalletControlProfileByProfileId(
     profileId: string
   ): Promise<ActiveWalletControlProfileResult | null>;
+  getWalletControlProfileRevisionHistory(
+    input: GetWalletControlProfileRevisionHistoryInput
+  ): Promise<WalletControlProfileRevisionHistoryRow | null>;
 
   createApiKeyControlProfile(
     input: CreateApiKeyControlProfileInput
   ): Promise<ApiKeyControlProfileRow | null>;
+  getApiKeyControlProfileById(profileId: string): Promise<ApiKeyControlProfileRow | null>;
   createApiKeyControlProfileRevision(
     input: CreateApiKeyControlProfileRevisionInput
+  ): Promise<ApiKeyControlProfileRevisionRow | null>;
+  getApiKeyControlProfileRevisionById(
+    revisionId: string
   ): Promise<ApiKeyControlProfileRevisionRow | null>;
   activateApiKeyControlProfileRevision(
     input: ActivateApiKeyControlProfileRevisionInput
@@ -436,6 +483,9 @@ export interface PolicyRepository {
   upsertApiKeyWalletPolicyBinding(
     input: UpsertApiKeyWalletPolicyBindingInput
   ): Promise<ApiKeyWalletPolicyBindingRow | null>;
+  replaceApiKeyWalletPolicyBindings(
+    input: ReplaceApiKeyWalletPolicyBindingsInput
+  ): Promise<ApiKeyWalletPolicyBindingRow[]>;
   listApiKeyWalletPolicyBindings(apiKeyId: string): Promise<ApiKeyWalletPolicyBindingRow[]>;
   listApiKeyWalletPolicyBindingsForApiKeys(
     apiKeyIds: string[]
@@ -465,7 +515,10 @@ export interface PolicyRepository {
   listPolicyEvaluationsForOperation(walletOperationId: string): Promise<PolicyEvaluationRow[]>;
   listWalletPolicyEvaluationAudits(
     input: ListWalletPolicyEvaluationAuditsInput
-  ): Promise<WalletPolicyEvaluationAuditRow[]>;
+  ): Promise<ListWalletPolicyEvaluationAuditsResult>;
+  getWalletPolicyEvaluationAudit(
+    input: GetWalletPolicyEvaluationAuditInput
+  ): Promise<WalletPolicyEvaluationAuditRow | null>;
   createApprovalRequest(input: CreateApprovalRequestInput): Promise<ApprovalRequestRow | null>;
   updateApprovalRequestStatus(
     input: UpdateApprovalRequestStatusInput

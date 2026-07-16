@@ -351,12 +351,14 @@ describe("PolicyRepository (postgres)", () => {
 
     const audits = await repo.listWalletPolicyEvaluationAudits({
       organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
       custodyWalletId: TEST_CUSTODY_WALLET.id,
-      limit: 10,
+      pageSize: 10,
     });
 
-    expect(audits).toHaveLength(1);
-    expect(audits[0]).toMatchObject({
+    expect(audits.total).toBe(1);
+    expect(audits.rows).toHaveLength(1);
+    expect(audits.rows[0]).toMatchObject({
       wallet_operation_id: operation?.id,
       policy_evaluation_id: evaluation?.id,
       operation_family: "ramp",

@@ -5,7 +5,11 @@ import {
   addressScreeningResponseSchema,
   allowlistEntriesResponseSchema,
   allowlistEntrySchema,
+  apiKeyControlProfileActivationResponseSchema,
+  apiKeyControlProfileResponseSchema,
+  apiKeyControlProfileRevisionResponseSchema,
   apiKeyDetailSchema,
+  apiKeyPolicyBindingsResponseSchema,
   apiKeyResponseSchema,
   assetProfileFieldOptionsResponseSchema,
   assetProfileResponseSchema,
@@ -93,6 +97,9 @@ import {
   walletApprovalRequestResponseSchema,
   walletApprovalRequestsResponseSchema,
   walletBalancesResponseSchema,
+  walletControlProfileRevisionHistorySchema,
+  walletPolicyEvaluationDetailSchema,
+  walletPolicyEvaluationResponseSchema,
   walletPolicyResponseSchema,
 } from "../schemas";
 
@@ -107,6 +114,18 @@ export const apiKeyDetailResponse = successResponseSchema(apiKeyDetailSchema);
 export const apiKeyCreateResponse = successResponseSchema(apiKeyResponseSchema);
 export const apiKeyRotateResponse = successResponseSchema(rotateApiKeyResponseSchema);
 export const apiKeyRevokeResponse = successResponseSchema(revokeApiKeyResponseSchema);
+export const apiKeyControlProfileResponse = successResponseSchema(
+  apiKeyControlProfileResponseSchema
+);
+export const apiKeyControlProfileRevisionResponse = successResponseSchema(
+  apiKeyControlProfileRevisionResponseSchema
+);
+export const apiKeyControlProfileActivationResponse = successResponseSchema(
+  apiKeyControlProfileActivationResponseSchema
+);
+export const apiKeyPolicyBindingsResponse = successResponseSchema(
+  apiKeyPolicyBindingsResponseSchema
+);
 
 export const assetProfileResponse = successResponseSchema(assetProfileResponseSchema);
 export const assetProfileFieldOptionsResponse = successResponseSchema(
@@ -202,6 +221,15 @@ export const listTemplatesResponse = successResponseSchema(listTemplatesResponse
 export const onboardingStatusResponse = successResponseSchema(onboardingStatusResponseSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
 export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSchema);
+export const walletControlProfileRevisionHistoryResponse = successResponseSchema(
+  walletControlProfileRevisionHistorySchema
+);
+export const walletPolicyEvaluationListResponse = paginatedResponseSchema(
+  walletPolicyEvaluationDetailSchema
+);
+export const walletPolicyEvaluationResponse = successResponseSchema(
+  walletPolicyEvaluationResponseSchema
+);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
 export const transferBatchResponse = successResponseSchema(transferBatchResponseSchema);
