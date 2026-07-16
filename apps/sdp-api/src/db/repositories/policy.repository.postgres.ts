@@ -225,7 +225,7 @@ inventory AS (
     END AS active_revision_number,
     COALESCE(profile.default_action, 'allow') AS default_action,
     COALESCE(JSONB_ARRAY_LENGTH(profile.rules), 0) AS rule_count,
-    COALESCE(profile.updated_at, target.target_updated_at) AS updated_at,
+    COALESCE(profile.updated_at::text, target.target_updated_at::text) AS updated_at,
     profile.activated_at,
     COALESCE(provider_status.status, 'not_applicable') AS provider_mapping_status,
     NULL::text AS binding_scope,
@@ -260,7 +260,7 @@ inventory AS (
     END AS active_revision_number,
     COALESCE(profile.default_action, 'allow') AS default_action,
     COALESCE(JSONB_ARRAY_LENGTH(profile.rules), 0) AS rule_count,
-    COALESCE(profile.updated_at, target.target_updated_at) AS updated_at,
+    COALESCE(profile.updated_at::text, target.target_updated_at::text) AS updated_at,
     profile.activated_at,
     NULL::text AS provider_mapping_status,
     CASE
