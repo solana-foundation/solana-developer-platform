@@ -283,7 +283,7 @@ function DecisionTab({
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-medium text-primary">{step.label}</p>
-                <p className="mt-1 break-words text-sm leading-5 text-secondary">
+                <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-5 text-secondary">
                   {step.description}
                 </p>
               </div>
@@ -400,12 +400,12 @@ function evaluationSteps(
 
   steps.push({
     label: t("DashboardCustody.policyAuditObservedValueContext"),
-    description: JSON.stringify(observedContext(evaluation)),
+    description: JSON.stringify(observedContext(evaluation), null, 2),
     outcome: t("DashboardCustody.policyAuditRecorded"),
   });
   steps.push({
     label: t("DashboardCustody.policyAuditEffectiveLimitExpectation"),
-    description: JSON.stringify(effectiveExpectation(evaluation)),
+    description: JSON.stringify(effectiveExpectation(evaluation), null, 2),
     outcome: t("DashboardCustody.policyAuditApplied"),
   });
   steps.push({
@@ -424,13 +424,17 @@ function policyContextDescription(context: {
   decision: string;
   requiresApproval: boolean;
 }): string {
-  return JSON.stringify({
-    source: context.source,
-    revisionId: context.revisionId,
-    defaultAction: context.defaultAction,
-    decision: context.decision,
-    requiresApproval: context.requiresApproval,
-  });
+  return JSON.stringify(
+    {
+      source: context.source,
+      revisionId: context.revisionId,
+      defaultAction: context.defaultAction,
+      decision: context.decision,
+      requiresApproval: context.requiresApproval,
+    },
+    null,
+    2
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -441,7 +445,7 @@ function backendDescription(record: Record<string, unknown>): string {
   for (const key of ["description", "reason", "name"]) {
     if (typeof record[key] === "string" && record[key]) return record[key];
   }
-  return JSON.stringify(record);
+  return JSON.stringify(record, null, 2);
 }
 
 function decisionFromRecord(record: Record<string, unknown>): PolicyDecision | null {

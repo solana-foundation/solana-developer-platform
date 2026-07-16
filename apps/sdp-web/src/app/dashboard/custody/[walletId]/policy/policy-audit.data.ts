@@ -11,6 +11,7 @@ import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const POLICY_AUDIT_PAGE_SIZE = 25;
 const POLICY_AUDIT_API_PAGE_SIZE = 100;
+const POLICY_AUDIT_MAX_LOCAL_FILTER_PAGES = 50;
 
 const POLICY_DECISIONS = [
   "allow",
@@ -247,7 +248,14 @@ async function collectPolicyEvaluations(
     const reachedLowerBound = result.data.some(
       (item) => Date.parse(item.evaluatedAt) < fromTimestamp
     );
-    if (!result.meta.hasMore || reachedLowerBound) break;
+    const pageCount = Math.max(1, Math.ceil(result.meta.total / Math.max(1, result.meta.pageSize)));
+    if (!result.meta.hasMore || reachedLowerBound || page >= pageCount) break;
+    if (page >= POLICY_AUDIT_MAX_LOCAL_FILTER_PAGES) {
+      throw new PolicyAuditRequestError(
+        "Policy audit history exceeds the local filtering limit",
+        422
+      );
+    }
     page += 1;
   }
 

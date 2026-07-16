@@ -210,6 +210,21 @@ describe("policy audit data", () => {
     expect(result.evaluations.map((item) => item.id)).toEqual(["inside"]);
   });
 
+  it("bounds local date filtering for very large audit histories", async () => {
+    const request = vi.fn(async (path: string) => {
+      const page = Number(new URL(`http://sdp.local${path}`).searchParams.get("page"));
+      return apiPage([], { total: 10_000, page, pageSize: 100, hasMore: true });
+    });
+
+    await expect(
+      fetchPolicyAuditList(request, "wallet-1", {
+        page: 1,
+        to: "2026-07-31",
+      })
+    ).rejects.toThrow("Policy audit history exceeds the local filtering limit");
+    expect(request).toHaveBeenCalledTimes(50);
+  });
+
   it("returns the empty audit state without manufacturing rows", async () => {
     const result = await fetchPolicyAuditList(
       vi.fn(async () => apiPage([])),
