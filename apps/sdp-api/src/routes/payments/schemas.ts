@@ -7,6 +7,7 @@ import {
   MURAL_SANDBOX_PAYIN_CURRENCIES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
+  type PolicyRule,
   type PrivateTransferRequest,
   RAMP_PROVIDERS,
 } from "@sdp/types";
@@ -57,9 +58,123 @@ export const walletIdParamsSchema = z.object({
   walletId: z.string().min(1),
 });
 
+export const walletPolicyEvaluationParamsSchema = walletIdParamsSchema.extend({
+  policyEvaluationId: z.string().min(1),
+});
+
+export const walletPolicyEvaluationListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+  decision: z
+    .enum([
+      "allow",
+      "deny",
+      "approval_required",
+      "provider_approval_required",
+      "review",
+      "not_evaluated",
+    ])
+    .optional(),
+  status: z
+    .enum([
+      "created",
+      "evaluated",
+      "pending_approval",
+      "executing",
+      "completed",
+      "failed",
+      "canceled",
+    ])
+    .optional(),
+  operationFamily: z
+    .enum(["transfer", "payment", "ramp", "issuance", "raw_sign", "program", "provider_admin"])
+    .optional(),
+  reasonCode: z.string().min(1).max(100).optional(),
+});
+
 export const transferIdParamsSchema = z.object({
   transferId: z.string().min(1),
 });
+
+const policyRuleBaseShape = {
+  id: z.string().min(1).max(120).optional(),
+  name: z.string().min(1).max(120).optional(),
+  description: z.string().max(500).optional(),
+  action: z
+    .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+    .optional(),
+};
+
+const walletOperationFamilySchema = z.enum([
+  "transfer",
+  "payment",
+  "ramp",
+  "issuance",
+  "raw_sign",
+  "program",
+  "provider_admin",
+]);
+
+const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnion("kind", [
+  z.object({
+    ...policyRuleBaseShape,
+    kind: z.literal("operation_family"),
+    family: walletOperationFamilySchema.optional(),
+    families: z.array(walletOperationFamilySchema).max(20).optional(),
+  }),
+  z.object({
+    ...policyRuleBaseShape,
+    kind: z.literal("operation_type"),
+    operationType: z.string().min(1, "operationType must not be empty").max(120).optional(),
+    operationTypes: z
+      .array(z.string().min(1, "operationTypes entries must not be empty").max(120))
+      .max(100)
+      .optional(),
+  }),
+  z.object({
+    ...policyRuleBaseShape,
+    kind: z.literal("asset"),
+    asset: z.string().min(1, "asset must not be empty").max(120).optional(),
+    assets: z
+      .array(z.string().min(1, "assets entries must not be empty").max(120))
+      .max(100)
+      .optional(),
+  }),
+  z.object({
+    ...policyRuleBaseShape,
+    kind: z.literal("destination"),
+    allowlist: z.array(solanaAddressSchema("allowlist entry")).max(500).optional(),
+    blocklist: z.array(solanaAddressSchema("blocklist entry")).max(500).optional(),
+    destination: solanaAddressSchema("destination").optional(),
+    destinations: z.array(solanaAddressSchema("destinations entry")).max(500).optional(),
+  }),
+  z.object({
+    ...policyRuleBaseShape,
+    kind: z.literal("amount"),
+    min: z
+      .string()
+      .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
+      .optional(),
+    max: z
+      .string()
+      .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
+      .optional(),
+    asset: z.string().min(1).max(120).optional(),
+    assets: z.array(z.string().min(1).max(120)).max(100).optional(),
+  }),
+  z.object({
+    ...policyRuleBaseShape,
+    kind: z.literal("approval"),
+    families: z.array(walletOperationFamilySchema).max(20).optional(),
+    operationTypes: z.array(z.string().min(1).max(120)).max(100).optional(),
+    assets: z.array(z.string().min(1).max(120)).max(100).optional(),
+    approvalGroupId: z.string().min(1).max(120).optional(),
+  }),
+  z.object({
+    ...policyRuleBaseShape,
+    kind: z.literal("always"),
+  }),
+]);
 
 export const updateWalletPolicySchema = z.object({
   destinationAllowlist: z.array(solanaAddressSchema("destinationAllowlist entry")).max(500),
@@ -72,114 +187,7 @@ export const updateWalletPolicySchema = z.object({
     .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
     .optional(),
   defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).optional(),
-  rules: z
-    .array(
-      z.discriminatedUnion("kind", [
-        z.object({
-          id: z.string().min(1).max(120).optional(),
-          name: z.string().min(1).max(120).optional(),
-          description: z.string().max(500).optional(),
-          action: z
-            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
-            .optional(),
-          kind: z.literal("operation_family"),
-          family: z
-            .enum([
-              "transfer",
-              "payment",
-              "ramp",
-              "issuance",
-              "raw_sign",
-              "program",
-              "provider_admin",
-            ])
-            .optional(),
-          families: z
-            .array(
-              z.enum([
-                "transfer",
-                "payment",
-                "ramp",
-                "issuance",
-                "raw_sign",
-                "program",
-                "provider_admin",
-              ])
-            )
-            .max(20)
-            .optional(),
-        }),
-        z.object({
-          id: z.string().min(1).max(120).optional(),
-          name: z.string().min(1).max(120).optional(),
-          description: z.string().max(500).optional(),
-          action: z
-            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
-            .optional(),
-          kind: z.literal("destination"),
-          allowlist: z.array(solanaAddressSchema("allowlist entry")).max(500).optional(),
-          blocklist: z.array(solanaAddressSchema("blocklist entry")).max(500).optional(),
-          destination: solanaAddressSchema("destination").optional(),
-          destinations: z.array(solanaAddressSchema("destinations entry")).max(500).optional(),
-        }),
-        z.object({
-          id: z.string().min(1).max(120).optional(),
-          name: z.string().min(1).max(120).optional(),
-          description: z.string().max(500).optional(),
-          action: z
-            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
-            .optional(),
-          kind: z.literal("amount"),
-          min: z
-            .string()
-            .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
-            .optional(),
-          max: z
-            .string()
-            .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
-            .optional(),
-          asset: z.string().min(1).max(120).optional(),
-          assets: z.array(z.string().min(1).max(120)).max(100).optional(),
-        }),
-        z.object({
-          id: z.string().min(1).max(120).optional(),
-          name: z.string().min(1).max(120).optional(),
-          description: z.string().max(500).optional(),
-          action: z
-            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
-            .optional(),
-          kind: z.literal("approval"),
-          families: z
-            .array(
-              z.enum([
-                "transfer",
-                "payment",
-                "ramp",
-                "issuance",
-                "raw_sign",
-                "program",
-                "provider_admin",
-              ])
-            )
-            .max(20)
-            .optional(),
-          operationTypes: z.array(z.string().min(1).max(120)).max(100).optional(),
-          assets: z.array(z.string().min(1).max(120)).max(100).optional(),
-          approvalGroupId: z.string().min(1).max(120).optional(),
-        }),
-        z.object({
-          id: z.string().min(1).max(120).optional(),
-          name: z.string().min(1).max(120).optional(),
-          description: z.string().max(500).optional(),
-          action: z
-            .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
-            .optional(),
-          kind: z.literal("always"),
-        }),
-      ])
-    )
-    .max(100)
-    .optional(),
+  rules: z.array(walletPolicyRuleSchema).max(100).optional(),
 });
 
 export const paymentAmountSchema = z

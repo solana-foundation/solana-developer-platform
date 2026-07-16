@@ -5717,6 +5717,18 @@ describe("Payments routes", () => {
         families: ["payment"],
         action: "approval_required",
       },
+      {
+        id: "deny-payment-execution",
+        kind: "operation_type",
+        operationType: "payment_transfer_execute",
+        action: "deny",
+      },
+      {
+        id: "approve-usdc",
+        kind: "asset",
+        asset: "USDC",
+        action: "approval_required",
+      },
     ];
 
     const updateRes = await app.request(
@@ -5837,6 +5849,32 @@ describe("Payments routes", () => {
         action: "deny",
       },
     ]);
+  });
+
+  it("rejects invalid public wallet policy rule values", async () => {
+    const updateRes = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationAllowlist: [],
+          rules: [{ kind: "operation_type", operationType: "" }],
+        }),
+      },
+      env
+    );
+
+    expect(updateRes.status).toBe(400);
+    const body = (await updateRes.json()) as {
+      error: { code: string; message: string; details?: { errors?: Record<string, string[]> } };
+    };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toContain("Invalid request body");
+    expect(body.error.details?.errors?.rules).toContain("operationType must not be empty");
   });
 
   it("blocks create transfer when projected daily total exceeds maxDailyAmount", async () => {

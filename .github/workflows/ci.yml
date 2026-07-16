@@ -389,7 +389,7 @@ jobs:
             custody_provider: local
           - name: Surfpool / Mosaic
             provider: surfpool
-            test_files: src/tests/mosaic-token-acl.test.ts src/tests/mosaic-abl.test.ts src/tests/mosaic-templates.test.ts
+            test_files: src/tests/mosaic-token-acl.test.ts src/tests/mosaic-token-acl-constraints.test.ts src/tests/mosaic-abl.test.ts src/tests/mosaic-templates.test.ts
             rpc_provider: triton
             custody_provider: local
           - name: Surfpool / Token Flows
