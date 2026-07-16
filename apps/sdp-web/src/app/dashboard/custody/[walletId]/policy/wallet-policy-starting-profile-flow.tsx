@@ -597,15 +597,20 @@ function LoadingState() {
 function FormSection({
   title,
   description,
+  trailing,
   children,
 }: {
   title: string;
   description: string;
+  trailing?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section>
-      <h2 className="text-base font-semibold text-primary">{title}</h2>
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="text-base font-semibold text-primary">{title}</h2>
+        {trailing}
+      </div>
       <p className="mt-1 text-sm leading-5 text-secondary">{description}</p>
       <div className="mt-5">{children}</div>
     </section>
@@ -812,6 +817,7 @@ function AssetEditor({
 }) {
   const t = useTranslations();
   const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
   const [inputError, setInputError] = useState<"invalid" | "duplicate" | null>(null);
   const normalizedQuery = query.trim().toLowerCase();
   const uniqueWalletAssets = walletAssets.filter(
@@ -820,10 +826,9 @@ function AssetEditor({
   const matchingWalletAssets = uniqueWalletAssets
     .filter(
       (asset) =>
-        !assets.includes(asset.mint) &&
-        (!normalizedQuery ||
-          asset.token.toLowerCase().includes(normalizedQuery) ||
-          asset.mint.toLowerCase().includes(normalizedQuery))
+        !normalizedQuery ||
+        asset.token.toLowerCase().includes(normalizedQuery) ||
+        asset.mint.toLowerCase().includes(normalizedQuery)
     )
     .slice(0, 5);
   const canAddCustomMint =
@@ -843,82 +848,131 @@ function AssetEditor({
     }
     onChange([...assets, normalized]);
     setQuery("");
+    setOpen(false);
     setInputError(null);
+  }
+
+  function toggleWalletAsset(mint: string) {
+    onChange(assets.includes(mint) ? assets.filter((asset) => asset !== mint) : [...assets, mint]);
+    setQuery("");
+    setOpen(false);
+    setInputError(null);
+  }
+
+  function submitSearch() {
+    if (matchingWalletAssets.length === 1) {
+      toggleWalletAsset(matchingWalletAssets[0].mint);
+      return;
+    }
+    if (canAddCustomMint) {
+      addAsset(query);
+      return;
+    }
+    if (query.trim()) setInputError("invalid");
   }
 
   return (
     <FormSection
       title={t("DashboardCustody.policyAllowedAssets")}
       description={t("DashboardCustody.policyAllowedAssetsDescription")}
+      trailing={
+        <span className="shrink-0 text-xs font-medium text-muted">
+          {t("DashboardCustody.policySelectedAssetCount", { count: assets.length })}
+        </span>
+      }
     >
-      <div className="relative">
-        <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" />
-        <Input
-          value={query}
-          className="pl-9"
-          placeholder={t("DashboardCustody.policySearchAssets")}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setInputError(null);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              addAsset(query);
-            }
-          }}
-        />
-      </div>
+      <fieldset
+        className="relative min-w-0"
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+        }}
+      >
+        <legend className="sr-only">{t("DashboardCustody.policyAllowedAssets")}</legend>
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" />
+          <Input
+            value={query}
+            className="pl-9"
+            placeholder={t("DashboardCustody.policySearchAssets")}
+            role="combobox"
+            aria-expanded={open}
+            aria-controls="policy-wallet-asset-options"
+            onFocus={() => setOpen(true)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOpen(true);
+              setInputError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                submitSearch();
+              }
+              if (event.key === "Escape") setOpen(false);
+            }}
+          />
+        </div>
 
-      {query.trim() && (matchingWalletAssets.length > 0 || canAddCustomMint) ? (
-        <div className="mt-2 overflow-hidden rounded-lg border border-border-default bg-white">
-          {matchingWalletAssets.map((asset) => (
-            <button
-              key={asset.mint}
-              type="button"
-              className="flex w-full items-center justify-between gap-4 border-b border-border-default px-3 py-2.5 text-left last:border-b-0 hover:bg-surface-sunken"
-              onClick={() => addAsset(asset.mint)}
-            >
-              <span className="min-w-0">
-                <span className="block text-sm font-medium text-primary">{asset.token}</span>
-                <span className="block truncate text-xs text-muted">{asset.mint}</span>
-              </span>
-              <span className="shrink-0 text-xs text-secondary">{asset.uiAmount}</span>
-            </button>
-          ))}
-          {canAddCustomMint ? (
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 border-t border-border-default px-3 py-2.5 text-left text-sm font-medium text-primary hover:bg-surface-sunken first:border-t-0"
-              onClick={() => addAsset(query)}
-            >
-              <Plus className="size-4" />
-              {t("DashboardCustody.policyAddCustomMint")}
-            </button>
-          ) : null}
-        </div>
-      ) : uniqueWalletAssets.length > 0 ? (
-        <div className="mt-3">
-          <p className="mb-2 text-xs font-medium text-muted">
-            {t("DashboardCustody.policyWalletAssets")}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {uniqueWalletAssets
-              .filter((asset) => !assets.includes(asset.mint))
-              .slice(0, 6)
-              .map((asset) => (
-                <button
-                  key={asset.mint}
-                  type="button"
-                  className="rounded-md border border-border-default bg-white px-3 py-2 text-sm text-primary hover:bg-surface-sunken"
-                  onClick={() => addAsset(asset.mint)}
-                >
-                  {asset.token}
-                </button>
-              ))}
+        {open ? (
+          <div
+            id="policy-wallet-asset-options"
+            role="listbox"
+            aria-multiselectable="true"
+            className="absolute z-20 mt-2 w-full overflow-hidden rounded-lg border border-border-default bg-white shadow-lg"
+          >
+            {matchingWalletAssets.length > 0 ? (
+              matchingWalletAssets.map((asset) => {
+                const selected = assets.includes(asset.mint);
+                return (
+                  <button
+                    key={asset.mint}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    className="flex w-full items-center gap-3 border-b border-border-default px-3 py-2.5 text-left last:border-b-0 hover:bg-surface-sunken"
+                    onClick={() => toggleWalletAsset(asset.mint)}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium text-primary">{asset.token}</span>
+                      <span className="block truncate text-xs text-muted">{asset.mint}</span>
+                    </span>
+                    <span className="shrink-0 text-xs text-secondary">{asset.uiAmount}</span>
+                    <span
+                      className={cn(
+                        "flex size-5 shrink-0 items-center justify-center rounded border",
+                        selected
+                          ? "border-primary bg-primary text-white"
+                          : "border-border-strong bg-white text-transparent"
+                      )}
+                    >
+                      <Check className="size-3.5" />
+                    </span>
+                  </button>
+                );
+              })
+            ) : query.trim() && !canAddCustomMint ? (
+              <p className="px-3 py-4 text-sm text-muted">
+                {t("DashboardCustody.policyNoMatchingAssets")}
+              </p>
+            ) : null}
+            {canAddCustomMint ? (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 border-t border-border-default px-3 py-2.5 text-left text-sm font-medium text-primary hover:bg-surface-sunken first:border-t-0"
+                onClick={() => addAsset(query)}
+              >
+                <Plus className="size-4" />
+                <span className="min-w-0 flex-1">
+                  <span className="block">{t("DashboardCustody.policyAddCustomMint")}</span>
+                  <span className="block truncate text-xs font-normal text-muted">
+                    {query.trim()}
+                  </span>
+                </span>
+              </button>
+            ) : null}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </fieldset>
 
       {inputError ? (
         <p className="mt-2 text-sm text-error">
@@ -931,28 +985,38 @@ function AssetEditor({
       ) : null}
 
       {assets.length > 0 ? (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {assets.map((mint) => {
-            const walletAsset = uniqueWalletAssets.find((asset) => asset.mint === mint);
-            return (
-              <span
-                key={mint}
-                className="inline-flex max-w-full items-center gap-2 rounded-full bg-fill px-3 py-1.5 text-sm text-primary"
-              >
-                <span className="max-w-48 truncate">{walletAsset?.token ?? mint}</span>
-                <button
-                  type="button"
-                  className="text-muted hover:text-primary"
-                  aria-label={t("DashboardCustody.policyRemoveAsset", {
-                    asset: walletAsset?.token ?? mint,
-                  })}
-                  onClick={() => onChange(assets.filter((asset) => asset !== mint))}
-                >
-                  <X className="size-3.5" />
-                </button>
-              </span>
-            );
-          })}
+        <div className="mt-5">
+          <p className="text-xs font-medium text-muted">
+            {t("DashboardCustody.policySelectedAssets")}
+          </p>
+          <div className="mt-2 divide-y divide-border-default border-y border-border-default">
+            {assets.map((mint) => {
+              const walletAsset = uniqueWalletAssets.find((asset) => asset.mint === mint);
+              const label = walletAsset?.token ?? t("DashboardCustody.policyCustomMint");
+              return (
+                <div key={mint} className="flex min-h-14 items-center gap-3 py-2.5">
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-primary">{label}</span>
+                    <span className="block truncate text-xs text-muted" title={mint}>
+                      {mint}
+                    </span>
+                  </span>
+                  {walletAsset ? (
+                    <span className="shrink-0 text-xs text-secondary">{walletAsset.uiAmount}</span>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t("DashboardCustody.policyRemoveAsset", { asset: label })}
+                    onClick={() => onChange(assets.filter((asset) => asset !== mint))}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
         </div>
       ) : null}
 
