@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
   "globalDependencies": [".env", ".env.*"],
   "globalEnv": [
     "API_KEY_PEPPER",
@@ -177,6 +178,15 @@
     "dev:local": {
       "cache": false,
       "persistent": true
+    },
+    "dev:db": {
+      "cache": false,
+      "persistent": true
+    },
+    "dev:webhook": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["NGROK_DOMAIN"]
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],

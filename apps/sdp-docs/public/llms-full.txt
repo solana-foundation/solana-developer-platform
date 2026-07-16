@@ -5055,6 +5055,7 @@ Source: https://platform.solana.com/docs/reference/api
 - [Projects](/docs/reference/api/projects)
 - [Issuance](/docs/reference/api/issuance)
 - [Payments](/docs/reference/api/payments)
+- [Policies](/docs/reference/api/policies)
 - [Compliance](/docs/reference/api/compliance)
 - [Asset Profiles](/docs/reference/api/asset-profiles)
 
@@ -5230,6 +5231,17 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations` | List wallet policy evaluations |
 | `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations/{policyEvaluationId}` | Get wallet policy evaluation |
 | `GET` | `/v1/payments/wallets/{walletId}/policies/revisions` | List wallet policy revisions |
+
+---
+
+### Policies
+Source: https://platform.solana.com/docs/reference/api/policies
+
+> Wallet and API-key policy-control inventory.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/policies` | List policy controls |
 
 ---
 

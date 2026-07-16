@@ -8,6 +8,22 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const script = path.join(here, "project-secrets.mjs");
+const committedWorkerVarKeys = [
+  "SDP_RUNTIME",
+  "SDP_DEPLOYMENT_MODE",
+  "EMAIL_FROM",
+  "SOLANA_NETWORK",
+  "SOLANA_RPC_URL",
+  "SOLANA_RPC_DEFAULT_PROVIDER",
+  "SOLANA_RPC_TRITON_URL",
+  "SOLANA_RPC_HELIUS_URL",
+  "SOLANA_RPC_ALCHEMY_URL",
+  "SOLANA_RPC_QUICKNODE_URL",
+  "SOLANA_RPC_VALIDATIONCLOUD_URL",
+  "FEE_PAYMENT_PROVIDER",
+  "KORA_RPC_URL",
+  "PAYMENTS_RECURRING_ENABLED",
+];
 
 function run(command, env = {}, extraArgs = []) {
   const result = spawnSync(process.execPath, [script, command, ...extraArgs], {
@@ -66,8 +82,7 @@ test("docker omits keys whose values are missing or empty", () => {
 
 test("cloudflare output stays valid JSON without committed or local-only keys", () => {
   const result = run("cloudflare", {
-    SDP_RUNTIME: "workers",
-    SOLANA_NETWORK: "mainnet-beta",
+    ...Object.fromEntries(committedWorkerVarKeys.map((key) => [key, "configured"])),
     DATABASE_URL: "postgresql://localhost/sdp",
     CLERK_SECRET_KEY: "sk_test_clerk",
     MONEYGRAM_SANDBOX_PUBLIC_KEY: "moneygram_public",
@@ -78,8 +93,9 @@ test("cloudflare output stays valid JSON without committed or local-only keys", 
   assert.equal(payload.CLERK_SECRET_KEY, "sk_test_clerk");
   assert.equal(payload.MONEYGRAM_SANDBOX_PUBLIC_KEY, "moneygram_public");
   assert.equal(payload.MONEYGRAM_SANDBOX_SECRET_KEY, "moneygram_secret");
-  assert.equal(payload.SDP_RUNTIME, undefined);
-  assert.equal(payload.SOLANA_NETWORK, undefined);
+  for (const key of committedWorkerVarKeys) {
+    assert.equal(payload[key], undefined, `${key} must remain a Wrangler var`);
+  }
   assert.equal(payload.DATABASE_URL, undefined);
 });
 
