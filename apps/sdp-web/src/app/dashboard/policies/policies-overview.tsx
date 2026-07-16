@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -677,17 +677,20 @@ export function PoliciesOverviewSurface({
 
 export function PoliciesOverview({ inventory, error, state }: PoliciesOverviewProps) {
   const router = useRouter();
+  const stateRef = useRef(state);
   const [searchValue, setSearchValue] = useState(state.query);
   const debouncedSearch = useDebounce(searchValue.trim(), 300);
+  stateRef.current = state;
 
   useEffect(() => setSearchValue(state.query), [state.query]);
   useEffect(() => {
-    if (debouncedSearch !== state.query) {
-      router.replace(buildPoliciesHref(state, { query: debouncedSearch, page: 1 }), {
+    const currentState = stateRef.current;
+    if (debouncedSearch !== currentState.query) {
+      router.replace(buildPoliciesHref(currentState, { query: debouncedSearch, page: 1 }), {
         scroll: false,
       });
     }
-  }, [debouncedSearch, router, state]);
+  }, [debouncedSearch, router]);
 
   const updateState = (changes: Partial<PoliciesUrlState>) => {
     router.replace(buildPoliciesHref(state, changes), { scroll: false });
