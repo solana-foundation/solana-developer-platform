@@ -471,11 +471,15 @@ function SummaryRail({
   const t = useTranslations();
   const rows = inventory
     ? ([
-        [t("DashboardPolicies.defaultAllow"), inventory.summary.defaultAllow],
-        [t("DashboardPolicies.draft"), inventory.summary.draft],
-        [t("DashboardPolicies.active"), inventory.summary.active],
-        [t("DashboardPolicies.disabled"), inventory.summary.disabled],
-        [t("DashboardPolicies.apiKeyBindings"), inventory.summary.totalApiKeyBindings],
+        ["default_allow", t("DashboardPolicies.defaultAllow"), inventory.summary.defaultAllow],
+        ["draft", t("DashboardPolicies.draft"), inventory.summary.draft],
+        ["active", t("DashboardPolicies.active"), inventory.summary.active],
+        ["disabled", t("DashboardPolicies.disabled"), inventory.summary.disabled],
+        [
+          "api_key_bindings",
+          t("DashboardPolicies.apiKeyBindings"),
+          inventory.summary.totalApiKeyBindings,
+        ],
       ] as const)
     : [];
   return (
@@ -500,13 +504,13 @@ function SummaryRail({
         <p className="mt-6 text-sm text-error">{t("DashboardPolicies.loadError")}</p>
       ) : (
         <dl className="mt-6 divide-y divide-border-default">
-          {rows.map(([label, value]) => (
-            <div key={label} className="flex items-center justify-between gap-4 py-3 first:pt-0">
+          {rows.map(([id, label, value]) => (
+            <div key={id} className="flex items-center justify-between gap-4 py-3 first:pt-0">
               <dt className="text-sm text-secondary">{label}</dt>
               <dd
                 className={cn(
                   "text-lg font-medium text-primary",
-                  label === t("DashboardPolicies.active") && "text-success"
+                  id === "active" && "text-success"
                 )}
               >
                 {value}
@@ -544,7 +548,7 @@ export function PoliciesOverviewSurface({
       <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
         <div className="border-b border-border-default p-4 md:p-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-            <nav className="flex gap-6 overflow-x-auto" aria-label={t("DashboardPolicies.status")}>
+            <nav className="flex gap-6 overflow-x-auto" aria-label={t("DashboardPolicies.target")}>
               {TABS.map((tab) => (
                 <button
                   key={tab.id}
