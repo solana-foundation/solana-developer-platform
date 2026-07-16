@@ -14,6 +14,7 @@ import {
   PanelLeftIcon,
   PanelRightIcon,
   Settings2Icon,
+  ShieldCheckIcon,
   WalletIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -95,6 +96,11 @@ function getNavSections(t: ReturnType<typeof useTranslations>): NavSection[] {
           label: t("Shared.dashboardShell.apiKeys"),
           href: "/dashboard/api-keys",
           icon: KeyRoundIcon,
+        },
+        {
+          label: t("Shared.dashboardShell.policies"),
+          href: "/dashboard/policies",
+          icon: ShieldCheckIcon,
         },
       ],
     },
@@ -307,6 +313,7 @@ function getWalletBackAction(
   };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: route-specific shell configs stay centralized.
 function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
@@ -360,6 +367,14 @@ function getDashboardPageConfig(
       showHeaderNavRow: true,
       contentWidthClass: "max-w-none",
     };
+  }
+  if (pathname === "/dashboard/policies") {
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.policies"),
+      backHref: "/dashboard",
+      backLabel: t("Shared.dashboardShell.backToOverview"),
+      contentWidthClass: "max-w-none",
+    });
   }
   if (pathname === "/dashboard/issuance") {
     return {
@@ -714,6 +729,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const shouldUseWorkspaceViewport =
     pathname === "/dashboard/issuance" ||
     pathname === "/dashboard/issuance/create" ||
+    pathname === "/dashboard/policies" ||
     pathname === "/dashboard/payments" ||
     pathname === "/dashboard/wallets" ||
     pathname === "/dashboard/custody" ||
