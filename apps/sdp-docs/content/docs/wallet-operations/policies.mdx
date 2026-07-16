@@ -102,6 +102,12 @@ Wallet policy evaluation starts from default allow. If no wallet control profile
 
 The `controlProfile` object shows the active immutable revision. Treat `revisionId` and `revisionNumber` as audit references: a policy evaluation records which revision was active when the wallet operation was checked.
 
+### Dashboard actions
+
+The dashboard authoring flow exposes three actions: **Allow**, **Deny**, and **Require approval**. Choose **Require approval** when an operator must decide whether an operation can continue; it holds the operation and creates an approval request.
+
+`review` remains a possible API evaluation result for legacy or safety paths, such as an unrecognized policy rule. It is visible in audit records, but it is not a dashboard authoring option or a separate human-review workflow. Do not use it to model operator approval; use `approval_required` instead.
+
 ## Operation permissions
 
 Wallet policies can match operations at two levels:
