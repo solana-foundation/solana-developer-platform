@@ -5018,6 +5018,10 @@ Source: https://platform.solana.com/docs/reference/api/api-keys
 | `DELETE` | `/v1/api-keys/{keyId}` | Deactivate API key |
 | `GET` | `/v1/api-keys/{keyId}` | Get API key |
 | `PATCH` | `/v1/api-keys/{keyId}` | Update API key |
+| `PUT` | `/v1/api-keys/{keyId}/policy-bindings` | Replace or clear API-key policy bindings |
+| `POST` | `/v1/api-keys/{keyId}/policy-profiles` | Create API-key policy profile |
+| `POST` | `/v1/api-keys/{keyId}/policy-profiles/{profileId}/revisions` | Create API-key policy revision |
+| `POST` | `/v1/api-keys/{keyId}/policy-profiles/{profileId}/revisions/{revisionId}/activate` | Activate API-key policy revision |
 | `POST` | `/v1/api-keys/{keyId}/rotate` | Rotate API key |
 
 ---
