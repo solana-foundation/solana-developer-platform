@@ -70,15 +70,24 @@ describe("wallet policy authoring", () => {
     expect(validatePolicyState(state).maxDailyAmount).toBe("daily_below_transaction");
   });
 
-  it("trims destinations, preserves first-seen order, de-duplicates, and reports invalid lines", () => {
-    const parsed = parseDestinationText(
-      `  ${ADDRESS_B}  \n${ADDRESS_A}\n${ADDRESS_B}\nnot-a-wallet\n`
-    );
+  it("parses comma-separated destinations, de-duplicates, and reports invalid entries", () => {
+    const parsed = parseDestinationText(`  ${ADDRESS_B}, ${ADDRESS_A}, ${ADDRESS_B}, not-a-wallet`);
 
     expect(parsed.valid).toEqual([ADDRESS_B, ADDRESS_A]);
-    expect(parsed.entries[2]).toMatchObject({ value: ADDRESS_B, duplicate: true, line: 3 });
+    expect(parsed.entries[2]).toMatchObject({
+      value: ADDRESS_B,
+      duplicate: true,
+      position: 3,
+    });
     expect(parsed.invalid).toEqual([
-      expect.objectContaining({ value: "not-a-wallet", line: 4, valid: false }),
+      expect.objectContaining({ value: "not-a-wallet", position: 4, valid: false }),
+    ]);
+  });
+
+  it("accepts pasted newline-separated destination lists", () => {
+    expect(parseDestinationText(`${ADDRESS_A}\n${ADDRESS_B}`).valid).toEqual([
+      ADDRESS_A,
+      ADDRESS_B,
     ]);
   });
 

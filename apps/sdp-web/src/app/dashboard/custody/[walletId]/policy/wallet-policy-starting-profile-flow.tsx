@@ -1135,11 +1135,11 @@ function DestinationEditor({
           }
           aria-invalid={Boolean(error)}
           className="min-h-40 w-full resize-y rounded-lg border border-border-default bg-white px-3 py-3 text-sm leading-6 text-primary outline-none transition-colors placeholder:text-muted focus:border-primary"
-          placeholder={`${"11111111111111111111111111111111"}\n${"So11111111111111111111111111111111111111112"}`}
+          placeholder="11111111111111111111111111111111, So11111111111111111111111111111111111111112"
         />
       </label>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-        <span className="text-muted">{t("DashboardCustody.policyOneAddressPerLine")}</span>
+        <span className="text-muted">{t("DashboardCustody.policyCommaSeparatedAddresses")}</span>
         <span className="font-medium text-secondary">
           {t("DashboardCustody.policyValidAddressCount", { count: parsed.valid.length })}
         </span>
@@ -1147,9 +1147,9 @@ function DestinationEditor({
       {parsed.invalid.length > 0 ? (
         <div className="mt-3 space-y-1.5">
           {parsed.invalid.map((entry) => (
-            <p key={`${entry.line}-${entry.value}`} className="text-sm text-error">
-              {t("DashboardCustody.policyInvalidAddressLine", {
-                line: entry.line,
+            <p key={`${entry.position}-${entry.value}`} className="text-sm text-error">
+              {t("DashboardCustody.policyInvalidAddressEntry", {
+                position: entry.position,
                 address: entry.value,
               })}
             </p>

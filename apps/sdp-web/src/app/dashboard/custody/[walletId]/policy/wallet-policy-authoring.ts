@@ -53,7 +53,7 @@ export interface PolicyValidationErrors {
 }
 
 export interface ParsedDestinationEntry {
-  line: number;
+  position: number;
   value: string;
   valid: boolean;
   duplicate: boolean;
@@ -189,14 +189,14 @@ function compareDecimals(left: string, right: string): number {
 export function parseDestinationText(value: string): ParsedDestinations {
   const seen = new Set<string>();
   const entries = value
-    .split(/\r?\n/)
+    .split(/[,\r\n]+/)
     .map((rawValue, index): ParsedDestinationEntry | null => {
       const entry = rawValue.trim();
       if (!entry) return null;
       const duplicate = seen.has(entry);
       seen.add(entry);
       return {
-        line: index + 1,
+        position: index + 1,
         value: entry,
         valid: isValidSolanaAddress(entry),
         duplicate,
@@ -343,7 +343,7 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
     maxDailyAmount: policy.maxDailyAmount ?? "",
     assets: uniqueValues(assets),
     destinationMode,
-    destinationText: uniqueValues(destinations).join("\n"),
+    destinationText: uniqueValues(destinations).join(", "),
     familyActions,
     operationTypeRules: operationTypeRules.filter(
       (entry, index, values) => values.findIndex((item) => item.value === entry.value) === index
