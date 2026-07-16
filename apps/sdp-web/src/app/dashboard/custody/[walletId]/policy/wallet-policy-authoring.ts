@@ -77,6 +77,16 @@ export const WALLET_OPERATION_FAMILIES = [
   "provider_admin",
 ] as const satisfies readonly WalletOperationFamily[];
 
+export const SUPPORTED_WALLET_OPERATION_TYPES = [
+  { value: "payment_transfer_execute", family: "payment" },
+  { value: "payment_transfer_batch_execute", family: "payment" },
+  { value: "ramp_onramp_quote", family: "ramp" },
+  { value: "ramp_offramp_quote", family: "ramp" },
+  { value: "issuance_mint_execute", family: "issuance" },
+  { value: "issuance_update_authority_execute", family: "issuance" },
+  { value: "custody_signer_check", family: "raw_sign" },
+] as const satisfies readonly { value: string; family: WalletOperationFamily }[];
+
 export const AUTHORING_RULE_ACTIONS = [
   "allow",
   "deny",

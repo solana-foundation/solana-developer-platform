@@ -9,6 +9,7 @@ import {
   parseDestinationText,
   policyDraftStorageKey,
   type StoredPolicyDraft,
+  SUPPORTED_WALLET_OPERATION_TYPES,
   savePolicyDraft,
   validatePolicyState,
 } from "./wallet-policy-authoring";
@@ -39,6 +40,18 @@ function emptyPolicy(): PaymentWalletPolicy {
 }
 
 describe("wallet policy authoring", () => {
+  it("exposes the supported operation types used by policy authoring", () => {
+    expect(SUPPORTED_WALLET_OPERATION_TYPES).toEqual([
+      { value: "payment_transfer_execute", family: "payment" },
+      { value: "payment_transfer_batch_execute", family: "payment" },
+      { value: "ramp_onramp_quote", family: "ramp" },
+      { value: "ramp_offramp_quote", family: "ramp" },
+      { value: "issuance_mint_execute", family: "issuance" },
+      { value: "issuance_update_authority_execute", family: "issuance" },
+      { value: "custody_signer_check", family: "raw_sign" },
+    ]);
+  });
+
   it("validates restriction intent, decimal values, and the daily limit relationship", () => {
     const state = createPolicyAuthoringState(emptyPolicy());
     expect(validatePolicyState(state).intent).toBe("restriction_required");

@@ -55,6 +55,7 @@ import {
   policyStateFingerprint,
   type RestrictionCategory,
   type StoredPolicyDraft,
+  SUPPORTED_WALLET_OPERATION_TYPES,
   savePolicyDraft,
   validatePolicyState,
   WALLET_OPERATION_FAMILIES,
@@ -1174,9 +1175,19 @@ function OperationEditor({
   const t = useTranslations();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [operationType, setOperationType] = useState("");
+  const [operationTypeOpen, setOperationTypeOpen] = useState(false);
+  const [activeOperationTypeIndex, setActiveOperationTypeIndex] = useState(-1);
   const [operationTypeError, setOperationTypeError] = useState<"duplicate" | "too_long" | null>(
     null
   );
+  const matchingOperationTypes = useMemo(() => {
+    const query = operationType.trim().toLowerCase();
+    return SUPPORTED_WALLET_OPERATION_TYPES.filter(
+      (entry) =>
+        !state.operationTypeRules.some((rule) => rule.value === entry.value) &&
+        (!query || entry.value.includes(query) || entry.family.includes(query))
+    );
+  }, [operationType, state.operationTypeRules]);
 
   function toggleFamily(family: WalletOperationFamily) {
     setPolicyState((current) => {
@@ -1203,6 +1214,15 @@ function OperationEditor({
       operationTypeRules: [...current.operationTypeRules, { value, action: "deny" }],
     }));
     setOperationType("");
+    setOperationTypeOpen(false);
+    setActiveOperationTypeIndex(-1);
+    setOperationTypeError(null);
+  }
+
+  function selectOperationType(value: string) {
+    setOperationType(value);
+    setOperationTypeOpen(false);
+    setActiveOperationTypeIndex(-1);
     setOperationTypeError(null);
   }
 
@@ -1297,22 +1317,89 @@ function OperationEditor({
         </a>
         {advancedOpen ? (
           <div className="pb-1">
-            <div className="flex gap-2">
-              <Input
-                value={operationType}
-                maxLength={121}
-                placeholder={t("DashboardCustody.policyOperationTypePlaceholder")}
-                onChange={(event) => {
-                  setOperationType(event.target.value);
-                  setOperationTypeError(null);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    addOperationType();
+            <div className="relative flex gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Input
+                  value={operationType}
+                  maxLength={121}
+                  placeholder={t("DashboardCustody.policyOperationTypePlaceholder")}
+                  role="combobox"
+                  aria-expanded={operationTypeOpen}
+                  aria-controls="policy-operation-type-options"
+                  aria-activedescendant={
+                    activeOperationTypeIndex >= 0
+                      ? `policy-operation-type-option-${activeOperationTypeIndex}`
+                      : undefined
                   }
-                }}
-              />
+                  onFocus={() => setOperationTypeOpen(true)}
+                  onBlur={() => {
+                    setOperationTypeOpen(false);
+                    setActiveOperationTypeIndex(-1);
+                  }}
+                  onChange={(event) => {
+                    setOperationType(event.target.value);
+                    setOperationTypeOpen(true);
+                    setActiveOperationTypeIndex(-1);
+                    setOperationTypeError(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setOperationTypeOpen(true);
+                      setActiveOperationTypeIndex((current) =>
+                        Math.min(current + 1, matchingOperationTypes.length - 1)
+                      );
+                    }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setActiveOperationTypeIndex((current) => Math.max(current - 1, 0));
+                    }
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      const activeOption = matchingOperationTypes[activeOperationTypeIndex];
+                      if (operationTypeOpen && activeOption)
+                        selectOperationType(activeOption.value);
+                      else addOperationType();
+                    }
+                    if (event.key === "Escape") {
+                      setOperationTypeOpen(false);
+                      setActiveOperationTypeIndex(-1);
+                    }
+                  }}
+                />
+                {operationTypeOpen && matchingOperationTypes.length > 0 ? (
+                  <div
+                    id="policy-operation-type-options"
+                    role="listbox"
+                    className="absolute z-20 mt-2 w-full overflow-hidden rounded-lg border border-border-default bg-white shadow-lg"
+                  >
+                    {matchingOperationTypes.map((entry, index) => (
+                      <button
+                        key={entry.value}
+                        id={`policy-operation-type-option-${index}`}
+                        type="button"
+                        role="option"
+                        aria-selected={activeOperationTypeIndex === index}
+                        className={cn(
+                          "flex w-full items-center justify-between gap-3 border-b border-border-default px-3 py-2.5 text-left last:border-b-0",
+                          activeOperationTypeIndex === index
+                            ? "bg-surface-sunken"
+                            : "hover:bg-surface-sunken"
+                        )}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => selectOperationType(entry.value)}
+                      >
+                        <span className="min-w-0 truncate text-sm font-medium text-primary">
+                          {entry.value}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted">
+                          {t(FAMILY_LABEL_KEYS[entry.family])}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               <Button
                 type="button"
                 variant="secondary"
