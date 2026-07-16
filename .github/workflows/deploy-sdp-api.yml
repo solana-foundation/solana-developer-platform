@@ -229,25 +229,13 @@ jobs:
           node scripts/render-wrangler-config.mjs --env "${TARGET_ENV}" --out "${wrangler_config_path}"
           echo "WRANGLER_CONFIG_PATH=${wrangler_config_path}" >> "${GITHUB_ENV}"
 
-      - name: Sync Worker secrets
+      - name: Deploy Worker with secrets
         run: |
           set -euo pipefail
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
             echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be present in Doppler config ${DOPPLER_CONFIG_NAME}." >&2
             exit 1
           fi
-          secrets_dir="${RUNNER_TEMP}/cloudflare-secret-batches"
-          node scripts/project-secrets.mjs cloudflare-batches --out-dir "${secrets_dir}" --batch-size 25
-          shopt -s nullglob
-          batch_count=0
-          for secrets_file in "${secrets_dir}"/*.json; do
-            batch_count=$((batch_count + 1))
-            echo "Syncing Worker secret batch ${batch_count} from ${secrets_file}"
-            pnpm --filter @sdp/api exec wrangler secret bulk "${secrets_file}" --env "${TARGET_ENV}" --config "${WRANGLER_CONFIG_PATH}"
-          done
-          if [ "${batch_count}" -eq 0 ]; then
-            echo "No Worker secrets to sync."
-          fi
-
-      - name: Deploy Worker
-        run: pnpm --filter @sdp/api exec wrangler deploy --env "${TARGET_ENV}" --config "${WRANGLER_CONFIG_PATH}"
+          secrets_file="${RUNNER_TEMP}/cloudflare-secrets.json"
+          node scripts/project-secrets.mjs cloudflare --out "${secrets_file}"
+          pnpm --filter @sdp/api exec wrangler deploy --secrets-file "${secrets_file}" --env "${TARGET_ENV}" --config "${WRANGLER_CONFIG_PATH}"
