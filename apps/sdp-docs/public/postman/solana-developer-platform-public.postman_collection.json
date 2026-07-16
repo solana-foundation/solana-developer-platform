@@ -144,6 +144,87 @@
           }
         },
         {
+          "name": "Create API-key policy profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-profiles",
+            "description": "Creates a draft operation-level control profile for one API key.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Treasury service controls\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create API-key policy revision",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-profiles/{{profileId}}/revisions",
+            "description": "Appends an immutable rule snapshot to an API-key control profile without activating it.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rules\": [\n    {\n      \"id\": \"deny-raw-signing\",\n      \"kind\": \"operation_family\",\n      \"family\": \"raw_sign\",\n      \"action\": \"deny\"\n    }\n  ],\n  \"defaultAction\": \"deny\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Activate API-key policy revision",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-profiles/{{profileId}}/revisions/{{revisionId}}/activate",
+            "description": "Makes one immutable revision the active policy for its API-key control profile."
+          }
+        },
+        {
+          "name": "Replace or clear API-key policy bindings",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-bindings",
+            "description": "Explicitly replaces the complete all-wallet/selected-wallet policy binding set, or clears it. Existing bindings are otherwise preserved by API-key updates and rotation.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode\": \"replace\",\n  \"bindings\": [\n    {\n      \"bindingScope\": \"all\",\n      \"apiKeyControlProfileId\": \"\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "Rotate API key",
           "request": {
             "method": "POST",
