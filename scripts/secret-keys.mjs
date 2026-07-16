@@ -167,11 +167,27 @@ export const LOCAL_ONLY_API_ENV_KEYS = new Set([
 ]);
 
 /**
- * Keys committed as plain vars in wrangler.toml [env.*.vars], so they are
- * excluded from the Cloudflare secret sync. Everything else Doppler defines
- * reaches deployed Workers as a secret.
+ * Keys deployed as plain Wrangler vars (committed defaults for dev and
+ * rendered from Doppler for production), so they are excluded from the
+ * Cloudflare secret sync. Everything else Doppler defines reaches deployed
+ * Workers as a secret.
  */
-export const COMMITTED_WORKER_VAR_KEYS = new Set(["SDP_RUNTIME", "EMAIL_FROM"]);
+export const COMMITTED_WORKER_VAR_KEYS = new Set([
+  "SDP_RUNTIME",
+  "SDP_DEPLOYMENT_MODE",
+  "EMAIL_FROM",
+  "SOLANA_NETWORK",
+  "SOLANA_RPC_URL",
+  "SOLANA_RPC_DEFAULT_PROVIDER",
+  "SOLANA_RPC_TRITON_URL",
+  "SOLANA_RPC_HELIUS_URL",
+  "SOLANA_RPC_ALCHEMY_URL",
+  "SOLANA_RPC_QUICKNODE_URL",
+  "SOLANA_RPC_VALIDATIONCLOUD_URL",
+  "FEE_PAYMENT_PROVIDER",
+  "KORA_RPC_URL",
+  "PAYMENTS_RECURRING_ENABLED",
+]);
 
 /**
  * Keys the deploy workflow syncs to deployed Workers as secrets via
