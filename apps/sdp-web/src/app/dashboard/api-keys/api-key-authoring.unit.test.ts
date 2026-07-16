@@ -127,6 +127,11 @@ describe("API-key authoring", () => {
     });
 
     expect(requiredBindingConfirmation(replaceIntent)).toBe("replace");
+    expect(replaceIntent).toMatchObject({
+      mode: "replace",
+      profile: "existing",
+      existingProfileId: "profile_1",
+    });
     expect(requiredBindingConfirmation(clearIntent)).toBe("clear");
   });
 

@@ -21,6 +21,7 @@ import {
   buildPolicyBindingTargets,
   getPolicyBindingIntent,
   isPositiveDecimal,
+  type PolicyBindingIntent,
   requiredBindingConfirmation,
 } from "./api-key-authoring";
 import { API_KEY_FLASH_COOKIE, API_KEYS_PAGE_PATH, type ApiKeyFlash } from "./api-key-flash";
@@ -52,7 +53,9 @@ interface ApiKeyDetail {
   id: string;
   name: string;
   role: ApiKeyRole;
+  expiresAt: string | null;
   walletScope: ApiKeyWalletScope;
+  signingWalletId: string | null;
   signingWalletIds: string[];
   policyBindings: ApiKeyWalletPolicyBindingSummary[];
 }
@@ -104,8 +107,18 @@ async function createAndActivateRestrictionProfile(
       body: JSON.stringify({ name: `${draft.name.trim()} additional restrictions` }),
     }
   );
+  await createAndActivateRestrictionRevision(client, keyId, profile.id, draft);
+  return profile.id;
+}
+
+async function createAndActivateRestrictionRevision(
+  client: SdpApiClient,
+  keyId: string,
+  profileId: string,
+  draft: ApiKeyAuthoringDraft
+): Promise<void> {
   const { revision } = await client.fetch<{ revision: ApiKeyControlProfileRevision }>(
-    `/v1/api-keys/${encodeURIComponent(keyId)}/policy-profiles/${encodeURIComponent(profile.id)}/revisions`,
+    `/v1/api-keys/${encodeURIComponent(keyId)}/policy-profiles/${encodeURIComponent(profileId)}/revisions`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -115,10 +128,21 @@ async function createAndActivateRestrictionProfile(
     }
   );
   await client.fetch(
-    `/v1/api-keys/${encodeURIComponent(keyId)}/policy-profiles/${encodeURIComponent(profile.id)}/revisions/${encodeURIComponent(revision.id)}/activate`,
+    `/v1/api-keys/${encodeURIComponent(keyId)}/policy-profiles/${encodeURIComponent(profileId)}/revisions/${encodeURIComponent(revision.id)}/activate`,
     { method: "POST" }
   );
-  return profile.id;
+}
+
+async function activateRestrictionRevision(
+  client: SdpApiClient,
+  keyId: string,
+  profileId: string,
+  revisionId: string
+): Promise<void> {
+  await client.fetch(
+    `/v1/api-keys/${encodeURIComponent(keyId)}/policy-profiles/${encodeURIComponent(profileId)}/revisions/${encodeURIComponent(revisionId)}/activate`,
+    { method: "POST" }
+  );
 }
 
 async function replacePolicyBindings(
@@ -141,6 +165,95 @@ async function clearPolicyBindings(client: SdpApiClient, keyId: string) {
     method: "PUT",
     body: JSON.stringify({ mode: "clear" }),
   });
+}
+
+async function restoreApiKeyEndpoint(
+  client: SdpApiClient,
+  keyId: string,
+  apiKey: ApiKeyDetail
+): Promise<void> {
+  await client.fetch(`/v1/api-keys/${encodeURIComponent(keyId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      name: apiKey.name,
+      expiresAt: apiKey.expiresAt,
+      walletScope: apiKey.walletScope,
+      ...(apiKey.walletScope === "all"
+        ? { signingWalletId: null, signingWalletIds: null, walletBindings: null }
+        : {
+            signingWalletId: apiKey.signingWalletId,
+            signingWalletIds: apiKey.signingWalletIds,
+          }),
+    }),
+  });
+}
+
+async function applyApiKeyEdit(input: {
+  client: SdpApiClient;
+  keyId: string;
+  apiKey: ApiKeyDetail;
+  bindingIntent: PolicyBindingIntent;
+  draft: ApiKeyAuthoringDraft;
+  expiresAt: string | null;
+  walletPayload: ReturnType<typeof buildEndpointWalletPayload>;
+}): Promise<void> {
+  const { client, keyId, apiKey, bindingIntent, draft, expiresAt, walletPayload } = input;
+  const previousProfileRevisionId =
+    bindingIntent.mode === "replace" && bindingIntent.profile === "existing"
+      ? apiKey.policyBindings.find(
+          (binding) => binding.apiKeyControlProfileId === bindingIntent.existingProfileId
+        )?.apiKeyControlProfileRevisionId
+      : null;
+  let endpointUpdated = false;
+  let existingProfileUpdated = false;
+
+  try {
+    await client.fetch(`/v1/api-keys/${encodeURIComponent(keyId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: draft.name.trim(),
+        expiresAt,
+        ...walletPayload,
+        ...(draft.walletScope === "all"
+          ? { signingWalletId: null, signingWalletIds: null, walletBindings: null }
+          : {}),
+      }),
+    });
+    endpointUpdated = true;
+
+    if (bindingIntent.mode === "replace") {
+      let profileId = bindingIntent.existingProfileId;
+      if (bindingIntent.profile === "new") {
+        profileId = await createAndActivateRestrictionProfile(client, keyId, draft);
+      } else if (profileId && draft.restrictionsEdited) {
+        await createAndActivateRestrictionRevision(client, keyId, profileId, draft);
+        existingProfileUpdated = true;
+      }
+      if (profileId) {
+        await replacePolicyBindings(client, keyId, draft, profileId);
+      }
+    } else if (bindingIntent.mode === "clear") {
+      await clearPolicyBindings(client, keyId);
+    }
+  } catch (error) {
+    if (
+      existingProfileUpdated &&
+      bindingIntent.mode === "replace" &&
+      bindingIntent.existingProfileId &&
+      previousProfileRevisionId
+    ) {
+      await activateRestrictionRevision(
+        client,
+        keyId,
+        bindingIntent.existingProfileId,
+        previousProfileRevisionId
+      ).catch(() => undefined);
+    }
+    if (endpointUpdated) {
+      await restoreApiKeyEndpoint(client, keyId, apiKey).catch(() => undefined);
+    }
+    throw error;
+  }
 }
 
 function normalizeDeactivateApiKeyInput(input: {
@@ -323,31 +436,15 @@ export async function saveApiKeyAuthoringAction(
       };
     }
 
-    let profileId: string | undefined;
-    if (bindingIntent.mode === "replace") {
-      profileId =
-        bindingIntent.profile === "new"
-          ? await createAndActivateRestrictionProfile(client, keyId, input.draft)
-          : bindingIntent.existingProfileId;
-    }
-
-    await client.fetch(`/v1/api-keys/${encodeURIComponent(keyId)}`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        name: input.draft.name.trim(),
-        expiresAt,
-        ...walletPayload,
-        ...(input.draft.walletScope === "all"
-          ? { signingWalletId: null, signingWalletIds: null, walletBindings: null }
-          : {}),
-      }),
+    await applyApiKeyEdit({
+      client,
+      keyId,
+      apiKey,
+      bindingIntent,
+      draft: input.draft,
+      expiresAt,
+      walletPayload,
     });
-
-    if (bindingIntent.mode === "replace" && profileId) {
-      await replacePolicyBindings(client, keyId, input.draft, profileId);
-    } else if (bindingIntent.mode === "clear") {
-      await clearPolicyBindings(client, keyId);
-    }
 
     await setFlash({
       level: "success",

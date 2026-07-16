@@ -1,13 +1,11 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Plus } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 
 interface CreateApiKeyModalProps {
-  wallets: PaymentsDashboardWallet[];
   triggerMode?: "button" | "icon";
   triggerLabel?: string;
   triggerVariant?: "default" | "secondary";

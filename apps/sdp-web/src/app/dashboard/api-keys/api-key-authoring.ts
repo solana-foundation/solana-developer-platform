@@ -279,7 +279,8 @@ export function getPolicyBindingIntent(
   if (draft.restrictionsEdited || !hadApiRestrictions) {
     return {
       mode: "replace",
-      profile: "new",
+      profile: apiProfileIds.length === 1 ? "existing" : "new",
+      existingProfileId: apiProfileIds.length === 1 ? apiProfileIds[0] : undefined,
       confirmationRequired: currentBindings.length > 0,
       affectedTargets,
     };
