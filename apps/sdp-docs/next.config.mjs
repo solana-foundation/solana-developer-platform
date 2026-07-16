@@ -15,6 +15,20 @@ const withMDX = createMDX({
 const nextConfig = {
   reactStrictMode: true,
   assetPrefix: "/docs",
+  async redirects() {
+    return [
+      {
+        source: "/docs/payments/wallet-policies",
+        destination: "/docs/wallet-operations/policies",
+        permanent: true,
+      },
+      {
+        source: "/docs/payments/wallet-balances",
+        destination: "/docs/wallet-operations/balances",
+        permanent: true,
+      },
+    ];
+  },
   async rewrites() {
     return [
       // Serve /docs/:slug.md as the markdown representation of each docs page

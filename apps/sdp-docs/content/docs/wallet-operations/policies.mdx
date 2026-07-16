@@ -1,9 +1,9 @@
 ---
 title: Wallet policies
-description: Wallet controls, default-allow rollout, and policy audit visibility.
+description: Wallet controls, operation permissions, and policy audit visibility.
 ---
 
-Wallet policies constrain how a custody wallet can move funds. SDP starts from default allow, then applies the active wallet control profile and any payment policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before wallet operations execute.
+Wallet policies constrain how a custody wallet can move funds and execute supported operations. SDP starts from default allow, then applies the active wallet control profile and any policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before wallet operations execute.
 
 Use policies for treasury wallets, automated payout wallets, or any custody wallet where unbounded outbound flow would be a liability.
 
@@ -98,7 +98,7 @@ Amount fields are **UI-unit decimal strings** (`"100.00"` means 100 tokens, rega
 
 ## Default allow and active controls
 
-Wallet policy evaluation starts from default allow. If no wallet control profile exists, supported payment and ramp operations continue to run unless another product-specific check rejects them. When you activate a control profile, SDP evaluates its rules first and returns the resulting `decision` as one of `allow`, `deny`, `approval_required`, `provider_approval_required`, `review`, or `not_evaluated`.
+Wallet policy evaluation starts from default allow. If no wallet control profile exists, supported wallet operations continue to run unless another product-specific check rejects them. When you activate a control profile, SDP evaluates its rules first and returns the resulting `decision` as one of `allow`, `deny`, `approval_required`, `provider_approval_required`, `review`, or `not_evaluated`.
 
 The `controlProfile` object shows the active immutable revision. Treat `revisionId` and `revisionNumber` as audit references: a policy evaluation records which revision was active when the wallet operation was checked.
 
@@ -226,4 +226,4 @@ See the [Compliance API reference](/docs/reference/api/compliance) for address-s
 
 - [Payouts and disbursements](/docs/payments/send-payouts) — running an outbound batch from a policy-constrained wallet.
 - [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint subject to policy enforcement.
-- [Wallet balances](/docs/payments/wallet-balances) — current balance, useful to size transfer limits.
+- [Wallet balances](/docs/wallet-operations/balances) — current balance, useful to size transfer limits.

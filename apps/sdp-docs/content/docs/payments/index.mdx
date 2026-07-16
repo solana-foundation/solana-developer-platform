@@ -1,9 +1,9 @@
 ---
 title: Payments
-description: Build payments on Solana with SDP — concepts, send, accept, ramps, and wallet operations.
+description: Build payments on Solana with SDP — concepts, send, accept, and ramps.
 ---
 
-SDP provides a Solana-native payments stack: stablecoin transfers, fiat on-ramps and off-ramps, wallet policies, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
+SDP provides a Solana-native payments stack: stablecoin transfers, fiat on-ramps and off-ramps, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
 
 If you have not yet provisioned a custody wallet or token, start with [Set Up Wallets](/docs/guides/setup-wallets) and [Tokenize an Asset](/docs/guides/tokenize-an-asset).
 
@@ -21,9 +21,8 @@ If you have not yet provisioned a custody wallet or token, start with [Set Up Wa
 - **Ramps** — fiat on-ramps and off-ramps.
   - [Ramps overview](/docs/payments/ramps) — onramp and offramp request shape, KYC handoff, status states.
   - [Ramp providers](/docs/payments/ramps-providers) — MoonPay, Lightspark, and BVNK configuration.
-- **Wallet operations**
-  - [Wallet policies](/docs/payments/wallet-policies) — destination allowlist and transfer limits.
-  - [Wallet balances](/docs/payments/wallet-balances) — per-wallet token balances with optional USD valuation.
+
+Wallet-wide controls and balances are documented in [Wallet operations](/docs/wallet-operations).
 
 ## Underlying API
 

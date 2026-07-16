@@ -89,7 +89,7 @@ const FLOW_STEPS = [
 const DOCS_BASE =
   process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
   (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
-const POLICY_OPERATION_PERMISSIONS_DOCS_HREF = `${DOCS_BASE}/payments/wallet-policies#operation-permissions`;
+const POLICY_OPERATION_PERMISSIONS_DOCS_HREF = `${DOCS_BASE}/wallet-operations/policies#operation-permissions`;
 
 const CATEGORY_OPTIONS = [
   {
