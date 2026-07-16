@@ -1,18 +1,11 @@
 "use client";
 
-import {
-  DEFAULT_SDP_DOCS_URL,
-  type PaymentWalletPolicy,
-  type PolicyProfileStatus,
-  type WalletOperationFamily,
-} from "@sdp/types";
+import type { PaymentWalletPolicy, PolicyProfileStatus, WalletOperationFamily } from "@sdp/types";
 import {
   ArrowLeft,
   ArrowRight,
   Check,
-  ChevronDown,
   Copy,
-  ExternalLink,
   MoreHorizontal,
   Plus,
   Search,
@@ -56,7 +49,6 @@ import {
   policyStateFingerprint,
   type RestrictionCategory,
   type StoredPolicyDraft,
-  SUPPORTED_WALLET_OPERATION_TYPES,
   savePolicyDraft,
   validatePolicyState,
   WALLET_OPERATION_FAMILIES,
@@ -87,11 +79,6 @@ const FLOW_STEPS = [
   "destinations-operations",
   "review",
 ] as const satisfies readonly PolicyFlowStep[];
-
-const DOCS_BASE =
-  process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
-  (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
-const POLICY_OPERATION_PERMISSIONS_DOCS_HREF = `${DOCS_BASE}/wallet-operations/policies#operation-permissions`;
 
 const CATEGORY_OPTIONS = [
   {
@@ -473,7 +460,16 @@ export function WalletPolicyStartingProfileFlow({
                 {isLoaded && currentStep === "review" ? (
                   <ReviewStep
                     state={state}
-                    onEdit={(step) => setStepIndex(FLOW_STEPS.indexOf(step))}
+                    onEdit={(step, category) => {
+                      if (category) {
+                        setPolicyState((current) =>
+                          current.categories.includes(category)
+                            ? current
+                            : { ...current, categories: [...current.categories, category] }
+                        );
+                      }
+                      setStepIndex(FLOW_STEPS.indexOf(step));
+                    }}
                   />
                 ) : null}
               </motion.div>
@@ -1163,21 +1159,6 @@ function OperationEditor({
   setPolicyState: (update: (current: PolicyAuthoringState) => PolicyAuthoringState) => void;
 }) {
   const t = useTranslations();
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [operationType, setOperationType] = useState("");
-  const [operationTypeOpen, setOperationTypeOpen] = useState(false);
-  const [activeOperationTypeIndex, setActiveOperationTypeIndex] = useState(-1);
-  const [operationTypeError, setOperationTypeError] = useState<"duplicate" | "too_long" | null>(
-    null
-  );
-  const matchingOperationTypes = useMemo(() => {
-    const query = operationType.trim().toLowerCase();
-    return SUPPORTED_WALLET_OPERATION_TYPES.filter(
-      (entry) =>
-        !state.operationTypeRules.some((rule) => rule.value === entry.value) &&
-        (!query || entry.value.includes(query) || entry.family.includes(query))
-    );
-  }, [operationType, state.operationTypeRules]);
 
   function toggleFamily(family: WalletOperationFamily) {
     setPolicyState((current) => {
@@ -1186,34 +1167,6 @@ function OperationEditor({
       else nextActions[family] = "deny";
       return { ...current, familyActions: nextActions };
     });
-  }
-
-  function addOperationType() {
-    const value = operationType.trim();
-    if (!value) return;
-    if (value.length > 120) {
-      setOperationTypeError("too_long");
-      return;
-    }
-    if (state.operationTypeRules.some((entry) => entry.value === value)) {
-      setOperationTypeError("duplicate");
-      return;
-    }
-    setPolicyState((current) => ({
-      ...current,
-      operationTypeRules: [...current.operationTypeRules, { value, action: "deny" }],
-    }));
-    setOperationType("");
-    setOperationTypeOpen(false);
-    setActiveOperationTypeIndex(-1);
-    setOperationTypeError(null);
-  }
-
-  function selectOperationType(value: string) {
-    setOperationType(value);
-    setOperationTypeOpen(false);
-    setActiveOperationTypeIndex(-1);
-    setOperationTypeError(null);
   }
 
   return (
@@ -1274,194 +1227,6 @@ function OperationEditor({
         })}
       </div>
 
-      <div className="mt-4">
-        <button
-          type="button"
-          aria-expanded={advancedOpen}
-          onClick={() => setAdvancedOpen((current) => !current)}
-          className="flex w-full items-center justify-between gap-3 py-3 text-left"
-        >
-          <span>
-            <span className="block text-sm font-semibold text-primary">
-              {t("DashboardCustody.policyAdvancedOperationTypes")}
-            </span>
-            <span className="mt-1 block text-sm leading-5 text-secondary">
-              {t("DashboardCustody.policyAdvancedOperationDescription")}
-            </span>
-          </span>
-          <ChevronDown
-            className={cn(
-              "size-4 shrink-0 text-muted transition-transform",
-              advancedOpen && "rotate-180"
-            )}
-          />
-        </button>
-        <a
-          href={POLICY_OPERATION_PERMISSIONS_DOCS_HREF}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mb-3 inline-flex items-center gap-1 text-xs font-medium text-tertiary underline-offset-2 transition-colors hover:text-primary hover:underline"
-        >
-          {t("DashboardCustody.policyViewOperationPermissions")}
-          <ExternalLink className="size-3" />
-        </a>
-        {advancedOpen ? (
-          <div className="pb-1">
-            <div className="relative flex gap-2">
-              <div className="relative min-w-0 flex-1">
-                <Input
-                  value={operationType}
-                  maxLength={121}
-                  placeholder={t("DashboardCustody.policyOperationTypePlaceholder")}
-                  role="combobox"
-                  aria-expanded={operationTypeOpen}
-                  aria-controls="policy-operation-type-options"
-                  aria-activedescendant={
-                    activeOperationTypeIndex >= 0
-                      ? `policy-operation-type-option-${activeOperationTypeIndex}`
-                      : undefined
-                  }
-                  onFocus={() => setOperationTypeOpen(true)}
-                  onBlur={() => {
-                    setOperationTypeOpen(false);
-                    setActiveOperationTypeIndex(-1);
-                  }}
-                  onChange={(event) => {
-                    setOperationType(event.target.value);
-                    setOperationTypeOpen(true);
-                    setActiveOperationTypeIndex(-1);
-                    setOperationTypeError(null);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "ArrowDown") {
-                      event.preventDefault();
-                      setOperationTypeOpen(true);
-                      setActiveOperationTypeIndex((current) =>
-                        Math.min(current + 1, matchingOperationTypes.length - 1)
-                      );
-                    }
-                    if (event.key === "ArrowUp") {
-                      event.preventDefault();
-                      setActiveOperationTypeIndex((current) => Math.max(current - 1, 0));
-                    }
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      const activeOption = matchingOperationTypes[activeOperationTypeIndex];
-                      if (operationTypeOpen && activeOption)
-                        selectOperationType(activeOption.value);
-                      else addOperationType();
-                    }
-                    if (event.key === "Escape") {
-                      setOperationTypeOpen(false);
-                      setActiveOperationTypeIndex(-1);
-                    }
-                  }}
-                />
-                {operationTypeOpen && matchingOperationTypes.length > 0 ? (
-                  <div
-                    id="policy-operation-type-options"
-                    role="listbox"
-                    className="absolute z-20 mt-2 w-full overflow-hidden rounded-lg border border-border-default bg-white shadow-lg"
-                  >
-                    {matchingOperationTypes.map((entry, index) => (
-                      <button
-                        key={entry.value}
-                        id={`policy-operation-type-option-${index}`}
-                        type="button"
-                        role="option"
-                        aria-selected={activeOperationTypeIndex === index}
-                        className={cn(
-                          "flex w-full items-center justify-between gap-3 border-b border-border-default px-3 py-2.5 text-left last:border-b-0",
-                          activeOperationTypeIndex === index
-                            ? "bg-surface-sunken"
-                            : "hover:bg-surface-sunken"
-                        )}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => selectOperationType(entry.value)}
-                      >
-                        <span className="min-w-0 truncate text-sm font-medium text-primary">
-                          {entry.value}
-                        </span>
-                        <span className="shrink-0 text-xs text-muted">
-                          {t(FAMILY_LABEL_KEYS[entry.family])}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                size="icon"
-                aria-label={t("DashboardCustody.policyAddOperationType")}
-                onClick={addOperationType}
-              >
-                <Plus className="size-4" />
-              </Button>
-            </div>
-            {operationTypeError ? (
-              <p className="mt-2 text-sm text-error">
-                {t(
-                  operationTypeError === "duplicate"
-                    ? "DashboardCustody.policyOperationTypeDuplicate"
-                    : "DashboardCustody.policyOperationTypeTooLong"
-                )}
-              </p>
-            ) : null}
-            {state.operationTypeRules.length > 0 ? (
-              <div className="mt-3 divide-y divide-border-default rounded-lg border border-border-default">
-                {state.operationTypeRules.map((entry) => (
-                  <div key={entry.value} className="flex items-center gap-3 px-3 py-2.5">
-                    <span className="min-w-0 flex-1 truncate text-sm text-primary">
-                      {entry.value}
-                    </span>
-                    <Select
-                      value={entry.action}
-                      onValueChange={(value) => {
-                        if (!value) return;
-                        setPolicyState((current) => ({
-                          ...current,
-                          operationTypeRules: current.operationTypeRules.map((item) =>
-                            item.value === entry.value
-                              ? { ...item, action: value as AuthoringRuleAction }
-                              : item
-                          ),
-                        }));
-                      }}
-                      className="w-48"
-                    >
-                      {AUTHORING_RULE_ACTIONS.map((option) => (
-                        <SelectItem key={option} value={option}>
-                          {t(RULE_ACTION_LABEL_KEYS[option])}
-                        </SelectItem>
-                      ))}
-                    </Select>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={t("DashboardCustody.policyRemoveOperationType", {
-                        operationType: entry.value,
-                      })}
-                      onClick={() =>
-                        setPolicyState((current) => ({
-                          ...current,
-                          operationTypeRules: current.operationTypeRules.filter(
-                            (item) => item.value !== entry.value
-                          ),
-                        }))
-                      }
-                    >
-                      <X className="size-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
       {error ? (
         <p className="mt-3 text-sm text-error">
           {t(
@@ -1489,7 +1254,7 @@ function ReviewStep({
   onEdit,
 }: {
   state: PolicyAuthoringState;
-  onEdit: (step: PolicyFlowStep) => void;
+  onEdit: (step: PolicyFlowStep, category?: RestrictionCategory) => void;
 }) {
   const t = useTranslations();
   const destinations = parseDestinationText(state.destinationText).valid;
@@ -1511,6 +1276,7 @@ function ReviewStep({
       label: t("DashboardCustody.policyReviewTransferLimits"),
       value: limitParts.join(" / "),
       step: "limits-assets" as const,
+      category: "limits" as const,
     },
     {
       label: t("DashboardCustody.policyReviewAllowedAssets"),
@@ -1518,6 +1284,7 @@ function ReviewStep({
         ? t("DashboardCustody.policyReviewAssetCount", { count: state.assets.length })
         : "",
       step: "limits-assets" as const,
+      category: "assets" as const,
     },
     {
       label: t("DashboardCustody.policyReviewDestinationControls"),
@@ -1532,6 +1299,7 @@ function ReviewStep({
           })
         : "",
       step: "destinations-operations" as const,
+      category: "destinations" as const,
     },
     {
       label: t("DashboardCustody.policyReviewOperationControls"),
@@ -1541,6 +1309,7 @@ function ReviewStep({
           })
         : "",
       step: "destinations-operations" as const,
+      category: "operations" as const,
     },
   ];
 
@@ -1558,7 +1327,12 @@ function ReviewStep({
             </p>
           </div>
           {row.step ? (
-            <Button type="button" variant="link" size="sm" onClick={() => onEdit(row.step)}>
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              onClick={() => onEdit(row.step, row.category)}
+            >
               {t("DashboardCustody.policyEdit")}
             </Button>
           ) : null}
