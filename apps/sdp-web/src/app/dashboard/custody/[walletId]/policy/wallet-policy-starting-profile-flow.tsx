@@ -666,7 +666,7 @@ function IntentStep({
 
       <FormSection
         title={t("DashboardCustody.policyRestrictionCategories")}
-        description={t("DashboardCustody.policyIntentDescription")}
+        description={t("DashboardCustody.policyRestrictionCategoriesDescription")}
       >
         <div className="grid gap-3 sm:grid-cols-2">
           {CATEGORY_OPTIONS.map((category) => {

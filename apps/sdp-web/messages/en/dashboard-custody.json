@@ -274,6 +274,7 @@
     "policyDefaultReview": "Review by default",
     "policyDefaultDeny": "Deny by default",
     "policyRestrictionCategories": "Restriction categories",
+    "policyRestrictionCategoriesDescription": "Choose the control areas to configure in this profile.",
     "policyRestrictionRequired": "Choose at least one restriction category when the default action is allow.",
     "policyCategoryLimitsDescription": "Set a maximum per transaction or across a day.",
     "policyAllowedAssets": "Allowed assets",

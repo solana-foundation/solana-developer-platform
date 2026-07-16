@@ -57,6 +57,10 @@ describe("wallet policy authoring", () => {
 
     state.maxDailyAmount = "0.49";
     expect(validatePolicyState(state).maxDailyAmount).toBe("daily_below_transaction");
+
+    state.maxTransferAmount = "10";
+    state.maxDailyAmount = "5.50";
+    expect(validatePolicyState(state).maxDailyAmount).toBe("daily_below_transaction");
   });
 
   it("trims destinations, preserves first-seen order, de-duplicates, and reports invalid lines", () => {

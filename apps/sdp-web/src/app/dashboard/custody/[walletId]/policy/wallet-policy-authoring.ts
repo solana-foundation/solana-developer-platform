@@ -179,9 +179,10 @@ function compareDecimals(left: string, right: string): number {
   const [rightWhole, rightFraction = ""] = right.split(".");
   const scale = Math.max(leftFraction.length, rightFraction.length);
   const multiplier = 10n ** BigInt(scale);
-  const leftValue = BigInt(leftWhole) * multiplier + BigInt(leftFraction.padEnd(scale, "0") || "0");
-  const rightValue =
-    BigInt(rightWhole) * multiplier + BigInt(rightFraction.padEnd(scale, "0") || "0");
+  const leftFractionValue = leftFraction.padEnd(scale, "0").replace(/^0+/, "") || "0";
+  const rightFractionValue = rightFraction.padEnd(scale, "0").replace(/^0+/, "") || "0";
+  const leftValue = BigInt(leftWhole) * multiplier + BigInt(leftFractionValue);
+  const rightValue = BigInt(rightWhole) * multiplier + BigInt(rightFractionValue);
   return leftValue === rightValue ? 0 : leftValue > rightValue ? 1 : -1;
 }
 
