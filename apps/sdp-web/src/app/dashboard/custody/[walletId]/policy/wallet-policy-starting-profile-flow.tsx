@@ -899,30 +899,27 @@ function AssetEditor({
         }}
       >
         <legend className="sr-only">{t("DashboardCustody.policyAllowedAssets")}</legend>
-        <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" />
-          <Input
-            value={query}
-            className="pl-9"
-            placeholder={t("DashboardCustody.policySearchAssets")}
-            role="combobox"
-            aria-expanded={open}
-            aria-controls="policy-wallet-asset-options"
-            onFocus={() => setOpen(true)}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setOpen(true);
-              setInputError(null);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                submitSearch();
-              }
-              if (event.key === "Escape") setOpen(false);
-            }}
-          />
-        </div>
+        <Input
+          value={query}
+          iconLeft={<Search />}
+          placeholder={t("DashboardCustody.policySearchAssets")}
+          role="combobox"
+          aria-expanded={open}
+          aria-controls="policy-wallet-asset-options"
+          onFocus={() => setOpen(true)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setOpen(true);
+            setInputError(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              submitSearch();
+            }
+            if (event.key === "Escape") setOpen(false);
+          }}
+        />
 
         {open ? (
           <div
@@ -1231,7 +1228,7 @@ function OperationEditor({
         {WALLET_OPERATION_FAMILIES.map((family) => {
           const action = state.familyActions[family];
           return (
-            <div key={family} className="flex min-h-14 items-center gap-3 py-2.5">
+            <div key={family} className="flex min-h-[60px] items-center gap-3 py-2.5">
               <button
                 type="button"
                 aria-label={t(FAMILY_LABEL_KEYS[family])}
@@ -1277,7 +1274,7 @@ function OperationEditor({
         })}
       </div>
 
-      <div className="mt-5 border-t border-border-default pt-1">
+      <div className="mt-4">
         <button
           type="button"
           aria-expanded={advancedOpen}
