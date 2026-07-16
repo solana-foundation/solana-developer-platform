@@ -78,8 +78,8 @@ test("cloudflare output stays valid JSON without committed or local-only keys", 
   assert.equal(payload.CLERK_SECRET_KEY, "sk_test_clerk");
   assert.equal(payload.MONEYGRAM_SANDBOX_PUBLIC_KEY, "moneygram_public");
   assert.equal(payload.MONEYGRAM_SANDBOX_SECRET_KEY, "moneygram_secret");
+  assert.equal(payload.SOLANA_NETWORK, "mainnet-beta");
   assert.equal(payload.SDP_RUNTIME, undefined);
-  assert.equal(payload.SOLANA_NETWORK, undefined);
   assert.equal(payload.DATABASE_URL, undefined);
 });
 
@@ -112,8 +112,7 @@ test("cloudflare-batches writes JSON files up to the requested batch size", () =
     );
     assert.deepEqual(Object.keys(payloads[0]), ["CLERK_JWKS_URL", "CLERK_AUDIENCE"]);
     assert.deepEqual(Object.keys(payloads[1]), ["CLERK_SECRET_KEY", "CLERK_WEBHOOK_SECRET"]);
-    assert.deepEqual(Object.keys(payloads[2]), ["PRIVY_APP_SECRET"]);
-    assert.equal(payloads[0].SOLANA_NETWORK, undefined);
+    assert.deepEqual(Object.keys(payloads[2]), ["SOLANA_NETWORK", "PRIVY_APP_SECRET"]);
   } finally {
     fs.rmSync(outDir, { force: true, recursive: true });
   }
