@@ -451,7 +451,6 @@
     "apiKeyAdditionalAmounts": "Additional restriction: amount constraints",
     "apiKeyAdditionalDestinations": "Additional restriction: destinations",
     "apiKeyAdditionalApprovals": "Additional restriction: approval requirements",
-    "apiKeyManualReview": "Review",
     "apiKeyFamilyTransfer": "Transfers",
     "apiKeyFamilyPayment": "Payments",
     "apiKeyFamilyRamp": "Ramps",

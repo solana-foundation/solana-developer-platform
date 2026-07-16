@@ -59,7 +59,7 @@ const FAMILY_OPTIONS: WalletOperationFamily[] = [
   "program",
   "provider_admin",
 ];
-const DEFAULT_ACTIONS: PolicyDefaultAction[] = ["allow", "deny", "approval_required", "review"];
+const DEFAULT_ACTIONS: PolicyDefaultAction[] = ["allow", "deny", "approval_required"];
 
 interface ApiKeyAuthoringWorkspaceProps {
   mode: ApiKeyAuthoringMode;
@@ -127,8 +127,9 @@ function defaultActionLabel(
   t: ReturnType<typeof useTranslations>
 ): string {
   if (action === "deny") return t("DashboardCustody.policyDenied");
-  if (action === "approval_required") return t("DashboardCustody.policyApprovalRequired");
-  if (action === "review") return t("DashboardCustody.apiKeyManualReview");
+  if (action === "approval_required" || action === "review") {
+    return t("DashboardCustody.policyApprovalRequired");
+  }
   return t("DashboardCustody.policyAllowed");
 }
 
