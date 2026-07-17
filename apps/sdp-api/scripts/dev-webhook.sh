@@ -15,17 +15,17 @@ if ! command -v ngrok >/dev/null 2>&1; then
   exit 0
 fi
 
-if [ -n "${NGROK_DOMAIN:-}" ]; then
-  base_url="https://${NGROK_DOMAIN}"
+if [ -n "${WEBHOOK_INGEST_DOMAIN:-}" ]; then
+  base_url="https://${WEBHOOK_INGEST_DOMAIN}"
   echo "Tunneling ${cyan}${base_url}${reset} -> http://127.0.0.1:${port}" >&2
 else
   base_url="https://<assigned-by-ngrok>"
-  echo "${yellow}No NGROK_DOMAIN set${reset} — ngrok will assign a random URL each run." >&2
-  echo "Reserve a free stable domain at https://dashboard.ngrok.com/domains and set ${cyan}NGROK_DOMAIN${reset} in apps/sdp-api/.dev.vars." >&2
+  echo "${yellow}No WEBHOOK_INGEST_DOMAIN set${reset} — ngrok will assign a random URL each run." >&2
+  echo "Reserve a free stable domain at https://dashboard.ngrok.com/domains and set ${cyan}WEBHOOK_INGEST_DOMAIN${reset} in apps/sdp-api/.dev.vars." >&2
 fi
 
 echo "${dim}Register provider webhooks against:${reset}" >&2
 echo "${dim}  Clerk  ${base_url}/webhooks/clerk/link-orgs${reset}" >&2
 echo "${dim}  Ramps  ${base_url}/webhooks/payments/ramps/sandbox/<provider>${reset}" >&2
 
-exec ngrok http ${NGROK_DOMAIN:+--domain="${NGROK_DOMAIN}"} "${port}"
+exec ngrok http ${WEBHOOK_INGEST_DOMAIN:+--url="${WEBHOOK_INGEST_DOMAIN}"} "${port}"

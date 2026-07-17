@@ -186,7 +186,7 @@
     "dev:webhook": {
       "cache": false,
       "persistent": true,
-      "passThroughEnv": ["NGROK_DOMAIN"]
+      "passThroughEnv": ["WEBHOOK_INGEST_DOMAIN"]
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],

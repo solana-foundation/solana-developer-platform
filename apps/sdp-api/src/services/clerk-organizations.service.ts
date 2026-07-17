@@ -78,10 +78,6 @@ export class ClerkOrganizationsService {
     );
   }
 
-  async getOrganization(organizationId: string): Promise<ClerkOrganization> {
-    return this.request<ClerkOrganization>(`/organizations/${organizationId}`);
-  }
-
   async updateOrganizationPrivateMetadata(
     organizationId: string,
     privateMetadata: Record<string, unknown>
