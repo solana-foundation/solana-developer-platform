@@ -318,6 +318,36 @@ function getWalletRoutePageConfig(
   };
 }
 
+function getApiKeyRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/api-keys") {
+    return {
+      title: t("Shared.dashboardShell.apiKeys"),
+      showHeaderNavRow: true,
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/api-keys/new") {
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.newApiKey"),
+      backHref: "/dashboard/api-keys",
+      backLabel: t("Shared.dashboardShell.backToApiKeys"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) {
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.editApiKey"),
+      backHref: "/dashboard/api-keys",
+      backLabel: t("Shared.dashboardShell.backToApiKeys"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  return null;
+}
+
 function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
@@ -357,13 +387,8 @@ function getDashboardPageConfig(
   }
   const walletRoutePageConfig = getWalletRoutePageConfig(pathname, t);
   if (walletRoutePageConfig) return walletRoutePageConfig;
-  if (pathname === "/dashboard/api-keys") {
-    return {
-      title: t("Shared.dashboardShell.apiKeys"),
-      showHeaderNavRow: true,
-      contentWidthClass: "max-w-none",
-    };
-  }
+  const apiKeyRouteConfig = getApiKeyRoutePageConfig(pathname, t);
+  if (apiKeyRouteConfig) return apiKeyRouteConfig;
   if (pathname === "/dashboard/issuance") {
     return {
       title: t("Shared.dashboardShell.issuance"),
@@ -717,6 +742,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const shouldUseWorkspaceViewport =
     pathname === "/dashboard/issuance" ||
     pathname === "/dashboard/issuance/create" ||
+    pathname === "/dashboard/api-keys/new" ||
+    (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
     pathname === "/dashboard/payments" ||
     pathname === "/dashboard/wallets" ||
     pathname === "/dashboard/custody" ||
