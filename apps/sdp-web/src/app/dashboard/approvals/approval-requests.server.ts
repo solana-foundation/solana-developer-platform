@@ -8,10 +8,23 @@ import type { SdpApiClient } from "@/lib/sdp-api";
 export async function fetchApprovalRequests(
   apiClient: SdpApiClient
 ): Promise<WalletApprovalRequestSummary[]> {
-  const response = await apiClient.fetch<{ approvalRequests: WalletApprovalRequestSummary[] }>(
-    "/v1/wallets/approval-requests?limit=100"
-  );
-  return response.approvalRequests;
+  const [pending, recent] = await Promise.all([
+    apiClient.fetch<{ approvalRequests: WalletApprovalRequestSummary[] }>(
+      "/v1/wallets/approval-requests?status=pending&limit=100"
+    ),
+    apiClient.fetch<{ approvalRequests: WalletApprovalRequestSummary[] }>(
+      "/v1/wallets/approval-requests?limit=100"
+    ),
+  ]);
+
+  return [
+    ...new Map(
+      [...pending.approvalRequests, ...recent.approvalRequests].map((request) => [
+        request.id,
+        request,
+      ])
+    ).values(),
+  ];
 }
 
 export async function fetchApprovalRequest(
