@@ -60,6 +60,7 @@ import {
   paymentSubscriptionPlanListResponseSchema,
   paymentSubscriptionPlanResponseSchema,
   paymentSubscriptionResponseSchema,
+  policyControlInventoryResponseSchema,
   prepareBurnResponseSchema,
   prepareDeployMetadataResponseSchema,
   prepareDeployResponseSchema,
@@ -97,6 +98,9 @@ import {
   walletApprovalRequestResponseSchema,
   walletApprovalRequestsResponseSchema,
   walletBalancesResponseSchema,
+  walletControlProfileRevisionHistorySchema,
+  walletPolicyEvaluationDetailSchema,
+  walletPolicyEvaluationResponseSchema,
   walletPolicyResponseSchema,
 } from "../schemas";
 
@@ -218,6 +222,18 @@ export const listTemplatesResponse = successResponseSchema(listTemplatesResponse
 export const onboardingStatusResponse = successResponseSchema(onboardingStatusResponseSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
 export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSchema);
+export const policyControlInventoryResponse = successResponseSchema(
+  policyControlInventoryResponseSchema
+);
+export const walletControlProfileRevisionHistoryResponse = successResponseSchema(
+  walletControlProfileRevisionHistorySchema
+);
+export const walletPolicyEvaluationListResponse = paginatedResponseSchema(
+  walletPolicyEvaluationDetailSchema
+);
+export const walletPolicyEvaluationResponse = successResponseSchema(
+  walletPolicyEvaluationResponseSchema
+);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
 export const transferBatchResponse = successResponseSchema(transferBatchResponseSchema);

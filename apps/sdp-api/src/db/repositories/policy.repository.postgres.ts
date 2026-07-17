@@ -25,8 +25,12 @@ import type {
   CreateWalletControlProfileRevisionInput,
   CreateWalletOperationInput,
   GetApprovalRequestDetailInput,
+  GetWalletControlProfileRevisionHistoryInput,
+  GetWalletPolicyEvaluationAuditInput,
   ListApprovalRequestDetailsInput,
+  ListPolicyControlInventoryInput,
   ListWalletPolicyEvaluationAuditsInput,
+  PolicyControlInventoryRow,
   PolicyEvaluationRow,
   PolicyRepository,
   ReplaceApiKeyWalletPolicyBindingsInput,
@@ -37,6 +41,7 @@ import type {
   WalletOperationRow,
   WalletPolicyEvaluationAuditRow,
 } from "./policy.repository";
+
 import {
   generateApiKeyControlProfileId,
   generateApiKeyControlProfileRevisionId,
@@ -47,6 +52,301 @@ import {
   generateWalletControlProfileRevisionId,
   generateWalletOperationId,
 } from "./policy.repository";
+
+const WALLET_CONTROL_PROFILE_REVISION_HISTORY_LIMIT = 100;
+
+const POLICY_CONTROL_INVENTORY_CTE = `
+WITH scope AS (
+  SELECT ?::text AS organization_id, ?::text AS project_id, ?::text[] AS wallet_ids
+),
+wallet_targets AS (
+  SELECT
+    w.id AS target_id,
+    w.wallet_id,
+    COALESCE(NULLIF(w.label, ''), w.wallet_id) AS display_name,
+    w.public_key AS wallet_address,
+    c.provider,
+    COALESCE(w.updated_at, w.created_at) AS target_updated_at
+  FROM custody_wallets w
+  INNER JOIN custody_configs c ON c.id = w.custody_config_id
+  INNER JOIN scope s
+    ON c.organization_id = s.organization_id
+   AND c.project_id IS NOT DISTINCT FROM s.project_id
+  WHERE c.status = 'active'
+    AND w.status = 'active'
+    AND (s.wallet_ids IS NULL OR w.wallet_id = ANY(s.wallet_ids))
+),
+api_key_targets AS (
+  SELECT
+    ak.id AS target_id,
+    ak.name AS display_name,
+    ak.key_prefix AS api_key_prefix,
+    TO_CHAR(
+      ak.created_at::timestamp AT TIME ZONE 'UTC',
+      'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+    ) AS target_updated_at
+  FROM api_keys ak
+  INNER JOIN scope s
+    ON ak.organization_id = s.organization_id
+   AND ak.project_id IS NOT DISTINCT FROM s.project_id
+  WHERE ak.status NOT IN ('revoked', 'deactivated')
+),
+wallet_profile_candidates AS (
+  SELECT
+    p.id,
+    p.custody_wallet_id,
+    p.status,
+    p.active_revision_id,
+    p.updated_at,
+    p.activated_at,
+    revision.id AS revision_id,
+    revision.revision_number,
+    revision.default_action,
+    revision.rules,
+    ROW_NUMBER() OVER (
+      PARTITION BY p.custody_wallet_id
+      ORDER BY
+        CASE p.status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,
+        p.updated_at DESC,
+        p.id DESC
+    ) AS profile_rank
+  FROM wallet_control_profiles p
+  INNER JOIN scope s
+    ON p.organization_id = s.organization_id
+   AND p.project_id IS NOT DISTINCT FROM s.project_id
+  LEFT JOIN LATERAL (
+    SELECT r.id, r.revision_number, r.default_action, r.rules
+    FROM wallet_control_profile_revisions r
+    WHERE r.profile_id = p.id
+    ORDER BY CASE WHEN r.id = p.active_revision_id THEN 0 ELSE 1 END, r.revision_number DESC
+    LIMIT 1
+  ) revision ON TRUE
+  WHERE p.status <> 'archived'
+),
+wallet_profiles AS (
+  SELECT * FROM wallet_profile_candidates WHERE profile_rank = 1
+),
+api_key_profile_candidates AS (
+  SELECT
+    p.id,
+    p.api_key_id,
+    p.status,
+    p.active_revision_id,
+    p.updated_at,
+    p.activated_at,
+    revision.id AS revision_id,
+    revision.revision_number,
+    revision.default_action,
+    revision.rules,
+    ROW_NUMBER() OVER (
+      PARTITION BY p.api_key_id
+      ORDER BY
+        CASE p.status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,
+        p.updated_at DESC,
+        p.id DESC
+    ) AS profile_rank
+  FROM api_key_control_profiles p
+  INNER JOIN scope s
+    ON p.organization_id = s.organization_id
+   AND p.project_id IS NOT DISTINCT FROM s.project_id
+  LEFT JOIN LATERAL (
+    SELECT r.id, r.revision_number, r.default_action, r.rules
+    FROM api_key_control_profile_revisions r
+    WHERE r.profile_id = p.id
+    ORDER BY CASE WHEN r.id = p.active_revision_id THEN 0 ELSE 1 END, r.revision_number DESC
+    LIMIT 1
+  ) revision ON TRUE
+  WHERE p.status <> 'archived'
+),
+api_key_profiles AS (
+  SELECT * FROM api_key_profile_candidates WHERE profile_rank = 1
+),
+api_key_binding_aggregates AS (
+  SELECT
+    b.api_key_id,
+    BOOL_OR(b.binding_scope = 'all') AS has_all_scope,
+    COUNT(DISTINCT b.wallet_id) FILTER (WHERE b.binding_scope = 'selected') AS selected_wallet_count,
+    COUNT(*) AS binding_count
+  FROM api_key_wallet_policy_bindings b
+  INNER JOIN api_key_targets target ON target.target_id = b.api_key_id
+  GROUP BY b.api_key_id
+),
+wallet_evaluations AS (
+  SELECT
+    target.target_id,
+    pe.decision,
+    pe.created_at,
+    ROW_NUMBER() OVER (
+      PARTITION BY target.target_id
+      ORDER BY pe.created_at DESC, pe.id DESC
+    ) AS evaluation_rank
+  FROM wallet_targets target
+  INNER JOIN scope s ON TRUE
+  INNER JOIN wallet_operations operation
+    ON operation.organization_id = s.organization_id
+   AND operation.project_id IS NOT DISTINCT FROM s.project_id
+   AND (
+     operation.custody_wallet_id = target.target_id
+     OR (operation.custody_wallet_id IS NULL AND operation.wallet_id = target.wallet_id)
+   )
+  INNER JOIN policy_evaluations pe ON pe.wallet_operation_id = operation.id
+),
+api_key_evaluations AS (
+  SELECT
+    target.target_id,
+    pe.decision,
+    pe.created_at,
+    ROW_NUMBER() OVER (
+      PARTITION BY target.target_id
+      ORDER BY pe.created_at DESC, pe.id DESC
+    ) AS evaluation_rank
+  FROM api_key_targets target
+  INNER JOIN scope s ON TRUE
+  INNER JOIN wallet_operations operation
+    ON operation.organization_id = s.organization_id
+   AND operation.project_id IS NOT DISTINCT FROM s.project_id
+   AND operation.api_key_id = target.target_id
+  INNER JOIN policy_evaluations pe ON pe.wallet_operation_id = operation.id
+),
+inventory AS (
+  SELECT
+    'wallet'::text AS target_type,
+    target.target_id,
+    target.wallet_id,
+    target.display_name,
+    target.wallet_address,
+    NULL::text AS api_key_prefix,
+    profile.id AS control_profile_id,
+    COALESCE(profile.status, 'default_allow') AS status,
+    profile.active_revision_id,
+    CASE
+      WHEN profile.revision_id = profile.active_revision_id THEN profile.revision_number
+      ELSE NULL
+    END AS active_revision_number,
+    COALESCE(profile.default_action, 'allow') AS default_action,
+    COALESCE(JSONB_ARRAY_LENGTH(profile.rules), 0) AS rule_count,
+    COALESCE(profile.updated_at::text, target.target_updated_at::text) AS updated_at,
+    profile.activated_at,
+    COALESCE(provider_status.status, 'not_applicable') AS provider_mapping_status,
+    NULL::text AS binding_scope,
+    NULL::integer AS selected_wallet_count,
+    0::bigint AS api_key_binding_count,
+    evaluation.decision AS latest_evaluation_decision,
+    evaluation.created_at AS latest_evaluation_at
+  FROM wallet_targets target
+  LEFT JOIN wallet_profiles profile ON profile.custody_wallet_id = target.target_id
+  LEFT JOIN policy_provider_sync_status provider_status
+    ON provider_status.wallet_control_profile_revision_id = profile.active_revision_id
+   AND provider_status.provider = target.provider
+  LEFT JOIN wallet_evaluations evaluation
+    ON evaluation.target_id = target.target_id
+   AND evaluation.evaluation_rank = 1
+
+  UNION ALL
+
+  SELECT
+    'api_key'::text AS target_type,
+    target.target_id,
+    NULL::text AS wallet_id,
+    target.display_name,
+    NULL::text AS wallet_address,
+    target.api_key_prefix,
+    profile.id AS control_profile_id,
+    COALESCE(profile.status, 'default_allow') AS status,
+    profile.active_revision_id,
+    CASE
+      WHEN profile.revision_id = profile.active_revision_id THEN profile.revision_number
+      ELSE NULL
+    END AS active_revision_number,
+    COALESCE(profile.default_action, 'allow') AS default_action,
+    COALESCE(JSONB_ARRAY_LENGTH(profile.rules), 0) AS rule_count,
+    COALESCE(profile.updated_at::text, target.target_updated_at::text) AS updated_at,
+    profile.activated_at,
+    NULL::text AS provider_mapping_status,
+    CASE
+      WHEN COALESCE(bindings.has_all_scope, false) THEN 'all'
+      WHEN COALESCE(bindings.selected_wallet_count, 0) > 0 THEN 'selected'
+      ELSE NULL::text
+    END AS binding_scope,
+    COALESCE(bindings.selected_wallet_count, 0)::integer AS selected_wallet_count,
+    COALESCE(bindings.binding_count, 0) AS api_key_binding_count,
+    evaluation.decision AS latest_evaluation_decision,
+    evaluation.created_at AS latest_evaluation_at
+  FROM api_key_targets target
+  LEFT JOIN api_key_profiles profile ON profile.api_key_id = target.target_id
+  LEFT JOIN api_key_binding_aggregates bindings ON bindings.api_key_id = target.target_id
+  LEFT JOIN api_key_evaluations evaluation
+    ON evaluation.target_id = target.target_id
+   AND evaluation.evaluation_rank = 1
+)
+`;
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+function policyControlInventoryFilters(
+  input: ListPolicyControlInventoryInput,
+  includeStatus: boolean
+): { conditions: string[]; params: unknown[] } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (input.target && input.target !== "all") {
+    conditions.push("inventory.target_type = ?");
+    params.push(input.target);
+  }
+
+  const query = input.query?.trim();
+  if (query) {
+    conditions.push("inventory.display_name ILIKE ? ESCAPE '\\'");
+    params.push(`%${escapeLikePattern(query)}%`);
+  }
+
+  if (includeStatus && input.status) {
+    conditions.push("inventory.status = ?");
+    params.push(input.status);
+  }
+
+  return { conditions, params };
+}
+
+function mapPolicyControlInventoryRow(row: Record<string, unknown>): PolicyControlInventoryRow {
+  return {
+    target_type: row.target_type as PolicyControlInventoryRow["target_type"],
+    target_id: row.target_id as string,
+    wallet_id: (row.wallet_id as string | null | undefined) ?? null,
+    display_name: row.display_name as string,
+    wallet_address: (row.wallet_address as string | null | undefined) ?? null,
+    api_key_prefix: (row.api_key_prefix as string | null | undefined) ?? null,
+    control_profile_id: (row.control_profile_id as string | null | undefined) ?? null,
+    status: row.status as PolicyControlInventoryRow["status"],
+    active_revision_id: (row.active_revision_id as string | null | undefined) ?? null,
+    active_revision_number:
+      row.active_revision_number === null || row.active_revision_number === undefined
+        ? null
+        : Number(row.active_revision_number),
+    default_action: row.default_action as PolicyControlInventoryRow["default_action"],
+    rule_count: Number(row.rule_count ?? 0),
+    updated_at: row.updated_at as string,
+    activated_at: (row.activated_at as string | null | undefined) ?? null,
+    provider_mapping_status:
+      (row.provider_mapping_status as
+        | PolicyControlInventoryRow["provider_mapping_status"]
+        | undefined) ?? null,
+    binding_scope:
+      (row.binding_scope as PolicyControlInventoryRow["binding_scope"] | undefined) ?? null,
+    selected_wallet_count:
+      row.selected_wallet_count === null || row.selected_wallet_count === undefined
+        ? null
+        : Number(row.selected_wallet_count),
+    latest_evaluation_decision:
+      (row.latest_evaluation_decision as
+        | PolicyControlInventoryRow["latest_evaluation_decision"]
+        | undefined) ?? null,
+    latest_evaluation_at: (row.latest_evaluation_at as string | null | undefined) ?? null,
+  };
+}
 
 function mapWalletControlProfileRow(row: Record<string, unknown>): WalletControlProfileRow {
   return {
@@ -219,9 +519,18 @@ function mapWalletPolicyEvaluationAuditRow(
     amount: (row.amount as string | null | undefined) ?? null,
     destination: (row.destination as string | null | undefined) ?? null,
     operation_status: row.operation_status as WalletPolicyEvaluationAuditRow["operation_status"],
+    wallet_policy_revision_id: (row.wallet_policy_revision_id as string | null | undefined) ?? null,
+    active_wallet_policy_revision_id:
+      (row.active_wallet_policy_revision_id as string | null | undefined) ?? null,
+    api_key_policy_revision_id:
+      (row.api_key_policy_revision_id as string | null | undefined) ?? null,
+    active_api_key_policy_revision_id:
+      (row.active_api_key_policy_revision_id as string | null | undefined) ?? null,
     decision: row.decision as WalletPolicyEvaluationAuditRow["decision"],
     reason_code: row.reason_code as string,
     reason: (row.reason as string | null | undefined) ?? null,
+    matched_rules: asPostgresJsonArray(row.matched_rules),
+    evaluation_context: mapPolicyEvaluationContext(row.evaluation_context),
     requires_approval: row.requires_approval as boolean,
     approval_request_id: (row.approval_request_id as string | null | undefined) ?? null,
     operation_created_at: row.operation_created_at as string,
@@ -549,8 +858,136 @@ async function getPolicyEvaluationByIdInternal(
   return row ? mapPolicyEvaluationRow(row) : null;
 }
 
+const walletPolicyEvaluationAuditSelect = `SELECT
+  wo.id AS wallet_operation_id,
+  pe.id AS policy_evaluation_id,
+  wo.operation_family,
+  wo.operation_type,
+  wo.asset,
+  wo.amount,
+  wo.destination,
+  wo.status AS operation_status,
+  pe.wallet_policy_revision_id,
+  wcp.active_revision_id AS active_wallet_policy_revision_id,
+  pe.api_key_policy_revision_id,
+  akcp.active_revision_id AS active_api_key_policy_revision_id,
+  pe.decision,
+  pe.reason_code,
+  pe.reason,
+  pe.matched_rules,
+  pe.evaluation_context,
+  pe.requires_approval,
+  pe.approval_request_id,
+  wo.created_at AS operation_created_at,
+  wo.updated_at AS operation_updated_at,
+  pe.created_at AS evaluated_at
+FROM policy_evaluations pe
+INNER JOIN wallet_operations wo ON wo.id = pe.wallet_operation_id
+LEFT JOIN wallet_control_profile_revisions wcpr ON wcpr.id = pe.wallet_policy_revision_id
+LEFT JOIN wallet_control_profiles wcp ON wcp.id = wcpr.profile_id
+LEFT JOIN api_key_control_profile_revisions akcpr ON akcpr.id = pe.api_key_policy_revision_id
+LEFT JOIN api_key_control_profiles akcp ON akcp.id = akcpr.profile_id`;
+
+function walletPolicyEvaluationAuditFilters(input: ListWalletPolicyEvaluationAuditsInput): {
+  conditions: string[];
+  params: unknown[];
+} {
+  const conditions = [
+    "wo.organization_id = ?",
+    "wo.project_id IS NOT DISTINCT FROM ?",
+    "wo.custody_wallet_id = ?",
+  ];
+  const params: unknown[] = [input.organizationId, input.projectId, input.custodyWalletId];
+
+  if (input.decision) {
+    conditions.push("pe.decision = ?");
+    params.push(input.decision);
+  }
+  if (input.status) {
+    conditions.push("wo.status = ?");
+    params.push(input.status);
+  }
+  if (input.operationFamily) {
+    conditions.push("wo.operation_family = ?");
+    params.push(input.operationFamily);
+  }
+  if (input.reasonCode) {
+    conditions.push("pe.reason_code = ?");
+    params.push(input.reasonCode);
+  }
+
+  return { conditions, params };
+}
+
 export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
   return {
+    async listPolicyControlInventory(input: ListPolicyControlInventoryInput) {
+      const page = Math.max(input.page ?? 1, 1);
+      const pageSize = Math.min(Math.max(input.pageSize ?? 25, 1), 100);
+      const offset = (page - 1) * pageSize;
+      const summaryFilters = policyControlInventoryFilters(input, false);
+      const summaryWhere =
+        summaryFilters.conditions.length > 0 ? summaryFilters.conditions.join(" AND ") : "TRUE";
+      const filteredTotalCondition = input.status ? "inventory.status = ?" : "TRUE";
+      const summary = await db
+        .prepare(
+          `${POLICY_CONTROL_INVENTORY_CTE}
+           SELECT
+             COUNT(*) FILTER (WHERE ${filteredTotalCondition}) AS filtered_total,
+             COUNT(*) AS total,
+             COUNT(*) FILTER (WHERE inventory.status = 'default_allow') AS default_allow,
+             COUNT(*) FILTER (WHERE inventory.status = 'draft') AS draft,
+             COUNT(*) FILTER (WHERE inventory.status = 'active') AS active,
+             COUNT(*) FILTER (WHERE inventory.status = 'disabled') AS disabled,
+             COALESCE(SUM(inventory.api_key_binding_count), 0) AS total_api_key_bindings
+           FROM inventory
+           WHERE ${summaryWhere}`
+        )
+        .bind(
+          input.organizationId,
+          input.projectId,
+          input.walletIds ?? null,
+          ...(input.status ? [input.status] : []),
+          ...summaryFilters.params
+        )
+        .first<Record<string, unknown>>();
+
+      const rowFilters = policyControlInventoryFilters(input, true);
+      const rowWhere =
+        rowFilters.conditions.length > 0 ? rowFilters.conditions.join(" AND ") : "TRUE";
+      const rows = await db
+        .prepare(
+          `${POLICY_CONTROL_INVENTORY_CTE}
+           SELECT *
+           FROM inventory
+           WHERE ${rowWhere}
+           ORDER BY inventory.updated_at DESC, inventory.target_type ASC, inventory.target_id ASC
+           LIMIT ? OFFSET ?`
+        )
+        .bind(
+          input.organizationId,
+          input.projectId,
+          input.walletIds ?? null,
+          ...rowFilters.params,
+          pageSize,
+          offset
+        )
+        .all<Record<string, unknown>>();
+
+      return {
+        rows: rows.results.map(mapPolicyControlInventoryRow),
+        total: Number(summary?.filtered_total ?? 0),
+        summary: {
+          total: Number(summary?.total ?? 0),
+          default_allow: Number(summary?.default_allow ?? 0),
+          draft: Number(summary?.draft ?? 0),
+          active: Number(summary?.active ?? 0),
+          disabled: Number(summary?.disabled ?? 0),
+          total_api_key_bindings: Number(summary?.total_api_key_bindings ?? 0),
+        },
+      };
+    },
+
     async createWalletControlProfile(input: CreateWalletControlProfileInput) {
       const id = generateWalletControlProfileId();
 
@@ -722,6 +1159,46 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
       return {
         profile: mappedProfile,
         revision,
+      };
+    },
+
+    async getWalletControlProfileRevisionHistory(
+      input: GetWalletControlProfileRevisionHistoryInput
+    ) {
+      const profile = await db
+        .prepare(
+          `SELECT *
+           FROM wallet_control_profiles
+           WHERE organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
+             AND custody_wallet_id = ?
+           ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+                    updated_at DESC,
+                    id DESC
+           LIMIT 1`
+        )
+        .bind(input.organizationId, input.projectId, input.custodyWalletId)
+        .first<Record<string, unknown>>();
+
+      if (!profile) {
+        return null;
+      }
+
+      const mappedProfile = mapWalletControlProfileRow(profile);
+      const revisions = await db
+        .prepare(
+          `SELECT *
+           FROM wallet_control_profile_revisions
+           WHERE profile_id = ?
+           ORDER BY revision_number DESC
+           LIMIT ?`
+        )
+        .bind(mappedProfile.id, WALLET_CONTROL_PROFILE_REVISION_HISTORY_LIMIT)
+        .all<Record<string, unknown>>();
+
+      return {
+        profile: mappedProfile,
+        revisions: revisions.results.map(mapWalletControlProfileRevisionRow),
       };
     },
 
@@ -1218,37 +1695,53 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async listWalletPolicyEvaluationAudits(input: ListWalletPolicyEvaluationAuditsInput) {
-      const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
-      const rows = await db
+      const page = Math.max(input.page ?? 1, 1);
+      const pageSize = Math.min(Math.max(input.pageSize ?? 25, 1), 100);
+      const offset = (page - 1) * pageSize;
+      const { conditions, params } = walletPolicyEvaluationAuditFilters(input);
+      const where = conditions.join(" AND ");
+
+      const count = await db
         .prepare(
-          `SELECT
-             wo.id AS wallet_operation_id,
-             pe.id AS policy_evaluation_id,
-             wo.operation_family,
-             wo.operation_type,
-             wo.asset,
-             wo.amount,
-             wo.destination,
-             wo.status AS operation_status,
-             pe.decision,
-             pe.reason_code,
-             pe.reason,
-             pe.requires_approval,
-             pe.approval_request_id,
-             wo.created_at AS operation_created_at,
-             wo.updated_at AS operation_updated_at,
-             pe.created_at AS evaluated_at
+          `SELECT COUNT(*) AS total
            FROM policy_evaluations pe
            INNER JOIN wallet_operations wo ON wo.id = pe.wallet_operation_id
-           WHERE wo.organization_id = ?
-             AND wo.custody_wallet_id = ?
-           ORDER BY pe.created_at DESC, wo.created_at DESC
-           LIMIT ?`
+           WHERE ${where}`
         )
-        .bind(input.organizationId, input.custodyWalletId, limit)
+        .bind(...params)
+        .first<{ total: number | string }>();
+
+      const rows = await db
+        .prepare(
+          `${walletPolicyEvaluationAuditSelect}
+           WHERE ${where}
+           ORDER BY pe.created_at DESC, pe.id DESC
+           LIMIT ? OFFSET ?`
+        )
+        .bind(...params, pageSize, offset)
         .all<Record<string, unknown>>();
 
-      return rows.results.map(mapWalletPolicyEvaluationAuditRow);
+      return {
+        rows: rows.results.map(mapWalletPolicyEvaluationAuditRow),
+        total: Number(count?.total ?? 0),
+      };
+    },
+
+    async getWalletPolicyEvaluationAudit(input: GetWalletPolicyEvaluationAuditInput) {
+      const { conditions, params } = walletPolicyEvaluationAuditFilters(input);
+      conditions.push("pe.id = ?");
+      params.push(input.policyEvaluationId);
+
+      const row = await db
+        .prepare(
+          `${walletPolicyEvaluationAuditSelect}
+           WHERE ${conditions.join(" AND ")}
+           LIMIT 1`
+        )
+        .bind(...params)
+        .first<Record<string, unknown>>();
+
+      return row ? mapWalletPolicyEvaluationAuditRow(row) : null;
     },
 
     async createApprovalRequest(input: CreateApprovalRequestInput) {

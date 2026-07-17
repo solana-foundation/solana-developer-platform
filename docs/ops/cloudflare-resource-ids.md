@@ -44,7 +44,7 @@ Four KV namespaces are used:
 | `SDP_CACHE` | General caching | `your_dev_cache_kv_id` |
 | `SDP_SESSIONS` | Session storage | `your_dev_sessions_kv_id` |
 
-**Real IDs**: Stored only in Doppler (`WRANGLER_SDP_*_ID` environment variables), not in git.
+**Real IDs**: Stored only in Doppler (`CLOUDFLARE_KV_SDP_*_ID` environment variables), not in git.
 
 ---
 
@@ -55,21 +55,21 @@ Each environment in Doppler must define these variables:
 ### For `dev` config:
 
 ```
-WRANGLER_HYPERDRIVE_ID=<dev-hyperdrive-id>
-WRANGLER_SDP_API_KEYS_ID=<dev-api-keys-id>
-WRANGLER_SDP_RATE_LIMITS_ID=<dev-rate-limits-id>
-WRANGLER_SDP_CACHE_ID=<dev-cache-id>
-WRANGLER_SDP_SESSIONS_ID=<dev-sessions-id>
+CLOUDFLARE_HYPERDRIVE_ID=<dev-hyperdrive-id>
+CLOUDFLARE_KV_SDP_API_KEYS_ID=<dev-api-keys-id>
+CLOUDFLARE_KV_SDP_RATE_LIMITS_ID=<dev-rate-limits-id>
+CLOUDFLARE_KV_SDP_CACHE_ID=<dev-cache-id>
+CLOUDFLARE_KV_SDP_SESSIONS_ID=<dev-sessions-id>
 ```
 
 ### For `prd` config:
 
 ```
-WRANGLER_HYPERDRIVE_ID=<prd-hyperdrive-id>
-WRANGLER_SDP_API_KEYS_ID=<prd-api-keys-id>
-WRANGLER_SDP_RATE_LIMITS_ID=<prd-rate-limits-id>
-WRANGLER_SDP_CACHE_ID=<prd-cache-id>
-WRANGLER_SDP_SESSIONS_ID=<prd-sessions-id>
+CLOUDFLARE_HYPERDRIVE_ID=<prd-hyperdrive-id>
+CLOUDFLARE_KV_SDP_API_KEYS_ID=<prd-api-keys-id>
+CLOUDFLARE_KV_SDP_RATE_LIMITS_ID=<prd-rate-limits-id>
+CLOUDFLARE_KV_SDP_CACHE_ID=<prd-cache-id>
+CLOUDFLARE_KV_SDP_SESSIONS_ID=<prd-sessions-id>
 ```
 
 **Note**: Real IDs are stored only in Doppler, not in this document.
@@ -82,7 +82,7 @@ WRANGLER_SDP_SESSIONS_ID=<prd-sessions-id>
 
 During CI/CD deployment, the `.github/workflows/deploy-sdp-api.yml` workflow:
 
-1. **Validates** that all required `WRANGLER_*` variables exist in Doppler
+1. **Validates** that all required `CLOUDFLARE_*` variables exist in Doppler
 2. **Calls** `scripts/render-wrangler-config.mjs`
 3. **Replaces** placeholders in `wrangler.toml` with real values from Doppler
 4. **Deploys** with `wrangler deploy --env <dev|production>`
@@ -132,7 +132,7 @@ In the `deploy-sdp-api.yml` workflow:
 
 This step:
 1. Reads secrets from Doppler (via `DOPPLER_TOKEN`)
-2. Extracts `WRANGLER_*` variables
+2. Extracts `CLOUDFLARE_*` variables
 3. Modifies `wrangler.toml` in the running container
 4. Subsequent `wrangler deploy` uses the injected IDs
 
@@ -149,18 +149,18 @@ doppler login
 doppler run --config dev -- pnpm dev
 ```
 
-Doppler automatically injects all secrets, including `WRANGLER_*` variables.
+Doppler automatically injects all secrets, including `CLOUDFLARE_*` variables.
 
 ### Option B: Manual Configuration (External Contributors)
 
 If you don't have Doppler access, you can set environment variables manually:
 
 ```bash
-export WRANGLER_HYPERDRIVE_ID=<local-hyperdrive-id>
-export WRANGLER_SDP_API_KEYS_ID=<local-kv-id>
-export WRANGLER_SDP_RATE_LIMITS_ID=<local-kv-id>
-export WRANGLER_SDP_CACHE_ID=<local-kv-id>
-export WRANGLER_SDP_SESSIONS_ID=<local-kv-id>
+export CLOUDFLARE_HYPERDRIVE_ID=<local-hyperdrive-id>
+export CLOUDFLARE_KV_SDP_API_KEYS_ID=<local-kv-id>
+export CLOUDFLARE_KV_SDP_RATE_LIMITS_ID=<local-kv-id>
+export CLOUDFLARE_KV_SDP_CACHE_ID=<local-kv-id>
+export CLOUDFLARE_KV_SDP_SESSIONS_ID=<local-kv-id>
 
 pnpm dev
 ```
@@ -168,8 +168,8 @@ pnpm dev
 Or create a `.env.local` file in `apps/sdp-api/`:
 
 ```bash
-WRANGLER_HYPERDRIVE_ID=your_local_id
-WRANGLER_SDP_API_KEYS_ID=your_local_id
+CLOUDFLARE_HYPERDRIVE_ID=your_local_id
+CLOUDFLARE_KV_SDP_API_KEYS_ID=your_local_id
 # ... etc
 ```
 
@@ -202,14 +202,14 @@ When running `pnpm dev`, Wrangler uses `localConnectionString` (for Hyperdrive) 
 
 ## Troubleshooting
 
-### "WRANGLER_HYPERDRIVE_ID not set in Doppler"
+### "CLOUDFLARE_HYPERDRIVE_ID not set in Doppler"
 
 **Cause**: The variable is missing from the Doppler config.
 
 **Solution**:
 1. Go to Doppler dashboard
 2. Select the target config (dev or prd)
-3. Add the missing `WRANGLER_*` variable
+3. Add the missing `CLOUDFLARE_*` variable
 4. Retry the deployment
 
 ### "Placeholder 'your_dev_hyperdrive_id' not found in wrangler.toml"
@@ -231,9 +231,9 @@ When running `pnpm dev`, Wrangler uses `localConnectionString` (for Hyperdrive) 
    node scripts/render-wrangler-config.mjs
    ```
 2. Check for errors in the output
-3. Verify all `WRANGLER_*` variables are exported:
+3. Verify all `CLOUDFLARE_*` variables are exported:
    ```bash
-   env | grep WRANGLER
+   env | grep CLOUDFLARE
    ```
 
 ### Local development: KV not persisting between requests

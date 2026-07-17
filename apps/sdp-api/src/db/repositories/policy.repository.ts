@@ -1,10 +1,13 @@
 import type {
   ApiKeyWalletPolicyBindingScope,
   ApprovalRequestStatus,
+  PolicyControlInventoryStatus,
+  PolicyControlInventoryTarget,
   PolicyDecision,
   PolicyDefaultAction,
   PolicyEvaluationContext,
   PolicyProfileStatus,
+  PolicyProviderSyncStatus,
   PolicyRule,
   WalletOperationActor,
   WalletOperationContext,
@@ -115,6 +118,54 @@ export interface ActivePolicyProfileRevisionRefRow {
   active_revision_id: string | null;
 }
 
+export interface PolicyControlInventoryRow {
+  target_type: Exclude<PolicyControlInventoryTarget, "all">;
+  target_id: string;
+  wallet_id: string | null;
+  display_name: string;
+  wallet_address: string | null;
+  api_key_prefix: string | null;
+  control_profile_id: string | null;
+  status: PolicyControlInventoryStatus;
+  active_revision_id: string | null;
+  active_revision_number: number | null;
+  default_action: PolicyDefaultAction;
+  rule_count: number;
+  updated_at: string;
+  activated_at: string | null;
+  provider_mapping_status: PolicyProviderSyncStatus | null;
+  binding_scope: ApiKeyWalletPolicyBindingScope | null;
+  selected_wallet_count: number | null;
+  latest_evaluation_decision: PolicyDecision | null;
+  latest_evaluation_at: string | null;
+}
+
+export interface ListPolicyControlInventoryInput {
+  organizationId: string;
+  projectId: string | null;
+  target?: PolicyControlInventoryTarget;
+  status?: PolicyControlInventoryStatus;
+  query?: string;
+  walletIds?: string[];
+  page?: number;
+  pageSize?: number;
+}
+
+export interface PolicyControlInventorySummaryRow {
+  total: number;
+  default_allow: number;
+  draft: number;
+  active: number;
+  disabled: number;
+  total_api_key_bindings: number;
+}
+
+export interface ListPolicyControlInventoryResult {
+  rows: PolicyControlInventoryRow[];
+  total: number;
+  summary: PolicyControlInventorySummaryRow;
+}
+
 export interface WalletOperationRow {
   id: string;
   organization_id: string;
@@ -159,9 +210,15 @@ export interface WalletPolicyEvaluationAuditRow {
   amount: string | null;
   destination: string | null;
   operation_status: WalletOperationStatus;
+  wallet_policy_revision_id: string | null;
+  active_wallet_policy_revision_id: string | null;
+  api_key_policy_revision_id: string | null;
+  active_api_key_policy_revision_id: string | null;
   decision: PolicyDecision;
   reason_code: string;
   reason: string | null;
+  matched_rules: Record<string, unknown>[];
+  evaluation_context: PolicyEvaluationContext | null;
   requires_approval: boolean;
   approval_request_id: string | null;
   operation_created_at: string;
@@ -394,10 +451,39 @@ export interface GetApprovalRequestDetailInput {
   approvalRequestId: string;
 }
 
+export interface GetWalletControlProfileRevisionHistoryInput {
+  organizationId: string;
+  projectId: string | null;
+  custodyWalletId: string;
+}
+
+export interface WalletControlProfileRevisionHistoryRow {
+  profile: WalletControlProfileRow;
+  revisions: WalletControlProfileRevisionRow[];
+}
+
 export interface ListWalletPolicyEvaluationAuditsInput {
   organizationId: string;
+  projectId: string | null;
   custodyWalletId: string;
-  limit?: number;
+  page?: number;
+  pageSize?: number;
+  decision?: PolicyDecision;
+  status?: WalletOperationStatus;
+  operationFamily?: WalletOperationFamily;
+  reasonCode?: string;
+}
+
+export interface ListWalletPolicyEvaluationAuditsResult {
+  rows: WalletPolicyEvaluationAuditRow[];
+  total: number;
+}
+
+export interface GetWalletPolicyEvaluationAuditInput {
+  organizationId: string;
+  projectId: string | null;
+  custodyWalletId: string;
+  policyEvaluationId: string;
 }
 
 export interface PolicyRepositoryContext {
@@ -405,6 +491,9 @@ export interface PolicyRepositoryContext {
 }
 
 export interface PolicyRepository {
+  listPolicyControlInventory(
+    input: ListPolicyControlInventoryInput
+  ): Promise<ListPolicyControlInventoryResult>;
   createWalletControlProfile(
     input: CreateWalletControlProfileInput
   ): Promise<WalletControlProfileRow | null>;
@@ -420,6 +509,9 @@ export interface PolicyRepository {
   getActiveWalletControlProfileByProfileId(
     profileId: string
   ): Promise<ActiveWalletControlProfileResult | null>;
+  getWalletControlProfileRevisionHistory(
+    input: GetWalletControlProfileRevisionHistoryInput
+  ): Promise<WalletControlProfileRevisionHistoryRow | null>;
 
   createApiKeyControlProfile(
     input: CreateApiKeyControlProfileInput
@@ -477,7 +569,10 @@ export interface PolicyRepository {
   listPolicyEvaluationsForOperation(walletOperationId: string): Promise<PolicyEvaluationRow[]>;
   listWalletPolicyEvaluationAudits(
     input: ListWalletPolicyEvaluationAuditsInput
-  ): Promise<WalletPolicyEvaluationAuditRow[]>;
+  ): Promise<ListWalletPolicyEvaluationAuditsResult>;
+  getWalletPolicyEvaluationAudit(
+    input: GetWalletPolicyEvaluationAuditInput
+  ): Promise<WalletPolicyEvaluationAuditRow | null>;
   createApprovalRequest(input: CreateApprovalRequestInput): Promise<ApprovalRequestRow | null>;
   updateApprovalRequestStatus(
     input: UpdateApprovalRequestStatusInput

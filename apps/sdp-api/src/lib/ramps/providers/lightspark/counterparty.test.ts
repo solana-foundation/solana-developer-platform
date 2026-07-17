@@ -1,13 +1,16 @@
 import { SdpPaymentsError } from "@sdp/payments";
 import {
   buildLightsparkAccountInfo,
+  buildLightsparkBusinessInfo,
   lightsparkCounterpartyRequirements,
+  lightsparkPayoutCollectedData,
 } from "@sdp/payments/ramps/providers/lightspark/counterparty";
 import type { Counterparty } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 
 type IndividualCounterparty = Extract<Counterparty, { entityType: "individual" }>;
+type BusinessCounterparty = Extract<Counterparty, { entityType: "business" }>;
 type IndividualCounterpartyRow = Extract<CounterpartyRow, { entity_type: "individual" }>;
 
 function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCounterparty {
@@ -58,6 +61,16 @@ function counterpartyRow(
     created_at: "2026-06-11T00:00:00.000Z",
     updated_at: "2026-06-11T00:00:00.000Z",
     ...overrides,
+  };
+}
+
+function businessCounterparty(): BusinessCounterparty {
+  const base = counterparty();
+  return {
+    ...base,
+    entityType: "business",
+    displayName: "Acme Corp",
+    identity: { address: base.identity.address },
   };
 }
 
@@ -150,6 +163,111 @@ describe("lightsparkCounterpartyRequirements", () => {
     });
 
     expect(requirements.status).toBe("unsupported");
+  });
+
+  it("returns unsupported for business on-ramp", () => {
+    const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
+      direction: "onramp",
+      providerData: {},
+    });
+
+    expect(requirements.status).toBe("unsupported");
+  });
+
+  it("collects businessInfo fields before the payout fields for a business without a Grid customer", () => {
+    const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
+      direction: "offramp",
+      providerData: {},
+      fiatCurrency: "USD",
+    });
+
+    if (requirements.status !== "collect") {
+      throw new Error("Expected collect requirements");
+    }
+    expect(requirements.fields.map((field) => field.key)).toEqual([
+      "businessLegalName",
+      "businessTaxId",
+      "businessIncorporatedOn",
+      "paymentRails",
+      "routingNumber",
+      "accountNumber",
+    ]);
+  });
+
+  it("collects only payout fields once the business has a Grid customer", () => {
+    const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
+      direction: "offramp",
+      providerData: { lightspark: { customerId: "Customer:cus_123" } },
+      fiatCurrency: "USD",
+    });
+
+    if (requirements.status !== "collect") {
+      throw new Error("Expected collect requirements");
+    }
+    expect(requirements.fields.map((field) => field.key)).toEqual([
+      "paymentRails",
+      "routingNumber",
+      "accountNumber",
+    ]);
+  });
+});
+
+describe("buildLightsparkBusinessInfo", () => {
+  it("maps collected fields into the Grid businessInfo payload", () => {
+    expect(
+      buildLightsparkBusinessInfo({
+        businessLegalName: "Acme Corporation, Inc.",
+        businessTaxId: "47-1234567",
+        businessIncorporatedOn: "2018-03-14",
+      })
+    ).toEqual({
+      legalName: "Acme Corporation, Inc.",
+      taxId: "47-1234567",
+      incorporatedOn: "2018-03-14",
+    });
+  });
+
+  it("throws when collectedData is missing", () => {
+    expect(() => buildLightsparkBusinessInfo(undefined)).toThrowError(SdpPaymentsError);
+  });
+
+  it("throws when the incorporation date is not an ISO date", () => {
+    expect(() =>
+      buildLightsparkBusinessInfo({
+        businessLegalName: "Acme Corporation, Inc.",
+        businessTaxId: "47-1234567",
+        businessIncorporatedOn: "March 14, 2018",
+      })
+    ).toThrowError(SdpPaymentsError);
+  });
+});
+
+describe("lightsparkPayoutCollectedData", () => {
+  it("drops business onboarding fields from the payout subset", () => {
+    expect(
+      lightsparkPayoutCollectedData("USD", {
+        businessLegalName: "Acme Corporation, Inc.",
+        businessTaxId: "47-1234567",
+        businessIncorporatedOn: "2018-03-14",
+        paymentRails: "ACH",
+        routingNumber: "021000021",
+        accountNumber: "12345678901",
+      })
+    ).toEqual({
+      paymentRails: "ACH",
+      routingNumber: "021000021",
+      accountNumber: "12345678901",
+    });
+  });
+
+  it("returns undefined when no payout fields were collected", () => {
+    expect(
+      lightsparkPayoutCollectedData("USD", {
+        businessLegalName: "Acme Corporation, Inc.",
+        businessTaxId: "47-1234567",
+        businessIncorporatedOn: "2018-03-14",
+      })
+    ).toBeUndefined();
   });
 });
 

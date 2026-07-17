@@ -105,6 +105,7 @@ jobs:
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
+      DOPPLER_PRESERVE_ENV: DATABASE_URL
     services:
       postgres:
         image: postgres:16-alpine
@@ -365,6 +366,9 @@ jobs:
           pnpm --filter sdp-docs generate:api
           pnpm --filter sdp-docs generate:ai
 
+      - name: Committed docs artifacts match generated output
+        run: git diff --exit-code apps/sdp-docs/public
+
       - name: Check docs links
         run: pnpm --filter sdp-docs check:links
 
@@ -389,7 +393,7 @@ jobs:
             custody_provider: local
           - name: Surfpool / Mosaic
             provider: surfpool
-            test_files: src/tests/mosaic-token-acl.test.ts src/tests/mosaic-abl.test.ts src/tests/mosaic-templates.test.ts
+            test_files: src/tests/mosaic-token-acl.test.ts src/tests/mosaic-token-acl-constraints.test.ts src/tests/mosaic-abl.test.ts src/tests/mosaic-templates.test.ts
             rpc_provider: triton
             custody_provider: local
           - name: Surfpool / Token Flows
@@ -405,6 +409,7 @@ jobs:
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
+      DOPPLER_PRESERVE_ENV: DATABASE_URL,SOLANA_NETWORK
       SOLANA_NETWORK: devnet
       INTEGRATION_SHARD_NAME: ${{ matrix.name }}
       INTEGRATION_TEST_FILES: ${{ matrix.test_files }}
@@ -554,6 +559,7 @@ jobs:
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
+      DOPPLER_PRESERVE_ENV: DATABASE_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_API_PERSIST_PATH,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START
       SOLANA_NETWORK: devnet
       PLAYWRIGHT_API_URL: http://127.0.0.1:8787
       PLAYWRIGHT_API_PORT: "8787"
