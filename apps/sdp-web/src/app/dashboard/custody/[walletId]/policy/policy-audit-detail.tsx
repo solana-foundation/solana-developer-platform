@@ -141,9 +141,7 @@ export function PolicyAuditDetail({
                 )
               }
             >
-              {actor.type === "api_key" && !actor.name
-                ? t("DashboardCustody.policyAuditUnavailableApiKey")
-                : actor.value}
+              {actor.type === "api_key" && !actor.name ? shortIdentifier(actor.value) : actor.value}
             </MetadataLine>
           ) : null}
         </div>
@@ -466,7 +464,7 @@ function summarizeRecord(record: Record<string, unknown>, t: PolicyTranslate): s
   if (entries.length === 0) return t("DashboardCustody.policyAuditNoRecordedValues");
   return entries
     .slice(0, 5)
-    .map(([key, value]) => `${formatDisplayLabel(key)}: ${formatSummaryValue(key, value, t)}`)
+    .map(([key, value]) => `${formatAuditFieldLabel(key)}: ${formatSummaryValue(key, value, t)}`)
     .join(" · ");
 }
 
@@ -480,17 +478,47 @@ function formatSummaryValue(key: string, value: unknown, t: PolicyTranslate): st
   }
   if (Array.isArray(value)) {
     return value.length > 0
-      ? value.map((item) => String(item)).join(", ")
+      ? value
+          .map((item) =>
+            shouldFormatAuditValue(key) ? formatDisplayLabel(String(item)) : String(item)
+          )
+          .join(", ")
       : t("DashboardCustody.policyAuditNone");
   }
   if (isRecord(value)) {
+    if (key === "actor") {
+      const actorType = typeof value.type === "string" ? formatDisplayLabel(value.type) : null;
+      const actorId = typeof value.id === "string" ? shortIdentifier(value.id) : null;
+      return [actorType, actorId].filter(Boolean).join(" · ");
+    }
     return summarizeRecord(value, t);
   }
   const text = String(value);
-  if (["source", "defaultAction", "decision", "status", "family", "kind", "action"].includes(key)) {
+  if (shouldFormatAuditValue(key)) {
     return formatDisplayLabel(text);
   }
   return text.length > 48 ? shortIdentifier(text, 10) : text;
+}
+
+function shouldFormatAuditValue(key: string): boolean {
+  return [
+    "source",
+    "defaultAction",
+    "decision",
+    "status",
+    "family",
+    "families",
+    "kind",
+    "action",
+    "type",
+    "operationFamily",
+    "operationType",
+    "operationTypes",
+  ].includes(key);
+}
+
+function formatAuditFieldLabel(key: string): string {
+  return formatDisplayLabel(key.replace(/([a-z0-9])([A-Z])/g, "$1_$2"));
 }
 
 function decisionFromRecord(record: Record<string, unknown>): PolicyDecision | null {
@@ -725,7 +753,7 @@ function ContextSection({
         <dl className="mt-3 grid gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
           {entries.map(([key, value]) => (
             <div key={key} className="min-w-0">
-              <dt className="text-xs text-tertiary">{formatDisplayLabel(key)}</dt>
+              <dt className="text-xs text-tertiary">{formatAuditFieldLabel(key)}</dt>
               <dd className="mt-1 break-words text-sm text-primary">
                 {formatSummaryValue(key, value, t)}
               </dd>
