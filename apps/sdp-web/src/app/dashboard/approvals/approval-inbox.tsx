@@ -35,6 +35,7 @@ import {
   formatApprovalLabel,
   formatApprovalRelativeTime,
   hasApprovalFilters,
+  mergeApprovalRequests,
   shortApprovalIdentifier,
 } from "./approval-requests.data";
 
@@ -124,14 +125,24 @@ export function ApprovalInbox({
   async function reload() {
     setReloading(true);
     try {
-      const response = await fetch("/api/dashboard/approval-requests?limit=100", {
-        cache: "no-store",
-      });
-      const body = (await response.json().catch(() => null)) as {
+      const [pendingResponse, recentResponse] = await Promise.all([
+        fetch("/api/dashboard/approval-requests?status=pending&limit=100", {
+          cache: "no-store",
+        }),
+        fetch("/api/dashboard/approval-requests?limit=100", { cache: "no-store" }),
+      ]);
+      const [pendingBody, recentBody] = (await Promise.all([
+        pendingResponse.json().catch(() => null),
+        recentResponse.json().catch(() => null),
+      ])) as Array<{
         data?: { approvalRequests?: WalletApprovalRequestSummary[] };
-      } | null;
-      if (!response.ok || !body?.data?.approvalRequests) throw new Error("Approval reload failed");
-      setRequests(body.data.approvalRequests);
+      } | null>;
+      const pendingRequests = pendingBody?.data?.approvalRequests;
+      const recentRequests = recentBody?.data?.approvalRequests;
+      if (!pendingResponse.ok || !recentResponse.ok || !pendingRequests || !recentRequests) {
+        throw new Error("Approval reload failed");
+      }
+      setRequests(mergeApprovalRequests(pendingRequests, recentRequests));
       setRelativeTimeBase(Date.now());
       setLoadError(false);
       window.dispatchEvent(new Event("sdp:approval-requests-updated"));

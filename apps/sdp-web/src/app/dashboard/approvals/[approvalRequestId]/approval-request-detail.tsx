@@ -102,15 +102,16 @@ export function ApprovalRequestDetail({
         error?: { message?: string } | string;
       } | null;
 
-      const outcome = classifyApprovalActionResponse(
-        response.status,
-        Boolean(body?.data?.approvalRequest)
-      );
+      const outcome = classifyApprovalActionResponse(response.status);
 
-      if (outcome === "success" && body?.data?.approvalRequest) {
-        setRequest(body.data.approvalRequest);
+      if (outcome === "success") {
+        if (body?.data?.approvalRequest) {
+          setRequest(body.data.approvalRequest);
+          window.dispatchEvent(new Event("sdp:approval-requests-updated"));
+        } else {
+          await refreshRequest();
+        }
         setConfirmation(null);
-        window.dispatchEvent(new Event("sdp:approval-requests-updated"));
         toast.success(t(ACTION_COPY[action].success));
         return;
       }

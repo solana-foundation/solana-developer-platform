@@ -4,6 +4,7 @@ import type {
   WalletPolicyEvaluationDetail,
 } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
+import { mergeApprovalRequests } from "./approval-requests.data";
 
 export async function fetchApprovalRequests(
   apiClient: SdpApiClient
@@ -17,14 +18,7 @@ export async function fetchApprovalRequests(
     ),
   ]);
 
-  return [
-    ...new Map(
-      [...pending.approvalRequests, ...recent.approvalRequests].map((request) => [
-        request.id,
-        request,
-      ])
-    ).values(),
-  ];
+  return mergeApprovalRequests(pending.approvalRequests, recent.approvalRequests);
 }
 
 export async function fetchApprovalRequest(

@@ -10,11 +10,8 @@ export function buildApprovalActionPath(approvalRequestId: string, action: Appro
   return `/api/dashboard/approval-requests/${encodeURIComponent(approvalRequestId)}/${action}`;
 }
 
-export function classifyApprovalActionResponse(
-  status: number,
-  hasApprovalRequest: boolean
-): ApprovalActionOutcome {
-  if (status >= 200 && status < 300 && hasApprovalRequest) return "success";
+export function classifyApprovalActionResponse(status: number): ApprovalActionOutcome {
+  if (status >= 200 && status < 300) return "success";
   if (status === 409) return "stale";
   if (status === 403) return "forbidden";
   return "failure";

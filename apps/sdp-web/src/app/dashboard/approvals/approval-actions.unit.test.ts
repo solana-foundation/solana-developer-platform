@@ -19,12 +19,12 @@ describe("approval actions", () => {
   });
 
   it("classifies an authoritative updated request as success", () => {
-    expect(classifyApprovalActionResponse(200, true)).toBe("success");
-    expect(classifyApprovalActionResponse(200, false)).toBe("failure");
+    expect(classifyApprovalActionResponse(200)).toBe("success");
+    expect(classifyApprovalActionResponse(204)).toBe("success");
   });
 
   it("classifies already-decided and forbidden responses", () => {
-    expect(classifyApprovalActionResponse(409, false)).toBe("stale");
-    expect(classifyApprovalActionResponse(403, false)).toBe("forbidden");
+    expect(classifyApprovalActionResponse(409)).toBe("stale");
+    expect(classifyApprovalActionResponse(403)).toBe("forbidden");
   });
 });

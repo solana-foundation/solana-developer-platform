@@ -5,6 +5,7 @@ import {
   EMPTY_APPROVAL_FILTERS,
   filterApprovalRequests,
   formatApprovalLabel,
+  mergeApprovalRequests,
 } from "./approval-requests.data";
 
 function approvalRequest(
@@ -112,6 +113,37 @@ describe("filterApprovalRequests", () => {
         filters({ from: "2026-07-16", to: "2026-07-16" })
       ).map(({ id }) => id)
     ).toEqual(["approved"]);
+  });
+
+  it("uses the user's local day for submitted-date filters", () => {
+    const previousTimezone = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles";
+    try {
+      const lateLocalRequest = approvalRequest("late-local", "approved", {
+        createdAt: "2026-07-16T06:30:00.000Z",
+      });
+      expect(
+        filterApprovalRequests(
+          [lateLocalRequest],
+          "history",
+          filters({ from: "2026-07-15", to: "2026-07-15" })
+        ).map(({ id }) => id)
+      ).toEqual(["late-local"]);
+    } finally {
+      if (previousTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTimezone;
+    }
+  });
+});
+
+describe("mergeApprovalRequests", () => {
+  it("keeps old pending requests while deduplicating recent results", () => {
+    const oldPending = approvalRequest("old-pending", "pending");
+    const recent = approvalRequest("recent", "approved");
+    expect(mergeApprovalRequests([oldPending], [recent, oldPending]).map(({ id }) => id)).toEqual([
+      "old-pending",
+      "recent",
+    ]);
   });
 });
 

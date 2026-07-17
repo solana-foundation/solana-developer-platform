@@ -50,16 +50,37 @@ const APPROVAL_LABEL_OVERRIDES: Readonly<Record<string, string>> = {
   provider_admin: "Provider administration",
 };
 
+export function mergeApprovalRequests(
+  ...requestGroups: WalletApprovalRequestSummary[][]
+): WalletApprovalRequestSummary[] {
+  return [...new Map(requestGroups.flat().map((request) => [request.id, request])).values()];
+}
+
+function localDateBoundary(value: string, endOfDay: boolean): number | null {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+
+  const date = endOfDay
+    ? new Date(year, month - 1, day, 23, 59, 59, 999)
+    : new Date(year, month - 1, day);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+  return date.getTime();
+}
+
 function startsAt(value: string): number | null {
   if (!value) return null;
-  const timestamp = Date.parse(`${value}T00:00:00.000Z`);
-  return Number.isNaN(timestamp) ? null : timestamp;
+  return localDateBoundary(value, false);
 }
 
 function endsAt(value: string): number | null {
   if (!value) return null;
-  const timestamp = Date.parse(`${value}T23:59:59.999Z`);
-  return Number.isNaN(timestamp) ? null : timestamp;
+  return localDateBoundary(value, true);
 }
 
 export function filterApprovalRequests(
