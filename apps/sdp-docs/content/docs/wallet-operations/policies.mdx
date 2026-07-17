@@ -1,9 +1,9 @@
 ---
 title: Wallet policies
-description: Wallet controls, default-allow rollout, and policy audit visibility.
+description: Wallet controls, operation permissions, and policy audit visibility.
 ---
 
-Wallet policies constrain how a custody wallet can move funds. SDP starts from default allow, then applies the active wallet control profile and any payment policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before wallet operations execute.
+Wallet policies constrain how a custody wallet can move funds and execute supported operations. SDP starts from default allow, then applies the active wallet control profile and any policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before wallet operations execute.
 
 Use policies for treasury wallets, automated payout wallets, or any custody wallet where unbounded outbound flow would be a liability.
 
@@ -70,7 +70,7 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the policy
             "walletOperationId": "wop_abc123",
             "policyEvaluationId": "peval_abc123",
             "operationFamily": "payment",
-            "operationType": "payment_transfer",
+            "operationType": "payment_transfer_execute",
             "asset": "USDC",
             "amount": "100.00",
             "destination": "7xKXz...9fGh",
@@ -98,9 +98,52 @@ Amount fields are **UI-unit decimal strings** (`"100.00"` means 100 tokens, rega
 
 ## Default allow and active controls
 
-Wallet policy evaluation starts from default allow. If no wallet control profile exists, supported payment and ramp operations continue to run unless another product-specific check rejects them. When you activate a control profile, SDP evaluates its rules first and returns the resulting `decision` as one of `allow`, `deny`, `approval_required`, `provider_approval_required`, `review`, or `not_evaluated`.
+Wallet policy evaluation starts from default allow. If no wallet control profile exists, supported wallet operations continue to run unless another product-specific check rejects them. When you activate a control profile, SDP evaluates its rules first and returns the resulting `decision` as one of `allow`, `deny`, `approval_required`, `provider_approval_required`, `review`, or `not_evaluated`.
 
 The `controlProfile` object shows the active immutable revision. Treat `revisionId` and `revisionNumber` as audit references: a policy evaluation records which revision was active when the wallet operation was checked.
+
+### Dashboard actions
+
+The dashboard authoring flow exposes three actions: **Allow**, **Deny**, and **Require approval**. Choose **Require approval** when an operator must decide whether an operation can continue; it holds the operation and creates an approval request.
+
+`review` remains a possible API evaluation result for legacy or safety paths, such as an unrecognized policy rule. It is visible in audit records, but it is not a dashboard authoring option or a separate human-review workflow. Do not use it to model operator approval; use `approval_required` instead.
+
+## Operation permissions
+
+Wallet policies can match operations at two levels:
+
+- **Operation family** rules apply to every evaluated operation in a broad product area.
+- **Operation type** rules match one exact operation identifier and take precedence when you need a narrower decision.
+
+These are wallet-policy selectors, not API-key permissions. API-key permissions such as `payments:write` and `tokens:write` determine whether a caller may invoke an endpoint; operation permissions determine what the selected wallet may do after the request is authorized. See [Manage API keys](/docs/guides/manage-api-keys) for caller permissions.
+
+### Operation families
+
+| Family | Description | Current evaluated operations |
+| --- | --- | --- |
+| `payment` | Outbound single and batch payments. | Single and batch transfer execution |
+| `ramp` | Fiat-to-crypto and crypto-to-fiat ramp activity. | On-ramp and off-ramp quote creation |
+| `issuance` | Token lifecycle actions signed by the wallet. | Mint execution and authority updates |
+| `raw_sign` | Low-level signing and signer verification. | Custody signer checks |
+| `transfer` | Generic direct-transfer family reserved for operations outside the payment workflow. | No current public operation type |
+| `program` | General Solana program interactions. | No current public operation type |
+| `provider_admin` | Custody-provider administration. | No current public operation type |
+
+Family values with no current public operation type are valid policy values, but they do not match a public SDP flow until an operation is emitted in that family.
+
+### Exact operation types
+
+| Operation type | Family | What it controls |
+| --- | --- | --- |
+| `payment_transfer_execute` | `payment` | Executes one outbound payment transfer from the wallet. |
+| `payment_transfer_batch_execute` | `payment` | Executes an outbound batch and evaluates the aggregate amount before submission. |
+| `ramp_onramp_quote` | `ramp` | Creates an on-ramp quote that delivers crypto to the destination wallet. |
+| `ramp_offramp_quote` | `ramp` | Creates an off-ramp quote that draws crypto from the source wallet. |
+| `issuance_mint_execute` | `issuance` | Executes a token mint using the configured signing wallet. |
+| `issuance_update_authority_execute` | `issuance` | Changes a token authority using the current authority wallet. |
+| `custody_signer_check` | `raw_sign` | Runs the custody signer-check transaction for the wallet. |
+
+Operation-type matching is exact and case-sensitive. The API accepts custom strings up to 120 characters so future or privately integrated operations can be represented, but a rule only affects an operation when SDP emits the same identifier. For current public flows, use one of the identifiers above.
 
 ## Policy evaluation and audit records
 
@@ -189,4 +232,4 @@ See the [Compliance API reference](/docs/reference/api/compliance) for address-s
 
 - [Payouts and disbursements](/docs/payments/send-payouts) — running an outbound batch from a policy-constrained wallet.
 - [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint subject to policy enforcement.
-- [Wallet balances](/docs/payments/wallet-balances) — current balance, useful to size transfer limits.
+- [Wallet balances](/docs/wallet-operations/balances) — current balance, useful to size transfer limits.

@@ -13,9 +13,6 @@
     "accept-indexing",
     "---Ramps---",
     "ramps",
-    "ramps-providers",
-    "---Wallet Operations---",
-    "wallet-policies",
-    "wallet-balances"
+    "ramps-providers"
   ]
 }

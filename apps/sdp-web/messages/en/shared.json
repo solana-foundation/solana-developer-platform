@@ -132,6 +132,8 @@
     "backToCounterparty": "Back to Counterparty",
     "backToWallets": "Back to wallets",
     "backToWalletDetail": "Back to wallet detail",
+    "backToWallet": "Back to wallet",
+    "walletControls": "Wallet controls",
     "createWallet": "Create wallet",
     "activateProvider": "Activate provider",
     "newAsset": "New asset",
