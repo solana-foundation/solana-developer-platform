@@ -11,7 +11,7 @@ export default function ApprovalsLoading() {
           <SkeletonBlock className="h-4 w-96 max-w-full" />
         </div>
         <SkeletonBlock className="h-10 w-52" />
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-3 2xl:grid-cols-6">
           {FILTER_SKELETON_KEYS.map((key) => (
             <SkeletonBlock key={key} className="h-16" />
           ))}

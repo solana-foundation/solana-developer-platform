@@ -346,7 +346,7 @@ function ApprovalFilters({
 }) {
   const t = useTranslations();
   return (
-    <div className="grid gap-3 border-b border-border-default py-4 md:grid-cols-2 xl:grid-cols-[repeat(4,minmax(140px,1fr))_minmax(135px,0.75fr)_minmax(135px,0.75fr)_auto]">
+    <div className="grid gap-3 border-b border-border-default py-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[repeat(4,minmax(140px,1fr))_minmax(135px,0.75fr)_minmax(135px,0.75fr)_auto]">
       <FilterField label={t("DashboardApprovals.walletFilter")}>
         <select
           value={filters.walletId}
@@ -488,7 +488,7 @@ function ApprovalRequestRows({
   const t = useTranslations();
   return (
     <>
-      <div className="divide-y divide-border-default border-b border-border-default lg:hidden">
+      <div className="divide-y divide-border-default border-b border-border-default 2xl:hidden">
         {requests.map((request) => {
           const reason = approvalReason(request, t("DashboardApprovals.approvalRequiredByPolicy"));
           const apiKeyLabel = approvalApiKeyLabel(
@@ -538,7 +538,7 @@ function ApprovalRequestRows({
         })}
       </div>
 
-      <div className="hidden overflow-x-auto lg:block">
+      <div className="hidden overflow-x-auto 2xl:block">
         <Table className="min-w-0 [&_table]:min-w-[1118px] [&_table]:table-fixed">
           <TableHeader>
             <TableRow>
@@ -650,7 +650,7 @@ function ApprovalRequestRows({
 
 function ApprovalCell({ children }: { children: React.ReactNode }) {
   return (
-    <TableCell className="!whitespace-normal px-4 py-3 text-sm font-normal text-primary">
+    <TableCell className="min-w-0 overflow-hidden !whitespace-normal px-4 py-3 text-sm font-normal text-primary [overflow-wrap:anywhere]">
       {children}
     </TableCell>
   );
