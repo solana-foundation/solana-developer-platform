@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 type SelectSize = "lg" | "xl";
 
 interface UiSelectProps {
+  ariaLabel?: string;
   value?: string | null;
   onValueChange?: (value: string | null) => void;
   placeholder?: string;
@@ -39,6 +40,7 @@ function collectItemLabels(children: ReactNode): Record<string, ReactNode> {
 }
 
 function Select({
+  ariaLabel,
   value,
   onValueChange,
   placeholder,
@@ -59,6 +61,7 @@ function Select({
       disabled={disabled}
     >
       <BaseSelect.Trigger
+        aria-label={ariaLabel}
         className={cn(
           "group/select relative flex w-full cursor-pointer items-center gap-2 text-left",
           disabled && "pointer-events-none opacity-40",
