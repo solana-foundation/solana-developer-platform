@@ -4313,8 +4313,13 @@ In your Clerk development app:
 - Copy the publishable key, secret key, and issuer into the
   [configurator](/docs/self-hosting/configurator).
 - Create a JWT template named `sdp-api`.
+- Expose your local API with the webhook tunnel: reserve a free stable domain
+  at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains), set it
+  as `WEBHOOK_INGEST_DOMAIN` in `apps/sdp-api/.dev.vars`, and run
+  `pnpm dev:webhooks`.
 - Create a webhook endpoint that points at
-  `http://localhost:8787/webhooks/clerk/link-orgs` for local testing.
+  `https://<your-domain>/webhooks/clerk/link-orgs` — Clerk delivers over the
+  public internet and cannot reach `localhost` directly.
 - Copy the webhook signing secret into `CLERK_WEBHOOK_SECRET`.
 
 `CLERK_WEBHOOK_SECRET` is optional at raw env-validation level, but this tutorial
