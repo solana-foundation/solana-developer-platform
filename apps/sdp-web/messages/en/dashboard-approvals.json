@@ -38,6 +38,7 @@
     "unableToLoad": "Unable to load approval requests",
     "unableToLoadDescription": "The request list could not be retrieved. Try loading it again.",
     "reload": "Reload",
+    "refreshFailed": "Approval requests could not be refreshed. Showing the last loaded results.",
     "viewOnly": "You can review approval requests, but your role cannot decide them.",
     "noAccess": "Approval requests are not available for your role.",
     "noAccessDescription": "Ask an organization administrator for wallet read access.",
