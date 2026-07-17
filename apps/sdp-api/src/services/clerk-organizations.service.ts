@@ -20,7 +20,7 @@ export class ClerkOrganizationsService {
   private apiBase: string;
   private secretKey: string;
 
-  constructor(private env: Env) {
+  constructor(env: Env) {
     if (!env.CLERK_SECRET_KEY) {
       throw new AppError("INTERNAL_ERROR", "CLERK_SECRET_KEY is required");
     }
