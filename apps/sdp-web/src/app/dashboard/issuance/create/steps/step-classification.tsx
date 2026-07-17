@@ -50,7 +50,7 @@ export function StepClassification() {
         <div className="flex items-center justify-between gap-3">
           <Label>{t("DashboardIssuance.classification.chooseClassification")}</Label>
           <a
-            href="https://platform.solana.com/docs"
+            href="https://platform.solana.com/docs/reference/issuance-token-types#selecting-a-template"
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
