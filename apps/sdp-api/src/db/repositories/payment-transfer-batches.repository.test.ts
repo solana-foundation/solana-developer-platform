@@ -67,10 +67,9 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
   };
 
   it("persists idempotency metadata and finds a batch by organization, project, and key", async () => {
-    const created = await repo.createTransferBatch({
-      ...baseInput,
-      projectId: TEST_PROJECT_ID,
-      idempotencyKey: "batch-key-abc",
+    const { batch: created } = await repo.createTransferBatchWithRecipients({
+      batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "batch-key-abc" },
+      recipients: [],
     });
 
     expect(created.idempotency_key).toBe("batch-key-abc");
@@ -87,15 +86,13 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
   });
 
   it("scopes idempotency keys to the project", async () => {
-    const first = await repo.createTransferBatch({
-      ...baseInput,
-      projectId: TEST_PROJECT_ID,
-      idempotencyKey: "shared-batch-key",
+    const { batch: first } = await repo.createTransferBatchWithRecipients({
+      batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "shared-batch-key" },
+      recipients: [],
     });
-    const second = await repo.createTransferBatch({
-      ...baseInput,
-      projectId: OTHER_PROJECT_ID,
-      idempotencyKey: "shared-batch-key",
+    const { batch: second } = await repo.createTransferBatchWithRecipients({
+      batch: { ...baseInput, projectId: OTHER_PROJECT_ID, idempotencyKey: "shared-batch-key" },
+      recipients: [],
     });
 
     expect(first.id).not.toBe(second.id);
@@ -109,18 +106,45 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
   });
 
   it("rejects a second batch with the same organization, project, and idempotency key", async () => {
-    await repo.createTransferBatch({
-      ...baseInput,
-      projectId: TEST_PROJECT_ID,
-      idempotencyKey: "duplicate-batch-key",
+    await repo.createTransferBatchWithRecipients({
+      batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "duplicate-batch-key" },
+      recipients: [],
     });
 
     await expect(
-      repo.createTransferBatch({
-        ...baseInput,
-        projectId: TEST_PROJECT_ID,
-        idempotencyKey: "duplicate-batch-key",
+      repo.createTransferBatchWithRecipients({
+        batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "duplicate-batch-key" },
+        recipients: [],
       })
     ).rejects.toSatisfy((error: unknown) => isPostgresUniqueViolation(error));
+  });
+
+  it("rolls back the batch row when a recipient insert fails", async () => {
+    await expect(
+      repo.createTransferBatchWithRecipients({
+        batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "rollback-batch-key" },
+        recipients: [
+          {
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT_ID,
+            externalId: null,
+            counterpartyId: "cpty_does_not_exist",
+            counterpartyAccountId: "cpacct_does_not_exist",
+            destinationAddress: "Dest111",
+            amount: "1",
+            status: "pending",
+            error: null,
+          },
+        ],
+      })
+    ).rejects.toThrow();
+
+    expect(
+      await repo.findTransferBatchByIdempotency({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        idempotencyKey: "rollback-batch-key",
+      })
+    ).toBeNull();
   });
 });

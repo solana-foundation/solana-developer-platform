@@ -1,9 +1,34 @@
 import { describe, expect, it } from "vitest";
+import { AppError } from "@/lib/errors";
 import {
   buildPaymentTransferFingerprint,
   buildTransferBatchFingerprint,
   normalizeForFingerprint,
+  resolveIdempotencyReplay,
 } from "./idempotency";
+
+describe("resolveIdempotencyReplay", () => {
+  it("returns null when no row has claimed the key", async () => {
+    expect(await resolveIdempotencyReplay(async () => null, "fp")).toBeNull();
+  });
+
+  it("returns the existing row when its fingerprint matches", async () => {
+    const row = { id: "row_1", idempotency_fingerprint: "fp" };
+    expect(await resolveIdempotencyReplay(async () => row, "fp")).toBe(row);
+  });
+
+  it("treats a stored row without a fingerprint as unclaimed", async () => {
+    const row = { id: "row_1", idempotency_fingerprint: null };
+    expect(await resolveIdempotencyReplay(async () => row, "fp")).toBeNull();
+  });
+
+  it("throws CONFLICT when the fingerprint differs", async () => {
+    const row = { id: "row_1", idempotency_fingerprint: "other" };
+    await expect(resolveIdempotencyReplay(async () => row, "fp")).rejects.toSatisfy(
+      (error: unknown) => error instanceof AppError && error.code === "CONFLICT"
+    );
+  });
+});
 
 describe("normalizeForFingerprint", () => {
   it("orders object keys deterministically and drops undefined", () => {

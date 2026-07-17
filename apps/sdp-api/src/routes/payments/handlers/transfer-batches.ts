@@ -993,23 +993,39 @@ export async function createTransferBatch(c: AppContext) {
 
   const batchRepository = getPaymentTransferBatchesRepository(c);
   let batch: PaymentTransferBatchRow;
+  let recipientRows: PaymentTransferRecipientRow[];
   try {
-    batch = await batchRepository.createTransferBatch({
-      organizationId: resolved.scope.auth.organizationId,
-      projectId: resolved.projectId,
-      externalId: parsed.data.externalId ?? null,
-      sourceWalletId: resolved.sourceWallet.walletId,
-      sourceAddress: resolved.sourceAddress,
-      token: resolved.tokenContext.token,
-      status: "processing",
-      totalAmount: resolved.totalAmount,
-      recipientCount: resolved.recipients.length,
-      transactionCount: chunks.length,
-      options: parsed.data.options ?? {},
-      initiatedByKeyId: resolved.scope.auth.id,
-      idempotencyKey,
-      idempotencyFingerprint,
+    const created = await batchRepository.createTransferBatchWithRecipients({
+      batch: {
+        organizationId: resolved.scope.auth.organizationId,
+        projectId: resolved.projectId,
+        externalId: parsed.data.externalId ?? null,
+        sourceWalletId: resolved.sourceWallet.walletId,
+        sourceAddress: resolved.sourceAddress,
+        token: resolved.tokenContext.token,
+        status: "processing",
+        totalAmount: resolved.totalAmount,
+        recipientCount: resolved.recipients.length,
+        transactionCount: chunks.length,
+        options: parsed.data.options ?? {},
+        initiatedByKeyId: resolved.scope.auth.id,
+        idempotencyKey,
+        idempotencyFingerprint,
+      },
+      recipients: resolved.recipients.map((recipient) => ({
+        organizationId: resolved.scope.auth.organizationId,
+        projectId: resolved.projectId,
+        externalId: recipient.externalId,
+        counterpartyId: recipient.counterpartyId,
+        counterpartyAccountId: recipient.counterpartyAccountId,
+        destinationAddress: recipient.destinationAddress,
+        amount: recipient.amount,
+        status: "pending",
+        error: null,
+      })),
     });
+    batch = created.batch;
+    recipientRows = created.recipients;
   } catch (error) {
     if (idempotencyKey && idempotencyFingerprint && isPostgresUniqueViolation(error)) {
       const replay = await resolveTransferBatchIdempotencyReplay(
@@ -1033,20 +1049,6 @@ export async function createTransferBatch(c: AppContext) {
     }
     throw error;
   }
-  const recipientRows = await batchRepository.createTransferRecipients(
-    resolved.recipients.map((recipient) => ({
-      batchId: batch.id,
-      organizationId: resolved.scope.auth.organizationId,
-      projectId: resolved.projectId,
-      externalId: recipient.externalId,
-      counterpartyId: recipient.counterpartyId,
-      counterpartyAccountId: recipient.counterpartyAccountId,
-      destinationAddress: recipient.destinationAddress,
-      amount: recipient.amount,
-      status: "pending",
-      error: null,
-    }))
-  );
   const recipientsByIndex = new Map<number, PaymentTransferRecipientRow>(
     resolved.recipients.map((recipient, position) => [recipient.index, recipientRows[position]])
   );

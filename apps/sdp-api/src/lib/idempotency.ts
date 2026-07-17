@@ -4,13 +4,15 @@ import { conflict } from "@/lib/errors";
  * Resolves an idempotent replay for a keyed insert: returns the existing row
  * when its stored fingerprint matches the incoming request, null when no row
  * has claimed the key yet, and throws CONFLICT when the key was already used
- * with a different request payload.
+ * with a different request payload. A stored row without a fingerprint is
+ * treated as unclaimed rather than a conflict, so the caller's insert surfaces
+ * the inconsistent row as a loud unique-violation error instead of a 409.
  */
 export async function resolveIdempotencyReplay<
   Row extends { idempotency_fingerprint: string | null },
 >(findExisting: () => Promise<Row | null>, fingerprint: string): Promise<Row | null> {
   const existing = await findExisting();
-  if (!existing) {
+  if (!existing || existing.idempotency_fingerprint === null) {
     return null;
   }
   if (existing.idempotency_fingerprint === fingerprint) {

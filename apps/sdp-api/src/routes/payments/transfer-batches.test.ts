@@ -767,9 +767,9 @@ describe("payment transfer batches", () => {
       )
     );
     expect(bodies[1].data.batch.id).toBe(bodies[0].data.batch.id);
-    expect(Array.isArray(bodies[0].data.recipients)).toBe(true);
+    expect(bodies[0].data.recipients).toHaveLength(1);
+    expect(bodies[1].data.recipients).toHaveLength(1);
     expect(Array.isArray(bodies[0].data.transfers)).toBe(true);
-    expect(Array.isArray(bodies[1].data.recipients)).toBe(true);
     expect(Array.isArray(bodies[1].data.transfers)).toBe(true);
     expect(signerCallCount).toBe(2);
     expect(signAndSendMock).toHaveBeenCalledTimes(1);
