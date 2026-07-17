@@ -5,6 +5,7 @@ export const PUBLIC_TAG_SLUGS = new Set([
   "projects",
   "issuance",
   "payments",
+  "policies",
   "compliance",
   "asset-profiles",
 ]);

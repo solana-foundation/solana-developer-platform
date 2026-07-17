@@ -111,6 +111,8 @@ export type PolicyProviderSyncStatus =
   | "synced"
   | "partial"
   | "failed";
+export type PolicyControlInventoryTarget = "wallet" | "api_key" | "all";
+export type PolicyControlInventoryStatus = "default_allow" | "draft" | "active" | "disabled";
 export type ApprovalGroupStatus = "active" | "archived";
 export type ApprovalRequestStatus =
   | "pending"
@@ -242,6 +244,60 @@ export interface ApiKeyWalletPolicyBinding {
   apiKeyControlProfileId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PolicyControlInventoryLatestEvaluation {
+  decision: PolicyDecision;
+  evaluatedAt: string;
+}
+
+interface PolicyControlInventoryItemBase {
+  targetId: string;
+  displayName: string;
+  controlProfileId: string | null;
+  status: PolicyControlInventoryStatus;
+  activeRevisionId: string | null;
+  activeRevisionNumber: number | null;
+  defaultAction: PolicyDefaultAction;
+  ruleCount: number;
+  updatedAt: string;
+  activatedAt: string | null;
+  latestEvaluation: PolicyControlInventoryLatestEvaluation | null;
+}
+
+export interface WalletPolicyControlInventoryItem extends PolicyControlInventoryItemBase {
+  targetType: "wallet";
+  walletId: string;
+  walletAddress: string;
+  providerMappingStatus: PolicyProviderSyncStatus;
+}
+
+export interface ApiKeyPolicyControlInventoryItem extends PolicyControlInventoryItemBase {
+  targetType: "api_key";
+  apiKeyPrefix: string;
+  bindingScope: ApiKeyWalletPolicyBindingScope | null;
+  selectedWalletCount: number;
+}
+
+export type PolicyControlInventoryItem =
+  | WalletPolicyControlInventoryItem
+  | ApiKeyPolicyControlInventoryItem;
+
+export interface PolicyControlInventorySummary {
+  total: number;
+  defaultAllow: number;
+  draft: number;
+  active: number;
+  disabled: number;
+  totalApiKeyBindings: number;
+}
+
+export interface PolicyControlInventoryResponse {
+  controls: PolicyControlInventoryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  summary: PolicyControlInventorySummary;
 }
 
 export interface WalletOperationActor {

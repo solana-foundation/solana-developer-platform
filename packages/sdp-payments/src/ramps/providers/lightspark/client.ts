@@ -50,7 +50,7 @@ import type {
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
-import { lightsparkCounterpartyRequirements } from "./counterparty";
+import { type LightsparkBusinessInfo, lightsparkCounterpartyRequirements } from "./counterparty";
 
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
 
@@ -226,12 +226,13 @@ export interface LightsparkConfig {
 
 export type LightsparkCustomerType = "INDIVIDUAL" | "BUSINESS";
 
-export interface CreateLightsparkCustomerInput {
+export type CreateLightsparkCustomerInput = {
   platformCustomerId: string;
-  customerType: LightsparkCustomerType;
-  fullName: string;
   email?: string;
-}
+} & (
+  | { customerType: "INDIVIDUAL"; fullName: string }
+  | { customerType: "BUSINESS"; businessInfo: LightsparkBusinessInfo }
+);
 
 export interface LightsparkCustomer {
   id: string;
@@ -244,7 +245,8 @@ export interface LightsparkCustomerResolution {
 interface GridCreateCustomerBody {
   platformCustomerId: string;
   customerType: LightsparkCustomerType;
-  fullName: string;
+  fullName?: string;
+  businessInfo?: LightsparkBusinessInfo;
   email?: string;
 }
 
@@ -587,7 +589,9 @@ export class LightsparkRampClient implements RampProvider {
         body: {
           platformCustomerId: input.platformCustomerId,
           customerType: input.customerType,
-          fullName: input.fullName,
+          ...(input.customerType === "INDIVIDUAL"
+            ? { fullName: input.fullName }
+            : { businessInfo: input.businessInfo }),
           ...(input.email ? { email: input.email } : {}),
         },
       }

@@ -2,7 +2,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
+import { canonicalSite } from "../src/lib/site";
+
+const {
   aiGuideUrl,
   aiLlmsFullUrl,
   aiLlmsUrl,
@@ -11,7 +13,7 @@ import {
   apiUrl,
   docsUrl,
   getDocsPageUrl,
-} from "../src/lib/site";
+} = canonicalSite;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

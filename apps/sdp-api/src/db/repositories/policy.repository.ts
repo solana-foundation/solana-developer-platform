@@ -1,10 +1,13 @@
 import type {
   ApiKeyWalletPolicyBindingScope,
   ApprovalRequestStatus,
+  PolicyControlInventoryStatus,
+  PolicyControlInventoryTarget,
   PolicyDecision,
   PolicyDefaultAction,
   PolicyEvaluationContext,
   PolicyProfileStatus,
+  PolicyProviderSyncStatus,
   PolicyRule,
   WalletOperationActor,
   WalletOperationContext,
@@ -113,6 +116,54 @@ export interface ApiKeyWalletPolicyBindingRow {
 export interface ActivePolicyProfileRevisionRefRow {
   profile_id: string;
   active_revision_id: string | null;
+}
+
+export interface PolicyControlInventoryRow {
+  target_type: Exclude<PolicyControlInventoryTarget, "all">;
+  target_id: string;
+  wallet_id: string | null;
+  display_name: string;
+  wallet_address: string | null;
+  api_key_prefix: string | null;
+  control_profile_id: string | null;
+  status: PolicyControlInventoryStatus;
+  active_revision_id: string | null;
+  active_revision_number: number | null;
+  default_action: PolicyDefaultAction;
+  rule_count: number;
+  updated_at: string;
+  activated_at: string | null;
+  provider_mapping_status: PolicyProviderSyncStatus | null;
+  binding_scope: ApiKeyWalletPolicyBindingScope | null;
+  selected_wallet_count: number | null;
+  latest_evaluation_decision: PolicyDecision | null;
+  latest_evaluation_at: string | null;
+}
+
+export interface ListPolicyControlInventoryInput {
+  organizationId: string;
+  projectId: string | null;
+  target?: PolicyControlInventoryTarget;
+  status?: PolicyControlInventoryStatus;
+  query?: string;
+  walletIds?: string[];
+  page?: number;
+  pageSize?: number;
+}
+
+export interface PolicyControlInventorySummaryRow {
+  total: number;
+  default_allow: number;
+  draft: number;
+  active: number;
+  disabled: number;
+  total_api_key_bindings: number;
+}
+
+export interface ListPolicyControlInventoryResult {
+  rows: PolicyControlInventoryRow[];
+  total: number;
+  summary: PolicyControlInventorySummaryRow;
 }
 
 export interface WalletOperationRow {
@@ -440,6 +491,9 @@ export interface PolicyRepositoryContext {
 }
 
 export interface PolicyRepository {
+  listPolicyControlInventory(
+    input: ListPolicyControlInventoryInput
+  ): Promise<ListPolicyControlInventoryResult>;
   createWalletControlProfile(
     input: CreateWalletControlProfileInput
   ): Promise<WalletControlProfileRow | null>;
