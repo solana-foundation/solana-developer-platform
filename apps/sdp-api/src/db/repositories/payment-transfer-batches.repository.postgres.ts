@@ -41,6 +41,8 @@ function mapPaymentTransferBatchRow(row: Record<string, unknown>): PaymentTransf
     options: row.options as Record<string, unknown>,
     error: (row.error as string | null | undefined) ?? null,
     initiated_by_key_id: (row.initiated_by_key_id as string | null | undefined) ?? null,
+    idempotency_key: (row.idempotency_key as string | null | undefined) ?? null,
+    idempotency_fingerprint: (row.idempotency_fingerprint as string | null | undefined) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -152,8 +154,10 @@ export function createPostgresPaymentTransferBatchesRepository(
              transaction_count,
              options,
              error,
-             initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::jsonb, '{}'::jsonb), ?, ?)
+             initiated_by_key_id,
+             idempotency_key,
+             idempotency_fingerprint
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::jsonb, '{}'::jsonb), ?, ?, ?, ?)
            RETURNING *`
         )
         .bind(
@@ -170,7 +174,9 @@ export function createPostgresPaymentTransferBatchesRepository(
           input.transactionCount ?? 0,
           jsonParam(input.options),
           input.error ?? null,
-          input.initiatedByKeyId ?? null
+          input.initiatedByKeyId ?? null,
+          input.idempotencyKey ?? null,
+          input.idempotencyFingerprint ?? null
         )
         .first<Record<string, unknown>>();
 
@@ -178,6 +184,20 @@ export function createPostgresPaymentTransferBatchesRepository(
         throw internalError("payment_transfer_batches INSERT ... RETURNING returned no row");
       }
       return mapPaymentTransferBatchRow(row);
+    },
+
+    async findTransferBatchByIdempotency({ organizationId, projectId, idempotencyKey }) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM payment_transfer_batches
+           WHERE organization_id = ?
+             AND project_id = ?
+             AND idempotency_key = ?`
+        )
+        .bind(organizationId, projectId, idempotencyKey)
+        .first<Record<string, unknown>>();
+
+      return row ? mapPaymentTransferBatchRow(row) : null;
     },
 
     async upsertTransferBatch(input: UpsertPaymentTransferBatchInput) {
