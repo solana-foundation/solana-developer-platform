@@ -32,6 +32,7 @@ import {
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
 import { z } from "zod";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import type {
   PaymentTransferBatchRow,
@@ -52,6 +53,7 @@ import {
   notFound,
   transactionFailed,
 } from "@/lib/errors";
+import { buildTransferBatchFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import {
   assertApiKeyWalletAccess,
@@ -186,6 +188,58 @@ function mapRecipientRow(row: PaymentTransferRecipientRow) {
     error: row.error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+async function resolveTransferBatchIdempotencyReplay(
+  repository: ReturnType<typeof getPaymentTransferBatchesRepository>,
+  organizationId: string,
+  projectId: string,
+  idempotencyKey: string,
+  fingerprint: string
+): Promise<PaymentTransferBatchRow | null> {
+  return resolveIdempotencyReplay(
+    () => repository.findTransferBatchByIdempotency({ organizationId, projectId, idempotencyKey }),
+    fingerprint
+  );
+}
+
+async function buildTransferBatchResponse(
+  c: AppContext,
+  batch: PaymentTransferBatchRow,
+  organizationId: string,
+  projectId: string
+) {
+  const recipients = await getPaymentTransferBatchesRepository(c).listTransferRecipientsByBatch({
+    batchId: batch.id,
+    organizationId,
+    projectId,
+    limit: 500,
+    offset: 0,
+  });
+  const transferIds = Array.from(
+    new Set(
+      recipients.rows
+        .map((recipient) => recipient.transfer_id)
+        .filter((transferId): transferId is string => Boolean(transferId))
+    )
+  );
+  const transferRows = await Promise.all(
+    transferIds.map((transferId) =>
+      getPaymentsRepository(c).getTransferById({
+        transferId,
+        organizationId,
+        projectId,
+      })
+    )
+  );
+
+  return {
+    batch: mapBatchRow(batch),
+    recipients: recipients.rows.map(mapRecipientRow),
+    transfers: transferRows
+      .filter((row): row is PaymentTransferRow => Boolean(row))
+      .map(mapTransferRow),
   };
 }
 
@@ -862,6 +916,7 @@ export async function estimateTransferBatch(c: AppContext) {
 export async function createTransferBatch(c: AppContext) {
   const body = await c.req.json();
   const parsed = createTransferBatchSchema.safeParse(body);
+  const idempotencyKey = c.req.header("Idempotency-Key") ?? null;
 
   if (!parsed.success) {
     throw badRequest("Invalid request body", {
@@ -870,6 +925,40 @@ export async function createTransferBatch(c: AppContext) {
   }
 
   const resolved = await resolveBatchRequest(c, parsed.data, ["payments:write"]);
+  const idempotencyFingerprint = idempotencyKey
+    ? buildTransferBatchFingerprint({
+        sourceAddress: resolved.sourceAddress,
+        token: resolved.tokenContext.token,
+        recipients: resolved.recipients.map((recipient) => ({
+          externalId: recipient.externalId,
+          counterpartyId: recipient.counterpartyId,
+          counterpartyAccountId: recipient.counterpartyAccountId,
+          destinationAddress: recipient.destinationAddress,
+          amount: recipient.amount,
+        })),
+        options: parsed.data.options,
+      })
+    : null;
+  if (idempotencyKey && idempotencyFingerprint) {
+    const replay = await resolveTransferBatchIdempotencyReplay(
+      getPaymentTransferBatchesRepository(c),
+      resolved.scope.auth.organizationId,
+      resolved.projectId,
+      idempotencyKey,
+      idempotencyFingerprint
+    );
+    if (replay) {
+      return success(
+        c,
+        await buildTransferBatchResponse(
+          c,
+          replay,
+          resolved.scope.auth.organizationId,
+          resolved.projectId
+        )
+      );
+    }
+  }
   await enforceBatchPolicies(c, resolved, parsed.data);
 
   const feePayment = getFeePayment(c);
@@ -903,34 +992,63 @@ export async function createTransferBatch(c: AppContext) {
   });
 
   const batchRepository = getPaymentTransferBatchesRepository(c);
-  const batch = await batchRepository.createTransferBatch({
-    organizationId: resolved.scope.auth.organizationId,
-    projectId: resolved.projectId,
-    externalId: parsed.data.externalId ?? null,
-    sourceWalletId: resolved.sourceWallet.walletId,
-    sourceAddress: resolved.sourceAddress,
-    token: resolved.tokenContext.token,
-    status: "processing",
-    totalAmount: resolved.totalAmount,
-    recipientCount: resolved.recipients.length,
-    transactionCount: chunks.length,
-    options: parsed.data.options ?? {},
-    initiatedByKeyId: resolved.scope.auth.id,
-  });
-  const recipientRows = await batchRepository.createTransferRecipients(
-    resolved.recipients.map((recipient) => ({
-      batchId: batch.id,
-      organizationId: resolved.scope.auth.organizationId,
-      projectId: resolved.projectId,
-      externalId: recipient.externalId,
-      counterpartyId: recipient.counterpartyId,
-      counterpartyAccountId: recipient.counterpartyAccountId,
-      destinationAddress: recipient.destinationAddress,
-      amount: recipient.amount,
-      status: "pending",
-      error: null,
-    }))
-  );
+  let batch: PaymentTransferBatchRow;
+  let recipientRows: PaymentTransferRecipientRow[];
+  try {
+    const created = await batchRepository.createTransferBatchWithRecipients({
+      batch: {
+        organizationId: resolved.scope.auth.organizationId,
+        projectId: resolved.projectId,
+        externalId: parsed.data.externalId ?? null,
+        sourceWalletId: resolved.sourceWallet.walletId,
+        sourceAddress: resolved.sourceAddress,
+        token: resolved.tokenContext.token,
+        status: "processing",
+        totalAmount: resolved.totalAmount,
+        recipientCount: resolved.recipients.length,
+        transactionCount: chunks.length,
+        options: parsed.data.options ?? {},
+        initiatedByKeyId: resolved.scope.auth.id,
+        idempotencyKey,
+        idempotencyFingerprint,
+      },
+      recipients: resolved.recipients.map((recipient) => ({
+        organizationId: resolved.scope.auth.organizationId,
+        projectId: resolved.projectId,
+        externalId: recipient.externalId,
+        counterpartyId: recipient.counterpartyId,
+        counterpartyAccountId: recipient.counterpartyAccountId,
+        destinationAddress: recipient.destinationAddress,
+        amount: recipient.amount,
+        status: "pending",
+        error: null,
+      })),
+    });
+    batch = created.batch;
+    recipientRows = created.recipients;
+  } catch (error) {
+    if (idempotencyKey && idempotencyFingerprint && isPostgresUniqueViolation(error)) {
+      const replay = await resolveTransferBatchIdempotencyReplay(
+        batchRepository,
+        resolved.scope.auth.organizationId,
+        resolved.projectId,
+        idempotencyKey,
+        idempotencyFingerprint
+      );
+      if (replay) {
+        return success(
+          c,
+          await buildTransferBatchResponse(
+            c,
+            replay,
+            resolved.scope.auth.organizationId,
+            resolved.projectId
+          )
+        );
+      }
+    }
+    throw error;
+  }
   const recipientsByIndex = new Map<number, PaymentTransferRecipientRow>(
     resolved.recipients.map((recipient, position) => [recipient.index, recipientRows[position]])
   );
@@ -1033,35 +1151,5 @@ export async function getTransferBatch(c: AppContext) {
     throw forbidden("API key is not authorized for the requested wallet");
   }
 
-  const recipients = await batchRepository.listTransferRecipientsByBatch({
-    batchId: batch.id,
-    organizationId: auth.organizationId,
-    projectId,
-    limit: 500,
-    offset: 0,
-  });
-  const transferIds = Array.from(
-    new Set(
-      recipients.rows
-        .map((recipient) => recipient.transfer_id)
-        .filter((transferId): transferId is string => Boolean(transferId))
-    )
-  );
-  const transferRows = await Promise.all(
-    transferIds.map((transferId) =>
-      getPaymentsRepository(c).getTransferById({
-        transferId,
-        organizationId: auth.organizationId,
-        projectId,
-      })
-    )
-  );
-
-  return success(c, {
-    batch: mapBatchRow(batch),
-    recipients: recipients.rows.map(mapRecipientRow),
-    transfers: transferRows
-      .filter((row): row is PaymentTransferRow => Boolean(row))
-      .map(mapTransferRow),
-  });
+  return success(c, await buildTransferBatchResponse(c, batch, auth.organizationId, projectId));
 }
