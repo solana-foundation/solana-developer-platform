@@ -2,6 +2,7 @@ import { ADVANCED_SETTINGS_VERSION } from "@sdp/issuance/capabilities";
 import type { IssuanceMetadata } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
+  getSelectedSettings,
   resolveAdvancedSettings,
   stampAdvancedSettingsVersion,
   validateAdvancedSettings,
@@ -58,6 +59,20 @@ describe("advanced settings persistence helpers", () => {
     it("is a no-op when there is no settings selection", () => {
       const metadata: IssuanceMetadata = { asset: { name: "X" } };
       expect(stampAdvancedSettingsVersion(metadata)).toBe(metadata);
+    });
+  });
+
+  describe("getSelectedSettings", () => {
+    it("returns the selected settings map", () => {
+      const metadata: IssuanceMetadata = {
+        settings: { selected: { freezeTransfers: {}, permanentDelegate: {} } },
+      };
+      expect(getSelectedSettings(metadata)).toEqual({ freezeTransfers: {}, permanentDelegate: {} });
+    });
+
+    it("returns an empty object when there is no selection", () => {
+      expect(getSelectedSettings({ asset: { name: "X" } })).toEqual({});
+      expect(getSelectedSettings({})).toEqual({});
     });
   });
 

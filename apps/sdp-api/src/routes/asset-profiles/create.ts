@@ -1,3 +1,4 @@
+import { resolveSettingsToExtensions } from "@sdp/issuance/capabilities";
 import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
 import { getAssetTypeRegistryEntry, type TokenWithAssetProfileResponse } from "@sdp/types";
 import { z } from "zod";
@@ -7,7 +8,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, internalError } from "@/lib/errors";
 import {
-  resolveAdvancedSettings,
+  getSelectedSettings,
   stampAdvancedSettingsVersion,
   validateAdvancedSettings,
 } from "@/lib/issuance/advanced-settings";
@@ -45,25 +46,18 @@ export const createTokenWithAssetProfile = async (c: AppContext) => {
 
   const { assetCategory, assetType, issuanceMetadata, ...tokenInput } = parsed.data;
 
-  const normalizedTemplate = normalizeTemplateId(tokenInput.template);
-  const resolved = resolveTemplateConfig(
-    normalizedTemplate,
-    tokenInput.overrides,
-    tokenInput.requiresAllowlist,
-    tokenInput.decimals
-  );
-
-  if (resolved.errors.length > 0) {
-    throw badRequest("Invalid template overrides", {
-      errors: resolved.errors,
-    });
-  }
-
   // Validate the asset type here (before opening a transaction) so a bad
   // category/type never gets as far as inserting a token.
   const registryEntry = getAssetTypeRegistryEntry(assetCategory, assetType);
   if (!registryEntry) {
     throw internalError("Missing registry entry for a validated asset type");
+  }
+
+  // Reject any selected advanced setting the asset type does not support before
+  // touching custody or resolving extensions.
+  const settingErrors = validateAdvancedSettings(assetCategory, assetType, issuanceMetadata ?? {});
+  if (settingErrors.length > 0) {
+    throw badRequest("Unsupported advanced settings", { errors: settingErrors });
   }
 
   const signingWalletId = resolveApiKeySigningWalletId(auth, tokenInput.signingWalletId, [
@@ -72,21 +66,35 @@ export const createTokenWithAssetProfile = async (c: AppContext) => {
 
   // Custody signer provisioning is idempotent setup, kept outside the DB
   // transaction (it may reach an external custody provider that cannot roll back).
-  if (signingWalletId) {
-    await createOrgSigner(c.env, orgId, projectId, signingWalletId);
-  }
+  // The signer address is the controlled wallet that authority-valued extensions
+  // (e.g. permanentDelegate) resolve to, so no placeholder is ever stored.
+  const signer =
+    signingWalletId != null
+      ? await createOrgSigner(c.env, orgId, projectId, signingWalletId)
+      : null;
 
-  // Reject any selected advanced setting the asset type does not support, then
-  // confirm the selection actually builds against the deploy template, before
-  // opening a transaction. Finally stamp the server-owned settings version.
-  const settingErrors = validateAdvancedSettings(assetCategory, assetType, issuanceMetadata ?? {});
-  if (settingErrors.length > 0) {
-    throw badRequest("Unsupported advanced settings", { errors: settingErrors });
-  }
+  // Extensions come from the profile's advanced settings when the manager has
+  // selected any (the profile is the source of truth); otherwise fall back to the
+  // request's template overrides. Either way `resolved` carries the template,
+  // decimals, allowlist, and extension config the token is created — and later
+  // deployed — with.
+  const selectedSettings = getSelectedSettings(issuanceMetadata ?? {});
+  const resolved =
+    Object.keys(selectedSettings).length > 0
+      ? resolveSettingsToExtensions(assetCategory, assetType, selectedSettings, {
+          authorities: signer ? { permanentDelegate: signer.address } : undefined,
+          decimals: tokenInput.decimals,
+          requiresAllowlist: tokenInput.requiresAllowlist,
+        })
+      : resolveTemplateConfig(
+          normalizeTemplateId(tokenInput.template),
+          tokenInput.overrides,
+          tokenInput.requiresAllowlist,
+          tokenInput.decimals
+        );
 
-  const buildErrors = resolveAdvancedSettings(assetCategory, assetType, issuanceMetadata ?? {});
-  if (buildErrors.length > 0) {
-    throw badRequest("Invalid advanced settings combination", { errors: buildErrors });
+  if (resolved.errors.length > 0) {
+    throw badRequest("Invalid token extension configuration", { errors: resolved.errors });
   }
 
   const metadata = stampAdvancedSettingsVersion(issuanceMetadata ?? {});

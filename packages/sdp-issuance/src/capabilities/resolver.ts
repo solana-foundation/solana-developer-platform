@@ -27,13 +27,23 @@ import { ADVANCED_SETTINGS, type SettingKey } from "./settings";
 // resolveTemplateConfig validates keys, not values, so any non-empty string works.
 const PLACEHOLDER_AUTHORITY = "11111111111111111111111111111111";
 
-// Authorities injected at deploy time for authority-valued extensions.
+// Authorities injected for authority-valued extensions. At token create the
+// caller passes the controlled signing wallet (which becomes custody at deploy),
+// so no placeholder is ever stored for e.g. permanentDelegate.
 export interface ExtensionAuthorities {
   permanentDelegate?: string;
 }
 
+export interface ResolveSettingsOptions {
+  authorities?: ExtensionAuthorities;
+  decimals?: number;
+  requiresAllowlist?: boolean;
+}
+
 export interface SettingsResolution {
   template: TokenTemplate;
+  decimals: number;
+  requiresAllowlist: boolean;
   extensions: TokenExtensionsConfig | null;
   errors: TemplateOverrideError[];
 }
@@ -91,19 +101,24 @@ function toOverride(
   }
 }
 
-// Resolve a selection into a deployment-ready extension config plus any template
-// errors. Unknown setting keys are skipped defensively (the caller validates
-// them against the capability first); pass `authorities` at deploy time.
+// Resolve a selection into a deployment-ready extension config (plus decimals,
+// allowlist, and any template errors). The base template comes from the asset
+// type's capability — the profile is the source of truth. Unknown setting keys
+// are skipped defensively (the caller validates them against the capability
+// first). Pass the controlled wallet in `options.authorities` so authority-valued
+// extensions resolve to a real address rather than a placeholder.
 export function resolveSettingsToExtensions(
   category: AssetCategory,
   type: string,
   selected: Record<string, SelectedSetting>,
-  authorities: ExtensionAuthorities = {}
+  options: ResolveSettingsOptions = {}
 ): SettingsResolution {
   const capability = ASSET_CAPABILITIES.find((c) => c.category === category && c.type === type);
   if (!capability) {
     return {
       template: "custom",
+      decimals: options.decimals ?? 0,
+      requiresAllowlist: options.requiresAllowlist ?? false,
       extensions: null,
       errors: [
         {
@@ -114,6 +129,7 @@ export function resolveSettingsToExtensions(
     };
   }
 
+  const authorities = options.authorities ?? {};
   const extensions: ExtensionOverrides = {};
   for (const [key, selection] of Object.entries(selected)) {
     if (!(key in ADVANCED_SETTINGS)) {
@@ -122,6 +138,17 @@ export function resolveSettingsToExtensions(
     Object.assign(extensions, toOverride(key as SettingKey, selection?.params ?? {}, authorities));
   }
 
-  const result = resolveTemplateConfig(capability.baseTemplate, { extensions });
-  return { template: result.template, extensions: result.extensions, errors: result.errors };
+  const result = resolveTemplateConfig(
+    capability.baseTemplate,
+    { extensions },
+    options.requiresAllowlist,
+    options.decimals
+  );
+  return {
+    template: result.template,
+    decimals: result.decimals,
+    requiresAllowlist: result.requiresAllowlist,
+    extensions: result.extensions,
+    errors: result.errors,
+  };
 }

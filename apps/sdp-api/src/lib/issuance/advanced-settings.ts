@@ -38,6 +38,13 @@ function readSettings(metadata: Metadata): SettingsNamespace | undefined {
   return settings as SettingsNamespace;
 }
 
+// The selected settings map (settingKey → selection), or {} when absent. Used at
+// token create to drive the token's extension config from the profile.
+export function getSelectedSettings(metadata: Metadata): Record<string, SelectedSetting> {
+  const settings = readSettings(metadata);
+  return (settings?.selected as Record<string, SelectedSetting> | undefined) ?? {};
+}
+
 // Validate the selected settings in `metadata` against the (category, type)
 // capability. Empty result ⇒ nothing selected, or every selection is allowed.
 export function validateAdvancedSettings(

@@ -116,6 +116,27 @@ describe("advanced settings capability registry", () => {
     assert.ok(stablecoin.extensions?.pausable, "pausable should be enabled");
   });
 
+  it("injects the provided authority and passes through decimals/allowlist", () => {
+    const result = resolveSettingsToExtensions(
+      "generic",
+      "generic",
+      { permanentDelegate: {} },
+      {
+        authorities: { permanentDelegate: "CustodyAddr1111111111111111111111111111111" },
+        decimals: 2,
+        requiresAllowlist: true,
+      }
+    );
+    assert.deepEqual(result.errors, []);
+    // the real authority is used — never a placeholder.
+    assert.equal(
+      result.extensions?.permanentDelegate,
+      "CustodyAddr1111111111111111111111111111111"
+    );
+    assert.equal(result.decimals, 2);
+    assert.equal(result.requiresAllowlist, true);
+  });
+
   it("surfaces a template error for a selection the substrate can't build", () => {
     // Bypassing the capability check, a transferFee on the stablecoin template
     // (which doesn't offer it) is rejected by the resolver — the production

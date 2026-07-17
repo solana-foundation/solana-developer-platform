@@ -24,6 +24,7 @@ import { ADVANCED_SETTINGS, SETTING_KEYS, type SettingKey } from "./settings";
 
 export {
   type ExtensionAuthorities,
+  type ResolveSettingsOptions,
   resolveSettingsToExtensions,
   type SettingsResolution,
 } from "./resolver";
