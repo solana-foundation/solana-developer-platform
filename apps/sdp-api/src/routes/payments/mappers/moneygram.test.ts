@@ -30,6 +30,8 @@ function transferRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransf
     fee: null,
     error: null,
     initiated_by_key_id: null,
+    idempotency_key: null,
+    idempotency_fingerprint: null,
     created_at: "2026-06-22T10:17:00.000Z",
     updated_at: "2026-06-22T10:18:00.000Z",
     ...overrides,

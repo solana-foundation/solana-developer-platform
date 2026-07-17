@@ -144,6 +144,87 @@
           }
         },
         {
+          "name": "Create API-key policy profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-profiles",
+            "description": "Creates a draft operation-level control profile for one API key.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Treasury service controls\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create API-key policy revision",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-profiles/{{profileId}}/revisions",
+            "description": "Appends an immutable rule snapshot to an API-key control profile without activating it.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rules\": [\n    {\n      \"id\": \"deny-raw-signing\",\n      \"kind\": \"operation_family\",\n      \"family\": \"raw_sign\",\n      \"action\": \"deny\"\n    }\n  ],\n  \"defaultAction\": \"deny\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Activate API-key policy revision",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-profiles/{{profileId}}/revisions/{{revisionId}}/activate",
+            "description": "Makes one immutable revision the active policy for its API-key control profile."
+          }
+        },
+        {
+          "name": "Replace or clear API-key policy bindings",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-bindings",
+            "description": "Explicitly replaces the complete all-wallet/selected-wallet policy binding set, or clears it. Existing bindings are otherwise preserved by API-key updates and rotation.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode\": \"replace\",\n  \"bindings\": [\n    {\n      \"bindingScope\": \"all\",\n      \"apiKeyControlProfileId\": \"\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "Rotate API key",
           "request": {
             "method": "POST",
@@ -368,6 +449,51 @@
                 }
               }
             }
+          }
+        },
+        {
+          "name": "List wallet approval requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests",
+            "description": "Lists wallet operation approval requests for the authenticated organization or project scope."
+          }
+        },
+        {
+          "name": "Get wallet approval request",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}",
+            "description": "Returns one wallet operation approval request with operation and policy context."
+          }
+        },
+        {
+          "name": "Approve wallet approval request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/approve",
+            "description": "Approves a pending wallet operation approval request."
+          }
+        },
+        {
+          "name": "Reject wallet approval request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/reject",
+            "description": "Rejects a pending wallet operation approval request."
+          }
+        },
+        {
+          "name": "Cancel wallet approval request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/cancel",
+            "description": "Cancels a pending wallet operation approval request."
           }
         },
         {
@@ -1169,6 +1295,33 @@
           }
         },
         {
+          "name": "List wallet policy revisions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/revisions",
+            "description": "Returns immutable revisions for the wallet control profile in newest-first order, including the currently active revision reference."
+          }
+        },
+        {
+          "name": "List wallet policy evaluations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/evaluations",
+            "description": "Returns paginated, filterable policy audit history for one wallet. Evaluation context is redacted and excludes raw provider payloads."
+          }
+        },
+        {
+          "name": "Get wallet policy evaluation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/evaluations/{{policyEvaluationId}}",
+            "description": "Returns one policy evaluation with matched rules, redacted evaluation context, revision references, decision, status, reason, and approval linkage."
+          }
+        },
+        {
           "name": "List transfers",
           "request": {
             "method": "GET",
@@ -1727,6 +1880,20 @@
                 }
               }
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Policies",
+      "item": [
+        {
+          "name": "List policy controls",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/policies",
+            "description": "Lists wallet and API-key control targets in one paginated inventory. Every target, profile, binding, and evaluation is scoped to the authenticated organization and exact project."
           }
         }
       ]

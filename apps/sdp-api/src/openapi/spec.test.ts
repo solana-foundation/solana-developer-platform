@@ -34,6 +34,30 @@ describe("OpenAPI spec", () => {
     expect(requirementsPath?.responses?.["200"]).toMatchSnapshot();
   });
 
+  it("documents every supported public wallet policy rule kind", () => {
+    const doc = createPublicOpenApiDocument();
+    const policyPath = doc.paths?.["/v1/payments/wallets/{walletId}/policies"];
+    const serializedUpdate = JSON.stringify(policyPath?.put);
+    const serializedResponse = JSON.stringify(policyPath?.get?.responses?.["200"]);
+
+    for (const kind of [
+      "operation_family",
+      "operation_type",
+      "asset",
+      "destination",
+      "amount",
+      "approval",
+      "always",
+    ]) {
+      expect(serializedUpdate).toContain(`"${kind}"`);
+      expect(serializedResponse).toContain(`"${kind}"`);
+    }
+
+    for (const field of ["operationType", "operationTypes", "asset", "assets"]) {
+      expect(serializedResponse).toContain(`"${field}"`);
+    }
+  });
+
   it("limits the public document to supported public API families", () => {
     const doc = createPublicOpenApiDocument();
 
@@ -44,6 +68,7 @@ describe("OpenAPI spec", () => {
       "Projects",
       "Issuance",
       "Payments",
+      "Policies",
       "Compliance",
       "Counterparties",
       "Asset Profiles",
@@ -61,5 +86,6 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/health"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/wallets"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/payments/transfers"]?.post).toBeDefined();
+    expect(doc.paths?.["/v1/policies"]?.get).toBeDefined();
   });
 });

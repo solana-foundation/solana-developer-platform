@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=${CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE:-${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}} wrangler dev",
+    "dev": "node scripts/dev-local.mjs",
     "dev:local": "node scripts/dev-local.mjs",
+    "dev:db": "pnpm -w db:postgres:up && pnpm -w db:postgres:logs",
+    "dev:webhook": "bash scripts/dev-webhook.sh",
     "build": "wrangler deploy --dry-run --outdir=dist",
     "deploy": "wrangler deploy",
     "deploy:dev": "wrangler deploy --env dev",
@@ -39,6 +41,7 @@
     "start:node": "node dist/server.js"
   },
   "dependencies": {
+    "@clerk/backend": "3.5.0",
     "@hono/node-server": "^2.0.4",
     "@react-email/components": "1.0.12",
     "@react-email/render": "2.0.8",
@@ -78,7 +81,6 @@
     "pg": "^8.21.0",
     "react": "19.2.7",
     "resend": "6.14.0",
-    "svix": "1.95.2",
     "zod": "4.4.3",
     "@coinbase/cdp-sdk": "1.49.2"
   },

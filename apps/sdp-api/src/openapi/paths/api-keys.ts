@@ -3,16 +3,23 @@ import { z } from "zod";
 
 import {
   apiKeyIdParamSchema,
+  createApiKeyControlProfileRequestSchema,
+  createApiKeyControlProfileRevisionRequestSchema,
   createApiKeyRequestSchema,
   errorResponseSchema,
   rotateApiKeyRequestSchema,
   updateApiKeyRequestSchema,
+  writeApiKeyPolicyBindingsRequestSchema,
 } from "../schemas";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
   actionSuccessResponse,
+  apiKeyControlProfileActivationResponse,
+  apiKeyControlProfileResponse,
+  apiKeyControlProfileRevisionResponse,
   apiKeyCreateResponse,
   apiKeyDetailResponse,
+  apiKeyPolicyBindingsResponse,
   apiKeyRevokeResponse,
   apiKeyRotateResponse,
   listApiKeysResponse,
@@ -108,6 +115,105 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
       200: {
         description: "API key updated",
         content: jsonContent(actionSuccessResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/api-keys/{keyId}/policy-profiles",
+    tags: ["API Keys"],
+    summary: "Create API-key policy profile",
+    operationId: "createApiKeyControlProfile",
+    description: "Creates a draft operation-level control profile for one API key.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ keyId: apiKeyIdParamSchema }),
+      body: { required: true, content: jsonContent(createApiKeyControlProfileRequestSchema) },
+    },
+    responses: {
+      201: {
+        description: "API-key control profile created",
+        content: jsonContent(apiKeyControlProfileResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/api-keys/{keyId}/policy-profiles/{profileId}/revisions",
+    tags: ["API Keys"],
+    summary: "Create API-key policy revision",
+    operationId: "createApiKeyControlProfileRevision",
+    description:
+      "Appends an immutable rule snapshot to an API-key control profile without activating it.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        keyId: apiKeyIdParamSchema,
+        profileId: z.string().min(1),
+      }),
+      body: {
+        required: true,
+        content: jsonContent(createApiKeyControlProfileRevisionRequestSchema),
+      },
+    },
+    responses: {
+      201: {
+        description: "API-key control profile revision created",
+        content: jsonContent(apiKeyControlProfileRevisionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/api-keys/{keyId}/policy-profiles/{profileId}/revisions/{revisionId}/activate",
+    tags: ["API Keys"],
+    summary: "Activate API-key policy revision",
+    operationId: "activateApiKeyControlProfileRevision",
+    description: "Makes one immutable revision the active policy for its API-key control profile.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        keyId: apiKeyIdParamSchema,
+        profileId: z.string().min(1),
+        revisionId: z.string().min(1),
+      }),
+    },
+    responses: {
+      200: {
+        description: "API-key control profile revision activated",
+        content: jsonContent(apiKeyControlProfileActivationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "put",
+    path: "/v1/api-keys/{keyId}/policy-bindings",
+    tags: ["API Keys"],
+    summary: "Replace or clear API-key policy bindings",
+    operationId: "writeApiKeyPolicyBindings",
+    description:
+      "Explicitly replaces the complete all-wallet/selected-wallet policy binding set, or clears it. Existing bindings are otherwise preserved by API-key updates and rotation.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ keyId: apiKeyIdParamSchema }),
+      body: { required: true, content: jsonContent(writeApiKeyPolicyBindingsRequestSchema) },
+    },
+    responses: {
+      200: {
+        description: "API-key policy bindings updated",
+        content: jsonContent(apiKeyPolicyBindingsResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },

@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.41.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.40.0...v0.41.0) (2026-07-15)
+
+### Features
+
+* **HOO-716:** idempotency for POST /transfers ([#710](https://github.com/solana-foundation/solana-developer-platform/pull/710)) ([2ee52e6](https://github.com/solana-foundation/solana-developer-platform/commit/2ee52e6c636742bce898354f58df9a915db7899a))
+* add counterparty requirements endpoint to public openapi spec ([#698](https://github.com/solana-foundation/solana-developer-platform/pull/698)) ([8e8df25](https://github.com/solana-foundation/solana-developer-platform/commit/8e8df2543521d2a79e4235fbb3854b862d53099d))
+* return idempotency key and server-timing for the response ([#681](https://github.com/solana-foundation/solana-developer-platform/pull/681)) ([bde2698](https://github.com/solana-foundation/solana-developer-platform/commit/bde26980fac1d41f96aa32417ac8e5bfed9ffa40))
+
+### Bug Fixes
+
+* enforce counterparty addresss in playground ([#705](https://github.com/solana-foundation/solana-developer-platform/pull/705)) ([add795c](https://github.com/solana-foundation/solana-developer-platform/commit/add795c076ce36ab1aee4307fbbdf8b16de99051))
+* minor ui fixes ([#669](https://github.com/solana-foundation/solana-developer-platform/pull/669)) ([d529bb4](https://github.com/solana-foundation/solana-developer-platform/commit/d529bb44ddeb234b7f3cf36c999c45f64248f8d5))
+* api playground crashing due to i18n mis-interpolation ([#699](https://github.com/solana-foundation/solana-developer-platform/pull/699)) ([e26302f](https://github.com/solana-foundation/solana-developer-platform/commit/e26302ff54bfd031a1c337be543afdf4daac21e0))
+
+### Refactors
+
+* isolate custody wallet provisioning ([#690](https://github.com/solana-foundation/solana-developer-platform/pull/690)) ([1b1facf](https://github.com/solana-foundation/solana-developer-platform/commit/1b1facfe0ffb291626a10cf7438ad350a17681be))
+* **sdp-api:** remove remaining workspace compatibility shims ([#688](https://github.com/solana-foundation/solana-developer-platform/pull/688)) ([9db1a7a](https://github.com/solana-foundation/solana-developer-platform/commit/9db1a7a4214be7b2f7a35ffa5abd3954bc6e3f06))
+* harden workspace module isolation ([#692](https://github.com/solana-foundation/solana-developer-platform/pull/692)) ([31e0dc6](https://github.com/solana-foundation/solana-developer-platform/commit/31e0dc6b9ea07ff23facc8ad7ad7ab9d1d4b2a9a))
+* **payments:** extract recurring payment lifecycle ([#689](https://github.com/solana-foundation/solana-developer-platform/pull/689)) ([369ff70](https://github.com/solana-foundation/solana-developer-platform/commit/369ff70b66b90a2a3790527703d391c738a27155))
+
+### Maintenance
+
+* remove create project endpoint ([#696](https://github.com/solana-foundation/solana-developer-platform/pull/696)) ([31a2eb1](https://github.com/solana-foundation/solana-developer-platform/commit/31a2eb1bbc51c45687710a3378d4b0a726ee66a3))
+
 ## [0.40.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.39.0...v0.40.0) (2026-07-11)
 
 ### Features
