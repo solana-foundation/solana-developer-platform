@@ -6,6 +6,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeftIcon,
   ArrowLeftRightIcon,
+  CircleCheckBigIcon,
   CoinsIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
@@ -48,6 +49,7 @@ type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
+  badge?: number;
   external?: boolean;
   children?: SubNavItem[];
 };
@@ -69,7 +71,10 @@ function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[]
   ];
 }
 
-function getNavSections(t: ReturnType<typeof useTranslations>): NavSection[] {
+function getNavSections(
+  t: ReturnType<typeof useTranslations>,
+  options: { canReadApprovals: boolean; pendingApprovalCount: number | null }
+): NavSection[] {
   return [
     {
       title: t("Shared.dashboardShell.create"),
@@ -102,6 +107,16 @@ function getNavSections(t: ReturnType<typeof useTranslations>): NavSection[] {
           href: "/dashboard/policies",
           icon: ShieldCheckIcon,
         },
+        ...(options.canReadApprovals
+          ? [
+              {
+                label: t("Shared.dashboardShell.approvals"),
+                href: "/dashboard/approvals",
+                icon: CircleCheckBigIcon,
+                ...(options.pendingApprovalCount ? { badge: options.pendingApprovalCount } : {}),
+              },
+            ]
+          : []),
       ],
     },
   ];
@@ -324,7 +339,7 @@ function getWalletRoutePageConfig(
   };
 }
 
-function getApiKeyRoutePageConfig(
+function getAccessControlPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
@@ -351,6 +366,21 @@ function getApiKeyRoutePageConfig(
       contentWidthClass: "max-w-none",
     });
   }
+  if (pathname.startsWith("/dashboard/approvals")) {
+    return {
+      title: t("Shared.dashboardShell.approvals"),
+      contentWidthClass: "max-w-none",
+      ...(pathname === "/dashboard/approvals"
+        ? {}
+        : {
+            backAction: {
+              href: "/dashboard/approvals",
+              label: t("Shared.dashboardShell.backToApprovals"),
+            },
+          }),
+    };
+  }
+
   return null;
 }
 
@@ -359,6 +389,8 @@ function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig {
+  const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
+  if (accessControlPageConfig) return accessControlPageConfig;
   if (pathname === "/dashboard") {
     return {
       title: t("Shared.dashboardShell.home"),
@@ -394,8 +426,6 @@ function getDashboardPageConfig(
   }
   const walletRoutePageConfig = getWalletRoutePageConfig(pathname, t);
   if (walletRoutePageConfig) return walletRoutePageConfig;
-  const apiKeyRouteConfig = getApiKeyRoutePageConfig(pathname, t);
-  if (apiKeyRouteConfig) return apiKeyRouteConfig;
   if (pathname === "/dashboard/policies") {
     return actionPageConfig({
       centeredTitle: t("Shared.dashboardShell.policies"),
@@ -521,7 +551,7 @@ function isItemActive(pathname: string, href: string): boolean {
 }
 
 const navItemBase =
-  "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors";
+  "relative flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors";
 const navItemActive = "border border-border-subtle bg-white text-primary";
 const navItemInactive = "text-secondary hover:bg-fill-strong hover:text-primary";
 
@@ -540,6 +570,7 @@ function SidebarGroup({
   isCollapsed: boolean;
   showTopSeparator: boolean;
 }) {
+  const t = useTranslations();
   return (
     <div className="space-y-2">
       <p
@@ -567,7 +598,13 @@ function SidebarGroup({
                 href={item.href}
                 onClick={onNavigate}
                 title={isCollapsed ? item.label : undefined}
-                aria-label={isCollapsed ? item.label : undefined}
+                aria-label={
+                  isCollapsed && item.badge
+                    ? `${item.label}, ${t("Shared.dashboardShell.pendingApprovals", { count: item.badge })}`
+                    : isCollapsed
+                      ? item.label
+                      : undefined
+                }
                 className={cn(
                   navItemBase,
                   active ? navItemActive : navItemInactive,
@@ -575,7 +612,22 @@ function SidebarGroup({
                 )}
               >
                 <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
-                {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
+                {isCollapsed ? null : (
+                  <>
+                    <span className="whitespace-nowrap">{item.label}</span>
+                    {item.badge ? (
+                      <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-medium text-white">
+                        {item.badge > 99 ? "99+" : item.badge}
+                      </span>
+                    ) : null}
+                  </>
+                )}
+                {isCollapsed && item.badge ? (
+                  <span
+                    className="absolute top-1 right-1 size-2 rounded-full border border-white bg-primary"
+                    aria-hidden="true"
+                  />
+                ) : null}
               </Link>
               {!isCollapsed && item.children && item.children.length > 0 && (
                 <div className="ml-5 mt-2">
@@ -707,15 +759,19 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const { dashboardAccess, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
+  const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const PageLoadingComponent = resolvePageLoadingComponent(pathname);
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [pendingApprovalCount, setPendingApprovalCount] = useState<number | null>(null);
   const previousPathnameRef = useRef(pathname);
   const sidebarExpandedWidth = 296;
   const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(pathname, t);
-  const navSections = getNavSections(t);
+  const navSections = getNavSections(t, {
+    canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
+    pendingApprovalCount,
+  });
   const bottomNavItems: NavItem[] = [
     {
       label: t("Shared.dashboardShell.apiDocs"),
@@ -768,6 +824,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       pathname !== "/dashboard/payments/counterparty/create") ||
     pathname === "/dashboard/payments/requests" ||
     pathname === "/dashboard/payments/recurring" ||
+    pathname.startsWith("/dashboard/approvals") ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
@@ -778,6 +835,38 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       setMobileSidebarOpen(false);
     }
   }, [pathname]);
+
+  useEffect(() => {
+    if (!dashboardAccess.capabilities.canReadApprovals || !selectedProjectId) {
+      setPendingApprovalCount(null);
+      return;
+    }
+
+    let ignored = false;
+    setPendingApprovalCount(null);
+    const refreshPendingCount = async () => {
+      try {
+        const response = await fetch("/api/dashboard/approval-requests?status=pending&limit=100", {
+          cache: "no-store",
+        });
+        const body = (await response.json().catch(() => null)) as {
+          data?: { approvalRequests?: unknown[] };
+        } | null;
+        if (!ignored && response.ok) {
+          setPendingApprovalCount(body?.data?.approvalRequests?.length ?? 0);
+        }
+      } catch {
+        if (!ignored) setPendingApprovalCount(null);
+      }
+    };
+
+    refreshPendingCount();
+    window.addEventListener("sdp:approval-requests-updated", refreshPendingCount);
+    return () => {
+      ignored = true;
+      window.removeEventListener("sdp:approval-requests-updated", refreshPendingCount);
+    };
+  }, [dashboardAccess.capabilities.canReadApprovals, selectedProjectId]);
 
   if (!isLoaded) {
     return (
