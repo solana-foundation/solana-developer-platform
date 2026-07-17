@@ -14,7 +14,6 @@ import {
 } from "../approval-actions";
 import { ApprovalStatusBadge } from "../approval-request-shared";
 import {
-  approvalAmount,
   approvalApiKeyLabel,
   approvalReason,
   approvalWalletLabel,
@@ -269,11 +268,7 @@ export function ApprovalRequestDetail({
                 />
                 <DetailValue
                   label={t("DashboardApprovals.source")}
-                  value={request.operation.source}
-                />
-                <DetailValue
-                  label={t("DashboardApprovals.amountAssetColumn")}
-                  value={approvalAmount(request)}
+                  value={request.operation.source ?? "-"}
                 />
               </DetailGrid>
             </DetailSection>
