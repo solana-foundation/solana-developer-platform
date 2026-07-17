@@ -119,6 +119,8 @@
     "newApiKey": "New API key",
     "editApiKey": "Edit API key",
     "backToApiKeys": "Back to API keys",
+    "approvals": "Approvals",
+    "pendingApprovals": "{count} pending approvals",
     "apiDocs": "API Docs",
     "settings": "Settings",
     "language": "Language",
@@ -144,6 +146,7 @@
     "receive": "Receive",
     "send": "Send",
     "backToPayments": "Back to payments",
+    "backToApprovals": "Back to approvals",
     "members": "Members",
     "allowlist": "Allowlist"
   },
