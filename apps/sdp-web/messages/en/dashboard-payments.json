@@ -353,6 +353,7 @@
       "walletsSelectedPlural": "{count} wallets selected",
       "from": "From",
       "reference": "Reference",
+      "referenceOptional": "Optional",
       "selectSourceWallet": "Select a source wallet",
       "searchWallets": "Search wallets",
       "asset": "Asset",
