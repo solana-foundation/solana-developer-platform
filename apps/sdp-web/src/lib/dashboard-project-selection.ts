@@ -17,8 +17,7 @@ export function resolveDashboardProjectSelection(
   const cookieProject = cookieProjectId
     ? projects.find((project) => project.id === cookieProjectId)
     : undefined;
-  const fallbackProject =
-    projects.find((project) => project.slug === "default-sandbox") ?? projects[0] ?? null;
+  const fallbackProject = projects.find((project) => project.slug === "default-sandbox") ?? null;
 
   return {
     selectedProjectId: cookieProject?.id ?? fallbackProject?.id ?? null,

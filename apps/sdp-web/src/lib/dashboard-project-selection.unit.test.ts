@@ -26,4 +26,11 @@ describe("resolveDashboardProjectSelection", () => {
       shouldRepairCookie: true,
     });
   });
+
+  it("does not silently select production when an organization has no sandbox", () => {
+    expect(resolveDashboardProjectSelection([production], null)).toEqual({
+      selectedProjectId: null,
+      shouldRepairCookie: false,
+    });
+  });
 });
