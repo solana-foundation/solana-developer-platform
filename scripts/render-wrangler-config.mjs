@@ -7,6 +7,10 @@ import { COMMITTED_WORKER_VAR_KEYS } from "./secret-keys.mjs";
 const TARGETS = new Set(["dev", "production"]);
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_CONFIG_PATH = path.join(REPO_ROOT, "apps/sdp-api/wrangler.toml");
+const STATIC_PRODUCTION_WORKER_VAR_KEYS = new Set(["SDP_RUNTIME", "EMAIL_FROM"]);
+const REQUIRED_PRODUCTION_WORKER_VAR_KEYS = [...COMMITTED_WORKER_VAR_KEYS].filter(
+  (key) => !STATIC_PRODUCTION_WORKER_VAR_KEYS.has(key)
+);
 
 const BINDING_REPLACEMENTS = [
   {
@@ -69,7 +73,12 @@ function hasApiKeyTemplate(value) {
 }
 
 function isWorkerVarPlaceholderLike(key, value) {
-  if (value === "0".repeat(32) || value.startsWith("your_") || value.includes("your-")) {
+  if (
+    value === "0".repeat(32) ||
+    value.startsWith("your_") ||
+    value.includes("_your_") ||
+    value.includes("your-")
+  ) {
     return true;
   }
 
@@ -118,14 +127,25 @@ function renderWorkerVars(contents, target) {
   const [, heading, sectionBody] = match;
   let renderedBody = sectionBody;
 
+  if (target === "production") {
+    const missingVars = REQUIRED_PRODUCTION_WORKER_VAR_KEYS.filter(
+      (key) => !process.env[key]?.trim()
+    );
+    if (missingVars.length > 0) {
+      throw new Error(
+        `Doppler config is missing required production Worker vars: ${missingVars.join(", ")}`
+      );
+    }
+  }
+
   for (const key of COMMITTED_WORKER_VAR_KEYS) {
     const value = process.env[key]?.trim();
     if (!value) {
       continue;
     }
 
-    const keyPattern = new RegExp(`^${key}\\s*=\\s*.*$`, "m");
-    if (!keyPattern.test(renderedBody)) {
+    const keyPattern = new RegExp(`^${key}\\s*=\\s*.*$`, "gm");
+    if (renderedBody.search(keyPattern) === -1) {
       renderedBody = `${renderedBody.endsWith("\n") ? renderedBody : `${renderedBody}\n`}${key} = ${tomlString(value)}\n`;
       continue;
     }

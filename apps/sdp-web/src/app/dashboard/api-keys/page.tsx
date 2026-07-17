@@ -1,6 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import type { PaymentsDashboardWallet } from "@sdp/types";
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardAction,
@@ -17,7 +19,6 @@ import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchPaymentsWallets } from "../payments/payments-page.data";
 import { ApiKeyFlashSurface } from "./api-key-flash-surface";
 import { type ApiKeyRecord, ApiKeysTableClient } from "./api-keys-table-client";
-import { CreateApiKeyModal } from "./create-api-key-modal";
 
 export const dynamic = "force-dynamic";
 
@@ -77,7 +78,9 @@ export default async function ApiKeysPage() {
           <CardDescription>{t("DashboardCustody.existingApiKeysDescription")}</CardDescription>
           {dashboardAccess.capabilities.canManageApiKeys ? (
             <CardAction>
-              <CreateApiKeyModal triggerLabel={t("DashboardCustody.newApiKey")} wallets={wallets} />
+              <Button asChild>
+                <Link href="/dashboard/api-keys/new">{t("DashboardCustody.newApiKey")}</Link>
+              </Button>
             </CardAction>
           ) : null}
         </CardHeader>

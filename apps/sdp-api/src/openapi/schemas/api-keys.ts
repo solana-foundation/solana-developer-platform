@@ -1,5 +1,7 @@
 import { PERMISSIONS } from "@sdp/types";
 import {
+  apiKeyControlProfileCreateSchema as apiKeyControlProfileCreateSchemaBase,
+  apiKeyControlProfileRevisionCreateSchema as apiKeyControlProfileRevisionCreateSchemaBase,
   apiKeyCreateSchema as apiKeyCreateSchemaBase,
   apiKeyRotateSchema as apiKeyRotateSchemaBase,
   apiKeyUpdateSchema as apiKeyUpdateSchemaBase,
@@ -91,6 +93,158 @@ export const apiKeyWalletPolicyBindingSchema = z
     }),
   })
   .openapi({ description: "Read-only policy binding summary for an API key wallet scope." });
+
+export const apiKeyPolicyRuleSchema = z
+  .object({
+    id: z.string().optional().openapi({ description: "Stable client-side rule identifier." }),
+    name: z.string().optional().openapi({ description: "Human-readable rule name." }),
+    description: z.string().optional().openapi({ description: "Rule description." }),
+    action: z
+      .enum(["allow", "deny", "approval_required", "provider_approval_required", "review"])
+      .optional()
+      .openapi({ description: "Decision to apply when this rule matches." }),
+    kind: z
+      .enum([
+        "operation_family",
+        "operation_type",
+        "asset",
+        "destination",
+        "amount",
+        "approval",
+        "always",
+      ])
+      .openapi({ description: "API-key policy rule kind." }),
+  })
+  .passthrough()
+  .openapi({
+    description: "Operation-level API-key policy rule.",
+    example: {
+      id: "deny-raw-signing",
+      kind: "operation_family",
+      family: "raw_sign",
+      action: "deny",
+    },
+  });
+
+export const apiKeyControlProfileSchema = z
+  .object({
+    id: z.string().openapi({ description: "API-key control profile ID." }),
+    organizationId: z.string().openapi({ description: "Owning organization ID." }),
+    projectId: projectIdParamSchema.nullable().openapi({ description: "Owning project ID." }),
+    apiKeyId: apiKeyIdParamSchema,
+    name: z.string().openapi({ description: "Control profile name." }),
+    status: z.enum(["draft", "active", "disabled", "archived"]).openapi({
+      description: "Control profile status.",
+    }),
+    activeRevisionId: z.string().nullable().openapi({
+      description: "Currently active immutable revision ID.",
+    }),
+    createdBy: z.string().nullable().openapi({ description: "Profile author ID." }),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+    activatedAt: isoDateTimeSchema.nullable(),
+    archivedAt: isoDateTimeSchema.nullable(),
+  })
+  .openapi({ description: "API-key control profile." });
+
+export const apiKeyControlProfileRevisionSchema = z
+  .object({
+    id: z.string().openapi({ description: "Immutable API-key control profile revision ID." }),
+    profileId: z.string().openapi({ description: "Parent control profile ID." }),
+    revisionNumber: z.number().int().positive().openapi({ description: "Revision number." }),
+    rules: z.array(apiKeyPolicyRuleSchema).openapi({ description: "Revision policy rules." }),
+    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).openapi({
+      description: "Decision used when no rule matches.",
+    }),
+    createdBy: z.string().nullable().openapi({ description: "Revision author ID." }),
+    createdAt: isoDateTimeSchema,
+    activatedAt: isoDateTimeSchema.nullable(),
+  })
+  .openapi({ description: "Immutable API-key control profile revision." });
+
+export const createApiKeyControlProfileRequestSchema = apiKeyControlProfileCreateSchemaBase
+  .extend({
+    name: withOpenApi(apiKeyControlProfileCreateSchemaBase.shape.name, {
+      description: "Human-readable name for the API-key control profile.",
+      example: "Treasury service controls",
+    }),
+  })
+  .openapi({ description: "Create an API-key control profile." });
+
+export const createApiKeyControlProfileRevisionRequestSchema =
+  apiKeyControlProfileRevisionCreateSchemaBase
+    .extend({
+      rules: z.array(apiKeyPolicyRuleSchema).max(100).openapi({
+        description: "Complete rule snapshot for the new immutable revision.",
+      }),
+      defaultAction: withOpenApi(apiKeyControlProfileRevisionCreateSchemaBase.shape.defaultAction, {
+        description: "Decision used when no rule matches.",
+        example: "deny",
+      }),
+    })
+    .openapi({ description: "Create a new immutable API-key control profile revision." });
+
+const writeSelectedApiKeyPolicyBindingSchema = z
+  .object({
+    bindingScope: z.literal("selected"),
+    walletId: z.string().openapi({ description: "Selected custody wallet ID." }),
+    walletControlProfileId: z.string().optional().openapi({
+      description: "Optional active wallet control profile for this wallet.",
+    }),
+    apiKeyControlProfileId: z.string().optional().openapi({
+      description: "Optional active API-key control profile for this wallet.",
+    }),
+  })
+  .refine(
+    (binding) => binding.walletControlProfileId || binding.apiKeyControlProfileId,
+    "Selected-wallet policy bindings must reference at least one control profile"
+  )
+  .openapi({
+    description:
+      "Selected-wallet policy binding replacement. At least one control profile ID is required.",
+  });
+
+const writeAllApiKeyPolicyBindingSchema = z
+  .object({
+    bindingScope: z.literal("all"),
+    apiKeyControlProfileId: z.string().openapi({
+      description: "Active API-key control profile shared by all wallets in key scope.",
+    }),
+  })
+  .openapi({ description: "All-wallet policy binding replacement." });
+
+export const writeApiKeyPolicyBindingsRequestSchema = z
+  .discriminatedUnion("mode", [
+    z.object({
+      mode: z.literal("replace"),
+      bindings: z
+        .array(z.union([writeAllApiKeyPolicyBindingSchema, writeSelectedApiKeyPolicyBindingSchema]))
+        .min(1)
+        .max(100),
+    }),
+    z.object({ mode: z.literal("clear") }),
+  ])
+  .openapi({
+    description:
+      "Explicitly replace the complete API-key policy binding set, or clear every policy binding.",
+  });
+
+export const apiKeyControlProfileResponseSchema = z.object({
+  profile: apiKeyControlProfileSchema,
+});
+
+export const apiKeyControlProfileRevisionResponseSchema = z.object({
+  revision: apiKeyControlProfileRevisionSchema,
+});
+
+export const apiKeyControlProfileActivationResponseSchema = z.object({
+  profile: apiKeyControlProfileSchema,
+  revision: apiKeyControlProfileRevisionSchema,
+});
+
+export const apiKeyPolicyBindingsResponseSchema = z.object({
+  policyBindings: z.array(apiKeyWalletPolicyBindingSchema),
+});
 
 export const apiKeyListItemSchema = z
   .object({

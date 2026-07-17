@@ -58,6 +58,40 @@ export const walletIdParamsSchema = z.object({
   walletId: z.string().min(1),
 });
 
+export const walletPolicyEvaluationParamsSchema = walletIdParamsSchema.extend({
+  policyEvaluationId: z.string().min(1),
+});
+
+export const walletPolicyEvaluationListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+  decision: z
+    .enum([
+      "allow",
+      "deny",
+      "approval_required",
+      "provider_approval_required",
+      "review",
+      "not_evaluated",
+    ])
+    .optional(),
+  status: z
+    .enum([
+      "created",
+      "evaluated",
+      "pending_approval",
+      "executing",
+      "completed",
+      "failed",
+      "canceled",
+    ])
+    .optional(),
+  operationFamily: z
+    .enum(["transfer", "payment", "ramp", "issuance", "raw_sign", "program", "provider_admin"])
+    .optional(),
+  reasonCode: z.string().min(1).max(100).optional(),
+});
+
 export const transferIdParamsSchema = z.object({
   transferId: z.string().min(1),
 });

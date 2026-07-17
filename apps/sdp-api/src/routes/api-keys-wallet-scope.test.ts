@@ -144,6 +144,112 @@ async function seedAuthAndWallets(): Promise<void> {
   ]);
 }
 
+function authenticatedJsonHeaders() {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${TEST_API_KEY.raw}`,
+  };
+}
+
+async function createManagedApiKey(input: {
+  name: string;
+  walletScope: "all" | "selected";
+  walletIds?: string[];
+}): Promise<string> {
+  const walletIds = input.walletIds ?? [];
+  const response = await app.request(
+    "/v1/api-keys",
+    {
+      method: "POST",
+      headers: authenticatedJsonHeaders(),
+      body: JSON.stringify({
+        name: input.name,
+        walletScope: input.walletScope,
+        ...(input.walletScope === "selected"
+          ? {
+              signingWalletId: walletIds[0],
+              signingWalletIds: walletIds,
+            }
+          : {}),
+      }),
+    },
+    env
+  );
+  expect(response.status).toBe(201);
+  const body = (await response.json()) as { data: { apiKey: { id: string } } };
+  return body.data.apiKey.id;
+}
+
+async function createAndActivateApiKeyPolicy(apiKeyId: string): Promise<{
+  profileId: string;
+  revisionId: string;
+}> {
+  const profileResponse = await app.request(
+    `/v1/api-keys/${apiKeyId}/policy-profiles`,
+    {
+      method: "POST",
+      headers: authenticatedJsonHeaders(),
+      body: JSON.stringify({ name: "Managed key controls" }),
+    },
+    env
+  );
+  expect(profileResponse.status).toBe(201);
+  const profileBody = (await profileResponse.json()) as { data: { profile: { id: string } } };
+  const profileId = profileBody.data.profile.id;
+
+  const firstRevisionResponse = await app.request(
+    `/v1/api-keys/${apiKeyId}/policy-profiles/${profileId}/revisions`,
+    {
+      method: "POST",
+      headers: authenticatedJsonHeaders(),
+      body: JSON.stringify({
+        rules: [{ id: "allow-payments", kind: "operation_family", family: "payment" }],
+        defaultAction: "allow",
+      }),
+    },
+    env
+  );
+  expect(firstRevisionResponse.status).toBe(201);
+
+  const secondRevisionResponse = await app.request(
+    `/v1/api-keys/${apiKeyId}/policy-profiles/${profileId}/revisions`,
+    {
+      method: "POST",
+      headers: authenticatedJsonHeaders(),
+      body: JSON.stringify({
+        rules: [
+          { id: "deny-raw-sign", kind: "operation_family", family: "raw_sign", action: "deny" },
+        ],
+        defaultAction: "review",
+      }),
+    },
+    env
+  );
+  expect(secondRevisionResponse.status).toBe(201);
+  const revisionBody = (await secondRevisionResponse.json()) as {
+    data: { revision: { id: string; revisionNumber: number } };
+  };
+  expect(revisionBody.data.revision.revisionNumber).toBe(2);
+
+  const revisionId = revisionBody.data.revision.id;
+  const activationResponse = await app.request(
+    `/v1/api-keys/${apiKeyId}/policy-profiles/${profileId}/revisions/${revisionId}/activate`,
+    {
+      method: "POST",
+      headers: authenticatedJsonHeaders(),
+    },
+    env
+  );
+  expect(activationResponse.status).toBe(200);
+  const activationBody = (await activationResponse.json()) as {
+    data: { profile: { activeRevisionId: string }; revision: { id: string } };
+  };
+  expect(activationBody.data.profile.activeRevisionId).toBe(revisionId);
+  expect(activationBody.data.revision.id).toBe(revisionId);
+
+  return { profileId, revisionId };
+}
+
 describe("API key wallet scope routes", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -241,6 +347,12 @@ describe("API key wallet scope routes", () => {
       .bind(body.data.apiKey.id)
       .all<{ wallet_id: string }>();
     expect(bindings.results?.map((row) => row.wallet_id)).toEqual(["wal_scope_a", "wal_scope_b"]);
+
+    const policyBindings = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM api_key_wallet_policy_bindings WHERE api_key_id = ?")
+      .bind(body.data.apiKey.id)
+      .first<{ count: number }>();
+    expect(Number(policyBindings?.count)).toBe(0);
   });
 
   it("lists wallet access and policy binding metadata for selected-wallet keys", async () => {
@@ -461,5 +573,322 @@ describe("API key wallet scope routes", () => {
       .bind(TEST_API_KEY.id)
       .first<{ count: number }>();
     expect(bindings?.count).toBe(0);
+  });
+
+  it("hides API keys outside the authenticated project and organization", async () => {
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "prj_other_api_key_policy",
+          TEST_ORG.id,
+          "Other Project",
+          "other-api-key-policy",
+          "sandbox",
+          "active",
+          TEST_USER.id
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_keys
+             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "key_other_project_policy",
+          TEST_ORG.id,
+          "prj_other_api_key_policy",
+          TEST_USER.id,
+          "Other project key",
+          "sk_other_prj",
+          "hash_other_project_policy",
+          "api_admin",
+          JSON.stringify(["*"]),
+          "active"
+        ),
+      getDb(env)
+        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+        .bind(
+          "org_other_api_key_policy",
+          "Other Organization",
+          "other-api-key-policy",
+          "individual",
+          "active"
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "prj_other_org_api_key_policy",
+          "org_other_api_key_policy",
+          "Other Organization Project",
+          "other-org-api-key-policy",
+          "sandbox",
+          "active",
+          TEST_USER.id
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_keys
+             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "key_other_org_policy",
+          "org_other_api_key_policy",
+          "prj_other_org_api_key_policy",
+          TEST_USER.id,
+          "Other organization key",
+          "sk_other_org",
+          "hash_other_org_policy",
+          "api_admin",
+          JSON.stringify(["*"]),
+          "active"
+        ),
+    ]);
+
+    for (const keyId of ["key_other_project_policy", "key_other_org_policy"]) {
+      const response = await app.request(
+        `/v1/api-keys/${keyId}/policy-profiles`,
+        {
+          method: "POST",
+          headers: authenticatedJsonHeaders(),
+          body: JSON.stringify({ name: "Out-of-scope controls" }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(404);
+    }
+  });
+
+  it("rejects revision authoring and activation for archived profiles", async () => {
+    const apiKeyId = await createManagedApiKey({
+      name: "Archived policy key",
+      walletScope: "all",
+    });
+    const profileResponse = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-profiles`,
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({ name: "Archived controls" }),
+      },
+      env
+    );
+    expect(profileResponse.status).toBe(201);
+    const profileBody = (await profileResponse.json()) as { data: { profile: { id: string } } };
+    const profileId = profileBody.data.profile.id;
+
+    const revisionResponse = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-profiles/${profileId}/revisions`,
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({ rules: [], defaultAction: "deny" }),
+      },
+      env
+    );
+    expect(revisionResponse.status).toBe(201);
+    const revisionBody = (await revisionResponse.json()) as {
+      data: { revision: { id: string } };
+    };
+
+    await getDb(env)
+      .prepare("UPDATE api_key_control_profiles SET status = 'archived' WHERE id = ?")
+      .bind(profileId)
+      .run();
+
+    const appendResponse = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-profiles/${profileId}/revisions`,
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({ rules: [], defaultAction: "allow" }),
+      },
+      env
+    );
+    expect(appendResponse.status).toBe(404);
+
+    const activationResponse = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-profiles/${profileId}/revisions/${revisionBody.data.revision.id}/activate`,
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders(),
+      },
+      env
+    );
+    expect(activationResponse.status).toBe(404);
+  });
+
+  it("authors revisions, activates and clears an all-wallet policy binding explicitly", async () => {
+    const apiKeyId = await createManagedApiKey({
+      name: "All-wallet policy key",
+      walletScope: "all",
+    });
+    const { profileId, revisionId } = await createAndActivateApiKeyPolicy(apiKeyId);
+
+    const bindingResponse = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-bindings`,
+      {
+        method: "PUT",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({
+          mode: "replace",
+          bindings: [{ bindingScope: "all", apiKeyControlProfileId: profileId }],
+        }),
+      },
+      env
+    );
+    expect(bindingResponse.status).toBe(200);
+    const bindingBody = (await bindingResponse.json()) as {
+      data: {
+        policyBindings: Array<{
+          bindingScope: string;
+          apiKeyControlProfileRevisionId: string | null;
+        }>;
+      };
+    };
+    expect(bindingBody.data.policyBindings).toEqual([
+      expect.objectContaining({
+        bindingScope: "all",
+        apiKeyControlProfileRevisionId: revisionId,
+      }),
+    ]);
+
+    const walletAccessUpdate = await app.request(
+      `/v1/api-keys/${apiKeyId}`,
+      {
+        method: "PATCH",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({
+          walletScope: "selected",
+          signingWalletId: "wal_scope_a",
+          signingWalletIds: ["wal_scope_a"],
+        }),
+      },
+      env
+    );
+    expect(walletAccessUpdate.status).toBe(200);
+    const preserved = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM api_key_wallet_policy_bindings WHERE api_key_id = ?")
+      .bind(apiKeyId)
+      .first<{ count: number }>();
+    expect(Number(preserved?.count)).toBe(1);
+
+    const clearResponse = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-bindings`,
+      {
+        method: "PUT",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({ mode: "clear" }),
+      },
+      env
+    );
+    expect(clearResponse.status).toBe(200);
+    expect(await clearResponse.json()).toMatchObject({ data: { policyBindings: [] } });
+  });
+
+  it("replaces selected-wallet policy bindings and preserves the prior set on scope failure", async () => {
+    const apiKeyId = await createManagedApiKey({
+      name: "Selected-wallet policy key",
+      walletScope: "selected",
+      walletIds: ["wal_scope_a"],
+    });
+    const { profileId } = await createAndActivateApiKeyPolicy(apiKeyId);
+
+    const firstReplace = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-bindings`,
+      {
+        method: "PUT",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({
+          mode: "replace",
+          bindings: [
+            {
+              bindingScope: "selected",
+              walletId: "wal_scope_a",
+              apiKeyControlProfileId: profileId,
+            },
+          ],
+        }),
+      },
+      env
+    );
+    expect(firstReplace.status).toBe(200);
+
+    const outOfScopeReplace = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-bindings`,
+      {
+        method: "PUT",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({
+          mode: "replace",
+          bindings: [
+            {
+              bindingScope: "selected",
+              walletId: "wal_scope_b",
+              apiKeyControlProfileId: profileId,
+            },
+          ],
+        }),
+      },
+      env
+    );
+    expect(outOfScopeReplace.status).toBe(403);
+
+    const preserved = await getDb(env)
+      .prepare(
+        "SELECT wallet_id FROM api_key_wallet_policy_bindings WHERE api_key_id = ? ORDER BY wallet_id"
+      )
+      .bind(apiKeyId)
+      .all<{ wallet_id: string }>();
+    expect(preserved.results.map((row) => row.wallet_id)).toEqual(["wal_scope_a"]);
+
+    const walletAccessUpdate = await app.request(
+      `/v1/api-keys/${apiKeyId}`,
+      {
+        method: "PATCH",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({
+          walletScope: "selected",
+          signingWalletId: "wal_scope_b",
+          signingWalletIds: ["wal_scope_a", "wal_scope_b"],
+        }),
+      },
+      env
+    );
+    expect(walletAccessUpdate.status).toBe(200);
+
+    const secondReplace = await app.request(
+      `/v1/api-keys/${apiKeyId}/policy-bindings`,
+      {
+        method: "PUT",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({
+          mode: "replace",
+          bindings: [
+            {
+              bindingScope: "selected",
+              walletId: "wal_scope_b",
+              apiKeyControlProfileId: profileId,
+            },
+          ],
+        }),
+      },
+      env
+    );
+    expect(secondReplace.status).toBe(200);
+    const secondBody = (await secondReplace.json()) as {
+      data: { policyBindings: Array<{ walletId: string | null }> };
+    };
+    expect(secondBody.data.policyBindings.map((binding) => binding.walletId)).toEqual([
+      "wal_scope_b",
+    ]);
   });
 });

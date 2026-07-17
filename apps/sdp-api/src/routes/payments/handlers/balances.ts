@@ -87,16 +87,17 @@ function mapPolicyAuditEntry(row: WalletPolicyEvaluationAuditRow): PaymentWallet
 
 async function getWalletPolicyAudit(
   c: AppContext,
-  input: { organizationId: string; custodyWalletId: string }
+  input: { organizationId: string; projectId: string | null; custodyWalletId: string }
 ) {
-  const rows = await getPolicyRepository(c).listWalletPolicyEvaluationAudits({
+  const result = await getPolicyRepository(c).listWalletPolicyEvaluationAudits({
     organizationId: input.organizationId,
+    projectId: input.projectId,
     custodyWalletId: input.custodyWalletId,
-    limit: 10,
+    pageSize: 10,
   });
 
   return {
-    recentEvaluations: rows.map(mapPolicyAuditEntry),
+    recentEvaluations: result.rows.map(mapPolicyAuditEntry),
   };
 }
 
@@ -277,6 +278,7 @@ export async function getWalletPolicy(c: AppContext) {
   const controlProfile = await getWalletControlProfileSummary(c, wallet.id);
   const audit = await getWalletPolicyAudit(c, {
     organizationId: auth.organizationId,
+    projectId: auth.projectId ?? null,
     custodyWalletId: wallet.id,
   });
 
@@ -375,6 +377,7 @@ export async function updateWalletPolicy(c: AppContext) {
   const payload = buildWalletPolicyPayload(wallet.walletId, rows, now);
   const audit = await getWalletPolicyAudit(c, {
     organizationId: auth.organizationId,
+    projectId: auth.projectId ?? null,
     custodyWalletId: wallet.id,
   });
 
