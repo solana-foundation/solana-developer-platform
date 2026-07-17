@@ -352,6 +352,7 @@
       "walletsSelectedSingular": "{count} wallet selected",
       "walletsSelectedPlural": "{count} wallets selected",
       "from": "From",
+      "reference": "Reference",
       "selectSourceWallet": "Select a source wallet",
       "searchWallets": "Search wallets",
       "asset": "Asset",

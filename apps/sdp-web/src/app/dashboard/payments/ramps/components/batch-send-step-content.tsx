@@ -13,6 +13,7 @@ import { getDevnetExplorerUrl } from "@/app/dashboard/payments/payments-workspac
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
@@ -113,6 +114,8 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
     asset,
     displayAsset,
     setAsset,
+    externalId,
+    setExternalId,
     assetOptions,
     selectedAssetBalance,
     availableAmount,
@@ -174,6 +177,16 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
           searchable={false}
           disabled={!walletId || assetOptions.length === 0}
         />
+        <div className="flex flex-col gap-2 sm:col-span-2">
+          <Label htmlFor="batch-send-reference">{t("DashboardPayments.batchSend.reference")}</Label>
+          <Input
+            id="batch-send-reference"
+            value={externalId}
+            onChange={(event) => setExternalId(event.currentTarget.value)}
+            maxLength={256}
+            size="xl"
+          />
+        </div>
       </div>
 
       {walletId && assetOptions.length === 0 ? (
