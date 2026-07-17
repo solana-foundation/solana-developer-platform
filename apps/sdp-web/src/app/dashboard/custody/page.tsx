@@ -97,7 +97,7 @@ async function OnboardingGateSection({ orgId }: { orgId: string }) {
   const organization = await getClerkOrganizationSummary(orgId);
 
   return (
-    <Card className="rounded-[24px] border-border-subtle shadow-none">
+    <Card className="rounded-[24px] ring-border-subtle shadow-none">
       <CardHeader>
         <CardTitle>{t("DashboardCustody.waitingForOrganizationSync")}</CardTitle>
         <CardDescription>{t("DashboardCustody.organizationSyncDescription")}</CardDescription>

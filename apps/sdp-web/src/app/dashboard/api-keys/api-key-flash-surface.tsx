@@ -72,7 +72,7 @@ export function ApiKeyFlashSurface() {
   }
 
   return (
-    <Card className={flash.level === "error" ? "border-destructive/25" : "border-primary/12"}>
+    <Card className={flash.level === "error" ? "ring-destructive/25" : "ring-primary/12"}>
       <CardHeader>
         <CardTitle>
           {flash.level === "error"
