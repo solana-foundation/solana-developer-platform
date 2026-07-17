@@ -1,6 +1,8 @@
 import {
   type CustodyWalletAggregate,
   type CustodyWalletTokenBalance,
+  type PaymentTransferBatchRecipientStatus,
+  type PaymentTransferBatchStatus,
   SOL_MINT,
   type PaymentTransferSummary as TransferRecord,
   type PaymentsDashboardWallet as WalletRecord,
@@ -11,6 +13,23 @@ import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { toTitleCase } from "../activity-format-utils";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+export function batchStatusClassName(
+  status: PaymentTransferBatchStatus | PaymentTransferBatchRecipientStatus
+): string {
+  switch (status) {
+    case "confirmed":
+      return "border-success-border bg-success-bg text-success";
+    case "pending":
+    case "processing":
+      return "border-warning-border bg-warning-bg text-warning";
+    case "failed":
+    case "partially_failed":
+      return "border-destructive-border bg-destructive-bg text-destructive-strong";
+    case "archived":
+      return "border-border-default bg-fill-subtle text-secondary";
+  }
+}
 
 function parseIntegerAmount(value: string): bigint | null {
   if (!/^\d+$/.test(value)) {
@@ -88,7 +107,11 @@ export function formatLamportsAsSol(lamports: bigint, locale?: string): string {
   return `${formatTokenAmount(formatUiAmountFromRaw(lamports, WELL_KNOWN_TOKENS.SOL.decimals), locale)} SOL`;
 }
 
-export function formatDisplayAmount(value?: string, token?: string, locale?: string): string {
+export function formatDisplayAmount(
+  value?: string | null,
+  token?: string,
+  locale?: string
+): string {
   if (!value) {
     return token ? `- ${token}` : "-";
   }
@@ -218,6 +241,9 @@ export function resolveCounterparty(transfer: TransferRecord, t: Translate): str
 }
 
 export function resolveTransferTypeLabel(type: string | undefined, t: Translate): string {
+  if (type === "transfer_batch") {
+    return t("DashboardPayments.batchActivity.batchTransfer");
+  }
   if (type === "onramp") {
     return t("DashboardPayments.deposit");
   }

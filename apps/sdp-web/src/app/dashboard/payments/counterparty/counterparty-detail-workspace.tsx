@@ -3,6 +3,8 @@
 import type {
   Counterparty,
   CounterpartyAccount,
+  PaymentTransferBatch,
+  PaymentTransferRecipient,
   PaymentTransferSummary,
   RampProviderId,
   RampTransferSettlement,
@@ -58,6 +60,7 @@ import {
   shortenAddress,
 } from "../payments-overview.utils";
 import { getDevnetExplorerUrl } from "../payments-workspace.data";
+import { sumBatchAmounts } from "../ramps/hooks/use-batch-send-wizard";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 
@@ -120,6 +123,29 @@ function TransferProviderCell({ provider }: { provider?: RampProviderId }) {
   );
 }
 
+type CounterpartyBatchTransfer = PaymentTransferSummary & {
+  type: "transfer_batch";
+  batch: PaymentTransferBatch;
+  counterpartyRecipients: PaymentTransferRecipient[];
+};
+
+function isCounterpartyBatchTransfer(
+  transfer: PaymentTransferSummary
+): transfer is CounterpartyBatchTransfer {
+  return transfer.type === "transfer_batch";
+}
+
+function formatCounterpartyBatchAmount(
+  transfer: CounterpartyBatchTransfer,
+  locale: string
+): string {
+  return formatDisplayAmount(
+    sumBatchAmounts(transfer.counterpartyRecipients.map((recipient) => recipient.amount)),
+    transfer.batch.token,
+    locale
+  );
+}
+
 function TransferTableRow({
   transfer,
   onSelect,
@@ -128,9 +154,12 @@ function TransferTableRow({
   onSelect: (transfer: PaymentTransferSummary) => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
+  const batchTransfer = isCounterpartyBatchTransfer(transfer) ? transfer : null;
   const walletAddress = isInbound ? transfer.destination : transfer.source;
   const flow = resolveTransferFlow(transfer);
+  const hasFlow = flow.send !== null || flow.receive !== null;
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: a table row can't be a <button>; role+key handler is the accessible compromise
@@ -169,7 +198,11 @@ function TransferTableRow({
         )}
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-right">
-        {flow.send || flow.receive ? (
+        {batchTransfer ? (
+          <span className="text-sm font-medium text-primary">
+            {formatCounterpartyBatchAmount(batchTransfer, locale)}
+          </span>
+        ) : hasFlow ? (
           <span className="inline-flex items-center justify-end gap-1.5 text-sm">
             {flow.send ? <span className="text-secondary">{flow.send}</span> : null}
             {flow.send && flow.receive ? (
@@ -524,6 +557,7 @@ function TransferDetailModal({
   const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
   const walletAddress = isInbound ? transfer.destination : transfer.source;
   const moneygram = transfer.moneygram;
+  const batchTransfer = isCounterpartyBatchTransfer(transfer) ? transfer : null;
   const signature = transfer.signature ?? moneygram?.solanaTxSignature ?? null;
   const flow = resolveTransferFlow(transfer);
   const counterpartyParty = transfer.fiatCurrency
@@ -685,6 +719,57 @@ function TransferDetailModal({
             ) : null}
           </div>
         </div>
+
+        {batchTransfer ? (
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-border-default px-4">
+              <div className="divide-y divide-border-default">
+                <DetailRow
+                  label={t("DashboardPayments.batchActivity.batchId")}
+                  value={batchTransfer.batch.id}
+                  mono
+                  copyValue={batchTransfer.batch.id}
+                />
+                <DetailRow
+                  label={t("DashboardPayments.batchActivity.batchStatus")}
+                  value={<TransferStatusBadge status={batchTransfer.batch.status} />}
+                />
+                <DetailRow
+                  label={t("DashboardPayments.batchActivity.recipientCount")}
+                  value={String(batchTransfer.batch.recipientCount)}
+                />
+              </div>
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-border-default">
+              <p className="border-b border-border-default px-4 py-3 text-xs font-medium uppercase tracking-wide text-secondary">
+                {t("DashboardPayments.batchActivity.counterpartyRecipients")}
+              </p>
+              <div className="divide-y divide-border-default">
+                {batchTransfer.counterpartyRecipients.map((recipient) => (
+                  <div
+                    key={recipient.id}
+                    className="flex min-w-0 items-center justify-between gap-4 px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs text-tertiary">
+                        {t("DashboardPayments.batchActivity.destination")}
+                      </p>
+                      <p className="truncate text-sm text-primary" title={recipient.destination}>
+                        {shortenAddress(recipient.destination)}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <span className="text-sm text-primary">
+                        {formatDisplayAmount(recipient.amount, batchTransfer.batch.token)}
+                      </span>
+                      <TransferStatusBadge status={recipient.status} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {signature ? (
           <Button

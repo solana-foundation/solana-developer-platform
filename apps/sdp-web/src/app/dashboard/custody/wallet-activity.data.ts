@@ -40,6 +40,9 @@ const WALLET_ACTIVITY_LIMIT = 20;
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 function resolvePaymentOperation(transfer: PaymentTransferSummary, t: Translate): string {
+  if (transfer.type === "transfer_batch") {
+    return t("DashboardPayments.batchActivity.batchTransfer");
+  }
   if (transfer.direction === "inbound") {
     return t("DashboardCustody.incoming");
   }

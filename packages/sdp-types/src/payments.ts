@@ -180,6 +180,8 @@ export interface PaymentTransferSummary {
   fiatAmount?: string;
   settlement?: RampTransferSettlement;
   moneygram?: MoneygramTransferDetails;
+  batch?: PaymentTransferBatch;
+  counterpartyRecipients?: PaymentTransferRecipient[];
   createdAt?: string;
   updatedAt?: string;
 }

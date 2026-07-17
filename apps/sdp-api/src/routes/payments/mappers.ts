@@ -1,12 +1,59 @@
-import type { RampTransferSettlement } from "@sdp/types";
+import type { PaymentTransferSummary, RampTransferSettlement } from "@sdp/types";
+import type {
+  PaymentTransferBatchRow,
+  PaymentTransferRecipientRow,
+} from "@/db/repositories/payment-transfer-batches.repository";
 import {
   isRampTransferType,
   type PaymentTransferRow as TransferRow,
 } from "@/db/repositories/payments.repository";
-import { AppError } from "@/lib/errors";
+import { internalError } from "@/lib/errors";
 import { mapMoneygramTransferDetails } from "./mappers/moneygram";
 
-export function mapTransferRow(row: TransferRow) {
+export interface TransferBatchMappingContext {
+  batch: PaymentTransferBatchRow;
+  recipients?: PaymentTransferRecipientRow[];
+}
+
+export function mapBatchRow(row: PaymentTransferBatchRow) {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    externalId: row.external_id,
+    sourceWalletId: row.source_wallet_id,
+    sourceAddress: row.source_address,
+    token: row.token,
+    status: row.status,
+    totalAmount: row.total_amount,
+    recipientCount: row.recipient_count,
+    transactionCount: row.transaction_count,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapRecipientRow(row: PaymentTransferRecipientRow) {
+  return {
+    id: row.id,
+    batchId: row.batch_id,
+    transferId: row.transfer_id,
+    externalId: row.external_id,
+    counterpartyId: row.counterparty_id,
+    counterpartyAccountId: row.counterparty_account_id,
+    destination: row.destination_address,
+    amount: row.amount,
+    status: row.status,
+    error: row.error,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapTransferRow(
+  row: TransferRow,
+  batchContext?: TransferBatchMappingContext
+): PaymentTransferSummary {
   const base = {
     id: row.id,
     organizationId: row.organization_id,
@@ -37,12 +84,29 @@ export function mapTransferRow(row: TransferRow) {
     updatedAt: row.updated_at,
   };
 
+  if (row.type === "transfer_batch") {
+    if (batchContext === undefined) {
+      throw internalError(`Batch transfer ${row.id} is missing its batch mapping context.`);
+    }
+    const batchTransfer = {
+      ...base,
+      batch: mapBatchRow(batchContext.batch),
+    };
+    if (batchContext.recipients === undefined) {
+      return batchTransfer;
+    }
+    return {
+      ...batchTransfer,
+      counterpartyRecipients: batchContext.recipients.map(mapRecipientRow),
+    };
+  }
+
   if (!isRampTransferType(row.type)) {
     return base;
   }
 
   if (!row.provider) {
-    throw new AppError("INTERNAL_ERROR", "Ramp transfer is missing provider.");
+    throw internalError("Ramp transfer is missing provider.");
   }
 
   const settlement = row.provider_data.settlement as RampTransferSettlement | undefined;

@@ -157,6 +157,8 @@ export async function fetchPaymentTransfers(
         token?: string;
         amount?: string;
         memo?: string;
+        batch?: PaymentTransferSummary["batch"];
+        counterpartyRecipients?: PaymentTransferSummary["counterpartyRecipients"];
         createdAt?: string;
         updatedAt?: string;
       }>;
@@ -175,6 +177,10 @@ export async function fetchPaymentTransfers(
         ...(transfer.token ? { token: transfer.token } : {}),
         ...(transfer.amount ? { amount: transfer.amount } : {}),
         ...(transfer.memo ? { memo: transfer.memo } : {}),
+        ...(transfer.batch ? { batch: transfer.batch } : {}),
+        ...(transfer.counterpartyRecipients
+          ? { counterpartyRecipients: transfer.counterpartyRecipients }
+          : {}),
         ...(transfer.createdAt ? { createdAt: transfer.createdAt } : {}),
         ...(transfer.updatedAt ? { updatedAt: transfer.updatedAt } : {}),
       }));

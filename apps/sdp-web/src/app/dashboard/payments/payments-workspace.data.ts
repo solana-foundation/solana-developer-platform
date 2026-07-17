@@ -653,6 +653,76 @@ export interface CreateTransferBatchResult {
   transfers: TransferRecord[];
 }
 
+export async function fetchTransferBatch(
+  batchId: string,
+  t: Translate
+): Promise<CreateTransferBatchResult> {
+  const response = await fetch(
+    `/api/dashboard/payments/transfer-batches/${encodeURIComponent(batchId)}`,
+    {
+      method: "GET",
+      cache: "no-store",
+    }
+  );
+  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.batchDetailsRequestFailed", { status: response.status })
+      )
+    );
+  }
+  if (!body.data?.batch || !body.data.recipients || !body.data.transfers) {
+    throw new Error(t("DashboardPayments.workspace.batchDetailsMissing"));
+  }
+  return {
+    batch: body.data.batch,
+    recipients: body.data.recipients,
+    transfers: body.data.transfers,
+  };
+}
+
+interface TransferBatchListEnvelope {
+  data?: PaymentTransferBatch[];
+  error?: {
+    message?: string;
+  };
+}
+
+export async function fetchTransferBatches(
+  options: {
+    pageSize: number;
+    walletId?: string;
+    signal?: AbortSignal;
+  },
+  t: Translate
+): Promise<PaymentTransferBatch[]> {
+  const batchesQuery = new URLSearchParams({
+    page: "1",
+    pageSize: String(options.pageSize),
+    ...(options.walletId ? { wallet: options.walletId } : {}),
+  }).toString();
+  const response = await fetch(`/api/dashboard/payments/transfer-batches?${batchesQuery}`, {
+    method: "GET",
+    cache: "no-store",
+    signal: options.signal,
+  });
+  const body = (await response.json()) as TransferBatchListEnvelope;
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.batchListRequestFailed", { status: response.status })
+      )
+    );
+  }
+  if (!body.data) {
+    throw new Error(t("DashboardPayments.workspace.batchListMissing"));
+  }
+  return body.data;
+}
+
 export async function createTransferBatch(
   input: PaymentTransferBatchRequest,
   t: Translate

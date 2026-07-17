@@ -8,8 +8,10 @@ import type {
   DeletePaymentTransferRecipientInput,
   GetPaymentTransferBatchInput,
   GetPaymentTransferRecipientInput,
+  ListPaymentTransferBatchesByIdsInput,
   ListPaymentTransferBatchesInput,
   ListPaymentTransferBatchesResult,
+  ListPaymentTransferRecipientsByTransferIdsInput,
   ListPaymentTransferRecipientsInput,
   ListPaymentTransferRecipientsResult,
   PaymentTransferBatchesRepository,
@@ -723,6 +725,49 @@ export function createPostgresPaymentTransferBatchesRepository(
         rows: rowsResult.results.map(mapPaymentTransferRecipientRow),
         total: countRow?.total ?? 0,
       };
+    },
+
+    async listTransferRecipientsByTransferIds(
+      input: ListPaymentTransferRecipientsByTransferIdsInput
+    ): Promise<PaymentTransferRecipientRow[]> {
+      if (input.transferIds.length === 0) {
+        return [];
+      }
+
+      const rows = await db
+        .prepare(
+          `SELECT *
+             FROM payment_transfer_recipients
+            WHERE transfer_id = ANY(?::text[])
+              AND organization_id = ?
+              AND project_id = ?
+            ORDER BY created_at ASC`
+        )
+        .bind(input.transferIds, input.organizationId, input.projectId)
+        .all<Record<string, unknown>>();
+
+      return rows.results.map(mapPaymentTransferRecipientRow);
+    },
+
+    async listTransferBatchesByIds(
+      input: ListPaymentTransferBatchesByIdsInput
+    ): Promise<PaymentTransferBatchRow[]> {
+      if (input.batchIds.length === 0) {
+        return [];
+      }
+
+      const rows = await db
+        .prepare(
+          `SELECT *
+             FROM payment_transfer_batches
+            WHERE id = ANY(?::text[])
+              AND organization_id = ?
+              AND project_id = ?`
+        )
+        .bind(input.batchIds, input.organizationId, input.projectId)
+        .all<Record<string, unknown>>();
+
+      return rows.results.map(mapPaymentTransferBatchRow);
     },
   };
 }

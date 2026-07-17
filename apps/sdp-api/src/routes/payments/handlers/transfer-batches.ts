@@ -78,7 +78,7 @@ import {
   getPaymentsRepository,
   getPaymentTransferBatchesRepository,
 } from "../context";
-import { mapTransferRow } from "../mappers";
+import { mapBatchRow, mapRecipientRow, mapTransferRow } from "../mappers";
 import { assertWalletPolicyAllowsTransfer } from "../policy";
 import {
   createTransferBatchSchema,
@@ -156,41 +156,6 @@ function parseRecipientAmount(amount: string, decimals: number): bigint {
   }
 }
 
-function mapBatchRow(row: PaymentTransferBatchRow) {
-  return {
-    id: row.id,
-    organizationId: row.organization_id,
-    projectId: row.project_id,
-    externalId: row.external_id,
-    sourceWalletId: row.source_wallet_id,
-    sourceAddress: row.source_address,
-    token: row.token,
-    status: row.status,
-    totalAmount: row.total_amount,
-    recipientCount: row.recipient_count,
-    transactionCount: row.transaction_count,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function mapRecipientRow(row: PaymentTransferRecipientRow) {
-  return {
-    id: row.id,
-    batchId: row.batch_id,
-    transferId: row.transfer_id,
-    externalId: row.external_id,
-    counterpartyId: row.counterparty_id,
-    counterpartyAccountId: row.counterparty_account_id,
-    destination: row.destination_address,
-    amount: row.amount,
-    status: row.status,
-    error: row.error,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
 async function resolveTransferBatchIdempotencyReplay(
   repository: ReturnType<typeof getPaymentTransferBatchesRepository>,
   organizationId: string,
@@ -239,7 +204,7 @@ async function buildTransferBatchResponse(
     recipients: recipients.rows.map(mapRecipientRow),
     transfers: transferRows
       .filter((row): row is PaymentTransferRow => Boolean(row))
-      .map(mapTransferRow),
+      .map((row) => mapTransferRow(row, { batch })),
   };
 }
 
@@ -1084,7 +1049,7 @@ export async function createTransferBatch(c: AppContext) {
     recipients: Array.from(recipientsByIndex.entries())
       .sort(([a], [b]) => a - b)
       .map(([, row]) => mapRecipientRow(row)),
-    transfers: transfers.map(mapTransferRow),
+    transfers: transfers.map((row) => mapTransferRow(row, { batch: finalBatch })),
   });
 }
 

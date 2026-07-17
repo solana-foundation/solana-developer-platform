@@ -178,6 +178,18 @@ export interface ListPaymentTransferRecipientsResult {
   total: number;
 }
 
+export interface ListPaymentTransferRecipientsByTransferIdsInput {
+  transferIds: string[];
+  organizationId: string;
+  projectId: string;
+}
+
+export interface ListPaymentTransferBatchesByIdsInput {
+  batchIds: string[];
+  organizationId: string;
+  projectId: string;
+}
+
 export interface UpdatePaymentTransferRecipientsStatusInput {
   recipientIds: string[];
   organizationId: string;
@@ -231,4 +243,10 @@ export interface PaymentTransferBatchesRepository {
   listTransferRecipientsByBatch(
     input: ListPaymentTransferRecipientsInput
   ): Promise<ListPaymentTransferRecipientsResult>;
+  listTransferRecipientsByTransferIds(
+    input: ListPaymentTransferRecipientsByTransferIdsInput
+  ): Promise<PaymentTransferRecipientRow[]>;
+  listTransferBatchesByIds(
+    input: ListPaymentTransferBatchesByIdsInput
+  ): Promise<PaymentTransferBatchRow[]>;
 }

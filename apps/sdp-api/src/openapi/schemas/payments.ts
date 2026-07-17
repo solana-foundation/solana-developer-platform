@@ -732,6 +732,20 @@ export const transferSchema = z
       .openapi({ description: "Optional memo for the transfer." }),
     token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema.optional(),
+    batch: z
+      .lazy(() => transferBatchSchema)
+      .optional()
+      .openapi({
+        description:
+          "Batch this transfer executes a chunk of. Present when type is transfer_batch.",
+      }),
+    counterpartyRecipients: z
+      .array(z.lazy(() => transferBatchRecipientSchema))
+      .optional()
+      .openapi({
+        description:
+          "Non-archived recipient rows for the filtered counterparty. Present on transfer_batch rows only when the request filters by counterpartyId.",
+      }),
     provider: z.enum(RAMP_PROVIDERS).optional().openapi({
       description: "Ramp provider for on-ramp and off-ramp transfer records.",
       example: "moonpay",

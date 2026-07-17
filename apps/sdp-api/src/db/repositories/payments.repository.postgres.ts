@@ -366,8 +366,10 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
         values.push(...params.walletIds);
       }
       if (params.counterpartyId) {
-        clauses.push("counterparty_id = ?");
-        values.push(params.counterpartyId);
+        clauses.push(
+          "(counterparty_id = ? OR EXISTS (SELECT 1 FROM payment_transfer_recipients r WHERE r.transfer_id = payment_transfers.id AND r.counterparty_id = ? AND r.status <> 'archived'))"
+        );
+        values.push(params.counterpartyId, params.counterpartyId);
       }
       if (params.sourceAddress) {
         clauses.push("source_address = ?");

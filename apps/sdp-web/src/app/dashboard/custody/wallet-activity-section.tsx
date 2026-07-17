@@ -1,6 +1,7 @@
 "use client";
 
 import { ExternalLink, RefreshCwIcon } from "lucide-react";
+import { useState } from "react";
 import useSWR from "swr";
 import {
   fetchWalletActivity,
@@ -8,8 +9,10 @@ import {
   type WalletActivityRow,
 } from "@/app/dashboard/custody/wallet-activity.data";
 import { getDevnetExplorerUrl } from "@/app/dashboard/payments/payments-workspace.data";
+import { TransferBatchesTable } from "@/app/dashboard/payments/transfer-batches-table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionTabs } from "@/components/ui/section-tabs";
 import {
   Table,
   TableBody,
@@ -73,6 +76,7 @@ function TruncatedText({ value, className }: { value: string; className?: string
 export function WalletActivitySection({ walletId, initialActivity }: WalletActivitySectionProps) {
   const t = useTranslations();
   const locale = useLocale();
+  const [activityTab, setActivityTab] = useState<"activity" | "batches">("activity");
   const {
     data: swrActivity,
     error: requestError,
@@ -113,8 +117,18 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
           {isValidating ? t("DashboardCustody.refreshing") : t("DashboardCustody.refresh")}
         </Button>
       </CardHeader>
-      <CardContent>
-        {liveActivityError ? (
+      <CardContent className="space-y-4">
+        <SectionTabs
+          tabs={[
+            { id: "activity", label: t("DashboardPayments.batchActivity.tabActivity") },
+            { id: "batches", label: t("DashboardPayments.batchActivity.tabBatches") },
+          ]}
+          value={activityTab}
+          onChange={setActivityTab}
+        />
+        {activityTab === "batches" ? (
+          <TransferBatchesTable walletId={walletId} />
+        ) : liveActivityError ? (
           <p className="text-sm text-destructive-strong">{liveActivityError}</p>
         ) : liveRows.length === 0 ? (
           <div className="space-y-2">

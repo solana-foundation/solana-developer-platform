@@ -32,6 +32,10 @@ import {
 import { z } from "zod";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import type {
+  PaymentTransferBatchRow,
+  PaymentTransferRecipientRow,
+} from "@/db/repositories/payment-transfer-batches.repository";
 import {
   isRampTransferType,
   RAMP_TRANSFER_TYPES,
@@ -42,7 +46,7 @@ import {
   WALLET_TRANSFER_TYPES,
 } from "@/db/repositories/payments.repository";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
+import { AppError, badRequest, badRequestQuery, internalError } from "@/lib/errors";
 import { buildPaymentTransferFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import {
@@ -67,7 +71,12 @@ import {
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import { type AppContext, getFeePayment, getPaymentsRepository } from "../context";
+import {
+  type AppContext,
+  getFeePayment,
+  getPaymentsRepository,
+  getPaymentTransferBatchesRepository,
+} from "../context";
 import { mapTransferRow } from "../mappers";
 import { assertWalletPolicyAllowsTransfer } from "../policy";
 import {
@@ -1482,6 +1491,149 @@ async function buildObservedTransfersForSignatures(
   return settled.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
 }
 
+function requireBatchTransferProjectId(row: TransferRow): string {
+  if (row.project_id === null) {
+    throw internalError(`Batch transfer ${row.id} is missing its project scope.`);
+  }
+  return row.project_id;
+}
+
+interface TransferBatchContext {
+  batch: PaymentTransferBatchRow;
+  recipients: PaymentTransferRecipientRow[];
+}
+
+/**
+ * Loads the batch header and recipient rows backing each transfer_batch row,
+ * keyed by transfer id. Recipient linkage includes archived recipients so a
+ * soft-deleted batch never breaks transfer listing.
+ */
+async function loadTransferBatchContexts(
+  c: AppContext,
+  transferRows: TransferRow[],
+  organizationId: string
+): Promise<Map<string, TransferBatchContext>> {
+  const batchTransferRows = transferRows.filter((row) => row.type === "transfer_batch");
+  if (batchTransferRows.length === 0) {
+    return new Map();
+  }
+
+  const transferIdsByProjectId = new Map<string, string[]>();
+  for (const row of batchTransferRows) {
+    const projectId = requireBatchTransferProjectId(row);
+    const transferIds = transferIdsByProjectId.get(projectId);
+    if (transferIds === undefined) {
+      transferIdsByProjectId.set(projectId, [row.id]);
+    } else {
+      transferIds.push(row.id);
+    }
+  }
+
+  const batchesRepo = getPaymentTransferBatchesRepository(c);
+  const recipientGroups = await Promise.all(
+    Array.from(transferIdsByProjectId, ([projectId, transferIds]) =>
+      batchesRepo.listTransferRecipientsByTransferIds({
+        transferIds,
+        organizationId,
+        projectId,
+      })
+    )
+  );
+  const recipientsByTransferId = new Map<string, PaymentTransferRecipientRow[]>();
+  for (const recipient of recipientGroups.flat()) {
+    if (recipient.transfer_id === null) {
+      throw internalError(`Batch recipient ${recipient.id} is missing its transfer linkage.`);
+    }
+    const recipients = recipientsByTransferId.get(recipient.transfer_id);
+    if (recipients === undefined) {
+      recipientsByTransferId.set(recipient.transfer_id, [recipient]);
+    } else {
+      recipients.push(recipient);
+    }
+  }
+
+  const batchIdsByProjectId = new Map<string, Set<string>>();
+  for (const row of batchTransferRows) {
+    const firstRecipient = recipientsByTransferId.get(row.id)?.[0];
+    if (firstRecipient === undefined) {
+      throw internalError(`Batch transfer ${row.id} has no recipient linkage.`);
+    }
+    const projectId = requireBatchTransferProjectId(row);
+    const batchIds = batchIdsByProjectId.get(projectId);
+    if (batchIds === undefined) {
+      batchIdsByProjectId.set(projectId, new Set([firstRecipient.batch_id]));
+    } else {
+      batchIds.add(firstRecipient.batch_id);
+    }
+  }
+
+  const batchGroups = await Promise.all(
+    Array.from(batchIdsByProjectId, ([projectId, batchIds]) =>
+      batchesRepo.listTransferBatchesByIds({
+        batchIds: [...batchIds],
+        organizationId,
+        projectId,
+      })
+    )
+  );
+  const batchesById = new Map(batchGroups.flat().map((batch) => [batch.id, batch]));
+
+  return new Map(
+    batchTransferRows.map((row) => {
+      const recipients = recipientsByTransferId.get(row.id);
+      const firstRecipient = recipients?.[0];
+      if (recipients === undefined || firstRecipient === undefined) {
+        throw internalError(`Batch transfer ${row.id} has no recipient linkage.`);
+      }
+      const batch = batchesById.get(firstRecipient.batch_id);
+      if (batch === undefined) {
+        throw internalError(`Transfer batch ${firstRecipient.batch_id} was not found.`);
+      }
+      return [row.id, { batch, recipients }] as const;
+    })
+  );
+}
+
+/**
+ * Maps a transfer row, attaching batch context for transfer_batch rows. When a
+ * counterparty filter is active, the counterparty's own (non-archived)
+ * recipient rows are included as counterpartyRecipients.
+ */
+function mapTransferRowWithBatchContext(
+  row: TransferRow,
+  batchContexts: Map<string, TransferBatchContext>,
+  counterpartyId: string | undefined
+) {
+  if (row.type !== "transfer_batch") {
+    return mapTransferRow(row);
+  }
+  const context = batchContexts.get(row.id);
+  if (context === undefined) {
+    throw internalError(`Batch transfer ${row.id} was not enriched.`);
+  }
+  return mapTransferRow(row, {
+    batch: context.batch,
+    ...(counterpartyId === undefined
+      ? {}
+      : { recipients: activeRecipientsForCounterparty(context, counterpartyId) }),
+  });
+}
+
+/**
+ * Non-archived recipient rows for one counterparty within a batch chunk. Must
+ * stay in sync with the SQL EXISTS membership predicate in
+ * payments.repository.postgres.ts listTransfers — both define "this batch
+ * transfer belongs to counterparty X".
+ */
+function activeRecipientsForCounterparty(
+  context: TransferBatchContext,
+  counterpartyId: string
+): PaymentTransferRecipientRow[] {
+  return context.recipients.filter(
+    (recipient) => recipient.counterparty_id === counterpartyId && recipient.status !== "archived"
+  );
+}
+
 function buildTransferReplayPayload(replay: TransferRow) {
   const storedPrivateTransfer = (replay.provider_data as Record<string, unknown> | null | undefined)
     ?.privateTransfer;
@@ -1768,6 +1920,7 @@ export async function listTransfers(c: AppContext) {
 
   let transferRows: TransferRow[];
   let total: number;
+  let batchContexts: Map<string, TransferBatchContext> | undefined;
 
   if (walletId || walletAddress) {
     // Helius-backed path: fetch on-chain signatures for the wallet address, then
@@ -1935,11 +2088,22 @@ export async function listTransfers(c: AppContext) {
       seen.add(row.id);
       return true;
     });
+    const walletBatchContexts = await loadTransferBatchContexts(c, merged, auth.organizationId);
+    batchContexts = walletBatchContexts;
 
     // 5. Apply remaining filters and sort
     const filtered = merged
       .filter((row) => {
-        if (counterpartyId && row.counterparty_id !== counterpartyId) return false;
+        if (counterpartyId && row.counterparty_id !== counterpartyId) {
+          if (row.type !== "transfer_batch") return false;
+          const context = walletBatchContexts.get(row.id);
+          if (context === undefined) {
+            throw internalError(`Batch transfer ${row.id} was not enriched.`);
+          }
+          if (activeRecipientsForCounterparty(context, counterpartyId).length === 0) {
+            return false;
+          }
+        }
         if (statuses && !statuses.includes(row.status)) return false;
         if (token && row.token !== token) return false;
         if (direction && row.direction !== direction) return false;
@@ -1970,7 +2134,13 @@ export async function listTransfers(c: AppContext) {
     transferRows = result.rows;
   }
 
-  const transfers = transferRows.map(mapTransferRow);
+  if (batchContexts === undefined) {
+    batchContexts = await loadTransferBatchContexts(c, transferRows, auth.organizationId);
+  }
+  const resolvedBatchContexts = batchContexts;
+  const transfers = transferRows.map((row) =>
+    mapTransferRowWithBatchContext(row, resolvedBatchContexts, counterpartyId)
+  );
   return paginated(c, transfers, { total, page, pageSize });
 }
 
@@ -1993,5 +2163,8 @@ export async function getTransfer(c: AppContext) {
     throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
   }
 
-  return success(c, { transfer: mapTransferRow(row) });
+  const batchContexts = await loadTransferBatchContexts(c, [row], auth.organizationId);
+  return success(c, {
+    transfer: mapTransferRowWithBatchContext(row, batchContexts, undefined),
+  });
 }

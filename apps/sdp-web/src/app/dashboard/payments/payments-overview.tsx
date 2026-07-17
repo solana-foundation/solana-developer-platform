@@ -3,10 +3,11 @@
 import type { CustodyWalletAggregate, PaymentTransferSummary as TransferRecord } from "@sdp/types";
 import { ExternalLink, RefreshCwIcon } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionTabs } from "@/components/ui/section-tabs";
 import {
   Table,
   TableBody,
@@ -35,6 +36,7 @@ import {
   fetchWalletAggregate,
   getDevnetExplorerUrl,
 } from "./payments-workspace.data";
+import { TransferBatchesTable } from "./transfer-batches-table";
 
 interface PaymentsOverviewProps {
   aggregate: CustodyWalletAggregate | null;
@@ -130,6 +132,7 @@ export function PaymentsOverview({
   const t = useTranslations();
   const locale = useLocale();
   const searchParams = useSearchParams();
+  const [recentTab, setRecentTab] = useState<"transfers" | "batches">("transfers");
   const refreshSeed = searchParams.get("refresh") ?? "default";
   const {
     data: swrAggregate,
@@ -197,7 +200,7 @@ export function PaymentsOverview({
   };
 
   return (
-    <div className="grid min-w-0 gap-6 overflow-x-hidden">
+    <div className="grid min-w-0 gap-6">
       <SectionEntry delay={0.04}>
         <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,1fr)]">
           <div className="flex min-h-[244px] flex-col justify-center rounded-[4px] bg-fill-subtle px-8 py-10 sm:px-14">
@@ -281,8 +284,18 @@ export function PaymentsOverview({
               {isRefreshing ? t("DashboardPayments.refreshing") : t("DashboardPayments.refresh")}
             </Button>
           </CardHeader>
-          <CardContent>
-            {liveTransfersError ? (
+          <CardContent className="space-y-4">
+            <SectionTabs
+              tabs={[
+                { id: "transfers", label: t("DashboardPayments.batchActivity.tabTransfers") },
+                { id: "batches", label: t("DashboardPayments.batchActivity.tabBatches") },
+              ]}
+              value={recentTab}
+              onChange={setRecentTab}
+            />
+            {recentTab === "batches" ? (
+              <TransferBatchesTable />
+            ) : liveTransfersError ? (
               <p className="text-sm text-destructive-strong">{liveTransfersError}</p>
             ) : liveTransfers.length === 0 ? (
               <p className="text-sm text-secondary">{t("DashboardPayments.noTransactions")}</p>
@@ -318,7 +331,10 @@ export function PaymentsOverview({
                         transfer.token,
                         locale
                       );
-                      const directionLabel = formatDirection(transfer.direction, t);
+                      const directionLabel =
+                        transfer.type === "transfer_batch"
+                          ? t("DashboardPayments.batchActivity.batchTransfer")
+                          : formatDirection(transfer.direction, t);
                       const createdLabel = formatTimestamp(transfer.createdAt, t, locale);
 
                       return (
