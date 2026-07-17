@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import type { MonitorOptions, Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
-import openapi from "./openapi";
+import openapi, { createWeakEtag } from "./openapi";
 
 const observability: Observability = {
   captureException: () => {},
@@ -17,6 +17,10 @@ const appEnv = {
 } as Env;
 
 describe("OpenAPI response delivery", () => {
+  it("hashes UTF-8 bytes for portable validators", () => {
+    expect(createWeakEtag("café → api")).toBe('W/"b8f938af-13"');
+  });
+
   it("serves the pre-serialized document with aggressive cache validators", async () => {
     const response = await openapi.request("/");
 

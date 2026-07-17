@@ -11,13 +11,14 @@ const openapi = new Hono<{ Bindings: Env }>();
 const document = createPublicOpenApiDocument();
 const documentBody = JSON.stringify(document);
 
-function createWeakEtag(value: string): string {
+export function createWeakEtag(value: string): string {
   let hash = 2_166_136_261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
+  const bytes = new TextEncoder().encode(value);
+  for (const byte of bytes) {
+    hash ^= byte;
     hash = Math.imul(hash, 16_777_619);
   }
-  return `W/"${(hash >>> 0).toString(16)}-${value.length}"`;
+  return `W/"${(hash >>> 0).toString(16)}-${bytes.length}"`;
 }
 
 const documentEtag = createWeakEtag(documentBody);

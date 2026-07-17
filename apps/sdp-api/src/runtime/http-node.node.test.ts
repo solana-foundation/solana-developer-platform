@@ -55,4 +55,16 @@ describe("Node HTTP response compression", () => {
     expect(response.headers.get("Vary")).toBe("Accept-Encoding");
     expect(await response.json()).toEqual({ payload: "x".repeat(8_000) });
   });
+
+  it("preserves a wildcard Vary header without appending redundant dimensions", async () => {
+    const app = new Hono<{ Bindings: Env }>();
+    app.get("/varies-on-everything", (c) => {
+      c.header("Vary", "*");
+      return c.text("uncacheable");
+    });
+
+    const response = await createNodeHttpApp(app).request("http://local.test/varies-on-everything");
+
+    expect(response.headers.get("Vary")).toBe("*");
+  });
 });

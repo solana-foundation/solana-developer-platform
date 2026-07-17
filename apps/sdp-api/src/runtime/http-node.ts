@@ -11,6 +11,10 @@ function appendVary(headers: Headers, value: string): void {
     .map((entry) => entry.trim())
     .filter(Boolean);
 
+  if (values.includes("*")) {
+    return;
+  }
+
   if (!values.some((entry) => entry.toLowerCase() === value.toLowerCase())) {
     values.push(value);
   }
