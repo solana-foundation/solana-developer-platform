@@ -41,6 +41,7 @@
     "start:node": "node dist/server.js"
   },
   "dependencies": {
+    "@clerk/backend": "3.5.0",
     "@hono/node-server": "^2.0.4",
     "@react-email/components": "1.0.12",
     "@react-email/render": "2.0.8",
@@ -80,7 +81,6 @@
     "pg": "^8.21.0",
     "react": "19.2.7",
     "resend": "6.14.0",
-    "svix": "1.95.2",
     "zod": "4.4.3",
     "@coinbase/cdp-sdk": "1.49.2"
   },
