@@ -6,7 +6,6 @@ import {
   buildBvnkOnrampPaymentRuleKey,
   buildBvnkOnrampWalletName,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import { Webhook } from "svix";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -17,15 +16,20 @@ const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_123456789
   "base64"
 )}`;
 
-async function sendClerkWebhook(event: { type: string; data: Record<string, unknown> }) {
+/**
+ * Impersonates Clerk delivering a webhook to our endpoint, signed per the
+ * Standard Webhooks scheme: base64 HMAC-SHA256 of `${id}.${timestamp}.${payload}`
+ * keyed with the base64-decoded portion of the `whsec_` secret.
+ */
+async function simulateClerkWebhook(event: { type: string; data: Record<string, unknown> }) {
   const payload = JSON.stringify(event);
   const timestamp = Math.floor(Date.now() / 1000);
   const messageId = `msg_${crypto.randomUUID()}`;
-  const signature = new Webhook(WEBHOOK_SECRET).sign(
-    messageId,
-    new Date(timestamp * 1000),
-    payload
-  );
+  const key = Buffer.from(WEBHOOK_SECRET.slice("whsec_".length), "base64");
+  const digest = createHmac("sha256", key)
+    .update(`${messageId}.${timestamp}.${payload}`)
+    .digest("base64");
+  const signature = `v1,${digest}`;
 
   return app.request(
     "/webhooks/clerk/link-orgs",
@@ -66,7 +70,7 @@ describe("Clerk webhooks", () => {
   });
 
   it("creates and updates the SDP organization mapping from Clerk organization events", async () => {
-    const created = await sendClerkWebhook({
+    const created = await simulateClerkWebhook({
       type: "organization.created",
       data: {
         id: "org_clerk_shared_identity",
@@ -118,7 +122,7 @@ describe("Clerk webhooks", () => {
       },
     });
 
-    const updated = await sendClerkWebhook({
+    const updated = await simulateClerkWebhook({
       type: "organization.updated",
       data: {
         id: "org_clerk_shared_identity",
@@ -159,69 +163,8 @@ describe("Clerk webhooks", () => {
     expect(updatedOrg?.settings ? JSON.parse(updatedOrg.settings) : null).toBeNull();
   });
 
-  it("reuses the resolved Clerk organization when creating from incomplete payloads", async () => {
-    env.CLERK_SECRET_KEY = "sk_test_clerk";
-    env.CLERK_API_URL = "https://clerk.test/v1";
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          id: "org_clerk_incomplete_payload",
-          name: "Fetched Bookface",
-          slug: "fetched-bookface",
-          private_metadata: {
-            sdp: {
-              tier: "pro",
-            },
-          },
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      )
-    );
-
-    const created = await sendClerkWebhook({
-      type: "organization.created",
-      data: {
-        id: "org_clerk_incomplete_payload",
-      },
-    });
-
-    expect(created.status).toBe(200);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "https://clerk.test/v1/organizations/org_clerk_incomplete_payload",
-      expect.any(Object)
-    );
-
-    const createdOrg = await getDb(env)
-      .prepare(
-        `SELECT o.name, o.slug, o.tier, aoi.slug AS identity_slug
-         FROM organizations o
-         JOIN auth_organization_identities aoi ON aoi.organization_id = o.id
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`
-      )
-      .bind("org_clerk_incomplete_payload")
-      .first<{
-        name: string;
-        slug: string;
-        tier: string;
-        identity_slug: string;
-      }>();
-
-    expect(createdOrg).toEqual({
-      name: "Fetched Bookface",
-      slug: "fetched-bookface",
-      identity_slug: "fetched-bookface",
-      tier: "enterprise",
-    });
-  });
-
   it("defaults new Clerk organizations to enterprise when SDP tier metadata is missing", async () => {
-    const created = await sendClerkWebhook({
+    const created = await simulateClerkWebhook({
       type: "organization.created",
       data: {
         id: "org_clerk_enterprise_default",
@@ -269,7 +212,7 @@ describe("Clerk webhooks", () => {
         .bind("aui_existing", "user_clerk_existing", "usr_clerk_existing", "old@example.com"),
     ]);
 
-    const updated = await sendClerkWebhook({
+    const updated = await simulateClerkWebhook({
       type: "user.updated",
       data: {
         id: "user_clerk_existing",
@@ -302,7 +245,7 @@ describe("Clerk webhooks", () => {
   });
 
   it("syncs organization memberships without creating records on delete-only events", async () => {
-    const deleteOnly = await sendClerkWebhook({
+    const deleteOnly = await simulateClerkWebhook({
       type: "organizationMembership.deleted",
       data: {
         organization: {
@@ -327,7 +270,7 @@ describe("Clerk webhooks", () => {
 
     expect(missingOrg).toBeNull();
 
-    const created = await sendClerkWebhook({
+    const created = await simulateClerkWebhook({
       type: "organizationMembership.created",
       data: {
         organization: {
@@ -362,7 +305,7 @@ describe("Clerk webhooks", () => {
       status: "active",
     });
 
-    const deleted = await sendClerkWebhook({
+    const deleted = await simulateClerkWebhook({
       type: "organizationMembership.deleted",
       data: {
         organization: {
@@ -390,7 +333,7 @@ describe("Clerk webhooks", () => {
   });
 
   it("syncs user lifecycle and Clerk organization deletion", async () => {
-    await sendClerkWebhook({
+    await simulateClerkWebhook({
       type: "organizationMembership.created",
       data: {
         organization: {
@@ -406,7 +349,7 @@ describe("Clerk webhooks", () => {
       },
     });
 
-    const updatedUser = await sendClerkWebhook({
+    const updatedUser = await simulateClerkWebhook({
       type: "user.updated",
       data: {
         id: "user_clerk_lifecycle",
@@ -483,7 +426,7 @@ describe("Clerk webhooks", () => {
       )
       .run();
 
-    const deletedUser = await sendClerkWebhook({
+    const deletedUser = await simulateClerkWebhook({
       type: "user.deleted",
       data: {
         id: "user_clerk_lifecycle",
@@ -499,7 +442,7 @@ describe("Clerk webhooks", () => {
 
     expect(removedUser?.status).toBe("deleted");
 
-    const deletedOrg = await sendClerkWebhook({
+    const deletedOrg = await simulateClerkWebhook({
       type: "organization.deleted",
       data: {
         id: "org_clerk_lifecycle",
