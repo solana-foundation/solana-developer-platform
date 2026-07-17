@@ -116,6 +116,7 @@ export const MAX_BATCH_RECIPIENTS = 500;
 export const batchSendSchema = z.object({
   walletId: z.string().min(1, "Select a source wallet."),
   asset: z.string().min(1, "Select an asset."),
+  externalId: z.string().trim().max(256).optional(),
   recipients: z
     .array(batchRecipientSchema)
     .min(1, "Add at least one recipient.")
