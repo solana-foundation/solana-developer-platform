@@ -128,7 +128,6 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
             <CreateApiKeyModal
               triggerLabel={t("Shared.SharedComponents.createApiKey")}
               triggerVariant="secondary"
-              wallets={wallets}
             />
           ) : null}
           {dashboardAccess.capabilities.canManageCustody ? (
