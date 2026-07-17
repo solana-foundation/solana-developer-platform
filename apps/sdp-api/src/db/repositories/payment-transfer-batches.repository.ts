@@ -23,6 +23,8 @@ export interface PaymentTransferBatchRow {
   options: Record<string, unknown>;
   error: string | null;
   initiated_by_key_id: string | null;
+  idempotency_key: string | null;
+  idempotency_fingerprint: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -58,6 +60,8 @@ export interface CreatePaymentTransferBatchInput {
   options?: Record<string, unknown>;
   error?: string | null;
   initiatedByKeyId?: string | null;
+  idempotencyKey?: string | null;
+  idempotencyFingerprint?: string | null;
 }
 
 export interface UpsertPaymentTransferBatchInput extends CreatePaymentTransferBatchInput {
@@ -126,6 +130,16 @@ export interface UpsertPaymentTransferRecipientInput extends CreatePaymentTransf
   recipientId?: string;
 }
 
+export interface CreatePaymentTransferBatchWithRecipientsInput {
+  batch: CreatePaymentTransferBatchInput;
+  recipients: Omit<CreatePaymentTransferRecipientInput, "batchId">[];
+}
+
+export interface CreatePaymentTransferBatchWithRecipientsResult {
+  batch: PaymentTransferBatchRow;
+  recipients: PaymentTransferRecipientRow[];
+}
+
 export interface UpdatePaymentTransferRecipientInput {
   recipientId: string;
   organizationId: string;
@@ -174,7 +188,14 @@ export interface UpdatePaymentTransferRecipientsStatusInput {
 }
 
 export interface PaymentTransferBatchesRepository {
-  createTransferBatch(input: CreatePaymentTransferBatchInput): Promise<PaymentTransferBatchRow>;
+  createTransferBatchWithRecipients(
+    input: CreatePaymentTransferBatchWithRecipientsInput
+  ): Promise<CreatePaymentTransferBatchWithRecipientsResult>;
+  findTransferBatchByIdempotency(input: {
+    organizationId: string;
+    projectId: string;
+    idempotencyKey: string;
+  }): Promise<PaymentTransferBatchRow | null>;
   upsertTransferBatch(input: UpsertPaymentTransferBatchInput): Promise<PaymentTransferBatchRow>;
   updateTransferBatch(
     input: UpdatePaymentTransferBatchInput
@@ -192,9 +213,6 @@ export interface PaymentTransferBatchesRepository {
   createTransferRecipient(
     input: CreatePaymentTransferRecipientInput
   ): Promise<PaymentTransferRecipientRow>;
-  createTransferRecipients(
-    inputs: CreatePaymentTransferRecipientInput[]
-  ): Promise<PaymentTransferRecipientRow[]>;
   upsertTransferRecipient(
     input: UpsertPaymentTransferRecipientInput
   ): Promise<PaymentTransferRecipientRow>;

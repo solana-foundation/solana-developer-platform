@@ -2,6 +2,7 @@ import type { AppLocale } from "@/i18n/config";
 import dashboardCustody from "../../messages/en/dashboard-custody.json";
 import dashboardIssuance from "../../messages/en/dashboard-issuance.json";
 import dashboardPayments from "../../messages/en/dashboard-payments.json";
+import dashboardPolicies from "../../messages/en/dashboard-policies.json";
 import shared from "../../messages/en/shared.json";
 import en from "../../messages/en.json";
 
@@ -10,6 +11,7 @@ const enMessages = {
   ...dashboardCustody,
   ...dashboardIssuance,
   ...dashboardPayments,
+  ...dashboardPolicies,
   Shared: shared,
 };
 

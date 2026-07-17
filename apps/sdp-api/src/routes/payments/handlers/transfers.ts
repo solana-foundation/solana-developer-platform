@@ -43,7 +43,7 @@ import {
 } from "@/db/repositories/payments.repository";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
-import { buildPaymentTransferFingerprint } from "@/lib/idempotency";
+import { buildPaymentTransferFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import {
   assertApiKeyWalletAccess,
@@ -201,18 +201,10 @@ async function resolveTransferIdempotencyReplay(
   idempotencyKey: string,
   fingerprint: string
 ): Promise<TransferRow | null> {
-  const existing = await repository.findTransferByIdempotency({
-    organizationId,
-    projectId,
-    idempotencyKey,
-  });
-  if (!existing) {
-    return null;
-  }
-  if (existing.idempotency_fingerprint === fingerprint) {
-    return existing;
-  }
-  throw new AppError("CONFLICT", "Idempotency key already used with different request payload");
+  return resolveIdempotencyReplay(
+    () => repository.findTransferByIdempotency({ organizationId, projectId, idempotencyKey }),
+    fingerprint
+  );
 }
 
 async function createTransferRecord(
