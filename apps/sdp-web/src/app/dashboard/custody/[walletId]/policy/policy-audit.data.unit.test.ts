@@ -12,6 +12,7 @@ import {
   parsePolicyAuditFilters,
 } from "./policy-audit.data";
 import {
+  decisionHeading,
   decisionLabel,
   formatRevisionReference,
   type PolicyTranslate,
@@ -324,5 +325,17 @@ describe("policy audit presentation invariants", () => {
 
     const legacy = evaluation("allow", { evaluationContext: null });
     expect(requestIdFromEvaluation(legacy)).toBeNull();
+  });
+
+  it("uses the evaluated operation in the detail heading", () => {
+    const rawSign = evaluation("allow", {
+      walletOperation: {
+        ...evaluation("allow").walletOperation,
+        operationFamily: "raw_sign",
+        operationType: "custody_signer_check",
+      },
+    });
+
+    expect(decisionHeading(rawSign)).toBe("Raw Sign · Custody Signer Check");
   });
 });

@@ -65,14 +65,14 @@ export function PolicyPageHeader({
   trailing?: ReactNode;
 }) {
   return (
-    <header className="grid min-h-12 grid-cols-1 items-center gap-3 border-b border-border-default pb-5 sm:grid-cols-[1fr_auto_1fr]">
+    <header className="grid min-h-11 grid-cols-1 items-center gap-3 border-b border-border-default pb-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
       <Button asChild variant="ghost" className="w-fit justify-self-start">
         <Link href={backHref}>
           <ArrowLeft className="size-4" />
           {backLabel}
         </Link>
       </Button>
-      <h1 className="text-center text-2xl font-medium text-primary sm:text-3xl">{title}</h1>
+      <h1 className="truncate text-lg font-medium text-primary sm:text-xl">{title}</h1>
       <div className="flex justify-start sm:justify-end">{trailing}</div>
     </header>
   );
@@ -196,14 +196,6 @@ export function providerMappingState(
   return "sdp_enforced";
 }
 
-export function decisionHeading(decision: PolicyDecision, t: PolicyTranslate): string {
-  const keys = {
-    allow: "DashboardCustody.policyAuditTransferAllowed",
-    deny: "DashboardCustody.policyAuditTransferBlocked",
-    approval_required: "DashboardCustody.policyAuditApprovalRequired",
-    provider_approval_required: "DashboardCustody.policyAuditApprovalRequired",
-    review: "DashboardCustody.policyAuditSentToReview",
-    not_evaluated: "DashboardCustody.policyAuditNotEvaluated",
-  } as const satisfies Record<PolicyDecision, MessageKey>;
-  return t(keys[decision]);
+export function decisionHeading(evaluation: WalletPolicyEvaluationDetail): string {
+  return formatOperation(evaluation);
 }

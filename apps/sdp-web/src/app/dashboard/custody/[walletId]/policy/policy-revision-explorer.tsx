@@ -1,8 +1,9 @@
 import type {
+  PolicyRule,
   WalletControlProfileRevisionHistory,
   WalletControlProfileRevisionSummary,
 } from "@sdp/types";
-import { Braces, Clock3, ShieldCheck, UserRound } from "lucide-react";
+import { Braces, ChevronRight, Clock3, ShieldCheck, UserRound } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { formatDisplayLabel } from "@/lib/utils";
@@ -41,7 +42,7 @@ export function PolicyRevisionExplorer({
     history.revisions[0];
 
   return (
-    <div className="grid overflow-hidden rounded-lg border border-border-default bg-white lg:grid-cols-[390px_minmax(0,1fr)]">
+    <div className="grid overflow-hidden rounded-lg border border-border-default bg-white lg:grid-cols-[320px_minmax(0,1fr)]">
       <div className="border-b border-border-default lg:border-r lg:border-b-0">
         <div className="border-b border-border-default bg-fill-subtle px-4 py-3">
           <p className="text-xs font-medium text-secondary">
@@ -79,7 +80,7 @@ export function PolicyRevisionExplorer({
                     value={
                       revision.activatedAt
                         ? formatPolicyDateTime(revision.activatedAt, locale)
-                        : t("DashboardCustody.policyAuditUnavailable")
+                        : "-"
                     }
                   />
                   <RevisionListValue
@@ -215,9 +216,7 @@ function RevisionSnapshot({
                   </div>
                   <Badge>{formatDisplayLabel(rule.action ?? revision.defaultAction)}</Badge>
                 </div>
-                <pre className="mt-3 max-h-72 overflow-auto rounded-md bg-surface-sunken p-4 text-xs leading-5 text-primary">
-                  {JSON.stringify(rule, null, 2)}
-                </pre>
+                <RuleSummary rule={rule} t={t} />
               </div>
             ))}
           </div>
@@ -225,6 +224,47 @@ function RevisionSnapshot({
       </div>
     </section>
   );
+}
+
+function RuleSummary({ rule, t }: { rule: PolicyRule; t: PolicyTranslate }) {
+  const hiddenKeys = new Set(["id", "name", "kind", "action", "description"]);
+  const entries = Object.entries(rule).filter(
+    ([key, value]) => !hiddenKeys.has(key) && value !== null && value !== undefined && value !== ""
+  );
+
+  return (
+    <div className="mt-3">
+      {rule.description ? (
+        <p className="text-sm leading-5 text-secondary">{rule.description}</p>
+      ) : null}
+      {entries.length > 0 ? (
+        <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-3">
+          {entries.map(([key, value]) => (
+            <div key={key} className="min-w-0">
+              <dt className="text-xs text-tertiary">{formatDisplayLabel(key)}</dt>
+              <dd className="mt-1 break-words text-sm text-primary">{formatRuleValue(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      <details className="group/rule mt-3">
+        <summary className="w-fit cursor-pointer list-none text-xs text-secondary transition-colors hover:text-primary">
+          {t("DashboardCustody.policyRevisionsRawRule")}
+          <ChevronRight className="ml-1 inline size-3 transition-transform group-open/rule:rotate-90" />
+        </summary>
+        <pre className="mt-3 max-h-72 overflow-auto rounded-md bg-surface-sunken p-4 text-xs leading-5 text-primary">
+          {JSON.stringify(rule, null, 2)}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
+function formatRuleValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map((item) => String(item)).join(", ");
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (value && typeof value === "object") return JSON.stringify(value);
+  return String(value);
 }
 
 function SnapshotValue({

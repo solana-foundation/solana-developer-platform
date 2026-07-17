@@ -39,7 +39,6 @@ import {
   PolicyPageHeader,
   type PolicyTranslate,
   policyActor,
-  providerMappingState,
   requestIdFromEvaluation,
   shortIdentifier,
 } from "./policy-audit.shared";
@@ -112,7 +111,7 @@ export function PolicyAuditDetail({
       <section>
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-2xl font-medium text-primary sm:text-3xl">
-            {decisionHeading(evaluation.decision, t)}
+            {decisionHeading(evaluation)}
           </h2>
           <DecisionBadge decision={evaluation.decision} t={t} />
         </div>
@@ -150,7 +149,11 @@ export function PolicyAuditDetail({
         </div>
       </section>
 
-      <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div
+        className={
+          tab === "revisions" ? "min-w-0" : "grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1fr)_340px]"
+        }
+      >
         <main className="min-w-0">
           <DetailTabs
             activeTab={tab}
@@ -185,14 +188,16 @@ export function PolicyAuditDetail({
           </div>
         </main>
 
-        <EvaluationContextRail
-          wallet={wallet}
-          evaluation={evaluation}
-          history={revisionHistory}
-          apiKeyNames={apiKeyNames}
-          policyHref={policyHref}
-          t={t}
-        />
+        {tab !== "revisions" ? (
+          <EvaluationContextRail
+            wallet={wallet}
+            evaluation={evaluation}
+            history={revisionHistory}
+            apiKeyNames={apiKeyNames}
+            policyHref={policyHref}
+            t={t}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -255,12 +260,15 @@ function DecisionTab({
 }) {
   const steps = evaluationSteps(evaluation, t);
   const appliedRevisionId = evaluation.policyRevisions.wallet.evaluatedRevisionId;
-  const activeRevisionId = evaluation.policyRevisions.wallet.activeRevisionId;
+  const activeRevisionId =
+    history.profile?.activeRevisionId ??
+    history.revisions.find((revision) => revision.isActive)?.id ??
+    null;
   const revisionChanged = appliedRevisionId !== activeRevisionId;
 
   return (
     <div className="space-y-6">
-      <section className="overflow-hidden rounded-lg border border-border-default bg-white">
+      <section className="border-y border-border-default">
         <div className="border-b border-border-default px-5 py-4">
           <h3 className="text-sm font-medium text-primary">
             {t("DashboardCustody.policyAuditDecision")}
@@ -283,9 +291,8 @@ function DecisionTab({
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-medium text-primary">{step.label}</p>
-                <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-5 text-secondary">
-                  {step.description}
-                </p>
+                <p className="mt-1 break-words text-sm leading-5 text-secondary">{step.summary}</p>
+                {step.details ? <RawDetails value={step.details} t={t} /> : null}
               </div>
               <div className="sm:pt-0.5">
                 {step.decision ? (
@@ -299,7 +306,7 @@ function DecisionTab({
         </ol>
       </section>
 
-      <section className="rounded-lg border border-border-default bg-white p-5">
+      <section className="border-y border-border-default px-1 py-5">
         <div className="grid gap-5 sm:grid-cols-2">
           <RevisionComparison
             label={t("DashboardCustody.policyAuditAppliedRevisionAtEvaluation")}
@@ -363,7 +370,8 @@ function DecisionTab({
 
 interface EvaluationStep {
   label: string;
-  description: string;
+  summary: string;
+  details?: unknown;
   decision?: PolicyDecision;
   outcome?: string;
 }
@@ -376,7 +384,17 @@ function evaluationSteps(
   const steps: EvaluationStep[] = [
     {
       label: t("DashboardCustody.policyAuditWalletPolicyEvaluation"),
-      description: context ? policyContextDescription(context.walletPolicy) : evaluation.reasonCode,
+      summary: context
+        ? summarizeRecord(
+            {
+              source: context.walletPolicy.source,
+              defaultAction: context.walletPolicy.defaultAction,
+              requiresApproval: context.walletPolicy.requiresApproval,
+            },
+            t
+          )
+        : formatDisplayLabel(evaluation.reasonCode),
+      details: context?.walletPolicy,
       decision: context?.walletPolicy.decision ?? evaluation.decision,
     },
   ];
@@ -384,7 +402,15 @@ function evaluationSteps(
   if (context?.apiKeyPolicy) {
     steps.push({
       label: t("DashboardCustody.policyAuditApiKeyPolicyEvaluation"),
-      description: policyContextDescription(context.apiKeyPolicy),
+      summary: summarizeRecord(
+        {
+          source: context.apiKeyPolicy.source,
+          defaultAction: context.apiKeyPolicy.defaultAction,
+          requiresApproval: context.apiKeyPolicy.requiresApproval,
+        },
+        t
+      ),
+      details: context.apiKeyPolicy,
       decision: context.apiKeyPolicy.decision,
     });
   }
@@ -392,60 +418,79 @@ function evaluationSteps(
   const matchedRule = evaluation.matchedRules[0];
   steps.push({
     label: t("DashboardCustody.policyAuditMatchedRule"),
-    description: matchedRule ? backendDescription(matchedRule) : evaluation.reasonCode,
+    summary: matchedRule
+      ? backendDescription(matchedRule, t)
+      : formatDisplayLabel(evaluation.reasonCode),
+    details: matchedRule,
     decision: matchedRule
       ? (decisionFromRecord(matchedRule) ?? evaluation.decision)
       : evaluation.decision,
   });
 
+  const observed = observedContext(evaluation);
   steps.push({
     label: t("DashboardCustody.policyAuditObservedValueContext"),
-    description: JSON.stringify(observedContext(evaluation), null, 2),
+    summary: summarizeRecord(observed, t),
+    details: observed,
     outcome: t("DashboardCustody.policyAuditRecorded"),
   });
+  const expectation = effectiveExpectation(evaluation);
   steps.push({
     label: t("DashboardCustody.policyAuditEffectiveLimitExpectation"),
-    description: JSON.stringify(effectiveExpectation(evaluation), null, 2),
+    summary: summarizeRecord(expectation, t),
+    details: expectation,
     outcome: t("DashboardCustody.policyAuditApplied"),
   });
   steps.push({
     label: t("DashboardCustody.policyAuditFinalDecision"),
-    description: evaluation.reason ?? evaluation.reasonCode,
+    summary: evaluation.reason ?? formatDisplayLabel(evaluation.reasonCode),
     decision: evaluation.decision,
   });
 
   return steps;
 }
 
-function policyContextDescription(context: {
-  source: string;
-  revisionId: string | null;
-  defaultAction: string;
-  decision: string;
-  requiresApproval: boolean;
-}): string {
-  return JSON.stringify(
-    {
-      source: context.source,
-      revisionId: context.revisionId,
-      defaultAction: context.defaultAction,
-      decision: context.decision,
-      requiresApproval: context.requiresApproval,
-    },
-    null,
-    2
-  );
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function backendDescription(record: Record<string, unknown>): string {
+function backendDescription(record: Record<string, unknown>, t: PolicyTranslate): string {
   for (const key of ["description", "reason", "name"]) {
     if (typeof record[key] === "string" && record[key]) return record[key];
   }
-  return JSON.stringify(record, null, 2);
+  return summarizeRecord(record, t);
+}
+
+function summarizeRecord(record: Record<string, unknown>, t: PolicyTranslate): string {
+  const entries = Object.entries(record).filter(([, value]) => hasAuditValue(value));
+  if (entries.length === 0) return t("DashboardCustody.policyAuditNoRecordedValues");
+  return entries
+    .slice(0, 5)
+    .map(([key, value]) => `${formatDisplayLabel(key)}: ${formatSummaryValue(key, value, t)}`)
+    .join(" · ");
+}
+
+function hasAuditValue(value: unknown): boolean {
+  return value !== null && value !== undefined && value !== "";
+}
+
+function formatSummaryValue(key: string, value: unknown, t: PolicyTranslate): string {
+  if (typeof value === "boolean") {
+    return value ? t("DashboardCustody.policyAuditYes") : t("DashboardCustody.policyAuditNo");
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0
+      ? value.map((item) => String(item)).join(", ")
+      : t("DashboardCustody.policyAuditNone");
+  }
+  if (isRecord(value)) {
+    return summarizeRecord(value, t);
+  }
+  const text = String(value);
+  if (["source", "defaultAction", "decision", "status", "family", "kind", "action"].includes(key)) {
+    return formatDisplayLabel(text);
+  }
+  return text.length > 48 ? shortIdentifier(text, 10) : text;
 }
 
 function decisionFromRecord(record: Record<string, unknown>): PolicyDecision | null {
@@ -585,6 +630,8 @@ function RequestTab({
     );
   }
 
+  const context = evaluation.evaluationContext;
+
   return (
     <section className="space-y-5">
       <div className="grid gap-4 border-y border-border-default py-5 sm:grid-cols-2 xl:grid-cols-4">
@@ -614,9 +661,34 @@ function RequestTab({
             {formatPolicyDateTime(evaluation.evaluatedAt, locale)}
           </span>
         </div>
-        <pre className="mt-4 max-h-[620px] overflow-auto rounded-lg border border-border-default bg-surface-sunken p-5 text-xs leading-5 text-primary">
-          {JSON.stringify(evaluation.evaluationContext, null, 2)}
-        </pre>
+        <div className="mt-4 border-y border-border-default">
+          <ContextSection
+            title={t("DashboardCustody.policyAuditOperation")}
+            values={{
+              operationFamily: context.operation.operationFamily,
+              operationType: context.operation.operationType,
+              asset: context.operation.asset,
+              amount: context.operation.amount,
+              destination: context.operation.destination,
+              source: context.operation.source,
+              actor: context.operation.actor,
+            }}
+            t={t}
+          />
+          <ContextSection
+            title={t("DashboardCustody.policyAuditWalletPolicyEvaluation")}
+            values={context.walletPolicy}
+            t={t}
+          />
+          {context.apiKeyPolicy ? (
+            <ContextSection
+              title={t("DashboardCustody.policyAuditApiKeyPolicyEvaluation")}
+              values={context.apiKeyPolicy}
+              t={t}
+            />
+          ) : null}
+        </div>
+        <RawDetails value={context} t={t} />
       </div>
     </section>
   );
@@ -633,6 +705,53 @@ function CopyableId({ label, value }: { label: string; value: string }) {
         <WalletMetadataCopyButton value={value} label={label} />
       </div>
     </div>
+  );
+}
+
+function ContextSection({
+  title,
+  values,
+  t,
+}: {
+  title: string;
+  values: object;
+  t: PolicyTranslate;
+}) {
+  const entries = Object.entries(values).filter(([, value]) => hasAuditValue(value));
+  return (
+    <section className="py-5 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border-default">
+      <h4 className="text-sm font-medium text-primary">{title}</h4>
+      {entries.length > 0 ? (
+        <dl className="mt-3 grid gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
+          {entries.map(([key, value]) => (
+            <div key={key} className="min-w-0">
+              <dt className="text-xs text-tertiary">{formatDisplayLabel(key)}</dt>
+              <dd className="mt-1 break-words text-sm text-primary">
+                {formatSummaryValue(key, value, t)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="mt-2 text-sm text-secondary">
+          {t("DashboardCustody.policyAuditNoRecordedValues")}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function RawDetails({ value, t }: { value: unknown; t: PolicyTranslate }) {
+  return (
+    <details className="group/raw mt-3">
+      <summary className="w-fit cursor-pointer list-none text-xs text-secondary transition-colors hover:text-primary">
+        {t("DashboardCustody.policyAuditRawDetails")}
+        <ArrowRight className="ml-1 inline size-3 transition-transform group-open/raw:rotate-90" />
+      </summary>
+      <pre className="mt-3 max-h-[420px] overflow-auto rounded-md bg-surface-sunken p-4 text-xs leading-5 text-primary">
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </details>
   );
 }
 
@@ -655,40 +774,36 @@ function EvaluationContextRail({
   const apiKeyId = operation?.apiKeyId ?? null;
   const actor = policyActor(evaluation, apiKeyNames);
   const requestId = requestIdFromEvaluation(evaluation);
-  const mapping = providerMappingState(evaluation);
-  const mappingLabel = {
-    pending: t("DashboardCustody.policyAuditProviderPending"),
-    partial: t("DashboardCustody.policyAuditProviderPartial"),
-    failed: t("DashboardCustody.policyAuditProviderFailed"),
-    provider_approval: t("DashboardCustody.policyAuditProviderApproval"),
-    sdp_enforced: t("DashboardCustody.policyAuditSdpEnforced"),
-  }[mapping];
+  const activeRevisionId =
+    history.profile?.activeRevisionId ??
+    history.revisions.find((revision) => revision.isActive)?.id ??
+    null;
 
   return (
-    <aside className="h-fit rounded-lg border border-border-default bg-white p-5 xl:sticky xl:top-4">
+    <aside className="h-fit border-t border-border-default pt-5 xl:sticky xl:top-4 xl:border-t-0 xl:border-l xl:pt-0 xl:pl-6">
       <h2 className="text-base font-medium text-primary">
         {t("DashboardCustody.policyAuditEvaluationContext")}
       </h2>
-      <dl className="mt-4 divide-y divide-border-default border-y border-border-default">
+      <dl className="mt-3 divide-y divide-border-default border-y border-border-default">
         <ContextRow icon={<WalletCards className="size-4" />} label={t("DashboardCustody.wallet")}>
           {walletLabel(wallet)}
         </ContextRow>
-        <ContextRow
-          icon={<KeyRound className="size-4" />}
-          label={t("DashboardCustody.policyAuditApiKey")}
-        >
-          {apiKeyId
-            ? (apiKeyNames[apiKeyId] ?? t("DashboardCustody.policyAuditUnavailableApiKey"))
-            : t("DashboardCustody.policyAuditUnavailable")}
-        </ContextRow>
-        <ContextRow
-          icon={<UserRound className="size-4" />}
-          label={t("DashboardCustody.policyAuditActor")}
-        >
-          {actor.type === "api_key"
-            ? formatDisplayLabel(operation?.actor?.type ?? "api_key")
-            : actor.value || t("DashboardCustody.policyAuditUnavailable")}
-        </ContextRow>
+        {apiKeyId ? (
+          <ContextRow
+            icon={<KeyRound className="size-4" />}
+            label={t("DashboardCustody.policyAuditApiKey")}
+          >
+            {apiKeyNames[apiKeyId] ?? shortIdentifier(apiKeyId)}
+          </ContextRow>
+        ) : null}
+        {actor.type !== "api_key" && actor.value ? (
+          <ContextRow
+            icon={<UserRound className="size-4" />}
+            label={t("DashboardCustody.policyAuditActor")}
+          >
+            {actor.value}
+          </ContextRow>
+        ) : null}
         <ContextRow
           icon={<ShieldCheck className="size-4" />}
           label={t("DashboardCustody.policyAuditAppliedRevision")}
@@ -705,39 +820,23 @@ function EvaluationContextRail({
         >
           {formatRevisionReference(
             history,
-            evaluation.policyRevisions.wallet.activeRevisionId,
+            activeRevisionId,
             t("DashboardCustody.policyAuditNoActiveRevision")
           )}
         </ContextRow>
-        <ContextRow
-          icon={<ShieldCheck className="size-4" />}
-          label={t("DashboardCustody.policyAuditProviderMapping")}
-        >
-          <Badge
-            variant={
-              mapping === "failed"
-                ? "danger"
-                : mapping === "partial" || mapping === "pending"
-                  ? "warning"
-                  : "default"
-            }
+        {evaluation.approvalRequestId ? (
+          <ContextRow
+            icon={<Clock3 className="size-4" />}
+            label={t("DashboardCustody.policyAuditApprovalRequest")}
           >
-            {mappingLabel}
-          </Badge>
-        </ContextRow>
-        <ContextRow
-          icon={<Clock3 className="size-4" />}
-          label={t("DashboardCustody.policyAuditApprovalRequest")}
-        >
-          {evaluation.approvalRequestId
-            ? shortIdentifier(evaluation.approvalRequestId)
-            : t("DashboardCustody.policyAuditUnavailable")}
-        </ContextRow>
-        <ContextRow
-          icon={<FileKey className="size-4" />}
-          label={t("DashboardCustody.policyAuditRequestId")}
-        >
-          {requestId ? (
+            {shortIdentifier(evaluation.approvalRequestId)}
+          </ContextRow>
+        ) : null}
+        {requestId ? (
+          <ContextRow
+            icon={<FileKey className="size-4" />}
+            label={t("DashboardCustody.policyAuditRequestId")}
+          >
             <span className="flex min-w-0 items-center justify-end gap-1">
               <span className="truncate" title={requestId}>
                 {shortIdentifier(requestId)}
@@ -747,10 +846,8 @@ function EvaluationContextRail({
                 label={t("DashboardCustody.policyAuditRequestId")}
               />
             </span>
-          ) : (
-            t("DashboardCustody.policyAuditUnavailable")
-          )}
-        </ContextRow>
+          </ContextRow>
+        ) : null}
       </dl>
 
       <div className="mt-4 space-y-2">
