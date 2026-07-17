@@ -7,6 +7,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, internalError } from "@/lib/errors";
 import {
+  resolveAdvancedSettings,
   stampAdvancedSettingsVersion,
   validateAdvancedSettings,
 } from "@/lib/issuance/advanced-settings";
@@ -75,11 +76,17 @@ export const createTokenWithAssetProfile = async (c: AppContext) => {
     await createOrgSigner(c.env, orgId, projectId, signingWalletId);
   }
 
-  // Reject any selected advanced setting the asset type does not support before
-  // opening a transaction, then stamp the server-owned settings version.
+  // Reject any selected advanced setting the asset type does not support, then
+  // confirm the selection actually builds against the deploy template, before
+  // opening a transaction. Finally stamp the server-owned settings version.
   const settingErrors = validateAdvancedSettings(assetCategory, assetType, issuanceMetadata ?? {});
   if (settingErrors.length > 0) {
     throw badRequest("Unsupported advanced settings", { errors: settingErrors });
+  }
+
+  const buildErrors = resolveAdvancedSettings(assetCategory, assetType, issuanceMetadata ?? {});
+  if (buildErrors.length > 0) {
+    throw badRequest("Invalid advanced settings combination", { errors: buildErrors });
   }
 
   const metadata = stampAdvancedSettingsVersion(issuanceMetadata ?? {});

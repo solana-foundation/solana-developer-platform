@@ -1,15 +1,17 @@
 import { ADVANCED_SETTINGS_VERSION } from "@sdp/issuance/capabilities";
 import type { IssuanceMetadata } from "@sdp/types";
 import { describe, expect, it } from "vitest";
-import { stampAdvancedSettingsVersion, validateAdvancedSettings } from "./advanced-settings";
+import {
+  resolveAdvancedSettings,
+  stampAdvancedSettingsVersion,
+  validateAdvancedSettings,
+} from "./advanced-settings";
 
 describe("advanced settings persistence helpers", () => {
   describe("validateAdvancedSettings", () => {
     it("accepts settings allowed for the asset type", () => {
       const metadata: IssuanceMetadata = {
-        settings: {
-          selected: { freezeTransfers: {}, transferFee: { params: { basisPoints: 50 } } },
-        },
+        settings: { selected: { freezeTransfers: {}, permanentDelegate: {} } },
       };
       expect(validateAdvancedSettings("stablecoin", "fiat_backed", metadata)).toEqual([]);
     });
@@ -56,6 +58,27 @@ describe("advanced settings persistence helpers", () => {
     it("is a no-op when there is no settings selection", () => {
       const metadata: IssuanceMetadata = { asset: { name: "X" } };
       expect(stampAdvancedSettingsVersion(metadata)).toBe(metadata);
+    });
+  });
+
+  describe("resolveAdvancedSettings", () => {
+    it("returns no errors when the selection builds against the template", () => {
+      const metadata: IssuanceMetadata = { settings: { selected: { freezeTransfers: {} } } };
+      expect(resolveAdvancedSettings("stablecoin", "fiat_backed", metadata)).toEqual([]);
+    });
+
+    it("returns no errors when there is no settings namespace", () => {
+      expect(resolveAdvancedSettings("generic", "generic", { asset: { name: "X" } })).toEqual([]);
+    });
+
+    it("surfaces a template error for a selection the substrate can't build", () => {
+      // transferFee bypassing the capability check → the stablecoin template rejects it.
+      const metadata: IssuanceMetadata = {
+        settings: { selected: { transferFee: { params: { basisPoints: 10, maxFee: "1" } } } },
+      };
+      const errors = resolveAdvancedSettings("stablecoin", "fiat_backed", metadata);
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0].code).toBe("EXTENSION_NOT_ALLOWED");
     });
   });
 });

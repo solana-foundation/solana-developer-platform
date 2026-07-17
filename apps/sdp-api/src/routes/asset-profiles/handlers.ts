@@ -20,6 +20,7 @@ import {
   notFound,
 } from "@/lib/errors";
 import {
+  resolveAdvancedSettings,
   stampAdvancedSettingsVersion,
   validateAdvancedSettings,
 } from "@/lib/issuance/advanced-settings";
@@ -194,6 +195,10 @@ export const updateAssetProfile = async (c: AppContext) => {
     const settingErrors = validateAdvancedSettings(nextCategory, nextType, effectiveMetadata);
     if (settingErrors.length > 0) {
       throw badRequest("Unsupported advanced settings", { errors: settingErrors });
+    }
+    const buildErrors = resolveAdvancedSettings(nextCategory, nextType, effectiveMetadata);
+    if (buildErrors.length > 0) {
+      throw badRequest("Invalid advanced settings combination", { errors: buildErrors });
     }
   }
 

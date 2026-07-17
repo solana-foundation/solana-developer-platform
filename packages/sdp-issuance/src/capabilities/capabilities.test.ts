@@ -11,6 +11,7 @@ import {
   isSettingAllowed,
   listSettingsForType,
   resolveAssetCapability,
+  resolveSettingsToExtensions,
   SETTING_KEYS,
   validateSelectedSettings,
 } from "./index";
@@ -52,8 +53,8 @@ describe("advanced settings capability registry", () => {
     assert.ok(stablecoin.includes("freezeTransfers"));
     assert.ok(stablecoin.includes("permanentDelegate"));
 
-    // debt securities additionally recommend interest.
-    assert.ok(getRecommendedSettings("tokenized_security", "debt").includes("interestBearing"));
+    // securities additionally recommend scaledUiAmount (in their template).
+    assert.ok(getRecommendedSettings("tokenized_security", "debt").includes("scaledUiAmount"));
 
     // generic assets force nothing on.
     assert.deepEqual(getRecommendedSettings("generic", "generic"), []);
@@ -74,7 +75,10 @@ describe("advanced settings capability registry", () => {
   it("validates a selection against a type's capability", () => {
     // all-allowed selection ⇒ no errors.
     assert.deepEqual(
-      validateSelectedSettings("stablecoin", "fiat_backed", ["freezeTransfers", "transferFee"]),
+      validateSelectedSettings("stablecoin", "fiat_backed", [
+        "freezeTransfers",
+        "permanentDelegate",
+      ]),
       []
     );
     // unknown key and unsupported key are reported with their reasons.
@@ -93,5 +97,38 @@ describe("advanced settings capability registry", () => {
 
   it("exposes a positive settings version for persistence stamping", () => {
     assert.ok(Number.isInteger(ADVANCED_SETTINGS_VERSION) && ADVANCED_SETTINGS_VERSION > 0);
+  });
+
+  it("resolves a selection into a deployment-ready extension config", () => {
+    // generic → custom substrate: a parametric setting maps into the config.
+    const generic = resolveSettingsToExtensions("generic", "generic", {
+      transferFee: { params: { basisPoints: 50, maxFee: "100" } },
+    });
+    assert.deepEqual(generic.errors, []);
+    assert.equal(generic.extensions?.transferFee?.basisPoints, 50);
+    assert.equal(generic.extensions?.transferFee?.maxFee, "100");
+
+    // stablecoin → guarded template: freeze enables the pausable extension.
+    const stablecoin = resolveSettingsToExtensions("stablecoin", "fiat_backed", {
+      freezeTransfers: {},
+    });
+    assert.deepEqual(stablecoin.errors, []);
+    assert.ok(stablecoin.extensions?.pausable, "pausable should be enabled");
+  });
+
+  it("surfaces a template error for a selection the substrate can't build", () => {
+    // Bypassing the capability check, a transferFee on the stablecoin template
+    // (which doesn't offer it) is rejected by the resolver — the production
+    // safety net behind the dev-time assertion.
+    const result = resolveSettingsToExtensions("stablecoin", "fiat_backed", {
+      transferFee: { params: { basisPoints: 10, maxFee: "1" } },
+    });
+    assert.ok(result.errors.length > 0, "expected a template override error");
+    assert.equal(result.errors[0].code, "EXTENSION_NOT_ALLOWED");
+  });
+
+  it("returns an error for an unknown asset type", () => {
+    const result = resolveSettingsToExtensions("generic", "not_a_type", { freezeTransfers: {} });
+    assert.ok(result.errors.length > 0);
   });
 });

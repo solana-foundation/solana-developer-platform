@@ -3,9 +3,12 @@
 // each catalog setting, whether it is recommended (default on), available
 // (opt-in), or unsupported (hidden/rejected).
 //
-// Composed à la carte: generic types use the `custom` substrate for free
-// composition; regulated types use their guarded template so the template's
-// required extensions are always enforced at deploy regardless of selection.
+// Regulated types deploy via their guarded Mosaic template, which supports a
+// fixed extension set (stablecoin: permanentDelegate + pausable; security: +
+// scaledUiAmount). Settings whose extension the guarded template can't build are
+// therefore `unsupported` — the dev-time assertion in index.ts enforces that no
+// recommended/available setting names an extension outside the template. Generic
+// types deploy via the `custom` substrate and compose the full set freely.
 //
 // See docs/decisions/0002-asset-advanced-settings.md.
 
@@ -25,23 +28,31 @@ function settings(
   return result;
 }
 
-// Stablecoins: permanentDelegate + pausable are required by the template, so
-// their manager-facing settings are recommended; stablecoins stay transferable.
+// Stablecoin template allows only permanentDelegate + pausable, so freeze
+// (pausable) and permanentDelegate are recommended and everything else is
+// unsupported.
 const STABLECOIN_SETTINGS = settings({
   freezeTransfers: "recommended",
   permanentDelegate: "recommended",
+  transferFee: "unsupported",
+  interestBearing: "unsupported",
+  scaledUiAmount: "unsupported",
   nonTransferable: "unsupported",
+  transferHook: "unsupported",
 });
 
-// Tokenized securities: as stablecoins, plus scaledUiAmount is template-required.
+// Tokenized-security template allows permanentDelegate + pausable + scaledUiAmount.
 const SECURITY_SETTINGS = settings({
   freezeTransfers: "recommended",
   permanentDelegate: "recommended",
   scaledUiAmount: "recommended",
+  transferFee: "unsupported",
+  interestBearing: "unsupported",
   nonTransferable: "unsupported",
+  transferHook: "unsupported",
 });
 
-// Generic assets: everything opt-in, nothing forced.
+// Generic assets deploy via the custom substrate: everything opt-in, nothing forced.
 const GENERIC_SETTINGS = settings({});
 
 export const ASSET_CAPABILITIES: readonly AssetCapability[] = [
@@ -56,13 +67,7 @@ export const ASSET_CAPABILITIES: readonly AssetCapability[] = [
     category: "stablecoin",
     type: "fiat_backed",
     baseTemplate: "stablecoin",
-    // A fiat peg does not bear yield.
-    settings: settings({
-      freezeTransfers: "recommended",
-      permanentDelegate: "recommended",
-      nonTransferable: "unsupported",
-      interestBearing: "unsupported",
-    }),
+    settings: STABLECOIN_SETTINGS,
   },
   {
     category: "stablecoin",
@@ -94,14 +99,7 @@ export const ASSET_CAPABILITIES: readonly AssetCapability[] = [
     category: "tokenized_security",
     type: "debt",
     baseTemplate: "tokenized-security",
-    // Debt instruments typically accrue interest.
-    settings: settings({
-      freezeTransfers: "recommended",
-      permanentDelegate: "recommended",
-      scaledUiAmount: "recommended",
-      interestBearing: "recommended",
-      nonTransferable: "unsupported",
-    }),
+    settings: SECURITY_SETTINGS,
   },
   {
     category: "tokenized_security",

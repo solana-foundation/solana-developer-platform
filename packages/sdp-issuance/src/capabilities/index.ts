@@ -14,11 +14,20 @@ import type {
   SettingAvailability,
 } from "@sdp/types";
 import { ASSET_TYPES } from "@sdp/types";
-import { normalizeTemplateId, TEMPLATE_DEFINITIONS } from "../templates/definitions";
+import {
+  normalizeTemplateId,
+  TEMPLATE_DEFINITIONS,
+  type TemplateOverrideError,
+} from "../templates/definitions";
 import { ASSET_CAPABILITIES } from "./capabilities";
 import { ADVANCED_SETTINGS, SETTING_KEYS, type SettingKey } from "./settings";
 
-export type { SettingKey };
+export {
+  type ExtensionAuthorities,
+  resolveSettingsToExtensions,
+  type SettingsResolution,
+} from "./resolver";
+export type { SettingKey, TemplateOverrideError };
 export { ADVANCED_SETTINGS, ASSET_CAPABILITIES, SETTING_KEYS };
 
 // The capability entry for an asset type, or undefined for an unknown pair.
@@ -115,8 +124,11 @@ export function validateSelectedSettings(
 // apps/sdp-web/.../asset-taxonomy.ts. Guarantees:
 //   1. every ASSET_TYPES pair has exactly one capability entry;
 //   2. every setting an entry references exists in the catalog;
-//   3. no recommended/available setting names an extension the entry's
-//      baseTemplate lists as `incompatible`.
+//   3. every recommended/available setting names only extensions the entry's
+//      baseTemplate can actually build — i.e. present in `required ∪ available`
+//      and not in `incompatible`. This mirrors resolveTemplateConfig's own
+//      override check, so a selection the capability offers can never be one the
+//      resolver would reject at deploy.
 if (process.env.NODE_ENV !== "production") {
   const seen = new Set<string>();
 
@@ -130,6 +142,7 @@ if (process.env.NODE_ENV !== "production") {
 
     const template = TEMPLATE_DEFINITIONS[normalizeTemplateId(capability.baseTemplate)];
     const incompatible = new Set(template.extensions.incompatible);
+    const buildable = new Set([...template.extensions.required, ...template.extensions.available]);
 
     for (const [settingKey, availability] of Object.entries(capability.settings)) {
       const setting = ADVANCED_SETTINGS[settingKey as SettingKey];
@@ -143,10 +156,11 @@ if (process.env.NODE_ENV !== "production") {
         continue;
       }
       for (const extension of setting.extensions) {
-        if (incompatible.has(extension)) {
+        if (incompatible.has(extension) || !buildable.has(extension)) {
           throw new Error(
             `capabilities: (${pairKey}) marks "${settingKey}" ${availability}, but its ` +
-              `extension "${extension}" is incompatible with the ${capability.baseTemplate} template.`
+              `extension "${extension}" is not buildable by the ${capability.baseTemplate} ` +
+              `template (allowed: ${[...buildable].join(", ") || "none"}).`
           );
         }
       }

@@ -19,13 +19,14 @@ const config = (leaf: string): string => `DashboardIssuance.config.${leaf}`;
 const desc = (leaf: string): string => config(`${leaf}Description`);
 
 export const ADVANCED_SETTINGS = {
-  // On/off. pausable + a frozen default account state give compliance freezes.
-  // Reuses existing i18n keys.
+  // On/off. The pausable extension backs emergency freezes. (defaultAccountState
+  // is template-managed via the allowlist setting, not configured here.) Reuses
+  // existing i18n keys.
   freezeTransfers: {
     group: "compliance",
     labelKey: config("freezeTransfers"),
     descriptionKey: desc("freezeTransfers"),
-    extensions: ["pausable", "defaultAccountState"],
+    extensions: ["pausable"],
     actions: ["pause", "unpause", "freeze", "unfreeze"],
     signing: "custodial-or-wallet",
   },

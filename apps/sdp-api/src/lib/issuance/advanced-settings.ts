@@ -12,10 +12,12 @@
 
 import {
   ADVANCED_SETTINGS_VERSION,
+  resolveSettingsToExtensions,
   type SettingValidationError,
+  type TemplateOverrideError,
   validateSelectedSettings,
 } from "@sdp/issuance/capabilities";
-import type { AssetCategory, IssuanceMetadata } from "@sdp/types";
+import type { AssetCategory, IssuanceMetadata, SelectedSetting } from "@sdp/types";
 
 // The loose issuance-metadata object the settings namespace lives inside. Using
 // IssuanceMetadata (rather than a bare Record) keeps the stamped result
@@ -48,6 +50,29 @@ export function validateAdvancedSettings(
     return [];
   }
   return validateSelectedSettings(category, type, Object.keys(settings.selected));
+}
+
+// Resolve the selected settings into a token extension config and return any
+// template-level build errors — the resolver-driven half of "flag unsupported
+// combinations early". The dev-time assertion keeps the capability registry
+// consistent with the templates, but that assertion is skipped in production, so
+// this runtime check is the production safety net against a selection the deploy
+// resolver couldn't build. Empty result ⇒ nothing selected, or it builds cleanly.
+export function resolveAdvancedSettings(
+  category: AssetCategory,
+  type: string,
+  metadata: Metadata
+): TemplateOverrideError[] {
+  const settings = readSettings(metadata);
+  if (!settings?.selected) {
+    return [];
+  }
+  const { errors } = resolveSettingsToExtensions(
+    category,
+    type,
+    settings.selected as Record<string, SelectedSetting>
+  );
+  return errors;
 }
 
 // Return metadata with the settings version stamped to the current server
