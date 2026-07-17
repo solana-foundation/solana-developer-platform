@@ -63,11 +63,7 @@ function localDateBoundary(value: string, endOfDay: boolean): number | null {
   const date = endOfDay
     ? new Date(year, month - 1, day, 23, 59, 59, 999)
     : new Date(year, month - 1, day);
-  if (
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day
-  ) {
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
     return null;
   }
   return date.getTime();
