@@ -124,6 +124,7 @@ export function ApprovalRequestDetail({
       }
 
       if (outcome === "forbidden") {
+        setConfirmation(null);
         toast.error(t("DashboardApprovals.forbiddenDecision"));
         return;
       }
