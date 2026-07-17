@@ -32,6 +32,7 @@ jobs:
       SERVICE: sdp-dev-api-public
       JOB: sdp-dev-api-public-cron
       MIGRATE_JOB: sdp-dev-api-public-migrate
+      PAYMENTS_RECURRING_ENABLED: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -66,9 +67,23 @@ jobs:
       - name: Deploy service
         run: |
           gcloud run services update "${SERVICE}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}" \
+            --update-env-vars "PAYMENTS_RECURRING_ENABLED=${PAYMENTS_RECURRING_ENABLED}"
 
       - name: Update cron job image
         run: |
           gcloud run jobs update "${JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}" \
+            --update-env-vars "PAYMENTS_RECURRING_ENABLED=${PAYMENTS_RECURRING_ENABLED}"
+
+      - name: Verify recurring payments configuration
+        run: |
+          set -euo pipefail
+
+          gcloud run services describe "${SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --format=json \
+            | jq -e '.spec.template.spec.containers[0].env | any(.name == "PAYMENTS_RECURRING_ENABLED" and .value == "true")'
+
+          gcloud run jobs describe "${JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --format=json \
+            | jq -e '.spec.template.spec.template.spec.containers[0].env | any(.name == "PAYMENTS_RECURRING_ENABLED" and .value == "true")'
