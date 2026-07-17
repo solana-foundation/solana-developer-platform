@@ -1,5 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
-import type { ListProjectsResponse, Project } from "@sdp/types";
+import type { Project } from "@sdp/types";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
@@ -9,21 +8,20 @@ import { NetworkDebugProvider } from "@/contexts/network-debug-context";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
+import { resolveDashboardProjectSelection } from "@/lib/dashboard-project-selection";
 import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
-import { createOrgSdpApiClient } from "@/lib/sdp-api";
+import { getSdpAuth, listSdpProjects } from "@/lib/sdp-api";
 
 async function loadProjects(): Promise<Project[]> {
   try {
-    const client = await createOrgSdpApiClient();
-    const response = await client.fetch<ListProjectsResponse>("/v1/projects");
-    return response.projects;
+    return await listSdpProjects();
   } catch {
     return [];
   }
 }
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  const { orgRole, orgId, userId } = await auth();
+  const { orgRole, orgId, userId } = await getSdpAuth();
 
   if (!userId || !orgId) {
     redirect(await getAuthEntryPath());
@@ -35,13 +33,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     userId,
   } satisfies DashboardCacheScope;
 
-  const projects = await loadProjects();
-  const cookieStore = await cookies();
+  const [projects, cookieStore] = await Promise.all([loadProjects(), cookies()]);
   const cookieProjectId = cookieStore.get(PROJECT_COOKIE_NAME)?.value ?? null;
-  const initialSelectedProjectId =
-    cookieProjectId && projects.some((project) => project.id === cookieProjectId)
-      ? cookieProjectId
-      : null;
+  const projectSelection = resolveDashboardProjectSelection(projects, cookieProjectId);
 
   return (
     <DashboardWorkspaceProvider
@@ -49,7 +43,8 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       dashboardAccess={dashboardAccess}
       serverDashboardCacheScope={dashboardCacheScope}
       projects={projects}
-      initialSelectedProjectId={initialSelectedProjectId}
+      initialSelectedProjectId={projectSelection.selectedProjectId}
+      shouldRepairInitialProjectCookie={projectSelection.shouldRepairCookie}
     >
       <NetworkDebugProvider>
         <DashboardShell>{children}</DashboardShell>

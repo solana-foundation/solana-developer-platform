@@ -10,9 +10,10 @@ const WALLET_BALANCE_CACHE_TTL_MS = 30_000;
 
 interface WalletBalancesEnvelope {
   data?: {
-    walletBalances?: {
+    wallets?: Array<{
+      walletId?: string;
       balances?: CustodyWalletTokenBalance[];
-    };
+    }>;
   };
   error?: {
     message?: string;
@@ -32,44 +33,45 @@ function getApiError(body: WalletBalancesEnvelope, fallback: string): string {
   return fallback;
 }
 
-async function fetchWalletBalances(walletId: string): Promise<CustodyWalletTokenBalance[]> {
-  const response = await fetch(
-    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`,
-    {
-      method: "GET",
-      cache: "no-store",
-    }
-  );
+async function fetchWalletBalances(): Promise<Record<string, CustodyWalletTokenBalance[]>> {
+  const response = await fetch("/api/dashboard/wallets?includeBalances=true&view=summary", {
+    method: "GET",
+    cache: "no-store",
+  });
   const body = (await response.json().catch(() => ({}))) as WalletBalancesEnvelope;
 
   if (!response.ok) {
     throw new Error(getApiError(body, `Wallet balances request failed (${response.status}).`));
   }
 
-  return Array.isArray(body.data?.walletBalances?.balances)
-    ? body.data.walletBalances.balances
-    : [];
+  return Object.fromEntries(
+    (body.data?.wallets ?? [])
+      .filter((wallet): wallet is { walletId: string; balances?: CustodyWalletTokenBalance[] } =>
+        Boolean(wallet.walletId)
+      )
+      .map((wallet) => [wallet.walletId, wallet.balances ?? []])
+  );
 }
 
 export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCardBalanceValueProps) {
   const t = useTranslations();
-  const { data, error } = usePersistedDashboardSWR<CustodyWalletTokenBalance[]>(
-    walletId ? `wallet-card-balance:${walletId}` : null,
-    () => fetchWalletBalances(walletId),
+  const { data, error } = usePersistedDashboardSWR<Record<string, CustodyWalletTokenBalance[]>>(
+    walletId ? "wallet-card-balances" : null,
+    fetchWalletBalances,
     {
-      fallbackData: initialBalances,
       revalidateOnFocus: true,
+      refreshWhenHidden: false,
       refreshInterval: BALANCE_REFRESH_INTERVAL_MS,
       dedupingInterval: 5_000,
       keepPreviousData: true,
     },
     {
-      key: `wallet-card-balance.${walletId}`,
+      key: "wallet-card-balances",
       ttlMs: WALLET_BALANCE_CACHE_TTL_MS,
     }
   );
 
-  const totalBalance = resolveTotalBalance(data ?? initialBalances);
+  const totalBalance = resolveTotalBalance(data?.[walletId] ?? initialBalances);
 
   return (
     <span className={`font-medium ${error ? "text-muted" : "text-primary"}`}>
