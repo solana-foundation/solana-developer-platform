@@ -624,6 +624,27 @@ export const FIELDS: EnvField[] = [
     defaultValue: "false",
   },
   {
+    key: "PAYMENTS_RECURRING_COLLECTION_ENABLED",
+    section: "advanced",
+    kind: "text",
+    label: "Recurring payment collection enabled",
+    defaultValue: "false",
+  },
+  {
+    key: "PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE",
+    section: "advanced",
+    kind: "text",
+    label: "Recurring payment collection batch size",
+    defaultValue: "25",
+  },
+  {
+    key: "PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES",
+    section: "advanced",
+    kind: "text",
+    label: "Recurring payment collection retry delay (minutes)",
+    defaultValue: "30",
+  },
+  {
     key: "SENTRY_DSN",
     section: "advanced",
     kind: "url",
