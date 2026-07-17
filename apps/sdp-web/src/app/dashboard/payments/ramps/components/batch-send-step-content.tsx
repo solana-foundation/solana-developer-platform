@@ -184,6 +184,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
             value={externalId}
             onChange={(event) => setExternalId(event.currentTarget.value)}
             maxLength={256}
+            placeholder={t("DashboardPayments.batchSend.referenceOptional")}
             size="xl"
           />
         </div>
