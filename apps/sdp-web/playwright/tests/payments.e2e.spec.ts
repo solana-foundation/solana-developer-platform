@@ -3,8 +3,10 @@ import { expect, test } from "@playwright/test";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
+  bootstrapLocalWalletFixtures,
   createExternalSolanaAddress,
   ensureLinkedOrg,
+  getPlaywrightCustodyProvider,
   resolvePlaywrightProjectId,
   seedCounterpartyWithSolanaAccount,
   seedProjectCookie,
@@ -207,28 +209,29 @@ test.describe
 
     test.beforeAll(async ({ browser }) => {
       const session = await getPlaywrightAdminSession(browser);
-      const fixtures = await bootstrapLocalPaymentFixtures({
+      const walletBootstrap = await bootstrapLocalWalletFixtures({
         identity: session.identity,
         bearerToken: session.getBearerToken,
+        provider: getPlaywrightCustodyProvider(),
+        walletCount: 1,
+        fundSourceWallet: true,
+        fundSourceAmountSol: 0.05,
         tier: "enterprise",
       });
-      const api = createLocalApiClient(
+      const projectId = await resolvePlaywrightProjectId(
         getBootstrapApiBaseUrl(),
-        session.getBearerToken,
-        fixtures.projectId
+        session.getBearerToken
       );
+      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
+      const sourceWallet = walletBootstrap.wallets[0];
+      if (!sourceWallet) {
+        throw new Error("Payment bootstrap did not create a source wallet");
+      }
 
-      await api.post(`/v1/issuance/tokens/${fixtures.token.id}/mint`, {
-        mint: {
-          destination: fixtures.wallets.treasury.publicKey,
-          amount: "25",
-        },
-      });
-
-      sourceWalletLabel = fixtures.wallets.treasury.label ?? fixtures.wallets.treasury.publicKey;
-      sourceWalletId = fixtures.wallets.treasury.walletId;
-      transferTokenSymbol = fixtures.token.symbol;
-      bootstrapProjectId = fixtures.projectId;
+      sourceWalletLabel = sourceWallet.label ?? sourceWallet.publicKey;
+      sourceWalletId = sourceWallet.walletId;
+      transferTokenSymbol = "SOL";
+      bootstrapProjectId = projectId;
 
       destinationAddress = await createExternalSolanaAddress();
       const suffix = randomUUID().slice(0, 8);
@@ -286,7 +289,7 @@ test.describe
       await app.getByRole("button", { name: "Asset" }).click();
       await page.getByRole("button", { name: transferTokenSymbol, exact: true }).click();
 
-      await app.getByLabel("Amount", { exact: true }).fill("1");
+      await app.getByLabel("Amount", { exact: true }).fill("0.01");
       await expect(next).toBeEnabled({ timeout: 120_000 });
       await next.click();
 
@@ -303,6 +306,6 @@ test.describe
 
       const transferRow = app.locator("tbody tr").filter({ hasText: destinationAddress }).first();
       await expect(transferRow).toBeVisible({ timeout: 120_000 });
-      await expect(transferRow).toContainText("1.00");
+      await expect(transferRow).toContainText("0.01");
     });
   });
