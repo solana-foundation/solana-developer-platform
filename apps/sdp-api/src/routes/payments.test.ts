@@ -5423,7 +5423,7 @@ describe("Payments routes", () => {
           provider: "moonpay",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC",
+          cryptoToken: "SOL",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
           redirectUrl: "https://example.com/onramp-done",
@@ -5455,12 +5455,64 @@ describe("Payments routes", () => {
     expect(hostedUrl.searchParams.get("apiKey")).toBe(TEST_MOONPAY_API_KEY);
     expect(hostedUrl.searchParams.get("baseCurrencyCode")).toBe("usd");
     expect(hostedUrl.searchParams.get(MOONPAY_PARAM_BASE_CURRENCY_AMOUNT)).toBe("120.50");
-    expect(hostedUrl.searchParams.get("currencyCode")).toBe("usdc_sol");
+    expect(hostedUrl.searchParams.get("currencyCode")).toBe("sol");
     expect(hostedUrl.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
     expect(hostedUrl.searchParams.get("redirectURL")).toBe("https://example.com/onramp-done");
     expect(hostedUrl.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("moonpay_user_123");
     expect(hostedUrl.searchParams.get("externalTransactionId")).toBe(body.data.quote.id);
     assertMoonPaySignature(hostedUrl);
+  });
+
+  it("rejects quotes for corridors the support matrix does not list the provider on", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "moonpay_user_123" });
+
+    const onrampRes = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+        }),
+      },
+      env
+    );
+
+    expect(onrampRes.status).toBe(400);
+    const onrampBody = (await onrampRes.json()) as { error: { code: string } };
+    expect(onrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
+
+    const offrampRes = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          sourceWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          cryptoAmount: "75.25",
+        }),
+      },
+      env
+    );
+
+    expect(offrampRes.status).toBe(400);
+    const offrampBody = (await offrampRes.json()) as { error: { code: string } };
+    expect(offrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
   });
 
   it("creates a BVNK off-ramp channel quote with crypto-deposit instructions", async () => {
