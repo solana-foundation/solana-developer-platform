@@ -115,6 +115,7 @@
     "issuance": "Issuance",
     "payments": "Payments",
     "apiKeys": "API keys",
+    "policies": "Policies",
     "newApiKey": "New API key",
     "editApiKey": "Edit API key",
     "backToApiKeys": "Back to API keys",
