@@ -762,7 +762,7 @@
       "collected": "Collected",
       "failed": "Failed",
       "skipped": "Skipped",
-      "recurringPayments": "Recurring payments",
+      "recurringPayments": "Payment schedules",
       "recurringPaymentCount": "{count} recurring payments",
       "oneRecurringPayment": "1 recurring payment",
       "unableToLoad": "Unable to load recurring payments",
