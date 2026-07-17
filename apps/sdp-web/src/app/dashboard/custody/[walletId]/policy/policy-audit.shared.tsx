@@ -4,9 +4,7 @@ import type {
   WalletOperationStatus,
   WalletPolicyEvaluationDetail,
 } from "@sdp/types";
-import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -51,31 +49,6 @@ export function DecisionBadge({ decision, t }: { decision: PolicyDecision; t: Po
 
 export function OperationStatusBadge({ status }: { status: WalletOperationStatus }) {
   return <Badge variant={STATUS_VARIANTS[status]}>{formatDisplayLabel(status)}</Badge>;
-}
-
-export function PolicyPageHeader({
-  backHref,
-  backLabel,
-  title,
-  trailing,
-}: {
-  backHref: string;
-  backLabel: string;
-  title: string;
-  trailing?: ReactNode;
-}) {
-  return (
-    <header className="grid min-h-11 grid-cols-1 items-center gap-3 border-b border-border-default pb-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-      <Button asChild variant="ghost" className="w-fit justify-self-start">
-        <Link href={backHref}>
-          <ArrowLeft className="size-4" />
-          {backLabel}
-        </Link>
-      </Button>
-      <h1 className="truncate text-lg font-medium text-primary sm:text-xl">{title}</h1>
-      <div className="flex justify-start sm:justify-end">{trailing}</div>
-    </header>
-  );
 }
 
 export function PolicyAuditLoadError({ backHref, t }: { backHref: string; t: PolicyTranslate }) {

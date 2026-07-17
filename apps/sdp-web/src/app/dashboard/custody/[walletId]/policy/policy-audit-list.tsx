@@ -27,7 +27,6 @@ import {
   formatPolicyDateTime,
   formatRevisionReference,
   OperationStatusBadge,
-  PolicyPageHeader,
   type PolicyTranslate,
   policyActor,
   shortIdentifier,
@@ -74,28 +73,22 @@ export function PolicyAuditList({
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-6">
-      <PolicyPageHeader
-        backHref={policyHref}
-        backLabel={t("DashboardCustody.policyAuditBackToWalletControls")}
-        title={t("DashboardCustody.policyAuditTitle")}
-        trailing={
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-medium text-primary sm:text-3xl">
+              {t("DashboardCustody.policyAuditWalletHistory", { wallet: walletLabel })}
+            </h1>
+            <p className="mt-1 text-sm text-secondary">
+              {t("DashboardCustody.policyAuditWalletHistoryDescription")}
+            </p>
+          </div>
           <Button asChild variant="outline" size="sm">
             <Link href={revisionsHref}>
               <History className="size-4" />
               {t("DashboardCustody.policyAuditRevisionHistory")}
             </Link>
           </Button>
-        }
-      />
-
-      <section className="space-y-4">
-        <div>
-          <h2 className="text-xl font-medium text-primary">
-            {t("DashboardCustody.policyAuditWalletHistory", { wallet: walletLabel })}
-          </h2>
-          <p className="mt-1 text-sm text-secondary">
-            {t("DashboardCustody.policyAuditWalletHistoryDescription")}
-          </p>
         </div>
 
         <form action={auditHref} className="space-y-4 border-y border-border-default py-4">

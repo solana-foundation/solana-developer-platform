@@ -9,6 +9,7 @@ import {
   ArrowRight,
   CalendarClock,
   Check,
+  ChevronRight,
   CircleMinus,
   Clock3,
   ExternalLink,
@@ -36,7 +37,6 @@ import {
   decisionHeading,
   formatPolicyDateTime,
   formatRevisionReference,
-  PolicyPageHeader,
   type PolicyTranslate,
   policyActor,
   requestIdFromEvaluation,
@@ -80,33 +80,38 @@ export function PolicyAuditDetail({
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-6">
-      <PolicyPageHeader
-        backHref={backHref}
-        backLabel={t("DashboardCustody.policyAuditBackToAudit")}
-        title={t("DashboardCustody.policyAuditTitle")}
-        trailing={
-          <div className="flex items-center gap-2">
-            <NeighborButton
-              direction="previous"
-              neighbor={neighbors.previous}
-              href={neighborHref(
-                detailBaseHref,
-                neighbors.previous,
-                filters,
-                tab,
-                selectedRevisionId
-              )}
-              t={t}
-            />
-            <NeighborButton
-              direction="next"
-              neighbor={neighbors.next}
-              href={neighborHref(detailBaseHref, neighbors.next, filters, tab, selectedRevisionId)}
-              t={t}
-            />
-          </div>
-        }
-      />
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border-default pb-4">
+        <nav
+          className="flex items-center gap-2 text-sm"
+          aria-label={t("DashboardCustody.policyAuditBreadcrumb")}
+        >
+          <Link href={backHref} className="text-secondary transition-colors hover:text-primary">
+            {t("DashboardCustody.policyAuditTitle")}
+          </Link>
+          <ChevronRight className="size-4 text-tertiary" />
+          <span className="text-primary">{t("DashboardCustody.policyAuditEvaluation")}</span>
+        </nav>
+        <div className="flex items-center gap-2">
+          <NeighborButton
+            direction="previous"
+            neighbor={neighbors.previous}
+            href={neighborHref(
+              detailBaseHref,
+              neighbors.previous,
+              filters,
+              tab,
+              selectedRevisionId
+            )}
+            t={t}
+          />
+          <NeighborButton
+            direction="next"
+            neighbor={neighbors.next}
+            href={neighborHref(detailBaseHref, neighbors.next, filters, tab, selectedRevisionId)}
+            t={t}
+          />
+        </div>
+      </div>
 
       <section>
         <div className="flex flex-wrap items-center gap-3">

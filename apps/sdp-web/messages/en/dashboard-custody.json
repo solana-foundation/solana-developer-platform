@@ -357,6 +357,8 @@
     "policyPerTransferValue": "Per transfer {value}",
     "policyDailyValue": "Daily {value}",
     "policyAuditTitle": "Policy audit",
+    "policyAuditBreadcrumb": "Policy audit navigation",
+    "policyAuditEvaluation": "Evaluation",
     "policyAuditBackToWalletControls": "Back to wallet controls",
     "policyAuditBackToAudit": "Back to audit",
     "policyAuditRevisionHistory": "Revision history",
