@@ -68,6 +68,7 @@ describe("OpenAPI spec", () => {
       "Projects",
       "Issuance",
       "Payments",
+      "Policies",
       "Compliance",
       "Counterparties",
       "Asset Profiles",
@@ -85,5 +86,6 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/health"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/wallets"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/payments/transfers"]?.post).toBeDefined();
+    expect(doc.paths?.["/v1/policies"]?.get).toBeDefined();
   });
 });
