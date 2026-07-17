@@ -1,19 +1,45 @@
 import type { AppLocale } from "@/i18n/config";
-import dashboardCustody from "../../messages/en/dashboard-custody.json";
-import dashboardIssuance from "../../messages/en/dashboard-issuance.json";
-import dashboardPayments from "../../messages/en/dashboard-payments.json";
-import shared from "../../messages/en/shared.json";
+import enDashboardCustody from "../../messages/en/dashboard-custody.json";
+import enDashboardIssuance from "../../messages/en/dashboard-issuance.json";
+import enDashboardPayments from "../../messages/en/dashboard-payments.json";
+import enShared from "../../messages/en/shared.json";
 import en from "../../messages/en.json";
+import kkDashboardCustody from "../../messages/kk/dashboard-custody.json";
+import kkDashboardIssuance from "../../messages/kk/dashboard-issuance.json";
+import kkDashboardPayments from "../../messages/kk/dashboard-payments.json";
+import kkShared from "../../messages/kk/shared.json";
+import kk from "../../messages/kk.json";
+import ruDashboardCustody from "../../messages/ru/dashboard-custody.json";
+import ruDashboardIssuance from "../../messages/ru/dashboard-issuance.json";
+import ruDashboardPayments from "../../messages/ru/dashboard-payments.json";
+import ruShared from "../../messages/ru/shared.json";
+import ru from "../../messages/ru.json";
 
 const enMessages = {
   ...en,
-  ...dashboardCustody,
-  ...dashboardIssuance,
-  ...dashboardPayments,
-  Shared: shared,
+  ...enDashboardCustody,
+  ...enDashboardIssuance,
+  ...enDashboardPayments,
+  Shared: enShared,
 };
 
 export type Messages = typeof enMessages;
+
+const kkMessages = {
+  ...kk,
+  ...kkDashboardCustody,
+  ...kkDashboardIssuance,
+  ...kkDashboardPayments,
+  Shared: kkShared,
+} as Messages;
+
+const ruMessages = {
+  ...ru,
+  ...ruDashboardCustody,
+  ...ruDashboardIssuance,
+  ...ruDashboardPayments,
+  Shared: ruShared,
+} as Messages;
 
 export type MessageKeyFor<TValue> = TValue extends string
   ? ""
@@ -26,7 +52,11 @@ export type MessageKeyFor<TValue> = TValue extends string
 export type MessageKey = MessageKeyFor<Messages>;
 export type TranslationValues = Record<string, string | number>;
 
-const messagesByLocale: Record<AppLocale, Messages> = { en: enMessages };
+const messagesByLocale: Record<AppLocale, Messages> = {
+  en: enMessages,
+  kk: kkMessages,
+  ru: ruMessages,
+};
 
 export function getMessages(locale: AppLocale): Messages {
   return messagesByLocale[locale];
