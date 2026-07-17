@@ -165,8 +165,8 @@ test.describe
       expect(recurringPaymentId).toMatch(/^prp_/);
       await expect(page.getByText(recurringCounterpartyName)).toBeVisible();
       await expect(page.getByText(`7.50 ${recurringTokenSymbol}`, { exact: true })).toBeVisible();
-      await expect(page.getByText("Pending activation")).toBeVisible();
-      await expect(page.getByText("Every day")).toBeVisible();
+      await expect(page.getByText("Pending activation", { exact: true })).toBeVisible();
+      await expect(page.getByText("Every day", { exact: true })).toBeVisible();
 
       await page.getByRole("link", { name: "Back to recurring payments" }).click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
