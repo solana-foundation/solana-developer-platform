@@ -103,6 +103,24 @@ describe("operations route loading states", () => {
     expect(tabPlaceholders.match(/shrink-0/g)).toHaveLength(6);
   });
 
+  it("reserves active mobile identity geometry in the issuance-detail header", () => {
+    const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
+    const identityRows = markup.match(
+      /<div class="([^"]*)" data-loading-identity-rows="issuance-detail">/
+    );
+    const identityClasses = identityRows?.[1] ?? "";
+
+    expect(identityRows).not.toBeNull();
+    expect(identityClasses).toContain("min-h-14");
+    expect(identityClasses).toContain("flex-col");
+    expect(identityClasses).toContain("sm:min-h-6");
+    expect(identityClasses).toContain("sm:flex-row");
+    expect(markup).toContain("data-loading-address-row");
+    expect(markup).toContain('data-loading-token-id-lines="2"');
+    expect(markup).toContain("data-loading-token-id-continuation");
+    expect(markup).toContain("sm:hidden");
+  });
+
   it("preserves the responsive and sticky geometry of the final routes", () => {
     const markup = renderAllRouteLoadingStates();
 

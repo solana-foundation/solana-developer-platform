@@ -91,13 +91,18 @@ function renderHeaders(): string {
 }
 
 describe("issuance detail mobile layout", () => {
-  it("allows a full token ID to shrink and wrap in both settled headers", () => {
+  it("prefers natural token ID breakpoints before emergency wrapping in both settled headers", () => {
     const markup = renderHeaders();
+    const tokenIdValueClasses = [
+      ...markup.matchAll(/<span class="([^"]*)" data-token-id-value/g),
+    ].map((match) => match[1] ?? "");
 
     expect(markup.match(/data-testid="token-id-row"/g)).toHaveLength(2);
-    expect(markup.match(/data-token-id-value/g)).toHaveLength(2);
+    expect(tokenIdValueClasses).toHaveLength(2);
+    expect(tokenIdValueClasses.every((className) => className.includes("min-w-0"))).toBe(true);
     expect(
-      markup.match(/<span class="[^"]*min-w-0[^"]*break-all[^"]*" data-token-id-value/g)
-    ).toHaveLength(2);
+      tokenIdValueClasses.every((className) => className.includes("[overflow-wrap:anywhere]"))
+    ).toBe(true);
+    expect(tokenIdValueClasses.some((className) => className.includes("break-all"))).toBe(false);
   });
 });

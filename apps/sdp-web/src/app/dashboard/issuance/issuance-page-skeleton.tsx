@@ -192,7 +192,23 @@ export function IssuanceDetailSkeleton() {
               <SkeletonBlock className="h-7 w-28 rounded-full" />
               <SkeletonBlock className="h-7 w-32 rounded-full" />
             </div>
-            <SkeletonBlock className="mt-3 h-4 w-72 max-w-full" />
+            <div
+              className="mt-2.5 flex min-h-14 flex-col gap-1 sm:min-h-6 sm:flex-row sm:items-start sm:gap-4"
+              data-loading-identity-rows="issuance-detail"
+            >
+              <div className="shrink-0" data-loading-address-row>
+                <SkeletonBlock className="h-6 w-28" />
+              </div>
+              <div className="flex min-w-0 flex-1 items-start gap-1">
+                <div className="min-w-0 flex-1 space-y-1" data-loading-token-id-lines="2">
+                  <SkeletonBlock className="h-3 w-full max-w-72" />
+                  <div className="sm:hidden" data-loading-token-id-continuation>
+                    <SkeletonBlock className="h-3 w-28" />
+                  </div>
+                </div>
+                <SkeletonBlock className="size-6 shrink-0 rounded-md" />
+              </div>
+            </div>
           </div>
         </div>
         <div className="flex shrink-0 gap-2">

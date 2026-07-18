@@ -92,7 +92,7 @@ export function TokenManagementHeader({
                 {t("DashboardIssuance.header.tokenId")}:
               </span>
               <span
-                className="min-w-0 flex-1 break-all font-mono text-[13px] tracking-[-0.1px]"
+                className="min-w-0 flex-1 font-mono text-[13px] tracking-[-0.1px] [overflow-wrap:anywhere]"
                 data-token-id-value
               >
                 {tokenId}

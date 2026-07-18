@@ -124,7 +124,7 @@ export function AssetProfileHeader({
               className="inline-flex min-w-0 max-w-full items-center gap-1"
               data-testid="token-id-row"
             >
-              <span className="min-w-0 break-all" data-token-id-value>
+              <span className="min-w-0 [overflow-wrap:anywhere]" data-token-id-value>
                 {token.id}
               </span>
               <button
