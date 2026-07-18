@@ -99,21 +99,25 @@ export default async function RecurringPaymentDetailRoute({
       const wallets = walletsResult.data ?? [];
       const wallet =
         wallets.find((entry) => entry.walletId === recurringPayment.sourceWalletId) ?? null;
-      const counterparty = await trace.step("fetch_recurring_payment_counterparty", () =>
-        fetchCounterparty(apiClient.request, recurringPayment.counterpartyId)
-      );
+      const subscriptionId = recurringPayment.subscriptionId;
+      const [counterparty, counterpartyAccounts, collectionAttemptsResult] = await Promise.all([
+        trace.step("fetch_recurring_payment_counterparty", () =>
+          fetchCounterparty(apiClient.request, recurringPayment.counterpartyId)
+        ),
+        trace.step("fetch_recurring_payment_counterparty_accounts", () =>
+          fetchAllCounterpartyWalletAccounts(apiClient.request, recurringPayment.counterpartyId)
+        ),
+        subscriptionId
+          ? trace.step("fetch_recurring_payment_collection_attempts", () =>
+              fetchRecurringPaymentCollectionAttempts(apiClient.request, subscriptionId, t)
+            )
+          : Promise.resolve({
+              ok: true as const,
+              data: { collectionAttempts: [], total: 0 },
+            }),
+      ]);
       const counterpartyLabel =
         counterparty?.displayName ?? t("DashboardPayments.recurring.counterpartyUnavailable");
-      const counterpartyAccounts = await trace.step(
-        "fetch_recurring_payment_counterparty_accounts",
-        () => fetchAllCounterpartyWalletAccounts(apiClient.request, recurringPayment.counterpartyId)
-      );
-      const subscriptionId = recurringPayment.subscriptionId;
-      const collectionAttemptsResult = subscriptionId
-        ? await trace.step("fetch_recurring_payment_collection_attempts", () =>
-            fetchRecurringPaymentCollectionAttempts(apiClient.request, subscriptionId, t)
-          )
-        : { ok: true as const, data: { collectionAttempts: [], total: 0 } };
       const knownToken = WELL_KNOWN_TOKEN_BY_MINT.get(recurringPayment.token);
       const tokenLabel =
         knownToken?.symbol ??

@@ -12,7 +12,7 @@ const TABLE_SKELETON_IDS = [
 
 export default function DashboardLoading() {
   return (
-    <div className="w-full space-y-8 py-2">
+    <div className="w-full space-y-8 py-2" data-loading-layout="home" aria-busy="true">
       <div className="flex items-center justify-end gap-3">
         <SkeletonBlock className="h-10 w-28 rounded-[10px]" />
         <SkeletonBlock className="h-10 w-32 rounded-[10px]" />
@@ -36,8 +36,8 @@ export default function DashboardLoading() {
           <SkeletonBlock className="h-9 w-20 rounded-[10px]" />
         </div>
 
-        <div className="rounded-[20px] border border-border-default bg-white p-6">
-          <div className="space-y-3">
+        <div className="rounded-[var(--sdp-surface-radius)] bg-white py-6 shadow-sm ring-1 ring-border-default">
+          <div className="space-y-3 px-6" data-loading-table>
             {TABLE_SKELETON_IDS.map((id) => (
               <SkeletonBlock key={id} className="h-11 w-full" />
             ))}
