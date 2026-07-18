@@ -1,11 +1,12 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import {
   CounterpartyDirectorySkeleton,
   PaymentRequestsPageSkeleton,
 } from "./payments-route-skeletons";
+import { PaymentsWorkspaceTabsSkeleton } from "./payments-workspace-tabs";
 
 type CounterpartyMenuOverview = "counterparty-directory" | "payment-requests";
 
@@ -21,16 +22,29 @@ export function CounterpartyPlaygroundLoading() {
   );
 }
 
-export function CounterpartyMenuLoading({ overview }: { overview: CounterpartyMenuOverview }) {
-  const { counterpartyTab } = useDashboardWorkspace();
-
-  if (counterpartyTab === "playground") {
-    return <CounterpartyPlaygroundLoading />;
-  }
-
-  return overview === "payment-requests" ? (
-    <PaymentRequestsPageSkeleton />
-  ) : (
-    <CounterpartyDirectorySkeleton />
+export function CounterpartyMenuLoading({
+  overview,
+  targetSearch,
+}: {
+  overview: CounterpartyMenuOverview;
+  targetSearch?: string;
+}) {
+  const searchParams = useSearchParams();
+  const activeSearchParams =
+    targetSearch === undefined ? searchParams : new URLSearchParams(targetSearch);
+  const isPlaygroundTab = activeSearchParams.get("tab") === "playground";
+  return (
+    <div className="flex h-full min-h-0 w-full flex-col">
+      <PaymentsWorkspaceTabsSkeleton />
+      <div className="min-h-0 flex-1">
+        {isPlaygroundTab ? (
+          <CounterpartyPlaygroundLoading />
+        ) : overview === "payment-requests" ? (
+          <PaymentRequestsPageSkeleton />
+        ) : (
+          <CounterpartyDirectorySkeleton />
+        )}
+      </div>
+    </div>
   );
 }

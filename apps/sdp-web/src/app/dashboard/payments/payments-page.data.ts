@@ -122,11 +122,68 @@ export async function fetchPaymentsAggregate(
   }
 }
 
+function normalizePaymentTransfer(
+  transfer: Partial<PaymentTransferSummary>
+): PaymentTransferSummary {
+  const {
+    id,
+    walletId,
+    status,
+    signature,
+    type,
+    direction,
+    source,
+    destination,
+    token,
+    amount,
+    memo,
+    provider,
+    counterpartyId,
+    counterpartyDisplayName,
+    providerReference,
+    deliveryMode,
+    fiatCurrency,
+    fiatAmount,
+    settlement,
+    moneygram,
+    createdAt,
+    updatedAt,
+  } = transfer;
+
+  return Object.fromEntries(
+    Object.entries({
+      id: id ?? "",
+      walletId,
+      status: status ?? "pending",
+      signature: signature ?? null,
+      type,
+      direction,
+      source,
+      destination,
+      token,
+      amount,
+      memo,
+      provider,
+      counterpartyId,
+      counterpartyDisplayName,
+      providerReference,
+      deliveryMode,
+      fiatCurrency,
+      fiatAmount,
+      settlement,
+      moneygram,
+      createdAt,
+      updatedAt,
+    }).filter(([, value]) => value !== undefined)
+  ) as unknown as PaymentTransferSummary;
+}
+
 export async function fetchPaymentTransfers(
   request: SdpApiClient["request"],
   pageSize = 20,
   options: {
     walletId?: string;
+    includeObserved?: boolean;
   } = {}
 ): Promise<FetchResult<PaymentTransferSummary[]>> {
   try {
@@ -134,6 +191,7 @@ export async function fetchPaymentTransfers(
       page: "1",
       pageSize: String(pageSize),
       ...(options.walletId ? { wallet: options.walletId } : {}),
+      ...(options.includeObserved === false ? { includeObserved: "false" } : {}),
     }).toString();
     const response = await request(`/v1/payments/transfers?${query}`);
     if (!response.ok) {
@@ -146,38 +204,12 @@ export async function fetchPaymentTransfers(
     }
 
     const json = (await response.json()) as {
-      data?: Array<{
-        id?: string;
-        status?: string;
-        signature?: string | null;
-        type?: string;
-        direction?: string;
-        source?: string;
-        destination?: string;
-        token?: string;
-        amount?: string;
-        memo?: string;
-        createdAt?: string;
-        updatedAt?: string;
-      }>;
+      data?: Array<Partial<PaymentTransferSummary>>;
     };
 
     const transfers = (json?.data ?? [])
-      .filter((transfer): transfer is NonNullable<typeof transfer> => Boolean(transfer?.id))
-      .map((transfer) => ({
-        id: transfer.id ?? "",
-        status: transfer.status ?? "pending",
-        signature: transfer.signature ?? null,
-        ...(transfer.type ? { type: transfer.type } : {}),
-        ...(transfer.direction ? { direction: transfer.direction } : {}),
-        ...(transfer.source ? { source: transfer.source } : {}),
-        ...(transfer.destination ? { destination: transfer.destination } : {}),
-        ...(transfer.token ? { token: transfer.token } : {}),
-        ...(transfer.amount ? { amount: transfer.amount } : {}),
-        ...(transfer.memo ? { memo: transfer.memo } : {}),
-        ...(transfer.createdAt ? { createdAt: transfer.createdAt } : {}),
-        ...(transfer.updatedAt ? { updatedAt: transfer.updatedAt } : {}),
-      }));
+      .filter((transfer) => typeof transfer.id === "string")
+      .map(normalizePaymentTransfer);
 
     return { ok: true, data: transfers };
   } catch (error) {

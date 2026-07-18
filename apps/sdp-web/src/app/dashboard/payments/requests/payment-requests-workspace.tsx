@@ -10,6 +10,7 @@ import {
 } from "@sdp/types";
 import {
   BanknoteIcon,
+  ChevronRightIcon,
   ClockIcon,
   CoinsIcon,
   CopyIcon,
@@ -19,7 +20,7 @@ import {
   WalletIcon,
 } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   type ChangeEvent,
   type KeyboardEvent,
@@ -66,7 +67,9 @@ import { cn } from "@/lib/utils";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
 import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
+import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
+import { PaymentsRouteTabs } from "../payments-workspace-tabs";
 import {
   deriveTokenOptions,
   type PaymentRequestsLocalErrorCode,
@@ -462,20 +465,21 @@ export function PaymentRequestsWorkspace({
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
-  const { counterpartyTab, sdpEnvironment, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
+  const { sdpEnvironment, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
     useDashboardWorkspace();
+  const searchParams = useSearchParams();
   const tokens = useMemo(
     () => deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]),
     [sdpEnvironment]
   );
-  const isPlaygroundTab = counterpartyTab === "playground";
+  const isPlaygroundTab = searchParams.get("tab") === "playground";
   const [selected, setSelected] = useState<PaymentRequest | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const requests = initialPaymentRequests;
 
   useEffect(() => {
-    setPlaygroundApiKeys(apiKeys);
-  }, [apiKeys, setPlaygroundApiKeys]);
+    syncPlaygroundApiKeysForActiveTab(isPlaygroundTab, apiKeys, setPlaygroundApiKeys);
+  }, [apiKeys, isPlaygroundTab, setPlaygroundApiKeys]);
 
   const selectedPlaygroundApiKey = useMemo(
     () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId),
@@ -521,12 +525,18 @@ export function PaymentRequestsWorkspace({
     <>
       <DashboardWorkspaceTabShell
         isPlaygroundTab={isPlaygroundTab}
+        tabNavigation={
+          <PaymentsRouteTabs
+            basePath="/dashboard/payments/requests"
+            value={isPlaygroundTab ? "playground" : "overview"}
+          />
+        }
         overviewClassName="flex min-h-0 flex-col overflow-hidden"
         overviewKey="payment-requests-overview-tab"
         playgroundKey="payment-requests-playground-tab"
         overview={
-          <Card className="flex min-h-0 flex-1 flex-col">
-            <CardHeader>
+          <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised py-0 shadow-none ring-0">
+            <CardHeader className="p-4">
               <CardTitle>{t("DashboardPayments.requests.paymentRequests")}</CardTitle>
               <CardDescription>
                 {t("DashboardPayments.requests.paymentRequestsDescription")}
@@ -539,13 +549,13 @@ export function PaymentRequestsWorkspace({
                 </CardAction>
               )}
             </CardHeader>
-            <CardContent className="flex min-h-0 flex-1 flex-col">
+            <CardContent className="flex min-h-0 flex-1 flex-col px-0">
               {initialError || initialLocalErrorCode ? (
                 <p className="text-sm text-error">
                   {initialError ?? t("DashboardPayments.requests.loadFailed")}
                 </p>
               ) : requests.length === 0 ? (
-                <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-strong py-16 text-center">
+                <div className="flex flex-1 flex-col items-center justify-center gap-4 py-16 text-center">
                   <ReceiptTextIcon className="h-10 w-10 text-muted" />
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-primary">
@@ -561,7 +571,37 @@ export function PaymentRequestsWorkspace({
                 </div>
               ) : (
                 <div className="min-h-0 flex-1 overflow-y-auto">
-                  <Table className="[&_table]:table-fixed">
+                  <div className="divide-y divide-border-default md:hidden">
+                    {requests.map((request) => {
+                      const symbol = tokenSymbolByMint.get(request.token);
+                      return (
+                        <button
+                          key={request.id}
+                          type="button"
+                          onClick={() => setSelected(request)}
+                          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
+                        >
+                          <span className="min-w-0 flex-1 space-y-1.5">
+                            <span className="flex items-center justify-between gap-3">
+                              <StatusBadge status={request.status} />
+                              <span className="truncate text-sm font-medium text-primary">
+                                {formatDisplayAmount(
+                                  request.amount,
+                                  symbol ? symbol : shortenAddress(request.token)
+                                )}
+                              </span>
+                            </span>
+                            <span className="block truncate text-xs text-secondary">
+                              {fromLabel(request.counterpartyId)} ·{" "}
+                              {formatTimestamp(request.createdAt, t)}
+                            </span>
+                          </span>
+                          <ChevronRightIcon className="size-4 shrink-0 text-tertiary" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <Table className="hidden [&_table]:table-fixed md:block">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-[16%]">{t("DashboardPayments.status")}</TableHead>

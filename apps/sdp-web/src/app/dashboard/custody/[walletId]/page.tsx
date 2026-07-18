@@ -18,6 +18,7 @@ import { WalletActivityViewport } from "@/app/dashboard/custody/wallet-activity-
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { WalletCategoryBadge } from "@/app/dashboard/custody/wallet-category-badge";
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
+import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import {
   WalletBalanceSummarySkeleton,
@@ -29,6 +30,7 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { formatDisplayLabel } from "@/lib/utils";
@@ -183,7 +185,7 @@ export default async function WalletDetailPage({
 }: {
   params: Promise<{ walletId: string }>;
 }) {
-  const [t, { userId, orgId }, { walletId }] = await Promise.all([
+  const [t, { userId, orgId, orgRole }, { walletId }] = await Promise.all([
     getTranslations(),
     auth(),
     params,
@@ -221,6 +223,7 @@ export default async function WalletDetailPage({
   const providerLabel = provider
     ? formatCustodyProviderName(provider)
     : t("DashboardCustody.unknown");
+  const canManageCustody = resolveDashboardAccess(orgRole).capabilities.canManageCustody;
 
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
@@ -243,9 +246,20 @@ export default async function WalletDetailPage({
               <div className="flex items-start gap-4">
                 {provider ? <WalletProviderMark provider={provider} /> : null}
                 <div className="space-y-2">
-                  <h2 className="text-[36px] leading-[1.02] font-medium tracking-[-0.04em] text-primary">
-                    {wallet.label?.trim() || t("DashboardCustody.untitledWallet")}
-                  </h2>
+                  {/* biome-ignore lint/a11y/useSemanticElements: The inline editor can render a block-level input wrapper, which is invalid inside h2. */}
+                  <div
+                    role="heading"
+                    aria-level={2}
+                    aria-label={wallet.label?.trim() || t("DashboardCustody.untitledWallet")}
+                    className="max-w-full text-[36px] leading-[1.02] font-medium tracking-[-0.04em] text-primary"
+                  >
+                    <WalletLabelInlineEditor
+                      canEdit={canManageCustody}
+                      emptyLabel={t("DashboardCustody.untitledWallet")}
+                      label={wallet.label?.trim() || null}
+                      walletId={wallet.walletId}
+                    />
+                  </div>
                   <p className="text-sm text-tertiary">
                     {provider ? formatCustodyProviderName(provider) : t("DashboardCustody.wallet")}
                   </p>
