@@ -133,6 +133,10 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
           )
         )
       : Promise.resolve(null);
+    // Token 404s exit before the speculative profile request is awaited. Attach
+    // a rejection observer so that early exit remains safe even if the profile
+    // fetch wrapper gains a throwing path later.
+    void profileResultPromise.catch(() => undefined);
     const tokenResult = await trace.step("fetch_token", () =>
       fetchData<Token | null>(
         apiClient.request,

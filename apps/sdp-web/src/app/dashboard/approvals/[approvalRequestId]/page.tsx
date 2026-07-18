@@ -43,6 +43,10 @@ export default async function ApprovalRequestPage({ params }: PageContext) {
 
   const apiClient = await createSdpApiClient();
   const apiKeyNamesPromise = fetchApprovalApiKeyNames(apiClient);
+  // The primary request can exit through notFound() before this speculative
+  // lookup is awaited. Keep that early exit from leaving a rejected promise
+  // unobserved if the helper ever stops being fail-soft.
+  void apiKeyNamesPromise.catch(() => undefined);
   let approvalRequest: WalletApprovalRequestSummary;
   try {
     approvalRequest = await fetchApprovalRequest(apiClient, approvalRequestId);
