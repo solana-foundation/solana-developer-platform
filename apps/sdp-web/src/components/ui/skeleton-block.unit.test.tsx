@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { SkeletonBlock } from "./skeleton-block";
 
 describe("SkeletonBlock", () => {
-  it("disables its pulse animation when reduced motion is requested", () => {
+  it("includes the reduced-motion animation override in rendered markup", () => {
     const markup = renderToStaticMarkup(<SkeletonBlock />);
 
     expect(markup).toContain("animate-pulse");
