@@ -20,7 +20,7 @@ const POLICY_CELL_SKELETON_IDS = ["status", "default-action", "rules", "bindings
 
 export function PoliciesPageSkeleton() {
   return (
-    <div className="h-full min-h-0 overflow-hidden px-3 pt-5 pb-6 md:px-6">
+    <div aria-busy="true" className="h-full min-h-0 overflow-hidden px-3 pt-5 pb-6 md:px-6">
       <div className="h-full overflow-hidden rounded-lg border border-border-default bg-white">
         <div className="border-b border-border-default px-4 py-3">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between xl:gap-6">
