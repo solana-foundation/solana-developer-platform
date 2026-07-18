@@ -1,11 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { fetchProviderAvailability } from "@/lib/provider-availability";
-import { createOrgSdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
-import type { OnboardingStatusResponse } from "../../onboarding-status";
-import { fetchCounterparties } from "../counterparty/counterparty-page.data";
-import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
+import { loadPaymentsActionPageData } from "../ramps/payments-action-page.server";
 import { PaymentsActionPage } from "../ramps/ramp-action-page";
 
 export default async function PaymentsPayPage() {
@@ -17,37 +13,6 @@ export default async function PaymentsPayPage() {
     redirect("/dashboard");
   }
 
-  const orgClient = await createOrgSdpApiClient();
-  const apiClient = await createSdpApiClient();
-  const [issuedTokenSymbolsResult, onboardingStatus, counterpartiesResult] = await Promise.all([
-    fetchPaymentsIssuedTokenSymbols(apiClient.request),
-    orgClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status").catch(
-      () =>
-        ({
-          linked: false,
-          organization: null,
-        }) satisfies OnboardingStatusResponse
-    ),
-    fetchCounterparties(apiClient.request),
-  ]);
-  const issuedTokenSymbolsByMint = Object.fromEntries(
-    (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
-  );
-  const providerAccess =
-    onboardingStatus.organization &&
-    (await fetchProviderAvailability(orgClient.request, onboardingStatus.organization.id).catch(
-      () => null
-    ));
-
-  return (
-    <PaymentsActionPage
-      mode="send"
-      wallets={[]}
-      walletsError={null}
-      issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
-      enabledComplianceProviders={providerAccess?.enabledComplianceProviders ?? []}
-      rampProviderAccess={providerAccess ? providerAccess.rampProviderAccess : null}
-      counterpartiesResult={counterpartiesResult}
-    />
-  );
+  const actionPageData = await loadPaymentsActionPageData();
+  return <PaymentsActionPage mode="send" wallets={[]} walletsError={null} {...actionPageData} />;
 }

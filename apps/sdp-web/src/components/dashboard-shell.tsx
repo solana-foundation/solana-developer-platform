@@ -196,6 +196,33 @@ function SidebarToggle({
   );
 }
 
+export function CenteredDashboardTopBar({
+  leadingContent,
+  title,
+  trailingContent,
+}: {
+  leadingContent: ReactNode;
+  title: string;
+  trailingContent: ReactNode;
+}) {
+  return (
+    <div
+      className="grid min-h-[40px] min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[1fr_auto_1fr]"
+      data-dashboard-centered-topbar
+    >
+      <div className="flex min-w-0 items-center gap-3">{leadingContent}</div>
+      <div className="col-span-2 row-start-2 flex min-w-0 items-start justify-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
+        <h1 className="min-w-0 max-w-full text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
+          {title}
+        </h1>
+      </div>
+      <div className="col-start-2 row-start-1 flex min-w-0 items-center justify-end gap-2 sm:col-start-3">
+        {trailingContent}
+      </div>
+    </div>
+  );
+}
+
 function DashboardTopBar({
   isMobileSidebarOpen,
   setMobileSidebarOpen,
@@ -216,25 +243,25 @@ function DashboardTopBar({
 
   if (centeredTitle) {
     return (
-      <div className="grid min-h-[40px] grid-cols-[1fr_auto_1fr] items-start gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <SidebarToggle
-            isMobileSidebarOpen={isMobileSidebarOpen}
-            setMobileSidebarOpen={setMobileSidebarOpen}
-          />
-          {topBarLeadingContent}
-        </div>
-        <div className="flex items-start justify-center">
-          <h1 className="text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
-            {centeredTitle}
-          </h1>
-        </div>
-        <div className="flex items-center justify-end gap-2">
-          <LanguagePicker />
-          <UserButton />
-          {sandboxBadge}
-        </div>
-      </div>
+      <CenteredDashboardTopBar
+        title={centeredTitle}
+        leadingContent={
+          <>
+            <SidebarToggle
+              isMobileSidebarOpen={isMobileSidebarOpen}
+              setMobileSidebarOpen={setMobileSidebarOpen}
+            />
+            {topBarLeadingContent}
+          </>
+        }
+        trailingContent={
+          <>
+            <LanguagePicker />
+            <UserButton />
+            {sandboxBadge}
+          </>
+        }
+      />
     );
   }
 
