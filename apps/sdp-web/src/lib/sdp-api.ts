@@ -3,7 +3,6 @@ import type { ListProjectsResponse, Project } from "@sdp/types";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
-import { resolveDashboardProjectSelection } from "./dashboard-project-selection";
 import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
 import {
   createTimedTrace,
@@ -211,18 +210,15 @@ export function createTokenSdpApiClient(token: string): SdpApiClient {
 }
 
 /**
- * Creates a project-scoped SDP API client. When the project cookie is missing,
- * it reuses the request's project bootstrap to select the sandbox in memory.
- * Org-scoped endpoints go through `createOrgSdpApiClient` instead.
+ * Creates a project-scoped SDP API client. Throws when the project cookie is
+ * missing; project selection is established by the dashboard proxy before
+ * rendering. Org-scoped endpoints go through `createOrgSdpApiClient` instead.
  */
 export async function createSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
-  const [token, cookieProjectId] = await Promise.all([
+  const [token, projectId] = await Promise.all([
     getRequestClerkToken(),
     getRequestSelectedProjectId(),
   ]);
-  const projectId =
-    cookieProjectId ??
-    resolveDashboardProjectSelection(await getRequestProjects(), cookieProjectId).selectedProjectId;
   if (!projectId) {
     throw new Error("Selected project required");
   }

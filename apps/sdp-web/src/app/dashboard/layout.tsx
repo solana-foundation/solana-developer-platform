@@ -12,11 +12,11 @@ import { resolveDashboardProjectSelection } from "@/lib/dashboard-project-select
 import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
 import { getSdpAuth, listSdpProjects } from "@/lib/sdp-api";
 
-async function loadProjects(): Promise<Project[]> {
+async function loadProjects(): Promise<Project[] | null> {
   try {
     return await listSdpProjects();
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -33,9 +33,12 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     userId,
   } satisfies DashboardCacheScope;
 
-  const [projects, cookieStore] = await Promise.all([loadProjects(), cookies()]);
+  const [loadedProjects, cookieStore] = await Promise.all([loadProjects(), cookies()]);
+  const projects = loadedProjects ?? [];
   const cookieProjectId = cookieStore.get(PROJECT_COOKIE_NAME)?.value ?? null;
-  const projectSelection = resolveDashboardProjectSelection(projects, cookieProjectId);
+  const projectSelection = resolveDashboardProjectSelection(projects, cookieProjectId, {
+    projectListIsAuthoritative: loadedProjects !== null,
+  });
 
   return (
     <DashboardWorkspaceProvider

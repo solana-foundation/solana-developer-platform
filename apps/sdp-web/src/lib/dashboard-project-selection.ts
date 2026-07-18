@@ -5,6 +5,10 @@ export interface DashboardProjectSelection {
   shouldRepairCookie: boolean;
 }
 
+interface DashboardProjectSelectionOptions {
+  projectListIsAuthoritative: boolean;
+}
+
 /**
  * Resolves the selected dashboard project without mutating request state.
  * Missing cookies use the sandbox in memory (the proxy normally bootstraps
@@ -12,7 +16,8 @@ export interface DashboardProjectSelection {
  */
 export function resolveDashboardProjectSelection(
   projects: Project[],
-  cookieProjectId: string | null | undefined
+  cookieProjectId: string | null | undefined,
+  { projectListIsAuthoritative }: DashboardProjectSelectionOptions
 ): DashboardProjectSelection {
   const cookieProject = cookieProjectId
     ? projects.find((project) => project.id === cookieProjectId)
@@ -21,6 +26,6 @@ export function resolveDashboardProjectSelection(
 
   return {
     selectedProjectId: cookieProject?.id ?? fallbackProject?.id ?? null,
-    shouldRepairCookie: Boolean(cookieProjectId && !cookieProject),
+    shouldRepairCookie: projectListIsAuthoritative && Boolean(cookieProjectId && !cookieProject),
   };
 }
