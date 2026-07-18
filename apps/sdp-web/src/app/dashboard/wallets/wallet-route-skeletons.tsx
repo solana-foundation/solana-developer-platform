@@ -117,7 +117,7 @@ export function WalletSetupSkeleton() {
           <Pulse className="h-9 w-56" />
         </div>
         <div className="grid gap-4">
-          {THREE_ITEMS.map((provider) => (
+          {FIVE_ITEMS.map((provider) => (
             <div
               key={provider}
               className="w-full rounded-2xl border border-border-default bg-surface-raised px-5 py-5"

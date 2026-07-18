@@ -191,7 +191,6 @@ test.describe
       browser,
       page,
     }) => {
-      test.setTimeout(420_000);
       const session = await getPlaywrightAdminSession(browser);
       const walletLabel = `Wallet Routes ${Date.now().toString(36).toUpperCase()}`;
       const fixtures = await bootstrapLocalWalletFixtures({
