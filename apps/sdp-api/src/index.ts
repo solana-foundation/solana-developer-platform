@@ -10,10 +10,7 @@
 import { createApp } from "@/app";
 import { runPendingTransfersReconciliation } from "@/cron/pending-transfers";
 import { runRecurringPaymentsCollection } from "@/cron/recurring-payments";
-import {
-  isRecurringPaymentCollectionEnabled,
-  isRecurringPaymentsEnabled,
-} from "@/lib/feature-flags";
+import { isRecurringPaymentCollectionEnabled } from "@/lib/feature-flags";
 import { withProcessEnvFallback } from "@/lib/runtime-env";
 import { WorkersBackgroundRunner } from "@/runtime/background-cf";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
@@ -39,7 +36,7 @@ const worker = {
       bg,
       observability,
     });
-    if (isRecurringPaymentsEnabled(runtimeEnv) && isRecurringPaymentCollectionEnabled(runtimeEnv)) {
+    if (isRecurringPaymentCollectionEnabled(runtimeEnv)) {
       runRecurringPaymentsCollection({
         env: runtimeEnv,
         bg,
