@@ -17,10 +17,13 @@ import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 type SetupStep = "provider" | "details";
+
+const SETUP_STEPS = ["provider", "details"] as const satisfies readonly SetupStep[];
 
 interface WalletSetupFlowProps {
   connectedProviders: KnownCustodyProvider[];
@@ -203,16 +206,18 @@ export function WalletSetupFlow({
 
   if (enabledProviderEntries.length === 0) {
     return (
-      <div className="mx-auto max-w-3xl rounded-lg border border-border-default bg-white p-6">
-        <p className="text-lg font-medium text-primary">
-          {t("DashboardCustody.noWalletProvidersEnabled")}
-        </p>
-        <p className="mt-2 text-sm leading-6 text-secondary">
-          {t("DashboardCustody.walletCreationAvailable")}
-        </p>
-        <Button asChild variant="secondary" className="mt-5">
-          <Link href="/dashboard/wallets">{t("DashboardCustody.backToWallets")}</Link>
-        </Button>
+      <div className="h-full overflow-y-auto px-4 py-6 md:px-6">
+        <div className="mx-auto max-w-3xl rounded-lg border border-border-default bg-white p-6">
+          <p className="text-lg font-medium text-primary">
+            {t("DashboardCustody.noWalletProvidersEnabled")}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-secondary">
+            {t("DashboardCustody.walletCreationAvailable")}
+          </p>
+          <Button asChild variant="secondary" className="mt-5">
+            <Link href="/dashboard/wallets">{t("DashboardCustody.backToWallets")}</Link>
+          </Button>
+        </div>
       </div>
     );
   }
@@ -222,6 +227,7 @@ export function WalletSetupFlow({
       ? t("DashboardCustody.chooseProvider")
       : t("DashboardCustody.walletDetails");
   const canContinue = Boolean(selectedProviderEntry);
+  const stepIndex = SETUP_STEPS.indexOf(currentStep);
 
   const formContent = (
     <>
@@ -270,86 +276,86 @@ export function WalletSetupFlow({
     </>
   );
 
-  if (currentStep === "provider") {
-    return (
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-6">
-        <div className="mx-auto w-full max-w-3xl space-y-6">
-          <div className="text-center">
-            <p className="text-[28px] leading-tight font-medium text-primary">{heading}</p>
-          </div>
-
-          <ProviderStep
-            connectedProviders={connectedProviders}
-            onSelect={(provider) => {
-              setSelectedProvider(provider);
-              setErrorMessage(null);
-            }}
-            providers={enabledProviderEntries}
-            selectedProvider={selectedProvider}
+  return (
+    <div className="flex h-full min-h-0 flex-col" data-wallet-setup-flow="true">
+      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6">
+        <div className="mx-auto w-full max-w-3xl">
+          <WizardStepProgress
+            data-wallet-setup-stepper="true"
+            currentStep={stepIndex}
+            progressLabel={t("DashboardCustody.stepOf", {
+              current: stepIndex + 1,
+              total: SETUP_STEPS.length,
+            })}
+            steps={SETUP_STEPS}
           />
         </div>
-
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:flex-row sm:justify-between">
-          <Button
-            type="button"
-            variant="secondary"
-            className="h-14 rounded-full text-base"
-            onClick={goBack}
-            iconLeft={<ArrowLeft className="h-4 w-4" />}
-          >
-            {t("DashboardCustody.previous")}
-          </Button>
-          <Button
-            type="button"
-            className="h-14 rounded-full text-base"
-            onClick={continueFromProvider}
-            disabled={!canContinue}
-            iconRight={<ArrowRight className="h-4 w-4" />}
-          >
-            {t("DashboardCustody.continue")}
-          </Button>
-        </div>
       </div>
-    );
-  }
 
-  if (currentStep === "details") {
-    return (
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-6">
-        <div className="mx-auto w-full max-w-3xl space-y-6">
-          <div className="text-center">
-            <p className="text-[28px] leading-tight font-medium text-primary">{heading}</p>
+      <div
+        className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6"
+        data-wallet-setup-scroll-region="true"
+      >
+        <div className="mx-auto w-full max-w-3xl pb-8">
+          <div className="space-y-6">
+            <h2 className="text-2xl font-medium tracking-tight text-primary">{heading}</h2>
+
+            {currentStep === "provider" ? (
+              <ProviderStep
+                connectedProviders={connectedProviders}
+                onSelect={(provider) => {
+                  setSelectedProvider(provider);
+                  setErrorMessage(null);
+                }}
+                providers={enabledProviderEntries}
+                selectedProvider={selectedProvider}
+              />
+            ) : (
+              <form id="wallet-details-form" onSubmit={handleSubmit} className="grid gap-4">
+                {formContent}
+              </form>
+            )}
           </div>
-
-          <form id="wallet-details-form" onSubmit={handleSubmit} className="grid gap-4">
-            {formContent}
-          </form>
         </div>
+      </div>
 
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:flex-row sm:justify-between">
+      <footer
+        className="shrink-0 border-t border-border-default bg-white/95 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
+        data-wallet-setup-actions="true"
+      >
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
           <Button
             type="button"
             variant="secondary"
-            className="h-14 rounded-full text-base"
             onClick={goBack}
-            iconLeft={<ArrowLeft className="h-4 w-4" />}
+            disabled={isPending}
+            iconLeft={currentStep === "details" ? <ArrowLeft className="size-4" /> : undefined}
           >
-            {t("DashboardCustody.previous")}
+            {currentStep === "provider" ? t("DashboardCustody.cancel") : t("DashboardCustody.back")}
           </Button>
-          <Button
-            type="button"
-            className="h-14 rounded-full text-base"
-            disabled={!canProvisionWallet || isPending}
-            onClick={handleCreateWallet}
-          >
-            {isPending
-              ? t("DashboardCustody.createWalletPending")
-              : t("DashboardCustody.createWallet")}
-          </Button>
-        </div>
-      </div>
-    );
-  }
 
-  return null;
+          {currentStep === "provider" ? (
+            <Button
+              type="button"
+              onClick={continueFromProvider}
+              disabled={!canContinue}
+              iconRight={<ArrowRight className="size-4" />}
+            >
+              {t("DashboardCustody.next")}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              disabled={!canProvisionWallet || isPending}
+              onClick={handleCreateWallet}
+            >
+              {isPending
+                ? t("DashboardCustody.createWalletPending")
+                : t("DashboardCustody.createWallet")}
+            </Button>
+          )}
+        </div>
+      </footer>
+    </div>
+  );
 }

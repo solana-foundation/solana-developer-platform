@@ -833,6 +833,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     (pathname.startsWith("/dashboard/custody/") &&
       pathname !== "/dashboard/custody/setup" &&
       pathname !== "/dashboard/custody/switch");
+  const isWalletSetupRoute =
+    pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup";
   const shouldUseWorkspaceViewport =
     pathname === "/dashboard/issuance" ||
     pathname === "/dashboard/issuance/create" ||
@@ -842,6 +844,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     pathname === "/dashboard/payments" ||
     pathname === "/dashboard/wallets" ||
     pathname === "/dashboard/custody" ||
+    isWalletSetupRoute ||
     pathname === "/dashboard/payments/counterparty" ||
     (pathname.startsWith("/dashboard/payments/counterparty/") &&
       pathname !== "/dashboard/payments/counterparty/create") ||
