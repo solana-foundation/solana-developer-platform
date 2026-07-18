@@ -1,6 +1,7 @@
 import { isAddress } from "@sdp/solana/address";
 import { COUNTERPARTY_ACCOUNT_KINDS } from "@sdp/types";
 import { z } from "zod";
+import { queryBooleanSchema } from "@/routes/common-schemas";
 
 export const counterpartyAccountKindSchema = z.enum(COUNTERPARTY_ACCOUNT_KINDS);
 
@@ -65,6 +66,6 @@ export const counterpartyAccountListParamsSchema = z.object({
 export const listCounterpartyAccountsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  includeArchived: z.coerce.boolean().default(false),
+  includeArchived: queryBooleanSchema.default(false),
   accountKind: counterpartyAccountKindSchema.optional(),
 });

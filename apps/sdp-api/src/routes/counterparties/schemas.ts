@@ -4,6 +4,7 @@ import {
   COUNTRY_CODES,
 } from "@sdp/types";
 import { z } from "zod";
+import { queryBooleanSchema } from "@/routes/common-schemas";
 import { rampCurrencyCodeSchema, rampFiatCurrencySchema } from "@/routes/payments/schemas";
 
 const countryCodeSchema = z.enum(COUNTRY_CODES);
@@ -102,7 +103,7 @@ export const updateCounterpartySchema = updateCounterpartyObjectSchema.refine(
 export const listCounterpartiesQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  includeArchived: z.coerce.boolean().default(false),
+  includeArchived: queryBooleanSchema.default(false),
 });
 
 export const listCounterpartyAccountsQuerySchema = z.object({

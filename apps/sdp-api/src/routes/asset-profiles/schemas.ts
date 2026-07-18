@@ -1,5 +1,6 @@
 import { ASSET_CATEGORIES, isAssetTypeSupported } from "@sdp/types";
 import { z } from "zod";
+import { queryBooleanSchema } from "@/routes/common-schemas";
 
 // Free-form JSON object (a namespace bucket inside issuance metadata). Mirrors
 // the JSONB columns' `jsonb_typeof(...) = 'object'` DB constraint.
@@ -89,6 +90,6 @@ export const updateAssetProfileSchema = updateAssetProfileObjectSchema
 export const listAssetProfilesQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  includeArchived: z.coerce.boolean().default(false),
+  includeArchived: queryBooleanSchema.default(false),
   category: assetCategorySchema.optional(),
 });

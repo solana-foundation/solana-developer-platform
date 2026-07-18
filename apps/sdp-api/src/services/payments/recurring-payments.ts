@@ -3696,6 +3696,25 @@ export async function cancelRecurringPayment(input: {
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
 }): Promise<PaymentRecurringPaymentRow> {
+  if (input.recurringPayment.status === "pending_activation") {
+    const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
+    const nowIso = new Date().toISOString();
+    const updated = await recurringRepo.updateRecurringPaymentLifecycle({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      status: "canceled",
+      expectedStatus: "pending_activation",
+      updatedAt: nowIso,
+    });
+    if (!updated) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment status changed before it could be canceled"
+      );
+    }
+    return updated;
+  }
   return runRecurringPaymentLifecycle({ ...input, operation: "cancel" });
 }
 

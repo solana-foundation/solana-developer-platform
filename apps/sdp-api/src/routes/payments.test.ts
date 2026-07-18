@@ -1749,6 +1749,35 @@ describe("Payments routes", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(3);
   });
 
+  it("cancels pending_activation recurring payments directly without on-chain tx", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPaymentId = await createRecurringPaymentForActivation(headers);
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(cancelRes.status).toBe(200);
+    const cancelBody = (await cancelRes.json()) as {
+      data: { recurringPayment: { id: string; status: string } };
+    };
+    expect(cancelBody.data.recurringPayment).toMatchObject({
+      id: recurringPaymentId,
+      status: "canceled",
+    });
+
+    const dbRow = await getDb(env)
+      .prepare("SELECT status FROM payment_recurring_payments WHERE id = ?")
+      .bind(recurringPaymentId)
+      .first<{ status: string }>();
+    expect(dbRow?.status).toBe("canceled");
+  });
+
   it("resumes canceled recurring payments through SDP API routes", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
