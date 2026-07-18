@@ -187,6 +187,150 @@ test.describe
       await expect(walletCard.getByRole("link", { name: "Manage" })).toBeVisible();
     });
 
+    test("wallet and custody routes preserve navigation through controls and history", async ({
+      browser,
+      page,
+    }) => {
+      test.setTimeout(420_000);
+      const session = await getPlaywrightAdminSession(browser);
+      const walletLabel = `Wallet Routes ${Date.now().toString(36).toUpperCase()}`;
+      const fixtures = await bootstrapLocalWalletFixtures({
+        identity: session.identity,
+        bearerToken: session.getBearerToken,
+        provider: "privy",
+        walletCount: 1,
+        walletLabel,
+        tier: "enterprise",
+      });
+      const projectId = await resolvePlaywrightProjectId(
+        getBootstrapApiBaseUrl(),
+        session.getBearerToken
+      );
+      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
+      const wallet = fixtures.wallets[0];
+      if (!wallet) {
+        throw new Error("Failed to bootstrap wallet route fixture");
+      }
+
+      await api.put(`/v1/payments/wallets/${encodeURIComponent(wallet.walletId)}/policies`, {
+        destinationAllowlist: [],
+        maxTransferAmount: "25",
+      });
+      await session.page.close();
+      await seedProjectCookie(page, projectId);
+
+      const encodedWalletId = encodeURIComponent(wallet.walletId);
+      const walletHref = `/dashboard/wallets/${encodedWalletId}`;
+      const custodyHref = `/dashboard/custody/${encodedWalletId}`;
+      const policyHref = `${walletHref}/policy`;
+      const auditHref = `${policyHref}/audit`;
+      const revisionsHref = `${policyHref}/revisions`;
+
+      await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
+      await expect(page.locator("[data-wallet-panel]").first()).toHaveAttribute(
+        "data-wallet-panel",
+        "overview",
+        {
+          timeout: E2E_POLL_TIMEOUT_MS,
+        }
+      );
+      await page.evaluate(() => {
+        const root = document.querySelector("[data-wallet-root]");
+        if (!root) {
+          throw new Error("Wallet workspace root did not render");
+        }
+
+        const state = { sawBlankPanel: false };
+        const sample = () => {
+          if (!root.querySelector("[data-wallet-panel]")) {
+            state.sawBlankPanel = true;
+          }
+        };
+        const observer = new MutationObserver(sample);
+        observer.observe(root, { childList: true, subtree: true });
+        Object.assign(window, { __walletWorkspacePanelMonitor: { observer, state } });
+      });
+
+      await page.getByRole("tab", { name: /API playground/i }).click();
+      await expect(page.locator("[data-wallet-panel]").first()).toHaveAttribute(
+        "data-wallet-panel",
+        "playground-ready",
+        { timeout: E2E_POLL_TIMEOUT_MS }
+      );
+      const sawBlankPlaygroundPanel = await page.evaluate(() => {
+        const monitor = (
+          window as unknown as {
+            __walletWorkspacePanelMonitor?: {
+              observer: MutationObserver;
+              state: { sawBlankPanel: boolean };
+            };
+          }
+        ).__walletWorkspacePanelMonitor;
+        monitor?.observer.disconnect();
+        return monitor?.state.sawBlankPanel ?? true;
+      });
+      expect(sawBlankPlaygroundPanel).toBe(false);
+
+      await page.getByRole("tab", { name: "Overview" }).click();
+      await expect(page.locator("[data-wallet-panel]").first()).toHaveAttribute(
+        "data-wallet-panel",
+        "overview"
+      );
+      const walletCard = page.locator("article").filter({ hasText: walletLabel }).first();
+      await walletCard.getByRole("link", { name: "Manage" }).click();
+      await expect(page).toHaveURL(new RegExp(`${walletHref.replaceAll("/", "\\/")}$`));
+      await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+
+      await page.goto(custodyHref, { waitUntil: "domcontentloaded" });
+      await expect(page).toHaveURL(new RegExp(`${custodyHref.replaceAll("/", "\\/")}$`));
+      await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+
+      await page.goto(policyHref, { waitUntil: "domcontentloaded" });
+      await expect(page.locator(`a[href="${auditHref}"]`)).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+      await expect(page.locator(`a[href="${revisionsHref}"]`)).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+
+      await page.locator(`a[href="${auditHref}"]`).click();
+      await expect(page).toHaveURL(new RegExp(`${auditHref.replaceAll("/", "\\/")}$`));
+      await expect(page.locator(`a[href="${revisionsHref}"]`)).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+
+      await page.locator(`a[href="${revisionsHref}"]`).click();
+      await expect(page).toHaveURL(new RegExp(`${revisionsHref.replaceAll("/", "\\/")}$`));
+      await expect(page.locator(`a[href="${auditHref}"]`)).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+
+      await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "Previous" })).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+      await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
+
+      await page.goto("/dashboard/wallets/setup?provider=privy", {
+        waitUntil: "domcontentloaded",
+      });
+      await expect(page.getByLabel("Wallet label")).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+
+      for (const switchHref of ["/dashboard/wallets/switch", "/dashboard/custody/switch"]) {
+        await page.goto(switchHref, { waitUntil: "domcontentloaded" });
+        await expect(page).toHaveURL(/\/dashboard\/wallets\/setup$/);
+        await expect(page.getByRole("button", { name: "Previous" })).toBeVisible({
+          timeout: E2E_POLL_TIMEOUT_MS,
+        });
+      }
+    });
+
     // ponytail: quarantined until Surfpool signing stops intermittently hanging in CI.
     test.skip("wallet activity shows a real burn row after API burn flow", async ({
       browser,

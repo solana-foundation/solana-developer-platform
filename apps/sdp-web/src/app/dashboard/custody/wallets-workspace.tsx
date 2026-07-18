@@ -14,7 +14,11 @@ import { WalletsOverview } from "./wallets-overview";
 const WalletsPlayground = dynamic(
   () => import("./wallets-playground").then((module) => module.WalletsPlayground),
   {
-    loading: () => <ApiPlaygroundShellSkeleton />,
+    loading: () => (
+      <div aria-busy="true" className="contents" data-wallet-panel="playground-pending">
+        <ApiPlaygroundShellSkeleton />
+      </div>
+    ),
   }
 );
 
@@ -101,20 +105,22 @@ export function WalletsWorkspace({
   };
 
   return (
-    <div className="h-full min-h-0 w-full">
+    <div className="h-full min-h-0 w-full" data-wallet-root>
       <DashboardWorkspaceTabShell
         disableOverviewInitialAnimation
         isPlaygroundTab={isPlaygroundTab}
         overviewClassName="space-y-6"
         overview={
-          <WalletsOverview
-            enabledProviders={enabledProviders}
-            configsError={configsError}
-            wallets={wallets}
-            walletsError={walletsError}
-            canManageCustody={dashboardAccess.capabilities.canManageCustody}
-            onCreateWallet={openWalletSetup}
-          />
+          <div className="contents" data-wallet-panel="overview">
+            <WalletsOverview
+              enabledProviders={enabledProviders}
+              configsError={configsError}
+              wallets={wallets}
+              walletsError={walletsError}
+              canManageCustody={dashboardAccess.capabilities.canManageCustody}
+              onCreateWallet={openWalletSetup}
+            />
+          </div>
         }
         playground={
           <WalletsPlayground

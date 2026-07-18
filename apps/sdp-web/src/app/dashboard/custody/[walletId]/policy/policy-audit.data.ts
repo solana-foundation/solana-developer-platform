@@ -65,6 +65,8 @@ export interface PolicyAuditContext {
   apiKeyNames: Record<string, string>;
 }
 
+export type PolicyRevisionContext = Pick<PolicyAuditContext, "wallet" | "revisionHistory">;
+
 export interface PolicyAuditNeighbor {
   id: string;
   page: number;
@@ -361,12 +363,22 @@ export async function fetchPolicyAuditContext(
   request: SdpApiClient["request"],
   walletId: string
 ): Promise<PolicyAuditContext> {
-  const [wallet, revisionHistory, apiKeyNames] = await Promise.all([
-    fetchWallet(request, walletId),
-    fetchRevisionHistory(request, walletId),
+  const [revisionContext, apiKeyNames] = await Promise.all([
+    fetchPolicyRevisionContext(request, walletId),
     fetchApiKeyNames(request),
   ]);
-  return { wallet, revisionHistory, apiKeyNames };
+  return { ...revisionContext, apiKeyNames };
+}
+
+export async function fetchPolicyRevisionContext(
+  request: SdpApiClient["request"],
+  walletId: string
+): Promise<PolicyRevisionContext> {
+  const [wallet, revisionHistory] = await Promise.all([
+    fetchWallet(request, walletId),
+    fetchRevisionHistory(request, walletId),
+  ]);
+  return { wallet, revisionHistory };
 }
 
 export async function fetchPolicyEvaluation(
