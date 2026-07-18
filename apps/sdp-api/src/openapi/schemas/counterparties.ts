@@ -391,27 +391,6 @@ export const listCounterpartyAccountsResponseSchema = withOpenApi(
   { description: "Paginated list of counterparty accounts." }
 );
 
-export const listCounterpartiesResponseSchema = withOpenApi(
-  z.object({
-    counterparties: withOpenApi(z.array(counterpartySchema), {
-      description: "Counterparties.",
-    }),
-    total: withOpenApi(z.number().int().nonnegative(), {
-      description: "Total counterparties matching the query.",
-      example: 42,
-    }),
-    page: withOpenApi(z.number().int().positive(), {
-      description: "Current page number.",
-      example: 1,
-    }),
-    pageSize: withOpenApi(z.number().int().positive(), {
-      description: "Items per page.",
-      example: 20,
-    }),
-  }),
-  { description: "Paginated list of counterparties." }
-);
-
 const countrySchema = withOpenApi(
   z.object({
     code: withOpenApi(z.string(), { description: "ISO 3166-1 alpha-2 code.", example: "US" }),

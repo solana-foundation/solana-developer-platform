@@ -257,11 +257,9 @@ describe("Custody wallet scope routes", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      data: {
-        wallets: Array<{ walletId: string }>;
-      };
+      data: Array<{ walletId: string }>;
     };
-    expect(body.data.wallets.map((wallet) => wallet.walletId)).toEqual(["para_wallet_a"]);
+    expect(body.data.map((wallet) => wallet.walletId)).toEqual(["para_wallet_a"]);
   });
 
   it("excludes bound wallets that lack wallets:read from the summary view", async () => {
@@ -282,11 +280,9 @@ describe("Custody wallet scope routes", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      data: {
-        wallets: Array<{ walletId: string }>;
-      };
+      data: Array<{ walletId: string }>;
     };
-    expect(body.data.wallets).toEqual([]);
+    expect(body.data).toEqual([]);
   });
 
   it("returns summary wallets without hydrating balances", async () => {
@@ -303,15 +299,58 @@ describe("Custody wallet scope routes", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      data: {
-        wallets: Array<{ walletId: string; balances?: unknown[] }>;
-      };
+      data: Array<{ walletId: string; balances?: unknown[] }>;
     };
 
-    expect(body.data.wallets).toHaveLength(3);
-    expect(body.data.wallets.every((wallet) => wallet.balances === undefined)).toBe(true);
+    expect(body.data).toHaveLength(3);
+    expect(body.data.every((wallet) => wallet.balances === undefined)).toBe(true);
     expect(getAccountInfoMock).not.toHaveBeenCalled();
     expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
+  });
+
+  it("paginates listed wallets and reports the full total across pages", async () => {
+    const page1 = await app.request(
+      "/v1/wallets?includeAllProviders=true&view=summary&pageSize=2&page=1",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(page1.status).toBe(200);
+    const page1Body = (await page1.json()) as {
+      data: Array<{ walletId: string }>;
+      meta: { total: number; page: number; pageSize: number; hasMore: boolean };
+    };
+    expect(page1Body.data).toHaveLength(2);
+    expect(page1Body.meta).toMatchObject({ total: 3, page: 1, pageSize: 2, hasMore: true });
+
+    const page2 = await app.request(
+      "/v1/wallets?includeAllProviders=true&view=summary&pageSize=2&page=2",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(page2.status).toBe(200);
+    const page2Body = (await page2.json()) as {
+      data: Array<{ walletId: string }>;
+      meta: { total: number; page: number; pageSize: number; hasMore: boolean };
+    };
+    expect(page2Body.data).toHaveLength(1);
+    expect(page2Body.meta).toMatchObject({ total: 3, page: 2, pageSize: 2, hasMore: false });
+
+    const allWalletIds = [...page1Body.data, ...page2Body.data].map((wallet) => wallet.walletId);
+    expect(new Set(allWalletIds)).toEqual(
+      new Set(["privy_wallet_a", "privy_wallet_b", "para_wallet_a"])
+    );
   });
 
   it("filters aggregate wallets to the API key bindings", async () => {

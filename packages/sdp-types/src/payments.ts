@@ -23,9 +23,7 @@ export interface PaymentsDashboardWallet {
 }
 
 export interface PaymentsDashboardWalletsEnvelope {
-  data?: {
-    wallets?: PaymentsDashboardWallet[];
-  };
+  data?: PaymentsDashboardWallet[];
   error?: {
     message?: string;
   };
@@ -312,20 +310,6 @@ export interface CounterpartyAccountSummary {
   name: string;
   address: string;
   label: string | null;
-}
-
-export interface ListProjectCounterpartyAccountsResponse {
-  accounts: CounterpartyAccountSummary[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-export interface ListProjectCounterpartyAccountsEnvelope {
-  data?: ListProjectCounterpartyAccountsResponse;
-  error?: {
-    message?: string;
-  };
 }
 
 export interface PaymentTransferBatchEstimate {

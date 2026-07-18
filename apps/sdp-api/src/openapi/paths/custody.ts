@@ -8,6 +8,7 @@ import {
   errorResponseSchema,
   initializeSigningRequestSchema,
   initializeSigningResponseSchema,
+  listWalletsQuerySchema,
   orgCustodyProviderSchema,
   setDefaultWalletRequestSchema,
   setDefaultWalletResponseSchema,
@@ -210,6 +211,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         includeAllProviders: z.boolean().optional(),
         includeBalances: z.boolean().optional(),
         view: z.enum(["summary"]).optional(),
+        page: listWalletsQuerySchema.shape.page,
+        pageSize: listWalletsQuerySchema.shape.pageSize,
       }),
     },
     responses: {
@@ -217,7 +220,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallets",
         content: jsonContent(custodyWalletsResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
     },
   });
 

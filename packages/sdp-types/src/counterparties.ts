@@ -170,13 +170,6 @@ export interface CounterpartyFieldOptionsResponse {
   fields: CounterpartyFieldOptions;
 }
 
-export interface ListCounterpartiesResponse {
-  counterparties: Counterparty[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
 export const COUNTERPARTY_ACCOUNT_KINDS = ["bank_account", "crypto_wallet"] as const;
 export type CounterpartyAccountKind = (typeof COUNTERPARTY_ACCOUNT_KINDS)[number];
 

@@ -3544,7 +3544,7 @@ Now confirm the setup by listing the wallets bound to your project:
 
 ```javascript
 const { data } = await sdp.get("/v1/wallets");
-console.log(`Custody wallets configured: ${data.wallets.length}`);
+console.log(`Custody wallets configured: ${data.length}`);
 ```
 
 A working setup prints:
@@ -3971,7 +3971,7 @@ Transfers run on the `/v1/payments/transfers` endpoint family, separate from the
 
 ```javascript
 const { data } = await sdp.get("/v1/wallets");
-const sourceWalletId = data.wallets[0].walletId;
+const sourceWalletId = data[0].walletId;
 
 const screening = await sdpAdmin.post("/v1/compliance/address-screenings", {
   address: destinationAddress,

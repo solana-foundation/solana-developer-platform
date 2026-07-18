@@ -269,19 +269,15 @@ describe("Custody multi-provider routes", () => {
 
     expect(defaultRes.status).toBe(200);
     const defaultBody = (await defaultRes.json()) as {
-      data: {
-        wallets: Array<{ provider?: string; isDefaultProvider?: boolean; walletId: string }>;
-      };
+      data: Array<{ provider?: string; isDefaultProvider?: boolean; walletId: string }>;
     };
 
-    expect(defaultBody.data.wallets).toHaveLength(4);
-    expect(new Set(defaultBody.data.wallets.map((wallet) => wallet.provider))).toEqual(
+    expect(defaultBody.data).toHaveLength(4);
+    expect(new Set(defaultBody.data.map((wallet) => wallet.provider))).toEqual(
       new Set(["privy", "para"])
     );
     expect(
-      defaultBody.data.wallets
-        .filter((wallet) => wallet.isDefaultProvider)
-        .map((wallet) => wallet.provider)
+      defaultBody.data.filter((wallet) => wallet.isDefaultProvider).map((wallet) => wallet.provider)
     ).toEqual(["privy", "privy"]);
 
     const defaultProviderOnlyQuery = new URLSearchParams({
@@ -301,18 +297,14 @@ describe("Custody multi-provider routes", () => {
 
     expect(defaultProviderOnlyRes.status).toBe(200);
     const defaultProviderOnlyBody = (await defaultProviderOnlyRes.json()) as {
-      data: {
-        wallets: Array<{ provider?: string; isDefaultProvider?: boolean; walletId: string }>;
-      };
+      data: Array<{ provider?: string; isDefaultProvider?: boolean; walletId: string }>;
     };
 
-    expect(defaultProviderOnlyBody.data.wallets).toHaveLength(2);
-    expect(
-      defaultProviderOnlyBody.data.wallets.every((wallet) => wallet.provider === "privy")
-    ).toBe(true);
-    expect(
-      defaultProviderOnlyBody.data.wallets.every((wallet) => wallet.isDefaultProvider === true)
-    ).toBe(true);
+    expect(defaultProviderOnlyBody.data).toHaveLength(2);
+    expect(defaultProviderOnlyBody.data.every((wallet) => wallet.provider === "privy")).toBe(true);
+    expect(defaultProviderOnlyBody.data.every((wallet) => wallet.isDefaultProvider === true)).toBe(
+      true
+    );
   });
 
   it("returns active configs and defaultConfigId from /v1/wallets/configs", async () => {

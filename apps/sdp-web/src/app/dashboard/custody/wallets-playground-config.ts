@@ -89,23 +89,27 @@ export function buildWalletsPlaygroundEndpointConfigs({
       pathFields: [],
       bodyFields: [],
       expectedResponse: {
-        data: {
-          wallets:
-            wallets.length > 0
-              ? wallets.map((wallet) => ({
-                  walletId: wallet.walletId,
-                  label: wallet.label,
-                  provider: wallet.provider,
-                  publicKey: wallet.publicKey,
-                }))
-              : [
-                  {
-                    walletId: exampleWalletId,
-                    label: exampleWalletLabel,
-                    provider: "privy",
-                    publicKey: examplePublicKey,
-                  },
-                ],
+        data:
+          wallets.length > 0
+            ? wallets.map((wallet) => ({
+                walletId: wallet.walletId,
+                label: wallet.label,
+                provider: wallet.provider,
+                publicKey: wallet.publicKey,
+              }))
+            : [
+                {
+                  walletId: exampleWalletId,
+                  label: exampleWalletLabel,
+                  provider: "privy",
+                  publicKey: examplePublicKey,
+                },
+              ],
+        meta: {
+          total: wallets.length || 1,
+          page: 1,
+          pageSize: 20,
+          hasMore: false,
         },
       },
     },

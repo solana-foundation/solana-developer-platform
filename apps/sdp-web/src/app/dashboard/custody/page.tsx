@@ -58,16 +58,19 @@ async function getCustodyWallets(
 ): Promise<CustodyWalletSummary[]> {
   // Wallet cards refresh balances client-side; avoid blocking the overview render on balance RPCs.
   // biome-ignore lint/security/noSecrets: Public API path with query flags for wallet listing.
-  const res = await request("/v1/wallets?includeAllProviders=true");
+  const res = await request("/v1/wallets?includeAllProviders=true&pageSize=100");
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`SDP API request failed (${res.status}): ${body}`);
   }
 
   const json = (await res.json()) as {
-    data?: { wallets?: CustodyWalletSummary[] };
+    data?: CustodyWalletSummary[];
   };
-  return json.data?.wallets ?? [];
+  if (!json.data) {
+    throw new Error("Wallet list response is missing wallet data.");
+  }
+  return json.data;
 }
 
 async function getClerkOrganizationSummary(

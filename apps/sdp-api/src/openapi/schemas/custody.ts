@@ -3,6 +3,7 @@ import {
   createWalletSchema as createWalletSchemaBase,
   deleteWalletSchema as deleteWalletSchemaBase,
   initializeSigningSchema as initializeSigningSchemaBase,
+  listWalletsQuerySchema as listWalletsQuerySchemaBase,
   setDefaultWalletSchema as setDefaultWalletSchemaBase,
   signerCheckSchema as signerCheckSchemaBase,
   switchSigningSchema as switchSigningSchemaBase,
@@ -95,6 +96,17 @@ export const deleteWalletRequestSchema = deleteWalletSchemaBase
     }),
   })
   .openapi({ description: "Delete wallet request body." });
+
+export const listWalletsQuerySchema = listWalletsQuerySchemaBase.extend({
+  page: withOpenApi(listWalletsQuerySchemaBase.shape.page, {
+    description: "Page number (1-based).",
+    example: 1,
+  }),
+  pageSize: withOpenApi(listWalletsQuerySchemaBase.shape.pageSize, {
+    description: "Items per page (max 100).",
+    example: 20,
+  }),
+});
 
 export const updateCustodyWalletRequestSchema = updateWalletSchemaBase
   .extend({
@@ -200,12 +212,6 @@ export const custodyWalletResponseSchema = z
     wallet: custodyWalletSchema,
   })
   .openapi({ description: "Created wallet response payload." });
-
-export const custodyWalletsResponseSchema = z
-  .object({
-    wallets: z.array(custodyWalletSchema).openapi({ description: "Wallets." }),
-  })
-  .openapi({ description: "Wallets list response payload." });
 
 export const custodyWalletAggregateResponseSchema = z
   .object({

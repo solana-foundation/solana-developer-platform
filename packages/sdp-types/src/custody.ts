@@ -332,10 +332,6 @@ export interface CustodyWalletResponse {
   wallet: CustodyWalletSummary;
 }
 
-export interface CustodyWalletsResponse {
-  wallets: CustodyWalletSummary[];
-}
-
 export interface CustodyWalletAggregate {
   walletCount: number;
   balances: CustodyWalletTokenBalance[];

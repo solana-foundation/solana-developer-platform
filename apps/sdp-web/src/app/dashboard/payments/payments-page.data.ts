@@ -30,6 +30,7 @@ export async function fetchPaymentsWallets(
   try {
     const query = new URLSearchParams({
       includeAllProviders: "true",
+      pageSize: "100",
       ...(options.view === "summary" ? { view: "summary" } : {}),
       ...(options.includeBalances ? { includeBalances: "true" } : {}),
     }).toString();
@@ -44,25 +45,27 @@ export async function fetchPaymentsWallets(
     }
 
     const json = (await response.json()) as {
-      data?: {
-        wallets?: Array<{
-          id?: string;
-          walletId?: string;
-          publicKey?: string;
-          label?: string | null;
-          balances?: PaymentsDashboardWallet["balances"];
-        }>;
-      };
+      data?: Array<{
+        id?: string;
+        walletId?: string;
+        publicKey?: string;
+        label?: string | null;
+        balances?: PaymentsDashboardWallet["balances"];
+      }>;
     };
 
-    type WalletSummary = NonNullable<NonNullable<typeof json.data>["wallets"]>[number];
+    type WalletSummary = NonNullable<typeof json.data>[number];
     type ValidWalletSummary = WalletSummary & {
       id: string;
       walletId: string;
       publicKey: string;
     };
 
-    const wallets = (json?.data?.wallets ?? [])
+    if (!json.data) {
+      throw new Error("Wallet list response is missing wallet data.");
+    }
+
+    const wallets = json.data
       .filter(
         (wallet): wallet is ValidWalletSummary =>
           typeof wallet?.id === "string" &&

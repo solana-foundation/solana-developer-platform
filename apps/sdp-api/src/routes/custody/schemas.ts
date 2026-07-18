@@ -9,7 +9,6 @@ import type {
   CustodyWalletAggregateResponse,
   CustodyWalletByIdResponse,
   CustodyWalletResponse,
-  CustodyWalletsResponse,
   DeleteWalletResponse,
   InitializeSigningResponse,
   SignerCheckResponse,
@@ -212,6 +211,15 @@ export const approvalRequestParamsSchema = z.object({
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// List Wallets
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const listWalletsQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Response Types
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -221,7 +229,6 @@ export type {
   CustodyWalletAggregateResponse,
   CustodyWalletByIdResponse,
   CustodyWalletResponse,
-  CustodyWalletsResponse,
   DeleteWalletResponse,
   InitializeSigningResponse,
   SignerCheckResponse,

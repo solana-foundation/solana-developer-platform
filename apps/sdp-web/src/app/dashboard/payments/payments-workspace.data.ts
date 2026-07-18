@@ -4,12 +4,10 @@ import type {
   CoinbaseRampEvent,
   Counterparty,
   CounterpartyAccount,
+  CounterpartyAccountSummary,
   CryptoRailId,
   CustodyWalletAggregate,
-  ListCounterpartiesResponse,
   ListCounterpartyAccountsResponse,
-  ListProjectCounterpartyAccountsEnvelope,
-  ListProjectCounterpartyAccountsResponse,
   MoneygramRampEvent,
   MuralSandboxPayinCurrency,
   PaymentRampEstimateEnvelope,
@@ -194,6 +192,7 @@ export async function fetchWallets(
 ): Promise<WalletRecord[]> {
   const query = new URLSearchParams({
     view: "summary",
+    pageSize: "100",
   });
   if (options.includeBalances) {
     query.set("includeBalances", "true");
@@ -212,7 +211,10 @@ export async function fetchWallets(
       )
     );
   }
-  return body.data?.wallets ?? [];
+  if (!body.data) {
+    throw new Error(t("DashboardPayments.workspace.walletListMissing"));
+  }
+  return body.data;
 }
 
 export async function fetchWalletAggregate(
@@ -587,6 +589,13 @@ export async function createTransfer(
   return body.data.transfer;
 }
 
+export interface BatchRecipientsPage {
+  accounts: CounterpartyAccountSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export async function fetchBatchRecipients(
   input: {
     page?: number;
@@ -596,7 +605,7 @@ export async function fetchBatchRecipients(
     signal?: AbortSignal;
   },
   t: Translate
-): Promise<ListProjectCounterpartyAccountsResponse> {
+): Promise<BatchRecipientsPage> {
   const query = new URLSearchParams({
     ...(input.page ? { page: String(input.page) } : {}),
     ...(input.pageSize ? { pageSize: String(input.pageSize) } : {}),
@@ -608,7 +617,11 @@ export async function fetchBatchRecipients(
     cache: "no-store",
     signal: input.signal,
   });
-  const body = (await response.json().catch(() => ({}))) as ListProjectCounterpartyAccountsEnvelope;
+  const body = (await response.json().catch(() => ({}))) as {
+    data?: CounterpartyAccountSummary[];
+    meta?: { total: number; page: number; pageSize: number };
+    error?: { message?: string };
+  };
   if (!response.ok) {
     throw new Error(
       getApiError(
@@ -617,10 +630,15 @@ export async function fetchBatchRecipients(
       )
     );
   }
-  if (!body.data) {
+  if (!body.data || !body.meta) {
     throw new Error(t("DashboardPayments.workspace.recipientListMissing"));
   }
-  return body.data;
+  return {
+    accounts: body.data,
+    total: body.meta.total,
+    page: body.meta.page,
+    pageSize: body.meta.pageSize,
+  };
 }
 
 export async function estimateTransferBatch(
@@ -845,12 +863,16 @@ export async function fetchAllCounterparties(): Promise<CounterpartiesResult> {
         return { ok: false, data: [], error: await response.text() };
       }
 
-      const json = (await response.json()) as { data?: ListCounterpartiesResponse };
-      const list = json.data;
-      counterparties.push(...(list?.counterparties ?? []));
+      const json = (await response.json()) as {
+        data?: Counterparty[];
+        meta?: { total: number };
+      };
+      if (!json.data || !json.meta) {
+        throw new Error("Counterparty list response is missing data or meta.");
+      }
+      counterparties.push(...json.data);
 
-      const total = list?.total ?? counterparties.length;
-      if (counterparties.length >= total || (list?.counterparties.length ?? 0) === 0) {
+      if (counterparties.length >= json.meta.total || json.data.length === 0) {
         break;
       }
     }

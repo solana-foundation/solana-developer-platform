@@ -5,6 +5,7 @@ import app from "@/index";
 import { createKVStoreSet } from "@/runtime/factory";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 
@@ -248,9 +249,9 @@ describe("Counterparties Routes", () => {
       );
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.data.total).toBe(2);
-      expect(body.data.counterparties).toHaveLength(2);
-      expect(body.data.page).toBe(1);
+      expect(body.meta.total).toBe(2);
+      expect(body.data).toHaveLength(2);
+      expect(body.meta.page).toBe(1);
     });
 
     it("excludes archived by default", async () => {
@@ -268,7 +269,96 @@ describe("Counterparties Routes", () => {
         env
       );
       const body = await res.json();
-      expect(body.data.total).toBe(0);
+      expect(body.meta.total).toBe(0);
+    });
+
+    it("paginates results and reports the full total across pages", async () => {
+      await createCounterparty({ externalId: "page_1", displayName: "Aaa" });
+      await createCounterparty({ externalId: "page_2", displayName: "Bbb" });
+      await createCounterparty({ externalId: "page_3", displayName: "Ccc" });
+
+      const page1Res = await app.request(
+        "/v1/counterparties?page=1&pageSize=2",
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(page1Res.status).toBe(200);
+      const page1Body = await page1Res.json();
+      expect(page1Body.data).toHaveLength(2);
+      expect(page1Body.meta).toMatchObject({ total: 3, page: 1, pageSize: 2, hasMore: true });
+
+      const page2Res = await app.request(
+        "/v1/counterparties?page=2&pageSize=2",
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(page2Res.status).toBe(200);
+      const page2Body = await page2Res.json();
+      expect(page2Body.data).toHaveLength(1);
+      expect(page2Body.meta).toMatchObject({ total: 3, page: 2, pageSize: 2, hasMore: false });
+
+      const allExternalIds = [...page1Body.data, ...page2Body.data].map(
+        (cp: { externalId: string }) => cp.externalId
+      );
+      expect(new Set(allExternalIds)).toEqual(new Set(["page_1", "page_2", "page_3"]));
+    });
+  });
+
+  describe("GET /v1/counterparties/accounts", () => {
+    async function createAccount(counterpartyId: string, address: string, label?: string) {
+      const res = await app.request(
+        `/v1/counterparties/${counterpartyId}/accounts`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            accountKind: "crypto_wallet",
+            ...(label ? { label } : {}),
+            details: { network: "solana", address },
+          }),
+        },
+        env
+      );
+      expect(res.status).toBe(201);
+    }
+
+    it("paginates project-wide recipient accounts and reports the full total across pages", async () => {
+      const aRes = await createCounterparty({ externalId: "recipients_a", displayName: "Aaa" });
+      const bRes = await createCounterparty({ externalId: "recipients_b", displayName: "Bbb" });
+      const cRes = await createCounterparty({ externalId: "recipients_c", displayName: "Ccc" });
+
+      const aCp = (await aRes.json()).data.counterparty;
+      const bCp = (await bRes.json()).data.counterparty;
+      const cCp = (await cRes.json()).data.counterparty;
+
+      await createAccount(aCp.id, TEST_SOLANA_ADDRESSES.wallet1, "Aaa wallet");
+      await createAccount(bCp.id, TEST_SOLANA_ADDRESSES.wallet2, "Bbb wallet");
+      await createAccount(cCp.id, TEST_SOLANA_ADDRESSES.wallet3, "Ccc wallet");
+
+      const page1Res = await app.request(
+        "/v1/counterparties/accounts?page=1&pageSize=2",
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(page1Res.status).toBe(200);
+      const page1Body = await page1Res.json();
+      expect(page1Body.data).toHaveLength(2);
+      expect(page1Body.meta).toMatchObject({ total: 3, page: 1, pageSize: 2, hasMore: true });
+
+      const page2Res = await app.request(
+        "/v1/counterparties/accounts?page=2&pageSize=2",
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(page2Res.status).toBe(200);
+      const page2Body = await page2Res.json();
+      expect(page2Body.data).toHaveLength(1);
+      expect(page2Body.meta).toMatchObject({ total: 3, page: 2, pageSize: 2, hasMore: false });
+
+      const allNames = [...page1Body.data, ...page2Body.data].map(
+        (account: { name: string }) => account.name
+      );
+      expect(new Set(allNames)).toEqual(new Set(["Aaa", "Bbb", "Ccc"]));
     });
   });
 

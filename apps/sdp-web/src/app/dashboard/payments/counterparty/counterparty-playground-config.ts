@@ -75,13 +75,16 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
       pathFields: [],
       bodyFields: [],
       expectedResponse: {
-        counterparties:
+        data:
           counterparties.length > 0
             ? counterparties.map((cp) => ({ id: cp.id, displayName: cp.displayName }))
             : [{ id: exampleCounterpartyId, displayName: exampleDisplayName, email: exampleEmail }],
-        total: counterparties.length || 1,
-        page: 1,
-        pageSize: 100,
+        meta: {
+          total: counterparties.length || 1,
+          page: 1,
+          pageSize: 20,
+          hasMore: false,
+        },
       },
     },
     {

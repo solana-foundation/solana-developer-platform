@@ -1,6 +1,6 @@
 "use client";
 
-import type { Counterparty, ListCounterpartiesResponse } from "@sdp/types";
+import type { Counterparty } from "@sdp/types";
 import { useEffect, useRef, useState } from "react";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { COUNTERPARTY_PAGE_SIZE } from "./counterparty-page.data";
@@ -52,13 +52,13 @@ export function useCounterpartyDirectory(
     setLoading(true);
     setError(null);
 
-    void dashboardFetch<{ data: ListCounterpartiesResponse }>(
+    void dashboardFetch<{ data: Counterparty[]; meta: { total: number } }>(
       `/api/dashboard/counterparty?page=${page}&pageSize=${pageSize}`
     ).then((result) => {
       if (aborted) return;
       if (result.ok) {
-        setCounterparties(result.data.data.counterparties);
-        setTotal(result.data.data.total);
+        setCounterparties(result.data.data);
+        setTotal(result.data.meta.total);
         loadedPageRef.current = page;
       } else {
         setError(result.error);

@@ -9,6 +9,7 @@
     },
     "workspace": {
       "walletListRequestFailed": "Wallet list request failed ({status}).",
+      "walletListMissing": "Wallet list response is missing wallet data.",
       "walletAggregateRequestFailed": "Wallet aggregate request failed ({status}).",
       "walletAggregateMissing": "Wallet aggregate response is missing aggregate details.",
       "walletPolicyRequestFailed": "Wallet policy request failed ({status}).",

@@ -8,8 +8,6 @@ import {
   type CounterpartyFieldOptionsResponse,
   type CounterpartyIdentity,
   type CounterpartyResponse,
-  type ListCounterpartiesResponse,
-  type ListProjectCounterpartyAccountsResponse,
   US_STATES,
 } from "@sdp/types";
 import { z } from "zod";
@@ -25,7 +23,7 @@ import {
   internalError,
   notFound,
 } from "@/lib/errors";
-import { created, noContent, success } from "@/lib/response";
+import { created, noContent, paginated, success } from "@/lib/response";
 import {
   advanceCounterpartyRequirements,
   assertRampProviderAvailable,
@@ -99,14 +97,7 @@ export const listCounterparties = async (c: AppContext) => {
     offset: (page - 1) * pageSize,
   });
 
-  const response: ListCounterpartiesResponse = {
-    counterparties: rows.map(mapToCounterparty),
-    total,
-    page,
-    pageSize,
-  };
-
-  return success(c, response);
+  return paginated(c, rows.map(mapToCounterparty), { total, page, pageSize });
 };
 
 export const listProjectCounterpartyAccounts = async (c: AppContext) => {
@@ -137,20 +128,15 @@ export const listProjectCounterpartyAccounts = async (c: AppContext) => {
     offset: resolvingIds ? 0 : (page - 1) * pageSize,
   });
 
-  const response: ListProjectCounterpartyAccountsResponse = {
-    accounts: rows.map((row) => ({
-      counterpartyId: row.counterparty_id,
-      counterpartyAccountId: row.account_id,
-      name: row.counterparty_display_name,
-      address: row.address,
-      label: row.account_label,
-    })),
-    total,
-    page,
-    pageSize,
-  };
+  const accounts = rows.map((row) => ({
+    counterpartyId: row.counterparty_id,
+    counterpartyAccountId: row.account_id,
+    name: row.counterparty_display_name,
+    address: row.address,
+    label: row.account_label,
+  }));
 
-  return success(c, response);
+  return paginated(c, accounts, { total, page, pageSize });
 };
 
 export const getCounterparty = async (c: AppContext) => {

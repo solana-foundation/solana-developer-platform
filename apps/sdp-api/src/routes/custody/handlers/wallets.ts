@@ -11,8 +11,8 @@ import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest } from "@/lib/errors";
-import { created, success } from "@/lib/response";
+import { AppError, badRequest, badRequestQuery, internalError } from "@/lib/errors";
+import { created, paginated, success } from "@/lib/response";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
 import {
@@ -34,10 +34,10 @@ import {
   type CustodyWalletAggregateResponse,
   type CustodyWalletByIdResponse,
   type CustodyWalletResponse,
-  type CustodyWalletsResponse,
   createWalletSchema,
   type DeleteWalletResponse,
   deleteWalletSchema,
+  listWalletsQuerySchema,
   setDefaultWalletSchema,
   updateWalletSchema,
 } from "../schemas";
@@ -716,13 +716,23 @@ export const updateWallet = async (c: AppContext) => {
 };
 
 export const listWallets = async (c: AppContext) => {
+  const parsedQuery = listWalletsQuerySchema.safeParse(c.req.query());
+  if (!parsedQuery.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsedQuery.error) });
+  }
+  const { page, pageSize } = parsedQuery.data;
+
   const filters = resolveWalletFilters(c, { defaultIncludeAllProviders: true });
   const wallets = await getCachedWalletSummaries(c, filters, "list_wallets");
+  const total = wallets.length;
+  const offset = (page - 1) * pageSize;
+  const pageWallets = wallets.slice(offset, offset + pageSize);
+
   const balancesStartedAt = performance.now();
   const balancesByWalletId = filters.includeBalances
     ? await getBalancesByWalletId(
         c,
-        wallets.map((wallet) => ({
+        pageWallets.map((wallet) => ({
           walletId: wallet.walletId,
           publicKey: wallet.publicKey,
         }))
@@ -731,12 +741,12 @@ export const listWallets = async (c: AppContext) => {
 
   if (filters.includeBalances) {
     logWalletStep(c, "list_wallets", "fetch_wallet_balances", balancesStartedAt, {
-      walletCount: wallets.length,
+      walletCount: pageWallets.length,
     });
   }
 
-  const response: CustodyWalletsResponse = {
-    wallets: wallets.map((wallet) => ({
+  const walletsResponse = pageWallets.map((wallet) => {
+    const walletSummary = {
       id: wallet.id,
       custodyConfigId: wallet.custodyConfigId,
       provider: wallet.provider,
@@ -747,15 +757,23 @@ export const listWallets = async (c: AppContext) => {
       purpose: wallet.purpose,
       status: wallet.status,
       createdAt: wallet.createdAt,
-      ...(filters.includeBalances
-        ? {
-            balances: balancesByWalletId.get(wallet.walletId) ?? [],
-          }
-        : {}),
-    })),
-  };
+    };
 
-  return success(c, response);
+    if (!filters.includeBalances) {
+      return walletSummary;
+    }
+
+    const balances = balancesByWalletId.get(wallet.walletId);
+    if (!balances) {
+      throw internalError(
+        `Missing fetched balances for wallet ${wallet.walletId} in the current page`
+      );
+    }
+
+    return { ...walletSummary, balances };
+  });
+
+  return paginated(c, walletsResponse, { total, page, pageSize });
 };
 
 export const getWalletAggregate = async (c: AppContext) => {

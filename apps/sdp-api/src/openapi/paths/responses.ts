@@ -17,13 +17,14 @@ import {
   counterpartyFieldOptionsResponseSchema,
   counterpartyRequirementsResponseSchema,
   counterpartyResponseSchema,
+  counterpartySchema,
   currentUserResponseSchema,
   custodyConfigResponseSchema,
   custodyConfigsResponseSchema,
   custodyWalletAggregateResponseSchema,
   custodyWalletByIdResponseSchema,
   custodyWalletResponseSchema,
-  custodyWalletsResponseSchema,
+  custodyWalletSchema,
   deleteWalletResponseSchema,
   executeBurnResponseSchema,
   executeForceBurnResponseSchema,
@@ -37,7 +38,6 @@ import {
   inviteMemberResponseSchema,
   listApiKeysResponseSchema,
   listAssetProfilesResponseSchema,
-  listCounterpartiesResponseSchema,
   listCounterpartyAccountsResponseSchema,
   listMembersResponseSchema,
   listProjectApiKeysResponseSchema,
@@ -141,7 +141,7 @@ export const counterpartyFieldOptionsResponse = successResponseSchema(
 export const counterpartyRequirementsResponse = successResponseSchema(
   counterpartyRequirementsResponseSchema
 );
-export const listCounterpartiesResponse = successResponseSchema(listCounterpartiesResponseSchema);
+export const listCounterpartiesResponse = paginatedResponseSchema(counterpartySchema);
 export const counterpartyAccountResponse = successResponseSchema(counterpartyAccountResponseSchema);
 export const listCounterpartyAccountsResponse = successResponseSchema(
   listCounterpartyAccountsResponseSchema
@@ -193,7 +193,7 @@ export const listSessionsResponse = successResponseSchema(listSessionsResponseSc
 export const custodyConfigResponse = successResponseSchema(custodyConfigResponseSchema);
 export const custodyConfigsResponse = successResponseSchema(custodyConfigsResponseSchema);
 export const custodyWalletResponse = successResponseSchema(custodyWalletResponseSchema);
-export const custodyWalletsResponse = successResponseSchema(custodyWalletsResponseSchema);
+export const custodyWalletsResponse = paginatedResponseSchema(custodyWalletSchema);
 export const custodyWalletAggregateResponse = successResponseSchema(
   custodyWalletAggregateResponseSchema
 );
