@@ -164,6 +164,14 @@ Off-ramp mirrors it on `POST /v1/payments/ramps/offramp/quote`, swapping `destin
 
 ### Quote response
 
+Every quote response is `{ "id", "provider", "status", "deliveryMode", ...fields specific to that deliveryMode }`. `deliveryMode` is set by the provider, not something you choose, and the fields beyond it are **only the ones that provider/mode actually returns** — don't assume a field from one example exists on another provider's response.
+
+`status` is one of `pending`, `processing`, `completed`, `failed`, reflecting the provider's state at the moment the quote call returns. SDP does not poll the provider afterward — observe settlement via the resulting transfer (see below) or a pending quote's expiry, when the provider returns one.
+
+#### `hosted` — MoonPay (on-ramp and off-ramp), Coinbase (on-ramp only)
+
+Open `hostedUrl`; the provider runs KYC and payment-method capture, then settles crypto to the destination wallet (on-ramp) or pays out fiat (off-ramp). No other fields are present.
+
 ```json
 {
   "quote": {
@@ -171,24 +179,81 @@ Off-ramp mirrors it on `POST /v1/payments/ramps/offramp/quote`, swapping `destin
     "provider": "moonpay",
     "status": "pending",
     "deliveryMode": "hosted",
-    "hostedUrl": "https://buy.moonpay.com/...",
-    "exchangeRate": 0.985,
-    "totalSendingAmount": 10000,
-    "sendingCurrency": { "code": "USD", "decimals": 2 },
-    "totalReceivingAmount": 9850,
-    "receivingCurrency": { "code": "USDC", "decimals": 6 },
-    "expiresAt": "2026-07-18T12:00:00.000Z"
+    "hostedUrl": "https://buy.moonpay.com/..."
   }
 }
 ```
 
-`deliveryMode` tells you what to do with the quote:
+#### `manual_instructions` — Lightspark, BVNK, Mural
 
-- **`hosted`** — open `hostedUrl`; the provider runs KYC and payment-method capture, then settles crypto to the destination wallet (on-ramp) or pays out fiat (off-ramp).
-- **`manual_instructions`** — display `paymentInstructions` (bank details or a crypto deposit address, shape varies by provider) and wait for the user to fund it.
-- **`session_widget`** — mount the provider's SDK using `clientSecret` / `sessionId` / `publishableKey` (Stripe on-ramp).
+Display `paymentInstructions` and wait for the user to fund it. The instruction shape is provider-specific (each item carries its own `provider` and, for BVNK, a `kind` of `fiat_funding` or `crypto_deposit`) — inspect `paymentInstructions[].provider` / `.kind` rather than assuming a fixed shape. A BVNK on-ramp `fiat_funding` instruction:
 
-`status` is one of `pending`, `processing`, `completed`, `failed`, reflecting the provider's state at the moment the quote call returns. SDP does not poll the provider afterward — observe settlement via the resulting transfer (see below) or a pending quote's expiry (`expiresAt`).
+```json
+{
+  "quote": {
+    "id": "bvnk_onramp_example",
+    "provider": "bvnk",
+    "status": "pending",
+    "deliveryMode": "manual_instructions",
+    "paymentInstructions": [
+      {
+        "provider": "bvnk",
+        "kind": "fiat_funding",
+        "onboardingStatus": "ready",
+        "ruleId": "rule_example",
+        "fundingWalletId": "wallet_example",
+        "fiatCurrency": "USD",
+        "beneficiaryAddress": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+        "network": "SOLANA",
+        "bankAccount": { "accountNumber": "0000000000000000", "bankName": "Example Bank" },
+        "instructionsNotes": "Fund your USD BVNK virtual account to receive crypto on SOLANA."
+      }
+    ]
+  }
+}
+```
+
+Only **Lightspark's** `manual_instructions` response additionally carries top-level rate-lock fields not present for BVNK or Mural: `exchangeRate`, `totalSendingAmount` + `sendingCurrency`, `totalReceivingAmount` + `receivingCurrency`, `feesIncluded` + `feeCurrency`, and `expiresAt`. BVNK and Mural quotes carry only `id` / `provider` / `status` / `deliveryMode` / `paymentInstructions`.
+
+#### `session_widget` — Stripe, MoneyGram
+
+Mount the provider's own SDK; the fields needed to do that are entirely provider-specific.
+
+Stripe (on-ramp):
+
+```json
+{
+  "quote": {
+    "id": "stripe_session_example",
+    "provider": "stripe",
+    "status": "pending",
+    "deliveryMode": "session_widget",
+    "clientSecret": "client_secret_example",
+    "sessionId": "stripe_session_example",
+    "publishableKey": "pk_test_...",
+    "redirectUrl": "https://app.example.com/onramp/complete"
+  }
+}
+```
+
+MoneyGram (off-ramp):
+
+```json
+{
+  "quote": {
+    "id": "session_example",
+    "provider": "moneygram",
+    "status": "pending",
+    "deliveryMode": "session_widget",
+    "sessionToken": "eyJ...",
+    "sessionId": "session_example",
+    "widgetUrl": "https://playground.xramps.moneygram.com/widget/session_example",
+    "sdkUrl": "https://playground.xramps.moneygram.com/sdk/index.global.js"
+  }
+}
+```
+
+`sessionToken` and `widgetUrl` are passed through verbatim from MoneyGram's own session response; `sdkUrl` is the one field SDP constructs itself, pointed at MoneyGram's sandbox host. `redirectUrl` is Stripe-only and omitted entirely when the provider doesn't return one; MoneyGram never sends it.
 
 ## Canceling a pending quote
 
