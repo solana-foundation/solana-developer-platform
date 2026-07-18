@@ -85,6 +85,7 @@ export type DashboardNavigationIntentInput = {
 };
 
 export const DASHBOARD_NAVIGATION_START_EVENT = "sdp:dashboard-navigation-start";
+export const DASHBOARD_NAVIGATION_RECOVERY_TIMEOUT_MS = 10_000;
 
 export type DashboardNavigationStartDetail = {
   fromPathname: string;

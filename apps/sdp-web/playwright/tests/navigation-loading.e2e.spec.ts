@@ -60,13 +60,32 @@ test.describe("dashboard navigation loading contract", () => {
       await expect(page.locator("main")).toHaveAttribute("aria-busy", "true");
     } finally {
       releaseRsc();
+      await navigation;
     }
 
-    await navigation;
     await expect(page).toHaveURL(/\/dashboard\/wallets(?:\?.*)?$/, { timeout: 120_000 });
     await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(1, {
       timeout: 120_000,
     });
     await expect(page.locator("main")).toHaveAttribute("aria-busy", "false");
+  });
+
+  test("keeps the current page visible when a managed link cancels navigation", async ({
+    page,
+  }) => {
+    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(1);
+
+    const walletsLink = page.getByRole("link", { name: "Wallets", exact: true });
+    await walletsLink.evaluate((link) => {
+      link.addEventListener("click", (event) => event.preventDefault(), { once: true });
+    });
+
+    await walletsLink.click({ noWaitAfter: true });
+
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.locator("main")).toHaveAttribute("aria-busy", "false");
+    await expect(page.locator("[data-dashboard-navigation-pending]")).toHaveCount(0);
+    await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(1);
   });
 });

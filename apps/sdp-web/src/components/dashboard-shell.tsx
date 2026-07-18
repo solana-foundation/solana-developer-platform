@@ -20,14 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  type MouseEvent as ReactMouseEvent,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from "react";
 import ApprovalsLoading from "@/app/dashboard/approvals/loading";
 import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
@@ -46,13 +39,14 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
+  announceDashboardNavigation,
+  DASHBOARD_NAVIGATION_RECOVERY_TIMEOUT_MS,
   DASHBOARD_NAVIGATION_START_EVENT,
   DASHBOARD_PAYMENTS_SUBNAV_HREFS,
   DASHBOARD_SIDE_NAV_HREFS,
   type DashboardLoadingSurface,
   type DashboardNavigationStartDetail,
   resolveDashboardLoadingSurface,
-  resolveDashboardNavigationIntent,
 } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
 
@@ -61,6 +55,14 @@ type SubNavItem = {
   href: string;
   disabled?: boolean;
 };
+
+type DashboardNavigationLinkProps = Omit<ComponentProps<typeof Link>, "href" | "onNavigate"> & {
+  href: string;
+};
+
+function DashboardNavigationLink({ href, ...props }: DashboardNavigationLinkProps) {
+  return <Link {...props} href={href} onNavigate={() => announceDashboardNavigation(href)} />;
+}
 
 type NavItem = {
   label: string;
@@ -194,7 +196,7 @@ function HeaderBackAction({
   compactOnMobile?: boolean;
 }) {
   return (
-    <Link
+    <DashboardNavigationLink
       href={href}
       className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary"
     >
@@ -207,7 +209,7 @@ function HeaderBackAction({
       >
         {label}
       </span>
-    </Link>
+    </DashboardNavigationLink>
   );
 }
 
@@ -665,7 +667,7 @@ function SidebarGroup({
 
           return (
             <div key={item.label}>
-              <Link
+              <DashboardNavigationLink
                 href={item.href}
                 onClick={onNavigate}
                 title={isCollapsed ? item.label : undefined}
@@ -699,7 +701,7 @@ function SidebarGroup({
                     aria-hidden="true"
                   />
                 ) : null}
-              </Link>
+              </DashboardNavigationLink>
               {!isCollapsed && item.children && item.children.length > 0 && (
                 <div className="ml-5 mt-2">
                   {item.children.map((child, i, siblings) => {
@@ -722,7 +724,7 @@ function SidebarGroup({
                             <LockIcon className="ml-auto h-3 w-3" />
                           </span>
                         ) : (
-                          <Link
+                          <DashboardNavigationLink
                             href={child.href}
                             onClick={onNavigate}
                             className={cn(
@@ -731,7 +733,7 @@ function SidebarGroup({
                             )}
                           >
                             {child.label}
-                          </Link>
+                          </DashboardNavigationLink>
                         )}
                       </div>
                     );
@@ -810,7 +812,7 @@ function DashboardSidebarContent({
         {bottomNavItems.map((item) => {
           const Icon = item.icon;
           return (
-            <Link
+            <DashboardNavigationLink
               key={item.label}
               href={item.href}
               target={item.external ? "_blank" : undefined}
@@ -825,7 +827,7 @@ function DashboardSidebarContent({
             >
               <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
               {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
-            </Link>
+            </DashboardNavigationLink>
           );
         })}
       </div>
@@ -922,32 +924,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
 
-  const handleNavigationClickCapture = useCallback(
-    (event: ReactMouseEvent<HTMLElement>) => {
-      const targetElement = event.target;
-      if (!(targetElement instanceof Element)) return;
-
-      const anchor = targetElement.closest<HTMLAnchorElement>("a[href]");
-      if (!anchor) return;
-
-      const toPathname = resolveDashboardNavigationIntent({
-        currentHref: window.location.href,
-        targetHref: anchor.href,
-        button: event.button,
-        metaKey: event.metaKey,
-        ctrlKey: event.ctrlKey,
-        shiftKey: event.shiftKey,
-        altKey: event.altKey,
-        target: anchor.getAttribute("target"),
-        download: anchor.hasAttribute("download"),
-      });
-      if (!toPathname) return;
-
-      setPendingNavigation({ fromPathname: pathname, toPathname });
-    },
-    [pathname]
-  );
-
   useEffect(() => {
     const handleProgrammaticNavigation = (event: Event) => {
       const detail = (event as CustomEvent<DashboardNavigationStartDetail>).detail;
@@ -960,6 +936,18 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       window.removeEventListener(DASHBOARD_NAVIGATION_START_EVENT, handleProgrammaticNavigation);
     };
   }, []);
+
+  useEffect(() => {
+    if (!pendingNavigation) return;
+
+    // A router error or middleware cancellation may never update usePathname.
+    // Restore the current page instead of leaving an indefinite loading shell.
+    const recoveryTimeout = window.setTimeout(() => {
+      setPendingNavigation((current) => (current === pendingNavigation ? null : current));
+    }, DASHBOARD_NAVIGATION_RECOVERY_TIMEOUT_MS);
+
+    return () => window.clearTimeout(recoveryTimeout);
+  }, [pendingNavigation]);
 
   useEffect(() => {
     if (previousPathnameRef.current !== pathname) {
@@ -1056,7 +1044,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   return (
     <main
-      onClickCapture={handleNavigationClickCapture}
       aria-busy={isNavigationPending}
       className={[
         "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",
