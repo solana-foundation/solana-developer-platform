@@ -1,9 +1,13 @@
 import { type createRpc, getAccountInfo } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { formatDecimalAmount } from "@sdp/solana/amount";
+import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
-import type { Address } from "@solana/kit";
-import { findAssociatedTokenPda } from "@solana-program/token-2022";
+import { type Address, createNoopSigner, type TransactionSigner } from "@solana/kit";
+import {
+  findAssociatedTokenPda,
+  getCreateAssociatedTokenIdempotentInstruction,
+  getTransferCheckedInstruction,
+} from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
 
 export { SOL_MINT } from "@/services/payment-operation.service";
@@ -267,6 +271,61 @@ export async function resolveSourceTokenAccountOrAta(
     tokenAccount,
     decimals,
     exists: false,
+  };
+}
+
+/**
+ * Build the standard fee-sponsored SPL transfer instruction pair: an
+ * idempotent ATA creation for the destination (rent paid by the fee payer)
+ * followed by a transferChecked from the authority's largest token account.
+ */
+export async function buildSplTransferInstructions(
+  rpc: ReturnType<typeof createRpc>,
+  input: {
+    authority: TransactionSigner;
+    destination: Address;
+    mint: Address;
+    amount: string;
+    feePayer: Address;
+  }
+) {
+  const tokenProgram = await resolveMintTokenProgram(rpc, input.mint);
+  const sourceTokenAccount = await resolveSourceTokenAccount(
+    rpc,
+    input.authority.address,
+    input.mint,
+    tokenProgram
+  );
+  const transferAmount = parseDecimalAmount(input.amount, sourceTokenAccount.decimals);
+  if (transferAmount <= 0n) {
+    throw badRequest("Transfer amount must be greater than zero");
+  }
+
+  const [destinationTokenAccount] = await findAssociatedTokenPda({
+    owner: input.destination,
+    tokenProgram,
+    mint: input.mint,
+  });
+
+  return {
+    createDestinationAtaInstruction: getCreateAssociatedTokenIdempotentInstruction({
+      payer: createNoopSigner(input.feePayer),
+      ata: destinationTokenAccount,
+      owner: input.destination,
+      mint: input.mint,
+      tokenProgram,
+    }),
+    transferInstruction: getTransferCheckedInstruction(
+      {
+        source: sourceTokenAccount.tokenAccount,
+        mint: input.mint,
+        destination: destinationTokenAccount,
+        authority: input.authority,
+        amount: transferAmount,
+        decimals: sourceTokenAccount.decimals,
+      },
+      { programAddress: tokenProgram }
+    ),
   };
 }
 

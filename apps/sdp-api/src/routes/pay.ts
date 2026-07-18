@@ -1,17 +1,42 @@
+import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import { getSolanaConfig } from "@sdp/rpc";
+import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import { parseDecimalAmount } from "@sdp/solana/amount";
+import {
+  type AccountMeta,
+  AccountRole,
+  appendTransactionMessageInstructions,
+  compileTransaction,
+  createNoopSigner,
+  createTransactionMessage,
+  getBase64Decoder,
+  getTransactionEncoder,
+  type Instruction,
+  pipe,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+} from "@solana/kit";
 import { encodeURL } from "@solana/pay";
+import { getTransferSolInstruction } from "@solana-program/system";
 import { Hono } from "hono";
+import { z } from "zod";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
-import { notFound } from "@/lib/errors";
+import { badRequest, notFound } from "@/lib/errors";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequestBestEffort,
 } from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
-import { resolveTokenLabel, SOL_MINT } from "./payments/token-accounts";
+import {
+  buildSplTransferInstructions,
+  resolveTokenLabel,
+  SOL_MINT,
+} from "./payments/token-accounts";
 
 const REQUEST_LABEL = "Solana Developer Platform";
+
+const transactionRequestBodySchema = z.object({ account: z.string() });
 
 const pay = new Hono<{ Bindings: Env }>();
 
@@ -30,20 +55,8 @@ pay.get("/:token", async (c) => {
 
   let solanaPayUrl: string | null = null;
   if (payable) {
-    const recipient = assertValidAddress(request.destination_address, "destinationAddress");
-    const reference = assertValidAddress(request.reference, "reference");
-    const tokenLabel = resolveTokenLabel(request.token);
-    const url = encodeURL({
-      recipient,
-      reference,
-      label: REQUEST_LABEL,
-      message: `Pay ${request.amount} ${tokenLabel} to ${REQUEST_LABEL}`,
-      ...(request.token === SOL_MINT
-        ? {}
-        : { splToken: assertValidAddress(request.token, "token") }),
-    });
-    url.searchParams.set("amount", request.amount);
-    solanaPayUrl = url.toString();
+    const link = new URL(`/pay/${c.req.param("token")}/tx`, c.req.url);
+    solanaPayUrl = encodeURL({ link }).toString();
   }
 
   return c.json({
@@ -56,6 +69,72 @@ pay.get("/:token", async (c) => {
     expiresAt: request.expires_at,
     network: getSolanaConfig(c.env).network,
     solanaPayUrl,
+  });
+});
+
+pay.get("/:token/tx", (c) => {
+  return c.json({ label: REQUEST_LABEL });
+});
+
+pay.post("/:token/tx", async (c) => {
+  const request = await createPaymentRequestsRepository(c.env).getPaymentRequestByPublicToken(
+    c.req.param("token")
+  );
+  if (!request) {
+    throw notFound("Payment request");
+  }
+  if (request.status !== "awaiting_payment" || isPaymentRequestExpired(request.expires_at)) {
+    throw badRequest("Payment request is no longer payable");
+  }
+
+  const { account } = transactionRequestBodySchema.parse(await c.req.json());
+  const payer = assertValidAddress(account, "account");
+  const recipient = assertValidAddress(request.destination_address, "destinationAddress");
+  const reference = assertValidAddress(request.reference, "reference");
+  const withReference = (instruction: Instruction & { accounts: readonly AccountMeta[] }) => ({
+    ...instruction,
+    accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
+  });
+
+  const rpc = solanaRpc.createRpc(c.env);
+  const feePayment = createFeePaymentAdapter(c.env);
+  const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
+    feePayment.getFeePayer(),
+    solanaRpc.getRecentBlockhash(rpc, "confirmed"),
+  ]);
+
+  let instructions: Instruction[];
+  if (request.token === SOL_MINT) {
+    const transferInstruction = getTransferSolInstruction({
+      source: createNoopSigner(payer),
+      destination: recipient,
+      amount: parseDecimalAmount(request.amount, 9),
+    });
+    instructions = [withReference(transferInstruction)];
+  } else {
+    const { createDestinationAtaInstruction, transferInstruction } =
+      await buildSplTransferInstructions(rpc, {
+        authority: createNoopSigner(payer),
+        destination: recipient,
+        mint: assertValidAddress(request.token, "token"),
+        amount: request.amount,
+        feePayer,
+      });
+    instructions = [createDestinationAtaInstruction, withReference(transferInstruction)];
+  }
+
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+    (m) => appendTransactionMessageInstructions(instructions, m)
+  );
+  const txBytes = new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
+  const sponsored = await feePayment.signAsFeePayer(txBytes);
+
+  return c.json({
+    transaction: getBase64Decoder().decode(sponsored),
+    message: `Pay ${request.amount} ${resolveTokenLabel(request.token)} to ${REQUEST_LABEL}`,
   });
 });
 

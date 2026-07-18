@@ -8,7 +8,6 @@ import type { Address } from "@solana/kit";
 import {
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
-  createNoopSigner,
   createTransactionMessage,
   getCompiledTransactionMessageDecoder,
   getCompiledTransactionMessageEncoder,
@@ -24,11 +23,6 @@ import {
   partiallySignTransactionWithSigners,
 } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
-import {
-  findAssociatedTokenPda,
-  getCreateAssociatedTokenIdempotentInstruction,
-  getTransferCheckedInstruction,
-} from "@solana-program/token-2022";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -77,11 +71,7 @@ import {
   walletIdParamsSchema,
 } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
-import {
-  resolveMintDecimals,
-  resolveMintTokenProgram,
-  resolveSourceTokenAccount,
-} from "../token-accounts";
+import { resolveMintDecimals, resolveMintTokenProgram } from "../token-accounts";
 import { type ResolvedScope, resolveScope, resolveWallet } from "../wallets";
 
 const SIGNATURE_HISTORY_LOOKUP_CONCURRENCY = 5;
@@ -795,47 +785,18 @@ async function executeSplTransfer(
   }
 
   const rpc = solanaRpc.createRpc(c.env);
-  const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
-  const sourceTokenAccount = await resolveSourceTokenAccount(
-    rpc,
-    signer.address,
-    mintAddress,
-    tokenProgram
-  );
-  const transferAmount = parseDecimalAmount(amount, sourceTokenAccount.decimals);
-
-  if (transferAmount <= 0n) {
-    throw badRequest("Transfer amount must be greater than zero");
-  }
-
-  const [destinationTokenAccount] = await findAssociatedTokenPda({
-    owner: destinationAddress,
-    tokenProgram,
-    mint: mintAddress,
-  });
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayment = getFeePayment(c);
   const feePayer = await feePayment.getFeePayer();
-  const feePayerSigner = createNoopSigner(feePayer);
 
-  const createDestinationAtaInstruction = getCreateAssociatedTokenIdempotentInstruction({
-    payer: feePayerSigner,
-    ata: destinationTokenAccount,
-    owner: destinationAddress,
-    mint: mintAddress,
-    tokenProgram,
-  });
-  const transferInstruction = getTransferCheckedInstruction(
-    {
-      source: sourceTokenAccount.tokenAccount,
-      mint: mintAddress,
-      destination: destinationTokenAccount,
+  const { createDestinationAtaInstruction, transferInstruction } =
+    await tokenAccounts.buildSplTransferInstructions(rpc, {
       authority: signer,
-      amount: transferAmount,
-      decimals: sourceTokenAccount.decimals,
-    },
-    { programAddress: tokenProgram }
-  );
+      destination: destinationAddress,
+      mint: mintAddress,
+      amount,
+      feePayer,
+    });
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
