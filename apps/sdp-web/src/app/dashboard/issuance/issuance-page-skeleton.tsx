@@ -46,7 +46,11 @@ function IssuanceTokenCardSkeleton() {
 
 export function IssuancePageSkeleton() {
   return (
-    <DashboardWorkspaceOverviewPanel className="space-y-6" data-loading-layout="issuance-overview">
+    <DashboardWorkspaceOverviewPanel
+      className="space-y-6"
+      data-loading-layout="issuance-overview"
+      aria-busy="true"
+    >
       <div className="flex items-center gap-3">
         <SkeletonBlock className="h-10 flex-1 rounded-[10px]" />
         <SkeletonBlock className="h-10 w-32 rounded-[10px]" />

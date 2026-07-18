@@ -63,6 +63,17 @@ describe("operations route loading states", () => {
     }
   });
 
+  it("announces the issuance overview as busy while it is loading", () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <IssuanceOverviewLoading />
+      </I18nProvider>
+    );
+
+    expect(markup).toContain('data-loading-layout="issuance-overview"');
+    expect(markup).toContain('aria-busy="true"');
+  });
+
   it("preserves the responsive and sticky geometry of the final routes", () => {
     const markup = renderAllRouteLoadingStates();
 
