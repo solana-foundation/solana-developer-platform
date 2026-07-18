@@ -11,12 +11,14 @@ import { updateWalletLabelAction } from "./actions";
 
 interface WalletLabelInlineEditorProps {
   canEdit?: boolean;
+  emptyLabel?: string;
   walletId: string;
   label: string | null;
 }
 
 export function WalletLabelInlineEditor({
   canEdit = true,
+  emptyLabel,
   walletId,
   label,
 }: WalletLabelInlineEditorProps) {
@@ -25,6 +27,7 @@ export function WalletLabelInlineEditor({
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(label ?? "");
   const [isPending, startTransition] = useTransition();
+  const displayLabel = label ?? emptyLabel ?? t("DashboardCustody.untitled");
 
   useEffect(() => {
     setDraft(label ?? "");
@@ -115,8 +118,8 @@ export function WalletLabelInlineEditor({
 
   return (
     <div className="group flex min-w-0 items-center gap-1">
-      <div className="min-w-0 truncate" title={label ?? t("DashboardCustody.untitled")}>
-        {label ?? t("DashboardCustody.untitled")}
+      <div className="min-w-0 truncate" title={displayLabel}>
+        {displayLabel}
       </div>
       {canEdit ? (
         <Button

@@ -5,14 +5,10 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
-import {
-  fetchDashboardPaymentTransfersForWallets,
-  fetchPaymentsAggregate,
-  fetchPaymentsIssuedTokenSymbols,
-  fetchPaymentsWallets,
-  fetchPaymentTransfers,
-} from "./payments-page.data";
+import { PaymentsCommandCenter } from "./payments-command-center";
+import { fetchPaymentsWallets, fetchPaymentTransfers } from "./payments-page.data";
 import { PaymentsWorkspace } from "./payments-workspace";
+import { PaymentsOverviewTabs } from "./payments-workspace-tabs";
 
 interface PaymentsPageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -37,56 +33,39 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
       (Array.isArray(resolvedSearchParams?.tab) && resolvedSearchParams.tab[0] === "playground")
         ? "playground"
         : "overview";
-    const apiBaseUrl = resolvePlaygroundApiBaseUrl();
-    const apiClient = await trace.step("create_sdp_api_client", () =>
+    const apiClientPromise = trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.payments.api"))
     );
-    const walletsResultPromise = trace.step("fetch_payments_wallet_summaries", () =>
-      fetchPaymentsWallets(apiClient.request, { view: "summary" })
-    );
-    const [
-      apiKeysResult,
-      walletsResult,
-      aggregateResult,
-      transfersResult,
-      issuedTokenSymbolsResult,
-    ] = await Promise.all([
+
+    if (currentTab === "overview") {
+      trace.log({ ok: true, tab: currentTab, phase: "static_actions" });
+      return (
+        <div className="flex h-full min-h-0 w-full flex-col">
+          <PaymentsOverviewTabs value="overview" />
+          <div className="min-h-0 flex-1">
+            <PaymentsCommandCenter apiClientPromise={apiClientPromise} organizationId={orgId} />
+          </div>
+        </div>
+      );
+    }
+
+    const apiClient = await apiClientPromise;
+    const apiBaseUrl = resolvePlaygroundApiBaseUrl();
+    const [apiKeysResult, walletsResult, transfersResult] = await Promise.all([
       trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
-      walletsResultPromise,
-      currentTab === "playground"
-        ? Promise.resolve({ ok: true as const, data: null })
-        : trace.step("fetch_payments_aggregate", () => fetchPaymentsAggregate(apiClient.request)),
-      trace.step("fetch_payment_transfers", () =>
-        currentTab === "playground"
-          ? fetchPaymentTransfers(apiClient.request)
-          : walletsResultPromise.then((walletsResult) =>
-              fetchDashboardPaymentTransfersForWallets(apiClient.request, walletsResult)
-            )
+      trace.step("fetch_payments_wallet_summaries", () =>
+        fetchPaymentsWallets(apiClient.request, { view: "summary" })
       ),
-      currentTab === "playground"
-        ? Promise.resolve({ ok: true as const, data: [] })
-        : trace.step("fetch_payment_token_symbols", () =>
-            fetchPaymentsIssuedTokenSymbols(apiClient.request)
-          ),
+      trace.step("fetch_payment_transfers", () => fetchPaymentTransfers(apiClient.request)),
     ]);
     const apiKeys = apiKeysResult.data ?? [];
     const wallets = walletsResult.data ?? [];
-    const aggregate = aggregateResult.data ?? null;
     const transfers = transfersResult.data ?? [];
-    const issuedTokenSymbolsByMint = Object.fromEntries(
-      (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
-    );
     const walletsError = walletsResult.ok
       ? null
       : t("DashboardPayments.page.walletApiError", {
           status: walletsResult.status ?? t("DashboardPayments.page.unavailableStatus"),
           error: walletsResult.error ?? t("DashboardPayments.page.unknownError"),
-        });
-    const aggregateError = aggregateResult.ok
-      ? null
-      : t("DashboardPayments.page.walletAggregateApiError", {
-          status: aggregateResult.status ?? t("DashboardPayments.page.unavailableStatus"),
-          error: aggregateResult.error ?? t("DashboardPayments.page.unknownError"),
         });
     const transfersError = transfersResult.ok
       ? null
@@ -101,22 +80,25 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
       walletCount: wallets.length,
       transferCount: transfers.length,
       apiKeyCount: apiKeys.length,
-      hasAggregate: Boolean(aggregate),
     });
 
     return (
       <div className="flex h-full min-h-0 w-full flex-col">
-        <PaymentsWorkspace
-          apiBaseUrl={apiBaseUrl}
-          apiKeys={apiKeys}
-          wallets={wallets}
-          walletsError={walletsError}
-          aggregate={aggregate}
-          aggregateError={aggregateError}
-          issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
-          transfers={transfers}
-          transfersError={transfersError}
-        />
+        <PaymentsOverviewTabs value="playground" />
+        <div className="min-h-0 flex-1">
+          <PaymentsWorkspace
+            activeTab="playground"
+            apiBaseUrl={apiBaseUrl}
+            apiKeys={apiKeys}
+            wallets={wallets}
+            walletsError={walletsError}
+            aggregate={null}
+            aggregateError={null}
+            issuedTokenSymbolsByMint={{}}
+            transfers={transfers}
+            transfersError={transfersError}
+          />
+        </div>
       </div>
     );
   } catch (error) {

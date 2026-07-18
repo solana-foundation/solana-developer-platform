@@ -61,6 +61,14 @@ describe("wallet and custody route loading states", () => {
     expect(html).toContain('data-skeleton-section="wallet-activity"');
   });
 
+  it("reserves the responsive wallet search toolbar while the overview loads", () => {
+    const html = renderToStaticMarkup(<WalletsLoading />);
+
+    expect(html).toContain('data-wallet-search-skeleton="true"');
+    expect(html).toContain("flex-col gap-3 sm:flex-row");
+    expect(html).toContain("sm:max-w-md");
+  });
+
   it("keeps the policy editor form, summary rail, and footer in place", () => {
     const html = renderToStaticMarkup(<WalletPolicySkeleton />);
 

@@ -14,6 +14,7 @@ interface DashboardWorkspaceTabShellProps {
   overviewKey?: string;
   playgroundClassName?: string;
   playgroundKey?: string;
+  tabNavigation?: ReactNode;
 }
 
 const tabTransition = { duration: 0.2, ease: "easeOut" } as const;
@@ -27,34 +28,38 @@ export function DashboardWorkspaceTabShell({
   overviewKey = "overview-tab",
   playgroundClassName,
   playgroundKey = "playground-tab",
+  tabNavigation,
 }: DashboardWorkspaceTabShellProps) {
   return (
-    <div className="relative h-full min-h-0 w-full">
-      <AnimatePresence mode="wait">
-        {isPlaygroundTab ? (
-          <motion.div
-            key={playgroundKey}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={tabTransition}
-            className={cn("absolute inset-0 flex min-h-0 flex-col", playgroundClassName)}
-          >
-            {playground}
-          </motion.div>
-        ) : (
-          <motion.div
-            key={overviewKey}
-            initial={disableOverviewInitialAnimation ? false : { opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={tabTransition}
-            className={cn(dashboardWorkspaceOverviewPanelClassName, overviewClassName)}
-          >
-            {overview}
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className="flex h-full min-h-0 w-full flex-col">
+      {tabNavigation}
+      <div className="relative min-h-0 flex-1">
+        <AnimatePresence mode="wait">
+          {isPlaygroundTab ? (
+            <motion.div
+              key={playgroundKey}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={tabTransition}
+              className={cn("absolute inset-0 flex min-h-0 flex-col", playgroundClassName)}
+            >
+              {playground}
+            </motion.div>
+          ) : (
+            <motion.div
+              key={overviewKey}
+              initial={disableOverviewInitialAnimation ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={tabTransition}
+              className={cn(dashboardWorkspaceOverviewPanelClassName, overviewClassName)}
+            >
+              {overview}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }
