@@ -44,7 +44,7 @@ The **Extensions** tab shows the template and each operational flag — allowlis
 Fetch the current token state:
 
 ```bash
-curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
+curl https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123 \
   -H "Authorization: Bearer sk_test_..."
 ```
 
@@ -81,7 +81,7 @@ On the token detail page, go to **Permissions**. Click **Edit** next to the auth
 **Execute mode** — SDP signs the authority rotation:
 
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/authority \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: rotate-001" \
@@ -96,7 +96,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
 **Prepare mode** — returns unsigned transaction for external signing:
 
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority/prepare \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/authority/prepare \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{

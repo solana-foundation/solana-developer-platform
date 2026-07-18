@@ -50,12 +50,12 @@ Select a template and click **Continue**.
 List available templates to see what fields each one pre-configures:
 
 ```bash
-curl https://api.solana.com/v1/issuance/templates \
+curl https://sdp-api-production.solana.workers.dev/v1/issuance/templates \
   -H "Authorization: Bearer sk_test_..."
 ```
 
 ```typescript
-const res = await fetch("https://api.solana.com/v1/issuance/templates", {
+const res = await fetch("https://sdp-api-production.solana.workers.dev/v1/issuance/templates", {
   headers: { Authorization: "Bearer sk_test_..." },
 });
 const { data } = await res.json();
@@ -93,7 +93,7 @@ Click **Continue** when ready.
 Pass identity fields in the `POST /v1/issuance/tokens` body:
 
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/issuance/tokens \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -134,7 +134,7 @@ Click **Create token** to save the draft.
 Add operational fields to the same body:
 
 ```typescript
-const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
+const res = await fetch("https://sdp-api-production.solana.workers.dev/v1/issuance/tokens", {
   method: "POST",
   headers: {
     Authorization: "Bearer sk_test_...",

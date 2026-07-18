@@ -11,7 +11,7 @@ This page introduces the building blocks the rest of the section assumes.
 
 Every SDP payment is anchored to a **custody wallet** — a Solana keypair whose private key SDP holds, scoped to an organization and (optionally) a project. Wallets sign outbound transfers on your behalf and contribute to balances and policies for the addresses you control.
 
-You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)) and reference them by their SDP `wallet_id` (`wal_…`). Transfer endpoints expect the **source** as a custody wallet ID — the wallet is resolved server-side from the caller's custody-wallet list — and the **destination** as the on-chain Solana address of the recipient. Ramp endpoints vary by provider: MoonPay and BVNK accept either a wallet ID or a Solana address for `sourceWallet` / `destinationWallet`; Lightspark uses its own `ExternalAccount:…` identifiers (onramp `destinationWallet` also accepts a Solana address, offramp `sourceWallet` does not).
+You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)) and reference them by the `walletId` returned from `GET /v1/wallets` (for example `privy_wallet_123` — the form depends on the custody signing provider). Transfer endpoints expect the **source** as that `walletId` — the wallet is resolved server-side from the caller's custody-wallet list — and the **destination** as the on-chain Solana address of the recipient. Ramp quote endpoints accept the same `walletId` (or a raw Solana address) for `sourceWallet` / `destinationWallet` — see [Ramp providers](/docs/payments/ramps-providers) for which of the seven integrated providers support which direction.
 
 ## Tokens and token accounts
 

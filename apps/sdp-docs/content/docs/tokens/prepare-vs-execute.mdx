@@ -16,7 +16,7 @@ Call a mutation endpoint without the `/prepare` suffix and SDP handles everythin
 
 ```typescript
 const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
+  "https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/mint",
   {
     method: "POST",
     headers: {
@@ -47,7 +47,7 @@ Add `/prepare` to a mutation endpoint and SDP builds the transaction but returns
 
 ```typescript
 const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare",
+  "https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/mint/prepare",
   {
     method: "POST",
     headers: {
@@ -103,7 +103,7 @@ Prepare endpoints accept `options.simulate: true` to dry-run the transaction bef
 | Seize | `POST .../seize` | `POST .../seize/prepare` |
 | Update authority | `POST .../authority` | `POST .../authority/prepare` |
 
-Issuance paths are prefixed with `https://api.solana.com/v1/issuance/tokens/{tokenId}`.
+Issuance paths are prefixed with `https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/{tokenId}`.
 
 ## Idempotency
 

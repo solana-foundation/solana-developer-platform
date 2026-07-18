@@ -84,7 +84,7 @@ Once confirmed, the mint appears in the Transactions table with a `confirmed` st
 <Tab value="API">
 
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/mint \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: mint-001" \
@@ -99,7 +99,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
 
 ```typescript
 const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
+  "https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/mint",
   {
     method: "POST",
     headers: {
@@ -162,7 +162,7 @@ For **Force burn** (requires `tokens:admin`), use the Compliance tab instead of 
 **Burn from a controlled account:**
 
 ```typescript
-await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
+await fetch("https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/burn", {
   method: "POST",
   headers: {
     Authorization: "Bearer sk_test_...",
@@ -178,7 +178,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
 **Force-burn from any holder** (requires `tokens:admin`):
 
 ```typescript
-await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
+await fetch("https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/force-burn", {
   method: "POST",
   headers: {
     Authorization: "Bearer sk_test_...",
@@ -217,7 +217,7 @@ Reload the token detail page if the displayed supply value appears stale.
 <Tab value="API">
 
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/supply/refresh \
   -H "Authorization: Bearer sk_test_..."
 ```
 

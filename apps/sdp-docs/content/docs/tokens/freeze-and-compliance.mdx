@@ -35,7 +35,7 @@ Enter the wallet address and select the intent (e.g., transfer destination or al
 <Tab value="API">
 
 ```bash
-curl -X POST https://api.solana.com/v1/compliance/address-screenings \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/compliance/address-screenings \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -97,7 +97,7 @@ The "Unfreeze transaction finalized." toast appears and the Frozen Accounts coun
 **Freeze:**
 
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/freeze \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -111,7 +111,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 **Unfreeze:**
 
 ```typescript
-await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
+await fetch("https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/unfreeze", {
   method: "POST",
   headers: { Authorization: "Bearer sk_test_...", "Content-Type": "application/json" },
   body: JSON.stringify({ accountAddress: "3xYZa...2aBc" }),
@@ -121,7 +121,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
 **List frozen accounts:**
 
 ```bash
-curl https://api.solana.com/v1/issuance/tokens/tok_abc123/frozen \
+curl https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/frozen \
   -H "Authorization: Bearer sk_test_..."
 ```
 
@@ -160,11 +160,11 @@ To resume, click **Unpause token** and confirm.
 
 ```bash
 # Pause
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/pause \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/pause \
   -H "Authorization: Bearer sk_test_..."
 
 # Unpause
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/unpause \
   -H "Authorization: Bearer sk_test_..."
 ```
 
@@ -190,7 +190,7 @@ In the **Compliance** tab, click **Seize tokens**. Provide the source, destinati
 <Tab value="API">
 
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/seize \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: seize-001" \

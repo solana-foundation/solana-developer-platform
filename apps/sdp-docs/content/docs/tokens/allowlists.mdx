@@ -82,7 +82,7 @@ After adding, the entry appears below the form with a **Remove entry** button.
 <Tab value="API">
 
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/allowlist \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -93,7 +93,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
 
 ```typescript
 const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist",
+  "https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/allowlist",
   {
     method: "POST",
     headers: {
@@ -128,7 +128,7 @@ Use the search field to find a specific address by label or public key.
 <Tab value="API">
 
 ```bash
-curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
+curl https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/allowlist \
   -H "Authorization: Bearer sk_test_..."
 ```
 
@@ -160,7 +160,7 @@ In the **Compliance → Allowlist** tab, click **Remove entry** next to the addr
 
 ```bash
 curl -X DELETE \
-  https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123 \
+  https://sdp-api-production.solana.workers.dev/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123 \
   -H "Authorization: Bearer sk_test_..."
 ```
 

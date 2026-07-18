@@ -31,7 +31,7 @@ If your retry path replays a transfer with identical inputs but a fresh request,
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST https://api.solana.com/v1/payments/transfers \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -49,7 +49,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
   if (row.transferId) return row.transferId; // already submitted
 
   const response = await fetch(
-    "https://api.solana.com/v1/payments/transfers",
+    "https://sdp-api-production.solana.workers.dev/v1/payments/transfers",
     {
       method: "POST",
       headers: {
@@ -76,7 +76,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
+    .uri(URI.create("https://sdp-api-production.solana.workers.dev/v1/payments/transfers"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -99,7 +99,7 @@ After the loop finishes, list all outbound transfers in the run's time window an
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
 ```bash
-curl "https://api.solana.com/v1/payments/transfers?direction=outbound&from=2026-05-14T00:00:00Z&to=2026-05-14T23:59:59Z&pageSize=100" \
+curl "https://sdp-api-production.solana.workers.dev/v1/payments/transfers?direction=outbound&from=2026-05-14T00:00:00Z&to=2026-05-14T23:59:59Z&pageSize=100" \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
@@ -108,7 +108,7 @@ curl "https://api.solana.com/v1/payments/transfers?direction=outbound&from=2026-
 async function* listOutboundTransfers(from: string, to: string) {
   let page = 1;
   while (true) {
-    const url = new URL("https://api.solana.com/v1/payments/transfers");
+    const url = new URL("https://sdp-api-production.solana.workers.dev/v1/payments/transfers");
     url.searchParams.set("direction", "outbound");
     url.searchParams.set("from", from);
     url.searchParams.set("to", to);

@@ -12,13 +12,13 @@ The minimal inbound-only request:
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
 ```bash
-curl "https://api.solana.com/v1/payments/transfers?direction=inbound&pageSize=50" \
+curl "https://sdp-api-production.solana.workers.dev/v1/payments/transfers?direction=inbound&pageSize=50" \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript
-const url = new URL("https://api.solana.com/v1/payments/transfers");
+const url = new URL("https://sdp-api-production.solana.workers.dev/v1/payments/transfers");
 url.searchParams.set("direction", "inbound");
 url.searchParams.set("pageSize", "50");
 

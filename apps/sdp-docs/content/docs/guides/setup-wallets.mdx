@@ -60,7 +60,7 @@ Each provider supports a different set of operations shown as capability chips:
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST https://api.solana.com/v1/wallets/initialize \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/wallets/initialize \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -71,7 +71,7 @@ curl -X POST https://api.solana.com/v1/wallets/initialize \
 </Tab>
 <Tab value="TypeScript">
 ```typescript
-const response = await fetch("https://api.solana.com/v1/wallets/initialize", {
+const response = await fetch("https://sdp-api-production.solana.workers.dev/v1/wallets/initialize", {
   method: "POST",
   headers: {
     "Authorization": "Bearer sk_test_...",
@@ -89,7 +89,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/wallets/initialize"))
+    .uri(URI.create("https://sdp-api-production.solana.workers.dev/v1/wallets/initialize"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -107,7 +107,7 @@ HttpRequest request = HttpRequest.newBuilder()
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST https://api.solana.com/v1/wallets \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/wallets \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -119,7 +119,7 @@ curl -X POST https://api.solana.com/v1/wallets \
 </Tab>
 <Tab value="TypeScript">
 ```typescript
-const response = await fetch("https://api.solana.com/v1/wallets", {
+const response = await fetch("https://sdp-api-production.solana.workers.dev/v1/wallets", {
   method: "POST",
   headers: {
     "Authorization": "Bearer sk_test_...",
@@ -136,7 +136,7 @@ const response = await fetch("https://api.solana.com/v1/wallets", {
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/wallets"))
+    .uri(URI.create("https://sdp-api-production.solana.workers.dev/v1/wallets"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -157,13 +157,13 @@ The `purpose` field is optional metadata in the API. The current dashboard creat
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl "https://api.solana.com/v1/wallets?view=summary" \
+curl "https://sdp-api-production.solana.workers.dev/v1/wallets?view=summary" \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript
-const response = await fetch("https://api.solana.com/v1/wallets?view=summary", {
+const response = await fetch("https://sdp-api-production.solana.workers.dev/v1/wallets?view=summary", {
   headers: { "Authorization": "Bearer sk_test_..." },
 });
 const { data } = await response.json();
@@ -173,7 +173,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/wallets?view=summary"))
+    .uri(URI.create("https://sdp-api-production.solana.workers.dev/v1/wallets?view=summary"))
     .header("Authorization", "Bearer sk_test_...")
     .GET()
     .build();
@@ -188,7 +188,7 @@ Use the returned `walletId` when setting a default wallet or binding wallet-scop
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST https://api.solana.com/v1/wallets/default-wallet \
+curl -X POST https://sdp-api-production.solana.workers.dev/v1/wallets/default-wallet \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{ "walletId": "wal_xyz789" }'
@@ -196,7 +196,7 @@ curl -X POST https://api.solana.com/v1/wallets/default-wallet \
 </Tab>
 <Tab value="TypeScript">
 ```typescript
-await fetch("https://api.solana.com/v1/wallets/default-wallet", {
+await fetch("https://sdp-api-production.solana.workers.dev/v1/wallets/default-wallet", {
   method: "POST",
   headers: {
     "Authorization": "Bearer sk_test_...",
@@ -209,7 +209,7 @@ await fetch("https://api.solana.com/v1/wallets/default-wallet", {
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/wallets/default-wallet"))
+    .uri(URI.create("https://sdp-api-production.solana.workers.dev/v1/wallets/default-wallet"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
