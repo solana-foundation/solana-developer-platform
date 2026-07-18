@@ -102,8 +102,11 @@ function mapAssetProfile(payload: unknown): AssetProfile | null {
 }
 
 export default async function IssuanceTokenManagementPage({ params }: TokenManagementPageProps) {
-  const t = await getTranslations();
-  const { userId, orgId } = await auth();
+  const [t, { userId, orgId }, { tokenId }] = await Promise.all([
+    getTranslations(),
+    auth(),
+    params,
+  ]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -111,7 +114,6 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
     redirect("/dashboard");
   }
 
-  const { tokenId } = await params;
   const trace = createTimedTrace("dashboard.issuance.token.page");
 
   try {
@@ -119,6 +121,18 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
       createSdpApiClient(trace.childContext("dashboard.issuance.token.api"))
     );
 
+    const assetProfilesEnabled = isAssetProfilesUiEnabled();
+    const profileResultPromise = assetProfilesEnabled
+      ? trace.step("fetch_asset_profile", () =>
+          fetchData<AssetProfile | null>(
+            apiClient.request,
+            `/v1/issuance/asset-profiles/by-token/${tokenId}`,
+            mapAssetProfile,
+            t("DashboardIssuance.errors.requestFailed"),
+            t("DashboardIssuance.errors.unknown")
+          )
+        )
+      : Promise.resolve(null);
     const tokenResult = await trace.step("fetch_token", () =>
       fetchData<Token | null>(
         apiClient.request,
@@ -138,29 +152,19 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
       notFound();
     }
 
+    const profileResult = await profileResultPromise;
+
     // Tokens with an active asset profile get the new management workspace
     // (behind the asset-profiles UI flag). Any profile-fetch failure — 404 (no
     // profile), 403 (backend flag off), 5xx — degrades to the legacy workspace.
-    let assetProfile: AssetProfile | null = null;
-    if (isAssetProfilesUiEnabled()) {
-      const profileResult = await trace.step("fetch_asset_profile", () =>
-        fetchData<AssetProfile | null>(
-          apiClient.request,
-          `/v1/issuance/asset-profiles/by-token/${tokenId}`,
-          mapAssetProfile,
-          t("DashboardIssuance.errors.requestFailed"),
-          t("DashboardIssuance.errors.unknown")
-        )
-      );
-      assetProfile = profileResult.data;
-      if (profileResult.error && profileResult.status !== 404) {
-        trace.log({
-          ok: false,
-          tokenId,
-          profileStatus: profileResult.status,
-          profileError: profileResult.error,
-        });
-      }
+    const assetProfile = profileResult?.data ?? null;
+    if (profileResult?.error && profileResult.status !== 404) {
+      trace.log({
+        ok: false,
+        tokenId,
+        profileStatus: profileResult.status,
+        profileError: profileResult.error,
+      });
     }
 
     trace.log({

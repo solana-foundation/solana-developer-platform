@@ -19,8 +19,11 @@ type PageContext = {
 };
 
 export default async function ApprovalRequestPage({ params }: PageContext) {
-  const t = await getTranslations();
-  const { userId, orgId, orgRole } = await auth();
+  const [t, { userId, orgId, orgRole }, { approvalRequestId }] = await Promise.all([
+    getTranslations(),
+    auth(),
+    params,
+  ]);
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
@@ -38,8 +41,8 @@ export default async function ApprovalRequestPage({ params }: PageContext) {
     );
   }
 
-  const { approvalRequestId } = await params;
   const apiClient = await createSdpApiClient();
+  const apiKeyNamesPromise = fetchApprovalApiKeyNames(apiClient);
   let approvalRequest: WalletApprovalRequestSummary;
   try {
     approvalRequest = await fetchApprovalRequest(apiClient, approvalRequestId);
@@ -50,7 +53,7 @@ export default async function ApprovalRequestPage({ params }: PageContext) {
 
   const [evaluation, apiKeyNames] = await Promise.all([
     fetchApprovalPolicyEvaluation(apiClient, approvalRequest),
-    fetchApprovalApiKeyNames(apiClient),
+    apiKeyNamesPromise,
   ]);
 
   return (
