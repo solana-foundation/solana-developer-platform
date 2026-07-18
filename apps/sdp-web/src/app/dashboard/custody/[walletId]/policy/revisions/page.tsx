@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { History } from "lucide-react";
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { getRequestLocale, getTranslations } from "@/i18n/server";

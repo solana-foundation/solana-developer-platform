@@ -70,6 +70,56 @@ test.describe("dashboard navigation loading contract", () => {
     await expect(page.locator("main")).toHaveAttribute("aria-busy", "false");
   });
 
+  test("gives an in-content dashboard link the same precommit feedback", async ({ page }) => {
+    let releaseRsc: () => void = () => {};
+    const rscGate = new Promise<void>((resolve) => {
+      releaseRsc = resolve;
+    });
+    let interceptedRsc = false;
+
+    await page.route(/\/dashboard\/wallets(?:\?.*)?$/, async (route) => {
+      if (route.request().headers().rsc !== "1") {
+        await route.continue();
+        return;
+      }
+
+      interceptedRsc = true;
+      await rscGate;
+      await route.continue();
+    });
+
+    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    const pageContent = page.locator("[data-dashboard-page-content]");
+    await expect(pageContent).toHaveCount(1);
+
+    const inContentWalletLink = pageContent.locator(
+      // biome-ignore lint/security/noSecrets: Static DOM selector, not a credential.
+      '[data-dashboard-navigation-link="true"][href="/dashboard/wallets"]'
+    );
+    const navigation = inContentWalletLink.click({ noWaitAfter: true });
+
+    try {
+      await expect.poll(() => interceptedRsc, { timeout: 10_000 }).toBe(true);
+      const pendingNavigation = page.locator("[data-dashboard-navigation-pending]");
+      await expect(pendingNavigation).toBeVisible({ timeout: 1_000 });
+      await expect(pendingNavigation).toHaveAttribute(
+        "data-dashboard-navigation-pending",
+        "wallets"
+      );
+      await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(0);
+      await expect(page.locator("main")).toHaveAttribute("aria-busy", "true");
+    } finally {
+      releaseRsc();
+      await navigation;
+    }
+
+    await expect(page).toHaveURL(/\/dashboard\/wallets(?:\?.*)?$/, { timeout: 120_000 });
+    await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(1, {
+      timeout: 120_000,
+    });
+    await expect(page.locator("main")).toHaveAttribute("aria-busy", "false");
+  });
+
   test("keeps the current page visible when a managed link cancels navigation", async ({
     page,
   }) => {

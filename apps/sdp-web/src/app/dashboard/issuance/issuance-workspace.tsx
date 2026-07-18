@@ -3,8 +3,8 @@
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Plus, Search } from "lucide-react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

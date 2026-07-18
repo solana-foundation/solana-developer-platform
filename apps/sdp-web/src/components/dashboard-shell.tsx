@@ -18,9 +18,8 @@ import {
   ShieldCheckIcon,
   WalletIcon,
 } from "lucide-react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import ApprovalsLoading from "@/app/dashboard/approvals/loading";
 import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
@@ -29,6 +28,7 @@ import PaymentsLoading from "@/app/dashboard/payments/loading";
 import { PoliciesPageSkeleton } from "@/app/dashboard/policies/policies-page-skeleton";
 import WalletsLoading from "@/app/dashboard/wallets/loading";
 import { CounterpartyHeaderTabs } from "@/components/counterparty-header-tabs";
+import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
@@ -39,7 +39,6 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
-  announceDashboardNavigation,
   DASHBOARD_NAVIGATION_RECOVERY_TIMEOUT_MS,
   DASHBOARD_NAVIGATION_START_EVENT,
   DASHBOARD_PAYMENTS_SUBNAV_HREFS,
@@ -55,14 +54,6 @@ type SubNavItem = {
   href: string;
   disabled?: boolean;
 };
-
-type DashboardNavigationLinkProps = Omit<ComponentProps<typeof Link>, "href" | "onNavigate"> & {
-  href: string;
-};
-
-function DashboardNavigationLink({ href, ...props }: DashboardNavigationLinkProps) {
-  return <Link {...props} href={href} onNavigate={() => announceDashboardNavigation(href)} />;
-}
 
 type NavItem = {
   label: string;
@@ -604,7 +595,13 @@ function resolvePageLoadingComponent(surface: DashboardLoadingSurface): React.Co
       return PoliciesPageSkeleton;
     case "approvals":
       return ApprovalsLoading;
-    default:
+    // These surfaces intentionally use the generic contract until the dependent
+    // route-skeleton PRs land; the merge-last rebase will wire their exact exports.
+    case "api-keys":
+    case "members":
+    case "settings":
+    case "allowlist":
+    case "home":
       return DashboardLoading;
   }
 }

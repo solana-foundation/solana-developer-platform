@@ -25,9 +25,9 @@ import {
   RotateCcwIcon,
   WalletIcon,
 } from "lucide-react";
-import Link from "next/link";
 import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

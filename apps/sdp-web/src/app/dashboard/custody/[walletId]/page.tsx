@@ -5,7 +5,6 @@ import type {
   PaymentWalletPolicy,
 } from "@sdp/types";
 import { SlidersHorizontal } from "lucide-react";
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
 import {
@@ -25,6 +24,7 @@ import {
   WalletBalancesSkeleton,
   WalletControlsSkeleton,
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";

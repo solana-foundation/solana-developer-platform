@@ -34,6 +34,14 @@ function findDashboardPages(directory: string): string[] {
   });
 }
 
+function findDashboardSourceFiles(directory: string): string[] {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) return findDashboardSourceFiles(entryPath);
+    return entry.name.endsWith(".tsx") ? [entryPath] : [];
+  });
+}
+
 describe("dashboard loading route inventory", () => {
   it("gives every dashboard page route an immediate loading contract", () => {
     const pageRoutes = findDashboardPages(dashboardPagesDirectory()).map(routePathnameForPage);
@@ -52,6 +60,25 @@ describe("dashboard loading route inventory", () => {
 
     for (const target of visibleTargets) {
       expect(resolveDashboardLoadingSurface(target), target).not.toBeNull();
+    }
+  });
+
+  it("routes dashboard source links through the managed navigation contract", () => {
+    const directNextLinkFiles = findDashboardSourceFiles(dashboardPagesDirectory())
+      .filter((filePath) => fs.readFileSync(filePath, "utf8").includes('from "next/link"'))
+      .map((filePath) => path.relative(dashboardPagesDirectory(), filePath))
+      .sort();
+
+    // These two links only open an external explorer in a new tab. Any new direct
+    // Next Link import must explicitly decide whether it belongs on this allowlist.
+    expect(directNextLinkFiles).toEqual([
+      "issuance/[tokenId]/asset-profile/asset-profile-header.tsx",
+      "issuance/[tokenId]/token-management-header.tsx",
+    ]);
+
+    for (const relativePath of directNextLinkFiles) {
+      const source = fs.readFileSync(path.join(dashboardPagesDirectory(), relativePath), "utf8");
+      expect(source, relativePath).not.toContain("/dashboard");
     }
   });
 });
