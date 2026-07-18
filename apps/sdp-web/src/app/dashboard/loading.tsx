@@ -1,8 +1,16 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 const METRIC_SKELETON_IDS = ["home-metric-skeleton-1", "home-metric-skeleton-2"];
-const TABLE_SKELETON_IDS = [
+const ACTIVITY_ROW_IDS = [
   "home-table-skeleton-1",
   "home-table-skeleton-2",
   "home-table-skeleton-3",
@@ -42,10 +50,74 @@ export default function DashboardLoading() {
           </div>
           <SkeletonBlock className="h-9 w-20 rounded-[10px]" />
         </CardHeader>
-        <CardContent className="space-y-3" data-loading-table>
-          {TABLE_SKELETON_IDS.map((id) => (
-            <SkeletonBlock key={id} className="h-11 w-full" />
-          ))}
+        <CardContent data-loading-table data-loading-home-activity-table>
+          <Table className="min-w-0 [&_table]:table-fixed">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[8rem] pl-6" data-loading-home-activity-column="time">
+                  <SkeletonBlock className="h-4 w-16" />
+                </TableHead>
+                <TableHead
+                  className="w-[calc(100%_-_8rem)] md:hidden"
+                  data-loading-home-activity-column="activity"
+                >
+                  <SkeletonBlock className="h-4 w-20" />
+                </TableHead>
+                <TableHead
+                  className="hidden w-[10rem] md:table-cell"
+                  data-loading-home-activity-column="type"
+                >
+                  <SkeletonBlock className="h-4 w-16" />
+                </TableHead>
+                <TableHead
+                  className="hidden w-[8rem] md:table-cell"
+                  data-loading-home-activity-column="token"
+                >
+                  <SkeletonBlock className="h-4 w-16" />
+                </TableHead>
+                <TableHead
+                  className="hidden w-[10rem] md:table-cell"
+                  data-loading-home-activity-column="amount"
+                >
+                  <SkeletonBlock className="h-4 w-20" />
+                </TableHead>
+                <TableHead
+                  className="hidden pr-6 md:table-cell"
+                  data-loading-home-activity-column="address"
+                >
+                  <SkeletonBlock className="h-4 w-24" />
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {ACTIVITY_ROW_IDS.map((id) => (
+                <TableRow key={id} data-loading-home-activity-row>
+                  <TableCell className="pl-6">
+                    <SkeletonBlock className="h-4 w-16 max-w-full" />
+                  </TableCell>
+                  <TableCell className="min-w-0 md:hidden">
+                    <div className="min-w-0" data-loading-home-mobile-activity>
+                      <SkeletonBlock className="h-4 w-24 max-w-full" />
+                      <SkeletonBlock className="mt-1 h-3 w-20 max-w-full" />
+                      <SkeletonBlock className="mt-1 h-3 w-32 max-w-full" />
+                    </div>
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    <SkeletonBlock className="h-4 w-24 max-w-full" />
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    <SkeletonBlock className="h-4 w-16 max-w-full" />
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    <SkeletonBlock className="h-4 w-24 max-w-full" />
+                  </TableCell>
+                  <TableCell className="hidden pr-6 md:table-cell">
+                    <SkeletonBlock className="h-3 w-32 max-w-full" />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
     </div>

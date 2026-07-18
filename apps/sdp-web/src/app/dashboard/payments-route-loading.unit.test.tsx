@@ -148,17 +148,32 @@ describe("home and payments route loading states", () => {
     expect(markup).not.toContain("overflow-hidden");
   });
 
-  it("keeps the Home activity header and rows inside one responsive Card", () => {
+  it("matches the Home activity Card's settled responsive table geometry", () => {
     const markup = renderToStaticMarkup(<DashboardLoading />);
 
     expect(markup.match(/data-loading-home-activity=/g)).toHaveLength(1);
     expect(markup.match(/data-loading-home-activity-header=/g)).toHaveLength(1);
+    expect(markup.match(/data-loading-home-activity-table=/g)).toHaveLength(1);
+    expect(markup.match(/data-loading-home-activity-column=/g)).toHaveLength(6);
+    expect(markup.match(/data-loading-home-activity-row=/g)).toHaveLength(6);
+    expect(markup.match(/data-loading-home-mobile-activity=/g)).toHaveLength(6);
+    expect(markup.match(/min-w-0 md:hidden/g)).toHaveLength(6);
+    expect(markup.match(/mt-1 h-3/g)).toHaveLength(12);
+    expect(markup.match(/hidden md:table-cell/g)).toHaveLength(18);
+    expect(markup.match(/hidden pr-6 md:table-cell/g)).toHaveLength(7);
     expect(markup).toMatch(
       /data-loading-home-activity="true"[\s\S]*data-loading-home-activity-header="true"[\s\S]*data-loading-table="true"/
     );
     expect(markup).toContain(
       "flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
     );
+    expect(markup).toContain("min-w-0 [&amp;_table]:table-fixed");
+    expect(markup).toContain("w-[8rem] pl-6");
+    expect(markup).toContain("w-[calc(100%_-_8rem)] md:hidden");
+    expect(markup.match(/hidden w-\[10rem\] md:table-cell/g)).toHaveLength(2);
+    expect(markup).toContain("hidden w-[8rem] md:table-cell");
+    expect(markup).toContain("hidden pr-6 md:table-cell");
+    expect(markup).not.toContain('class="h-11 w-full"');
   });
 
   it("keeps the recurring list loader contained at a 390px viewport", () => {
