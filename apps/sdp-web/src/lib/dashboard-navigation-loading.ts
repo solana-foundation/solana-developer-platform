@@ -57,10 +57,10 @@ function normalizePathname(pathname: string): string {
 function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | null {
   const prefix =
     pathname === "/dashboard/custody" || pathname.startsWith("/dashboard/custody/")
-    ? "/dashboard/custody"
-    : pathname === "/dashboard/wallets" || pathname.startsWith("/dashboard/wallets/")
-      ? "/dashboard/wallets"
-      : null;
+      ? "/dashboard/custody"
+      : pathname === "/dashboard/wallets" || pathname.startsWith("/dashboard/wallets/")
+        ? "/dashboard/wallets"
+        : null;
   if (!prefix) return null;
   if (pathname === prefix) return "wallets-overview";
   if (pathname === `${prefix}/setup` || pathname === `${prefix}/switch`) return "wallet-setup";
