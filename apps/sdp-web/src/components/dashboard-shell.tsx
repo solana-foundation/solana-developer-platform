@@ -36,7 +36,6 @@ import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { isRecurringPaymentsDashboardEnabled } from "@/lib/recurring-payments-feature";
 import { cn } from "@/lib/utils";
 
 type SubNavItem = {
@@ -65,9 +64,7 @@ function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[]
     { label: t("Shared.dashboardShell.pay"), href: "/dashboard/payments/pay" },
     { label: t("Shared.dashboardShell.deposit"), href: "/dashboard/payments/deposit" },
     { label: t("Shared.dashboardShell.requests"), href: "/dashboard/payments/requests" },
-    ...(isRecurringPaymentsDashboardEnabled()
-      ? [{ label: t("Shared.dashboardShell.recurring"), href: "/dashboard/payments/recurring" }]
-      : []),
+    { label: t("Shared.dashboardShell.recurring"), href: "/dashboard/payments/recurring" },
   ];
 }
 
@@ -384,7 +381,6 @@ function getAccessControlPageConfig(
   return null;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: route-specific shell configs stay centralized.
 function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>

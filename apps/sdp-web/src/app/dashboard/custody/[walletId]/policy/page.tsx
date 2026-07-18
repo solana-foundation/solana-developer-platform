@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import type {
-  CustodyWalletByIdResponse,
+  CustodyWalletMetadataResponse,
   CustodyWalletTokenBalance,
   PaymentWalletPolicy,
 } from "@sdp/types";
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient, getSelectedProjectId, type SdpApiClient } from "@/lib/sdp-api";
+import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { WalletPolicyStartingProfileFlow } from "./wallet-policy-starting-profile-flow";
 
 interface WalletPolicyResult {
@@ -27,8 +28,8 @@ interface WalletBalancesResponse {
 async function getWalletDetail(
   request: SdpApiClient["request"],
   walletId: string
-): Promise<CustodyWalletByIdResponse["wallet"]> {
-  const response = await request(`/v1/wallets/${encodeURIComponent(walletId)}`);
+): Promise<CustodyWalletMetadataResponse["wallet"]> {
+  const response = await request(getWalletMetadataPath(walletId));
   if (response.status === 404) {
     notFound();
   }
@@ -37,7 +38,7 @@ async function getWalletDetail(
     throw new Error(`SDP API request failed (${response.status}): ${body}`);
   }
 
-  const json = (await response.json()) as { data?: CustodyWalletByIdResponse };
+  const json = (await response.json()) as { data?: CustodyWalletMetadataResponse };
   const wallet = json.data?.wallet;
   if (!wallet) {
     notFound();

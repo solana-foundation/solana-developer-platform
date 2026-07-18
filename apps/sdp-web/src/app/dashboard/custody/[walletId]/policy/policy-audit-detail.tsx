@@ -1,5 +1,5 @@
 import type {
-  CustodyWalletByIdResponse,
+  CustodyWalletMetadataResponse,
   PolicyDecision,
   WalletControlProfileRevisionHistory,
   WalletPolicyEvaluationDetail,
@@ -58,7 +58,7 @@ export function PolicyAuditDetail({
   locale,
   t,
 }: {
-  wallet: CustodyWalletByIdResponse["wallet"];
+  wallet: CustodyWalletMetadataResponse["wallet"];
   evaluation: WalletPolicyEvaluationDetail;
   revisionHistory: WalletControlProfileRevisionHistory;
   apiKeyNames: Record<string, string>;
@@ -804,7 +804,7 @@ function EvaluationContextRail({
   policyHref,
   t,
 }: {
-  wallet: CustodyWalletByIdResponse["wallet"];
+  wallet: CustodyWalletMetadataResponse["wallet"];
   evaluation: WalletPolicyEvaluationDetail;
   history: WalletControlProfileRevisionHistory;
   apiKeyNames: Record<string, string>;
@@ -993,7 +993,7 @@ function NeighborButton({
   );
 }
 
-function walletLabel(wallet: CustodyWalletByIdResponse["wallet"]): string {
+function walletLabel(wallet: CustodyWalletMetadataResponse["wallet"]): string {
   return wallet.label?.trim() || wallet.walletId;
 }
 

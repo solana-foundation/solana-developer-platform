@@ -1,5 +1,9 @@
 import { PoliciesOverviewSkeleton } from "./policies-overview";
 
 export default function PoliciesLoading() {
-  return <PoliciesOverviewSkeleton />;
+  return (
+    <div className="contents" data-loading-layout="policies">
+      <PoliciesOverviewSkeleton />
+    </div>
+  );
 }
