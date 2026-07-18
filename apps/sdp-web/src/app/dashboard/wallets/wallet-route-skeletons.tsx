@@ -118,34 +118,42 @@ export function WalletsOnboardingSkeleton() {
 
 export function WalletSetupSkeleton() {
   return (
-    <LoadingRegion
-      layout="wallet-setup"
-      className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-6"
-    >
-      <div className="mx-auto w-full max-w-3xl space-y-6">
-        <div className="flex justify-center">
-          <Pulse className="h-9 w-56" />
-        </div>
-        <div className="grid gap-4">
-          {FIVE_ITEMS.map((provider) => (
-            <div
-              key={provider}
-              className="w-full rounded-2xl border border-border-default bg-surface-raised px-5 py-5"
-            >
-              <div className="flex items-start gap-4">
-                <Pulse className="size-11 shrink-0 rounded-full" />
-                <div className="min-w-0 flex-1 space-y-2 pt-0.5">
-                  <Pulse className="h-6 w-48 max-w-full" />
-                  <Pulse className="h-4 w-full max-w-[42rem]" />
-                </div>
-              </div>
-            </div>
-          ))}
+    <LoadingRegion layout="wallet-setup" className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6">
+        <div className="mx-auto flex w-full max-w-3xl items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <Pulse className="h-1.5 w-5 rounded-full" />
+            <Pulse className="h-1.5 w-2.5 rounded-full" />
+          </div>
+          <Pulse className="h-3 w-16" />
         </div>
       </div>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:flex-row sm:justify-between">
-        <Pulse className="h-14 w-full rounded-full sm:w-32" />
-        <Pulse className="h-14 w-full rounded-full sm:w-36" />
+      <div className="min-h-0 flex-1 overflow-hidden px-4 md:px-6">
+        <div className="mx-auto w-full max-w-3xl space-y-6 pb-8">
+          <Pulse className="h-8 w-56" />
+          <div className="grid gap-4">
+            {FIVE_ITEMS.map((provider) => (
+              <div
+                key={provider}
+                className="w-full rounded-2xl border border-border-default bg-surface-raised px-5 py-5"
+              >
+                <div className="flex items-start gap-4">
+                  <Pulse className="size-11 shrink-0 rounded-full" />
+                  <div className="min-w-0 flex-1 space-y-2 pt-0.5">
+                    <Pulse className="h-6 w-48 max-w-full" />
+                    <Pulse className="h-4 w-full max-w-[42rem]" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6">
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
+          <Pulse className="h-10 w-24 rounded-lg" />
+          <Pulse className="h-10 w-28 rounded-lg" />
+        </div>
       </div>
     </LoadingRegion>
   );

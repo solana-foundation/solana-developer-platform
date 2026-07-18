@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Select, SelectItem } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
@@ -606,26 +607,15 @@ export function WalletPolicyToolbar({
 function StepIndicator({ stepIndex }: { stepIndex: number }) {
   const t = useTranslations();
   return (
-    <div data-wallet-policy-stepper="true" className="flex shrink-0 items-center gap-4">
-      <div className="flex items-center gap-1.5" aria-hidden="true">
-        {FLOW_STEPS.map((step, index) => (
-          <span
-            key={step}
-            className={cn(
-              "h-1.5 rounded-full transition-[width,background-color] duration-200",
-              index === stepIndex
-                ? "w-5 bg-primary"
-                : index < stepIndex
-                  ? "w-2.5 bg-primary"
-                  : "w-2.5 bg-fill-strong"
-            )}
-          />
-        ))}
-      </div>
-      <span className="text-xs text-muted">
-        {t("DashboardCustody.stepOf", { current: stepIndex + 1, total: FLOW_STEPS.length })}
-      </span>
-    </div>
+    <WizardStepProgress
+      data-wallet-policy-stepper="true"
+      currentStep={stepIndex}
+      progressLabel={t("DashboardCustody.stepOf", {
+        current: stepIndex + 1,
+        total: FLOW_STEPS.length,
+      })}
+      steps={FLOW_STEPS}
+    />
   );
 }
 
@@ -1159,7 +1149,7 @@ function DestinationEditor({
           }
           aria-invalid={Boolean(error)}
           className="min-h-40 w-full resize-y rounded-lg border border-border-default bg-white px-3 py-3 text-sm leading-6 text-primary outline-none transition-colors placeholder:text-muted focus:border-primary"
-          placeholder="11111111111111111111111111111111, So11111111111111111111111111111111111111112"
+          placeholder={t("DashboardCustody.policyWalletAddressesPlaceholder")}
         />
       </label>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
