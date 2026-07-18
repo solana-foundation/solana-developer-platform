@@ -767,15 +767,3 @@ export function PoliciesOverview({ inventory, error, state }: PoliciesOverviewPr
     />
   );
 }
-
-export function PoliciesOverviewSkeleton() {
-  return (
-    <PoliciesOverviewSurface
-      inventory={null}
-      error={false}
-      state={{ tab: "all", query: "", status: "", page: 1, pageSize: 25 }}
-      searchValue=""
-      loading
-    />
-  );
-}

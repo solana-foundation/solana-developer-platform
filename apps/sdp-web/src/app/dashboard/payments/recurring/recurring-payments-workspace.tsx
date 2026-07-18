@@ -26,7 +26,6 @@ import {
   WalletIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
@@ -53,6 +52,7 @@ import {
 } from "@/components/ui/table";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
@@ -721,7 +721,7 @@ export function RecurringPaymentsWorkspace({
   counterparties,
 }: RecurringPaymentsWorkspaceProps) {
   const t = useTranslations();
-  const router = useRouter();
+  const router = useDashboardRouter();
 
   const walletById = useMemo(
     () => new Map(wallets.map((wallet) => [wallet.walletId, wallet])),
@@ -887,7 +887,7 @@ export function RecurringPaymentDetailWorkspace({
   collectionAttemptsError,
 }: RecurringPaymentDetailWorkspaceProps) {
   const t = useTranslations();
-  const router = useRouter();
+  const router = useDashboardRouter();
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);

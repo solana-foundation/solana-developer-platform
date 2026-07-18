@@ -16,8 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { updateWalletPolicy } from "@/app/dashboard/payments/payments-workspace.data";
@@ -34,6 +33,7 @@ import { Select, SelectItem } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { cn } from "@/lib/utils";
 import {
   AUTHORING_RULE_ACTIONS,
@@ -190,7 +190,7 @@ export function WalletPolicyStartingProfileFlow({
   policyError,
 }: WalletPolicyStartingProfileFlowProps) {
   const t = useTranslations();
-  const router = useRouter();
+  const router = useDashboardRouter();
   const pathname = usePathname();
   const initialState = useMemo(() => createPolicyAuthoringState(initialPolicy), [initialPolicy]);
   const [state, setState] = useState(initialState);

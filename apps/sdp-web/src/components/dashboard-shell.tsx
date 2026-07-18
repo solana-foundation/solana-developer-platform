@@ -20,11 +20,20 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import ApprovalsLoading from "@/app/dashboard/approvals/loading";
 import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
 import CounterpartyLoading from "@/app/dashboard/payments/counterparty/loading";
 import PaymentsLoading from "@/app/dashboard/payments/loading";
+import { PoliciesPageSkeleton } from "@/app/dashboard/policies/policies-page-skeleton";
 import WalletsLoading from "@/app/dashboard/wallets/loading";
 import { CounterpartyHeaderTabs } from "@/components/counterparty-header-tabs";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
@@ -36,6 +45,15 @@ import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import {
+  DASHBOARD_NAVIGATION_START_EVENT,
+  DASHBOARD_PAYMENTS_SUBNAV_HREFS,
+  DASHBOARD_SIDE_NAV_HREFS,
+  type DashboardLoadingSurface,
+  type DashboardNavigationStartDetail,
+  resolveDashboardLoadingSurface,
+  resolveDashboardNavigationIntent,
+} from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
 
 type SubNavItem = {
@@ -60,11 +78,23 @@ type NavSection = {
 
 function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[] {
   return [
-    { label: t("Shared.dashboardShell.counterparty"), href: "/dashboard/payments/counterparty" },
-    { label: t("Shared.dashboardShell.pay"), href: "/dashboard/payments/pay" },
-    { label: t("Shared.dashboardShell.deposit"), href: "/dashboard/payments/deposit" },
-    { label: t("Shared.dashboardShell.requests"), href: "/dashboard/payments/requests" },
-    { label: t("Shared.dashboardShell.recurring"), href: "/dashboard/payments/recurring" },
+    {
+      label: t("Shared.dashboardShell.counterparty"),
+      href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.counterparty,
+    },
+    { label: t("Shared.dashboardShell.pay"), href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay },
+    {
+      label: t("Shared.dashboardShell.deposit"),
+      href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.deposit,
+    },
+    {
+      label: t("Shared.dashboardShell.requests"),
+      href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.requests,
+    },
+    {
+      label: t("Shared.dashboardShell.recurring"),
+      href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
+    },
   ];
 }
 
@@ -76,8 +106,16 @@ function getNavSections(
     {
       title: t("Shared.dashboardShell.create"),
       items: [
-        { label: t("Shared.dashboardShell.home"), href: "/dashboard", icon: LayoutDashboardIcon },
-        { label: t("Shared.dashboardShell.wallets"), href: "/dashboard/wallets", icon: WalletIcon },
+        {
+          label: t("Shared.dashboardShell.home"),
+          href: DASHBOARD_SIDE_NAV_HREFS.home,
+          icon: LayoutDashboardIcon,
+        },
+        {
+          label: t("Shared.dashboardShell.wallets"),
+          href: DASHBOARD_SIDE_NAV_HREFS.wallets,
+          icon: WalletIcon,
+        },
       ],
     },
     {
@@ -85,30 +123,30 @@ function getNavSections(
       items: [
         {
           label: t("Shared.dashboardShell.issuance"),
-          href: "/dashboard/issuance",
+          href: DASHBOARD_SIDE_NAV_HREFS.issuance,
           icon: CoinsIcon,
         },
         {
           label: t("Shared.dashboardShell.payments"),
-          href: "/dashboard/payments",
+          href: DASHBOARD_SIDE_NAV_HREFS.payments,
           icon: ArrowLeftRightIcon,
           children: getPaymentsActions(t),
         },
         {
           label: t("Shared.dashboardShell.apiKeys"),
-          href: "/dashboard/api-keys",
+          href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,
           icon: KeyRoundIcon,
         },
         {
           label: t("Shared.dashboardShell.policies"),
-          href: "/dashboard/policies",
+          href: DASHBOARD_SIDE_NAV_HREFS.policies,
           icon: ShieldCheckIcon,
         },
         ...(options.canReadApprovals
           ? [
               {
                 label: t("Shared.dashboardShell.approvals"),
-                href: "/dashboard/approvals",
+                href: DASHBOARD_SIDE_NAV_HREFS.approvals,
                 icon: CircleCheckBigIcon,
                 ...(options.pendingApprovalCount ? { badge: options.pendingApprovalCount } : {}),
               },
@@ -550,13 +588,23 @@ function getDashboardPageConfig(
   return { title: t("Shared.dashboardShell.home") };
 }
 
-function resolvePageLoadingComponent(pathname: string): React.ComponentType {
-  if (pathname.startsWith("/dashboard/payments/counterparty")) return CounterpartyLoading;
-  if (pathname.startsWith("/dashboard/payments")) return PaymentsLoading;
-  if (pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody"))
-    return WalletsLoading;
-  if (pathname.startsWith("/dashboard/issuance")) return IssuancePageSkeleton;
-  return DashboardLoading;
+function resolvePageLoadingComponent(surface: DashboardLoadingSurface): React.ComponentType {
+  switch (surface) {
+    case "counterparty":
+      return CounterpartyLoading;
+    case "payments":
+      return PaymentsLoading;
+    case "wallets":
+      return WalletsLoading;
+    case "issuance":
+      return IssuancePageSkeleton;
+    case "policies":
+      return PoliciesPageSkeleton;
+    case "approvals":
+      return ApprovalsLoading;
+    default:
+      return DashboardLoading;
+  }
 }
 
 function isItemActive(pathname: string, href: string): boolean {
@@ -706,6 +754,7 @@ function DashboardSidebarContent({
   onClose,
   isCollapsed,
   variant,
+  onOrganizationSwitchingChange,
 }: {
   bottomNavItems: NavItem[];
   navSections: NavSection[];
@@ -714,6 +763,7 @@ function DashboardSidebarContent({
   onClose: () => void;
   isCollapsed: boolean;
   variant: "desktop" | "mobile";
+  onOrganizationSwitchingChange: (isSwitching: boolean) => void;
 }) {
   const t = useTranslations();
   const showMobileClose = variant === "mobile";
@@ -723,7 +773,10 @@ function DashboardSidebarContent({
         <div className="py-3">
           {showMobileClose ? (
             <div className="flex items-center justify-between gap-2">
-              <WorkspaceSwitcher collapsed={false} />
+              <WorkspaceSwitcher
+                collapsed={false}
+                onOrganizationSwitchingChange={onOrganizationSwitchingChange}
+              />
               <button
                 type="button"
                 aria-label={t("Shared.dashboardShell.closeNavigation")}
@@ -734,7 +787,10 @@ function DashboardSidebarContent({
               </button>
             </div>
           ) : (
-            <WorkspaceSwitcher collapsed={isCollapsed} />
+            <WorkspaceSwitcher
+              collapsed={isCollapsed}
+              onOrganizationSwitchingChange={onOrganizationSwitchingChange}
+            />
           )}
         </div>
         {navSections.map((section, idx) => (
@@ -784,13 +840,24 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
-  const PageLoadingComponent = resolvePageLoadingComponent(pathname);
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<{
+    fromPathname: string;
+    toPathname: string;
+  } | null>(null);
   const [pendingApprovalCount, setPendingApprovalCount] = useState<number | null>(null);
   const previousPathnameRef = useRef(pathname);
+  const pendingNavigationPathname =
+    pendingNavigation?.fromPathname === pathname ? pendingNavigation.toPathname : null;
+  const shellPathname = pendingNavigationPathname ?? pathname;
+  const loadingSurface = resolveDashboardLoadingSurface(shellPathname) ?? "home";
+  const PageLoadingComponent = resolvePageLoadingComponent(loadingSurface);
+  const isNavigationPending =
+    Boolean(pendingNavigationPathname) || isProjectSwitching || isOrganizationSwitching;
   const sidebarExpandedWidth = 296;
   const sidebarCollapsedWidth = 64;
-  const pageConfig = getDashboardPageConfig(pathname, t);
+  const pageConfig = getDashboardPageConfig(shellPathname, t);
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     pendingApprovalCount,
@@ -806,7 +873,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       ? [
           {
             label: t("Shared.dashboardShell.settings"),
-            href: "/dashboard/settings",
+            href: DASHBOARD_SIDE_NAV_HREFS.settings,
             icon: Settings2Icon,
           },
         ]
@@ -823,41 +890,81 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     pageConfig.showHeaderNavRow || Boolean(backAction) || Boolean(headerNav);
   const shouldRenderTopBarBorder = Boolean(centeredTitle) && !shouldRenderHeaderNavRow;
   const shouldClipHorizontalOverflow =
-    pathname === "/dashboard/payments" ||
-    (pathname.startsWith("/dashboard/payments/") &&
-      !pathname.startsWith("/dashboard/payments/counterparty"));
+    shellPathname === "/dashboard/payments" ||
+    (shellPathname.startsWith("/dashboard/payments/") &&
+      !shellPathname.startsWith("/dashboard/payments/counterparty"));
   const isWalletDetailRoute =
-    (pathname.startsWith("/dashboard/wallets/") &&
-      pathname !== "/dashboard/wallets/setup" &&
-      pathname !== "/dashboard/wallets/switch") ||
-    (pathname.startsWith("/dashboard/custody/") &&
-      pathname !== "/dashboard/custody/setup" &&
-      pathname !== "/dashboard/custody/switch");
+    (shellPathname.startsWith("/dashboard/wallets/") &&
+      shellPathname !== "/dashboard/wallets/setup" &&
+      shellPathname !== "/dashboard/wallets/switch") ||
+    (shellPathname.startsWith("/dashboard/custody/") &&
+      shellPathname !== "/dashboard/custody/setup" &&
+      shellPathname !== "/dashboard/custody/switch");
   const isWalletSetupRoute =
-    pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup";
+    shellPathname === "/dashboard/wallets/setup" || shellPathname === "/dashboard/custody/setup";
   const shouldUseWorkspaceViewport =
-    pathname === "/dashboard/issuance" ||
-    pathname === "/dashboard/issuance/create" ||
-    pathname === "/dashboard/policies" ||
-    pathname === "/dashboard/api-keys/new" ||
-    (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
-    pathname === "/dashboard/payments" ||
-    pathname === "/dashboard/wallets" ||
-    pathname === "/dashboard/custody" ||
+    shellPathname === "/dashboard/issuance" ||
+    shellPathname === "/dashboard/issuance/create" ||
+    shellPathname === "/dashboard/policies" ||
+    shellPathname === "/dashboard/api-keys/new" ||
+    (shellPathname.startsWith("/dashboard/api-keys/") && shellPathname.endsWith("/edit")) ||
+    shellPathname === "/dashboard/payments" ||
+    shellPathname === "/dashboard/wallets" ||
+    shellPathname === "/dashboard/custody" ||
     isWalletSetupRoute ||
-    pathname === "/dashboard/payments/counterparty" ||
-    (pathname.startsWith("/dashboard/payments/counterparty/") &&
-      pathname !== "/dashboard/payments/counterparty/create") ||
-    pathname === "/dashboard/payments/requests" ||
-    pathname === "/dashboard/payments/recurring" ||
-    pathname.startsWith("/dashboard/approvals") ||
+    shellPathname === "/dashboard/payments/counterparty" ||
+    (shellPathname.startsWith("/dashboard/payments/counterparty/") &&
+      shellPathname !== "/dashboard/payments/counterparty/create") ||
+    shellPathname === "/dashboard/payments/requests" ||
+    shellPathname === "/dashboard/payments/recurring" ||
+    shellPathname.startsWith("/dashboard/approvals") ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
 
+  const handleNavigationClickCapture = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      const targetElement = event.target;
+      if (!(targetElement instanceof Element)) return;
+
+      const anchor = targetElement.closest<HTMLAnchorElement>("a[href]");
+      if (!anchor) return;
+
+      const toPathname = resolveDashboardNavigationIntent({
+        currentHref: window.location.href,
+        targetHref: anchor.href,
+        button: event.button,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        target: anchor.getAttribute("target"),
+        download: anchor.hasAttribute("download"),
+      });
+      if (!toPathname) return;
+
+      setPendingNavigation({ fromPathname: pathname, toPathname });
+    },
+    [pathname]
+  );
+
+  useEffect(() => {
+    const handleProgrammaticNavigation = (event: Event) => {
+      const detail = (event as CustomEvent<DashboardNavigationStartDetail>).detail;
+      if (!detail?.fromPathname || !detail.toPathname) return;
+      setPendingNavigation(detail);
+    };
+
+    window.addEventListener(DASHBOARD_NAVIGATION_START_EVENT, handleProgrammaticNavigation);
+    return () => {
+      window.removeEventListener(DASHBOARD_NAVIGATION_START_EVENT, handleProgrammaticNavigation);
+    };
+  }, []);
+
   useEffect(() => {
     if (previousPathnameRef.current !== pathname) {
       previousPathnameRef.current = pathname;
+      setPendingNavigation(null);
       setMobileSidebarOpen(false);
     }
   }, [pathname]);
@@ -949,6 +1056,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   return (
     <main
+      onClickCapture={handleNavigationClickCapture}
+      aria-busy={isNavigationPending}
       className={[
         "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",
         shouldLockShellViewport ? "h-screen overflow-hidden" : "",
@@ -970,11 +1079,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           <DashboardSidebarContent
             bottomNavItems={bottomNavItems}
             navSections={navSections}
-            pathname={pathname}
+            pathname={shellPathname}
             onNavigate={undefined}
             onClose={() => setSidebarOpen(false)}
             isCollapsed={!isSidebarOpen}
             variant="desktop"
+            onOrganizationSwitchingChange={setOrganizationSwitching}
           />
           <button
             type="button"
@@ -1002,11 +1112,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               <DashboardSidebarContent
                 bottomNavItems={bottomNavItems}
                 navSections={navSections}
-                pathname={pathname}
+                pathname={shellPathname}
                 onNavigate={() => setMobileSidebarOpen(false)}
                 onClose={() => setMobileSidebarOpen(false)}
                 isCollapsed={false}
                 variant="mobile"
+                onOrganizationSwitchingChange={setOrganizationSwitching}
               />
             </div>
           </div>
@@ -1087,6 +1198,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               ) : null}
             </div>
             <div
+              data-dashboard-page-content={isNavigationPending ? undefined : ""}
               className={[
                 "mx-auto min-w-0 w-full",
                 contentWidthClass,
@@ -1096,7 +1208,19 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 shouldLockViewportScroll ? "min-h-0 flex-1 overflow-hidden" : "",
               ].join(" ")}
             >
-              {isProjectSwitching ? <PageLoadingComponent /> : children}
+              {isNavigationPending ? (
+                <div
+                  className="h-full min-h-0"
+                  data-dashboard-navigation-pending={loadingSurface}
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span className="sr-only">{t("Shared.dashboardShell.loadingDashboard")}</span>
+                  <PageLoadingComponent />
+                </div>
+              ) : (
+                children
+              )}
             </div>
           </div>
         </section>
