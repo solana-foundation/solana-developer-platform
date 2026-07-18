@@ -10,14 +10,14 @@ description: Per-wallet token balances with optional USD valuation via SDP.
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/balances \
+curl https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/balances \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript
 const response = await fetch(
-  "https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/balances",
+  "https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/balances",
   { headers: { Authorization: "Bearer sk_test_..." } }
 );
 const { data } = await response.json();
@@ -27,7 +27,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/balances"))
+    .uri(URI.create("https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/balances"))
     .header("Authorization", "Bearer sk_test_...")
     .GET()
     .build();
@@ -43,7 +43,7 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the balanc
 {
   "data": {
     "walletBalances": {
-      "walletId": "wal_abc123",
+      "walletId": "privy_wallet_123",
       "address": "3xYZa...2aBc",
       "balances": [
         {

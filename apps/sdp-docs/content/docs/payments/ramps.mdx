@@ -10,7 +10,7 @@ SDP wraps several ramp providers behind a two-step flow: **estimate** a rate wit
 | Estimate | `POST /v1/payments/ramps/onramp/estimate` | `POST /v1/payments/ramps/offramp/estimate` |
 | Quote | `POST /v1/payments/ramps/onramp/quote` | `POST /v1/payments/ramps/offramp/quote` |
 
-Estimate is unauthenticated against any provider and fans out across every provider that supports the requested pair — no counterparty required. Quote is provider-specific: you pick one `provider` and it returns either a hosted redirect URL, funding instructions to display, or a session-widget secret, depending on `deliveryMode`.
+Estimate still requires a valid API key (`payments:read`) like every other endpoint, but it requires no counterparty and no provider-side onboarding — it fans out across every provider that supports the requested pair with no setup beyond your API key. Quote is provider-specific: you pick one `provider` and it returns either a hosted redirect URL, funding instructions to display, or a session-widget secret, depending on `deliveryMode`.
 
 For per-provider configuration and which providers support which direction, see [Ramp providers](/docs/payments/ramps-providers).
 

@@ -12,14 +12,14 @@ Use policies for treasury wallets, automated payout wallets, or any custody wall
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
 ```bash
-curl https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/policies \
+curl https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/policies \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript
 const response = await fetch(
-  "https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/policies",
+  "https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/policies",
   { headers: { Authorization: "Bearer sk_test_..." } }
 );
 const { data } = await response.json();
@@ -38,7 +38,7 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the policy
 {
   "data": {
     "policy": {
-      "walletId": "wal_abc123",
+      "walletId": "privy_wallet_123",
       "destinationAllowlist": ["7xKXz...9fGh", "5aBCd...2eFg"],
       "maxTransferAmount": "100.00",
       "maxDailyAmount": "1000.00",
@@ -186,7 +186,7 @@ Set both for defense in depth: a per-transaction cap that catches obvious mistak
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
 ```bash
-curl -X PUT https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/policies \
+curl -X PUT https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/policies \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -202,7 +202,7 @@ curl -X PUT https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wa
 <Tab value="TypeScript">
 ```typescript
 await fetch(
-  "https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/policies",
+  "https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/policies",
   {
     method: "PUT",
     headers: {

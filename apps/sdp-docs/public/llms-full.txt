@@ -295,7 +295,7 @@ Use the returned `walletId` when setting a default wallet or binding wallet-scop
 curl -X POST https://sdp-api-production.solana.workers.dev/v1/wallets/default-wallet \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
-  -d '{ "walletId": "wal_xyz789" }'
+  -d '{ "walletId": "privy_wallet_123" }'
 ```
 </Tab>
 <Tab value="TypeScript">
@@ -306,7 +306,7 @@ await fetch("https://sdp-api-production.solana.workers.dev/v1/wallets/default-wa
     "Authorization": "Bearer sk_test_...",
     "Content-Type": "application/json",
   },
-  body: JSON.stringify({ walletId: "wal_xyz789" }),
+  body: JSON.stringify({ walletId: "privy_wallet_123" }),
 });
 ```
 </Tab>
@@ -317,7 +317,7 @@ HttpRequest request = HttpRequest.newBuilder()
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
-        { "walletId": "wal_xyz789" }"""))
+        { "walletId": "privy_wallet_123" }"""))
     .build();
 ```
 </Tab>
@@ -1915,14 +1915,14 @@ Use policies for treasury wallets, automated payout wallets, or any custody wall
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
 ```bash
-curl https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/policies \
+curl https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/policies \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript
 const response = await fetch(
-  "https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/policies",
+  "https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/policies",
   { headers: { Authorization: "Bearer sk_test_..." } }
 );
 const { data } = await response.json();
@@ -1941,7 +1941,7 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the policy
 {
   "data": {
     "policy": {
-      "walletId": "wal_abc123",
+      "walletId": "privy_wallet_123",
       "destinationAllowlist": ["7xKXz...9fGh", "5aBCd...2eFg"],
       "maxTransferAmount": "100.00",
       "maxDailyAmount": "1000.00",
@@ -2089,7 +2089,7 @@ Set both for defense in depth: a per-transaction cap that catches obvious mistak
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
 ```bash
-curl -X PUT https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/policies \
+curl -X PUT https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/policies \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -2105,7 +2105,7 @@ curl -X PUT https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wa
 <Tab value="TypeScript">
 ```typescript
 await fetch(
-  "https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/policies",
+  "https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/policies",
   {
     method: "PUT",
     headers: {
@@ -2151,14 +2151,14 @@ Source: https://platform.solana.com/docs/wallet-operations/balances
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/balances \
+curl https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/balances \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript
 const response = await fetch(
-  "https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/balances",
+  "https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/balances",
   { headers: { Authorization: "Bearer sk_test_..." } }
 );
 const { data } = await response.json();
@@ -2168,7 +2168,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://sdp-api-production.solana.workers.dev/v1/payments/wallets/wal_abc123/balances"))
+    .uri(URI.create("https://sdp-api-production.solana.workers.dev/v1/payments/wallets/privy_wallet_123/balances"))
     .header("Authorization", "Bearer sk_test_...")
     .GET()
     .build();
@@ -2184,7 +2184,7 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the balanc
 {
   "data": {
     "walletBalances": {
-      "walletId": "wal_abc123",
+      "walletId": "privy_wallet_123",
       "address": "3xYZa...2aBc",
       "balances": [
         {
@@ -3110,7 +3110,7 @@ SDP wraps several ramp providers behind a two-step flow: **estimate** a rate wit
 | Estimate | `POST /v1/payments/ramps/onramp/estimate` | `POST /v1/payments/ramps/offramp/estimate` |
 | Quote | `POST /v1/payments/ramps/onramp/quote` | `POST /v1/payments/ramps/offramp/quote` |
 
-Estimate is unauthenticated against any provider and fans out across every provider that supports the requested pair — no counterparty required. Quote is provider-specific: you pick one `provider` and it returns either a hosted redirect URL, funding instructions to display, or a session-widget secret, depending on `deliveryMode`.
+Estimate still requires a valid API key (`payments:read`) like every other endpoint, but it requires no counterparty and no provider-side onboarding — it fans out across every provider that supports the requested pair with no setup beyond your API key. Quote is provider-specific: you pick one `provider` and it returns either a hosted redirect URL, funding instructions to display, or a session-widget secret, depending on `deliveryMode`.
 
 For per-provider configuration and which providers support which direction, see [Ramp providers](/docs/payments/ramps-providers).
 
