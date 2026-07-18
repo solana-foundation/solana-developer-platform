@@ -36,18 +36,20 @@ export function WalletsPlayground({
   );
 
   return (
-    <ApiPlaygroundShell
-      productName={t("DashboardCustody.wallets")}
-      endpoints={endpoints}
-      defaultEndpointId="list-wallets"
-      apiBaseUrl={apiBaseUrl}
-      apiKeyValue={apiKeyValue}
-      apiKeySelector={<PlaygroundApiKeySelector />}
-      requiresApiKey={!hasActiveApiKeys}
-      leftMessages={[
-        ...(configsError ? [{ text: configsError, tone: "critical" as const }] : []),
-        ...(walletsError ? [{ text: walletsError, tone: "critical" as const }] : []),
-      ]}
-    />
+    <div className="contents" data-wallet-panel="playground-ready">
+      <ApiPlaygroundShell
+        productName={t("DashboardCustody.wallets")}
+        endpoints={endpoints}
+        defaultEndpointId="list-wallets"
+        apiBaseUrl={apiBaseUrl}
+        apiKeyValue={apiKeyValue}
+        apiKeySelector={<PlaygroundApiKeySelector />}
+        requiresApiKey={!hasActiveApiKeys}
+        leftMessages={[
+          ...(configsError ? [{ text: configsError, tone: "critical" as const }] : []),
+          ...(walletsError ? [{ text: walletsError, tone: "critical" as const }] : []),
+        ]}
+      />
+    </div>
   );
 }

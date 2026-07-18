@@ -178,6 +178,41 @@ function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {
   };
 }
 
+/**
+ * Builds the org- and project-scoped clients a server page needs from one
+ * request-bound Clerk token. This avoids acquiring the same token twice while
+ * preserving the absence of a project header on organization endpoints.
+ *
+ * A missing project is represented by a null project client so onboarding
+ * pages can still query organization state before a project has been selected.
+ */
+export async function createRequestScopedSdpApiClients({
+  getToken,
+  organizationTraceContext,
+  projectTraceContext,
+}: {
+  getToken: ClerkGetToken;
+  organizationTraceContext?: TraceContext;
+  projectTraceContext?: TraceContext;
+}): Promise<{
+  organizationClient: SdpApiClient;
+  projectClient: SdpApiClient | null;
+}> {
+  const [token, projectId] = await Promise.all([
+    acquireClerkToken(getToken),
+    getSelectedProjectId(),
+  ]);
+
+  return {
+    organizationClient: assembleSdpApiClient(
+      createSdpApiRequest(token, null, organizationTraceContext)
+    ),
+    projectClient: projectId
+      ? assembleSdpApiClient(createSdpApiRequest(token, projectId, projectTraceContext))
+      : null,
+  };
+}
+
 async function buildSdpApiClient(
   projectId: string | null,
   traceContext?: TraceContext
