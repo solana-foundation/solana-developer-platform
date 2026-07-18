@@ -9,7 +9,7 @@ function SkeletonBlock({ className }: { className: string }) {
 
 function WalletInfoCardSkeleton() {
   return (
-    <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
+    <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
       <div className="space-y-6 p-6">
         <div className="flex items-start gap-4">
           <SkeletonBlock className="h-12 w-12 rounded-2xl" />
@@ -36,7 +36,7 @@ function WalletInfoCardSkeleton() {
 
 function BalanceCardSkeleton() {
   return (
-    <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
+    <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
       <div className="space-y-6 p-6">
         <div>
           <SkeletonBlock className="h-3 w-28" />
@@ -62,7 +62,7 @@ function BalancesSectionSkeleton() {
   return (
     <section className="space-y-3">
       <SkeletonBlock className="h-10 w-36" />
-      <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
+      <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
         {["balance-1", "balance-2"].map((row) => (
           <div
             key={row}
@@ -83,7 +83,7 @@ function BalancesSectionSkeleton() {
 async function ActivitySectionSkeleton() {
   const t = await getTranslations();
   return (
-    <section className="rounded-2xl border border-border-default bg-white p-6">
+    <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <SkeletonBlock className="h-7 w-40" />

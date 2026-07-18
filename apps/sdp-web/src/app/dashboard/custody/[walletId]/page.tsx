@@ -251,7 +251,7 @@ export default async function WalletDetailPage({
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-        <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
+        <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
           <div className="space-y-6 p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex items-start gap-4">
@@ -304,7 +304,7 @@ export default async function WalletDetailPage({
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
+        <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
           <div className="space-y-6 p-6">
             <div>
               <p className="text-xs font-medium tracking-[0.14em] text-muted uppercase">
@@ -350,7 +350,7 @@ export default async function WalletDetailPage({
         ) : null}
 
         {balances.length > 0 ? (
-          <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
+          <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
             {balances.map((balance) => {
               const ownedToken =
                 balance.token === "SOL" ? null : (ownedTokensByMint.get(balance.mint) ?? null);
@@ -367,7 +367,7 @@ export default async function WalletDetailPage({
             })}
           </div>
         ) : (
-          <div className="rounded-2xl border border-border-default bg-white px-4 py-4 text-sm text-secondary">
+          <div className="rounded-2xl border border-border-default bg-surface-raised px-4 py-4 text-sm text-secondary">
             {t("DashboardCustody.noTrackedBalances")}
           </div>
         )}
@@ -402,7 +402,7 @@ async function WalletControlsPanel({
   const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
+    <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
       <div className="flex flex-col gap-5 p-6 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-center gap-2">

@@ -17,6 +17,7 @@ export default async function Home() {
       <header className="border-b border-border-subtle">
         <div className="mx-auto flex h-[72px] max-w-[1200px] items-center justify-between px-6 xl:px-0">
           <Image
+            data-testid="landing-solana-logo"
             src="/landing/solana-logo.svg"
             alt={t("Home.solanaLogo")}
             width={20}
@@ -33,7 +34,7 @@ export default async function Home() {
             <LanguagePicker variant="landing" />
             <Link
               href="/sign-in"
-              className="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-sm font-semibold text-white transition hover:opacity-90"
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-sm font-semibold text-on-primary transition hover:opacity-90"
             >
               {t("Home.dashboard")}
             </Link>
@@ -56,7 +57,7 @@ export default async function Home() {
               href={waitlistHref}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex h-10 items-center justify-center rounded-[10px] bg-primary px-[18px] text-[15px] font-semibold leading-[15px] text-white transition hover:opacity-90"
+              className="inline-flex h-10 items-center justify-center rounded-[10px] bg-primary px-[18px] text-[15px] font-semibold leading-[15px] text-on-primary transition hover:opacity-90"
             >
               {t("Home.joinWaitlist")}
             </Link>
@@ -70,11 +71,12 @@ export default async function Home() {
           <div className="absolute right-[8px] top-0 flex h-[443px] w-[625px] items-center">
             <div className="relative h-[443px] w-[313px]">
               <Image
+                data-testid="landing-hero-figure"
                 src="/landing/hero-figure.svg"
                 alt=""
                 width={313}
                 height={443}
-                className="h-full w-full"
+                className="h-full w-full dark:invert"
               />
             </div>
 
@@ -84,7 +86,7 @@ export default async function Home() {
                 alt=""
                 width={313}
                 height={443}
-                className="h-full w-full"
+                className="h-full w-full dark:invert"
               />
             </div>
 

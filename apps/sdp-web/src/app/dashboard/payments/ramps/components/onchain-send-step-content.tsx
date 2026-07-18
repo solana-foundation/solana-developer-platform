@@ -34,7 +34,7 @@ function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; val
   return (
     <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
       <span className="flex items-center gap-2.5 text-sm text-tertiary">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white text-secondary">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-raised text-secondary">
           {icon}
         </span>
         {label}

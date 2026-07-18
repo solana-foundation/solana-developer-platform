@@ -24,6 +24,11 @@ export default async function RootLayout({
   const pathname = (await headers()).get("x-sdp-pathname") ?? "/";
   const { locale, messages } = await getI18nRequest();
   const shouldLoadClerk = await shouldLoadClerkForPath(pathname);
+  const appContent = shouldLoadClerk ? (
+    <ClerkClientProvider>{children}</ClerkClientProvider>
+  ) : (
+    children
+  );
 
   return (
     <html lang={locale} suppressHydrationWarning>
@@ -34,7 +39,7 @@ export default async function RootLayout({
       <body>
         <ThemeProvider>
           <I18nProvider locale={locale} messages={messages}>
-            <ClerkClientProvider enabled={shouldLoadClerk}>{children}</ClerkClientProvider>
+            {appContent}
             <AppToaster />
           </I18nProvider>
         </ThemeProvider>

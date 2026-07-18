@@ -38,7 +38,7 @@ export function FormCard({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-border-default bg-white p-5">
+    <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
       <div className="flex items-start gap-3">
         {Icon ? (
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-primary">
@@ -145,13 +145,17 @@ export function DetailField({
 
   if (field.control === "toggle") {
     const checked = Boolean(raw);
+    const toggleId = `issuance-field-${String(field.key)}`;
+    const toggleLabel = t(field.labelKey);
     return (
       <div>
-        <Label>{t(field.labelKey)}</Label>
+        <Label htmlFor={toggleId}>{toggleLabel}</Label>
         <div className="mt-1.5 flex items-center gap-2">
           <ToggleSwitch
+            id={toggleId}
             checked={checked}
             disabled={disabled}
+            aria-label={toggleLabel}
             onChange={(next) => updateDraft({ [field.key]: next } as Partial<DraftState>)}
           />
           <span className="text-sm text-tertiary">

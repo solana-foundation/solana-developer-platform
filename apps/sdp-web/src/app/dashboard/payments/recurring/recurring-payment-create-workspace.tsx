@@ -797,7 +797,7 @@ export function RecurringPaymentCreateWorkspace({
       {currentStep.id === "review" ? (
         <div className="space-y-5">
           <ReviewSummaryCard rows={reviewRows} />
-          <div className="rounded-2xl border border-border-default bg-white px-4 py-3 text-sm text-secondary">
+          <div className="rounded-2xl border border-border-default bg-surface-raised px-4 py-3 text-sm text-secondary">
             {t("DashboardPayments.recurring.pendingRecordDescription")}
           </div>
         </div>

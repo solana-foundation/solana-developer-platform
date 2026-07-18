@@ -552,7 +552,7 @@ export function PoliciesOverviewSurface({
 
   return (
     <div className="h-full min-h-0 overflow-y-auto px-3 pt-5 pb-6 md:px-6">
-      <div className="overflow-hidden rounded-lg border border-border-default bg-white">
+      <div className="overflow-hidden rounded-lg border border-border-default bg-surface-raised">
         <div className="border-b border-border-default px-4">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-stretch xl:justify-between xl:gap-6">
             <div

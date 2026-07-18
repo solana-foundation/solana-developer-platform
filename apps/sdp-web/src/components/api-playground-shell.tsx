@@ -2,11 +2,10 @@
 
 import { Badge } from "@solana/design-system/badge";
 import { Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
-import type { ComponentProps, CSSProperties, ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useTheme } from "@/contexts/theme-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
@@ -331,7 +330,7 @@ function FieldLabel({ children, htmlFor }: { children: string; htmlFor: string }
 
 function EmptyState({ children }: { children: string }) {
   return (
-    <div className="rounded-2xl border border-dashed border-border-default bg-white/50 px-4 py-5 text-sm text-tertiary">
+    <div className="rounded-2xl border border-dashed border-border-default bg-surface-raised/50 px-4 py-5 text-sm text-tertiary">
       {children}
     </div>
   );
@@ -344,7 +343,7 @@ function MessageCard({ message }: { message: ApiPlaygroundMessage }) {
         "rounded-xl border px-4 py-3 text-sm",
         message.tone === "critical"
           ? "border-error-border bg-error-bg text-error"
-          : "border-border-default bg-white/60 text-secondary"
+          : "border-border-default bg-surface-raised/60 text-secondary"
       )}
     >
       {message.text}
@@ -458,42 +457,6 @@ const cssVariablesTheme = {
   ],
 };
 
-const codeBlockDefaultLightVars: CSSProperties = {
-  "--code-block-bg": "color-mix(in srgb, var(--gray-50) 60%, white)",
-  "--code-block-border": "color-mix(in srgb, var(--gray-1300) 8%, transparent)",
-  "--code-block-header-bg": "color-mix(in srgb, var(--gray-1400) 4%, transparent)",
-  "--code-block-header-text": "var(--text-medium)",
-  "--code-block-header-border": "var(--code-block-border)",
-  "--code-block-line-number": "var(--text-low)",
-  "--code-block-line-highlight": "color-mix(in srgb, var(--gray-1400) 5%, transparent)",
-  "--code-block-scrollbar-thumb": "var(--gray-200)",
-  "--shiki-foreground": "var(--gray-1400)",
-  "--shiki-background": "transparent",
-  "--shiki-token-keyword": "oklch(0.44 0.16 301)",
-  "--shiki-token-string": "oklch(0.44 0.12 160)",
-  "--shiki-token-comment": "oklch(0.55 0.015 280)",
-  "--shiki-token-function": "oklch(0.44 0.14 264)",
-  "--shiki-token-constant": "oklch(0.47 0.14 25)",
-  "--shiki-token-parameter": "oklch(0.47 0.1 55)",
-  "--shiki-token-punctuation": "oklch(0.56 0.01 280)",
-  "--shiki-token-type": "oklch(0.44 0.1 195)",
-  "--shiki-token-attribute": "oklch(0.44 0.1 145)",
-  "--shiki-token-escape": "oklch(0.47 0.12 40)",
-  "--shiki-token-variable-lang": "oklch(0.44 0.14 310)",
-} as CSSProperties;
-
-// Dark code block surfaces (soft inset, not pitch-black).
-const codeBlockDefaultDarkVars: CSSProperties = {
-  "--code-block-bg": "#1c1c1d",
-  "--code-block-border": "color-mix(in srgb, white 8%, transparent)",
-  "--code-block-header-bg": "color-mix(in srgb, white 4%, transparent)",
-  "--code-block-header-text": "var(--text-medium)",
-  "--code-block-header-border": "var(--code-block-border)",
-  "--code-block-line-number": "var(--text-low)",
-  "--code-block-line-highlight": "color-mix(in srgb, white 6%, transparent)",
-  "--code-block-scrollbar-thumb": "color-mix(in srgb, white 18%, transparent)",
-} as CSSProperties;
-
 let shikiModulePromise: Promise<typeof import("shiki")> | null = null;
 
 function getShikiModule() {
@@ -570,7 +533,6 @@ export function ApiPlaygroundShell({
   rightMessages = [],
 }: ApiPlaygroundShellProps) {
   const t = useTranslations();
-  const { theme } = useTheme();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const initialEndpoint =
     endpoints.find((endpoint) => endpoint.id === defaultEndpointId) ?? endpoints[0];
@@ -783,7 +745,7 @@ export function ApiPlaygroundShell({
       <div className="grid shrink-0 border-b border-border-default lg:grid-cols-2">
         <div className="px-6 py-5">
           <div className="relative">
-            <div className="pointer-events-none flex h-11 w-full items-center rounded-xl border border-border-default bg-white px-3 shadow-none">
+            <div className="pointer-events-none flex h-11 w-full items-center rounded-xl border border-border-default bg-surface-raised px-3 shadow-none">
               <span className="flex min-w-0 items-center gap-3 pr-8">
                 <Badge variant={getMethodBadgeVariant(activeEndpoint.method)}>
                   {activeEndpoint.method}
@@ -834,7 +796,9 @@ export function ApiPlaygroundShell({
               onClick={() => setMobileSection(value)}
               className={cn(
                 "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                mobileSection === value ? "bg-white text-primary shadow-sm" : "text-tertiary"
+                mobileSection === value
+                  ? "bg-surface-raised text-primary shadow-sm"
+                  : "text-tertiary"
               )}
             >
               {t(labelKey)}
@@ -881,7 +845,7 @@ export function ApiPlaygroundShell({
                             onChange={(event) =>
                               updateFieldValue(field.key, event.currentTarget.value)
                             }
-                            className="h-11 w-full rounded-[var(--sdp-field-radius)] border border-border-default bg-white px-4 text-sm text-primary outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
+                            className="h-11 w-full rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 text-sm text-primary outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
                           >
                             <option value="">
                               {field.placeholder ?? t("Shared.SharedComponents.selectValue")}
@@ -900,7 +864,7 @@ export function ApiPlaygroundShell({
                               updateFieldValue(field.key, event.currentTarget.value)
                             }
                             placeholder={field.placeholder}
-                            className="h-11 rounded-[var(--sdp-field-radius)] border-border-default bg-white px-4 shadow-none"
+                            className="h-11 rounded-[var(--sdp-field-radius)] border-border-default bg-surface-raised px-4 shadow-none"
                           />
                         )}
                       </div>
@@ -930,7 +894,7 @@ export function ApiPlaygroundShell({
                             onChange={(event) =>
                               updateFieldValue(field.key, event.currentTarget.value)
                             }
-                            className="h-11 w-full rounded-[var(--sdp-field-radius)] border border-border-default bg-white px-4 text-sm text-primary outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
+                            className="h-11 w-full rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 text-sm text-primary outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
                           >
                             <option value="">
                               {field.placeholder ?? t("Shared.SharedComponents.selectValue")}
@@ -949,7 +913,7 @@ export function ApiPlaygroundShell({
                               updateFieldValue(field.key, event.currentTarget.value)
                             }
                             placeholder={field.placeholder}
-                            className="h-11 rounded-[var(--sdp-field-radius)] border-border-default bg-white px-4 shadow-none"
+                            className="h-11 rounded-[var(--sdp-field-radius)] border-border-default bg-surface-raised px-4 shadow-none"
                           />
                         )}
                       </div>
@@ -989,7 +953,9 @@ export function ApiPlaygroundShell({
                     onClick={() => setActivePanel(tab)}
                     className={cn(
                       "rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors",
-                      activePanel === tab ? "bg-white text-primary shadow-sm" : "text-tertiary"
+                      activePanel === tab
+                        ? "bg-surface-raised text-primary shadow-sm"
+                        : "text-tertiary"
                     )}
                   >
                     {t(labelKey)}
@@ -1001,7 +967,6 @@ export function ApiPlaygroundShell({
             <div
               className="code-block-line-numbers group relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--button-radius-md)]"
               style={{
-                ...(theme === "dark" ? codeBlockDefaultDarkVars : codeBlockDefaultLightVars),
                 border: "1px solid var(--code-block-border)",
                 background: "var(--code-block-bg)",
                 fontFamily: "var(--font-berkeley-mono), ui-monospace, monospace",
@@ -1056,7 +1021,7 @@ export function ApiPlaygroundShell({
                 type="button"
                 onClick={handleExecute}
                 disabled={isExecuting || requiresApiKey}
-                className="h-10 rounded-[var(--button-radius-lg)] bg-primary px-4 text-white hover:opacity-90 max-sm:flex-1 whitespace-nowrap"
+                className="h-10 rounded-[var(--button-radius-lg)] bg-primary px-4 text-on-primary hover:opacity-90 max-sm:flex-1 whitespace-nowrap"
                 iconLeft={
                   isExecuting ? (
                     <Loader2 className="size-4 animate-spin" />
@@ -1084,7 +1049,7 @@ export function ApiPlaygroundShell({
             type="button"
             variant="outline"
             onClick={() => copyText(codeSnippet, "code")}
-            className="h-10 rounded-[var(--button-radius-lg)] border-border-default bg-white px-4 max-sm:flex-1 whitespace-nowrap"
+            className="h-10 rounded-[var(--button-radius-lg)] border-border-default bg-surface-raised px-4 max-sm:flex-1 whitespace-nowrap"
             iconLeft={<Copy className="size-4" />}
           >
             {copiedAction === "code"
@@ -1095,7 +1060,7 @@ export function ApiPlaygroundShell({
             type="button"
             variant="outline"
             onClick={() => copyText(aiInstructions, "ai")}
-            className="h-10 rounded-[var(--button-radius-lg)] border-border-default bg-white px-4 max-sm:flex-1 whitespace-nowrap"
+            className="h-10 rounded-[var(--button-radius-lg)] border-border-default bg-surface-raised px-4 max-sm:flex-1 whitespace-nowrap"
             iconLeft={<Sparkles className="size-4" />}
           >
             {copiedAction === "ai"

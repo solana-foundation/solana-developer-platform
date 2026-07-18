@@ -34,7 +34,7 @@ function PaymentsOverviewSkeleton() {
 
 function PaymentsTransactionsSkeleton() {
   return (
-    <section className="rounded-3xl border border-border-default bg-white/85 p-5 shadow-[0_12px_32px_rgba(28,28,29,0.04)] animate-pulse">
+    <section className="rounded-3xl border border-border-default bg-surface-raised/85 p-5 shadow-[0_12px_32px_rgba(28,28,29,0.04)] animate-pulse">
       <div className="space-y-3">
         <SkeletonBlock className="h-6 w-40" />
         <SkeletonBlock className="h-4 w-[46%]" />

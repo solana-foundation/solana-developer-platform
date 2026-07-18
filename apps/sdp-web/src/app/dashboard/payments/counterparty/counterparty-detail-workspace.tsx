@@ -211,8 +211,8 @@ function FilterChip({
       className={cn(
         "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
         active
-          ? "border-primary bg-primary text-white"
-          : "border-border-default bg-white text-secondary hover:text-primary"
+          ? "border-primary bg-primary text-on-primary"
+          : "border-border-default bg-surface-raised text-secondary hover:text-primary"
       )}
     >
       {children}
@@ -352,7 +352,7 @@ function CounterpartyTransactions({
             </div>
           ) : null}
 
-          <div className="overflow-x-auto rounded-2xl border border-border-default bg-white shadow-sm">
+          <div className="overflow-x-auto rounded-2xl border border-border-default bg-surface-raised shadow-sm">
             <table className="w-full min-w-[760px] table-fixed border-collapse">
               <thead>
                 <tr className="border-b border-border-default">
@@ -881,7 +881,7 @@ export function CounterpartyDetailWorkspace({
               <h3 className="text-2xl font-medium text-primary">
                 {t("DashboardPayments.counterparty.identity")}
               </h3>
-              <div className="rounded-2xl border border-border-default bg-white p-5 shadow-sm">
+              <div className="rounded-2xl border border-border-default bg-surface-raised p-5 shadow-sm">
                 <FieldList
                   rows={[
                     {
@@ -927,7 +927,7 @@ export function CounterpartyDetailWorkspace({
               <h3 className="text-2xl font-medium text-primary">
                 {t("DashboardPayments.counterparty.personalInformation")}
               </h3>
-              <div className="rounded-2xl border border-border-default bg-white p-5 shadow-sm">
+              <div className="rounded-2xl border border-border-default bg-surface-raised p-5 shadow-sm">
                 {personalInfoRows.length > 0 ? (
                   <FieldList rows={personalInfoRows} />
                 ) : (
@@ -961,7 +961,7 @@ export function CounterpartyDetailWorkspace({
                 </p>
               </div>
             ) : (
-              <div className="overflow-hidden rounded-2xl border border-border-default bg-white shadow-sm">
+              <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised shadow-sm">
                 {accounts.map((account) => {
                   const details = account.details as { network?: string; address?: string };
                   return (

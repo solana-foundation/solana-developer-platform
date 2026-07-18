@@ -36,7 +36,7 @@ export function CreateTokenIdentityStep({
       exit={{ opacity: 0, y: -8 }}
       className="px-6 pb-6"
     >
-      <div className="space-y-5 rounded-[28px] bg-white p-5">
+      <div className="space-y-5 rounded-[28px] bg-surface-raised p-5">
         <p className="text-sm text-secondary">{t("DashboardIssuance.create.requiredFields")}</p>
 
         <div className="grid gap-4">

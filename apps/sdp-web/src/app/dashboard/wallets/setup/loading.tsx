@@ -15,7 +15,7 @@ export default function WalletSetupLoading() {
         ].map((id) => (
           <div
             key={id}
-            className="w-full rounded-2xl border border-border-default bg-white px-5 py-5"
+            className="w-full rounded-2xl border border-border-default bg-surface-raised px-5 py-5"
           >
             <div className="flex items-start gap-4">
               <div className="h-11 w-11 shrink-0 animate-pulse rounded-full bg-fill-strong" />

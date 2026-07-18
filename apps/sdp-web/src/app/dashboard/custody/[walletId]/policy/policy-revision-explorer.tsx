@@ -42,7 +42,7 @@ export function PolicyRevisionExplorer({
     history.revisions[0];
 
   return (
-    <div className="grid overflow-hidden rounded-lg border border-border-default bg-white lg:grid-cols-[320px_minmax(0,1fr)]">
+    <div className="grid overflow-hidden rounded-lg border border-border-default bg-surface-raised lg:grid-cols-[320px_minmax(0,1fr)]">
       <div className="border-b border-border-default lg:border-r lg:border-b-0">
         <div className="border-b border-border-default bg-fill-subtle px-4 py-3">
           <p className="text-xs font-medium text-secondary">

@@ -10,6 +10,7 @@ const STRIPE_CRYPTO_ONRAMP_URL = "https://crypto-js.stripe.com/crypto-onramp-out
 
 type StripeOnrampSession = {
   mount: (target: string | HTMLElement) => void;
+  setAppearance: (appearance: { theme: "light" | "dark" }) => void;
 };
 
 type StripeOnrampFactory = (publishableKey: string) => {
@@ -100,34 +101,52 @@ export function StripeOnrampFrame({
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(false);
+  const mountAttemptRef = useRef(0);
+  const sessionRef = useRef<StripeOnrampSession | null>(null);
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
   const [failed, setFailed] = useState(false);
 
   const mountStripeWidget = useCallback(async () => {
+    const mountAttempt = ++mountAttemptRef.current;
     setFailed(false);
     try {
       const factory = await loadStripeOnramp();
-      if (!mountedRef.current || !containerRef.current) {
+      if (
+        !mountedRef.current ||
+        !containerRef.current ||
+        mountAttempt !== mountAttemptRef.current
+      ) {
         return;
       }
+      const session = factory(publishableKey).createSession({
+        clientSecret,
+        appearance: { theme: themeRef.current },
+      });
       containerRef.current.replaceChildren();
-      factory(publishableKey)
-        .createSession({ clientSecret, appearance: { theme } })
-        .mount(containerRef.current);
+      session.mount(containerRef.current);
+      sessionRef.current = session;
     } catch (error) {
       console.error("[stripe onramp] failed to mount widget", error);
-      if (mountedRef.current) {
+      if (mountedRef.current && mountAttempt === mountAttemptRef.current) {
         setFailed(true);
       }
     }
-  }, [clientSecret, publishableKey, theme]);
+  }, [clientSecret, publishableKey]);
 
   useEffect(() => {
     mountedRef.current = true;
     void mountStripeWidget();
     return () => {
       mountedRef.current = false;
+      mountAttemptRef.current += 1;
+      sessionRef.current = null;
     };
   }, [mountStripeWidget]);
+
+  useEffect(() => {
+    sessionRef.current?.setAppearance({ theme });
+  }, [theme]);
 
   return (
     <div className="flex min-h-[640px] flex-col items-center justify-center">

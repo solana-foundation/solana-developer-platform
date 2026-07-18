@@ -72,7 +72,7 @@ export function PaymentMethodStep({ mode, value, onChange }: PaymentMethodStepPr
               : "outline-transparent hover:bg-fill-strong"
           )}
         >
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white text-primary">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-surface-raised text-primary">
             {option.icon}
           </span>
           <span className="min-w-0 flex-1">

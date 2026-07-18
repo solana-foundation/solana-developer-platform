@@ -9,6 +9,28 @@ test.describe("public auth entry e2e", () => {
     await expect(page.getByRole("link", { name: "Docs" })).toBeVisible();
   });
 
+  test("system dark mode keeps landing artwork and Clerk sign-in legible", async ({ page }) => {
+    await page.addInitScript(() => window.localStorage.removeItem("sdp-theme"));
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("/");
+
+    await expect(page.locator("html")).toHaveClass(/dark/);
+    await expect(page.getByTestId("landing-solana-logo")).toHaveCSS("filter", "invert(1)");
+    await expect(page.getByTestId("landing-hero-figure")).toHaveCSS("filter", "invert(1)");
+
+    await page.goto("/sign-in");
+    await expect(
+      page.getByRole("heading", { name: "Sign in to Solana Developer Platform" })
+    ).toBeVisible({ timeout: 120_000 });
+    await expect(page.locator(".cl-card")).toHaveCSS("background-color", "rgb(52, 52, 53)");
+    await expect(page.locator(".cl-formFieldInput").first()).toHaveCSS(
+      "background-color",
+      "rgb(28, 28, 29)"
+    );
+    await expect(page.getByLabel("Sign in with GitHub")).not.toHaveCSS("filter", "none");
+    await expect(page.getByLabel("Sign in with Google")).toHaveCSS("filter", "none");
+  });
+
   test("direct sign-in link renders for signed-out users", async ({ page }) => {
     await page.goto("/sign-in");
 

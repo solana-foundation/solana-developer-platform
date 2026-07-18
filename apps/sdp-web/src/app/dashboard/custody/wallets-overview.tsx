@@ -138,7 +138,7 @@ function WalletCard({
         {provider ? (
           <WalletProviderMark provider={provider} />
         ) : (
-          <div className="flex h-14 w-14 items-center justify-center rounded-full border border-border-default bg-white text-lg font-semibold text-tertiary">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full border border-border-default bg-surface-raised text-lg font-semibold text-tertiary">
             {(wallet.label?.trim() || "W").slice(0, 1).toUpperCase()}
           </div>
         )}

@@ -17,32 +17,32 @@ const PROVIDER_LOGOS: Partial<
 > = {
   privy: {
     src: "/provider-logos/privy.png",
-    backgroundClassName: "bg-white",
+    backgroundClassName: "bg-[white]",
     paddingClassName: "p-2",
   },
   fireblocks: {
     src: "/provider-logos/fireblocks.svg",
-    backgroundClassName: "bg-white",
+    backgroundClassName: "bg-[white]",
     paddingClassName: "p-2.5",
   },
   coinbase_cdp: {
     src: "/provider-logos/coinbase-cdp.png",
-    backgroundClassName: "bg-white",
+    backgroundClassName: "bg-[white]",
     paddingClassName: "p-1.5",
   },
   para: {
     src: "/provider-logos/para.svg",
-    backgroundClassName: "bg-white",
+    backgroundClassName: "bg-[white]",
     paddingClassName: "p-2",
   },
   turnkey: {
     src: "/provider-logos/turnkey.svg",
-    backgroundClassName: "bg-white",
+    backgroundClassName: "bg-[white]",
     paddingClassName: "p-2.5",
   },
   dfns: {
     src: "/provider-logos/dfns.svg",
-    backgroundClassName: "bg-white",
+    backgroundClassName: "bg-[white]",
     paddingClassName: "p-1.5",
   },
   anchorage: {
@@ -52,12 +52,12 @@ const PROVIDER_LOGOS: Partial<
   },
   utila: {
     src: "/provider-logos/utila.svg",
-    backgroundClassName: "bg-white",
+    backgroundClassName: "bg-[white]",
     paddingClassName: "p-2",
   },
   ibm_haven: {
     src: "/provider-logos/ibm-haven.svg",
-    backgroundClassName: "bg-white",
+    backgroundClassName: "bg-[white]",
     paddingClassName: "p-1.5",
   },
 };

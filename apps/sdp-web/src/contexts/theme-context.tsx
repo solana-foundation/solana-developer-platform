@@ -1,10 +1,17 @@
 "use client";
 
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
 
 export type Theme = "light" | "dark";
 
-/** localStorage key holding the user's explicit choice (absent → follow OS). */
+/** localStorage key holding the user's explicit choice (absent means follow the OS). */
 export const THEME_STORAGE_KEY = "sdp-theme";
 
 type ThemeContextValue = {
@@ -14,68 +21,118 @@ type ThemeContextValue = {
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
+const themeListeners = new Set<() => void>();
+let inMemoryPreference: Theme | null = null;
+
+export function isTheme(value: unknown): value is Theme {
+  return value === "light" || value === "dark";
+}
+
+export function resolveTheme(preference: unknown, prefersDark: boolean): Theme {
+  return isTheme(preference) ? preference : prefersDark ? "dark" : "light";
+}
 
 /**
- * Inline, render-blocking script that applies the theme class before first
- * paint (no flash). Runs before React hydrates: reads the persisted choice,
- * else falls back to the OS `prefers-color-scheme`. Kept in sync with
- * {@link THEME_STORAGE_KEY} and the `.dark` class used by the CSS + design system.
+ * Render-blocking script that applies the resolved class before the first
+ * paint. Storage failures and invalid values both fall back to the OS.
  */
-export const THEME_NO_FLASH_SCRIPT = `(function(){try{var s=localStorage.getItem('${THEME_STORAGE_KEY}');var d=s?s==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.classList.toggle('dark',d);}catch(e){}})();`;
+export const THEME_NO_FLASH_SCRIPT = `(function(){var s=null;try{s=localStorage.getItem('${THEME_STORAGE_KEY}')}catch(e){}var m=false;try{m=window.matchMedia('(prefers-color-scheme: dark)').matches}catch(e){}var d=s==='dark'||(s!=='light'&&m);document.documentElement.classList.toggle('dark',d)})();`;
 
 function readThemeFromDom(): Theme {
-  if (typeof document === "undefined") return "light";
   return document.documentElement.classList.contains("dark") ? "dark" : "light";
 }
 
-function applyTheme(theme: Theme) {
+function getSystemTheme(media?: MediaQueryList): Theme {
+  const prefersDark = media?.matches ?? window.matchMedia("(prefers-color-scheme: dark)").matches;
+  return prefersDark ? "dark" : "light";
+}
+
+function readStoredPreference(): Theme | null {
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    if (isTheme(stored)) return stored;
+  } catch {
+    // Keep the session-only preference when storage is unavailable.
+  }
+  return inMemoryPreference;
+}
+
+function applyThemeClass(theme: Theme) {
   document.documentElement.classList.toggle("dark", theme === "dark");
+}
+
+function notifyThemeListeners() {
+  for (const listener of themeListeners) listener();
+}
+
+function applyResolvedTheme(theme: Theme) {
+  if (readThemeFromDom() === theme) return;
+  applyThemeClass(theme);
+  notifyThemeListeners();
+}
+
+function persistTheme(theme: Theme) {
+  inMemoryPreference = theme;
   try {
     localStorage.setItem(THEME_STORAGE_KEY, theme);
   } catch {
-    // Ignore storage failures (private mode, quota) — the class still applies.
+    // The explicit choice still lasts for this page session.
   }
+}
+
+function subscribeToTheme(listener: () => void): () => void {
+  themeListeners.add(listener);
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+
+  const handleSystemThemeChange = () => {
+    if (readStoredPreference() === null) {
+      applyResolvedTheme(getSystemTheme(media));
+    }
+  };
+
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key !== THEME_STORAGE_KEY) return;
+    inMemoryPreference = isTheme(event.newValue) ? event.newValue : null;
+    applyResolvedTheme(resolveTheme(event.newValue, media.matches));
+  };
+
+  media.addEventListener("change", handleSystemThemeChange);
+  window.addEventListener("storage", handleStorage);
+
+  return () => {
+    themeListeners.delete(listener);
+    media.removeEventListener("change", handleSystemThemeChange);
+    window.removeEventListener("storage", handleStorage);
+  };
+}
+
+function getServerThemeSnapshot(): Theme {
+  return "light";
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  // Read the class the no-flash script already applied so `theme` is correct on
-  // the client's FIRST render. This matters for consumers that only theme
-  // themselves at mount and don't react to later prop changes (notably Clerk's
-  // widgets) — they must see the right theme immediately, not one tick later.
-  // (SSR has no DOM and renders "light"; <html suppressHydrationWarning> covers
-  // the resulting attribute diff, and client-rendered consumers commit the
-  // correct theme on hydration.)
-  const [theme, setThemeState] = useState<Theme>(readThemeFromDom);
-
-  // Safety re-sync (e.g. the class changed between the initializer and mount).
-  useEffect(() => {
-    setThemeState(readThemeFromDom());
-  }, []);
+  const theme = useSyncExternalStore(subscribeToTheme, readThemeFromDom, getServerThemeSnapshot);
 
   const setTheme = useCallback((next: Theme) => {
-    applyTheme(next);
-    setThemeState(next);
+    persistTheme(next);
+    applyResolvedTheme(next);
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setThemeState((prev) => {
-      const next: Theme = prev === "dark" ? "light" : "dark";
-      applyTheme(next);
-      return next;
-    });
+    const next = readThemeFromDom() === "dark" ? "light" : "dark";
+    persistTheme(next);
+    applyResolvedTheme(next);
   }, []);
 
-  return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
+  const value = useMemo(() => ({ theme, toggleTheme, setTheme }), [setTheme, theme, toggleTheme]);
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme(): ThemeContextValue {
-  const ctx = useContext(ThemeContext);
-  if (ctx === null) {
+  const context = useContext(ThemeContext);
+  if (context === null) {
     throw new Error("useTheme must be used within a ThemeProvider");
   }
-  return ctx;
+  return context;
 }

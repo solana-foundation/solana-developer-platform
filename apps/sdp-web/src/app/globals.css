@@ -4,6 +4,10 @@
    Imported after the package so its Tier 3 retheme wins. */
 @import "./sdp-theme.css";
 
+/* Tailwind v4 defaults dark: utilities to the OS media query. SDP has an
+   explicit, persisted preference, so utilities must follow the root class. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Ensure Tailwind scans app source files */
 @source "../**/*.{ts,tsx}";
 
@@ -25,9 +29,16 @@
   max-height: min(var(--sdp-select-popover-max-height), var(--available-height));
 }
 
+:root {
+  color-scheme: light;
+}
+
+:root.dark {
+  color-scheme: dark;
+}
+
 html,
 body {
-  color-scheme: light;
   background-color: var(--sdp-shell-bg);
 }
 
@@ -56,4 +67,9 @@ vercel-live-feedback {
     Inter, "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   --geist-foreground: #1c1c1d;
+}
+
+:root.dark vercel-live-feedback {
+  color-scheme: dark;
+  --geist-foreground: #fcfcfa;
 }

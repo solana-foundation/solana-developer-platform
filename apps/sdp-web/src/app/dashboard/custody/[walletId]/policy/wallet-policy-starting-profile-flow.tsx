@@ -402,7 +402,7 @@ export function WalletPolicyStartingProfileFlow({
     Boolean(currentPolicy.controlProfile) && hasActiveRestrictions(currentPolicy);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white">
+    <div className="flex h-full min-h-0 flex-col bg-surface-raised">
       <div className="shrink-0 px-4 py-5 md:px-6">
         <div className="mx-auto w-full max-w-6xl">
           <StepIndicator stepIndex={stepIndex} />
@@ -486,7 +486,7 @@ export function WalletPolicyStartingProfileFlow({
         </div>
       </div>
 
-      <footer className="shrink-0 border-t border-border-default bg-white/95 px-4 py-4 md:px-6">
+      <footer className="shrink-0 border-t border-border-default bg-surface-raised/95 px-4 py-4 md:px-6">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3">
           <Button
             type="button"
@@ -683,7 +683,7 @@ function IntentStep({
                   "relative min-h-28 rounded-lg border p-4 pr-12 text-left transition-colors",
                   selected
                     ? "border-primary bg-fill-subtle"
-                    : "border-border-default bg-white hover:bg-surface-sunken"
+                    : "border-border-default bg-surface-raised hover:bg-surface-sunken"
                 )}
               >
                 <span className="block text-sm font-semibold text-primary">
@@ -696,8 +696,8 @@ function IntentStep({
                   className={cn(
                     "absolute top-4 right-4 flex size-5 items-center justify-center rounded border",
                     selected
-                      ? "border-primary bg-primary text-white"
-                      : "border-border-strong bg-white text-transparent"
+                      ? "border-primary bg-primary text-on-primary"
+                      : "border-border-strong bg-surface-raised text-transparent"
                   )}
                 >
                   <Check className="size-3.5" />
@@ -922,7 +922,7 @@ function AssetEditor({
             id="policy-wallet-asset-options"
             role="listbox"
             aria-multiselectable="true"
-            className="absolute z-20 mt-2 w-full overflow-hidden rounded-lg border border-border-default bg-white shadow-lg"
+            className="absolute z-20 mt-2 w-full overflow-hidden rounded-lg border border-border-default bg-surface-raised shadow-lg"
           >
             {matchingWalletAssets.length > 0 ? (
               matchingWalletAssets.map((asset) => {
@@ -945,8 +945,8 @@ function AssetEditor({
                       className={cn(
                         "flex size-5 shrink-0 items-center justify-center rounded border",
                         selected
-                          ? "border-primary bg-primary text-white"
-                          : "border-border-strong bg-white text-transparent"
+                          ? "border-primary bg-primary text-on-primary"
+                          : "border-border-strong bg-surface-raised text-transparent"
                       )}
                     >
                       <Check className="size-3.5" />
@@ -1096,7 +1096,7 @@ function DestinationEditor({
             className={cn(
               "h-9 rounded-full text-sm font-semibold transition-colors",
               state.destinationMode === mode
-                ? "bg-white text-primary shadow-sm"
+                ? "bg-surface-raised text-primary shadow-sm"
                 : "text-secondary hover:text-primary"
             )}
             onClick={() => setPolicyState((current) => ({ ...current, destinationMode: mode }))}
@@ -1121,7 +1121,7 @@ function DestinationEditor({
             setPolicyState((current) => ({ ...current, destinationText: event.target.value }))
           }
           aria-invalid={Boolean(error)}
-          className="min-h-40 w-full resize-y rounded-lg border border-border-default bg-white px-3 py-3 text-sm leading-6 text-primary outline-none transition-colors placeholder:text-muted focus:border-primary"
+          className="min-h-40 w-full resize-y rounded-lg border border-border-default bg-surface-raised px-3 py-3 text-sm leading-6 text-primary outline-none transition-colors placeholder:text-muted focus:border-primary"
           placeholder="11111111111111111111111111111111, So11111111111111111111111111111111111111112"
         />
       </label>
@@ -1190,8 +1190,8 @@ function OperationEditor({
                 className={cn(
                   "flex size-5 shrink-0 items-center justify-center rounded border",
                   action
-                    ? "border-primary bg-primary text-white"
-                    : "border-border-strong bg-white text-transparent"
+                    ? "border-primary bg-primary text-on-primary"
+                    : "border-border-strong bg-surface-raised text-transparent"
                 )}
               >
                 <Check className="size-3.5" />
@@ -1427,7 +1427,7 @@ function PolicySummaryRail({
   }
 
   return (
-    <aside className="h-fit rounded-lg border border-border-default bg-white p-5 lg:sticky lg:top-0">
+    <aside className="h-fit rounded-lg border border-border-default bg-surface-raised p-5 lg:sticky lg:top-0">
       <h2 className="text-base font-semibold text-primary">
         {t("DashboardCustody.policySummary")}
       </h2>

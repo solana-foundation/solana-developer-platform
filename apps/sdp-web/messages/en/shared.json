@@ -124,6 +124,8 @@
     "apiDocs": "API Docs",
     "settings": "Settings",
     "language": "Language",
+    "colorTheme": "Color theme",
+    "darkMode": "Dark mode",
     "chooseLanguage": "Choose language",
     "moreLanguagesHint": "Additional languages will appear here as they become available.",
     "collapseSidebar": "Collapse sidebar",

@@ -32,7 +32,7 @@ function WalletCardSkeleton() {
         <SkeletonBlock className="h-4 w-24" />
         <SkeletonBlock className="h-8 w-40" />
       </div>
-      <div className="mt-6 space-y-3 rounded-xl border border-border-subtle bg-white/70 p-3">
+      <div className="mt-6 space-y-3 rounded-xl border border-border-subtle bg-surface-raised/70 p-3">
         <SkeletonBlock className="h-4 w-full" />
         <SkeletonBlock className="h-4 w-full" />
         <SkeletonBlock className="h-4 w-full" />
