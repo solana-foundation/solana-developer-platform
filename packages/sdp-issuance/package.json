@@ -48,7 +48,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/",
-    "test": "node --import tsx --test \"src/**/*.test.ts\""
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "matrix:generate": "tsx scripts/generate-support-matrix.ts"
   },
   "dependencies": {
     "@sdp/payments": "workspace:*",

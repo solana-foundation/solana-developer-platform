@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { ASSET_TYPES } from "@sdp/types";
 
@@ -10,6 +12,7 @@ import {
   getRecommendedSettings,
   isSettingAllowed,
   listSettingsForType,
+  renderSupportMatrixMarkdown,
   resolveAssetCapability,
   resolveSettingsToExtensions,
   SETTING_KEYS,
@@ -151,5 +154,17 @@ describe("advanced settings capability registry", () => {
   it("returns an error for an unknown asset type", () => {
     const result = resolveSettingsToExtensions("generic", "not_a_type", { freezeTransfers: {} });
     assert.ok(result.errors.length > 0);
+  });
+
+  it("keeps the committed support matrix in sync with the registry", () => {
+    const committed = readFileSync(
+      fileURLToPath(new URL("./SUPPORT_MATRIX.md", import.meta.url)),
+      "utf8"
+    );
+    assert.equal(
+      renderSupportMatrixMarkdown(),
+      committed,
+      "SUPPORT_MATRIX.md is stale — run `pnpm --filter @sdp/issuance matrix:generate`"
+    );
   });
 });

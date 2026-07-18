@@ -28,6 +28,13 @@ export {
   resolveSettingsToExtensions,
   type SettingsResolution,
 } from "./resolver";
+export {
+  buildSupportMatrix,
+  renderSupportMatrixMarkdown,
+  type SupportMatrix,
+  type SupportMatrixAvailabilityRow,
+  type SupportMatrixSettingRow,
+} from "./support-matrix";
 export type { SettingKey, TemplateOverrideError };
 export { ADVANCED_SETTINGS, ASSET_CAPABILITIES, SETTING_KEYS };
 
