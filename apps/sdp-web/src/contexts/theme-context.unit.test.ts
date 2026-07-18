@@ -69,8 +69,8 @@ describe("no-flash theme script", () => {
   });
 
   it("still follows the system when storage access throws", () => {
-    expect(
-      runNoFlashScript({ storedValue: null, prefersDark: true, storageThrows: true })
-    ).toBe(true);
+    expect(runNoFlashScript({ storedValue: null, prefersDark: true, storageThrows: true })).toBe(
+      true
+    );
   });
 });
