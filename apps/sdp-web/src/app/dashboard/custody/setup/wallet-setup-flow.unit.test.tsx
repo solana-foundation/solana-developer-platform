@@ -44,7 +44,10 @@ describe("WalletSetupFlow", () => {
     );
     expect(markup).toContain("Cancel");
     expect(markup).toContain("Next");
+    expect(markup).toContain('id="wallet-provider-form"');
+    expect(markup).toMatch(/<button[^>]*type="submit"[^>]*form="wallet-provider-form"/);
     expect(markup.match(/aria-pressed="false"/g)).toHaveLength(2);
+    expect(markup).not.toContain("data-wallet-enter-advance");
   });
 
   it("keeps wallet details in the same shell with back and create actions", () => {
@@ -52,6 +55,7 @@ describe("WalletSetupFlow", () => {
 
     expect(markup).toContain("Step 2 of 2");
     expect(markup).toContain('id="wallet-details-form"');
+    expect(markup).toMatch(/<button[^>]*type="submit"[^>]*form="wallet-details-form"/);
     expect(markup).toContain("Wallet details");
     expect(markup).toContain(">Back<");
     expect(markup).toContain("Create wallet");

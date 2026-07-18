@@ -3,7 +3,7 @@
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useMemo, useState, useTransition } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   createCustodySetupWalletAction,
   initializeCustodySetupAction,
@@ -24,6 +24,42 @@ import { cn } from "@/lib/utils";
 type SetupStep = "provider" | "details";
 
 const SETUP_STEPS = ["provider", "details"] as const satisfies readonly SetupStep[];
+const PROVIDER_FORM_ID = "wallet-provider-form";
+const DETAILS_FORM_ID = "wallet-details-form";
+
+// Keep Enter available to controls that own it (newlines, option selection,
+// navigation, and action buttons). The already-selected provider card opts in
+// because selecting it again is a no-op and the next useful action is Continue.
+function ignoresEnterToSubmit(target: HTMLElement): boolean {
+  if (target.closest('[data-wallet-enter-advance="true"]')) {
+    return false;
+  }
+  if (target.isContentEditable) {
+    return true;
+  }
+  const tagName = target.tagName;
+  if (
+    tagName === "TEXTAREA" ||
+    tagName === "SELECT" ||
+    tagName === "A" ||
+    tagName === "SUMMARY" ||
+    tagName === "BUTTON"
+  ) {
+    return true;
+  }
+  const role = target.getAttribute("role");
+  if (
+    role === "button" ||
+    role === "combobox" ||
+    role === "listbox" ||
+    role === "option" ||
+    role === "menu" ||
+    role === "menuitem"
+  ) {
+    return true;
+  }
+  return target.getAttribute("aria-haspopup") !== null;
+}
 
 interface WalletSetupFlowProps {
   connectedProviders: KnownCustodyProvider[];
@@ -84,6 +120,7 @@ function ProviderStep({
             key={provider.id}
             type="button"
             onClick={() => onSelect(provider.id)}
+            data-wallet-enter-advance={isSelected ? "true" : undefined}
             className={cn(
               "group w-full cursor-pointer rounded-2xl border px-5 py-5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default focus-visible:ring-offset-2",
               isSelected
@@ -143,6 +180,7 @@ export function WalletSetupFlow({
   );
   const [walletLabel, setWalletLabel] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const submissionInFlightRef = useRef(false);
 
   const connectedProviderSet = useMemo(() => new Set(connectedProviders), [connectedProviders]);
   const selectedProviderEntry = useMemo(
@@ -174,35 +212,87 @@ export function WalletSetupFlow({
     router.push("/dashboard/wallets");
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleProviderSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    continueFromProvider();
   };
 
-  const handleCreateWallet = () => {
-    const form = document.getElementById("wallet-details-form");
-    if (!(form instanceof HTMLFormElement)) {
+  const handleCreateWallet = (form: HTMLFormElement) => {
+    if (
+      submissionInFlightRef.current ||
+      !form.reportValidity() ||
+      !canProvisionWallet ||
+      isPending ||
+      !selectedProviderEntry
+    ) {
       return;
     }
 
-    if (!form.reportValidity() || !canProvisionWallet || isPending || !selectedProviderEntry) {
-      return;
-    }
-
+    submissionInFlightRef.current = true;
     const formData = new FormData(form);
     setErrorMessage(null);
 
     startTransition(async () => {
-      const result = await formAction(formData);
+      try {
+        const result = await formAction(formData);
 
-      if (result.status === "error") {
-        setErrorMessage(result.message);
+        if (result.status === "error") {
+          setErrorMessage(result.message);
+          return;
+        }
+
+        router.refresh();
+        router.push("/dashboard/wallets");
+      } finally {
+        submissionInFlightRef.current = false;
+      }
+    });
+  };
+
+  const handleDetailsSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    handleCreateWallet(event.currentTarget);
+  };
+
+  const currentStepSubmitRef = useRef<() => void>(() => {});
+  currentStepSubmitRef.current = () => {
+    const formId = currentStep === "provider" ? PROVIDER_FORM_ID : DETAILS_FORM_ID;
+    const form = document.getElementById(formId);
+    if (form instanceof HTMLFormElement) {
+      form.requestSubmit();
+    }
+  };
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (
+        event.key !== "Enter" ||
+        event.repeat ||
+        event.shiftKey ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.isComposing ||
+        event.defaultPrevented
+      ) {
+        return;
+      }
+      const target = event.target;
+      if (
+        !(target instanceof HTMLElement) ||
+        !target.closest("[data-wallet-setup-flow]") ||
+        ignoresEnterToSubmit(target)
+      ) {
         return;
       }
 
-      router.refresh();
-      router.push("/dashboard/wallets");
-    });
-  };
+      event.preventDefault();
+      currentStepSubmitRef.current();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   if (enabledProviderEntries.length === 0) {
     return (
@@ -301,17 +391,19 @@ export function WalletSetupFlow({
             <h2 className="text-2xl font-medium tracking-tight text-primary">{heading}</h2>
 
             {currentStep === "provider" ? (
-              <ProviderStep
-                connectedProviders={connectedProviders}
-                onSelect={(provider) => {
-                  setSelectedProvider(provider);
-                  setErrorMessage(null);
-                }}
-                providers={enabledProviderEntries}
-                selectedProvider={selectedProvider}
-              />
+              <form id={PROVIDER_FORM_ID} onSubmit={handleProviderSubmit}>
+                <ProviderStep
+                  connectedProviders={connectedProviders}
+                  onSelect={(provider) => {
+                    setSelectedProvider(provider);
+                    setErrorMessage(null);
+                  }}
+                  providers={enabledProviderEntries}
+                  selectedProvider={selectedProvider}
+                />
+              </form>
             ) : (
-              <form id="wallet-details-form" onSubmit={handleSubmit} className="grid gap-4">
+              <form id={DETAILS_FORM_ID} onSubmit={handleDetailsSubmit} className="grid gap-4">
                 {formContent}
               </form>
             )}
@@ -336,8 +428,8 @@ export function WalletSetupFlow({
 
           {currentStep === "provider" ? (
             <Button
-              type="button"
-              onClick={continueFromProvider}
+              type="submit"
+              form={PROVIDER_FORM_ID}
               disabled={!canContinue}
               iconRight={<ArrowRight className="size-4" />}
             >
@@ -345,9 +437,9 @@ export function WalletSetupFlow({
             </Button>
           ) : (
             <Button
-              type="button"
+              type="submit"
+              form={DETAILS_FORM_ID}
               disabled={!canProvisionWallet || isPending}
-              onClick={handleCreateWallet}
             >
               {isPending
                 ? t("DashboardCustody.createWalletPending")

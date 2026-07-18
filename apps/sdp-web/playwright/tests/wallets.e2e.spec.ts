@@ -1,5 +1,5 @@
 import { type Browser, expect, type Page, test } from "@playwright/test";
-import type { Token, TokenTransaction } from "@sdp/types";
+import type { PaymentsDashboardWallet, Token, TokenTransaction } from "@sdp/types";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import {
@@ -21,6 +21,10 @@ interface MintResponse {
 
 interface TransactionResponse {
   transaction: TokenTransaction;
+}
+
+interface WalletsResponse {
+  wallets: PaymentsDashboardWallet[];
 }
 
 const E2E_POLL_TIMEOUT_MS = 180_000;
@@ -455,6 +459,83 @@ test.describe
           timeout: E2E_POLL_TIMEOUT_MS,
         });
       }
+    });
+
+    test("wallet setup Enter advances without creating and final Enter creates once", async ({
+      browser,
+      page,
+    }) => {
+      const session = await getPlaywrightAdminSession(browser);
+      let projectId = "";
+      try {
+        await bootstrapLocalWalletFixtures({
+          identity: session.identity,
+          bearerToken: session.getBearerToken,
+          provider: "privy",
+          walletCount: 1,
+          walletLabel: `Wallet Enter Prerequisite ${Date.now().toString(36).toUpperCase()}`,
+          tier: "enterprise",
+        });
+        projectId = await resolvePlaywrightProjectId(
+          getBootstrapApiBaseUrl(),
+          session.getBearerToken
+        );
+      } finally {
+        await session.page.close();
+      }
+
+      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken, projectId);
+      const walletLabel = `Wallet Enter ${Date.now().toString(36).toUpperCase()}`;
+      const countMatchingWallets = async () => {
+        // biome-ignore lint/security/noSecrets: Local API path with query params for wallet listing.
+        const { wallets } = await api.get<WalletsResponse>("/v1/wallets?includeAllProviders=true");
+        return wallets.filter((wallet) => wallet.label === walletLabel).length;
+      };
+      expect(await countMatchingWallets()).toBe(0);
+
+      let serverActionRequestCount = 0;
+      page.on("request", (request) => {
+        if (request.method() === "POST" && request.headers()["next-action"]) {
+          serverActionRequestCount += 1;
+        }
+      });
+
+      const advanceProviderWithEnter = async () => {
+        const privyProvider = page.getByRole("button", { name: /Privy/ });
+        await privyProvider.focus();
+        await page.keyboard.press("Space");
+        await expect(privyProvider).toHaveAttribute("aria-pressed", "true");
+        await page.keyboard.press("Enter");
+        await expect(page.getByText("Step 2 of 2", { exact: true })).toBeVisible();
+        expect(serverActionRequestCount).toBe(0);
+      };
+
+      await page.setViewportSize({ width: 390, height: 844 });
+      await seedProjectCookie(page, projectId);
+      await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
+      await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+      await advanceProviderWithEnter();
+
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
+      await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+      await advanceProviderWithEnter();
+
+      const walletLabelInput = page.getByLabel("Wallet label");
+      await walletLabelInput.fill(walletLabel);
+      await walletLabelInput.focus();
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Enter");
+
+      await expect(page).toHaveURL(/\/dashboard\/wallets$/, {
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+      expect(serverActionRequestCount).toBe(1);
+      await expect.poll(countMatchingWallets, E2E_POLL_OPTIONS).toBe(1);
     });
 
     // ponytail: quarantined until Surfpool signing stops intermittently hanging in CI.
