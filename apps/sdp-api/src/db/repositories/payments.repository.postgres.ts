@@ -417,13 +417,12 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
     async listTransfers(params: ListTransfersInput): Promise<ListTransfersResult> {
       const { whereClause, values } = buildTransferListWhere(params);
       const paginationValues = [...values, params.limit, params.offset];
-      const sortColumn =
-        {
-          amount: "NULLIF(pt.amount, '')::numeric",
-          createdAt: "pt.created_at",
-          status: "pt.status",
-          updatedAt: "pt.updated_at",
-        }[params.sortBy ?? "createdAt"] ?? "pt.created_at";
+      const sort = {
+        amount: { column: "NULLIF(pt.amount, '')::numeric", nulls: " NULLS LAST" },
+        createdAt: { column: "pt.created_at", nulls: "" },
+        status: { column: "pt.status", nulls: "" },
+        updatedAt: { column: "pt.updated_at", nulls: "" },
+      }[params.sortBy ?? "createdAt"] ?? { column: "pt.created_at", nulls: "" };
       const sortDirection = params.sortDirection === "asc" ? "ASC" : "DESC";
 
       const [rows, countRow] = await Promise.all([
@@ -436,7 +435,7 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
               AND c.organization_id = pt.organization_id
               AND c.project_id IS NOT DISTINCT FROM pt.project_id
              WHERE ${whereClause}
-             ORDER BY ${sortColumn} ${sortDirection} NULLS LAST, pt.created_at DESC, pt.id DESC
+             ORDER BY ${sort.column} ${sortDirection}${sort.nulls}, pt.created_at DESC, pt.id DESC
              LIMIT ?
              OFFSET ?`
           )

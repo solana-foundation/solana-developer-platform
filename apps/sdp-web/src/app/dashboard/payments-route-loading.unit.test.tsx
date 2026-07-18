@@ -22,6 +22,7 @@ import RecurringPaymentDetailLoading from "./payments/recurring/[recurringPaymen
 import RecurringPaymentCreateLoading from "./payments/recurring/create/loading";
 import RecurringPaymentsLoading from "./payments/recurring/loading";
 import PaymentRequestsLoading from "./payments/requests/loading";
+import TransactionsLoading from "./payments/transactions/loading";
 
 const dashboardWorkspaceMock = vi.hoisted(() => ({
   counterpartyTab: "overview" as "overview" | "playground",
@@ -38,6 +39,7 @@ vi.mock("@/contexts/dashboard-workspace-context", async (importOriginal) => {
 const EXPECTED_ROUTE_LAYOUTS = [
   "home",
   "payments-overview",
+  "payments-transactions",
   "payments-pay",
   "payments-deposit",
   "payment-requests",
@@ -58,6 +60,7 @@ function renderAuthenticatedLoadingStates(): string {
       <PayLoading />
       <DepositLoading />
       <PaymentRequestsLoading />
+      <TransactionsLoading />
       <CounterpartyLoading />
       <CounterpartyCreateLoading />
       <CounterpartyDetailLoading />

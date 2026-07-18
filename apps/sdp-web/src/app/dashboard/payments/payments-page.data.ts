@@ -127,6 +127,7 @@ export async function fetchPaymentTransfers(
   pageSize = 20,
   options: {
     walletId?: string;
+    includeObserved?: boolean;
   } = {}
 ): Promise<FetchResult<PaymentTransferSummary[]>> {
   try {
@@ -134,6 +135,7 @@ export async function fetchPaymentTransfers(
       page: "1",
       pageSize: String(pageSize),
       ...(options.walletId ? { wallet: options.walletId } : {}),
+      ...(options.includeObserved === false ? { includeObserved: "false" } : {}),
     }).toString();
     const response = await request(`/v1/payments/transfers?${query}`);
     if (!response.ok) {

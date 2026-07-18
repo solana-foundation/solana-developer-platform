@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchDashboardPaymentTransfersForWallets } from "./payments-page.data";
+import {
+  fetchDashboardPaymentTransfersForWallets,
+  fetchPaymentTransfers,
+} from "./payments-page.data";
 
 describe("fetchDashboardPaymentTransfersForWallets", () => {
   it("reuses preloaded wallets while preserving wallet-scoped transfer history", async () => {
@@ -41,5 +44,24 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
       "/v1/payments/transfers?page=1&pageSize=20&wallet=wallet-1",
       "/v1/payments/transfers?page=1&pageSize=20&wallet=wallet-2",
     ]);
+  });
+});
+
+describe("fetchPaymentTransfers", () => {
+  it("uses one bounded database-backed request for the overview preview", async () => {
+    const request = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    await fetchPaymentTransfers(request, 5, { includeObserved: false });
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith(
+      "/v1/payments/transfers?page=1&pageSize=5&includeObserved=false"
+    );
   });
 });

@@ -1967,6 +1967,7 @@ export async function listTransfers(c: AppContext) {
     transferRows = filtered.slice(offset, offset + pageSize);
   } else {
     // DB-only path for org-scoped queries without a specific wallet
+    const queryStartedAt = performance.now();
     const result = await repo.listTransfers({
       organizationId: auth.organizationId,
       projectId: auth.projectId,
@@ -1985,6 +1986,9 @@ export async function listTransfers(c: AppContext) {
       sortDirection,
       limit: pageSize,
       offset,
+    });
+    c.header("Server-Timing", `db;dur=${(performance.now() - queryStartedAt).toFixed(1)}`, {
+      append: true,
     });
     total = result.total;
     transferRows = result.rows;

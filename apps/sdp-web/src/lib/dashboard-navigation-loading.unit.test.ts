@@ -23,6 +23,7 @@ describe("dashboard loading route", () => {
     ["/dashboard/issuance/create", "issuance-create"],
     ["/dashboard/issuance/token-1", "issuance-detail"],
     ["/dashboard/payments", "payments-overview"],
+    ["/dashboard/payments/transactions", "payments-transactions"],
     ["/dashboard/payments/pay", "payments-pay"],
     ["/dashboard/payments/deposit", "payments-deposit"],
     ["/dashboard/payments/requests", "payment-requests"],

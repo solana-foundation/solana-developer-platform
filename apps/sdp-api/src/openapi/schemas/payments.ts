@@ -740,7 +740,7 @@ export const transferSchema = z
       example: "moonpay",
     }),
     counterpartyId: z.string().optional().openapi({
-      description: "Counterparty tied to a ramp transfer record.",
+      description: "Counterparty tied to the transfer record, when available.",
       example: "counterparty_example",
     }),
     providerReference: z.string().optional().openapi({

@@ -7434,7 +7434,12 @@ describe("Payments routes", () => {
         data: Array<{ id: string; walletId: string }>;
         meta: { total: number; page: number; pageSize: number; hasMore: boolean };
       };
-      expect(body.data).toEqual([{ id: "xfr_search_new", walletId: TEST_WALLET_ID }]);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]).toMatchObject({
+        id: "xfr_search_new",
+        walletId: TEST_WALLET_ID,
+        counterpartyId,
+      });
       expect(body.meta).toMatchObject({ total: 2, page: 2, pageSize: 1, hasMore: false });
     });
 

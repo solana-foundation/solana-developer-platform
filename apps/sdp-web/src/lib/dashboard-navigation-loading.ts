@@ -10,6 +10,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
 } as const;
 
 export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
+  transactions: "/dashboard/payments/transactions",
   counterparty: "/dashboard/payments/counterparty",
   pay: "/dashboard/payments/pay",
   deposit: "/dashboard/payments/deposit",
@@ -30,6 +31,7 @@ export type DashboardLoadingRoute =
   | "issuance-create"
   | "issuance-detail"
   | "payments-overview"
+  | "payments-transactions"
   | "payments-pay"
   | "payments-deposit"
   | "payment-requests"
@@ -88,6 +90,7 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (/^\/dashboard\/issuance\/[^/]+$/.test(pathname)) return "issuance-detail";
 
   if (pathname === "/dashboard/payments") return "payments-overview";
+  if (pathname === "/dashboard/payments/transactions") return "payments-transactions";
   if (pathname === "/dashboard/payments/pay") return "payments-pay";
   if (pathname === "/dashboard/payments/deposit") return "payments-deposit";
   if (pathname === "/dashboard/payments/requests") return "payment-requests";

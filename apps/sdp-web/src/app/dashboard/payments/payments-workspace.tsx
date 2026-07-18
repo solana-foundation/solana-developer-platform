@@ -58,25 +58,6 @@ export function PaymentsWorkspace({
     setPlaygroundApiKeys(apiKeys);
   }, [apiKeys, setPlaygroundApiKeys]);
 
-  useEffect(() => {
-    if (isPlaygroundTab) {
-      return;
-    }
-
-    const preloadPlayground = () => {
-      void import("./payments-playground");
-    };
-
-    // biome-ignore lint/security/noSecrets: requestIdleCallback is a browser API, not a secret.
-    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      const idleId = window.requestIdleCallback(preloadPlayground);
-      return () => window.cancelIdleCallback(idleId);
-    }
-
-    const timeoutId = globalThis.setTimeout(preloadPlayground, 600);
-    return () => globalThis.clearTimeout(timeoutId);
-  }, [isPlaygroundTab]);
-
   const selectedPlaygroundApiKey = useMemo(
     () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
     [apiKeys, selectedPlaygroundApiKeyId]

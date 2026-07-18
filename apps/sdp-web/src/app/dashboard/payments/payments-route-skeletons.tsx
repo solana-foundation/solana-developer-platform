@@ -492,3 +492,72 @@ export function RecurringPaymentDetailSkeleton() {
     </div>
   );
 }
+
+export function TransactionsResultsSkeleton() {
+  return (
+    <section data-loading-transaction-results data-loading-table aria-busy="true">
+      <div className="hidden lg:block">
+        <div className="grid grid-cols-[23%_12%_13%_10%_15%_13%_14%] gap-3 border-b border-border-default px-4 py-3">
+          {[
+            "transaction",
+            "status",
+            "amount",
+            "direction",
+            "counterparty",
+            "wallet",
+            "created",
+          ].map((column) => (
+            <SkeletonBlock key={column} className="h-4 w-20 max-w-full" />
+          ))}
+        </div>
+        {TABLE_ROW_IDS.map((rowId) => (
+          <div
+            key={`transactions-${rowId}`}
+            className="grid grid-cols-[23%_12%_13%_10%_15%_13%_14%] items-center gap-3 border-b border-border-default px-4 py-3 last:border-b-0"
+            data-loading-table-row
+          >
+            <SkeletonBlock className="h-9 w-40 max-w-full" />
+            <SkeletonBlock className="h-5 w-20 max-w-full rounded-full" />
+            <SkeletonBlock className="h-4 w-24 max-w-full" />
+            <SkeletonBlock className="h-4 w-16 max-w-full" />
+            <SkeletonBlock className="h-4 w-24 max-w-full" />
+            <SkeletonBlock className="h-4 w-24 max-w-full" />
+            <SkeletonBlock className="h-4 w-24 max-w-full" />
+          </div>
+        ))}
+      </div>
+      <div className="divide-y divide-border-default lg:hidden" data-loading-mobile-rows>
+        {TABLE_ROW_IDS.map((rowId) => (
+          <div key={`transactions-mobile-${rowId}`} className="space-y-3 p-4">
+            <SkeletonBlock className="h-9 w-44 max-w-full" />
+            <SkeletonBlock className="h-4 w-full" />
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between gap-4 border-t border-border-default p-4">
+        <SkeletonBlock className="h-9 w-28" />
+        <SkeletonBlock className="h-9 w-44" />
+      </div>
+    </section>
+  );
+}
+
+export function PaymentsTransactionsPageSkeleton() {
+  return (
+    <DashboardWorkspaceOverviewPanel
+      className="h-full min-h-0 overflow-y-auto px-3 pt-5 pb-6 md:px-6"
+      data-loading-layout="payments-transactions"
+      aria-busy="true"
+    >
+      <div className="overflow-hidden rounded-lg border border-border-default bg-surface-raised">
+        <div className="grid gap-2 border-b border-border-default p-3 lg:grid-cols-[minmax(280px,1fr)_190px_190px_auto]">
+          <SkeletonBlock className="h-10 w-full rounded-lg" />
+          <SkeletonBlock className="h-10 w-full rounded-lg" />
+          <SkeletonBlock className="h-10 w-full rounded-lg" />
+          <SkeletonBlock className="h-10 w-full rounded-lg" />
+        </div>
+        <TransactionsResultsSkeleton />
+      </div>
+    </DashboardWorkspaceOverviewPanel>
+  );
+}
