@@ -6914,7 +6914,8 @@ describe("Payments routes", () => {
       expect(transfers.results[0]?.error).toBeTruthy();
     });
 
-    it("returns 400 ACCOUNT_FROZEN when the source token account is frozen", async () => {
+    it("returns 400 ACCOUNT_FROZEN when the source SPL token account is frozen", async () => {
+      mockRecurringActivationRpc();
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
@@ -6939,7 +6940,7 @@ describe("Payments routes", () => {
           body: JSON.stringify({
             source: TEST_WALLET_ID,
             destination: TEST_SOLANA_ADDRESSES.wallet2,
-            token: "SOL",
+            token: DEVNET_USDC_MINT,
             amount: "1",
           }),
         },
