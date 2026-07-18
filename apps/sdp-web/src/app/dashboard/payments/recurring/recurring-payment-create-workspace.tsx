@@ -64,6 +64,20 @@ function resolveAccountAddress(account: CounterpartyAccount | null): string {
   return typeof address === "string" ? address : "";
 }
 
+function recurringPaymentAssetOptions(
+  wallet: PaymentsDashboardWallet | null,
+  issuedTokenSymbolsByMint: Record<string, string>,
+  t: ReturnType<typeof useTranslations>
+): ComboboxOption[] {
+  const walletWithoutSol = wallet
+    ? { ...wallet, balances: wallet.balances?.filter((balance) => !isSolBalance(balance)) }
+    : null;
+
+  return walletBalanceAssetOptions(walletWithoutSol, issuedTokenSymbolsByMint, t, {
+    hideUnresolvedMints: true,
+  });
+}
+
 function resolvePeriodHours(fields: RecurringPaymentCreateFields): number | null {
   const rawValue =
     fields.schedulePreset === "custom" ? fields.customPeriodHours : fields.schedulePreset;
@@ -273,10 +287,7 @@ export function RecurringPaymentCreateWorkspace({
     availableWallets.find((wallet) => wallet.walletId === fields.walletId) ?? null;
 
   const assetOptions = useMemo<ComboboxOption[]>(
-    () =>
-      walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t, {
-        hideUnresolvedMints: true,
-      }),
+    () => recurringPaymentAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t),
     [issuedTokenSymbolsByMint, selectedWallet, t]
   );
   const assetSelectOptions = useMemo(
@@ -341,9 +352,7 @@ export function RecurringPaymentCreateWorkspace({
 
   const selectWallet = (walletId: string) => {
     const wallet = availableWallets.find((entry) => entry.walletId === walletId) ?? null;
-    const nextAssets = walletBalanceAssetOptions(wallet, issuedTokenSymbolsByMint, t, {
-      hideUnresolvedMints: true,
-    });
+    const nextAssets = recurringPaymentAssetOptions(wallet, issuedTokenSymbolsByMint, t);
     setFields((current) => ({
       ...current,
       walletId,

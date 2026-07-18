@@ -16,6 +16,7 @@ import { createApp } from "@/app";
 import { startCron } from "@/cron/runner";
 import { withProcessEnvFallback } from "@/lib/runtime-env";
 import { NodeBackgroundRunner } from "@/runtime/background-node";
+import { createNodeHttpApp } from "@/runtime/http-node";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
 import { shutdown } from "@/runtime/shutdown-node";
@@ -116,7 +117,7 @@ async function main(): Promise<void> {
 
   initNodeSentry(getSentryOptions(env));
 
-  const app = createApp({ observability: nodeObservability });
+  const app = createNodeHttpApp(createApp({ observability: nodeObservability }));
   const bg = new NodeBackgroundRunner();
   const cron = startCron({
     env,
