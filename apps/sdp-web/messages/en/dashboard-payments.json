@@ -414,13 +414,12 @@
       "recipientCountSingular": "{count} recipient",
       "recipientCountPlural": "{count} recipients",
       "recipientsLoadFailed": "Failed to load batch recipients.",
+      "batchesLoadFailed": "Failed to load batch payments.",
       "noRecipients": "No recipients found for this batch.",
       "viewOnExplorer": "View recipient transaction on explorer",
       "batchId": "Batch ID",
       "batchStatus": "Batch status",
-      "recipientCount": "Recipient count",
-      "counterpartyRecipients": "Recipients for this counterparty",
-      "destination": "Destination"
+      "recipientCount": "Recipient count"
     },
     "manualInstructions": {
       "copied": "{label} copied.",
@@ -498,6 +497,7 @@
       "youDeposit": "You deposit",
       "youSend": "You send",
       "recipientGets": "Recipient gets",
+      "recipientsGet": "Recipients get",
       "viewOnExplorer": "View on explorer",
       "deleted": "{name} deleted",
       "createdButUnavailable": "Counterparty was created but could not be loaded.",
@@ -679,6 +679,8 @@
       "exchangeRate": "Exchange rate",
       "fees": "Fees",
       "provider": "Provider",
+      "wallet": "Wallet",
+      "walletId": "Wallet ID",
       "transactionId": "Transaction ID",
       "providerReference": "Provider reference",
       "memo": "Memo",

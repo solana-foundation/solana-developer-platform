@@ -45,22 +45,26 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Modal } from "@/components/ui/modal";
+import { SectionTabs } from "@/components/ui/section-tabs";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
+import { BatchRecipientsList } from "../batch-recipients-list";
 import {
   formatDisplayAmount,
   formatMinorCurrencyAmount,
   formatTimestamp,
+  resolveBatchTokenLabel,
   resolveTransferFlow,
   resolveTransferTypeLabel,
   shortenAddress,
 } from "../payments-overview.utils";
 import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { sumBatchAmounts } from "../ramps/hooks/use-batch-send-wizard";
+import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 
@@ -105,20 +109,26 @@ function TransferStatusBadge({ status }: { status: string }) {
   );
 }
 
+/**
+ * Renders the transfer's ramp provider logo and label. A missing provider is safe to
+ * present as SDP: the API only omits `provider` for onchain transfer types (transfer,
+ * transfer_batch) executed directly from SDP custody wallets, and rejects ramp
+ * transfers without a provider at the mapping layer, so no third-party-routed transfer
+ * can ever reach this cell provider-less.
+ */
 function TransferProviderCell({ provider }: { provider?: RampProviderId }) {
-  if (!provider) {
-    return <span className="text-sm text-tertiary">—</span>;
-  }
   return (
     <div className="flex items-center gap-2">
       <Image
-        src={RAMP_PROVIDER_LOGOS[provider]}
+        src={provider ? RAMP_PROVIDER_LOGOS[provider] : "/provider-logos/sdp.svg"}
         alt=""
         width={20}
         height={20}
         className="size-5 rounded"
       />
-      <span className="text-sm text-primary">{getRampProviderLabel(provider)}</span>
+      <span className="text-sm text-primary">
+        {provider ? getRampProviderLabel(provider) : "SDP"}
+      </span>
     </div>
   );
 }
@@ -132,7 +142,11 @@ type CounterpartyBatchTransfer = PaymentTransferSummary & {
 function isCounterpartyBatchTransfer(
   transfer: PaymentTransferSummary
 ): transfer is CounterpartyBatchTransfer {
-  return transfer.type === "transfer_batch";
+  return (
+    transfer.type === "transfer_batch" &&
+    transfer.batch !== undefined &&
+    transfer.counterpartyRecipients !== undefined
+  );
 }
 
 function formatCounterpartyBatchAmount(
@@ -141,7 +155,7 @@ function formatCounterpartyBatchAmount(
 ): string {
   return formatDisplayAmount(
     sumBatchAmounts(transfer.counterpartyRecipients.map((recipient) => recipient.amount)),
-    transfer.batch.token,
+    resolveBatchTokenLabel(transfer.batch.token),
     locale
   );
 }
@@ -429,6 +443,7 @@ function CounterpartyTransactions({
       )}
 
       <TransferDetailModal
+        key={selectedTransfer?.id}
         transfer={selectedTransfer}
         counterpartyName={counterpartyName}
         onClose={() => setSelectedTransfer(null)}
@@ -540,6 +555,185 @@ function RampSettlementRows({ settlement }: { settlement: RampTransferSettlement
   );
 }
 
+function TransferWalletRows({
+  isInbound,
+  walletAddress,
+}: {
+  isInbound: boolean;
+  walletAddress: string;
+}) {
+  const t = useTranslations();
+  const { liveWallets } = usePaymentsActionWallets([], null);
+  const matchedWallet = liveWallets.find((wallet) => wallet.publicKey === walletAddress);
+
+  return (
+    <>
+      {matchedWallet?.label ? (
+        <DetailRow
+          label={t("DashboardPayments.transferDetails.wallet")}
+          value={matchedWallet.label}
+        />
+      ) : null}
+      {matchedWallet ? (
+        <DetailRow
+          label={t("DashboardPayments.transferDetails.walletId")}
+          value={matchedWallet.walletId}
+          mono
+          copyValue={matchedWallet.walletId}
+        />
+      ) : null}
+      <DetailRow
+        label={
+          isInbound ? t("DashboardPayments.requests.to") : t("DashboardPayments.requests.from")
+        }
+        value={shortenAddress(walletAddress)}
+        mono
+        copyValue={walletAddress}
+      />
+    </>
+  );
+}
+
+function MoneygramDetailRows({
+  moneygram,
+  fiatCurrency,
+}: {
+  moneygram: NonNullable<PaymentTransferSummary["moneygram"]>;
+  fiatCurrency: PaymentTransferSummary["fiatCurrency"];
+}) {
+  const t = useTranslations();
+  return (
+    <>
+      {moneygram.referenceNumber ? (
+        <DetailRow
+          label={t("DashboardPayments.transferDetails.cashPickupCode")}
+          value={moneygram.referenceNumber}
+          mono
+          copyValue={moneygram.referenceNumber}
+        />
+      ) : null}
+      {moneygram.transactionId ? (
+        <DetailRow
+          label={t("DashboardPayments.transferDetails.moneygramTransactionId")}
+          value={moneygram.transactionId}
+          mono
+          copyValue={moneygram.transactionId}
+        />
+      ) : null}
+      {moneygram.payoutStatus ? (
+        <DetailRow
+          label={t("DashboardPayments.transferDetails.payoutStatus")}
+          value={toTitleCase(moneygram.payoutStatus)}
+        />
+      ) : null}
+      {moneygram.payoutAmount !== undefined && fiatCurrency ? (
+        <DetailRow
+          label={t("DashboardPayments.transferDetails.payoutAmount")}
+          value={formatDisplayAmount(String(moneygram.payoutAmount), fiatCurrency)}
+        />
+      ) : null}
+      {moneygram.cryptoTransferId ? (
+        <DetailRow
+          label={t("DashboardPayments.transferDetails.cryptoTransferId")}
+          value={moneygram.cryptoTransferId}
+          mono
+          copyValue={moneygram.cryptoTransferId}
+        />
+      ) : null}
+      {moneygram.solanaTxSignature ? (
+        <DetailRow
+          label={t("DashboardPayments.transferDetails.solanaSignature")}
+          value={shortenAddress(moneygram.solanaTxSignature)}
+          mono
+          copyValue={moneygram.solanaTxSignature}
+        />
+      ) : null}
+      {moneygram.lastWidgetError ? (
+        <DetailRow
+          label={t("DashboardPayments.transferDetails.moneygramError")}
+          value={moneygram.lastWidgetError}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function TransferDetailRows({
+  transfer,
+  isInbound,
+  counterpartyName,
+}: {
+  transfer: PaymentTransferSummary;
+  isInbound: boolean;
+  counterpartyName: string;
+}) {
+  const t = useTranslations();
+  const walletAddress = isInbound ? transfer.destination : transfer.source;
+  const moneygram = transfer.moneygram;
+  const counterpartyParty = transfer.fiatCurrency
+    ? `${counterpartyName} · ${transfer.fiatCurrency.toUpperCase()}`
+    : counterpartyName;
+
+  const walletRow = walletAddress ? (
+    <TransferWalletRows isInbound={isInbound} walletAddress={walletAddress} />
+  ) : null;
+  const counterpartyRow = (
+    <DetailRow
+      label={isInbound ? t("DashboardPayments.requests.from") : t("DashboardPayments.requests.to")}
+      value={counterpartyParty}
+    />
+  );
+
+  return (
+    <div className="rounded-2xl border border-border-default px-4">
+      <div className="divide-y divide-border-default">
+        {isInbound ? (
+          <>
+            {walletRow}
+            {counterpartyRow}
+          </>
+        ) : (
+          <>
+            {counterpartyRow}
+            {walletRow}
+          </>
+        )}
+        <DetailRow
+          label={t("DashboardPayments.transferDetails.provider")}
+          value={<TransferProviderCell provider={transfer.provider} />}
+        />
+        <DetailRow
+          label={t("DashboardPayments.transferDetails.transactionId")}
+          value={transfer.id}
+          mono
+          copyValue={transfer.id}
+        />
+        {transfer.providerReference ? (
+          <DetailRow
+            label={t("DashboardPayments.transferDetails.providerReference")}
+            value={transfer.providerReference}
+            mono
+            copyValue={transfer.providerReference}
+          />
+        ) : null}
+        {transfer.memo ? (
+          <DetailRow label={t("DashboardPayments.transferDetails.memo")} value={transfer.memo} />
+        ) : null}
+        {transfer.settlement ? <RampSettlementRows settlement={transfer.settlement} /> : null}
+        {moneygram ? (
+          <MoneygramDetailRows moneygram={moneygram} fiatCurrency={transfer.fiatCurrency} />
+        ) : null}
+        {transfer.updatedAt ? (
+          <DetailRow
+            label={t("DashboardPayments.transferDetails.lastUpdated")}
+            value={formatTimestamp(transfer.updatedAt, t)}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function TransferDetailModal({
   transfer,
   counterpartyName,
@@ -550,34 +744,25 @@ function TransferDetailModal({
   onClose: () => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
+  const [activeTab, setActiveTab] = useState<"details" | "recipients">("details");
   if (!transfer) {
     return null;
   }
 
   const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
-  const walletAddress = isInbound ? transfer.destination : transfer.source;
-  const moneygram = transfer.moneygram;
   const batchTransfer = isCounterpartyBatchTransfer(transfer) ? transfer : null;
-  const signature = transfer.signature ?? moneygram?.solanaTxSignature ?? null;
-  const flow = resolveTransferFlow(transfer);
-  const counterpartyParty = transfer.fiatCurrency
-    ? `${counterpartyName} · ${transfer.fiatCurrency.toUpperCase()}`
-    : counterpartyName;
-
-  const walletRow = walletAddress ? (
-    <DetailRow
-      label={isInbound ? t("DashboardPayments.requests.to") : t("DashboardPayments.requests.from")}
-      value={shortenAddress(walletAddress)}
-      mono
-      copyValue={walletAddress}
-    />
-  ) : null;
-  const counterpartyRow = (
-    <DetailRow
-      label={isInbound ? t("DashboardPayments.requests.from") : t("DashboardPayments.requests.to")}
-      value={counterpartyParty}
-    />
-  );
+  const signature = transfer.signature ?? transfer.moneygram?.solanaTxSignature ?? null;
+  const batchTotal = batchTransfer
+    ? formatDisplayAmount(
+        batchTransfer.batch.totalAmount,
+        resolveBatchTokenLabel(batchTransfer.batch.token),
+        locale
+      )
+    : null;
+  const flow = batchTransfer
+    ? { send: batchTotal, receive: batchTotal }
+    : resolveTransferFlow(transfer);
 
   return (
     <Modal
@@ -613,7 +798,9 @@ function TransferDetailModal({
           <ArrowRightIcon className="size-5 shrink-0 text-tertiary" />
           <div className="min-w-0 space-y-0.5 text-right">
             <p className="text-xs font-medium uppercase tracking-wide text-secondary">
-              {t("DashboardPayments.counterparty.recipientGets")}
+              {batchTransfer
+                ? t("DashboardPayments.counterparty.recipientsGet")
+                : t("DashboardPayments.counterparty.recipientGets")}
             </p>
             <p className="truncate text-xl font-semibold tracking-tight text-primary">
               {flow.receive ?? "—"}
@@ -621,155 +808,54 @@ function TransferDetailModal({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border-default px-4">
-          <div className="divide-y divide-border-default">
-            {isInbound ? (
-              <>
-                {walletRow}
-                {counterpartyRow}
-              </>
-            ) : (
-              <>
-                {counterpartyRow}
-                {walletRow}
-              </>
-            )}
-            {transfer.provider ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.provider")}
-                value={<TransferProviderCell provider={transfer.provider} />}
-              />
-            ) : null}
-            <DetailRow
-              label={t("DashboardPayments.transferDetails.transactionId")}
-              value={transfer.id}
-              mono
-              copyValue={transfer.id}
-            />
-            {transfer.providerReference ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.providerReference")}
-                value={transfer.providerReference}
-                mono
-                copyValue={transfer.providerReference}
-              />
-            ) : null}
-            {transfer.memo ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.memo")}
-                value={transfer.memo}
-              />
-            ) : null}
-            {transfer.settlement ? <RampSettlementRows settlement={transfer.settlement} /> : null}
-            {moneygram?.referenceNumber ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.cashPickupCode")}
-                value={moneygram.referenceNumber}
-                mono
-                copyValue={moneygram.referenceNumber}
-              />
-            ) : null}
-            {moneygram?.transactionId ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.moneygramTransactionId")}
-                value={moneygram.transactionId}
-                mono
-                copyValue={moneygram.transactionId}
-              />
-            ) : null}
-            {moneygram?.payoutStatus ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.payoutStatus")}
-                value={toTitleCase(moneygram.payoutStatus)}
-              />
-            ) : null}
-            {moneygram?.payoutAmount !== undefined && transfer.fiatCurrency ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.payoutAmount")}
-                value={formatDisplayAmount(String(moneygram.payoutAmount), transfer.fiatCurrency)}
-              />
-            ) : null}
-            {moneygram?.cryptoTransferId ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.cryptoTransferId")}
-                value={moneygram.cryptoTransferId}
-                mono
-                copyValue={moneygram.cryptoTransferId}
-              />
-            ) : null}
-            {moneygram?.solanaTxSignature ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.solanaSignature")}
-                value={shortenAddress(moneygram.solanaTxSignature)}
-                mono
-                copyValue={moneygram.solanaTxSignature}
-              />
-            ) : null}
-            {moneygram?.lastWidgetError ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.moneygramError")}
-                value={moneygram.lastWidgetError}
-              />
-            ) : null}
-            {transfer.updatedAt ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.lastUpdated")}
-                value={formatTimestamp(transfer.updatedAt, t)}
-              />
-            ) : null}
-          </div>
-        </div>
-
         {batchTransfer ? (
-          <div className="space-y-3">
-            <div className="rounded-2xl border border-border-default px-4">
-              <div className="divide-y divide-border-default">
-                <DetailRow
-                  label={t("DashboardPayments.batchActivity.batchId")}
-                  value={batchTransfer.batch.id}
-                  mono
-                  copyValue={batchTransfer.batch.id}
-                />
-                <DetailRow
-                  label={t("DashboardPayments.batchActivity.batchStatus")}
-                  value={<TransferStatusBadge status={batchTransfer.batch.status} />}
-                />
-                <DetailRow
-                  label={t("DashboardPayments.batchActivity.recipientCount")}
-                  value={String(batchTransfer.batch.recipientCount)}
-                />
-              </div>
-            </div>
-            <div className="overflow-hidden rounded-2xl border border-border-default">
-              <p className="border-b border-border-default px-4 py-3 text-xs font-medium uppercase tracking-wide text-secondary">
-                {t("DashboardPayments.batchActivity.counterpartyRecipients")}
-              </p>
-              <div className="divide-y divide-border-default">
-                {batchTransfer.counterpartyRecipients.map((recipient) => (
-                  <div
-                    key={recipient.id}
-                    className="flex min-w-0 items-center justify-between gap-4 px-4 py-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-xs text-tertiary">
-                        {t("DashboardPayments.batchActivity.destination")}
-                      </p>
-                      <p className="truncate text-sm text-primary" title={recipient.destination}>
-                        {shortenAddress(recipient.destination)}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <span className="text-sm text-primary">
-                        {formatDisplayAmount(recipient.amount, batchTransfer.batch.token)}
-                      </span>
-                      <TransferStatusBadge status={recipient.status} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          <SectionTabs
+            tabs={[
+              { id: "details", label: t("DashboardPayments.counterparty.details") },
+              { id: "recipients", label: t("DashboardPayments.batchActivity.recipients") },
+            ]}
+            value={activeTab}
+            onChange={setActiveTab}
+          />
         ) : null}
+
+        {batchTransfer && activeTab === "recipients" ? (
+          <div className="overflow-hidden rounded-2xl border border-border-default">
+            <BatchRecipientsList
+              batchId={batchTransfer.batch.id}
+              batchStatus={batchTransfer.batch.status}
+            />
+          </div>
+        ) : (
+          <>
+            <TransferDetailRows
+              transfer={transfer}
+              isInbound={isInbound}
+              counterpartyName={counterpartyName}
+            />
+
+            {batchTransfer ? (
+              <div className="rounded-2xl border border-border-default px-4">
+                <div className="divide-y divide-border-default">
+                  <DetailRow
+                    label={t("DashboardPayments.batchActivity.batchId")}
+                    value={batchTransfer.batch.id}
+                    mono
+                    copyValue={batchTransfer.batch.id}
+                  />
+                  <DetailRow
+                    label={t("DashboardPayments.batchActivity.batchStatus")}
+                    value={<TransferStatusBadge status={batchTransfer.batch.status} />}
+                  />
+                  <DetailRow
+                    label={t("DashboardPayments.batchActivity.recipientCount")}
+                    value={String(batchTransfer.batch.recipientCount)}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
 
         {signature ? (
           <Button
