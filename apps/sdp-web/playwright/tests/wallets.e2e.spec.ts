@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import type { Token, TokenTransaction } from "@sdp/types";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
@@ -135,6 +135,45 @@ function getActivityRow(
     .filter({ hasText: input.operationLabel });
 }
 
+async function bootstrapWalletRouteFixture(
+  browser: Browser,
+  input: { labelPrefix: string; withPolicy?: boolean }
+) {
+  const session = await getPlaywrightAdminSession(browser);
+
+  try {
+    const walletLabel = `${input.labelPrefix} ${Date.now().toString(36).toUpperCase()}`;
+    const fixtures = await bootstrapLocalWalletFixtures({
+      identity: session.identity,
+      bearerToken: session.getBearerToken,
+      provider: "privy",
+      walletCount: 1,
+      walletLabel,
+      tier: "enterprise",
+    });
+    const projectId = await resolvePlaywrightProjectId(
+      getBootstrapApiBaseUrl(),
+      session.getBearerToken
+    );
+    const wallet = fixtures.wallets[0];
+    if (!wallet) {
+      throw new Error("Failed to bootstrap wallet route fixture");
+    }
+
+    if (input.withPolicy) {
+      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
+      await api.put(`/v1/payments/wallets/${encodeURIComponent(wallet.walletId)}/policies`, {
+        destinationAllowlist: [],
+        maxTransferAmount: "25",
+      });
+    }
+
+    return { projectId, wallet, walletLabel };
+  } finally {
+    await session.page.close();
+  }
+}
+
 test.describe
   .serial("dashboard wallets e2e", () => {
     let walletsProjectId = "";
@@ -187,43 +226,15 @@ test.describe
       await expect(walletCard.getByRole("link", { name: "Manage" })).toBeVisible();
     });
 
-    test("wallet and custody routes preserve navigation through controls and history", async ({
-      browser,
-      page,
-    }) => {
-      const session = await getPlaywrightAdminSession(browser);
-      const walletLabel = `Wallet Routes ${Date.now().toString(36).toUpperCase()}`;
-      const fixtures = await bootstrapLocalWalletFixtures({
-        identity: session.identity,
-        bearerToken: session.getBearerToken,
-        provider: "privy",
-        walletCount: 1,
-        walletLabel,
-        tier: "enterprise",
+    test("wallet workspace and detail aliases preserve navigation", async ({ browser, page }) => {
+      const { projectId, wallet, walletLabel } = await bootstrapWalletRouteFixture(browser, {
+        labelPrefix: "Wallet Routes",
       });
-      const projectId = await resolvePlaywrightProjectId(
-        getBootstrapApiBaseUrl(),
-        session.getBearerToken
-      );
-      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
-      const wallet = fixtures.wallets[0];
-      if (!wallet) {
-        throw new Error("Failed to bootstrap wallet route fixture");
-      }
-
-      await api.put(`/v1/payments/wallets/${encodeURIComponent(wallet.walletId)}/policies`, {
-        destinationAllowlist: [],
-        maxTransferAmount: "25",
-      });
-      await session.page.close();
       await seedProjectCookie(page, projectId);
 
       const encodedWalletId = encodeURIComponent(wallet.walletId);
       const walletHref = `/dashboard/wallets/${encodedWalletId}`;
       const custodyHref = `/dashboard/custody/${encodedWalletId}`;
-      const policyHref = `${walletHref}/policy`;
-      const auditHref = `${policyHref}/audit`;
-      const revisionsHref = `${policyHref}/revisions`;
 
       await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
       await expect(page.locator("[data-wallet-panel]").first()).toHaveAttribute(
@@ -287,6 +298,19 @@ test.describe
       await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
+    });
+
+    test("wallet policy history routes preserve navigation", async ({ browser, page }) => {
+      const { projectId, wallet } = await bootstrapWalletRouteFixture(browser, {
+        labelPrefix: "Wallet Policy Routes",
+        withPolicy: true,
+      });
+      await seedProjectCookie(page, projectId);
+
+      const walletHref = `/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`;
+      const policyHref = `${walletHref}/policy`;
+      const auditHref = `${policyHref}/audit`;
+      const revisionsHref = `${policyHref}/revisions`;
 
       await page.goto(policyHref, { waitUntil: "domcontentloaded" });
       await expect(page.locator(`a[href="${auditHref}"]`)).toBeVisible({
@@ -307,6 +331,20 @@ test.describe
       await expect(page.locator(`a[href="${auditHref}"]`)).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
+    });
+
+    test("wallet setup routes preserve provider selection and aliases", async ({
+      browser,
+      page,
+    }) => {
+      const session = await getPlaywrightAdminSession(browser);
+      const projectId = await resolvePlaywrightProjectId(
+        getBootstrapApiBaseUrl(),
+        session.getBearerToken
+      );
+      await ensureLinkedOrg(session.identity, { tier: "enterprise" });
+      await session.page.close();
+      await seedProjectCookie(page, projectId);
 
       await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
       await expect(page.getByRole("button", { name: "Previous" })).toBeVisible({
