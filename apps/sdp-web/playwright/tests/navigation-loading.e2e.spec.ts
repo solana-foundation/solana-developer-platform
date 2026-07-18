@@ -84,6 +84,35 @@ test.describe("dashboard navigation loading contract", () => {
     await expect(page.locator("main")).toHaveAttribute("aria-busy", "false");
   });
 
+  test("keeps exact navigation feedback usable on mobile with reduced motion", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const stalledRsc = await stallRsc(page, /\/dashboard\/wallets(?:\?.*)?$/);
+
+    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: /open navigation/i }).click();
+
+    const navigation = page
+      .getByRole("link", { name: "Wallets", exact: true })
+      .last()
+      .click({ noWaitAfter: true });
+
+    try {
+      await stalledRsc.intercepted;
+      await expectPendingRoute(page, "wallets-overview");
+      await expect(page.locator("[data-dashboard-navigation-pending]")).toHaveCount(1);
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+        .toBe(true);
+    } finally {
+      stalledRsc.release();
+      await navigation;
+    }
+
+    await expect(page).toHaveURL(/\/dashboard\/wallets(?:\?.*)?$/, { timeout: 120_000 });
+    await expect(page.locator("main")).toHaveAttribute("aria-busy", "false");
+  });
+
   test("gives an in-content dashboard link the same precommit feedback", async ({ page }) => {
     const stalledRsc = await stallRsc(page, /\/dashboard\/wallets(?:\?.*)?$/);
 
@@ -156,7 +185,7 @@ test.describe("dashboard navigation loading contract", () => {
     await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
 
     const navigation = page
-      .getByRole("button", { name: "Create Wallet", exact: true })
+      .getByRole("button", { name: /^(?:create|new) wallet$/i })
       .first()
       .click({ noWaitAfter: true });
 
