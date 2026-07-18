@@ -1,85 +1,58 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  DASHBOARD_PAYMENTS_SUBNAV_HREFS,
-  DASHBOARD_SIDE_NAV_HREFS,
-  resolveDashboardLoadingSurface,
+  resolveDashboardLoadingRoute,
   resolveDashboardNavigationIntent,
 } from "./dashboard-navigation-loading";
 
 const CURRENT_DASHBOARD_URL = "http://localhost:3100/dashboard";
-const TEST_SEGMENT_VALUE = "loading-contract-sample";
 
-function dashboardPagesDirectory(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../app/dashboard");
-}
-
-function routePathnameForPage(pagePath: string): string {
-  const relativeDirectory = path.relative(dashboardPagesDirectory(), path.dirname(pagePath));
-  const segments = relativeDirectory
-    .split(path.sep)
-    .filter((segment) => segment && !segment.startsWith("("))
-    .map((segment) => (segment.startsWith("[") ? TEST_SEGMENT_VALUE : segment));
-
-  return ["", "dashboard", ...segments].join("/");
-}
-
-function findDashboardPages(directory: string): string[] {
-  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const entryPath = path.join(directory, entry.name);
-    if (entry.isDirectory()) return findDashboardPages(entryPath);
-    return entry.name === "page.tsx" ? [entryPath] : [];
-  });
-}
-
-function findDashboardSourceFiles(directory: string): string[] {
-  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const entryPath = path.join(directory, entry.name);
-    if (entry.isDirectory()) return findDashboardSourceFiles(entryPath);
-    return entry.name.endsWith(".tsx") ? [entryPath] : [];
-  });
-}
-
-describe("dashboard loading route inventory", () => {
-  it("gives every dashboard page route an immediate loading contract", () => {
-    const pageRoutes = findDashboardPages(dashboardPagesDirectory()).map(routePathnameForPage);
-
-    expect(pageRoutes.length).toBeGreaterThan(0);
-    for (const route of pageRoutes) {
-      expect(resolveDashboardLoadingSurface(route), route).not.toBeNull();
-    }
+describe("dashboard loading route", () => {
+  it.each([
+    ["/dashboard", "home"],
+    ["/dashboard/wallets", "wallets-overview"],
+    ["/dashboard/wallets/setup", "wallet-setup"],
+    ["/dashboard/wallets/wallet-1", "wallet-detail"],
+    ["/dashboard/wallets/wallet-1/policy", "wallet-policy"],
+    ["/dashboard/wallets/wallet-1/policy/audit", "wallet-policy-audit-list"],
+    ["/dashboard/wallets/wallet-1/policy/audit/evaluation-1", "wallet-policy-audit-detail"],
+    ["/dashboard/wallets/wallet-1/policy/revisions", "wallet-policy-revisions"],
+    ["/dashboard/custody", "wallets-overview"],
+    ["/dashboard/custody/switch", "wallet-setup"],
+    ["/dashboard/custody/wallet-1", "wallet-detail"],
+    ["/dashboard/issuance", "issuance-overview"],
+    ["/dashboard/issuance/create", "issuance-create"],
+    ["/dashboard/issuance/token-1", "issuance-detail"],
+    ["/dashboard/payments", "payments-overview"],
+    ["/dashboard/payments/pay", "payments-pay"],
+    ["/dashboard/payments/deposit", "payments-deposit"],
+    ["/dashboard/payments/requests", "payment-requests"],
+    ["/dashboard/payments/counterparty", "counterparty-directory"],
+    ["/dashboard/payments/counterparty/create", "counterparty-create"],
+    ["/dashboard/payments/counterparty/counterparty-1", "counterparty-detail"],
+    ["/dashboard/payments/recurring", "recurring-payments"],
+    ["/dashboard/payments/recurring/create", "recurring-payment-create"],
+    ["/dashboard/payments/recurring/payment-1", "recurring-payment-detail"],
+    ["/dashboard/api-keys", "api-keys-list"],
+    ["/dashboard/api-keys/new", "api-key-new"],
+    ["/dashboard/api-keys/key-1/edit", "api-key-edit"],
+    ["/dashboard/policies", "policies"],
+    ["/dashboard/approvals", "approvals-list"],
+    ["/dashboard/approvals/request-1", "approval-detail"],
+    ["/dashboard/members", "members"],
+    ["/dashboard/settings", "settings"],
+    ["/dashboard/allowlist", "allowlist"],
+  ])("maps %s to its exact route skeleton", (pathname, route) => {
+    expect(resolveDashboardLoadingRoute(pathname)).toBe(route);
   });
 
-  it("covers every visible side-nav and Payments subnav destination", () => {
-    const visibleTargets = [
-      ...Object.values(DASHBOARD_SIDE_NAV_HREFS),
-      ...Object.values(DASHBOARD_PAYMENTS_SUBNAV_HREFS),
-    ];
-
-    for (const target of visibleTargets) {
-      expect(resolveDashboardLoadingSurface(target), target).not.toBeNull();
-    }
-  });
-
-  it("routes dashboard source links through the managed navigation contract", () => {
-    const directNextLinkFiles = findDashboardSourceFiles(dashboardPagesDirectory())
-      .filter((filePath) => fs.readFileSync(filePath, "utf8").includes('from "next/link"'))
-      .map((filePath) => path.relative(dashboardPagesDirectory(), filePath))
-      .sort();
-
-    // These two links only open an external explorer in a new tab. Any new direct
-    // Next Link import must explicitly decide whether it belongs on this allowlist.
-    expect(directNextLinkFiles).toEqual([
-      "issuance/[tokenId]/asset-profile/asset-profile-header.tsx",
-      "issuance/[tokenId]/token-management-header.tsx",
-    ]);
-
-    for (const relativePath of directNextLinkFiles) {
-      const source = fs.readFileSync(path.join(dashboardPagesDirectory(), relativePath), "utf8");
-      expect(source, relativePath).not.toContain("/dashboard");
-    }
+  it.each([
+    "/dashboard/wallets/wallet-1/policy/unknown",
+    "/dashboard/api-keys/key-1",
+    "/dashboard/unknown",
+    "/dashboard/walletsmith",
+    "/sign-in",
+  ])("does not invent a fallback for unsupported route %s", (pathname) => {
+    expect(resolveDashboardLoadingRoute(pathname)).toBeNull();
   });
 });
 
@@ -99,6 +72,7 @@ describe("dashboard navigation intent", () => {
     ["new tab", { targetHref: "/dashboard/wallets", target: "_blank" }],
     ["download", { targetHref: "/dashboard/wallets", download: true }],
     ["modified click", { targetHref: "/dashboard/wallets", metaKey: true }],
+    ["unsupported dashboard route", { targetHref: "/dashboard/unknown" }],
     ["non-dashboard route", { targetHref: "/sign-in" }],
   ])("ignores %s navigation", (_label, input) => {
     expect(

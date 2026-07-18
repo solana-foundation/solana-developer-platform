@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
+import { DASHBOARD_NAVIGATION_START_EVENT } from "../../src/lib/dashboard-navigation-loading";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import {
   ensureLinkedOrg,
@@ -6,6 +7,41 @@ import {
   resolvePlaywrightProjectId,
   seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
+
+async function stallRsc(page: Page, routePattern: RegExp) {
+  let releaseRequest: () => void = () => {};
+  const requestGate = new Promise<void>((resolve) => {
+    releaseRequest = resolve;
+  });
+  let markIntercepted: () => void = () => {};
+  const intercepted = new Promise<void>((resolve) => {
+    markIntercepted = resolve;
+  });
+
+  await page.route(routePattern, async (route) => {
+    if (route.request().headers().rsc !== "1") {
+      await route.continue();
+      return;
+    }
+
+    markIntercepted();
+    await requestGate;
+    await route.continue();
+  });
+
+  return { intercepted, release: releaseRequest };
+}
+
+async function expectPendingRoute(page: Page, loadingRoute: string) {
+  const pendingNavigation = page.locator("[data-dashboard-navigation-pending]");
+  await expect(pendingNavigation).toBeVisible({ timeout: 1_000 });
+  await expect(pendingNavigation).toHaveAttribute(
+    "data-dashboard-navigation-pending",
+    loadingRoute
+  );
+  await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(0);
+  await expect(page.locator("main")).toHaveAttribute("aria-busy", "true");
+}
 
 test.describe("dashboard navigation loading contract", () => {
   let projectId = "";
@@ -24,22 +60,7 @@ test.describe("dashboard navigation loading contract", () => {
   test("immediately replaces the prior page while the destination RSC is stalled", async ({
     page,
   }) => {
-    let releaseRsc: () => void = () => {};
-    const rscGate = new Promise<void>((resolve) => {
-      releaseRsc = resolve;
-    });
-    let interceptedRsc = false;
-
-    await page.route(/\/dashboard\/wallets(?:\?.*)?$/, async (route) => {
-      if (route.request().headers().rsc !== "1") {
-        await route.continue();
-        return;
-      }
-
-      interceptedRsc = true;
-      await rscGate;
-      await route.continue();
-    });
+    const stalledRsc = await stallRsc(page, /\/dashboard\/wallets(?:\?.*)?$/);
 
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
     await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(1);
@@ -49,17 +70,10 @@ test.describe("dashboard navigation loading contract", () => {
       .click({ noWaitAfter: true });
 
     try {
-      await expect.poll(() => interceptedRsc, { timeout: 10_000 }).toBe(true);
-      const pendingNavigation = page.locator("[data-dashboard-navigation-pending]");
-      await expect(pendingNavigation).toBeVisible({ timeout: 1_000 });
-      await expect(pendingNavigation).toHaveAttribute(
-        "data-dashboard-navigation-pending",
-        "wallets"
-      );
-      await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(0);
-      await expect(page.locator("main")).toHaveAttribute("aria-busy", "true");
+      await stalledRsc.intercepted;
+      await expectPendingRoute(page, "wallets-overview");
     } finally {
-      releaseRsc();
+      stalledRsc.release();
       await navigation;
     }
 
@@ -71,22 +85,7 @@ test.describe("dashboard navigation loading contract", () => {
   });
 
   test("gives an in-content dashboard link the same precommit feedback", async ({ page }) => {
-    let releaseRsc: () => void = () => {};
-    const rscGate = new Promise<void>((resolve) => {
-      releaseRsc = resolve;
-    });
-    let interceptedRsc = false;
-
-    await page.route(/\/dashboard\/wallets(?:\?.*)?$/, async (route) => {
-      if (route.request().headers().rsc !== "1") {
-        await route.continue();
-        return;
-      }
-
-      interceptedRsc = true;
-      await rscGate;
-      await route.continue();
-    });
+    const stalledRsc = await stallRsc(page, /\/dashboard\/wallets(?:\?.*)?$/);
 
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
     const pageContent = page.locator("[data-dashboard-page-content]");
@@ -99,17 +98,10 @@ test.describe("dashboard navigation loading contract", () => {
     const navigation = inContentWalletLink.click({ noWaitAfter: true });
 
     try {
-      await expect.poll(() => interceptedRsc, { timeout: 10_000 }).toBe(true);
-      const pendingNavigation = page.locator("[data-dashboard-navigation-pending]");
-      await expect(pendingNavigation).toBeVisible({ timeout: 1_000 });
-      await expect(pendingNavigation).toHaveAttribute(
-        "data-dashboard-navigation-pending",
-        "wallets"
-      );
-      await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(0);
-      await expect(page.locator("main")).toHaveAttribute("aria-busy", "true");
+      await stalledRsc.intercepted;
+      await expectPendingRoute(page, "wallets-overview");
     } finally {
-      releaseRsc();
+      stalledRsc.release();
       await navigation;
     }
 
@@ -137,5 +129,68 @@ test.describe("dashboard navigation loading contract", () => {
     await expect(page.locator("main")).toHaveAttribute("aria-busy", "false");
     await expect(page.locator("[data-dashboard-navigation-pending]")).toHaveCount(0);
     await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(1);
+  });
+
+  test("uses the exact subnav loading surface before Requests commits", async ({ page }) => {
+    const stalledRsc = await stallRsc(page, /\/dashboard\/payments\/requests(?:\?.*)?$/);
+    await page.goto("/dashboard/payments", { waitUntil: "domcontentloaded" });
+
+    const navigation = page.getByRole("link", { name: "Requests", exact: true }).click({
+      noWaitAfter: true,
+    });
+
+    try {
+      await stalledRsc.intercepted;
+      await expectPendingRoute(page, "payment-requests");
+    } finally {
+      stalledRsc.release();
+      await navigation;
+    }
+
+    await expect(page).toHaveURL(/\/dashboard\/payments\/requests(?:\?.*)?$/);
+    await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(1);
+  });
+
+  test("gives programmatic router navigation immediate exact feedback", async ({ page }) => {
+    const stalledRsc = await stallRsc(page, /\/dashboard\/wallets\/setup(?:\?.*)?$/);
+    await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
+
+    const navigation = page
+      .getByRole("button", { name: "Create Wallet", exact: true })
+      .first()
+      .click({ noWaitAfter: true });
+
+    try {
+      await stalledRsc.intercepted;
+      await expectPendingRoute(page, "wallet-setup");
+    } finally {
+      stalledRsc.release();
+      await navigation;
+    }
+
+    await expect(page).toHaveURL(/\/dashboard\/wallets\/setup(?:\?.*)?$/);
+    await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(1);
+  });
+
+  test("recovers the prior page when a programmatic navigation never commits", async ({ page }) => {
+    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(1);
+
+    await page.evaluate((eventName) => {
+      window.dispatchEvent(
+        new CustomEvent(eventName, {
+          detail: {
+            fromPathname: "/dashboard",
+            toPathname: "/dashboard/wallets",
+          },
+        })
+      );
+    }, DASHBOARD_NAVIGATION_START_EVENT);
+
+    await expectPendingRoute(page, "wallets-overview");
+    await expect(page.locator("[data-dashboard-page-content]")).toHaveCount(1, {
+      timeout: 11_000,
+    });
+    await expect(page.locator("main")).toHaveAttribute("aria-busy", "false");
   });
 });

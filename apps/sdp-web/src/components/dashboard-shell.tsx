@@ -20,13 +20,46 @@ import {
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import ApprovalsLoading from "@/app/dashboard/approvals/loading";
-import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
+import {
+  ApiKeyAuthoringSkeleton,
+  ApiKeysListSkeleton,
+} from "@/app/dashboard/api-keys/api-key-page-skeletons";
+import {
+  ApprovalDetailSkeleton,
+  ApprovalInboxSkeleton,
+} from "@/app/dashboard/approvals/approval-page-skeletons";
+import {
+  IssuanceCreateSkeleton,
+  IssuanceDetailSkeleton,
+  IssuancePageSkeleton,
+} from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
-import CounterpartyLoading from "@/app/dashboard/payments/counterparty/loading";
-import PaymentsLoading from "@/app/dashboard/payments/loading";
-import { PoliciesPageSkeleton } from "@/app/dashboard/policies/policies-page-skeleton";
-import WalletsLoading from "@/app/dashboard/wallets/loading";
+import {
+  CompactOperationsCardSkeleton,
+  SettingsPageSkeleton,
+} from "@/app/dashboard/operations-card-page-skeletons";
+import { PaymentsPageSkeleton } from "@/app/dashboard/payments/payments-page-skeleton";
+import {
+  CounterpartyCreateSkeleton,
+  CounterpartyDetailSkeleton,
+  CounterpartyDirectorySkeleton,
+  PaymentRequestsPageSkeleton,
+  PaymentsDepositPageSkeleton,
+  PaymentsPayPageSkeleton,
+  RecurringPaymentCreateSkeleton,
+  RecurringPaymentDetailSkeleton,
+  RecurringPaymentsPageSkeleton,
+} from "@/app/dashboard/payments/payments-route-skeletons";
+import { PoliciesOverviewSkeleton } from "@/app/dashboard/policies/policies-overview";
+import {
+  WalletDetailSkeleton,
+  WalletPolicyAuditDetailSkeleton,
+  WalletPolicyAuditListSkeleton,
+  WalletPolicyRevisionsSkeleton,
+  WalletPolicySkeleton,
+  WalletSetupSkeleton,
+  WalletsOverviewSkeleton,
+} from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { CounterpartyHeaderTabs } from "@/components/counterparty-header-tabs";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
@@ -43,9 +76,9 @@ import {
   DASHBOARD_NAVIGATION_START_EVENT,
   DASHBOARD_PAYMENTS_SUBNAV_HREFS,
   DASHBOARD_SIDE_NAV_HREFS,
-  type DashboardLoadingSurface,
+  type DashboardLoadingRoute,
   type DashboardNavigationStartDetail,
-  resolveDashboardLoadingSurface,
+  resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
 
@@ -581,28 +614,84 @@ function getDashboardPageConfig(
   return { title: t("Shared.dashboardShell.home") };
 }
 
-function resolvePageLoadingComponent(surface: DashboardLoadingSurface): React.ComponentType {
-  switch (surface) {
-    case "counterparty":
-      return CounterpartyLoading;
-    case "payments":
-      return PaymentsLoading;
-    case "wallets":
-      return WalletsLoading;
-    case "issuance":
-      return IssuancePageSkeleton;
-    case "policies":
-      return PoliciesPageSkeleton;
-    case "approvals":
-      return ApprovalsLoading;
-    // These surfaces intentionally use the generic contract until the dependent
-    // route-skeleton PRs land; the merge-last rebase will wire their exact exports.
-    case "api-keys":
-    case "members":
-    case "settings":
-    case "allowlist":
+function ApiKeyNewLoading() {
+  return <ApiKeyAuthoringSkeleton route="api-key-new" />;
+}
+
+function ApiKeyEditLoading() {
+  return <ApiKeyAuthoringSkeleton route="api-key-edit" />;
+}
+
+function MembersLoading() {
+  return <CompactOperationsCardSkeleton route="members" />;
+}
+
+function AllowlistLoading() {
+  return <CompactOperationsCardSkeleton route="allowlist" />;
+}
+
+function resolvePageLoadingComponent(route: DashboardLoadingRoute): React.ComponentType {
+  switch (route) {
     case "home":
       return DashboardLoading;
+    case "wallets-overview":
+      return WalletsOverviewSkeleton;
+    case "wallet-setup":
+      return WalletSetupSkeleton;
+    case "wallet-detail":
+      return WalletDetailSkeleton;
+    case "wallet-policy":
+      return WalletPolicySkeleton;
+    case "wallet-policy-audit-list":
+      return WalletPolicyAuditListSkeleton;
+    case "wallet-policy-audit-detail":
+      return WalletPolicyAuditDetailSkeleton;
+    case "wallet-policy-revisions":
+      return WalletPolicyRevisionsSkeleton;
+    case "issuance-overview":
+      return IssuancePageSkeleton;
+    case "issuance-create":
+      return IssuanceCreateSkeleton;
+    case "issuance-detail":
+      return IssuanceDetailSkeleton;
+    case "payments-overview":
+      return PaymentsPageSkeleton;
+    case "payments-pay":
+      return PaymentsPayPageSkeleton;
+    case "payments-deposit":
+      return PaymentsDepositPageSkeleton;
+    case "payment-requests":
+      return PaymentRequestsPageSkeleton;
+    case "counterparty-directory":
+      return CounterpartyDirectorySkeleton;
+    case "counterparty-create":
+      return CounterpartyCreateSkeleton;
+    case "counterparty-detail":
+      return CounterpartyDetailSkeleton;
+    case "recurring-payments":
+      return RecurringPaymentsPageSkeleton;
+    case "recurring-payment-create":
+      return RecurringPaymentCreateSkeleton;
+    case "recurring-payment-detail":
+      return RecurringPaymentDetailSkeleton;
+    case "api-keys-list":
+      return ApiKeysListSkeleton;
+    case "api-key-new":
+      return ApiKeyNewLoading;
+    case "api-key-edit":
+      return ApiKeyEditLoading;
+    case "policies":
+      return PoliciesOverviewSkeleton;
+    case "approvals-list":
+      return ApprovalInboxSkeleton;
+    case "approval-detail":
+      return ApprovalDetailSkeleton;
+    case "members":
+      return MembersLoading;
+    case "settings":
+      return SettingsPageSkeleton;
+    case "allowlist":
+      return AllowlistLoading;
   }
 }
 
@@ -850,8 +939,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const pendingNavigationPathname =
     pendingNavigation?.fromPathname === pathname ? pendingNavigation.toPathname : null;
   const shellPathname = pendingNavigationPathname ?? pathname;
-  const loadingSurface = resolveDashboardLoadingSurface(shellPathname) ?? "home";
-  const PageLoadingComponent = resolvePageLoadingComponent(loadingSurface);
+  const loadingRoute = resolveDashboardLoadingRoute(shellPathname) ?? "home";
+  const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute);
   const isNavigationPending =
     Boolean(pendingNavigationPathname) || isProjectSwitching || isOrganizationSwitching;
   const sidebarExpandedWidth = 296;
@@ -1195,7 +1284,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               {isNavigationPending ? (
                 <div
                   className="h-full min-h-0"
-                  data-dashboard-navigation-pending={loadingSurface}
+                  data-dashboard-navigation-pending={loadingRoute}
                   role="status"
                   aria-live="polite"
                 >
