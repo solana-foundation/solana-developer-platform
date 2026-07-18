@@ -25,6 +25,25 @@ describe("OpenAPI spec", () => {
     expect(refreshPath?.operationId).toBe("refreshTokenSupply");
   });
 
+  it("documents the wallet metadata fast path and balance-on default", () => {
+    const doc = createOpenApiDocument();
+    const operation = doc.paths?.["/v1/wallets/{walletId}"]?.get;
+    const includeBalance = operation?.parameters?.find(
+      (parameter) => "name" in parameter && parameter.name === "includeBalance"
+    );
+
+    expect(includeBalance).toMatchObject({
+      name: "includeBalance",
+      in: "query",
+      required: false,
+      schema: { type: "boolean" },
+    });
+    expect(JSON.stringify(includeBalance)).toContain("Defaults to true");
+    expect(JSON.stringify(operation?.responses?.["200"])).toContain(
+      "Omitted when includeBalance=false"
+    );
+  });
+
   it("documents counterparty ramp requirements", () => {
     const doc = createOpenApiDocument();
 

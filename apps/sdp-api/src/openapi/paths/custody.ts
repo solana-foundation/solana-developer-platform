@@ -407,13 +407,20 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet by ID",
     operationId: "getWalletById",
     description:
-      "Returns wallet metadata, custody provider, public key, and current SOL balance for a specific wallet ID. This endpoint requires authenticated access.",
+      "Returns wallet metadata, custody provider, public key, and by default the current SOL balance for a specific wallet ID. Set includeBalance=false for metadata-only reads that must not call Solana RPC or pricing services. This endpoint requires authenticated access.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
         walletId: walletIdParamSchema,
       }),
       headers: projectScopeHeaders,
+      query: z.object({
+        includeBalance: z.boolean().optional().openapi({
+          description:
+            "Whether to resolve the current SOL balance. Defaults to true; false returns metadata without balance RPC or pricing calls.",
+          example: false,
+        }),
+      }),
     },
     responses: {
       200: {

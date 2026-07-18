@@ -4,6 +4,7 @@ import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import * as heliusDasService from "@/services/helius-das.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
@@ -11,6 +12,7 @@ import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
+const attachUsdValuesMock = vi.spyOn(heliusDasService, "attachUsdValuesToBalances");
 
 const TEST_ORG = {
   id: "org_custody_wallet_by_id",
@@ -176,11 +178,15 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
 describe("Custody wallet by ID route", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    createRpcMock.mockReset();
+    getAccountInfoMock.mockReset();
+    attachUsdValuesMock.mockReset();
 
     createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
     } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
+    attachUsdValuesMock.mockImplementation(async (_env, balances) => balances);
     await seedTestDatabase(env);
     await seedAuthAndConfigs();
   });
@@ -230,6 +236,100 @@ describe("Custody wallet by ID route", () => {
       amount: "4200000000",
       decimals: 9,
     });
+    expect(createRpcMock).toHaveBeenCalledTimes(1);
+    expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
+    expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns metadata without entering RPC or pricing when includeBalance=false", async () => {
+    let signalRpcStarted!: () => void;
+    const rpcStarted = new Promise<void>((resolve) => {
+      signalRpcStarted = resolve;
+    });
+
+    let releaseRpc!: (accountInfo: Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>) => void;
+    const rpcGate = new Promise<Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>>((resolve) => {
+      releaseRpc = resolve;
+    });
+
+    getAccountInfoMock.mockImplementationOnce(async () => {
+      signalRpcStarted();
+      return rpcGate;
+    });
+
+    const request = Promise.resolve(
+      app.request(
+        "/v1/wallets/para_wallet_a?includeBalance=false",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      )
+    );
+
+    const firstCompleted = await Promise.race([
+      request.then((response) => ({ kind: "response" as const, response })),
+      rpcStarted.then(() => ({ kind: "rpc" as const })),
+    ]);
+
+    if (firstCompleted.kind === "rpc") {
+      releaseRpc({
+        lamports: 4200000000n,
+      } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
+      await request;
+    }
+
+    expect(firstCompleted.kind).toBe("response");
+    if (firstCompleted.kind !== "response") {
+      return;
+    }
+
+    expect(firstCompleted.response.status).toBe(200);
+    const body = (await firstCompleted.response.json()) as {
+      data: {
+        wallet: Record<string, unknown>;
+      };
+    };
+
+    expect(body.data.wallet).toMatchObject({
+      id: "cwlt_wallet_by_id_para_a",
+      provider: "para",
+      walletId: "para_wallet_a",
+      publicKey: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    expect(body.data.wallet).not.toHaveProperty("balance");
+    expect(createRpcMock).not.toHaveBeenCalled();
+    expect(getAccountInfoMock).not.toHaveBeenCalled();
+    expect(attachUsdValuesMock).not.toHaveBeenCalled();
+  });
+
+  it("includes the balance when includeBalance=true is explicit", async () => {
+    const res = await app.request(
+      "/v1/wallets/para_wallet_a?includeBalance=true",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        wallet: {
+          balance?: { amount: string };
+        };
+      };
+    };
+    expect(body.data.wallet.balance).toMatchObject({ amount: "4200000000" });
+    expect(createRpcMock).toHaveBeenCalledTimes(1);
+    expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
+    expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
   });
 
   it("rejects unauthenticated requests", async () => {
