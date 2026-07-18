@@ -105,10 +105,14 @@ pay.post("/:token/tx", async (c) => {
 
   let instructions: Instruction[];
   if (request.token === SOL_MINT) {
+    const lamports = parseDecimalAmount(request.amount, 9);
+    if (lamports <= 0n) {
+      throw badRequest("Transfer amount must be greater than zero");
+    }
     const transferInstruction = getTransferSolInstruction({
       source: createNoopSigner(payer),
       destination: recipient,
-      amount: parseDecimalAmount(request.amount, 9),
+      amount: lamports,
     });
     instructions = [withReference(transferInstruction)];
   } else {
