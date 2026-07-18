@@ -360,6 +360,7 @@ test.describe
       expect(await pageGeometry()).toEqual(baseline);
 
       await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu")).toBeHidden();
       await page.setViewportSize({ width: 390, height: 844 });
       const mobileBaseline = await pageGeometry();
       await actions.click();
