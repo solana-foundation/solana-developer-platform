@@ -91,6 +91,18 @@ describe("operations route loading states", () => {
     );
   });
 
+  it("reserves the settled issuance-detail tab rail geometry", () => {
+    const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
+    const tabList = markup.match(
+      /<div class="([^"]*)" data-loading-tab-list="issuance-detail">([\s\S]*?)<\/div><div class="space-y-4 pt-1">/
+    );
+    const [, tabListClasses = "", tabPlaceholders = ""] = tabList ?? [];
+
+    expect(tabList).not.toBeNull();
+    expect(tabListClasses).toContain("overflow-x-auto");
+    expect(tabPlaceholders.match(/shrink-0/g)).toHaveLength(6);
+  });
+
   it("preserves the responsive and sticky geometry of the final routes", () => {
     const markup = renderAllRouteLoadingStates();
 

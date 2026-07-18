@@ -17,6 +17,15 @@ const ISSUANCE_DETAIL_ROW_IDS = [
   "issuance-detail-row-4",
 ];
 
+const ISSUANCE_DETAIL_TAB_IDS = [
+  "issuance-detail-tab-1",
+  "issuance-detail-tab-2",
+  "issuance-detail-tab-3",
+  "issuance-detail-tab-4",
+  "issuance-detail-tab-5",
+  "issuance-detail-tab-6",
+];
+
 const ISSUANCE_WIZARD_CARD_IDS = [
   "issuance-wizard-card-1",
   "issuance-wizard-card-2",
@@ -192,8 +201,11 @@ export function IssuanceDetailSkeleton() {
         </div>
       </header>
 
-      <div className="flex gap-8 overflow-hidden border-b border-border-default pt-3 pb-4">
-        {ISSUANCE_DETAIL_ROW_IDS.map((id) => (
+      <div
+        className="flex gap-8 overflow-x-auto border-b border-border-default pt-3 pb-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        data-loading-tab-list="issuance-detail"
+      >
+        {ISSUANCE_DETAIL_TAB_IDS.map((id) => (
           <SkeletonBlock key={id} className="h-4 w-20 shrink-0" />
         ))}
       </div>
