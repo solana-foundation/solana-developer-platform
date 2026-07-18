@@ -297,7 +297,7 @@ describe("policy audit data", () => {
 
   it("loads revision pages without the unused API-key directory request", async () => {
     const request = vi.fn(async (path: string) => {
-      if (path === "/v1/wallets/wallet-1") {
+      if (path === "/v1/wallets/wallet-1?includeBalance=false") {
         return Response.json({
           data: {
             wallet: {
@@ -321,7 +321,7 @@ describe("policy audit data", () => {
       revisionHistory: { profile: null, revisions: [] },
     });
     expect(request.mock.calls.map(([path]) => path)).toEqual([
-      "/v1/wallets/wallet-1",
+      "/v1/wallets/wallet-1?includeBalance=false",
       "/v1/payments/wallets/wallet-1/policies/revisions",
     ]);
   });

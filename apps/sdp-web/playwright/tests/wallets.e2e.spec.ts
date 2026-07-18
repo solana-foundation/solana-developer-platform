@@ -439,6 +439,7 @@ test.describe
       await session.page.close();
 
       await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
+      await page.getByRole("heading", { name: "Recent activity" }).scrollIntoViewIfNeeded();
 
       const expectedActivityRows = [
         { operationLabel: "Burn", token: deployedToken.symbol, amount: "2" },
@@ -482,7 +483,9 @@ test.describe
       }
 
       let failNextActivityRequest = false;
+      let activityRequestCount = 0;
       await page.route(/\/api\/dashboard\/wallets\/[^/]+\/activity$/, async (route) => {
+        activityRequestCount += 1;
         if (failNextActivityRequest) {
           await route.fulfill({
             status: 503,
@@ -520,7 +523,27 @@ test.describe
         });
       });
 
+      await page.setViewportSize({ width: 1280, height: 500 });
       await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("heading", { name: wallet.label ?? "Treasury" })).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+      await expect(page.getByRole("button", { name: "Actions" })).toBeEnabled();
+      const activityRegion = page.locator("[data-wallet-activity-state]");
+      await expect(activityRegion).not.toBeInViewport();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          })
+      );
+      await expect(activityRegion).toHaveAttribute("data-wallet-activity-state", "deferred");
+      expect(activityRequestCount).toBe(0);
+
+      await page.getByRole("heading", { name: "Recent activity" }).scrollIntoViewIfNeeded();
+      await expect(activityRegion).toHaveAttribute("data-wallet-activity-state", "mounted");
+      await expect.poll(() => activityRequestCount).toBe(1);
+
       const activityRow = page.locator("tr").filter({ hasText: "5.00 USDC" });
       await expect(activityRow).toBeVisible({ timeout: 120_000 });
       await expect(activityRow).toContainText("Incoming");
