@@ -78,12 +78,13 @@ pay.get("/:token/tx", (c) => {
 });
 
 pay.post("/:token/tx", async (c) => {
-  const request = await createPaymentRequestsRepository(c.env).getPaymentRequestByPublicToken(
+  const existing = await createPaymentRequestsRepository(c.env).getPaymentRequestByPublicToken(
     c.req.param("token")
   );
-  if (!request) {
+  if (!existing) {
     throw notFound("Payment request");
   }
+  const request = await reconcilePaymentRequestBestEffort(c.env, existing);
   if (request.status !== "awaiting_payment" || isPaymentRequestExpired(request.expires_at)) {
     throw badRequest("Payment request is no longer payable");
   }
