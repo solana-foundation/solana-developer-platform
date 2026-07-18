@@ -16,8 +16,8 @@
  *      warned) rather than silently leaked.
  *   4. closeAllRedisClients — only after bg drain, so in-flight Redis
  *      commands aren't racing a client.quit() call.
- *   5. closeDatabasePools — last; the pg client is per-query so this is
- *      a cache clear, not a connection drain.
+ *   5. closeDatabasePools — last; waits for the Node pg pools to close after
+ *      every request and background task has released its connection.
  */
 
 import type { CronHandle } from "@/cron/runner";
