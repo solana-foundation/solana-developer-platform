@@ -549,7 +549,21 @@ test.describe
       await expect(activityRow).toContainText("Incoming");
       await expect(activityRow.getByRole("link")).toHaveCount(1);
 
+      await page
+        .getByRole("heading", { name: wallet.label ?? "Treasury" })
+        .scrollIntoViewIfNeeded();
+      await expect(activityRegion).not.toBeInViewport();
+      await expect(activityRegion).toHaveAttribute("data-wallet-activity-visible", "false");
+      const requestCountBeforeReconnect = activityRequestCount;
+      await page.evaluate(() => {
+        window.dispatchEvent(new Event("offline"));
+        window.dispatchEvent(new Event("online"));
+      });
+      await page.waitForTimeout(1_000);
+      expect(activityRequestCount).toBe(requestCountBeforeReconnect);
+
       failNextActivityRequest = true;
+      await page.getByRole("heading", { name: "Recent activity" }).scrollIntoViewIfNeeded();
       const refreshButton = page.getByRole("button", { name: "Refresh" });
       await expect(refreshButton).toBeEnabled({ timeout: E2E_POLL_TIMEOUT_MS });
       await refreshButton.click();

@@ -90,6 +90,7 @@ export function WalletActivitySection({ walletId, isVisible = true }: WalletActi
     mutate,
   } = useSWR(`wallet-activity-${walletId}`, () => fetchWalletActivity(walletId), {
     revalidateOnFocus: isVisible,
+    revalidateOnReconnect: isVisible,
     refreshWhenHidden: false,
     refreshInterval: isVisible ? 20_000 : 0,
   });
