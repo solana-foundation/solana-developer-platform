@@ -169,7 +169,7 @@ export async function fetchPaymentTransfers(
         id: transfer.id ?? "",
         status: transfer.status ?? "pending",
         signature: transfer.signature ?? null,
-        ...(transfer.type ? { type: transfer.type } : {}),
+        type: transfer.type ?? "transfer",
         ...(transfer.direction ? { direction: transfer.direction } : {}),
         ...(transfer.source ? { source: transfer.source } : {}),
         ...(transfer.destination ? { destination: transfer.destination } : {}),

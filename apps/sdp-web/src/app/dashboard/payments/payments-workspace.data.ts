@@ -831,7 +831,9 @@ export interface CounterpartiesResult {
   error?: string;
 }
 
-export async function fetchAllCounterparties(): Promise<CounterpartiesResult> {
+export async function fetchAllCounterparties(
+  options: { includeArchived?: boolean } = {}
+): Promise<CounterpartiesResult> {
   const counterparties: Counterparty[] = [];
 
   try {
@@ -839,6 +841,7 @@ export async function fetchAllCounterparties(): Promise<CounterpartiesResult> {
       const query = new URLSearchParams({
         page: String(page),
         pageSize: String(COUNTERPARTY_PAGE_SIZE),
+        ...(options.includeArchived ? { includeArchived: "true" } : {}),
       });
       const response = await fetch(`/api/dashboard/counterparty?${query.toString()}`, {
         headers: { Accept: "application/json" },

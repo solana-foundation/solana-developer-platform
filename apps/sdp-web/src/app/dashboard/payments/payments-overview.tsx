@@ -313,7 +313,7 @@ export function PaymentsOverview({
     mutate: mutateCounterparties,
   } = usePersistedDashboardSWR<CounterpartiesResult>(
     [PAYMENTS_OVERVIEW_COUNTERPARTIES_KEY, refreshSeed],
-    () => fetchAllCounterparties(),
+    () => fetchAllCounterparties({ includeArchived: true }),
     { revalidateOnFocus: true },
     {
       key: "payments.counterparties.all",

@@ -236,15 +236,12 @@ export function resolveCounterparty(
   throw new Error(`Payment transfer ${transfer.id} has no resolvable counterparty`);
 }
 
-export function resolveTransferTypeLabel(type: string | undefined, t: Translate): string {
+export function resolveTransferTypeLabel(type: string, t: Translate): string {
   if (type === "onramp") {
     return t("DashboardPayments.deposit");
   }
   if (type === "offramp") {
     return t("DashboardPayments.pay");
-  }
-  if (type === undefined) {
-    throw new Error("Payment transfer type is missing");
   }
   return toTitleCase(type);
 }

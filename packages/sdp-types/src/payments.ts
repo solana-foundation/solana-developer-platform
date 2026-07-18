@@ -165,7 +165,7 @@ export interface PaymentTransferSummary {
   id: string;
   status: string;
   signature: string | null;
-  type?: string;
+  type: string;
   direction?: string;
   source?: string;
   destination?: string;
