@@ -163,6 +163,7 @@ export interface MoneygramTransferDetails {
 
 export interface PaymentTransferSummary {
   id: string;
+  walletId?: string;
   status: string;
   signature: string | null;
   type?: string;

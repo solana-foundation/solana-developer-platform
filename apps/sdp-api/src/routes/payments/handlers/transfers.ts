@@ -1713,33 +1713,43 @@ export async function listTransfers(c: AppContext) {
     pageSize,
     wallet: walletId,
     walletAddress,
+    search,
     token,
     direction,
     status: statuses,
     category,
+    type: requestedTypes,
     counterpartyId,
     provider,
     providerReference,
     from,
     to,
+    includeObserved,
+    sortBy,
+    sortDirection,
   } = query.data;
   const repo = getPaymentsRepository(c);
   const offset = (page - 1) * pageSize;
-  const transferTypes =
+  const categoryTypes =
     category === "wallet"
       ? WALLET_TRANSFER_TYPES
       : category === "ramp"
         ? RAMP_TRANSFER_TYPES
         : undefined;
+  const transferTypes = requestedTypes ?? categoryTypes;
+  if (
+    requestedTypes &&
+    categoryTypes &&
+    requestedTypes.some((type) => !categoryTypes.includes(type as never))
+  ) {
+    throw new AppError("BAD_REQUEST", "type must match the requested transfer category");
+  }
   const transferTypeSet = transferTypes ? new Set<TransferType>(transferTypes) : undefined;
   const hasProvider = provider !== undefined;
   const hasProviderReference = providerReference !== undefined;
 
-  if (hasProvider !== hasProviderReference) {
-    throw new AppError(
-      "BAD_REQUEST",
-      "provider and providerReference are both required for provider reference lookup"
-    );
+  if (hasProviderReference && !hasProvider) {
+    throw new AppError("BAD_REQUEST", "provider is required for provider reference lookup");
   }
 
   if (hasProvider && hasProviderReference) {
@@ -1769,7 +1779,7 @@ export async function listTransfers(c: AppContext) {
   let transferRows: TransferRow[];
   let total: number;
 
-  if (walletId || walletAddress) {
+  if ((walletId || walletAddress) && includeObserved) {
     // Helius-backed path: fetch on-chain signatures for the wallet address, then
     // cross-reference with our DB. Append pending/processing/failed from DB (not on-chain yet).
     //
@@ -1896,12 +1906,16 @@ export async function listTransfers(c: AppContext) {
         walletIds: resolvedWalletId ? undefined : (allowedWalletIds ?? undefined),
         sourceAddress: resolvedWalletId ? undefined : walletAddress,
         counterpartyId,
+        search,
         statuses: nonChainStatuses,
         types: transferTypes,
+        provider,
         token,
         direction,
         createdAtFrom: from,
         createdAtTo: to,
+        sortBy,
+        sortDirection,
         limit: 100,
         offset: 0,
       });
@@ -1940,6 +1954,7 @@ export async function listTransfers(c: AppContext) {
     const filtered = merged
       .filter((row) => {
         if (counterpartyId && row.counterparty_id !== counterpartyId) return false;
+        if (provider && row.provider !== provider) return false;
         if (statuses && !statuses.includes(row.status)) return false;
         if (token && row.token !== token) return false;
         if (direction && row.direction !== direction) return false;
@@ -1955,14 +1970,19 @@ export async function listTransfers(c: AppContext) {
     const result = await repo.listTransfers({
       organizationId: auth.organizationId,
       projectId: auth.projectId,
+      walletId,
       walletIds: allowedWalletIds ?? undefined,
       counterpartyId,
+      search,
       token,
       direction,
       statuses,
       types: transferTypes,
+      provider,
       createdAtFrom: from,
       createdAtTo: to,
+      sortBy,
+      sortDirection,
       limit: pageSize,
       offset,
     });

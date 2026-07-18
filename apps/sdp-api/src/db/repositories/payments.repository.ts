@@ -134,12 +134,16 @@ export interface ListTransfersInput {
   walletIds?: string[];
   counterpartyId?: string;
   sourceAddress?: string;
+  search?: string;
   token?: string;
   direction?: PaymentTransferDirection;
   statuses?: PaymentTransferStatus[];
   types?: readonly PaymentTransferType[];
+  provider?: RampProviderId;
   createdAtFrom?: string;
   createdAtTo?: string;
+  sortBy?: "amount" | "createdAt" | "status" | "updatedAt";
+  sortDirection?: "asc" | "desc";
   limit: number;
   offset: number;
 }

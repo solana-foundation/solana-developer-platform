@@ -521,6 +521,7 @@ export const transferStatusSchema = z.enum([
 export const listTransfersQuerySchema = z.object({
   wallet: z.string().optional(),
   walletAddress: z.string().optional(),
+  search: z.string().trim().min(1).max(200).optional(),
   token: z.string().optional(),
   direction: transferDirectionSchema.optional(),
   status: z
@@ -529,11 +530,26 @@ export const listTransfersQuerySchema = z.object({
     .pipe(z.array(transferStatusSchema).min(1))
     .optional(),
   category: z.enum(["wallet", "ramp"]).optional(),
+  type: z
+    .string()
+    .transform((value) => value.split(","))
+    .pipe(
+      z
+        .array(z.enum(["transfer", "transfer_confidential", "transfer_batch", "onramp", "offramp"]))
+        .min(1)
+    )
+    .optional(),
   counterpartyId: z.string().min(1).optional(),
   provider: rampProviderSchema.optional(),
   providerReference: z.string().min(1).optional(),
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
+  includeObserved: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .default(true),
+  sortBy: z.enum(["createdAt", "updatedAt", "amount", "status"]).default("createdAt"),
+  sortDirection: z.enum(["asc", "desc"]).default("desc"),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });

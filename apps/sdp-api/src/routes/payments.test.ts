@@ -5988,27 +5988,41 @@ describe("Payments routes", () => {
     status: string;
     signature?: string | null;
     walletId?: string;
+    counterpartyId?: string | null;
+    destination?: string;
+    source?: string;
+    token?: string;
+    amount?: string;
+    memo?: string | null;
+    type?: "transfer" | "transfer_confidential" | "transfer_batch" | "onramp" | "offramp";
+    direction?: "inbound" | "outbound";
+    provider?: "moonpay" | "lightspark" | "bvnk" | "moneygram" | "coinbase" | "mural" | "stripe";
+    providerReference?: string | null;
+    createdAt?: string;
   }): Promise<void> {
-    const now = new Date().toISOString();
+    const now = params.createdAt ?? new Date().toISOString();
     await getDb(env)
       .prepare(
         `INSERT INTO payment_transfers
-           (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, signature, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, wallet_id, counterparty_id, source_address, destination_address, token, amount, memo, type, direction, status, provider, provider_reference, signature, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         params.id,
         TEST_ORG.id,
         TEST_PROJECT.id,
         params.walletId ?? TEST_WALLET_ID,
-        TEST_SOLANA_ADDRESSES.wallet1,
-        TEST_SOLANA_ADDRESSES.wallet2,
-        "SOL",
-        "1",
-        null,
-        "transfer",
-        "outbound",
+        params.counterpartyId ?? null,
+        params.source ?? TEST_SOLANA_ADDRESSES.wallet1,
+        params.destination ?? TEST_SOLANA_ADDRESSES.wallet2,
+        params.token ?? "SOL",
+        params.amount ?? "1",
+        params.memo ?? null,
+        params.type ?? "transfer",
+        params.direction ?? "outbound",
         params.status,
+        params.provider ?? null,
+        params.providerReference ?? null,
         params.signature ?? null,
         now,
         now
@@ -7366,6 +7380,81 @@ describe("Payments routes", () => {
         "completed",
         "confirmed",
       ]);
+    });
+
+    it("composes search, type, provider, and stable database pagination", async () => {
+      const counterpartyId = await seedCounterparty({ id: "counterparty_searchable" });
+      await seedTransfer({
+        id: "xfr_search_old",
+        status: "completed",
+        counterpartyId,
+        type: "offramp",
+        provider: "moonpay",
+        providerReference: "merchant-reference-42",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      await seedTransfer({
+        id: "xfr_search_new",
+        status: "completed",
+        counterpartyId,
+        type: "offramp",
+        provider: "moonpay",
+        providerReference: "merchant-reference-43",
+        createdAt: "2026-01-02T00:00:00.000Z",
+      });
+      await seedTransfer({
+        id: "xfr_wrong_provider",
+        status: "completed",
+        counterpartyId,
+        type: "offramp",
+        provider: "stripe",
+      });
+
+      const query = new URLSearchParams({
+        search: "MoonPay Test Counterparty",
+        type: "offramp",
+        provider: "moonpay",
+        status: "completed",
+        sortBy: "createdAt",
+        sortDirection: "asc",
+        page: "2",
+        pageSize: "1",
+      });
+      const res = await app.request(
+        `/v1/payments/transfers?${query}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ id: string; walletId: string }>;
+        meta: { total: number; page: number; pageSize: number; hasMore: boolean };
+      };
+      expect(body.data).toEqual([{ id: "xfr_search_new", walletId: TEST_WALLET_ID }]);
+      expect(body.meta).toMatchObject({ total: 2, page: 2, pageSize: 1, hasMore: false });
+    });
+
+    it("uses database-backed pagination for wallet filters when observed history is disabled", async () => {
+      await seedTransfer({ id: "xfr_wallet_recorded", status: "confirmed" });
+
+      const res = await app.request(
+        `/v1/payments/transfers?wallet=${TEST_WALLET_ID}&includeObserved=false`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ id: string }>; meta: { total: number } };
+      expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_wallet_recorded"]);
+      expect(body.meta.total).toBe(1);
+      expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
     });
 
     it("returns bad request for invalid transfer status query param", async () => {
