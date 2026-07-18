@@ -30,7 +30,6 @@ import {
   WalletIcon,
 } from "lucide-react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -47,6 +46,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
 import {
@@ -795,7 +795,7 @@ export function CounterpartyDetailWorkspace({
 }: CounterpartyDetailWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const router = useRouter();
+  const router = useDashboardRouter();
   const { copy, copied } = useCopy(1200);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState(initialAccounts);

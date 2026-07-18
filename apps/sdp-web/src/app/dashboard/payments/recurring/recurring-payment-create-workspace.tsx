@@ -2,7 +2,6 @@
 
 import type { Counterparty, CounterpartyAccount, PaymentsDashboardWallet } from "@sdp/types";
 import { PlusIcon, RepeatIcon, WalletIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
@@ -10,6 +9,7 @@ import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
 import { isSolBalance, shortenAddress } from "../payments-overview.utils";
 import {
@@ -218,7 +218,7 @@ export function RecurringPaymentCreateWorkspace({
       description: t("DashboardPayments.recurring.customScheduleDescription"),
     },
   ] as const satisfies readonly { value: SchedulePreset; label: string; description: string }[];
-  const router = useRouter();
+  const router = useDashboardRouter();
   const [stepIndex, setStepIndex] = useState(0);
   const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
   const [destinationAccountDialogOpen, setDestinationAccountDialogOpen] = useState(false);

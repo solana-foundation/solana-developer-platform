@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import Link from "next/link";
 import { redirect } from "next/navigation";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import {
   Card,

@@ -31,7 +31,6 @@ import {
 import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
-import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -65,6 +64,7 @@ import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { useZodForm } from "@/lib/use-zod-form";
 import { cn } from "@/lib/utils";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
+import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
 import {
@@ -75,7 +75,7 @@ import {
 
 const PaymentRequestsPlayground = dynamic(
   () => import("./payment-requests-playground").then((module) => module.PaymentRequestsPlayground),
-  { loading: () => <ApiPlaygroundShellSkeleton /> }
+  { loading: () => <CounterpartyPlaygroundLoading /> }
 );
 
 const STATUS_TRANSLATION_KEYS = {

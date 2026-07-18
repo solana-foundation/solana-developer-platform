@@ -1,10 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import PublicPayLoading from "../pay/[token]/loading";
 import DashboardLoading from "./loading";
 import CounterpartyDetailLoading from "./payments/counterparty/[counterpartyId]/loading";
 import CounterpartyCreateLoading from "./payments/counterparty/create/loading";
 import CounterpartyLoading from "./payments/counterparty/loading";
+import { CounterpartyPlaygroundLoading } from "./payments/counterparty-menu-loading";
 import DepositLoading from "./payments/deposit/loading";
 import PaymentsLoading from "./payments/loading";
 import PayLoading from "./payments/pay/loading";
@@ -21,6 +22,18 @@ import RecurringPaymentDetailLoading from "./payments/recurring/[recurringPaymen
 import RecurringPaymentCreateLoading from "./payments/recurring/create/loading";
 import RecurringPaymentsLoading from "./payments/recurring/loading";
 import PaymentRequestsLoading from "./payments/requests/loading";
+
+const dashboardWorkspaceMock = vi.hoisted(() => ({
+  counterpartyTab: "overview" as "overview" | "playground",
+}));
+
+vi.mock("@/contexts/dashboard-workspace-context", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/contexts/dashboard-workspace-context")>();
+  return {
+    ...actual,
+    useDashboardWorkspace: () => dashboardWorkspaceMock,
+  };
+});
 
 const EXPECTED_ROUTE_LAYOUTS = [
   "home",
@@ -60,6 +73,10 @@ function renderScopedLoadingStates(): string {
 }
 
 describe("home and payments route loading states", () => {
+  afterEach(() => {
+    dashboardWorkspaceMock.counterpartyTab = "overview";
+  });
+
   it("gives every scoped route a geometry-specific loading boundary", () => {
     const markup = renderScopedLoadingStates();
 
@@ -117,6 +134,23 @@ describe("home and payments route loading states", () => {
 
     expect(tableCases.map(({ markup }) => markup).join("")).not.toContain(
       "data-loading-mobile-rows"
+    );
+  });
+
+  it("keeps counterparty menu loading aligned with the selected tab", () => {
+    dashboardWorkspaceMock.counterpartyTab = "playground";
+
+    const expectedPlayground = renderToStaticMarkup(<CounterpartyPlaygroundLoading />);
+    expect(renderToStaticMarkup(<CounterpartyLoading />)).toBe(expectedPlayground);
+    expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toBe(expectedPlayground);
+    expect(expectedPlayground).toContain('data-loading-layout="counterparty-playground"');
+
+    dashboardWorkspaceMock.counterpartyTab = "overview";
+    expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(
+      'data-loading-layout="counterparty-directory"'
+    );
+    expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toContain(
+      'data-loading-layout="payment-requests"'
     );
   });
 
