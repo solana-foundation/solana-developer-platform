@@ -7,7 +7,7 @@ export default function PublicPayLoading() {
       data-loading-layout="public-pay-checkout"
       aria-busy="true"
     >
-      <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-border-subtle bg-white shadow-[0_24px_70px_-24px_rgba(28,28,29,0.22)]">
+      <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-border-subtle bg-surface-raised shadow-[0_24px_70px_-24px_rgba(28,28,29,0.22)]">
         <div className="p-8">
           <div className="flex items-center justify-center border-b border-border-default pb-6">
             <SkeletonBlock className="h-5 w-28" />
@@ -22,7 +22,7 @@ export default function PublicPayLoading() {
           </div>
 
           <div className="mt-7 flex flex-col items-center gap-5">
-            <div className="rounded-2xl border border-border-default bg-white p-4">
+            <div className="rounded-2xl border border-border-default bg-[white] p-4">
               <SkeletonBlock className="size-[208px] max-h-[52vw] max-w-[52vw] rounded-lg" />
             </div>
             <SkeletonBlock className="h-4 w-36" />

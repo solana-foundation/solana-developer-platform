@@ -1,3 +1,4 @@
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
 const METRIC_SKELETON_IDS = ["home-metric-skeleton-1", "home-metric-skeleton-2"];
@@ -20,30 +21,33 @@ export default function DashboardLoading() {
 
       <div className="grid gap-4 md:grid-cols-2">
         {METRIC_SKELETON_IDS.map((id) => (
-          <div key={id} className="rounded-[18px] border border-border-default bg-white px-6 py-6">
+          <div
+            key={id}
+            className="rounded-[18px] border border-border-default bg-surface-raised px-6 py-6"
+          >
             <SkeletonBlock className="h-4 w-28 rounded-[4px]" />
             <SkeletonBlock className="mt-4 h-9 w-40 rounded-[4px]" />
           </div>
         ))}
       </div>
 
-      <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="space-y-2">
-            <SkeletonBlock className="h-8 w-52 rounded-[4px]" />
-            <SkeletonBlock className="h-4 w-72 rounded-[4px]" />
+      <Card className="min-w-0 overflow-hidden bg-surface-raised" data-loading-home-activity>
+        <CardHeader
+          className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
+          data-loading-home-activity-header
+        >
+          <div className="min-w-0 space-y-2">
+            <SkeletonBlock className="h-6 w-52 max-w-full rounded-[4px]" />
+            <SkeletonBlock className="h-4 w-72 max-w-full rounded-[4px]" />
           </div>
           <SkeletonBlock className="h-9 w-20 rounded-[10px]" />
-        </div>
-
-        <div className="rounded-[var(--sdp-surface-radius)] bg-white py-6 shadow-sm ring-1 ring-border-default">
-          <div className="space-y-3 px-6" data-loading-table>
-            {TABLE_SKELETON_IDS.map((id) => (
-              <SkeletonBlock key={id} className="h-11 w-full" />
-            ))}
-          </div>
-        </div>
-      </div>
+        </CardHeader>
+        <CardContent className="space-y-3" data-loading-table>
+          {TABLE_SKELETON_IDS.map((id) => (
+            <SkeletonBlock key={id} className="h-11 w-full" />
+          ))}
+        </CardContent>
+      </Card>
     </div>
   );
 }

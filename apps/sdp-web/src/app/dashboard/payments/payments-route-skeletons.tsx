@@ -1,6 +1,14 @@
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Card, CardAction, CardContent, CardHeader } from "@/components/ui/card";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 const TABLE_ROW_IDS = [
   "payments-loading-row-1",
@@ -19,11 +27,148 @@ const DETAIL_ROW_IDS = [
   "payments-loading-detail-7",
   "payments-loading-detail-8",
 ];
-const WIZARD_OPTION_IDS = [
-  "payments-loading-option-1",
-  "payments-loading-option-2",
-  "payments-loading-option-3",
-];
+
+type TableSkeletonVariant = "payment-requests" | "counterparty-directory" | "recurring-payments";
+
+interface TableSkeletonColumn {
+  id: string;
+  headerClassName: string;
+  cellClassName?: string;
+  headerSkeletonClassName?: string;
+  cellSkeletonClassName: string;
+}
+
+interface TableSkeletonConfig {
+  tableClassName: string;
+  containerClassName: string;
+  columns: readonly TableSkeletonColumn[];
+}
+
+const TABLE_SKELETON_CONFIGS: Record<TableSkeletonVariant, TableSkeletonConfig> = {
+  "payment-requests": {
+    tableClassName: "[&_table]:table-fixed",
+    containerClassName: "min-h-0 flex-1 overflow-y-auto",
+    columns: [
+      {
+        id: "status",
+        headerClassName: "w-[16%]",
+        headerSkeletonClassName: "h-4 w-16",
+        cellSkeletonClassName: "h-5 w-20 max-w-full rounded-full",
+      },
+      {
+        id: "amount",
+        headerClassName: "w-[20%]",
+        headerSkeletonClassName: "h-4 w-20",
+        cellSkeletonClassName: "h-4 w-24 max-w-full",
+      },
+      {
+        id: "from",
+        headerClassName: "w-[22%]",
+        headerSkeletonClassName: "h-4 w-16",
+        cellSkeletonClassName: "h-4 w-28 max-w-full",
+      },
+      {
+        id: "to",
+        headerClassName: "w-[22%]",
+        headerSkeletonClassName: "h-4 w-12",
+        cellSkeletonClassName: "h-4 w-28 max-w-full",
+      },
+      {
+        id: "created",
+        headerClassName: "w-[20%]",
+        headerSkeletonClassName: "h-4 w-20",
+        cellSkeletonClassName: "h-4 w-24 max-w-full",
+      },
+    ],
+  },
+  "counterparty-directory": {
+    tableClassName: "[&_table]:table-fixed",
+    containerClassName: "min-h-0 flex-1 overflow-y-auto",
+    columns: [
+      {
+        id: "display-name",
+        headerClassName: "w-[30%]",
+        headerSkeletonClassName: "h-4 w-24",
+        cellSkeletonClassName: "h-4 w-32 max-w-full",
+      },
+      {
+        id: "type",
+        headerClassName: "w-[12%]",
+        headerSkeletonClassName: "h-4 w-12",
+        cellSkeletonClassName: "h-4 w-16 max-w-full",
+      },
+      {
+        id: "email",
+        headerClassName: "w-[24%]",
+        headerSkeletonClassName: "h-4 w-16",
+        cellSkeletonClassName: "h-4 w-28 max-w-full",
+      },
+      {
+        id: "external-id",
+        headerClassName: "w-[16%]",
+        headerSkeletonClassName: "h-4 w-20",
+        cellSkeletonClassName: "h-4 w-24 max-w-full",
+      },
+      {
+        id: "created",
+        headerClassName: "w-[18%]",
+        headerSkeletonClassName: "h-4 w-20",
+        cellSkeletonClassName: "h-4 w-20 max-w-full",
+      },
+      {
+        id: "actions",
+        headerClassName: "w-[56px]",
+        cellClassName: "text-right",
+        cellSkeletonClassName: "ml-auto size-8 rounded-lg",
+      },
+    ],
+  },
+  "recurring-payments": {
+    tableClassName: "w-full [&_table]:table-fixed",
+    containerClassName: "min-h-0 flex-1 overflow-hidden",
+    columns: [
+      {
+        id: "status",
+        headerClassName: "w-[34%] md:w-[26%] lg:w-[21%] xl:w-[18%]",
+        headerSkeletonClassName: "h-4 w-16",
+        cellSkeletonClassName: "h-5 w-20 max-w-full rounded-full",
+      },
+      {
+        id: "amount",
+        headerClassName: "w-[26%] md:w-[22%] lg:w-[20%] xl:w-[18%]",
+        headerSkeletonClassName: "h-4 w-20",
+        cellSkeletonClassName: "h-4 w-24 max-w-full",
+      },
+      {
+        id: "counterparty",
+        headerClassName: "w-[40%] md:w-[34%] lg:w-[31%] xl:w-[24%]",
+        headerSkeletonClassName: "h-4 w-24",
+        cellSkeletonClassName: "h-4 w-28 max-w-full",
+      },
+      {
+        id: "funding-wallet",
+        headerClassName: "hidden lg:table-cell lg:w-[28%] xl:w-[22%]",
+        cellClassName: "hidden lg:table-cell",
+        headerSkeletonClassName: "h-4 w-24",
+        cellSkeletonClassName: "h-4 w-28 max-w-full",
+      },
+      {
+        id: "interval",
+        headerClassName: "hidden xl:table-cell xl:w-[18%]",
+        cellClassName: "hidden xl:table-cell",
+        headerSkeletonClassName: "h-4 w-16",
+        cellSkeletonClassName: "h-4 w-20 max-w-full",
+      },
+      {
+        id: "next-payment",
+        headerClassName: "hidden md:table-cell md:w-[18%] xl:hidden 2xl:table-cell 2xl:w-[18%]",
+        cellClassName: "hidden md:table-cell xl:hidden 2xl:table-cell",
+        headerSkeletonClassName: "h-4 w-24",
+        cellSkeletonClassName: "h-4 w-24 max-w-full",
+      },
+    ],
+  },
+};
 
 function WorkspaceCardHeaderSkeleton({
   withAction = true,
@@ -47,52 +192,51 @@ function WorkspaceCardHeaderSkeleton({
   );
 }
 
-function ResponsiveTableSkeleton({ compact = false }: { compact?: boolean }) {
-  return (
-    <div className="min-w-0 max-w-full" data-loading-table>
-      <div className="hidden overflow-hidden rounded-xl ring-1 ring-border-default md:block">
-        <div className="grid grid-cols-[1.1fr_1.4fr_1.2fr_1fr] gap-6 bg-fill-subtle px-6 py-3">
-          <SkeletonBlock className="h-4 w-20" />
-          <SkeletonBlock className="h-4 w-24" />
-          <SkeletonBlock className="h-4 w-20" />
-          <SkeletonBlock className="h-4 w-24" />
-        </div>
-        <div className="divide-y divide-border-default bg-white">
-          {TABLE_ROW_IDS.map((id) => (
-            <div
-              key={id}
-              className="grid min-h-14 grid-cols-[1.1fr_1.4fr_1.2fr_1fr] items-center gap-6 px-6"
-            >
-              <SkeletonBlock className="h-5 w-20 max-w-full rounded-full" />
-              <SkeletonBlock className="h-4 w-28 max-w-full" />
-              <SkeletonBlock className="h-4 w-32 max-w-full" />
-              <SkeletonBlock className="h-4 w-24 max-w-full" />
-            </div>
-          ))}
-        </div>
-      </div>
+function RouteTableSkeleton({ variant }: { variant: TableSkeletonVariant }) {
+  const config = TABLE_SKELETON_CONFIGS[variant];
 
-      <div className="space-y-2 md:hidden" data-loading-mobile-rows>
-        {TABLE_ROW_IDS.slice(0, compact ? 4 : 5).map((id) => (
-          <div key={id} className="space-y-3 rounded-xl bg-fill-subtle px-4 py-4">
-            <div className="flex items-center justify-between gap-4">
-              <SkeletonBlock className="h-5 w-20 rounded-full" />
-              <SkeletonBlock className="h-4 w-20" />
-            </div>
-            <SkeletonBlock className="h-4 w-3/4" />
-          </div>
-        ))}
-      </div>
+  return (
+    <div
+      className={config.containerClassName}
+      data-loading-table
+      data-loading-table-variant={variant}
+    >
+      <Table className={config.tableClassName}>
+        <TableHeader>
+          <TableRow>
+            {config.columns.map((column) => (
+              <TableHead
+                key={column.id}
+                className={column.headerClassName}
+                data-loading-column={column.id}
+              >
+                {column.headerSkeletonClassName ? (
+                  <SkeletonBlock className={column.headerSkeletonClassName} />
+                ) : null}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {TABLE_ROW_IDS.map((rowId) => (
+            <TableRow key={rowId} data-loading-table-row>
+              {config.columns.map((column) => (
+                <TableCell key={column.id} className={column.cellClassName}>
+                  <SkeletonBlock className={column.cellSkeletonClassName} />
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 }
 
 function WorkspaceTablePageSkeleton({
   layout,
-  compact,
 }: {
   layout: "payment-requests" | "counterparty-directory";
-  compact?: boolean;
 }) {
   return (
     <DashboardWorkspaceOverviewPanel
@@ -100,13 +244,42 @@ function WorkspaceTablePageSkeleton({
       data-loading-layout={layout}
       aria-busy="true"
     >
-      <Card className="flex min-h-0 flex-1 flex-col">
+      <Card className="flex min-h-0 flex-1 flex-col bg-surface-raised">
         <WorkspaceCardHeaderSkeleton />
-        <CardContent className="min-h-0 flex-1">
-          <ResponsiveTableSkeleton compact={compact} />
+        <CardContent className="flex min-h-0 flex-1 flex-col">
+          <RouteTableSkeleton variant={layout} />
         </CardContent>
       </Card>
     </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+function CounterpartyPickerSkeleton() {
+  return (
+    <div className="space-y-3" data-loading-counterparty-picker>
+      <div
+        className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left"
+        data-loading-add-counterparty
+      >
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle">
+          <SkeletonBlock className="size-4 rounded-full" />
+        </div>
+        <div className="min-w-0 flex-1 space-y-2">
+          <SkeletonBlock className="h-4 w-40 max-w-full" />
+          <SkeletonBlock className="h-4 w-64 max-w-full" />
+        </div>
+      </div>
+      <div className="flex flex-col gap-2" data-loading-combobox>
+        <SkeletonBlock className="h-4 w-28" />
+        <div className="flex h-[var(--input-height-xl)] w-full items-center gap-2 rounded-[var(--input-radius-xl)] border border-border-default bg-transparent px-[var(--input-padding-x-xl)]">
+          <SkeletonBlock className="size-5 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1">
+            <SkeletonBlock className="h-4 w-40 max-w-full" />
+          </div>
+          <SkeletonBlock className="size-5 shrink-0 rounded-full" />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -147,21 +320,7 @@ function WizardPageSkeleton({
           <WizardProgressSkeleton steps={steps} />
           <SkeletonBlock className="h-9 w-80 max-w-[88%]" />
         </div>
-        <div className="space-y-3">
-          {WIZARD_OPTION_IDS.map((id) => (
-            <div
-              key={id}
-              className="flex min-h-16 items-center gap-4 rounded-2xl bg-white px-4 py-3 ring-1 ring-border-default"
-            >
-              <SkeletonBlock className="size-10 shrink-0 rounded-full" />
-              <div className="min-w-0 flex-1 space-y-2">
-                <SkeletonBlock className="h-4 w-44 max-w-full" />
-                <SkeletonBlock className="h-3 w-64 max-w-full" />
-              </div>
-              <SkeletonBlock className="size-5 shrink-0 rounded-full" />
-            </div>
-          ))}
-        </div>
+        <CounterpartyPickerSkeleton />
       </div>
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 pt-4 pb-1 sm:flex-row sm:justify-between">
         <SkeletonBlock className="h-14 w-full rounded-full sm:w-28" />
@@ -189,7 +348,7 @@ export function PaymentRequestsPageSkeleton() {
 }
 
 export function CounterpartyDirectorySkeleton() {
-  return <WorkspaceTablePageSkeleton layout="counterparty-directory" compact />;
+  return <WorkspaceTablePageSkeleton layout="counterparty-directory" />;
 }
 
 export function PaymentsPayPageSkeleton() {
@@ -253,13 +412,13 @@ export function CounterpartyDetailSkeleton() {
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="space-y-3">
           <SkeletonBlock className="h-8 w-28" />
-          <div className="rounded-2xl bg-white px-5 ring-1 ring-border-default">
+          <div className="rounded-2xl bg-surface-raised px-5 ring-1 ring-border-default">
             <DetailRowsSkeleton count={6} />
           </div>
         </section>
         <section className="space-y-3">
           <SkeletonBlock className="h-8 w-52" />
-          <div className="space-y-4 rounded-2xl bg-white p-5 ring-1 ring-border-default">
+          <div className="space-y-4 rounded-2xl bg-surface-raised p-5 ring-1 ring-border-default">
             {DETAIL_ROW_IDS.slice(0, 5).map((id) => (
               <div key={id} className="flex items-center gap-3">
                 <SkeletonBlock className="size-8 shrink-0 rounded-full" />
@@ -290,10 +449,10 @@ export function RecurringPaymentsPageSkeleton() {
       data-loading-layout="recurring-payments"
       aria-busy="true"
     >
-      <Card className="flex h-full min-h-0 min-w-0 flex-col">
+      <Card className="flex h-full min-h-0 min-w-0 flex-col bg-surface-raised">
         <WorkspaceCardHeaderSkeleton stackActionOnMobile />
-        <CardContent className="min-h-0 min-w-0 flex-1">
-          <ResponsiveTableSkeleton />
+        <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <RouteTableSkeleton variant="recurring-payments" />
         </CardContent>
       </Card>
     </div>
@@ -303,7 +462,7 @@ export function RecurringPaymentsPageSkeleton() {
 export function RecurringPaymentDetailSkeleton() {
   return (
     <div
-      className="h-full min-h-0 w-full overflow-hidden px-3 pt-6 pb-5 md:px-6 md:pb-6"
+      className="h-full min-h-0 w-full overflow-auto px-3 pt-6 pb-5 md:px-6 md:pb-6"
       data-loading-layout="recurring-payment-detail"
       aria-busy="true"
     >
@@ -319,7 +478,7 @@ export function RecurringPaymentDetailSkeleton() {
         <div className="rounded-xl px-4 ring-1 ring-border-default">
           <DetailRowsSkeleton />
         </div>
-        <Card className="gap-4">
+        <Card className="gap-4 bg-surface-raised">
           <WorkspaceCardHeaderSkeleton withAction={false} />
           <CardContent>
             <div className="space-y-3">

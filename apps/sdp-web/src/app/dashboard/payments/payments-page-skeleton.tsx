@@ -34,7 +34,7 @@ function PaymentsOverviewSkeleton() {
 
 function PaymentsTransactionsSkeleton() {
   return (
-    <section className="rounded-[var(--sdp-surface-radius)] bg-white py-6 shadow-sm ring-1 ring-border-default">
+    <section className="rounded-[var(--sdp-surface-radius)] bg-surface-raised py-6 shadow-sm ring-1 ring-border-default">
       <div className="space-y-2 px-6">
         <SkeletonBlock className="h-6 w-40" />
         <SkeletonBlock className="h-4 w-[46%]" />
