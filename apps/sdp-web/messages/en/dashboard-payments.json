@@ -670,7 +670,6 @@
       "copy": "Copy {label}"
     },
     "requestFailed": "Request failed.",
-    "recurringPaymentsUnavailable": "Recurring payments unavailable",
     "submitting": "Submitting...",
     "sendTransfer": "Send transfer",
     "sendBatch": "Send batch",

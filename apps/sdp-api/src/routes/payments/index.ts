@@ -1,7 +1,4 @@
-import type { Next } from "hono";
-import { type Context, Hono } from "hono";
-import { AppError } from "@/lib/errors";
-import { isRecurringPaymentsEnabled } from "@/lib/feature-flags";
+import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
@@ -57,22 +54,8 @@ import {
 
 const payments = new Hono<{ Bindings: Env }>();
 
-async function requireRecurringPaymentsFeature(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!isRecurringPaymentsEnabled(c.env)) {
-    throw new AppError("FORBIDDEN", "Recurring payments are not enabled for this environment");
-  }
-
-  await next();
-}
-
 payments.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 payments.use("*", projectContextMiddleware());
-payments.use("/subscription-plans", requireRecurringPaymentsFeature);
-payments.use("/subscription-plans/*", requireRecurringPaymentsFeature);
-payments.use("/subscriptions", requireRecurringPaymentsFeature);
-payments.use("/subscriptions/*", requireRecurringPaymentsFeature);
-payments.use("/recurring-payments", requireRecurringPaymentsFeature);
-payments.use("/recurring-payments/*", requireRecurringPaymentsFeature);
 
 payments.get(
   "/wallets/:walletId/balances",
