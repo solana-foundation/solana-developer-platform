@@ -562,8 +562,11 @@ test.describe
       await page.waitForTimeout(1_000);
       expect(activityRequestCount).toBe(requestCountBeforeReconnect);
 
-      failNextActivityRequest = true;
       await page.getByRole("heading", { name: "Recent activity" }).scrollIntoViewIfNeeded();
+      await expect(activityRegion).toHaveAttribute("data-wallet-activity-visible", "true");
+      await expect.poll(() => activityRequestCount).toBe(requestCountBeforeReconnect + 1);
+
+      failNextActivityRequest = true;
       const refreshButton = page.getByRole("button", { name: "Refresh" });
       await expect(refreshButton).toBeEnabled({ timeout: E2E_POLL_TIMEOUT_MS });
       await refreshButton.click();

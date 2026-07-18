@@ -1,6 +1,7 @@
 "use client";
 
 import { ExternalLink, RefreshCwIcon } from "lucide-react";
+import { useEffect, useRef } from "react";
 import useSWR from "swr";
 import {
   fetchWalletActivity,
@@ -94,6 +95,14 @@ export function WalletActivitySection({ walletId, isVisible = true }: WalletActi
     refreshWhenHidden: false,
     refreshInterval: isVisible ? 20_000 : 0,
   });
+  const previousIsVisible = useRef(isVisible);
+
+  useEffect(() => {
+    if (isVisible && !previousIsVisible.current) {
+      void mutate();
+    }
+    previousIsVisible.current = isVisible;
+  }, [isVisible, mutate]);
 
   if (!swrActivity && !requestError) {
     return (
