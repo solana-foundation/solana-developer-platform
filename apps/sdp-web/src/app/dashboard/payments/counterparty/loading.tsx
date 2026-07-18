@@ -1,5 +1,5 @@
-import { CounterpartyDirectorySkeleton } from "../payments-route-skeletons";
+import { CounterpartyMenuLoading } from "../counterparty-menu-loading";
 
 export default function CounterpartyLoading() {
-  return <CounterpartyDirectorySkeleton />;
+  return <CounterpartyMenuLoading overview="counterparty-directory" />;
 }

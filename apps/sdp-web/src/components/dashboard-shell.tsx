@@ -38,12 +38,11 @@ import {
   CompactOperationsCardSkeleton,
   SettingsPageSkeleton,
 } from "@/app/dashboard/operations-card-page-skeletons";
+import { CounterpartyMenuLoading } from "@/app/dashboard/payments/counterparty-menu-loading";
 import { PaymentsPageSkeleton } from "@/app/dashboard/payments/payments-page-skeleton";
 import {
   CounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton,
-  CounterpartyDirectorySkeleton,
-  PaymentRequestsPageSkeleton,
   PaymentsDepositPageSkeleton,
   PaymentsPayPageSkeleton,
   RecurringPaymentCreateSkeleton,
@@ -630,6 +629,14 @@ function AllowlistLoading() {
   return <CompactOperationsCardSkeleton route="allowlist" />;
 }
 
+function CounterpartyDirectoryLoading() {
+  return <CounterpartyMenuLoading overview="counterparty-directory" />;
+}
+
+function PaymentRequestsLoading() {
+  return <CounterpartyMenuLoading overview="payment-requests" />;
+}
+
 function resolvePageLoadingComponent(route: DashboardLoadingRoute): React.ComponentType {
   switch (route) {
     case "home":
@@ -661,9 +668,9 @@ function resolvePageLoadingComponent(route: DashboardLoadingRoute): React.Compon
     case "payments-deposit":
       return PaymentsDepositPageSkeleton;
     case "payment-requests":
-      return PaymentRequestsPageSkeleton;
+      return PaymentRequestsLoading;
     case "counterparty-directory":
-      return CounterpartyDirectorySkeleton;
+      return CounterpartyDirectoryLoading;
     case "counterparty-create":
       return CounterpartyCreateSkeleton;
     case "counterparty-detail":

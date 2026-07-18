@@ -5,7 +5,6 @@ import { MoreHorizontalIcon, PlusIcon, Trash2Icon, UserIcon, UsersIcon } from "l
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
@@ -37,13 +36,14 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
+import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
 import type { CounterpartyPlaygroundView } from "./counterparty-playground-config";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 import { useCounterpartyDirectory } from "./use-counterparty-directory";
 
 const CounterpartyPlayground = dynamic(
   () => import("./counterparty-playground").then((module) => module.CounterpartyPlayground),
-  { loading: () => <ApiPlaygroundShellSkeleton /> }
+  { loading: () => <CounterpartyPlaygroundLoading /> }
 );
 
 interface CounterpartyApiKeyOption {
