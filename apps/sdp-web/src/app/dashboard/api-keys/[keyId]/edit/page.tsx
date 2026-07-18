@@ -9,7 +9,7 @@ import { ApiKeyAuthoringWorkspace } from "../../api-key-authoring-workspace";
 export const dynamic = "force-dynamic";
 
 export default async function EditApiKeyPage({ params }: { params: Promise<{ keyId: string }> }) {
-  const { userId, orgId, orgRole } = await auth();
+  const [{ userId, orgId, orgRole }, { keyId }] = await Promise.all([auth(), params]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -20,7 +20,6 @@ export default async function EditApiKeyPage({ params }: { params: Promise<{ key
     redirect("/dashboard/api-keys");
   }
 
-  const { keyId } = await params;
   const client = await createSdpApiClient();
   const [apiKey, wallets] = await Promise.all([
     fetchApiKeyForAuthoring(client, decodeURIComponent(keyId)),

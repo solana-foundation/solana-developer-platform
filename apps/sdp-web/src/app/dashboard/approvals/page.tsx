@@ -14,8 +14,11 @@ export const dynamic = "force-dynamic";
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 export default async function ApprovalsPage({ searchParams }: { searchParams: SearchParams }) {
-  const t = await getTranslations();
-  const { userId, orgId, orgRole } = await auth();
+  const [t, { userId, orgId, orgRole }, resolvedSearchParams] = await Promise.all([
+    getTranslations(),
+    auth(),
+    searchParams,
+  ]);
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
@@ -33,7 +36,7 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Se
     );
   }
 
-  const rawTab = (await searchParams).tab;
+  const rawTab = resolvedSearchParams.tab;
   const tabValue = Array.isArray(rawTab) ? rawTab[0] : rawTab;
   const initialTab: ApprovalInboxTab = tabValue === "history" ? "history" : "pending";
   let requests: WalletApprovalRequestSummary[] = [];

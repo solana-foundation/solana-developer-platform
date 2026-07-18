@@ -10,6 +10,7 @@ import {
   fetchPolicyAuditContext,
   fetchPolicyAuditList,
   fetchPolicyEvaluationNeighbors,
+  fetchPolicyRevisionContext,
   parsePolicyAuditFilters,
 } from "./policy-audit.data";
 import {
@@ -292,6 +293,37 @@ describe("policy audit data", () => {
       }
     );
     expect(result).toMatchObject({ evaluations: [], total: 0, page: 1 });
+  });
+
+  it("loads revision pages without the unused API-key directory request", async () => {
+    const request = vi.fn(async (path: string) => {
+      if (path === "/v1/wallets/wallet-1?includeBalance=false") {
+        return Response.json({
+          data: {
+            wallet: {
+              walletId: "wallet-1",
+              publicKey: "wallet-address",
+              label: "Treasury",
+            },
+          },
+        });
+      }
+      if (path === "/v1/payments/wallets/wallet-1/policies/revisions") {
+        return Response.json({ data: { profile: null, revisions: [] } });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+
+    const context = await fetchPolicyRevisionContext(request, "wallet-1");
+
+    expect(context).toMatchObject({
+      wallet: { walletId: "wallet-1" },
+      revisionHistory: { profile: null, revisions: [] },
+    });
+    expect(request.mock.calls.map(([path]) => path)).toEqual([
+      "/v1/wallets/wallet-1?includeBalance=false",
+      "/v1/payments/wallets/wallet-1/policies/revisions",
+    ]);
   });
 });
 

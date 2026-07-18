@@ -206,7 +206,14 @@ export async function fetchDashboardPaymentTransfers(
   pageSize = 20
 ): Promise<FetchResult<PaymentTransferSummary[]>> {
   const walletsResult = await fetchPaymentsWallets(request, { view: "summary" });
+  return fetchDashboardPaymentTransfersForWallets(request, walletsResult, pageSize);
+}
 
+export async function fetchDashboardPaymentTransfersForWallets(
+  request: SdpApiClient["request"],
+  walletsResult: FetchResult<PaymentsDashboardWallet[]>,
+  pageSize = 20
+): Promise<FetchResult<PaymentTransferSummary[]>> {
   if (!walletsResult.ok || (walletsResult.data?.length ?? 0) === 0) {
     return fetchPaymentTransfers(request, pageSize);
   }
