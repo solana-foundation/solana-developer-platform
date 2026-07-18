@@ -21,7 +21,6 @@ test("renders recurring collection settings into the Wrangler worker vars", () =
     'id = "your_dev_sessions_kv_id"',
     "",
     "[env.dev.vars]",
-    'PAYMENTS_RECURRING_ENABLED = "false"',
     "",
   ].join("\n");
 
@@ -38,7 +37,6 @@ test("renders recurring collection settings into the Wrangler worker vars", () =
           CLOUDFLARE_KV_SDP_RATE_LIMITS_ID: "kv_rate_limits_real",
           CLOUDFLARE_KV_SDP_CACHE_ID: "kv_cache_real",
           CLOUDFLARE_KV_SDP_SESSIONS_ID: "kv_sessions_real",
-          PAYMENTS_RECURRING_ENABLED: "true",
           PAYMENTS_RECURRING_COLLECTION_ENABLED: "true",
           PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE: "7",
           PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES: "45",
@@ -50,7 +48,6 @@ test("renders recurring collection settings into the Wrangler worker vars", () =
 
     assert.equal(result.status, 0, result.stderr);
     const rendered = fs.readFileSync(outPath, "utf8");
-    assert.match(rendered, /^PAYMENTS_RECURRING_ENABLED = "true"$/m);
     assert.match(rendered, /^PAYMENTS_RECURRING_COLLECTION_ENABLED = "true"$/m);
     assert.match(rendered, /^PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE = "7"$/m);
     assert.match(rendered, /^PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES = "45"$/m);
@@ -77,7 +74,6 @@ const productionEnv = {
   SOLANA_RPC_VALIDATIONCLOUD_URL: "https://validation-cloud.example",
   FEE_PAYMENT_PROVIDER: "kora",
   KORA_RPC_URL: "https://kora.example",
-  PAYMENTS_RECURRING_ENABLED: "true",
   PAYMENTS_RECURRING_COLLECTION_ENABLED: "true",
   PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE: "25",
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES: "30",
@@ -105,7 +101,6 @@ test("production render keeps deployment config as Wrangler vars", () => {
       /^SOLANA_RPC_VALIDATIONCLOUD_URL = "https:\/\/validation-cloud\.example"$/m
     );
     assert.match(productionVars, /^KORA_RPC_URL = "https:\/\/kora\.example"$/m);
-    assert.match(productionVars, /^PAYMENTS_RECURRING_ENABLED = "true"$/m);
     assert.match(productionVars, /^PAYMENTS_RECURRING_COLLECTION_ENABLED = "true"$/m);
     assert.match(productionVars, /^PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE = "25"$/m);
     assert.match(productionVars, /^PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES = "30"$/m);

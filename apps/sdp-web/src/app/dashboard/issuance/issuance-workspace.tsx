@@ -6,7 +6,6 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +14,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
+import { IssuancePlaygroundLoading } from "./issuance-playground-loading";
 import { getTemplateCatalogEntry, type IssuanceTemplateId } from "./template-catalog";
 
 // Draft creation is a full-page wizard (V2 issuance direction) gated behind the
@@ -25,7 +25,7 @@ const CREATE_DRAFT_PATH = "/dashboard/issuance/create";
 const IssuancePlayground = dynamic(
   () => import("./issuance-playground").then((module) => module.IssuancePlayground),
   {
-    loading: () => <ApiPlaygroundShellSkeleton />,
+    loading: () => <IssuancePlaygroundLoading />,
   }
 );
 

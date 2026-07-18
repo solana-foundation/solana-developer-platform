@@ -4,12 +4,12 @@ import { clerk, clerkSetup } from "@clerk/testing/playwright";
 import { expect, test as setup } from "@playwright/test";
 import { getE2EEnv } from "../env";
 import { authStatePath } from "../support/auth-state";
-import { ensureClerkAdminUser } from "../support/clerk-admin";
+import { resolveClerkTestIdentity } from "../support/clerk-admin";
 
 setup("authenticate admin test user and save auth state", async ({ page }) => {
   setup.setTimeout(360_000);
   const env = getE2EEnv();
-  const identity = await ensureClerkAdminUser();
+  const identity = await resolveClerkTestIdentity();
 
   await clerkSetup({
     publishableKey: env.clerkPublishableKey,
@@ -37,7 +37,32 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
     { organizationId: identity.organizationId }
   );
 
-  await page.goto("/dashboard/issuance");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        return (
+          window as unknown as {
+            Clerk?: { organization?: { id?: string } };
+          }
+        ).Clerk?.organization?.id;
+      })
+    )
+    .toBe(identity.organizationId);
+
+  if (env.useExternalApi) {
+    await page.context().addCookies([
+      {
+        name: "sdp_selected_project_id",
+        value: env.expectedProjectId,
+        url: env.baseURL,
+        httpOnly: true,
+        sameSite: "Lax",
+        secure: false,
+      },
+    ]);
+  }
+
+  await page.goto(env.useExternalApi ? "/dashboard" : "/dashboard/issuance");
   await expect(page).toHaveURL(/\/dashboard/);
   fs.mkdirSync(path.dirname(authStatePath), { recursive: true });
   await page.context().storageState({ path: authStatePath });

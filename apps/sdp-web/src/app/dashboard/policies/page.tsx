@@ -54,11 +54,14 @@ export default async function PoliciesPage({
 }: {
   searchParams?: Promise<RawSearchParams>;
 }) {
-  const { userId, orgId } = await auth();
+  const [{ userId, orgId }, resolvedSearchParams] = await Promise.all([
+    auth(),
+    searchParams ?? Promise.resolve({}),
+  ]);
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
-  const state = parseState((await searchParams) ?? {});
+  const state = parseState(resolvedSearchParams);
   const query = new URLSearchParams({
     target: inventoryTarget(state.tab),
     page: String(state.page),

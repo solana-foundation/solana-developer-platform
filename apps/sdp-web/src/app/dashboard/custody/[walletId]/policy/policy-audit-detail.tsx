@@ -1,5 +1,5 @@
 import type {
-  CustodyWalletByIdResponse,
+  CustodyWalletMetadataResponse,
   PolicyDecision,
   WalletControlProfileRevisionHistory,
   WalletPolicyEvaluationDetail,
@@ -58,7 +58,7 @@ export function PolicyAuditDetail({
   locale,
   t,
 }: {
-  wallet: CustodyWalletByIdResponse["wallet"];
+  wallet: CustodyWalletMetadataResponse["wallet"];
   evaluation: WalletPolicyEvaluationDetail;
   revisionHistory: WalletControlProfileRevisionHistory;
   apiKeyNames: Record<string, string>;
@@ -146,7 +146,15 @@ export function PolicyAuditDetail({
                 )
               }
             >
-              {actor.type === "api_key" && !actor.name ? shortIdentifier(actor.value) : actor.value}
+              <span
+                className="min-w-0 flex-1 truncate"
+                data-policy-audit-detail-actor
+                title={actor.value}
+              >
+                {actor.type === "api_key" && !actor.name
+                  ? shortIdentifier(actor.value)
+                  : actor.value}
+              </span>
             </MetadataLine>
           ) : null}
         </div>
@@ -796,7 +804,7 @@ function EvaluationContextRail({
   policyHref,
   t,
 }: {
-  wallet: CustodyWalletByIdResponse["wallet"];
+  wallet: CustodyWalletMetadataResponse["wallet"];
   evaluation: WalletPolicyEvaluationDetail;
   history: WalletControlProfileRevisionHistory;
   apiKeyNames: Record<string, string>;
@@ -834,7 +842,13 @@ function EvaluationContextRail({
             icon={<UserRound className="size-4" />}
             label={t("DashboardCustody.policyAuditActor")}
           >
-            {actor.value}
+            <span
+              className="block truncate"
+              data-policy-audit-detail-rail-actor
+              title={actor.value}
+            >
+              {actor.value}
+            </span>
           </ContextRow>
         ) : null}
         <ContextRow
@@ -935,8 +949,8 @@ function RailAction({ href, label }: { href: string; label: string }) {
 
 function MetadataLine({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-2">
-      {icon}
+    <span className="inline-flex min-w-0 max-w-full items-center gap-2">
+      <span className="shrink-0">{icon}</span>
       {children}
     </span>
   );
@@ -979,7 +993,7 @@ function NeighborButton({
   );
 }
 
-function walletLabel(wallet: CustodyWalletByIdResponse["wallet"]): string {
+function walletLabel(wallet: CustodyWalletMetadataResponse["wallet"]): string {
   return wallet.label?.trim() || wallet.walletId;
 }
 
