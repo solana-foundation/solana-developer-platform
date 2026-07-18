@@ -771,7 +771,7 @@ function isItemActive(pathname: string, href: string): boolean {
 }
 
 const navItemBase =
-  "relative flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors";
+  "relative flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors";
 const navItemActive = "border border-border-subtle bg-white text-primary";
 const navItemInactive = "text-secondary hover:bg-fill-strong hover:text-primary";
 
@@ -841,7 +841,7 @@ function SidebarGroup({
                     navItemBase,
                     active ? navItemActive : navItemInactive,
                     isCollapsed && "justify-center",
-                    isPaymentsGroup && !isCollapsed && "flex-1 pr-11"
+                    isPaymentsGroup && !isCollapsed && "pr-11"
                   )}
                 >
                   <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
