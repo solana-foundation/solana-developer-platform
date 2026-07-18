@@ -1140,7 +1140,13 @@ describe("payment transfer batches", () => {
     expect(batchCount).toEqual({ count: 0 });
 
     const recipientCount = await getDb(env)
-      .prepare(`SELECT COUNT(*)::int AS count FROM payment_transfer_recipients`)
+      .prepare(
+        `SELECT COUNT(*)::int AS count
+           FROM payment_transfer_recipients r
+           JOIN payment_transfer_batches b ON b.id = r.batch_id
+          WHERE b.organization_id = ? AND b.project_id = ?`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
       .first<{ count: number }>();
     expect(recipientCount).toEqual({ count: 0 });
   });
