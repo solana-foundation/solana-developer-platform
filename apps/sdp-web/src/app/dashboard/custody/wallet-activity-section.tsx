@@ -1,12 +1,17 @@
 "use client";
 
 import { ExternalLink, RefreshCwIcon } from "lucide-react";
+import { useEffect, useRef } from "react";
 import useSWR from "swr";
 import {
   fetchWalletActivity,
   type WalletActivityPayload,
   type WalletActivityRow,
 } from "@/app/dashboard/custody/wallet-activity.data";
+import {
+  WALLET_ACTIVITY_HEADING_ID,
+  WalletActivitySkeleton,
+} from "@/app/dashboard/custody/wallet-activity-skeleton";
 import { getDevnetExplorerUrl } from "@/app/dashboard/payments/payments-workspace.data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,9 +28,15 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatDisplayAmount } from "../payments/payments-overview.utils";
 
 interface WalletActivitySectionProps {
+  isVisible?: boolean;
   walletId: string;
-  initialActivity: WalletActivityPayload;
 }
+
+const EMPTY_WALLET_ACTIVITY: WalletActivityPayload = {
+  activityRows: [],
+  activityError: null,
+  activityNotice: null,
+};
 
 function formatTimestamp(value: string | undefined, locale: string): string {
   if (!value) {
@@ -70,24 +81,40 @@ function TruncatedText({ value, className }: { value: string; className?: string
   );
 }
 
-export function WalletActivitySection({ walletId, initialActivity }: WalletActivitySectionProps) {
+export function WalletActivitySection({ walletId, isVisible = true }: WalletActivitySectionProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const hasInitialActivity = initialActivity.activityError === null;
   const {
     data: swrActivity,
     error: requestError,
     isValidating,
     mutate,
   } = useSWR(`wallet-activity-${walletId}`, () => fetchWalletActivity(walletId), {
-    fallbackData: initialActivity,
-    revalidateOnMount: hasInitialActivity ? false : undefined,
-    revalidateIfStale: hasInitialActivity ? false : undefined,
-    revalidateOnFocus: true,
+    revalidateOnFocus: isVisible,
+    revalidateOnReconnect: isVisible,
     refreshWhenHidden: false,
-    refreshInterval: 20_000,
+    refreshInterval: isVisible ? 20_000 : 0,
   });
-  const liveActivity = swrActivity ?? initialActivity;
+  const previousIsVisible = useRef(isVisible);
+
+  useEffect(() => {
+    if (isVisible && !previousIsVisible.current) {
+      void mutate();
+    }
+    previousIsVisible.current = isVisible;
+  }, [isVisible, mutate]);
+
+  if (!swrActivity && !requestError) {
+    return (
+      <WalletActivitySkeleton
+        title={t("DashboardCustody.recentActivity")}
+        description={t("DashboardCustody.recentActivityDescription")}
+        headingId={WALLET_ACTIVITY_HEADING_ID}
+      />
+    );
+  }
+
+  const liveActivity = swrActivity ?? EMPTY_WALLET_ACTIVITY;
   const liveRows = Array.isArray(liveActivity.activityRows) ? liveActivity.activityRows : [];
   const requestErrorMessage = requestError
     ? requestError instanceof Error
@@ -100,10 +127,15 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
     requestErrorMessage && liveRows.length > 0 ? requestErrorMessage : liveActivity.activityNotice;
 
   return (
-    <Card className="min-w-0 overflow-hidden">
+    <Card
+      aria-labelledby={WALLET_ACTIVITY_HEADING_ID}
+      className="min-h-[22rem] min-w-0 overflow-hidden"
+    >
       <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
-          <CardTitle>{t("DashboardCustody.recentActivity")}</CardTitle>
+          <CardTitle>
+            <h3 id={WALLET_ACTIVITY_HEADING_ID}>{t("DashboardCustody.recentActivity")}</h3>
+          </CardTitle>
           <CardDescription>{t("DashboardCustody.recentActivityDescription")}</CardDescription>
         </div>
         <Button

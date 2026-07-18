@@ -1,13 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
 import type {
-  CustodyWalletByIdResponse,
+  CustodyWalletMetadataResponse,
   CustodyWalletTokenBalance,
   PaymentWalletPolicy,
 } from "@sdp/types";
 import { SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import type { ReactNode } from "react";
+import { type ReactNode, Suspense } from "react";
 import {
   formatCustodyProviderName,
   getCustodyProviderCategory,
@@ -15,20 +15,22 @@ import {
   isKnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { WalletActionsMenu } from "@/app/dashboard/custody/wallet-actions-menu";
-import {
-  loadWalletActivity,
-  type WalletActivityPayload,
-} from "@/app/dashboard/custody/wallet-activity.data";
-import { WalletActivitySection } from "@/app/dashboard/custody/wallet-activity-section";
+import { WalletActivityViewport } from "@/app/dashboard/custody/wallet-activity-viewport";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { WalletCategoryBadge } from "@/app/dashboard/custody/wallet-category-badge";
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
+import {
+  WalletBalanceSummarySkeleton,
+  WalletBalancesSkeleton,
+  WalletControlsSkeleton,
+} from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { formatDisplayLabel } from "@/lib/utils";
 import {
   formatCurrencyAmount,
@@ -63,8 +65,8 @@ interface OwnedTokenRoute {
 async function getWalletDetail(
   request: SdpApiClient["request"],
   walletId: string
-): Promise<CustodyWalletByIdResponse["wallet"]> {
-  const response = await request(`/v1/wallets/${encodeURIComponent(walletId)}`);
+): Promise<CustodyWalletMetadataResponse["wallet"]> {
+  const response = await request(getWalletMetadataPath(walletId));
   if (response.status === 404) {
     notFound();
   }
@@ -73,7 +75,7 @@ async function getWalletDetail(
     throw new Error(`SDP API request failed (${response.status}): ${body}`);
   }
 
-  const json = (await response.json()) as { data?: CustodyWalletByIdResponse };
+  const json = (await response.json()) as { data?: CustodyWalletMetadataResponse };
   const wallet = json.data?.wallet;
   if (!wallet) {
     notFound();
@@ -176,28 +178,16 @@ async function getOwnedTokenRoutes(
   }
 }
 
-async function getWalletActivity(
-  request: SdpApiClient["request"],
-  walletId: string,
-  t: Awaited<ReturnType<typeof getTranslations>>
-): Promise<WalletActivityPayload> {
-  const result = await loadWalletActivity(request, walletId, t);
-  return (
-    result.data ?? {
-      activityRows: [],
-      activityError: result.error ?? t("DashboardCustody.walletActivityUnavailable"),
-      activityNotice: null,
-    }
-  );
-}
-
 export default async function WalletDetailPage({
   params,
 }: {
   params: Promise<{ walletId: string }>;
 }) {
-  const t = await getTranslations();
-  const { userId, orgId } = await auth();
+  const [t, { userId, orgId }, { walletId }] = await Promise.all([
+    getTranslations(),
+    auth(),
+    params,
+  ]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -205,25 +195,21 @@ export default async function WalletDetailPage({
     redirect("/dashboard");
   }
 
-  const { walletId } = await params;
   const resolvedWalletId = decodeURIComponent(walletId);
   const apiClient = await createSdpApiClient();
-  const [wallet, trackedBalancesResult, walletPolicyResult, ownedTokensByMint, walletActivity] =
-    await Promise.all([
-      getWalletDetail(apiClient.request, resolvedWalletId),
-      getWalletTrackedBalances(
-        apiClient.request,
-        resolvedWalletId,
-        t("DashboardCustody.trackedBalancesUnavailable")
-      ),
-      getWalletPolicy(
-        apiClient.request,
-        resolvedWalletId,
-        t("DashboardCustody.walletControlsUnavailable")
-      ),
-      getOwnedTokenRoutes(apiClient.request),
-      getWalletActivity(apiClient.request, resolvedWalletId, t),
-    ]);
+  const walletPromise = getWalletDetail(apiClient.request, resolvedWalletId);
+  const trackedBalancesPromise = getWalletTrackedBalances(
+    apiClient.request,
+    resolvedWalletId,
+    t("DashboardCustody.trackedBalancesUnavailable")
+  );
+  const walletPolicyPromise = getWalletPolicy(
+    apiClient.request,
+    resolvedWalletId,
+    t("DashboardCustody.walletControlsUnavailable")
+  );
+  const ownedTokensByMintPromise = getOwnedTokenRoutes(apiClient.request);
+  const wallet = await walletPromise;
 
   const provider =
     wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
@@ -231,10 +217,10 @@ export default async function WalletDetailPage({
   const supportsSignerCheck = provider
     ? getCustodyProviderEntry(provider).supportsSigning
     : !wallet.provider;
-  const balances =
-    trackedBalancesResult.balances.length > 0 ? trackedBalancesResult.balances : [wallet.balance];
-  const totalBalance = resolveTotalBalance(balances);
   const purposeLabel = formatPurpose(wallet.purpose, t);
+  const providerLabel = provider
+    ? formatCustodyProviderName(provider)
+    : t("DashboardCustody.unknown");
 
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
@@ -304,77 +290,138 @@ export default async function WalletDetailPage({
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
-          <div className="space-y-6 p-6">
-            <div>
-              <p className="text-xs font-medium tracking-[0.14em] text-muted uppercase">
-                {t("DashboardCustody.totalBalance")}
-              </p>
-              <p className="mt-3 text-[38px] leading-none font-medium tracking-[-0.05em] text-primary">
-                {formatCurrencyAmount(totalBalance)}
-              </p>
-            </div>
-
-            <div className="overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
-              <WalletInfoRow
-                label={t("DashboardCustody.address")}
-                value={truncateMiddle(wallet.publicKey)}
-                monospace
-              />
-              <WalletInfoRow
-                label={t("DashboardCustody.provider")}
-                value={
-                  provider ? formatCustodyProviderName(provider) : t("DashboardCustody.unknown")
-                }
-              />
-              {purposeLabel ? (
-                <WalletInfoRow label={t("DashboardCustody.purpose")} value={purposeLabel} />
-              ) : null}
-            </div>
-          </div>
-        </section>
+        <Suspense fallback={<WalletBalanceSummarySkeleton />}>
+          <WalletBalanceSummary
+            balancesPromise={trackedBalancesPromise}
+            providerLabel={providerLabel}
+            publicKey={wallet.publicKey}
+            purposeLabel={purposeLabel}
+            t={t}
+          />
+        </Suspense>
       </div>
 
-      <WalletControlsPanel
-        walletId={resolvedWalletId}
-        policy={walletPolicyResult.policy}
-        policyError={walletPolicyResult.error}
-      />
+      <Suspense fallback={<WalletControlsSkeleton />}>
+        <WalletControlsPanel
+          walletId={resolvedWalletId}
+          policyPromise={walletPolicyPromise}
+          t={t}
+        />
+      </Suspense>
 
-      <section className="space-y-3">
-        <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
-          {t("DashboardCustody.balances")}
-        </h3>
-        {trackedBalancesResult.error ? (
-          <p className="text-sm text-tertiary">{trackedBalancesResult.error}</p>
-        ) : null}
+      <Suspense fallback={<WalletBalancesSkeleton />}>
+        <WalletBalancesSection
+          balancesPromise={trackedBalancesPromise}
+          ownedTokensByMintPromise={ownedTokensByMintPromise}
+          t={t}
+        />
+      </Suspense>
 
-        {balances.length > 0 ? (
-          <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
-            {balances.map((balance) => {
-              const ownedToken =
-                balance.token === "SOL" ? null : (ownedTokensByMint.get(balance.mint) ?? null);
-
-              return (
-                <WalletBalanceRow
-                  key={`${balance.mint}-${balance.token}`}
-                  label={ownedToken?.name ?? balance.token}
-                  value={formatDisplayAmount(balance.uiAmount, balance.token)}
-                  mint={balance.mint}
-                  href={ownedToken ? `/dashboard/issuance/${ownedToken.id}` : null}
-                />
-              );
-            })}
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-border-default bg-white px-4 py-4 text-sm text-secondary">
-            {t("DashboardCustody.noTrackedBalances")}
-          </div>
-        )}
-      </section>
-
-      <WalletActivitySection walletId={resolvedWalletId} initialActivity={walletActivity} />
+      <WalletActivityViewport walletId={resolvedWalletId} />
     </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+async function WalletBalanceSummary({
+  balancesPromise,
+  providerLabel,
+  publicKey,
+  purposeLabel,
+  t,
+}: {
+  balancesPromise: Promise<WalletTrackedBalancesResult>;
+  providerLabel: string;
+  publicKey: string;
+  purposeLabel: string | null;
+  t: Awaited<ReturnType<typeof getTranslations>>;
+}) {
+  const balancesResult = await balancesPromise;
+  const totalBalance = balancesResult.error ? null : resolveTotalBalance(balancesResult.balances);
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
+      <div className="space-y-6 p-6">
+        <div>
+          <p className="text-xs font-medium tracking-[0.14em] text-muted uppercase">
+            {t("DashboardCustody.totalBalance")}
+          </p>
+          {balancesResult.error ? (
+            <div className="mt-3 space-y-2">
+              <p className="text-[38px] leading-none font-medium tracking-[-0.05em] text-primary">
+                —
+              </p>
+              <p className="text-sm text-tertiary">{balancesResult.error}</p>
+            </div>
+          ) : (
+            <p className="mt-3 text-[38px] leading-none font-medium tracking-[-0.05em] text-primary">
+              {formatCurrencyAmount(totalBalance)}
+            </p>
+          )}
+        </div>
+
+        <div className="overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
+          <WalletInfoRow
+            label={t("DashboardCustody.address")}
+            value={truncateMiddle(publicKey)}
+            monospace
+          />
+          <WalletInfoRow label={t("DashboardCustody.provider")} value={providerLabel} />
+          {purposeLabel ? (
+            <WalletInfoRow label={t("DashboardCustody.purpose")} value={purposeLabel} />
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+async function WalletBalancesSection({
+  balancesPromise,
+  ownedTokensByMintPromise,
+  t,
+}: {
+  balancesPromise: Promise<WalletTrackedBalancesResult>;
+  ownedTokensByMintPromise: Promise<Map<string, { id: string; name: string | null }>>;
+  t: Awaited<ReturnType<typeof getTranslations>>;
+}) {
+  const [trackedBalancesResult, ownedTokensByMint] = await Promise.all([
+    balancesPromise,
+    ownedTokensByMintPromise,
+  ]);
+  const balances = trackedBalancesResult.balances;
+
+  return (
+    <section className="space-y-3">
+      <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
+        {t("DashboardCustody.balances")}
+      </h3>
+      {trackedBalancesResult.error ? (
+        <p className="text-sm text-tertiary">{trackedBalancesResult.error}</p>
+      ) : null}
+
+      {balances.length > 0 ? (
+        <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
+          {balances.map((balance) => {
+            const ownedToken =
+              balance.token === "SOL" ? null : (ownedTokensByMint.get(balance.mint) ?? null);
+
+            return (
+              <WalletBalanceRow
+                key={`${balance.mint}-${balance.token}`}
+                label={ownedToken?.name ?? balance.token}
+                value={formatDisplayAmount(balance.uiAmount, balance.token)}
+                mint={balance.mint}
+                href={ownedToken ? `/dashboard/issuance/${ownedToken.id}` : null}
+              />
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-border-default bg-white px-4 py-4 text-sm text-secondary">
+          {t("DashboardCustody.noTrackedBalances")}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -389,14 +436,14 @@ function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolea
 
 async function WalletControlsPanel({
   walletId,
-  policy,
-  policyError,
+  policyPromise,
+  t,
 }: {
   walletId: string;
-  policy: PaymentWalletPolicy | null;
-  policyError: string | null;
+  policyPromise: Promise<WalletPolicyResult>;
+  t: Awaited<ReturnType<typeof getTranslations>>;
 }) {
-  const t = await getTranslations();
+  const { policy, error: policyError } = await policyPromise;
   const hasRestrictions = walletPolicyHasRestrictions(policy);
   const destinationCount = policy?.destinationAllowlist.length ?? 0;
   const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
