@@ -140,7 +140,6 @@ let originalBvnkWalletId: string | undefined;
 let originalBvnkApiBaseUrl: string | undefined;
 let originalMagicBlockApiBaseUrl: string | undefined;
 let originalMagicBlockAuthToken: string | undefined;
-let originalRecurringPaymentsEnabled: string | undefined;
 
 function assertMoonPaySignature(url: URL): void {
   const signature = url.searchParams.get("signature");
@@ -698,7 +697,6 @@ describe("Payments routes", () => {
     originalBvnkApiBaseUrl = env.BVNK_API_BASE_URL;
     originalMagicBlockApiBaseUrl = env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL;
     originalMagicBlockAuthToken = env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN;
-    originalRecurringPaymentsEnabled = env.PAYMENTS_RECURRING_ENABLED;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
@@ -719,7 +717,6 @@ describe("Payments routes", () => {
     env.BVNK_API_BASE_URL = TEST_BVNK_API_BASE_URL;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = undefined;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = undefined;
-    env.PAYMENTS_RECURRING_ENABLED = undefined;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -745,38 +742,12 @@ describe("Payments routes", () => {
     env.BVNK_API_BASE_URL = originalBvnkApiBaseUrl;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = originalMagicBlockApiBaseUrl;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = originalMagicBlockAuthToken;
-    env.PAYMENTS_RECURRING_ENABLED = originalRecurringPaymentsEnabled;
 
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
   });
 
-  it("gates recurring subscription endpoints behind PAYMENTS_RECURRING_ENABLED", async () => {
-    const res = await app.request(
-      "/v1/payments/subscription-plans",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ownerWalletId: TEST_WALLET_ID,
-          token: DEVNET_USDC_MINT,
-          amount: "10.00",
-          periodHours: 24,
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("Recurring payments are not enabled");
-  });
-
   it("creates, lists, and gets recurring payment records through SDP API routes", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -854,7 +825,6 @@ describe("Payments routes", () => {
   });
 
   it("activates recurring payments through SDP API routes", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1027,7 +997,6 @@ describe("Payments routes", () => {
   });
 
   it("updates pending recurring payment terms directly and journals an audit event", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -1114,7 +1083,6 @@ describe("Payments routes", () => {
   });
 
   it("updates active recurring payment metadata in place on the existing on-chain plan", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1214,7 +1182,6 @@ describe("Payments routes", () => {
   });
 
   it("replaces active recurring payment records for term changes and cancels the old subscription", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1343,7 +1310,6 @@ describe("Payments routes", () => {
   });
 
   it("rejects active replacement next due dates before replacement transactions are submitted", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1417,7 +1383,6 @@ describe("Payments routes", () => {
   });
 
   it("rejects fresh in-flight recurring payment updates", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -1444,7 +1409,6 @@ describe("Payments routes", () => {
   });
 
   it("rejects stale recurring payment update recovery with a different payload", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1529,7 +1493,6 @@ describe("Payments routes", () => {
   });
 
   it("clamps stale metadata update retries after the subscription period advances", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1650,7 +1613,6 @@ describe("Payments routes", () => {
   });
 
   it("creates the source token account during recurring payment activation when it is missing", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1706,7 +1668,6 @@ describe("Payments routes", () => {
   });
 
   it("cancels active recurring payments through SDP API routes", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1789,7 +1750,6 @@ describe("Payments routes", () => {
   });
 
   it("resumes canceled recurring payments through SDP API routes", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1876,7 +1836,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers submitted recurring payment cancel attempts", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1972,7 +1931,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers submitted recurring payment resume attempts", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2078,7 +2036,6 @@ describe("Payments routes", () => {
   });
 
   it("blocks recurring payment cancellation while a fresh collection is processing", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2162,7 +2119,6 @@ describe("Payments routes", () => {
   });
 
   it("resets recurring payment cancellation claims when subscription validation fails", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2224,7 +2180,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers confirmed recurring payment collections before cancellation", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2370,7 +2325,6 @@ describe("Payments routes", () => {
   });
 
   it("collects due recurring payments through SDP API routes", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2493,7 +2447,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers submitted recurring payment collection attempts", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2660,7 +2613,6 @@ describe("Payments routes", () => {
   });
 
   it("finalizes recovered recurring payment collections after cancellation", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2828,7 +2780,6 @@ describe("Payments routes", () => {
   });
 
   it("retries recurring payment collection after pre-submission crash", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3002,7 +2953,6 @@ describe("Payments routes", () => {
   });
 
   it("does not fail fresh transferless recurring payment attempts during recovery", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3106,7 +3056,6 @@ describe("Payments routes", () => {
   });
 
   it("does not fail fresh unsigned recurring payment transfers during recovery", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3260,7 +3209,6 @@ describe("Payments routes", () => {
   });
 
   it("journals failed recovered recurring payment collection attempts and allows retry", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3440,7 +3388,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers confirmed collection transfers without reopening the due period", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3605,7 +3552,6 @@ describe("Payments routes", () => {
   });
 
   it("rejects early recurring payment collection", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3654,7 +3600,6 @@ describe("Payments routes", () => {
   });
 
   it("journals failed pre-submission recurring payment collection attempts", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3736,7 +3681,6 @@ describe("Payments routes", () => {
   });
 
   it("journals failed activation attempts and allows activation retry", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock
@@ -3838,7 +3782,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers stale activating recurring payments without recreating the plan", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -4027,7 +3970,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers stale authorized recurring payments without re-confirming old signatures", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -4187,7 +4129,6 @@ describe("Payments routes", () => {
   });
 
   it("journals failed on-chain activation attempts and retries with a fresh signature", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -4308,7 +4249,6 @@ describe("Payments routes", () => {
   });
 
   it("clears failed authorization signatures when finalization cannot find the subscription", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -4440,7 +4380,6 @@ describe("Payments routes", () => {
   });
 
   it("requires owner wallet access when updating subscription plans", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -4484,7 +4423,6 @@ describe("Payments routes", () => {
   });
 
   it("rejects archived counterparties when creating subscriptions", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -4560,7 +4498,6 @@ describe("Payments routes", () => {
   });
 
   it("requires plan wallet access when mutating subscriptions and collection attempts", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -4651,7 +4588,6 @@ describe("Payments routes", () => {
   });
 
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const authHeaders = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
     };
