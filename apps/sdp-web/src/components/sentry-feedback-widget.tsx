@@ -14,10 +14,14 @@ export function SentryFeedbackWidget({ collapsed = false }: { collapsed?: boolea
 
   useEffect(() => {
     const feedback = Sentry.getFeedback();
-    if (!feedback || !ref.current) return;
-    feedback.setTheme(theme);
-    return feedback.attachTo(ref.current);
+    feedback?.setTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    const feedback = Sentry.getFeedback();
+    if (!feedback || !ref.current) return;
+    return feedback.attachTo(ref.current);
+  }, []);
 
   return (
     <button

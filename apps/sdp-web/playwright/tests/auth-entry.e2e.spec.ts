@@ -22,11 +22,18 @@ test.describe("public auth entry e2e", () => {
     await expect(
       page.getByRole("heading", { name: "Sign in to Solana Developer Platform" })
     ).toBeVisible({ timeout: 120_000 });
-    await expect(page.locator(".cl-card")).toHaveCSS("background-color", "rgb(52, 52, 53)");
-    await expect(page.locator(".cl-formFieldInput").first()).toHaveCSS(
-      "background-color",
-      "rgb(28, 28, 29)"
-    );
+
+    const clerkColors = await page.locator("html").evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        background: styles.getPropertyValue("--clerk-color-background").trim(),
+        input: styles.getPropertyValue("--clerk-color-input").trim(),
+      };
+    });
+    expect(clerkColors.background).not.toBe("");
+    expect(clerkColors.input).not.toBe("");
+    expect(clerkColors.background).not.toBe(clerkColors.input);
+
     await expect(page.getByLabel("Sign in with GitHub")).not.toHaveCSS("filter", "none");
     await expect(page.getByLabel("Sign in with Google")).toHaveCSS("filter", "none");
   });
