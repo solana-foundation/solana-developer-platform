@@ -86,7 +86,11 @@ export function WalletsOverviewSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
       <LoadingRegion layout="wallets-overview" className="space-y-6">
-        <div className="flex justify-end">
+        <div
+          className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
+          data-wallet-search-skeleton
+        >
+          <Pulse className="h-10 w-full rounded-lg sm:max-w-md" />
           <Pulse className="h-10 w-full rounded-lg sm:w-36" />
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
