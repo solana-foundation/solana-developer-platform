@@ -173,7 +173,7 @@ describe("recurring payment schema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("still parses native SOL at the request schema layer for service-level rejection", () => {
+  it("accepts native SOL as a supported recurring payment token", () => {
     expect(recurringPaymentTokenSchema.parse("SOL")).toBe("SOL");
   });
 

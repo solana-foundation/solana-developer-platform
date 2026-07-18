@@ -1071,7 +1071,7 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
     ),
     token: withOpenApi(createRecurringPaymentSchemaBase.shape.token, {
       description:
-        "SPL token mint address. Native SOL is not supported for program-backed recurring payments.",
+        "Token to collect. Pass an SPL token mint address, a well-known symbol, or native SOL (`SOL` or `So11111111111111111111111111111111111111112`). Native SOL recurring payments settle as wrapped SOL (wSOL) in the recipient's token account.",
       example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(createRecurringPaymentSchemaBase.shape.amount, {
@@ -1117,7 +1117,7 @@ export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaB
     ),
     token: withOpenApi(updateRecurringPaymentSchemaBase.shape.token, {
       description:
-        "Optional replacement SPL token mint address. Native SOL is not supported for recurring payments.",
+        "Optional replacement token. Pass an SPL token mint address, a well-known symbol, or native SOL (`SOL` or `So11111111111111111111111111111111111111112`). Native SOL recurring payments settle as wrapped SOL (wSOL) in the recipient's token account.",
       example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(updateRecurringPaymentSchemaBase.shape.amount, {
@@ -1181,7 +1181,10 @@ export const paymentRecurringPaymentSchema = z
     destinationTokenAccount: solanaAddressSchema
       .nullable()
       .openapi({ description: "Derived counterparty token account used for collection." }),
-    token: z.string().openapi({ description: "SPL token mint address." }),
+    token: z.string().openapi({
+      description:
+        "Recurring payment token. Accepts an SPL token mint address, a well-known symbol, or native SOL (`SOL` or `So11111111111111111111111111111111111111112`). Native SOL recurring payments settle as wrapped SOL (wSOL) in the recipient's token account.",
+    }),
     amount: tokenAmountSchema,
     periodHours: z.number().int().positive().openapi({ example: 720 }),
     firstCollectionAt: isoDateTimeSchema

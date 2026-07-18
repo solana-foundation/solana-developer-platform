@@ -4,6 +4,7 @@ import {
   getUtcDayWindow,
   sumDecimalAmounts,
 } from "@sdp/payments/decimal";
+import type { RpcEnv } from "@sdp/rpc";
 import { isDecimalString } from "@sdp/solana/amount";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import type {
@@ -11,6 +12,7 @@ import type {
   PaymentWalletPolicyRow as WalletPolicyRow,
 } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
+import { normalizePaymentToken } from "@/services/payment-operation.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 
 export const PAYMENT_POLICY_VERSION = 1;
@@ -120,6 +122,7 @@ export function buildWalletPolicyPayload(
 export async function assertWalletPolicyAllowsTransferWithRepository(
   repository: PaymentsRepository,
   input: {
+    env: RpcEnv;
     organizationId: string;
     projectId: string | null;
     wallet: CustodyWallet;
@@ -168,7 +171,7 @@ export async function assertWalletPolicyAllowsTransferWithRepository(
       organizationId: input.organizationId,
       projectId: input.projectId,
       walletId: input.wallet.walletId,
-      token: input.token,
+      token: normalizePaymentToken(input.token, input.env),
       direction: "outbound",
       statuses: ["pending", "processing", "confirmed", "finalized"],
       createdAtFrom: dayWindow.start,

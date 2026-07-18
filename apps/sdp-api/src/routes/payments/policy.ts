@@ -29,5 +29,8 @@ export async function assertWalletPolicyAllowsTransfer(
     amount: string;
   }
 ): Promise<void> {
-  return assertWalletPolicyAllowsTransferWithRepository(getPaymentsRepository(c), input);
+  return assertWalletPolicyAllowsTransferWithRepository(getPaymentsRepository(c), {
+    ...input,
+    env: c.env,
+  });
 }

@@ -18,6 +18,7 @@ import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { UpdatePaymentRecurringPaymentRequest } from "@sdp/types";
 import {
   type Address,
+  address,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   createNoopSigner,
@@ -32,9 +33,11 @@ import {
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import * as subscriptionsProgram from "@solana/subscriptions";
+import { getTransferSolInstruction } from "@solana-program/system";
 import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
+  getSyncNativeInstruction,
 } from "@solana-program/token-2022";
 import { getDb } from "@/db";
 import {
@@ -63,7 +66,11 @@ import {
   resolveMintTokenProgram,
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
-import { normalizePaymentToken, SOL_MINT } from "@/services/payment-operation.service";
+import {
+  isNativePaymentToken,
+  normalizePaymentToken,
+  SOL_MINT,
+} from "@/services/payment-operation.service";
 import { assertWalletPolicyAllowsTransferWithRepository } from "@/services/payments/wallet-policy";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -79,13 +86,47 @@ const COLLECTION_STALE_AFTER_MS = RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS;
 
 type RecurringCollectionSource = "manual" | "automated";
 
-function assertRecurringPaymentTokenMint(token: string, env: Env): string {
-  const normalized = normalizePaymentToken(token, env);
-  if (normalized === "SOL" || normalized === SOL_MINT) {
-    throw badRequest("Recurring payments require an SPL token mint");
+function resolveRecurringPaymentTokenMint(token: string, env: Env): string {
+  if (isNativePaymentToken(token)) {
+    return SOL_MINT;
   }
 
-  return assertValidAddress(normalized, "token");
+  return assertValidAddress(normalizePaymentToken(token, env), "token");
+}
+
+/**
+ * Builds instructions that fund and sync the resolved wrapped-SOL source token account.
+ */
+export function buildNativeSolWrapInstructions(input: {
+  payer: TransactionSigner;
+  sourceSigner: TransactionSigner;
+  sourceOwner: Address;
+  sourceTokenAccount: { tokenAccount: Address; exists: boolean };
+  tokenProgram: Address;
+  amountBaseUnits: bigint;
+}): Instruction[] {
+  return [
+    ...(input.sourceTokenAccount.exists
+      ? []
+      : [
+          getCreateAssociatedTokenIdempotentInstruction({
+            payer: input.payer,
+            ata: input.sourceTokenAccount.tokenAccount,
+            owner: input.sourceOwner,
+            mint: address(SOL_MINT),
+            tokenProgram: input.tokenProgram,
+          }),
+        ]),
+    getTransferSolInstruction({
+      source: input.sourceSigner,
+      destination: input.sourceTokenAccount.tokenAccount,
+      amount: input.amountBaseUnits,
+    }),
+    getSyncNativeInstruction(
+      { account: input.sourceTokenAccount.tokenAccount },
+      { programAddress: input.tokenProgram }
+    ),
+  ];
 }
 
 function generateProgramPlanId(): string {
@@ -1348,7 +1389,7 @@ async function resolveRecurringPaymentUpdate(input: {
 
   const token =
     input.request.token !== undefined
-      ? assertRecurringPaymentTokenMint(input.request.token, input.env)
+      ? resolveRecurringPaymentTokenMint(input.request.token, input.env)
       : input.recurringPayment.token;
   const counterpartyId = input.request.counterpartyId ?? input.recurringPayment.counterparty_id;
   const counterpartyAccountId =
@@ -1381,6 +1422,7 @@ async function resolveRecurringPaymentUpdate(input: {
       : input.recurringPayment.metadata_uri;
 
   await assertWalletPolicyAllowsTransferWithRepository(createPaymentsRepository(input.env), {
+    env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
     wallet: finalSourceWallet,
@@ -2705,7 +2747,7 @@ export async function createRecurringPayment(input: {
   metadataUri?: string | null;
   createdBy: string | null;
 }): Promise<PaymentRecurringPaymentRow> {
-  const tokenMint = assertRecurringPaymentTokenMint(input.token, input.env);
+  const tokenMint = resolveRecurringPaymentTokenMint(input.token, input.env);
   const destination = await resolveSolanaCounterpartyAccount({
     env: input.env,
     organizationId: input.organizationId,
@@ -2715,6 +2757,7 @@ export async function createRecurringPayment(input: {
   });
 
   await assertWalletPolicyAllowsTransferWithRepository(createPaymentsRepository(input.env), {
+    env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
     wallet: input.sourceWallet,
@@ -3834,6 +3877,7 @@ export async function collectRecurringPayment(input: {
     }
 
     await assertWalletPolicyAllowsTransferWithRepository(paymentsRepo, {
+      env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
       wallet: input.sourceWallet,
@@ -3849,7 +3893,7 @@ export async function collectRecurringPayment(input: {
       counterpartyId: input.recurringPayment.counterparty_id,
       sourceAddress: input.sourceWallet.publicKey,
       destinationAddress: input.recurringPayment.destination_address,
-      token: input.recurringPayment.token,
+      token: normalizePaymentToken(input.recurringPayment.token, input.env),
       amount: input.recurringPayment.amount,
       memo: null,
       type: "transfer",
@@ -3945,6 +3989,20 @@ export async function collectRecurringPayment(input: {
         tokenMint: mint,
         tokenProgram,
       });
+    const collectionInstructions: Instruction[] = [
+      ...(mint === SOL_MINT
+        ? buildNativeSolWrapInstructions({
+            payer,
+            sourceSigner,
+            sourceOwner,
+            sourceTokenAccount,
+            tokenProgram,
+            amountBaseUnits,
+          })
+        : []),
+      createDestinationAtaInstruction,
+      collectInstruction,
+    ];
 
     const recurringPaymentWithDestination =
       await recurringRepo.updateRecurringPaymentDestinationTokenAccount({
@@ -3964,7 +4022,7 @@ export async function collectRecurringPayment(input: {
       projectId: input.projectId,
       sourceWallet: input.sourceWallet,
       sourceSigner,
-      instructions: [createDestinationAtaInstruction, collectInstruction],
+      instructions: collectionInstructions,
       feePayer,
     });
     submittedSignature = signature;

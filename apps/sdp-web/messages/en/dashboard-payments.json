@@ -737,7 +737,6 @@
       "selectWalletFirst": "Select a wallet first",
       "searchAssets": "Search assets",
       "unresolvedTokenBalances": "This wallet has token balances, but their symbols could not be resolved yet.",
-      "nativeSolUnsupported": "Recurring payments require a token balance. Native SOL is not supported.",
       "invalidAmount": "Enter an amount greater than zero.",
       "intervalHours": "Interval in hours",
       "invalidInterval": "Enter a whole number of hours between 1 and 8760.",
