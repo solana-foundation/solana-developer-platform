@@ -367,6 +367,10 @@ const OUTPUT_PANEL_LABEL_KEYS = [
   labelKey: MessageKey;
 }[];
 
+// @solana/design-system/styles (imported by globals.css) owns the complete
+// light/dark --code-block-* and --shiki-token-* palette. Keep this Shiki theme
+// variable-based so the highlighted markup follows the root .dark class
+// without re-highlighting or duplicating the package palette here.
 const cssVariablesTheme = {
   name: "css-variables",
   type: "light" as const,

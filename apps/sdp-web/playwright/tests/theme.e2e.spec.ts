@@ -68,6 +68,40 @@ test.describe("dashboard theme e2e", () => {
     );
   });
 
+  test("inherits API playground code tokens from the design system in both modes", async ({
+    page,
+  }) => {
+    await clearThemePreferenceBeforeNavigation(page);
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.goto("/dashboard/payments");
+    await page.getByRole("tab", { name: "API Playground" }).click();
+
+    const codePanel = page.locator(".code-block-line-numbers");
+    await expect(codePanel).toBeVisible();
+
+    const readCodeTokens = () =>
+      codePanel.evaluate((element) => {
+        const styles = getComputedStyle(element);
+        return {
+          background: styles.getPropertyValue("--code-block-bg").trim(),
+          keyword: styles.getPropertyValue("--shiki-token-keyword").trim(),
+        };
+      });
+
+    const lightTokens = await readCodeTokens();
+    expect(lightTokens.background).not.toBe("");
+    expect(lightTokens.keyword).not.toBe("");
+
+    await page.getByRole("switch", { name: "Color theme" }).click();
+    await expect(page.locator("html")).toHaveClass(/dark/);
+
+    const darkTokens = await readCodeTokens();
+    expect(darkTokens.background).not.toBe("");
+    expect(darkTokens.keyword).not.toBe("");
+    expect(darkTokens.background).not.toBe(lightTokens.background);
+    expect(darkTokens.keyword).not.toBe(lightTokens.keyword);
+  });
+
   test("follows live system changes until the user makes an explicit choice", async ({ page }) => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "dark" });
