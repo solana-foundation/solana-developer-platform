@@ -83,6 +83,7 @@ type DashboardWorkspaceProviderProps = {
   serverDashboardCacheScope: DashboardCacheScope;
   projects: Project[];
   initialSelectedProjectId: string | null;
+  shouldRepairInitialProjectCookie: boolean;
   initialSidebarOpen?: boolean;
 };
 
@@ -92,6 +93,7 @@ export function DashboardWorkspaceProvider({
   serverDashboardCacheScope,
   projects,
   initialSelectedProjectId,
+  shouldRepairInitialProjectCookie,
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
@@ -109,7 +111,7 @@ export function DashboardWorkspaceProvider({
   );
 
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    sandboxProject?.id ?? null
+    initialSelectedProjectId
   );
   const sdpEnvironment: SdpEnvironment =
     selectedProjectId && selectedProjectId === productionProject?.id ? "production" : "sandbox";
@@ -167,24 +169,15 @@ export function DashboardWorkspaceProvider({
     [router]
   );
 
-  // Persist the in-memory selection to the cookie when:
-  //   - the current selection isn't backed by a known project (stale state), or
-  //   - the server reported no cookie value at mount (first visit / cleared cookie)
-  // Server Components can't write cookies in Next 16, so the layout passes
-  // initialSelectedProjectId=null when the cookie is missing/stale; we persist
-  // it here via the existing selectProjectAction.
+  const initialCookieRepairStarted = useRef(false);
   useEffect(() => {
-    const selectionIsValid =
-      selectedProjectId !== null && projects.some((project) => project.id === selectedProjectId);
-    if (selectionIsValid && initialSelectedProjectId === selectedProjectId) return;
+    if (!shouldRepairInitialProjectCookie || initialCookieRepairStarted.current) return;
 
-    const target = selectionIsValid ? selectedProjectId : (sandboxProject?.id ?? null);
-    if (target !== selectedProjectId) {
-      selectProject(target);
-    } else if (target !== null) {
-      void selectProjectAction(target);
-    }
-  }, [selectedProjectId, projects, sandboxProject, selectProject, initialSelectedProjectId]);
+    initialCookieRepairStarted.current = true;
+    void selectProjectAction(initialSelectedProjectId).catch(() => {
+      initialCookieRepairStarted.current = false;
+    });
+  }, [initialSelectedProjectId, shouldRepairInitialProjectCookie]);
 
   useEffect(() => {
     if (!auth.isLoaded || liveDashboardCacheScopeKey === serverDashboardCacheScopeKey) {

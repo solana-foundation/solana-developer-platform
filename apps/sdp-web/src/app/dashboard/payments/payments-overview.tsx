@@ -131,6 +131,8 @@ export function PaymentsOverview({
   const locale = useLocale();
   const searchParams = useSearchParams();
   const refreshSeed = searchParams.get("refresh") ?? "default";
+  const hasInitialAggregate = aggregate !== null && aggregateError === null;
+  const hasInitialTransfers = transfersError === null;
   const {
     data: swrAggregate,
     error: aggregateFetchError,
@@ -140,8 +142,11 @@ export function PaymentsOverview({
     [PAYMENTS_OVERVIEW_AGGREGATE_KEY, refreshSeed],
     () => fetchWalletAggregate(t),
     {
-      fallbackData: aggregateError || !aggregate ? undefined : aggregate,
+      fallbackData: hasInitialAggregate ? aggregate : undefined,
+      revalidateOnMount: hasInitialAggregate ? false : undefined,
+      revalidateIfStale: hasInitialAggregate ? false : undefined,
       revalidateOnFocus: true,
+      refreshWhenHidden: false,
       refreshInterval: 30_000,
     },
     {
@@ -158,8 +163,11 @@ export function PaymentsOverview({
     [PAYMENTS_OVERVIEW_TRANSFERS_KEY, refreshSeed],
     () => fetchTransfers({ pageSize: 20 }, t),
     {
-      fallbackData: transfersError ? undefined : transfers,
+      fallbackData: hasInitialTransfers ? transfers : undefined,
+      revalidateOnMount: hasInitialTransfers ? false : undefined,
+      revalidateIfStale: hasInitialTransfers ? false : undefined,
       revalidateOnFocus: true,
+      refreshWhenHidden: false,
       refreshInterval: 10_000,
     },
     {
