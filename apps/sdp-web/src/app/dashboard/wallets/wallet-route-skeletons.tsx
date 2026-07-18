@@ -15,8 +15,8 @@ const THREE_ITEMS = ["one", "two", "three"] as const;
 const FOUR_ITEMS = ["one", "two", "three", "four"] as const;
 const FIVE_ITEMS = ["one", "two", "three", "four", "five"] as const;
 const AUDIT_COLUMNS = [
-  ["decision", "w-[110px]"],
-  ["operation", "w-[245px]"],
+  ["decision", "w-[160px]"],
+  ["operation", "w-[195px]"],
   ["amount", "w-[145px]"],
   ["destination", "w-[145px]"],
   ["actor", "w-[170px]"],
@@ -309,9 +309,23 @@ export function WalletPolicySkeleton() {
 function AuditHeaderSkeleton() {
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div className="space-y-2">
-        <Pulse className="h-8 w-72 max-w-full" />
-        <Pulse className="h-4 w-[min(34rem,90%)]" />
+      <div className="min-w-0 flex-[1_1_34rem] space-y-2">
+        <div className="space-y-1">
+          <div data-loading-audit-title-line>
+            <Pulse className="h-7 w-[94%] max-w-[34rem] sm:h-8 sm:w-72" />
+          </div>
+          <div className="sm:hidden" data-loading-audit-title-line>
+            <Pulse className="h-7 w-[62%]" />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <div data-loading-audit-description-line>
+            <Pulse className="h-4 w-[94%] max-w-[34rem]" />
+          </div>
+          <div className="sm:hidden" data-loading-audit-description-line>
+            <Pulse className="h-4 w-[72%]" />
+          </div>
+        </div>
       </div>
       <Pulse className="h-9 w-36 rounded-lg" />
     </div>
@@ -382,7 +396,11 @@ function DesktopAuditTableSkeleton() {
                 <Pulse className="h-5 w-20 rounded-full" />
               </TableCell>
               {FIVE_ITEMS.map((column) => (
-                <TableCell key={column} className="px-4 py-3">
+                <TableCell
+                  key={column}
+                  className={cn("px-4 py-3", column === "three" && "overflow-hidden")}
+                  data-loading-desktop-actor-cell={column === "three" || undefined}
+                >
                   <Pulse className="h-4 w-24" />
                 </TableCell>
               ))}
@@ -414,8 +432,9 @@ export function WalletPolicyAuditListSkeleton() {
               </div>
             ))}
             <div className="flex items-end gap-2">
-              <Pulse className="h-9 w-20 rounded-lg" />
-              <Pulse className="h-9 w-16 rounded-lg" />
+              <div data-loading-filter-apply>
+                <Pulse className="h-9 w-20 rounded-lg" />
+              </div>
             </div>
           </div>
           <Pulse className="h-4 w-28" />
@@ -442,13 +461,29 @@ export function WalletPolicyAuditDetailSkeleton() {
           </div>
         </div>
         <section className="space-y-3">
-          <div className="flex items-center gap-3">
-            <Pulse className="h-8 w-64 max-w-full" />
-            <Pulse className="h-6 w-20 rounded-full" />
+          <div className="flex flex-wrap items-start gap-3">
+            <div className="w-full space-y-1 sm:w-auto">
+              <div data-loading-detail-title-line>
+                <Pulse className="h-7 w-80 max-w-full sm:h-8 sm:w-64" />
+              </div>
+              <div className="sm:hidden" data-loading-detail-title-line>
+                <Pulse className="h-7 w-20" />
+              </div>
+            </div>
+            <div data-loading-detail-decision-badge>
+              <Pulse className="h-6 w-20 rounded-full" />
+            </div>
           </div>
-          <div className="flex flex-wrap gap-4">
-            {THREE_ITEMS.map((item) => (
-              <Pulse key={item} className="h-4 w-32" />
+          <div className="grid gap-2 sm:flex sm:flex-wrap sm:gap-4">
+            {FOUR_ITEMS.map((item) => (
+              <div
+                key={item}
+                className="flex min-w-0 items-center gap-2"
+                data-loading-detail-metadata
+              >
+                <Pulse className="size-4 shrink-0 rounded-sm" />
+                <Pulse className={item === "four" ? "h-4 w-64 max-w-[80%]" : "h-4 w-32"} />
+              </div>
             ))}
           </div>
         </section>

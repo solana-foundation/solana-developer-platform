@@ -72,6 +72,10 @@ describe("wallet and custody route loading states", () => {
   it("matches the policy audit list's mobile rows and desktop table", () => {
     const html = renderToStaticMarkup(<WalletPolicyAuditListSkeleton />);
 
+    expect(html.match(/data-loading-audit-title-line="true"/g)).toHaveLength(2);
+    expect(html.match(/data-loading-audit-description-line="true"/g)).toHaveLength(2);
+    expect(html.match(/data-loading-filter-apply="true"/g)).toHaveLength(1);
+    expect(html).not.toContain("data-loading-filter-clear");
     expect(html).toContain('data-loading-mobile-rows="true"');
     expect(html.match(/data-loading-mobile-row="true"/g)).toHaveLength(5);
     expect(html).toContain("grid-cols-[minmax(0,1fr)_auto]");
@@ -83,11 +87,20 @@ describe("wallet and custody route loading states", () => {
     expect(html).toContain('data-loading-desktop-table="true"');
     expect(html).toContain('class="hidden lg:block"');
     expect(html).toContain("[&amp;_table]:min-w-[1040px]");
+    expect(html).toContain("w-[160px]");
+    expect(html).toContain("w-[195px]");
+    expect(html).toContain('data-loading-desktop-actor-cell="true"');
+    expect(html).toContain("overflow-hidden");
   });
 
   it("stacks policy audit decision steps until the small breakpoint", () => {
     const html = renderToStaticMarkup(<WalletPolicyAuditDetailSkeleton />);
 
+    expect(html).toContain("flex flex-wrap items-start gap-3");
+    expect(html.match(/data-loading-detail-title-line="true"/g)).toHaveLength(2);
+    expect(html).toContain('data-loading-detail-decision-badge="true"');
+    expect(html).toContain("grid gap-2 sm:flex sm:flex-wrap sm:gap-4");
+    expect(html.match(/data-loading-detail-metadata="true"/g)).toHaveLength(4);
     expect(html.match(/data-loading-audit-step="true"/g)).toHaveLength(5);
     expect(html).toContain("sm:grid-cols-[40px_minmax(0,1fr)_auto]");
     expect(html).not.toContain(" grid-cols-[40px_minmax(0,1fr)_auto]");
