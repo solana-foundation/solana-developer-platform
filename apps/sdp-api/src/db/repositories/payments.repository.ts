@@ -41,6 +41,7 @@ export interface PaymentTransferRow {
   project_id: string | null;
   wallet_id: string;
   counterparty_id: string | null;
+  counterparty_display_name?: string | null;
   source_address: string | null;
   destination_address: string | null;
   token: string;
@@ -132,14 +133,15 @@ export interface ListTransfersInput {
   projectId: string | null;
   walletId?: string;
   walletIds?: string[];
+  walletAddress?: string;
   counterpartyId?: string;
-  sourceAddress?: string;
   search?: string;
   token?: string;
   direction?: PaymentTransferDirection;
   statuses?: PaymentTransferStatus[];
   types?: readonly PaymentTransferType[];
   provider?: RampProviderId;
+  providerReference?: string;
   createdAtFrom?: string;
   createdAtTo?: string;
   sortBy?: "amount" | "createdAt" | "status" | "updatedAt";

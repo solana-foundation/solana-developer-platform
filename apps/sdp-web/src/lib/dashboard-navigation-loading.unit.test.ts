@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   resolveDashboardLoadingRoute,
   resolveDashboardNavigationIntent,
+  resolveDashboardNavigationTarget,
 } from "./dashboard-navigation-loading";
 
 const CURRENT_DASHBOARD_URL = "http://localhost:3100/dashboard";
@@ -65,6 +66,24 @@ describe("dashboard navigation intent", () => {
         targetHref: "/dashboard/wallets",
       })
     ).toBe("/dashboard/wallets");
+  });
+
+  it("keeps the target query with cross-route loading intent", () => {
+    expect(
+      resolveDashboardNavigationTarget({
+        currentHref: `${CURRENT_DASHBOARD_URL}/payments?tab=playground`,
+        targetHref: "/dashboard/payments/requests",
+      })
+    ).toEqual({ pathname: "/dashboard/payments/requests", search: "" });
+    expect(
+      resolveDashboardNavigationTarget({
+        currentHref: CURRENT_DASHBOARD_URL,
+        targetHref: "/dashboard/payments/requests?tab=playground",
+      })
+    ).toEqual({
+      pathname: "/dashboard/payments/requests",
+      search: "?tab=playground",
+    });
   });
 
   it.each([

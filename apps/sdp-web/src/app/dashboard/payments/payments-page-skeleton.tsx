@@ -3,41 +3,50 @@ import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
   PaymentsActivitySkeleton,
   PaymentsBalanceSkeleton,
-  PaymentsSummaryCardSkeleton,
+  PaymentsNetworkSkeleton,
+  PaymentsUpcomingSkeleton,
 } from "./payments-command-center-skeletons";
 
 const ACTION_SKELETON_IDS = ["pay", "deposit", "request", "schedule"];
 
 function PaymentsActionsSkeleton() {
   return (
-    <section className="rounded-[var(--sdp-surface-radius)] border border-border-default bg-surface-raised p-5">
+    <section className="rounded-lg border border-border-default bg-surface-raised p-4">
       <SkeletonBlock className="h-5 w-28" />
-      <SkeletonBlock className="mt-2 h-4 w-72 max-w-full" />
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-4">
         {ACTION_SKELETON_IDS.map((id) => (
-          <SkeletonBlock key={id} className="h-24 w-full rounded-[var(--sdp-surface-radius)]" />
+          <SkeletonBlock key={id} className="h-36 w-full rounded-md xl:h-44" />
         ))}
       </div>
     </section>
   );
 }
 
+function PaymentsTabsSkeleton() {
+  return (
+    <div className="flex h-14 shrink-0 items-end gap-6 border-b border-border-default px-3 pb-3 md:px-6">
+      <SkeletonBlock className="h-4 w-16" />
+      <SkeletonBlock className="h-4 w-28" />
+    </div>
+  );
+}
+
 export function PaymentsPageSkeleton() {
   return (
-    <DashboardWorkspaceOverviewPanel
-      className="grid content-start gap-4"
-      data-loading-layout="payments-overview"
-      aria-busy="true"
-    >
-      <PaymentsActionsSkeleton />
-      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(18rem,0.75fr)_minmax(0,1.5fr)]">
+    <div className="flex h-full min-h-0 w-full flex-col" aria-busy="true">
+      <PaymentsTabsSkeleton />
+      <DashboardWorkspaceOverviewPanel
+        className="grid content-start gap-4 xl:grid-cols-[minmax(0,1.63fr)_minmax(20rem,1fr)]"
+        data-loading-layout="payments-overview"
+      >
+        <PaymentsActionsSkeleton />
         <PaymentsBalanceSkeleton />
         <PaymentsActivitySkeleton />
-      </div>
-      <div className="grid min-w-0 gap-4 md:grid-cols-2">
-        <PaymentsSummaryCardSkeleton name="upcoming" />
-        <PaymentsSummaryCardSkeleton name="network" />
-      </div>
-    </DashboardWorkspaceOverviewPanel>
+        <div className="grid min-w-0 content-start gap-4">
+          <PaymentsUpcomingSkeleton />
+          <PaymentsNetworkSkeleton />
+        </div>
+      </DashboardWorkspaceOverviewPanel>
+    </div>
   );
 }

@@ -64,4 +64,44 @@ describe("fetchPaymentTransfers", () => {
       "/v1/payments/transfers?page=1&pageSize=5&includeObserved=false"
     );
   });
+
+  it("preserves transfer metadata used by the command center", async () => {
+    const request = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "transfer-1",
+                walletId: "wallet-1",
+                status: "confirmed",
+                signature: "signature-1",
+                type: "onramp",
+                provider: "mural",
+                counterpartyId: "counterparty-1",
+                counterpartyDisplayName: "Northstar Labs",
+                providerReference: "provider-reference-1",
+                deliveryMode: "crypto",
+                fiatCurrency: "USD",
+                fiatAmount: "1250",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+    );
+
+    const result = await fetchPaymentTransfers(request, 5, { includeObserved: false });
+
+    expect(result.data?.[0]).toMatchObject({
+      walletId: "wallet-1",
+      provider: "mural",
+      counterpartyId: "counterparty-1",
+      counterpartyDisplayName: "Northstar Labs",
+      providerReference: "provider-reference-1",
+      deliveryMode: "crypto",
+      fiatCurrency: "USD",
+      fiatAmount: "1250",
+    });
+  });
 });

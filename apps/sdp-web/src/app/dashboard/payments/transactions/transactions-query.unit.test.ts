@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   countActiveTransactionFilters,
+  normalizeTransactionSearch,
   parseTransactionFilters,
   serializeTransactionFilters,
   toTransactionsApiQuery,
@@ -33,6 +34,22 @@ describe("transaction filter query", () => {
       sortBy: "amount",
       sortDirection: "asc",
     });
+  });
+
+  it("only activates meaningful searches of at least three characters", () => {
+    expect(normalizeTransactionSearch(undefined)).toBeUndefined();
+    expect(normalizeTransactionSearch("   ")).toBeUndefined();
+    expect(normalizeTransactionSearch(" x ")).toBeUndefined();
+    expect(normalizeTransactionSearch(" xy ")).toBeUndefined();
+    expect(normalizeTransactionSearch(" xyz ")).toBe("xyz");
+
+    const filters = parseTransactionFilters({
+      search: "xy",
+      snapshot: "2026-07-18T12:00:00.000Z",
+    });
+    expect(filters.search).toBeUndefined();
+    expect(serializeTransactionFilters(filters).has("search")).toBe(false);
+    expect(toTransactionsApiQuery({ ...filters, search: "xy" }).has("search")).toBe(false);
   });
 
   it("serializes only non-default URL filters and resets cleanly", () => {

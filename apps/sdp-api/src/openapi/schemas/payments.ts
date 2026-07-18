@@ -743,6 +743,10 @@ export const transferSchema = z
       description: "Counterparty tied to the transfer record, when available.",
       example: "counterparty_example",
     }),
+    counterpartyDisplayName: z.string().optional().openapi({
+      description: "Current display name of the counterparty tied to the transfer.",
+      example: "Acme Studio",
+    }),
     providerReference: z.string().optional().openapi({
       description: "Provider quote or transaction reference used for ramp correlation.",
       example: "ramp_quote_example",
@@ -1714,7 +1718,7 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
     }),
     search: withOpenApi(listTransfersQuerySchemaBase.shape.search, {
       description:
-        "Search transfer ID, signature, provider reference, source or destination address, memo, counterparty ID, or counterparty display name.",
+        "Search transfer ID, signature, provider reference, source or destination address, memo, counterparty ID, or counterparty display name. Use at least 3 non-whitespace characters; a blank value is treated as no search filter.",
       example: "xfr_example",
     }),
     token: withOpenApi(listTransfersQuerySchemaBase.shape.token, {

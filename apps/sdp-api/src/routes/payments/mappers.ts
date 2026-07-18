@@ -32,6 +32,9 @@ export function mapTransferRow(row: TransferRow) {
     ...(row.source_address ? { source: row.source_address } : {}),
     ...(row.destination_address ? { destination: row.destination_address } : {}),
     ...(row.counterparty_id ? { counterpartyId: row.counterparty_id } : {}),
+    ...(row.counterparty_display_name
+      ? { counterpartyDisplayName: row.counterparty_display_name }
+      : {}),
     ...(row.memo ? { memo: row.memo } : {}),
     token: row.token,
     ...(row.amount ? { amount: row.amount } : {}),

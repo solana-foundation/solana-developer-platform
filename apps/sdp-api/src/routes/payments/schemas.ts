@@ -521,7 +521,14 @@ export const transferStatusSchema = z.enum([
 export const listTransfersQuerySchema = z.object({
   wallet: z.string().optional(),
   walletAddress: z.string().optional(),
-  search: z.string().trim().min(1).max(200).optional(),
+  search: z
+    .string()
+    .trim()
+    .max(200)
+    .refine((value) => value.length === 0 || value.length >= 3, {
+      message: "Search must be blank or contain at least 3 characters",
+    })
+    .optional(),
   token: z.string().optional(),
   direction: transferDirectionSchema.optional(),
   status: z

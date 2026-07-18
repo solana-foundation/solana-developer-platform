@@ -175,6 +175,7 @@ export interface PaymentTransferSummary {
   memo?: string;
   provider?: RampProviderId;
   counterpartyId?: string;
+  counterpartyDisplayName?: string;
   providerReference?: string;
   deliveryMode?: PaymentRampQuoteDeliveryMode;
   fiatCurrency?: string;

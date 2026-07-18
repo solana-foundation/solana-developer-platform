@@ -28,6 +28,11 @@ import {
   shortenAddress,
 } from "../payments-overview.utils";
 import { getDevnetExplorerUrl } from "../payments-workspace.data";
+import { TransactionAmount } from "./transactions-amount";
+import {
+  getTransactionCounterpartyPresentation,
+  retainTransactionCounterpartyDisplayName,
+} from "./transactions-counterparty";
 import type { TransactionsPageResult } from "./transactions-page.data";
 import type { TransactionFilters } from "./transactions-query";
 import { useTransactionFilters } from "./transactions-workspace";
@@ -119,6 +124,7 @@ function TransactionDetail({
     );
   }
 
+  const counterparty = getTransactionCounterpartyPresentation(transfer);
   const rows = [
     [t("DashboardPayments.transactions.transactionId"), transfer.id],
     [t("DashboardPayments.transactions.status"), formatStatus(transfer.status)],
@@ -129,7 +135,14 @@ function TransactionDetail({
     ],
     [t("DashboardPayments.transactions.direction"), formatDirection(transfer.direction, t)],
     [t("DashboardPayments.transactions.wallet"), transfer.walletId],
-    [t("DashboardPayments.transactions.counterparty"), transfer.counterpartyId],
+    [
+      t("DashboardPayments.transactions.counterparty"),
+      counterparty.displayName ?? transfer.counterpartyId,
+    ],
+    [
+      t("DashboardPayments.transactions.counterpartyId"),
+      counterparty.displayName ? transfer.counterpartyId : undefined,
+    ],
     [t("DashboardPayments.transactions.provider"), transfer.provider],
     [t("DashboardPayments.transactions.providerReference"), transfer.providerReference],
     [t("DashboardPayments.transactions.source"), transfer.source],
@@ -201,7 +214,7 @@ function useTransactionDetail(selected: PaymentTransferSummary | null) {
             body.error?.message ?? t("DashboardPayments.transactions.detailLoadError")
           );
         }
-        setDetail(body.data.transfer);
+        setDetail(retainTransactionCounterpartyDisplayName(body.data.transfer, selected));
       })
       .catch((requestError) => {
         if (requestError instanceof DOMException && requestError.name === "AbortError") return;
@@ -273,45 +286,58 @@ function DesktopTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {transfers.map((transfer) => (
-            <TableRow key={transfer.id} data-testid={`transaction-row-${transfer.id}`}>
-              <TableCell>
-                <TransactionIdentity transfer={transfer} onSelect={onSelect} />
-              </TableCell>
-              <TableCell>
-                <Badge variant={statusVariant(transfer.status)}>
-                  {formatStatus(transfer.status)}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-sm font-medium text-primary">
-                {formatDisplayAmount(transfer.amount, transfer.token, locale)}
-              </TableCell>
-              <TableCell className="text-sm text-secondary">
-                {formatDirection(transfer.direction, t)}
-              </TableCell>
-              <TableCell
-                className="truncate text-sm text-secondary"
-                title={transfer.counterpartyId ?? transfer.destination ?? undefined}
-              >
-                {transfer.counterpartyId
-                  ? shortenAddress(transfer.counterpartyId)
-                  : transfer.destination
-                    ? shortenAddress(transfer.destination)
-                    : "—"}
-              </TableCell>
-              <TableCell
-                className="truncate font-mono text-xs text-secondary"
-                title={transfer.walletId}
-              >
-                {transfer.walletId ? shortenAddress(transfer.walletId) : "—"}
-              </TableCell>
-              <TableCell className="text-sm text-secondary">
-                <time dateTime={transfer.createdAt}>
-                  {formatTimestamp(transfer.createdAt, t, locale)}
-                </time>
-              </TableCell>
-            </TableRow>
-          ))}
+          {transfers.map((transfer) => {
+            const counterparty = getTransactionCounterpartyPresentation(transfer);
+            return (
+              <TableRow key={transfer.id} data-testid={`transaction-row-${transfer.id}`}>
+                <TableCell>
+                  <TransactionIdentity transfer={transfer} onSelect={onSelect} />
+                </TableCell>
+                <TableCell>
+                  <Badge variant={statusVariant(transfer.status)}>
+                    {formatStatus(transfer.status)}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <TransactionAmount
+                    transfer={transfer}
+                    locale={locale}
+                    className="text-sm font-medium text-primary"
+                  />
+                </TableCell>
+                <TableCell className="text-sm text-secondary">
+                  {formatDirection(transfer.direction, t)}
+                </TableCell>
+                <TableCell className="min-w-0">
+                  <span
+                    className="block truncate text-sm text-secondary"
+                    title={counterparty.primary}
+                  >
+                    {counterparty.primary}
+                  </span>
+                  {counterparty.secondary ? (
+                    <span
+                      className="mt-0.5 block truncate font-mono text-xs text-tertiary"
+                      title={counterparty.reference}
+                    >
+                      {counterparty.secondary}
+                    </span>
+                  ) : null}
+                </TableCell>
+                <TableCell
+                  className="truncate font-mono text-xs text-secondary"
+                  title={transfer.walletId}
+                >
+                  {transfer.walletId ? shortenAddress(transfer.walletId) : "—"}
+                </TableCell>
+                <TableCell className="text-sm text-secondary">
+                  <time dateTime={transfer.createdAt}>
+                    {formatTimestamp(transfer.createdAt, t, locale)}
+                  </time>
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>
@@ -329,42 +355,61 @@ function MobileRows({
   const locale = useLocale();
   return (
     <div className="divide-y divide-border-default lg:hidden" data-transactions-mobile-rows>
-      {transfers.map((transfer) => (
-        <article key={transfer.id} className="space-y-4 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <TransactionIdentity transfer={transfer} onSelect={onSelect} />
-            <Badge variant={statusVariant(transfer.status)}>{formatStatus(transfer.status)}</Badge>
-          </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-            <div>
-              <p className="text-xs text-tertiary">{t("DashboardPayments.transactions.amount")}</p>
-              <p className="mt-1 font-medium text-primary">
-                {formatDisplayAmount(transfer.amount, transfer.token, locale)}
-              </p>
+      {transfers.map((transfer) => {
+        const counterparty = getTransactionCounterpartyPresentation(transfer);
+        return (
+          <article key={transfer.id} className="space-y-4 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <TransactionIdentity transfer={transfer} onSelect={onSelect} />
+              <Badge variant={statusVariant(transfer.status)}>
+                {formatStatus(transfer.status)}
+              </Badge>
             </div>
-            <div>
-              <p className="text-xs text-tertiary">
-                {t("DashboardPayments.transactions.direction")}
-              </p>
-              <p className="mt-1 text-secondary">{formatDirection(transfer.direction, t)}</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+              <div className="min-w-0">
+                <p className="text-xs text-tertiary">
+                  {t("DashboardPayments.transactions.amount")}
+                </p>
+                <TransactionAmount
+                  transfer={transfer}
+                  locale={locale}
+                  className="mt-1 font-medium text-primary"
+                />
+              </div>
+              <div>
+                <p className="text-xs text-tertiary">
+                  {t("DashboardPayments.transactions.direction")}
+                </p>
+                <p className="mt-1 text-secondary">{formatDirection(transfer.direction, t)}</p>
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-tertiary">
+                  {t("DashboardPayments.transactions.counterparty")}
+                </p>
+                <p className="mt-1 truncate text-secondary" title={counterparty.primary}>
+                  {counterparty.primary}
+                </p>
+                {counterparty.secondary ? (
+                  <p
+                    className="mt-0.5 truncate font-mono text-xs text-tertiary"
+                    title={counterparty.reference}
+                  >
+                    {counterparty.secondary}
+                  </p>
+                ) : null}
+              </div>
+              <div>
+                <p className="text-xs text-tertiary">
+                  {t("DashboardPayments.transactions.created")}
+                </p>
+                <p className="mt-1 text-secondary">
+                  {formatTimestamp(transfer.createdAt, t, locale)}
+                </p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="text-xs text-tertiary">
-                {t("DashboardPayments.transactions.counterparty")}
-              </p>
-              <p className="mt-1 truncate text-secondary">
-                {transfer.counterpartyId ?? transfer.destination ?? "—"}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-tertiary">{t("DashboardPayments.transactions.created")}</p>
-              <p className="mt-1 text-secondary">
-                {formatTimestamp(transfer.createdAt, t, locale)}
-              </p>
-            </div>
-          </div>
-        </article>
-      ))}
+          </article>
+        );
+      })}
     </div>
   );
 }

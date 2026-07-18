@@ -46,6 +46,7 @@ export interface TransactionFilters {
 type RawSearchParams = Record<string, string | string[] | undefined>;
 
 const DEFAULT_PAGE_SIZE = 25;
+export const MIN_TRANSACTION_SEARCH_LENGTH = 3;
 
 function firstValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -80,12 +81,17 @@ function parseTrimmed(value: string | undefined, maxLength = 200): string | unde
   return trimmed ? trimmed.slice(0, maxLength) : undefined;
 }
 
+export function normalizeTransactionSearch(value: string | undefined): string | undefined {
+  const trimmed = parseTrimmed(value);
+  return trimmed && trimmed.length >= MIN_TRANSACTION_SEARCH_LENGTH ? trimmed : undefined;
+}
+
 export function parseTransactionFilters(
   searchParams: RawSearchParams,
   now = new Date()
 ): TransactionFilters {
   return {
-    search: parseTrimmed(firstValue(searchParams.search)),
+    search: normalizeTransactionSearch(firstValue(searchParams.search)),
     status: parseEnum(firstValue(searchParams.status), TRANSACTION_STATUSES),
     direction: parseEnum(firstValue(searchParams.direction), ["inbound", "outbound"] as const),
     type: parseEnum(firstValue(searchParams.type), TRANSACTION_TYPES),
@@ -110,7 +116,7 @@ export function serializeTransactionFilters(filters: TransactionFilters): URLSea
     if (value !== undefined && value !== "") query.set(key, String(value));
   };
 
-  set("search", filters.search);
+  set("search", normalizeTransactionSearch(filters.search));
   set("status", filters.status);
   set("direction", filters.direction);
   set("type", filters.type);
@@ -140,7 +146,7 @@ export function toTransactionsApiQuery(filters: TransactionFilters): URLSearchPa
     if (value) query.set(key, value);
   };
 
-  set("search", filters.search);
+  set("search", normalizeTransactionSearch(filters.search));
   set("status", filters.status);
   set("direction", filters.direction);
   set("type", filters.type);

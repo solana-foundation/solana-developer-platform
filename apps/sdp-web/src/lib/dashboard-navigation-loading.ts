@@ -136,6 +136,12 @@ export const DASHBOARD_NAVIGATION_RECOVERY_TIMEOUT_MS = 10_000;
 export type DashboardNavigationStartDetail = {
   fromPathname: string;
   toPathname: string;
+  toSearch: string;
+};
+
+export type DashboardNavigationTarget = {
+  pathname: string;
+  search: string;
 };
 
 /**
@@ -143,7 +149,7 @@ export type DashboardNavigationStartDetail = {
  * should be shown immediately. Modified, external, same-route, and unsupported
  * links keep their native behavior without changing the shell.
  */
-export function resolveDashboardNavigationIntent({
+export function resolveDashboardNavigationTarget({
   currentHref,
   targetHref,
   button = 0,
@@ -153,7 +159,7 @@ export function resolveDashboardNavigationIntent({
   altKey = false,
   target,
   download = false,
-}: DashboardNavigationIntentInput): string | null {
+}: DashboardNavigationIntentInput): DashboardNavigationTarget | null {
   if (
     button !== 0 ||
     metaKey ||
@@ -182,24 +188,31 @@ export function resolveDashboardNavigationIntent({
   if (targetPathname === currentPathname) return null;
   if (!resolveDashboardLoadingRoute(targetPathname)) return null;
 
-  return targetPathname;
+  return { pathname: targetPathname, search: targetUrl.search };
+}
+
+export function resolveDashboardNavigationIntent(
+  input: DashboardNavigationIntentInput
+): string | null {
+  return resolveDashboardNavigationTarget(input)?.pathname ?? null;
 }
 
 /** Announces programmatic router navigation to the shell before the RSC request starts. */
 export function announceDashboardNavigation(targetHref: string): void {
   if (typeof window === "undefined") return;
 
-  const toPathname = resolveDashboardNavigationIntent({
+  const target = resolveDashboardNavigationTarget({
     currentHref: window.location.href,
     targetHref,
   });
-  if (!toPathname) return;
+  if (!target) return;
 
   window.dispatchEvent(
     new CustomEvent<DashboardNavigationStartDetail>(DASHBOARD_NAVIGATION_START_EVENT, {
       detail: {
         fromPathname: window.location.pathname,
-        toPathname,
+        toPathname: target.pathname,
+        toSearch: target.search,
       },
     })
   );

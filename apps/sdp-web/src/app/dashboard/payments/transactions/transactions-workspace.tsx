@@ -1,10 +1,5 @@
 "use client";
 
-import type {
-  Counterparty,
-  ListCounterpartiesResponse,
-  PaymentsDashboardWalletsEnvelope,
-} from "@sdp/types";
 import { FilterIcon, SearchIcon, XIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
@@ -18,16 +13,28 @@ import {
   useTransition,
 } from "react";
 import useSWR from "swr";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
 import { useDebounce } from "@/lib/use-debounce";
 import { cn } from "@/lib/utils";
 import {
+  fetchTransactionFilterOptions,
+  type TransactionFilterOptions,
+} from "./transactions-filter-options";
+import {
+  reconcileDeferredFilterInput,
+  resolveReturnedTransactionFilterSync,
+} from "./transactions-filter-state";
+import {
   countActiveTransactionFilters,
+  MIN_TRANSACTION_SEARCH_LENGTH,
+  normalizeTransactionSearch,
   serializeTransactionFilters,
   TRANSACTION_STATUSES,
   TRANSACTION_TYPES,
@@ -75,61 +82,13 @@ const TYPE_LABELS = {
   offramp: "DashboardPayments.transactions.offramp",
 } as const satisfies Record<TransactionTypeFilter, MessageKey>;
 
-interface FilterOptions {
-  wallets: Array<{ id: string; label: string }>;
-  counterparties: Array<{ id: string; label: string }>;
-}
-
-async function fetchFilterOptions(): Promise<FilterOptions> {
-  const [walletsResponse, counterpartiesResponse] = await Promise.all([
-    fetch("/api/dashboard/wallets?view=summary&pageSize=50", { cache: "no-store" }),
-    fetch("/api/dashboard/counterparty?page=1&pageSize=50", { cache: "no-store" }),
-  ]);
-  if (!walletsResponse.ok || !counterpartiesResponse.ok) {
-    throw new Error("Transaction filter options could not be loaded");
-  }
-  const walletsBody = (await walletsResponse
-    .json()
-    .catch(() => ({}))) as PaymentsDashboardWalletsEnvelope;
-  const counterpartiesBody = (await counterpartiesResponse.json().catch(() => ({}))) as {
-    data?: ListCounterpartiesResponse;
-  };
-
-  return {
-    wallets: (walletsBody.data?.wallets ?? []).map((wallet) => ({
-      id: wallet.walletId,
-      label: wallet.label?.trim() || wallet.publicKey,
-    })),
-    counterparties: (counterpartiesBody.data?.counterparties ?? []).map(
-      (counterparty: Counterparty) => ({
-        id: counterparty.id,
-        label: counterparty.displayName,
-      })
-    ),
-  };
-}
-
-function AssetFilter({
-  value,
-  updateFilters,
-}: {
-  value: string | undefined;
-  updateFilters: TransactionFilterContextValue["updateFilters"];
-}) {
+function AssetFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const t = useTranslations();
-  const [inputValue, setInputValue] = useState(value ?? "");
-  const debouncedValue = useDebounce(inputValue.trim(), 300);
-
-  useEffect(() => setInputValue(value ?? ""), [value]);
-  useEffect(() => {
-    if (debouncedValue === (value ?? "")) return;
-    updateFilters({ asset: debouncedValue || undefined });
-  }, [debouncedValue, updateFilters, value]);
 
   return (
     <Input
-      value={inputValue}
-      onChange={(event) => setInputValue(event.target.value)}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
       placeholder={t("DashboardPayments.transactions.assetPlaceholder")}
       aria-label={t("DashboardPayments.transactions.assetPlaceholder")}
     />
@@ -170,11 +129,15 @@ function AdvancedFilters({
   filters,
   options,
   optionsLoading,
+  assetValue,
+  onAssetChange,
   updateFilters,
 }: {
   filters: TransactionFilters;
-  options: FilterOptions | undefined;
+  options: TransactionFilterOptions | undefined;
   optionsLoading: boolean;
+  assetValue: string;
+  onAssetChange: (value: string) => void;
   updateFilters: TransactionFilterContextValue["updateFilters"];
 }) {
   const t = useTranslations();
@@ -256,15 +219,13 @@ function AdvancedFilters({
         ariaLabel={t("DashboardPayments.transactions.allProviders")}
         onChange={(provider) => updateFilters({ provider })}
       >
-        {["moonpay", "lightspark", "bvnk", "moneygram", "coinbase", "mural", "stripe"].map(
-          (provider) => (
-            <SelectItem key={provider} value={provider}>
-              {provider === "bvnk" ? "BVNK" : provider[0]?.toUpperCase() + provider.slice(1)}
-            </SelectItem>
-          )
-        )}
+        {RAMP_PROVIDER_OPTIONS.map((provider) => (
+          <SelectItem key={provider.id} value={provider.id}>
+            {provider.title}
+          </SelectItem>
+        ))}
       </SelectFilter>
-      <AssetFilter value={filters.asset} updateFilters={updateFilters} />
+      <AssetFilter value={assetValue} onChange={onAssetChange} />
       <Input
         type="date"
         value={filters.from ?? ""}
@@ -292,9 +253,14 @@ export function TransactionsWorkspace({
   const router = useRouter();
   const { selectedProjectId } = useDashboardWorkspace();
   const stateRef = useRef(filters);
+  const searchValueRef = useRef(filters.search ?? "");
+  const assetValueRef = useRef(filters.asset ?? "");
+  const dirtyInputsRef = useRef({ search: false, asset: false });
+  const browserNavigationRef = useRef(false);
   const transitionStartedAt = useRef<number | null>(null);
   const [displayFilters, setDisplayFilters] = useState(filters);
   const [searchValue, setSearchValue] = useState(filters.search ?? "");
+  const [assetValue, setAssetValue] = useState(filters.asset ?? "");
   const [isPending, startTransition] = useTransition();
   const advancedFilterCount = countActiveTransactionFilters(displayFilters);
   const hasAdvancedFilter = Boolean(
@@ -309,18 +275,50 @@ export function TransactionsWorkspace({
   );
   const [filtersOpen, setFiltersOpen] = useState(hasAdvancedFilter);
   const debouncedSearch = useDebounce(searchValue.trim(), 300);
-  const { data: filterOptions, isLoading: optionsLoading } = useSWR<FilterOptions>(
+  const debouncedAsset = useDebounce(assetValue.trim(), 300);
+  const { data: filterOptions, isLoading: optionsLoading } = useSWR<TransactionFilterOptions>(
     filtersOpen && selectedProjectId
-      ? ["payments-transaction-filter-options-v1", selectedProjectId]
+      ? ["payments-transaction-filter-options-v2", selectedProjectId]
       : null,
-    fetchFilterOptions,
+    () => fetchTransactionFilterOptions(),
     { dedupingInterval: 60_000, revalidateOnFocus: false }
   );
 
   useEffect(() => {
+    const handleBrowserNavigation = () => {
+      browserNavigationRef.current = true;
+    };
+    window.addEventListener("popstate", handleBrowserNavigation);
+    return () => window.removeEventListener("popstate", handleBrowserNavigation);
+  }, []);
+
+  useEffect(() => {
+    const browserNavigation = browserNavigationRef.current;
+    const sync = resolveReturnedTransactionFilterSync(filters, stateRef.current, {
+      browserNavigation,
+      currentSearch: window.location.search,
+    });
+    if (!sync.apply) {
+      return;
+    }
+    browserNavigationRef.current = false;
     stateRef.current = filters;
     setDisplayFilters(filters);
-    setSearchValue(filters.search ?? "");
+    const nextSearch = reconcileDeferredFilterInput(
+      { value: searchValueRef.current, dirty: dirtyInputsRef.current.search },
+      filters.search,
+      sync.forceDeferredInputs
+    );
+    const nextAsset = reconcileDeferredFilterInput(
+      { value: assetValueRef.current, dirty: dirtyInputsRef.current.asset },
+      filters.asset,
+      sync.forceDeferredInputs
+    );
+    searchValueRef.current = nextSearch.value;
+    assetValueRef.current = nextAsset.value;
+    dirtyInputsRef.current = { search: nextSearch.dirty, asset: nextAsset.dirty };
+    setSearchValue(nextSearch.value);
+    setAssetValue(nextAsset.value);
   }, [filters]);
 
   useEffect(() => {
@@ -358,12 +356,34 @@ export function TransactionsWorkspace({
   );
 
   useEffect(() => {
-    if (debouncedSearch === (stateRef.current.search ?? "")) return;
-    updateFilters({ search: debouncedSearch || undefined });
+    const normalizedSearch = normalizeTransactionSearch(debouncedSearch);
+    if (normalizedSearch === stateRef.current.search) return;
+    updateFilters({ search: normalizedSearch });
   }, [debouncedSearch, updateFilters]);
 
+  useEffect(() => {
+    if (debouncedAsset === (stateRef.current.asset ?? "")) return;
+    updateFilters({ asset: debouncedAsset || undefined });
+  }, [debouncedAsset, updateFilters]);
+
+  const updateSearchValue = (value: string) => {
+    searchValueRef.current = value;
+    dirtyInputsRef.current.search = true;
+    setSearchValue(value);
+  };
+
+  const updateAssetValue = (value: string) => {
+    assetValueRef.current = value;
+    dirtyInputsRef.current.asset = true;
+    setAssetValue(value);
+  };
+
   const clearFilters = () => {
+    searchValueRef.current = "";
+    assetValueRef.current = "";
+    dirtyInputsRef.current = { search: false, asset: false };
     setSearchValue("");
+    setAssetValue("");
     setFiltersOpen(false);
     updateFilters({
       search: undefined,
@@ -388,13 +408,14 @@ export function TransactionsWorkspace({
     <TransactionFilterContext.Provider
       value={{ filters: displayFilters, isPending, updateFilters }}
     >
-      <div className="h-full min-h-0 overflow-y-auto px-3 pt-5 pb-6 md:px-6">
-        <div className="overflow-hidden rounded-lg border border-border-default bg-white">
+      <DashboardWorkspaceOverviewPanel>
+        <div className="overflow-hidden rounded-lg border border-border-default bg-surface-raised">
           <div className="border-b border-border-default p-3">
-            <div className="grid gap-2 lg:grid-cols-[minmax(280px,1fr)_190px_190px_auto]">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_190px_190px_auto]">
               <Input
                 value={searchValue}
-                onChange={(event) => setSearchValue(event.target.value)}
+                onChange={(event) => updateSearchValue(event.target.value)}
+                minLength={MIN_TRANSACTION_SEARCH_LENGTH}
                 placeholder={t("DashboardPayments.transactions.searchPlaceholder")}
                 aria-label={t("DashboardPayments.transactions.searchPlaceholder")}
                 iconLeft={<SearchIcon />}
@@ -403,7 +424,7 @@ export function TransactionsWorkspace({
                     <button
                       type="button"
                       aria-label={t("DashboardPayments.transactions.clearSearch")}
-                      onClick={() => setSearchValue("")}
+                      onClick={() => updateSearchValue("")}
                       className="rounded text-tertiary hover:text-primary"
                     >
                       <XIcon />
@@ -486,12 +507,14 @@ export function TransactionsWorkspace({
               filters={displayFilters}
               options={filterOptions}
               optionsLoading={optionsLoading}
+              assetValue={assetValue}
+              onAssetChange={updateAssetValue}
               updateFilters={updateFilters}
             />
           </div>
           {children}
         </div>
-      </div>
+      </DashboardWorkspaceOverviewPanel>
     </TransactionFilterContext.Provider>
   );
 }

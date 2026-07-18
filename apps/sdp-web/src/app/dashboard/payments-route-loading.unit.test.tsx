@@ -27,6 +27,17 @@ import TransactionsLoading from "./payments/transactions/loading";
 const dashboardWorkspaceMock = vi.hoisted(() => ({
   counterpartyTab: "overview" as "overview" | "playground",
 }));
+const navigationMock = vi.hoisted(() => ({ tab: null as null | "playground" }));
+
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+  return {
+    ...actual,
+    useRouter: () => ({ push: () => undefined }),
+    useSearchParams: () =>
+      new URLSearchParams(navigationMock.tab ? { tab: navigationMock.tab } : undefined),
+  };
+});
 
 vi.mock("@/contexts/dashboard-workspace-context", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/contexts/dashboard-workspace-context")>();
@@ -78,6 +89,7 @@ function renderScopedLoadingStates(): string {
 describe("home and payments route loading states", () => {
   afterEach(() => {
     dashboardWorkspaceMock.counterpartyTab = "overview";
+    navigationMock.tab = null;
   });
 
   it("gives every scoped route a geometry-specific loading boundary", () => {
@@ -98,6 +110,17 @@ describe("home and payments route loading states", () => {
     expect(markup).toContain("size-[208px]");
   });
 
+  it("keeps the transaction toolbar and loading table contained beside the expanded sidebar", () => {
+    const markup = renderToStaticMarkup(<TransactionsLoading />);
+
+    expect(markup).toContain("sm:grid-cols-2");
+    expect(markup).toContain("xl:grid-cols-[minmax(280px,1fr)_190px_190px_auto]");
+    expect(markup).not.toContain("lg:grid-cols-[minmax(280px,1fr)_190px_190px_auto]");
+    expect(markup).toContain("hidden overflow-x-auto lg:block");
+    expect(markup).toContain("[&amp;_table]:min-w-[1040px]");
+    expect(markup).toContain("[&amp;_table]:table-fixed");
+  });
+
   it("matches each settled route's native table columns and responsive visibility", () => {
     const tableCases = [
       {
@@ -114,12 +137,12 @@ describe("home and payments route loading states", () => {
         layout: "recurring-payments",
         markup: renderToStaticMarkup(<RecurringPaymentsPageSkeleton />),
         columnClasses: [
-          "w-[34%] md:w-[26%] lg:w-[21%] xl:w-[18%]",
-          "w-[26%] md:w-[22%] lg:w-[20%] xl:w-[18%]",
-          "w-[40%] md:w-[34%] lg:w-[31%] xl:w-[24%]",
-          "hidden lg:table-cell lg:w-[28%] xl:w-[22%]",
-          "hidden xl:table-cell xl:w-[18%]",
-          "hidden md:table-cell md:w-[18%] xl:hidden 2xl:table-cell 2xl:w-[18%]",
+          "w-[34%] md:w-[26%] lg:w-[21%] xl:w-[18%] 2xl:w-[15%]",
+          "w-[26%] md:w-[22%] lg:w-[20%] xl:w-[18%] 2xl:w-[15%]",
+          "w-[40%] md:w-[34%] lg:w-[31%] xl:w-[24%] 2xl:w-[20%]",
+          "hidden lg:table-cell lg:w-[28%] xl:w-[22%] 2xl:w-[18%]",
+          "hidden xl:table-cell xl:w-[18%] 2xl:w-[16%]",
+          "hidden md:table-cell lg:hidden 2xl:table-cell md:w-[18%] 2xl:w-[16%]",
         ],
       },
     ];
@@ -135,20 +158,29 @@ describe("home and payments route loading states", () => {
       }
     }
 
-    expect(tableCases.map(({ markup }) => markup).join("")).not.toContain(
-      "data-loading-mobile-rows"
-    );
+    for (const { markup } of tableCases) {
+      expect(markup).toContain("data-loading-mobile-rows");
+      expect(markup).toContain("md:hidden");
+      expect(markup).toContain("hidden md:block");
+    }
+  });
+
+  it("uses the same next-payment breakpoints in the recurring header, rows, and loader", () => {
+    const markup = renderToStaticMarkup(<RecurringPaymentsPageSkeleton />);
+
+    expect(markup.match(/hidden md:table-cell lg:hidden 2xl:table-cell/g)).toHaveLength(6);
+    expect(markup).not.toContain("md:table-cell xl:hidden 2xl:table-cell");
   });
 
   it("keeps counterparty menu loading aligned with the selected tab", () => {
-    dashboardWorkspaceMock.counterpartyTab = "playground";
+    navigationMock.tab = "playground";
 
     const expectedPlayground = renderToStaticMarkup(<CounterpartyPlaygroundLoading />);
-    expect(renderToStaticMarkup(<CounterpartyLoading />)).toBe(expectedPlayground);
-    expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toBe(expectedPlayground);
+    expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(expectedPlayground);
+    expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toContain(expectedPlayground);
     expect(expectedPlayground).toContain('data-loading-layout="counterparty-playground"');
 
-    dashboardWorkspaceMock.counterpartyTab = "overview";
+    navigationMock.tab = null;
     expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(
       'data-loading-layout="counterparty-directory"'
     );
@@ -181,7 +213,7 @@ describe("home and payments route loading states", () => {
     const markup = renderToStaticMarkup(<RecurringPaymentDetailSkeleton />);
 
     expect(markup).toContain('data-loading-layout="recurring-payment-detail"');
-    expect(markup).toContain("overflow-auto");
+    expect(markup).toContain("overflow-y-auto");
     expect(markup).not.toContain("overflow-hidden");
   });
 
@@ -216,7 +248,7 @@ describe("home and payments route loading states", () => {
   it("keeps the recurring list loader contained at a 390px viewport", () => {
     const markup = renderToStaticMarkup(<RecurringPaymentsLoading />);
 
-    expect(markup).toContain("flex min-w-0 flex-col gap-4 sm:grid");
+    expect(markup).toContain("flex min-w-0 flex-col gap-4 p-4 sm:grid");
     expect(markup).toContain("h-full min-h-0 min-w-0 flex-col");
     expect(markup).toContain("flex min-h-0 min-w-0 flex-1 flex-col");
     expect(markup).toContain("table-scroll-container overflow-x-auto");
