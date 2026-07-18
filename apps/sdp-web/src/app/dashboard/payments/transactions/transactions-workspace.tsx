@@ -47,6 +47,7 @@ import {
 interface TransactionFilterContextValue {
   filters: TransactionFilters;
   isPending: boolean;
+  clearFilters: () => void;
   updateFilters: (
     changes: Partial<TransactionFilters>,
     options?: { preserveSnapshot?: boolean }
@@ -257,7 +258,6 @@ export function TransactionsWorkspace({
   const assetValueRef = useRef(filters.asset ?? "");
   const dirtyInputsRef = useRef({ search: false, asset: false });
   const browserNavigationRef = useRef(false);
-  const transitionStartedAt = useRef<number | null>(null);
   const [displayFilters, setDisplayFilters] = useState(filters);
   const [searchValue, setSearchValue] = useState(filters.search ?? "");
   const [assetValue, setAssetValue] = useState(filters.asset ?? "");
@@ -321,18 +321,6 @@ export function TransactionsWorkspace({
     setAssetValue(nextAsset.value);
   }, [filters]);
 
-  useEffect(() => {
-    if (isPending || transitionStartedAt.current === null) return;
-    console.info(
-      JSON.stringify({
-        event: "sdp_web_ui_transition",
-        surface: "payments_transactions",
-        durationMs: Math.round((performance.now() - transitionStartedAt.current) * 10) / 10,
-      })
-    );
-    transitionStartedAt.current = null;
-  }, [isPending]);
-
   const updateFilters = useCallback(
     (changes: Partial<TransactionFilters>, options: { preserveSnapshot?: boolean } = {}) => {
       const current = stateRef.current;
@@ -349,7 +337,6 @@ export function TransactionsWorkspace({
       };
       stateRef.current = next;
       setDisplayFilters(next);
-      transitionStartedAt.current = performance.now();
       startTransition(() => router.replace(buildTransactionsHref(next), { scroll: false }));
     },
     [router]
@@ -406,7 +393,7 @@ export function TransactionsWorkspace({
 
   return (
     <TransactionFilterContext.Provider
-      value={{ filters: displayFilters, isPending, updateFilters }}
+      value={{ filters: displayFilters, isPending, clearFilters, updateFilters }}
     >
       <DashboardWorkspaceOverviewPanel>
         <div className="overflow-hidden rounded-lg border border-border-default bg-surface-raised">

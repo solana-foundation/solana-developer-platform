@@ -423,7 +423,7 @@ export function TransactionsResults({
 }) {
   const t = useTranslations();
   const router = useRouter();
-  const { filters, isPending, updateFilters } = useTransactionFilters();
+  const { filters, isPending, clearFilters, updateFilters } = useTransactionFilters();
   const [selected, setSelected] = useState<PaymentTransferSummary | null>(null);
   const detailState = useTransactionDetail(selected);
   const pageCount = Math.max(1, Math.ceil(result.total / result.pageSize));
@@ -445,21 +445,6 @@ export function TransactionsResults({
       ),
     [serverFilters]
   );
-  const clearFilters = () =>
-    updateFilters({
-      search: undefined,
-      status: undefined,
-      direction: undefined,
-      type: undefined,
-      walletId: undefined,
-      counterpartyId: undefined,
-      asset: undefined,
-      provider: undefined,
-      from: undefined,
-      to: undefined,
-      page: 1,
-    });
-
   if (result.error) {
     return (
       <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
