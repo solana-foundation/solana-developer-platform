@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { getDefaultAccessControl, getRecommendedCapacities } from "../asset-details-config";
 import { ASSET_TAXONOMY, getCategoryPresentation } from "../asset-taxonomy";
-import { getDefaultPublicFields } from "../draft-mapping";
+import { getDefaultPublicFields, getRecommendedAdvancedSettings } from "../draft-mapping";
 import { SelectionCard } from "../selection-card";
 import { useIssuanceDraft } from "../use-issuance-draft";
 
@@ -107,6 +107,10 @@ export function StepClassification() {
                   updateDraft({
                     assetType: subType.type,
                     capacities: getRecommendedCapacities(category.category, subType.type),
+                    advancedSettings: getRecommendedAdvancedSettings(
+                      category.category,
+                      subType.type
+                    ),
                     accessControl: getDefaultAccessControl(category.category),
                     publicFields: getDefaultPublicFields(category.category, subType.type),
                   });

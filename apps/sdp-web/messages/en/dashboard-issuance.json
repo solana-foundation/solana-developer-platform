@@ -665,7 +665,14 @@
       "nonTransferableDescription": "Prevent tokens from being transferred once held (soulbound).",
       "transferHook": "Transfer hook",
       "transferHookDescription": "Route every transfer through a custom on-chain program for additional checks.",
-      "transferHookProgramId": "Program ID"
+      "transferHookProgramId": "Program ID",
+      "advancedSettingsTitle": "Advanced settings",
+      "advancedSettingsDescription": "On-chain token capabilities for this asset. Recommended options are pre-selected based on the asset type.",
+      "settingGroupEconomics": "Economics",
+      "settingGroupCompliance": "Compliance",
+      "settingGroupControls": "Controls",
+      "settingRecommended": "Recommended",
+      "settingAdvancedOptions": "Advanced options"
     },
     "playground": {
       "tokenNameExample": "Acme Dollar",

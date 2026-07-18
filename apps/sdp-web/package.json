@@ -20,6 +20,7 @@
   "dependencies": {
     "@base-ui/react": "^1.5.0",
     "@clerk/nextjs": "7.4.3",
+    "@sdp/issuance": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
     "@sentry/nextjs": "^10.64.0",

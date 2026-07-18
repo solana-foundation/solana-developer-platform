@@ -246,10 +246,6 @@ export const CAPACITY_META: Record<
     labelKey: "DashboardIssuance.config.restrictTradingHours",
     descriptionKey: "DashboardIssuance.config.restrictTradingHoursDescription",
   },
-  freezeTransfers: {
-    labelKey: "DashboardIssuance.config.freezeTransfers",
-    descriptionKey: "DashboardIssuance.config.freezeTransfersDescription",
-  },
   issueRetireControls: {
     labelKey: "DashboardIssuance.config.issueRetireControls",
     descriptionKey: "DashboardIssuance.config.issueRetireControlsDescription",
@@ -276,7 +272,6 @@ export function getRecommendedCapacities(
 ): Record<CapacityKey, boolean> {
   const caps = createInitialCapacities();
   caps.kyc = true;
-  caps.freezeTransfers = true;
   caps.issueRetireControls = true;
   if (category === "stablecoin") {
     caps.restrictTradingHours = type === "fiat_backed";

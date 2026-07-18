@@ -11,6 +11,7 @@ import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { TokenSignerSelect } from "../../[tokenId]/token-signer-select";
 import { AdvancedCapacities } from "../advanced-capacities";
+import { AdvancedSettingsEditor } from "../advanced-settings-editor";
 import { ACCESS_CONTROL_OPTIONS, getCategorySections } from "../asset-details-config";
 import { DocumentRows } from "../document-rows";
 import {
@@ -258,6 +259,12 @@ export function StepAssetDetails({
               </DocsLink>
             </div>
           </FormCard>
+          <AdvancedSettingsEditor
+            category={draft.assetCategory}
+            type={draft.assetType}
+            value={draft.advancedSettings}
+            onChange={(advancedSettings) => updateDraft({ advancedSettings })}
+          />
           <AdvancedCapacities
             value={draft.capacities}
             onChange={(key, checked) =>

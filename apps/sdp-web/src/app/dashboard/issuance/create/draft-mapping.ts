@@ -1,7 +1,58 @@
-import { type AssetCategory, getAssetTypeRegistryEntry, type IssuanceMetadata } from "@sdp/types";
+import { ADVANCED_SETTINGS, getRecommendedSettings } from "@sdp/issuance/capabilities";
+import {
+  type AdvancedSetting,
+  type AssetCategory,
+  getAssetTypeRegistryEntry,
+  type IssuanceMetadata,
+} from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { detailFieldOptionLabel } from "./asset-details-config";
-import { CAPACITY_KEYS, type DraftState, isValidDecimals } from "./issuance-draft-wizard.types";
+import {
+  type AdvancedSettingsDraft,
+  CAPACITY_KEYS,
+  type DraftState,
+  isValidDecimals,
+} from "./issuance-draft-wizard.types";
+
+// Recommended advanced settings for an asset type, pre-filled with each
+// parametric setting's default param values. Applied when a type is chosen (the
+// "recommended options are pre-selected" behaviour), mirroring
+// getRecommendedCapacities / getDefaultPublicFields.
+export function getRecommendedAdvancedSettings(
+  category: AssetCategory,
+  type: string
+): AdvancedSettingsDraft {
+  const result: AdvancedSettingsDraft = {};
+  for (const key of getRecommendedSettings(category, type)) {
+    const setting: AdvancedSetting = ADVANCED_SETTINGS[key];
+    const params: Record<string, string> = {};
+    for (const param of setting.params ?? []) {
+      if (param.defaultValue !== undefined) {
+        params[param.key] = String(param.defaultValue);
+      }
+    }
+    result[key] = Object.keys(params).length > 0 ? { params } : {};
+  }
+  return result;
+}
+
+// Convert the draft's advanced-settings selection into the persisted
+// issuance_metadata.settings.selected shape, dropping empty param strings.
+function buildSelectedSettings(
+  advancedSettings: AdvancedSettingsDraft
+): Record<string, { params?: Record<string, string> }> {
+  const selected: Record<string, { params?: Record<string, string> }> = {};
+  for (const [key, selection] of Object.entries(advancedSettings)) {
+    const params: Record<string, string> = {};
+    for (const [paramKey, paramValue] of Object.entries(selection.params ?? {})) {
+      if (paramValue.trim() !== "") {
+        params[paramKey] = paramValue.trim();
+      }
+    }
+    selected[key] = Object.keys(params).length > 0 ? { params } : {};
+  }
+  return selected;
+}
 
 const SYMBOL_RE = /^[A-Za-z0-9.]{1,10}$/;
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -130,7 +181,11 @@ export function buildIssuanceMetadata(draft: DraftState): IssuanceMetadata {
   );
   const custom = pruneEmpty({ customer: Object.keys(customer).length > 0 ? customer : undefined });
 
-  const base = pruneEmpty({ asset, compliance, chain, custom });
+  const selectedSettings = buildSelectedSettings(draft.advancedSettings);
+  const settings =
+    Object.keys(selectedSettings).length > 0 ? { selected: selectedSettings } : undefined;
+
+  const base = pruneEmpty({ asset, compliance, chain, custom, settings });
   // Only persist an explicit `visibility` selection when it differs from the
   // type's registry default. When it matches, we leave `visibility` off and let
   // the server fall back to the default projection — keeping metadata minimal
