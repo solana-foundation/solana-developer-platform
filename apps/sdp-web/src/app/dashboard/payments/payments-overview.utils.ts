@@ -8,11 +8,6 @@ import {
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import {
-  paymentCounterpartiesMissing,
-  paymentTransferCounterpartyMissing,
-  paymentTransferTypeMissing,
-} from "@/lib/errors";
 import { toTitleCase } from "../activity-format-utils";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -217,26 +212,28 @@ export function resolveCounterparty(
   if (transfer.counterpartyId) {
     const counterpartyName = counterpartyNamesById.get(transfer.counterpartyId);
     if (counterpartyName === undefined) {
-      throw paymentCounterpartiesMissing([transfer.counterpartyId]);
+      throw new Error(
+        `Payments workspace could not resolve counterparty ${transfer.counterpartyId}`
+      );
     }
     return counterpartyName;
   }
 
   if (transfer.direction === "outbound") {
     if (transfer.destination === undefined) {
-      throw paymentTransferCounterpartyMissing(transfer.id);
+      throw new Error(`Payment transfer ${transfer.id} has no resolvable counterparty`);
     }
     return transfer.destination;
   }
 
   if (transfer.direction === "inbound") {
     if (transfer.source === undefined) {
-      throw paymentTransferCounterpartyMissing(transfer.id);
+      throw new Error(`Payment transfer ${transfer.id} has no resolvable counterparty`);
     }
     return transfer.source;
   }
 
-  throw paymentTransferCounterpartyMissing(transfer.id);
+  throw new Error(`Payment transfer ${transfer.id} has no resolvable counterparty`);
 }
 
 export function resolveTransferTypeLabel(type: string | undefined, t: Translate): string {
@@ -247,7 +244,7 @@ export function resolveTransferTypeLabel(type: string | undefined, t: Translate)
     return t("DashboardPayments.pay");
   }
   if (type === undefined) {
-    throw paymentTransferTypeMissing();
+    throw new Error("Payment transfer type is missing");
   }
   return toTitleCase(type);
 }
