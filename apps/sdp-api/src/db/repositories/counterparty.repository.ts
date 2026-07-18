@@ -1,10 +1,10 @@
 import type { CounterpartyRow } from "@sdp/payments";
+import type { BvnkCustomerResolution } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type {
   CounterpartyEntityType,
   CounterpartyIdentity,
   CounterpartyProviderData,
 } from "@sdp/types";
-import type { BvnkCustomerResolution } from "@/lib/ramps/providers/bvnk/provider-data";
 import type { RepositoryDbClient } from "./base";
 
 export type { CounterpartyRow } from "@sdp/payments";

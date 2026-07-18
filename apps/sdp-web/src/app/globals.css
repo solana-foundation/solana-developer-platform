@@ -31,6 +31,10 @@ body {
   background-color: var(--sdp-shell-bg);
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: gray transparent;

@@ -61,6 +61,8 @@ Add to repository (not environment-specific):
 - `DOPPLER_TOKEN_CI` — Doppler API token for CI workflows with read access to `dev_ci` config
 - `RELEASE_APP_ID` — GitHub App ID for release automation
 - `RELEASE_APP_PRIVATE_KEY` — GitHub App private key for release automation
+- `TRANSLATION_AGENT_USERNAME` — HTTP Basic username for the deployed Eve translation agent
+- `TRANSLATION_AGENT_PASSWORD` — HTTP Basic password for the deployed Eve translation agent
 
   ⚠️ **Important**: The default `GITHUB_TOKEN` is insufficient. The release tag must trigger the production deploy workflow, and the release commit must be pushed by automation instead of a personal user token. The GitHub App needs `contents: write` permission and must be allowed to push release commits to protected `main`.
 
@@ -80,6 +82,17 @@ Secrets are managed centrally in Doppler. GitHub/Vercel environments map to Dopp
 ### Secret Coverage
 
 See [`docs/ops/doppler-secrets.md`](doppler-secrets.md) for the complete list of secrets that must be present in each Doppler config (Cloudflare credentials, database URLs, API keys, etc.).
+
+### Automated UI Translations
+
+The release workflow discovers locale catalogs under `apps/sdp-web/messages` whenever it prepares a release PR. Deploy [`agents/sdp-translation-agent`](../../agents/sdp-translation-agent) as a separate Vercel project with Node 24+, then configure these repository variables:
+
+- `TRANSLATION_AGENT_URL` — base URL of the deployed Eve agent
+- `TRANSLATION_AGENT_MODEL` — model identifier configured in Eve, used in release communication
+
+Optional repository variables cap the work performed by one release: `TRANSLATION_AGENT_MAX_KEYS` (default `500`), `TRANSLATION_AGENT_BATCH_SIZE` (default `50`), and `TRANSLATION_AGENT_MAX_RETRIES` (default `2`). The Action translates only missing keys, preserves existing catalog values, validates current source keys/placeholders/markup, and commits generated values to the release PR. Eve receives each locale batch through its structured output API and does not receive repository credentials or write access. Stale target keys remain harmless when an English source string is removed; they can be cleaned up separately without blocking releases. If no locale is missing strings, it reports a no-op. Missing agent configuration, an unavailable Eve deployment, or invalid generated output fails the workflow instead of producing an incomplete catalog.
+
+Adding a new locale in a normal pull request is enough for it to be picked up on the next release; no workflow edit is required. The release job writes an idempotent summary comment and GitHub Actions step summary listing impacted locales, string counts, Eve agent/model, and whether each locale was newly discovered or already established. LLM-generated values remain subject to normal review.
 
 ---
 

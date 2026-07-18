@@ -44,10 +44,10 @@ import {
   type KeychainTurnkeyConfig,
   KeychainUtilaAdapter,
 } from "@sdp/custody/keychain";
+import { normalizePem } from "@sdp/custody/provisioning";
 import type { SigningPort } from "@sdp/custody/signing";
 import { SigningError } from "@sdp/custody/signing";
 import { parsePostgresJson } from "@/db/postgres-utils";
-import { normalizePem } from "@/services/custody/provisioning.common";
 import type { Env } from "@/types/env";
 
 // ═══════════════════════════════════════════════════════════════════════════

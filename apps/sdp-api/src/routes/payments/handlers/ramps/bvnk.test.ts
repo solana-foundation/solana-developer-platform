@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import {
   type BvnkOnrampRequestSpec,
   buildBvnkOnrampPaymentRuleKey,
-} from "@/lib/ramps/providers/bvnk/provider-data";
+} from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { describe, expect, it } from "vitest";
+import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type { AppContext } from "../../context";
 import { bvnkOnrampQuote } from "./bvnk";
 

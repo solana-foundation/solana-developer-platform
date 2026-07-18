@@ -1,16 +1,12 @@
 "use client";
 
-import {
-  OrganizationSwitcher,
-  SignInButton,
-  UserButton,
-  useAuth,
-} from "@clerk/nextjs";
+import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeftIcon,
   ArrowLeftRightIcon,
+  CircleCheckBigIcon,
   CoinsIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
@@ -19,6 +15,7 @@ import {
   PanelLeftIcon,
   PanelRightIcon,
   Settings2Icon,
+  ShieldCheckIcon,
   WalletIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -53,6 +50,7 @@ type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
+  badge?: number;
   external?: boolean;
   children?: SubNavItem[];
 };
@@ -62,49 +60,28 @@ type NavSection = {
   items: NavItem[];
 };
 
-function getPaymentsActions(
-  t: ReturnType<typeof useTranslations>,
-): SubNavItem[] {
+function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[] {
   return [
-    {
-      label: t("Shared.dashboardShell.counterparty"),
-      href: "/dashboard/payments/counterparty",
-    },
+    { label: t("Shared.dashboardShell.counterparty"), href: "/dashboard/payments/counterparty" },
     { label: t("Shared.dashboardShell.pay"), href: "/dashboard/payments/pay" },
-    {
-      label: t("Shared.dashboardShell.deposit"),
-      href: "/dashboard/payments/deposit",
-    },
-    {
-      label: t("Shared.dashboardShell.requests"),
-      href: "/dashboard/payments/requests",
-    },
+    { label: t("Shared.dashboardShell.deposit"), href: "/dashboard/payments/deposit" },
+    { label: t("Shared.dashboardShell.requests"), href: "/dashboard/payments/requests" },
     ...(isRecurringPaymentsDashboardEnabled()
-      ? [
-          {
-            label: t("Shared.dashboardShell.recurring"),
-            href: "/dashboard/payments/recurring",
-          },
-        ]
+      ? [{ label: t("Shared.dashboardShell.recurring"), href: "/dashboard/payments/recurring" }]
       : []),
   ];
 }
 
-function getNavSections(t: ReturnType<typeof useTranslations>): NavSection[] {
+function getNavSections(
+  t: ReturnType<typeof useTranslations>,
+  options: { canReadApprovals: boolean; pendingApprovalCount: number | null }
+): NavSection[] {
   return [
     {
       title: t("Shared.dashboardShell.create"),
       items: [
-        {
-          label: t("Shared.dashboardShell.home"),
-          href: "/dashboard",
-          icon: LayoutDashboardIcon,
-        },
-        {
-          label: t("Shared.dashboardShell.wallets"),
-          href: "/dashboard/wallets",
-          icon: WalletIcon,
-        },
+        { label: t("Shared.dashboardShell.home"), href: "/dashboard", icon: LayoutDashboardIcon },
+        { label: t("Shared.dashboardShell.wallets"), href: "/dashboard/wallets", icon: WalletIcon },
       ],
     },
     {
@@ -126,6 +103,21 @@ function getNavSections(t: ReturnType<typeof useTranslations>): NavSection[] {
           href: "/dashboard/api-keys",
           icon: KeyRoundIcon,
         },
+        {
+          label: t("Shared.dashboardShell.policies"),
+          href: "/dashboard/policies",
+          icon: ShieldCheckIcon,
+        },
+        ...(options.canReadApprovals
+          ? [
+              {
+                label: t("Shared.dashboardShell.approvals"),
+                href: "/dashboard/approvals",
+                icon: CircleCheckBigIcon,
+                ...(options.pendingApprovalCount ? { badge: options.pendingApprovalCount } : {}),
+              },
+            ]
+          : []),
       ],
     },
   ];
@@ -133,9 +125,7 @@ function getNavSections(t: ReturnType<typeof useTranslations>): NavSection[] {
 
 const docsHref =
   process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
-  (process.env.NODE_ENV === "development"
-    ? "http://localhost:3001/docs"
-    : DEFAULT_SDP_DOCS_URL);
+  (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
 
 type DashboardPageConfig = {
   title: string;
@@ -313,11 +303,7 @@ function actionPageConfig(config: {
     showHeaderNavRow: true,
     centeredTitle: config.centeredTitle,
     topBarLeadingContent: (
-      <HeaderBackAction
-        href={config.backHref}
-        label={config.backLabel}
-        compactOnMobile
-      />
+      <HeaderBackAction href={config.backHref} label={config.backLabel} compactOnMobile />
     ),
     contentWidthClass: config.contentWidthClass,
   };
@@ -325,7 +311,7 @@ function actionPageConfig(config: {
 
 function getCounterpartyRoutePageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>,
+  t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/payments/counterparty/create") {
     return actionPageConfig({
@@ -348,31 +334,89 @@ function getCounterpartyRoutePageConfig(
   return null;
 }
 
-function getWalletBackAction(
+function getWalletRoutePageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>,
-): DashboardPageConfig["backAction"] {
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
   const walletPolicyRouteMatch = pathname.match(
-    /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/,
+    /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/
   );
-  if (!walletPolicyRouteMatch) {
-    return {
+  if (walletPolicyRouteMatch) {
+    const [, section, walletId] = walletPolicyRouteMatch;
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.walletControls"),
+      backHref: `/dashboard/${section}/${walletId}`,
+      backLabel: t("Shared.dashboardShell.backToWallet"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+
+  const isWalletDetail =
+    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
+    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
+  if (!isWalletDetail) return null;
+
+  return {
+    title: t("Shared.dashboardShell.wallets"),
+    contentWidthClass: "max-w-none",
+    backAction: {
       href: "/dashboard/wallets",
       label: t("Shared.dashboardShell.backToWallets"),
+    },
+  };
+}
+
+function getAccessControlPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/api-keys") {
+    return {
+      title: t("Shared.dashboardShell.apiKeys"),
+      showHeaderNavRow: true,
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/api-keys/new") {
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.newApiKey"),
+      backHref: "/dashboard/api-keys",
+      backLabel: t("Shared.dashboardShell.backToApiKeys"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) {
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.editApiKey"),
+      backHref: "/dashboard/api-keys",
+      backLabel: t("Shared.dashboardShell.backToApiKeys"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (pathname.startsWith("/dashboard/approvals")) {
+    return {
+      title: t("Shared.dashboardShell.approvals"),
+      contentWidthClass: "max-w-none",
+      ...(pathname === "/dashboard/approvals"
+        ? {}
+        : {
+            backAction: {
+              href: "/dashboard/approvals",
+              label: t("Shared.dashboardShell.backToApprovals"),
+            },
+          }),
     };
   }
 
-  const [, section, walletId] = walletPolicyRouteMatch;
-  return {
-    href: `/dashboard/${section}/${walletId}`,
-    label: t("Shared.dashboardShell.backToWalletDetail"),
-  };
+  return null;
 }
 
 function getDashboardPageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>,
+  t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig {
+  const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
+  if (accessControlPageConfig) return accessControlPageConfig;
   if (pathname === "/dashboard") {
     return {
       title: t("Shared.dashboardShell.home"),
@@ -386,10 +430,7 @@ function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     };
   }
-  if (
-    pathname === "/dashboard/wallets/setup" ||
-    pathname === "/dashboard/custody/setup"
-  ) {
+  if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
     return {
       title: t("Shared.dashboardShell.createWallet"),
       contentWidthClass: "max-w-none",
@@ -399,10 +440,7 @@ function getDashboardPageConfig(
       },
     };
   }
-  if (
-    pathname === "/dashboard/wallets/switch" ||
-    pathname === "/dashboard/custody/switch"
-  ) {
+  if (pathname === "/dashboard/wallets/switch" || pathname === "/dashboard/custody/switch") {
     return {
       title: t("Shared.dashboardShell.activateProvider"),
       contentWidthClass: "max-w-3xl",
@@ -412,24 +450,15 @@ function getDashboardPageConfig(
       },
     };
   }
-  if (
-    (pathname.startsWith("/dashboard/wallets/") &&
-      pathname !== "/dashboard/wallets/setup") ||
-    (pathname.startsWith("/dashboard/custody/") &&
-      pathname !== "/dashboard/custody/setup")
-  ) {
-    return {
-      title: t("Shared.dashboardShell.wallets"),
+  const walletRoutePageConfig = getWalletRoutePageConfig(pathname, t);
+  if (walletRoutePageConfig) return walletRoutePageConfig;
+  if (pathname === "/dashboard/policies") {
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.policies"),
+      backHref: "/dashboard",
+      backLabel: t("Shared.dashboardShell.backToOverview"),
       contentWidthClass: "max-w-none",
-      backAction: getWalletBackAction(pathname, t),
-    };
-  }
-  if (pathname === "/dashboard/api-keys") {
-    return {
-      title: t("Shared.dashboardShell.apiKeys"),
-      showHeaderNavRow: true,
-      contentWidthClass: "max-w-none",
-    };
+    });
   }
   if (pathname === "/dashboard/issuance") {
     return {
@@ -498,9 +527,7 @@ function getDashboardPageConfig(
     };
   }
   if (pathname.startsWith("/dashboard/payments/")) {
-    const action = getPaymentsActions(t).find((item) =>
-      pathname.startsWith(item.href),
-    );
+    const action = getPaymentsActions(t).find((item) => pathname.startsWith(item.href));
     const centeredTitle = action
       ? action.label
       : pathname.endsWith("/receive")
@@ -527,13 +554,9 @@ function getDashboardPageConfig(
 }
 
 function resolvePageLoadingComponent(pathname: string): React.ComponentType {
-  if (pathname.startsWith("/dashboard/payments/counterparty"))
-    return CounterpartyLoading;
+  if (pathname.startsWith("/dashboard/payments/counterparty")) return CounterpartyLoading;
   if (pathname.startsWith("/dashboard/payments")) return PaymentsLoading;
-  if (
-    pathname.startsWith("/dashboard/wallets") ||
-    pathname.startsWith("/dashboard/custody")
-  )
+  if (pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody"))
     return WalletsLoading;
   if (pathname.startsWith("/dashboard/issuance")) return IssuancePageSkeleton;
   return DashboardLoading;
@@ -544,10 +567,7 @@ function isItemActive(pathname: string, href: string): boolean {
     return pathname === "/dashboard";
   }
   if (href === "/dashboard/wallets") {
-    return (
-      pathname.startsWith("/dashboard/wallets") ||
-      pathname.startsWith("/dashboard/custody")
-    );
+    return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
   }
   if (href === "/dashboard/payments") {
     if (pathname.startsWith("/dashboard/payments/counterparty")) return false;
@@ -557,10 +577,9 @@ function isItemActive(pathname: string, href: string): boolean {
 }
 
 const navItemBase =
-  "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors";
+  "relative flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors";
 const navItemActive = "border border-border-subtle bg-white text-primary";
-const navItemInactive =
-  "text-secondary hover:bg-fill-strong hover:text-primary";
+const navItemInactive = "text-secondary hover:bg-fill-strong hover:text-primary";
 
 function SidebarGroup({
   title,
@@ -577,12 +596,13 @@ function SidebarGroup({
   isCollapsed: boolean;
   showTopSeparator: boolean;
 }) {
+  const t = useTranslations();
   return (
     <div className="space-y-2">
       <p
         className={cn(
           "relative px-3 text-xs uppercase leading-normal tracking-wide",
-          isCollapsed ? "text-transparent" : "text-muted",
+          isCollapsed ? "text-transparent" : "text-muted"
         )}
       >
         {title}
@@ -604,17 +624,36 @@ function SidebarGroup({
                 href={item.href}
                 onClick={onNavigate}
                 title={isCollapsed ? item.label : undefined}
-                aria-label={isCollapsed ? item.label : undefined}
+                aria-label={
+                  isCollapsed && item.badge
+                    ? `${item.label}, ${t("Shared.dashboardShell.pendingApprovals", { count: item.badge })}`
+                    : isCollapsed
+                      ? item.label
+                      : undefined
+                }
                 className={cn(
                   navItemBase,
                   active ? navItemActive : navItemInactive,
-                  isCollapsed && "justify-center",
+                  isCollapsed && "justify-center"
                 )}
               >
                 <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
                 {isCollapsed ? null : (
-                  <span className="whitespace-nowrap">{item.label}</span>
+                  <>
+                    <span className="whitespace-nowrap">{item.label}</span>
+                    {item.badge ? (
+                      <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-medium text-white">
+                        {item.badge > 99 ? "99+" : item.badge}
+                      </span>
+                    ) : null}
+                  </>
                 )}
+                {isCollapsed && item.badge ? (
+                  <span
+                    className="absolute top-1 right-1 size-2 rounded-full border border-white bg-primary"
+                    aria-hidden="true"
+                  />
+                ) : null}
               </Link>
               {!isCollapsed && item.children && item.children.length > 0 && (
                 <div className="ml-5 mt-2">
@@ -629,7 +668,7 @@ function SidebarGroup({
                             "w-0.5 shrink-0 self-stretch transition-colors",
                             isFirst && "mt-1",
                             isLast && "mb-1",
-                            childActive ? "bg-secondary" : "bg-fill-strong",
+                            childActive ? "bg-secondary" : "bg-fill-strong"
                           )}
                         />
                         {child.disabled ? (
@@ -643,7 +682,7 @@ function SidebarGroup({
                             onClick={onNavigate}
                             className={cn(
                               "flex h-9 flex-1 items-center rounded-lg px-3 text-sm transition-colors",
-                              childActive ? navItemActive : navItemInactive,
+                              childActive ? navItemActive : navItemInactive
                             )}
                           >
                             {child.label}
@@ -728,13 +767,11 @@ function DashboardSidebarContent({
               aria-label={isCollapsed ? item.label : undefined}
               className={cn(
                 "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-secondary transition-colors hover:bg-fill-strong hover:text-primary",
-                isCollapsed && "justify-center",
+                isCollapsed && "justify-center"
               )}
             >
               <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
-              {isCollapsed ? null : (
-                <span className="whitespace-nowrap">{item.label}</span>
-              )}
+              {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
             </Link>
           );
         })}
@@ -749,15 +786,19 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const { dashboardAccess, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
+  const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const PageLoadingComponent = resolvePageLoadingComponent(pathname);
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [pendingApprovalCount, setPendingApprovalCount] = useState<number | null>(null);
   const previousPathnameRef = useRef(pathname);
   const sidebarExpandedWidth = 296;
   const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(pathname, t);
-  const navSections = getNavSections(t);
+  const navSections = getNavSections(t, {
+    canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
+    pendingApprovalCount,
+  });
   const bottomNavItems: NavItem[] = [
     {
       label: t("Shared.dashboardShell.apiDocs"),
@@ -777,18 +818,14 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   ];
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
   const backAction = pageConfig.backAction ? (
-    <HeaderBackAction
-      href={pageConfig.backAction.href}
-      label={pageConfig.backAction.label}
-    />
+    <HeaderBackAction href={pageConfig.backAction.href} label={pageConfig.backAction.label} />
   ) : null;
   const headerNav = pageConfig.headerNav;
   const centeredTitle = pageConfig.centeredTitle;
   const topBarLeadingContent = pageConfig.topBarLeadingContent;
   const shouldRenderHeaderNavRow =
     pageConfig.showHeaderNavRow || Boolean(backAction) || Boolean(headerNav);
-  const shouldRenderTopBarBorder =
-    Boolean(centeredTitle) && !shouldRenderHeaderNavRow;
+  const shouldRenderTopBarBorder = Boolean(centeredTitle) && !shouldRenderHeaderNavRow;
   const shouldClipHorizontalOverflow =
     pathname === "/dashboard/payments" ||
     (pathname.startsWith("/dashboard/payments/") &&
@@ -803,6 +840,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const shouldUseWorkspaceViewport =
     pathname === "/dashboard/issuance" ||
     pathname === "/dashboard/issuance/create" ||
+    pathname === "/dashboard/policies" ||
+    pathname === "/dashboard/api-keys/new" ||
+    (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
     pathname === "/dashboard/payments" ||
     pathname === "/dashboard/wallets" ||
     pathname === "/dashboard/custody" ||
@@ -811,10 +851,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       pathname !== "/dashboard/payments/counterparty/create") ||
     pathname === "/dashboard/payments/requests" ||
     pathname === "/dashboard/payments/recurring" ||
+    pathname.startsWith("/dashboard/approvals") ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
-  const shouldLockShellViewport =
-    shouldLockViewportScroll || isMobileSidebarOpen;
+  const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
 
   useEffect(() => {
     if (previousPathnameRef.current !== pathname) {
@@ -823,13 +863,43 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     }
   }, [pathname]);
 
+  useEffect(() => {
+    if (!dashboardAccess.capabilities.canReadApprovals || !selectedProjectId) {
+      setPendingApprovalCount(null);
+      return;
+    }
+
+    let ignored = false;
+    setPendingApprovalCount(null);
+    const refreshPendingCount = async () => {
+      try {
+        const response = await fetch("/api/dashboard/approval-requests?status=pending&limit=100", {
+          cache: "no-store",
+        });
+        const body = (await response.json().catch(() => null)) as {
+          data?: { approvalRequests?: unknown[] };
+        } | null;
+        if (!ignored && response.ok) {
+          setPendingApprovalCount(body?.data?.approvalRequests?.length ?? 0);
+        }
+      } catch {
+        if (!ignored) setPendingApprovalCount(null);
+      }
+    };
+
+    refreshPendingCount();
+    window.addEventListener("sdp:approval-requests-updated", refreshPendingCount);
+    return () => {
+      ignored = true;
+      window.removeEventListener("sdp:approval-requests-updated", refreshPendingCount);
+    };
+  }, [dashboardAccess.capabilities.canReadApprovals, selectedProjectId]);
+
   if (!isLoaded) {
     return (
       <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
         <div className="mx-auto max-w-5xl border border-border-subtle bg-white/70 p-6">
-          <p className="text-sm text-tertiary">
-            {t("Shared.dashboardShell.loadingDashboard")}
-          </p>
+          <p className="text-sm text-tertiary">{t("Shared.dashboardShell.loadingDashboard")}</p>
         </div>
       </main>
     );
@@ -895,9 +965,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         ].join(" ")}
       >
         <aside
-          style={{
-            width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
-          }}
+          style={{ width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth }}
           className="relative z-10 hidden bg-[var(--sdp-shell-bg)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between"
         >
           <DashboardSidebarContent
@@ -948,17 +1016,13 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         <section
           className={[
             "relative min-w-0 rounded-2xl border border-border-subtle bg-white/80 lg:rounded-tl-[16px]",
-            shouldLockViewportScroll
-              ? "flex min-h-0 flex-col overflow-hidden"
-              : "px-3 py-5 md:p-6",
+            shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "px-3 py-5 md:p-6",
           ].join(" ")}
         >
           <div
             className={[
               "min-w-0 w-full",
-              shouldLockViewportScroll
-                ? "flex min-h-0 flex-1 flex-col"
-                : "space-y-6",
+              shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col" : "space-y-6",
             ].join(" ")}
           >
             <div className="shrink-0 space-y-4">
@@ -981,11 +1045,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   />
                 </div>
               ) : (
-                <div
-                  className={
-                    shouldLockViewportScroll ? "px-3 pt-5 md:px-6 md:pt-6" : ""
-                  }
-                >
+                <div className={shouldLockViewportScroll ? "px-3 pt-5 md:px-6 md:pt-6" : ""}>
                   <DashboardTopBar
                     isMobileSidebarOpen={isMobileSidebarOpen}
                     setMobileSidebarOpen={setMobileSidebarOpen}
@@ -1016,12 +1076,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   >
                     {backAction && headerNav ? (
                       <>
-                        <div className="flex items-center justify-start">
-                          {backAction}
-                        </div>
-                        <div className="flex items-center justify-center">
-                          {headerNav}
-                        </div>
+                        <div className="flex items-center justify-start">{backAction}</div>
+                        <div className="flex items-center justify-center">{headerNav}</div>
                         <div />
                       </>
                     ) : (
@@ -1038,9 +1094,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 shouldClipHorizontalOverflow && !shouldLockViewportScroll
                   ? "overflow-x-hidden"
                   : "",
-                shouldLockViewportScroll
-                  ? "min-h-0 flex-1 overflow-hidden"
-                  : "",
+                shouldLockViewportScroll ? "min-h-0 flex-1 overflow-hidden" : "",
               ].join(" ")}
             >
               {isProjectSwitching ? <PageLoadingComponent /> : children}

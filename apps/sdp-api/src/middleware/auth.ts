@@ -10,6 +10,7 @@
  * 6. Set auth context for downstream handlers
  */
 
+import { hashString } from "@sdp/payments/hash";
 import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyWalletBinding, CachedApiKey } from "@sdp/types";
 import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
 import type { Context, Next } from "hono";
@@ -20,7 +21,6 @@ import {
   parsePostgresJsonOr,
 } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
-import { hashString } from "@/lib/hash";
 import type { KVStore } from "@/runtime/kv";
 import type { Env } from "@/types/env";
 

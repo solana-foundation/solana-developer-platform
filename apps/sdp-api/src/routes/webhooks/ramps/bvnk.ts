@@ -1,13 +1,5 @@
-import type { BvnkBankFundingDetails, SdpEnvironment } from "@sdp/types";
-import { getDb } from "@/db";
-import { createCounterpartiesRepository } from "@/db/repositories";
-import type {
-  CounterpartiesRepository,
-  CounterpartyRow,
-} from "@/db/repositories/counterparty.repository";
-import { AppError, badRequest, internalError, providerNotConfigured } from "@/lib/errors";
-import { readRecord, readString } from "@/lib/json";
-import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
+import { readRecord, readString } from "@sdp/payments/json";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   type BvnkCustomerResolution,
   type BvnkOnrampPaymentRuleState,
@@ -21,8 +13,16 @@ import {
   readBvnkOnrampPaymentRuleState,
   withBvnkOfframpWalletStatus,
   withBvnkOnrampPaymentRuleState,
-} from "@/lib/ramps/providers/bvnk/provider-data";
-import type { RampRuntimeContext, RampWebhookValidationContext } from "@/lib/ramps/types";
+} from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
+import type { BvnkBankFundingDetails, SdpEnvironment } from "@sdp/types";
+import { getDb } from "@/db";
+import { createCounterpartiesRepository } from "@/db/repositories";
+import type {
+  CounterpartiesRepository,
+  CounterpartyRow,
+} from "@/db/repositories/counterparty.repository";
+import { AppError, badRequest, internalError, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { ensureBvnkPaymentRule } from "@/routes/payments/handlers/ramps/bvnk";
 import type { AppContext, WebhookProcessor } from "./processor";

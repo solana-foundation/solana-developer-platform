@@ -1,17 +1,14 @@
 /**
- * Mosaic Service (compat shim)
+ * Mosaic service factory.
  *
- * Domain logic moved to `@sdp/issuance`; this shim re-exports it so existing
- * `@/services/mosaic` imports keep working, and keeps the app-wired factory
- * (fee-payment adapter + AppError mapping) here.
+ * Domain logic lives in `@sdp/issuance`; this module wires the app's
+ * fee-payment adapter and AppError mapping into that service.
  */
 
-export * from "@sdp/issuance/mosaic";
-
 import { MosaicService } from "@sdp/issuance/mosaic/service";
+import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import type { TransactionSigner } from "@solana/kit";
 import { transactionFailed } from "@/lib/errors";
-import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import type { Env } from "@/types/env";
 
 export type MosaicFeePayment = "sponsored" | "wallet";

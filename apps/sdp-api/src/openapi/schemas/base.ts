@@ -190,6 +190,7 @@ export const errorCodeSchema = z
     "SIGNING_PENDING",
     "PROVIDER_NOT_CONFIGURED",
     "PROVIDER_UNAVAILABLE",
+    "UNSUPPORTED_CORRIDOR",
   ])
   .openapi({ description: "Machine-readable error code." });
 

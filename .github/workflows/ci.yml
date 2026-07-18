@@ -13,6 +13,26 @@ env:
   CI_IS_FORK_PULL_REQUEST: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
 
 jobs:
+  module_boundaries:
+    name: Module Boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+
+      - name: Check module boundaries
+        run: pnpm check:module-boundaries
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -40,6 +60,34 @@ jobs:
         run: |
           git diff --name-only --diff-filter=d -z origin/main...HEAD \
             | xargs -0 --no-run-if-empty pnpm exec biome check --no-errors-on-unmatched
+
+  translation_agent:
+    name: Translation Agent
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agents/sdp-translation-agent
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: agents/sdp-translation-agent/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile --ignore-workspace
+
+      - name: Typecheck and build
+        run: pnpm typecheck && pnpm build
 
   typecheck:
     name: Typecheck
@@ -85,6 +133,7 @@ jobs:
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
+      DOPPLER_PRESERVE_ENV: DATABASE_URL
     services:
       postgres:
         image: postgres:16-alpine
@@ -345,6 +394,9 @@ jobs:
           pnpm --filter sdp-docs generate:api
           pnpm --filter sdp-docs generate:ai
 
+      - name: Committed docs artifacts match generated output
+        run: git diff --exit-code apps/sdp-docs/public
+
       - name: Check docs links
         run: pnpm --filter sdp-docs check:links
 
@@ -369,7 +421,7 @@ jobs:
             custody_provider: local
           - name: Surfpool / Mosaic
             provider: surfpool
-            test_files: src/tests/mosaic-token-acl.test.ts src/tests/mosaic-abl.test.ts src/tests/mosaic-templates.test.ts
+            test_files: src/tests/mosaic-token-acl.test.ts src/tests/mosaic-token-acl-constraints.test.ts src/tests/mosaic-abl.test.ts src/tests/mosaic-templates.test.ts
             rpc_provider: triton
             custody_provider: local
           - name: Surfpool / Token Flows
@@ -385,6 +437,7 @@ jobs:
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
+      DOPPLER_PRESERVE_ENV: DATABASE_URL,SOLANA_NETWORK
       SOLANA_NETWORK: devnet
       INTEGRATION_SHARD_NAME: ${{ matrix.name }}
       INTEGRATION_TEST_FILES: ${{ matrix.test_files }}
@@ -534,6 +587,7 @@ jobs:
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
+      DOPPLER_PRESERVE_ENV: DATABASE_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_API_PERSIST_PATH,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START
       SOLANA_NETWORK: devnet
       PLAYWRIGHT_API_URL: http://127.0.0.1:8787
       PLAYWRIGHT_API_PORT: "8787"

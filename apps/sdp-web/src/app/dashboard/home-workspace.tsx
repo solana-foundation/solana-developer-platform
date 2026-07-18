@@ -58,7 +58,7 @@ function MetricCard({
   const t = useTranslations();
   const locale = useLocale();
   return (
-    <Card className="gap-0 rounded-[18px] border-border-default py-0 shadow-none">
+    <Card className="gap-0 rounded-[18px] py-0 shadow-none">
       <CardContent className="space-y-2 px-6 py-6">
         <p className="text-[15px] text-tertiary">{label}</p>
         <p className="text-[24px] leading-none font-medium tracking-[-0.03em] text-primary sm:text-[30px]">
@@ -128,7 +128,6 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
             <CreateApiKeyModal
               triggerLabel={t("Shared.SharedComponents.createApiKey")}
               triggerVariant="secondary"
-              wallets={wallets}
             />
           ) : null}
           {dashboardAccess.capabilities.canManageCustody ? (

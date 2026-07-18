@@ -104,6 +104,7 @@ export function useBatchSendWizard({
   const [stepIndex, setStepIndex] = useState(0);
   const [walletId, setWalletId] = useState("");
   const [asset, setAsset] = useState("");
+  const [externalId, setExternalId] = useState("");
   const [entries, setEntries] = useState<Record<string, BatchRecipientEntry>>({});
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -272,9 +273,11 @@ export function useBatchSendWizard({
     totalAmountValue > 0 && availableAmount !== null && totalAmountValue > availableAmount;
   const exceedsMaxRecipients = recipients.length > MAX_BATCH_RECIPIENTS;
   const hasMint = !walletId || selectedAssetBalance !== null;
+  const trimmedExternalId = externalId.trim();
 
   const request = useMemo(
     () => ({
+      ...(trimmedExternalId.length > 0 ? { externalId: trimmedExternalId } : {}),
       source: walletId,
       token: asset,
       recipients: recipients.map((r) => ({
@@ -283,9 +286,14 @@ export function useBatchSendWizard({
         amount: r.amount,
       })),
     }),
-    [walletId, asset, recipients]
+    [walletId, asset, recipients, trimmedExternalId]
   );
-  const recipientsValid = batchSendSchema.safeParse({ walletId, asset, recipients }).success;
+  const recipientsValid = batchSendSchema.safeParse({
+    walletId,
+    asset,
+    externalId,
+    recipients,
+  }).success;
 
   const currentStepId = steps[stepIndex].id;
   const isLastStep = stepIndex === steps.length - 1;
@@ -379,6 +387,8 @@ export function useBatchSendWizard({
     asset,
     displayAsset,
     setAsset,
+    externalId,
+    setExternalId,
     assetOptions,
     selectedWallet,
     selectedAssetBalance,

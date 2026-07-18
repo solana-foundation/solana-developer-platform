@@ -1,17 +1,64 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+env_files=()
+for env_file in "$root"/apps/*/.dev.vars "$root"/apps/*/.env.local; do
+  if [ -f "$env_file" ]; then
+    env_files+=("${env_file#"$root"/}")
+  fi
+done
+
+# Exports KEY=VALUE lines with the same inert-data semantics as every other
+# consumer of these files (wrangler, Next.js, dev-local.mjs): split on the
+# first "=", keep the value literal. Never `source` them — shell parsing would
+# expand/execute characters like $, #, and backticks inside secret values.
+load_env_files() {
+  local file line key value
+  for file in "$@"; do
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%$'\r'}"
+      case "$line" in '' | '#'*) continue ;; esac
+      key="${line%%=*}"
+      value="${line#*=}"
+      case "$key" in
+      [A-Za-z_]*) export "$key=$value" ;;
+      esac
+    done <"$root/$file"
+  done
+}
+
+# Re-entry inside `doppler run`: overlay the local env files on top of the
+# Doppler-injected environment, so files beat Doppler without letting stale
+# shell exports beat either (no --preserve-env involved).
+if [ "${1:-}" = "--overlay-env" ]; then
+  shift
+  if [ "${#env_files[@]}" -gt 0 ]; then
+    load_env_files "${env_files[@]}"
+  fi
+  exec "$@"
+fi
+
 if [ "${DOPPLER_RUN_ACTIVE:-}" = "1" ]; then
   exec "$@"
 fi
 
 if ! command -v doppler >/dev/null 2>&1; then
-  echo "Doppler CLI is required. Install it first, then rerun this command." >&2
-  exit 1
+  if [ "${#env_files[@]}" -gt 0 ]; then
+    load_env_files "${env_files[@]}"
+  fi
+  exec "$@"
 fi
 
 project="${DOPPLER_PROJECT:-solana-developer-platform}"
 config="${DOPPLER_CONFIG:-dev}"
-preserve_env="${DOPPLER_PRESERVE_ENV:-DATABASE_URL,CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_URL,SDP_API_LOCAL_PERSIST_PATH,SDP_API_PORT,SDP_API_RESET_LOCAL_STATE,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_API_PERSIST_PATH,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START,SOLANA_RPC_URL,SOLANA_RPC_CI_PREFERRED_PROVIDER,SOLANA_RPC_DEFAULT_PROVIDER,SURFPOOL_REMOTE_RPC_URL,KORA_RPC_URL,KORA_SURFPOOL_KORA_RPC_URL,KORA_SURFPOOL_DATABASE_URL,KORA_SURFPOOL_CUSTODY_PRIVATE_KEY,KORA_API_KEY,KORA_HMAC_SECRET,FEE_PAYMENT_PROVIDER,RPC_URL,SIGNER_PRIVATE_KEY,RUN_INTEGRATION_TESTS,SDP_INTEGRATION_CUSTODY_PROVIDER,CUSTODY_PRIVATE_KEY}"
 
-exec doppler run --project "${project}" --config "${config}" --preserve-env="${preserve_env}" -- env DOPPLER_RUN_ACTIVE=1 DOPPLER_PROJECT="${project}" DOPPLER_CONFIG="${config}" "$@"
+# Explicit opt-in for callers (CI jobs) whose exported vars must beat Doppler.
+# Never defaulted: locally the env files above are the only override path.
+doppler_args=(run --project "${project}" --config "${config}")
+if [ -n "${DOPPLER_PRESERVE_ENV:-}" ]; then
+  doppler_args+=(--preserve-env="${DOPPLER_PRESERVE_ENV}")
+fi
+
+exec doppler "${doppler_args[@]}" -- env DOPPLER_RUN_ACTIVE=1 DOPPLER_PROJECT="${project}" DOPPLER_CONFIG="${config}" "$root/scripts/doppler/run-with-config.sh" --overlay-env "$@"

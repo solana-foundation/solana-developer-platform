@@ -1,18 +1,21 @@
+import type {
+  DeletedObjectJSON,
+  OrganizationJSON,
+  OrganizationMembershipJSON,
+  UserDeletedJSON,
+  UserJSON,
+} from "@clerk/backend";
+import { verifyWebhook, type WebhookEvent } from "@clerk/backend/webhooks";
 import type { SdpEnvironment } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { Context } from "hono";
-import { Webhook } from "svix";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
-import { readString } from "@/lib/json";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
-import {
-  type ClerkOrganization,
-  ClerkOrganizationsService,
-} from "@/services/clerk-organizations.service";
+import type { ClerkOrganization } from "@/services/clerk-organizations.service";
 import { type ClerkUser, ClerkUsersService } from "@/services/clerk-users.service";
 import { ProjectService } from "@/services/project.service";
 import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
@@ -39,42 +42,7 @@ const RAMP_PROVIDER_WEBHOOK_PROCESSOR = {
   WebhookProcessor<unknown, unknown>
 >;
 
-type ClerkWebhookEvent = {
-  type: string;
-  data: Record<string, unknown>;
-};
-
 type WebhookRampProvider = keyof typeof RAMP_PROVIDER_WEBHOOK_PROCESSOR;
-
-type ClerkOrgData = {
-  id: string | undefined;
-  name: string | undefined;
-  slug: string | undefined;
-};
-
-type ClerkMemberData = {
-  userId: string | undefined;
-  role: string | undefined;
-  email: string | undefined;
-};
-
-type ClerkUserData = {
-  id: string | undefined;
-  email: string | undefined;
-  name: string | undefined;
-};
-
-type OrganizationMapping = {
-  organizationId: string;
-  clerkOrganization: ClerkOrganization | null;
-};
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
 
 function parseRampWebhookProvider(value: string | undefined): WebhookRampProvider {
   if (value !== undefined && Object.hasOwn(RAMP_PROVIDER_WEBHOOK_PROCESSOR, value)) {
@@ -133,71 +101,12 @@ async function ensureUniqueSlug(
   return candidate;
 }
 
-function extractOrganization(data: Record<string, unknown>): ClerkOrgData {
-  const organization = asRecord(data.organization) ?? data;
-  const id =
-    readString(data.organization_id) ||
-    readString(data.organizationId) ||
-    readString(organization?.id);
-  const name = readString(organization?.name) || readString(data.name);
-  const slug = readString(organization?.slug) || readString(data.slug);
-
-  return { id, name, slug };
-}
-
-function extractMember(data: Record<string, unknown>): ClerkMemberData {
-  const publicUser = asRecord(data.public_user_data) ?? asRecord(data.publicUserData);
-  const userId =
-    readString(data.user_id) ||
-    readString(data.userId) ||
-    readString(publicUser?.user_id) ||
-    readString(publicUser?.userId);
-  const role = readString(data.role);
-  const email =
-    readString(publicUser?.identifier) ||
-    readString(publicUser?.email_address) ||
-    readString(publicUser?.emailAddress);
-
-  return { userId, role, email };
-}
-
-function extractPrimaryEmail(data: Record<string, unknown>): string | undefined {
-  const emailAddresses = Array.isArray(data.email_addresses) ? data.email_addresses : [];
-  const primaryEmailId = readString(data.primary_email_address_id);
-
-  for (const item of emailAddresses) {
-    const emailRecord = asRecord(item);
-    if (!emailRecord) {
-      continue;
-    }
-
-    const email = readString(emailRecord.email_address);
-    if (email && readString(emailRecord.id) === primaryEmailId) {
-      return email;
-    }
-  }
-
-  for (const item of emailAddresses) {
-    const emailRecord = asRecord(item);
-    const email = emailRecord ? readString(emailRecord.email_address) : undefined;
-    if (email) {
-      return email;
-    }
-  }
-
-  return readString(data.email_address);
-}
-
-function extractUser(data: Record<string, unknown>): ClerkUserData {
-  const firstName = readString(data.first_name);
-  const lastName = readString(data.last_name);
-  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
-  const name = fullName || readString(data.name) || readString(data.username);
-
+function toClerkOrganization(data: OrganizationJSON): ClerkOrganization {
   return {
-    id: readString(data.id) || readString(data.user_id) || readString(data.userId),
-    email: extractPrimaryEmail(data),
-    name,
+    id: data.id,
+    name: data.name,
+    slug: data.slug,
+    private_metadata: data.private_metadata,
   };
 }
 
@@ -212,54 +121,14 @@ async function findOrganizationMapping(c: AppContext, clerkOrgId: string) {
     .first<{ organization_id: string; slug: string | null }>();
 }
 
-async function resolveClerkOrganization(
-  c: AppContext,
-  org: ClerkOrgData,
-  privateMetadata?: unknown
-): Promise<ClerkOrganization> {
-  if (!org.id) {
-    throw badRequest("Clerk organization id missing");
-  }
-
-  if (org.name && org.slug) {
-    return {
-      id: org.id,
-      name: org.name,
-      slug: org.slug,
-      ...(privateMetadata !== undefined ? { private_metadata: asRecord(privateMetadata) } : {}),
-    };
-  }
-
-  const clerkOrg = await new ClerkOrganizationsService(c.env).getOrganization(org.id);
-  return {
-    id: org.id,
-    name: org.name ?? clerkOrg.name,
-    slug: org.slug ?? clerkOrg.slug,
-    private_metadata:
-      privateMetadata !== undefined ? asRecord(privateMetadata) : clerkOrg.private_metadata,
-  };
-}
-
-async function ensureOrganizationMapping(
-  c: AppContext,
-  org: ClerkOrgData,
-  privateMetadata?: unknown
-): Promise<OrganizationMapping> {
-  if (!org.id) {
-    throw badRequest("Clerk organization id missing");
-  }
-
+async function ensureOrganizationMapping(c: AppContext, org: OrganizationJSON): Promise<string> {
   const existing = await findOrganizationMapping(c, org.id);
   if (existing) {
-    return {
-      organizationId: existing.organization_id,
-      clerkOrganization: null,
-    };
+    return existing.organization_id;
   }
 
-  const clerkOrg = await resolveClerkOrganization(c, org, privateMetadata);
-  const orgName = clerkOrg.name?.trim() || "New Organization";
-  const slug = await ensureUniqueSlug(getDb(c.env), clerkOrg.slug || orgName || org.id);
+  const orgName = org.name.trim();
+  const slug = await ensureUniqueSlug(getDb(c.env), org.slug);
   const orgId = `org_${crypto.randomUUID()}`;
   const authOrgId = `aoi_${crypto.randomUUID()}`;
 
@@ -282,91 +151,58 @@ async function ensureOrganizationMapping(
     if (!isSelfHostedDeployment(c.env)) {
       await syncProviderAccessFromClerk(getDb(c.env), {
         organizationId: orgId,
-        clerkOrganization: clerkOrg,
+        clerkOrganization: toClerkOrganization(org),
       });
     }
   } catch (err) {
     if (isPostgresUniqueViolation(err)) {
       const retry = await findOrganizationMapping(c, org.id);
       if (retry) {
-        return {
-          organizationId: retry.organization_id,
-          clerkOrganization: clerkOrg,
-        };
+        return retry.organization_id;
       }
     }
     throw err;
   }
 
-  return {
-    organizationId: orgId,
-    clerkOrganization: clerkOrg,
-  };
+  return orgId;
 }
 
-async function syncOrganization(c: AppContext, data: Record<string, unknown>) {
+async function syncOrganization(c: AppContext, data: OrganizationJSON) {
   const db = getDb(c.env);
-  const org = extractOrganization(data);
-  const mapping = await ensureOrganizationMapping(c, org, data.private_metadata);
-  const { organizationId } = mapping;
-  const clerkOrg =
-    mapping.clerkOrganization ?? (await resolveClerkOrganization(c, org, data.private_metadata));
+  const organizationId = await ensureOrganizationMapping(c, data);
 
-  const updates: string[] = [];
-  const params: string[] = [];
-  let nextSlug: string | null = null;
-
-  if (clerkOrg.name?.trim()) {
-    updates.push("name = ?");
-    params.push(clerkOrg.name.trim());
-  }
-
-  if (clerkOrg.slug?.trim()) {
-    const slug = await ensureUniqueSlug(db, clerkOrg.slug, organizationId);
-    nextSlug = slug;
-    updates.push("slug = ?");
-    params.push(slug);
-  }
-
-  if (updates.length > 0) {
-    updates.push("updated_at = datetime('now')");
-    params.push(organizationId);
-
-    const organizationUpdate = db
-      .prepare(`UPDATE organizations SET ${updates.join(", ")} WHERE id = ?`)
-      .bind(...params);
-
-    if (nextSlug) {
-      await db.batch([
-        db
-          .prepare(
-            `UPDATE auth_organization_identities
-             SET slug = ?, updated_at = datetime('now')
-             WHERE provider = 'clerk' AND provider_org_id = ?`
-          )
-          .bind(nextSlug, clerkOrg.id),
-        organizationUpdate,
-      ]);
-    } else {
-      await organizationUpdate.run();
-    }
-  }
+  const slug = await ensureUniqueSlug(db, data.slug, organizationId);
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE auth_organization_identities
+         SET slug = ?, updated_at = datetime('now')
+         WHERE provider = 'clerk' AND provider_org_id = ?`
+      )
+      .bind(slug, data.id),
+    db
+      .prepare(
+        `UPDATE organizations
+         SET name = ?, slug = ?, updated_at = datetime('now')
+         WHERE id = ?`
+      )
+      .bind(data.name.trim(), slug, organizationId),
+  ]);
 
   if (!isSelfHostedDeployment(c.env)) {
     await syncProviderAccessFromClerk(db, {
       organizationId,
-      clerkOrganization: clerkOrg,
+      clerkOrganization: toClerkOrganization(data),
     });
   }
 }
 
-async function deleteOrganization(c: AppContext, data: Record<string, unknown>) {
-  const org = extractOrganization(data);
-  if (!org.id) {
+async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
+  if (!data.id) {
     return;
   }
 
-  const mapping = await findOrganizationMapping(c, org.id);
+  const mapping = await findOrganizationMapping(c, data.id);
   if (!mapping) {
     return;
   }
@@ -413,11 +249,10 @@ async function resolveUserEmail(env: Env, userId: string, fallbackEmail?: string
   return email;
 }
 
-async function ensureUserMapping(c: AppContext, user: ClerkUserData): Promise<string> {
-  if (!user.id) {
-    throw badRequest("Clerk user id missing");
-  }
-
+async function ensureUserMapping(
+  c: AppContext,
+  user: { id: string; email?: string | null; name?: string | null }
+): Promise<string> {
   const db = getDb(c.env);
   const email = await resolveUserEmail(c.env, user.id, user.email);
   const existing = await db
@@ -495,13 +330,17 @@ async function ensureUserMapping(c: AppContext, user: ClerkUserData): Promise<st
   return userId;
 }
 
-async function syncUser(c: AppContext, data: Record<string, unknown>) {
-  await ensureUserMapping(c, extractUser(data));
+async function syncUser(c: AppContext, data: UserJSON) {
+  const fullName = [data.first_name, data.last_name].filter(Boolean).join(" ").trim();
+  await ensureUserMapping(c, {
+    id: data.id,
+    email: primaryEmailFromClerkUser(data),
+    name: fullName || data.username,
+  });
 }
 
-async function deleteUser(c: AppContext, data: Record<string, unknown>) {
-  const user = extractUser(data);
-  if (!user.id) {
+async function deleteUser(c: AppContext, data: UserDeletedJSON) {
+  if (!data.id) {
     return;
   }
 
@@ -511,7 +350,7 @@ async function deleteUser(c: AppContext, data: Record<string, unknown>) {
        FROM auth_user_identities
        WHERE provider = 'clerk' AND provider_user_id = ?`
     )
-    .bind(user.id)
+    .bind(data.id)
     .first<{ user_id: string }>();
 
   if (!identity) {
@@ -526,24 +365,13 @@ async function deleteUser(c: AppContext, data: Record<string, unknown>) {
   ]);
 }
 
-async function upsertMembership(c: AppContext, data: Record<string, unknown>) {
-  const org = extractOrganization(data);
-  const member = extractMember(data);
-
-  if (!org.id) {
-    throw badRequest("Clerk organization id missing");
-  }
-  if (!member.userId) {
-    throw badRequest("Clerk member user id missing");
-  }
-
-  const { organizationId } = await ensureOrganizationMapping(c, org);
+async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON) {
+  const organizationId = await ensureOrganizationMapping(c, data.organization);
   const userId = await ensureUserMapping(c, {
-    id: member.userId,
-    email: member.email,
-    name: undefined,
+    id: data.public_user_data.user_id,
+    email: data.public_user_data.identifier,
   });
-  const role = mapClerkRoleToOrgRole(member.role);
+  const role = mapClerkRoleToOrgRole(data.role);
   const memberId = `mem_${crypto.randomUUID()}`;
 
   await getDb(c.env)
@@ -565,15 +393,8 @@ async function upsertMembership(c: AppContext, data: Record<string, unknown>) {
   ]);
 }
 
-async function deleteMembership(c: AppContext, data: Record<string, unknown>) {
-  const org = extractOrganization(data);
-  const member = extractMember(data);
-
-  if (!org.id || !member.userId) {
-    return;
-  }
-
-  const mapping = await findOrganizationMapping(c, org.id);
+async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON) {
+  const mapping = await findOrganizationMapping(c, data.organization.id);
   if (!mapping) {
     return;
   }
@@ -584,7 +405,7 @@ async function deleteMembership(c: AppContext, data: Record<string, unknown>) {
        FROM auth_user_identities
        WHERE provider = 'clerk' AND provider_user_id = ?`
     )
-    .bind(member.userId)
+    .bind(data.public_user_data.user_id)
     .first<{ user_id: string }>();
 
   if (!identity) {
@@ -599,14 +420,6 @@ async function deleteMembership(c: AppContext, data: Record<string, unknown>) {
     )
     .bind(mapping.organization_id, identity.user_id)
     .run();
-}
-
-function requiredHeader(c: AppContext, name: string) {
-  const value = c.req.header(name);
-  if (!value) {
-    throw badRequest(`Missing webhook header: ${name}`);
-  }
-  return value;
 }
 
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
@@ -651,49 +464,36 @@ export const handleClerkWebhook = async (c: AppContext) => {
     throw new AppError("INTERNAL_ERROR", "CLERK_WEBHOOK_SECRET is required");
   }
 
-  const payload = await c.req.raw.text();
-  const headers = {
-    "svix-id": requiredHeader(c, "svix-id"),
-    "svix-timestamp": requiredHeader(c, "svix-timestamp"),
-    "svix-signature": requiredHeader(c, "svix-signature"),
-  };
-
-  let event: ClerkWebhookEvent;
+  let event: WebhookEvent;
   try {
-    event = new Webhook(secret).verify(payload, headers) as ClerkWebhookEvent;
+    event = await verifyWebhook(c.req.raw, { signingSecret: secret });
   } catch (err) {
     throw new AppError("UNAUTHORIZED", "Invalid webhook signature", {
       cause: err instanceof Error ? err.message : String(err),
     });
   }
 
-  if (!event?.type) {
-    throw badRequest("Webhook event type missing");
-  }
-
-  const data = (event.data ?? {}) as Record<string, unknown>;
-
   switch (event.type) {
     case "organization.created":
     case "organization.updated":
-      await syncOrganization(c, data);
+      await syncOrganization(c, event.data);
       break;
     case "organization.deleted":
-      await deleteOrganization(c, data);
+      await deleteOrganization(c, event.data);
       break;
     case "user.created":
     case "user.updated":
-      await syncUser(c, data);
+      await syncUser(c, event.data);
       break;
     case "user.deleted":
-      await deleteUser(c, data);
+      await deleteUser(c, event.data);
       break;
     case "organizationMembership.created":
     case "organizationMembership.updated":
-      await upsertMembership(c, data);
+      await upsertMembership(c, event.data);
       break;
     case "organizationMembership.deleted":
-      await deleteMembership(c, data);
+      await deleteMembership(c, event.data);
       break;
     default:
       break;
