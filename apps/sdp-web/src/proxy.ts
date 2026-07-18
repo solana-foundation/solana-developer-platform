@@ -6,13 +6,13 @@ import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
 import { PROJECT_COOKIE_NAME, PROJECT_COOKIE_OPTIONS } from "@/lib/project-cookie";
 import { acquireClerkToken, createTokenSdpApiClient } from "@/lib/sdp-api";
 
-export const isPublicRoute = createRouteMatcher([
-  "/sign-in(.*)",
-  "/sign-up(.*)",
-  "/pay(.*)",
-  "/",
-  "/docs(.*)",
-]);
+const isGeneralPublicRoute = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)", "/", "/docs(.*)"]);
+
+const PUBLIC_PAY_CHECKOUT_PATH = /^\/pay\/[^/]+\/?$/;
+
+export function isPublicRoute(req: NextRequest): boolean {
+  return isGeneralPublicRoute(req) || PUBLIC_PAY_CHECKOUT_PATH.test(req.nextUrl.pathname);
+}
 
 const needsSelectedProject = createRouteMatcher([
   "/dashboard(.*)",

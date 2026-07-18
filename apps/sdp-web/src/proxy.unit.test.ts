@@ -7,6 +7,9 @@ describe("public web routes", () => {
     expect(isPublicRoute(new NextRequest("https://dashboard.example.com/pay/public-token"))).toBe(
       true
     );
+    expect(
+      isPublicRoute(new NextRequest("https://dashboard.example.com/pay/public-token/internal"))
+    ).toBe(false);
     expect(isPublicRoute(new NextRequest("https://dashboard.example.com/dashboard/payments"))).toBe(
       false
     );
