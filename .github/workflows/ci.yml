@@ -581,9 +581,11 @@ jobs:
           - name: Dashboard E2E (Surfpool Local)
             test_script: test:e2e:dashboard
             artifact_suffix: dashboard-surfpool
+            rpc_provider: validationcloud
           - name: Issuance E2E (Surfpool Shards)
             test_script: kora:surfpool:e2e:issuance
             artifact_suffix: issuance
+            rpc_provider: quicknode
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
@@ -696,7 +698,7 @@ jobs:
           DOPPLER_CONFIG: dev_ci
           SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
           NEXT_PUBLIC_SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
-          SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
+          SOLANA_RPC_CI_PREFERRED_PROVIDER: ${{ matrix.rpc_provider }}
         run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
 
       - name: Run browser e2e suite
@@ -704,7 +706,7 @@ jobs:
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
-          SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
+          SOLANA_RPC_CI_PREFERRED_PROVIDER: ${{ matrix.rpc_provider }}
         run: |
           if [ "${{ matrix.test_script }}" = "kora:surfpool:e2e:issuance" ]; then
             scripts/doppler/run-with-config.sh pnpm ${{ matrix.test_script }}
