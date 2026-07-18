@@ -1537,7 +1537,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/subscription-plans",
-            "description": "Lists feature-flagged recurring-payment subscription plans."
+            "description": "Lists recurring-payment subscription plans."
           }
         },
         {
@@ -1552,7 +1552,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscription-plans",
-            "description": "Creates a feature-flagged recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
+            "description": "Creates a recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"ownerWalletId\": \"wal_merchant\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"programPlanId\": \"17014118346046923173\",\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\",\n  \"status\": \"active\"\n}",
@@ -1642,7 +1642,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscriptions",
-            "description": "Creates a feature-flagged recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
+            "description": "Creates a recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"subscriberTokenAccount\": \"\",\n  \"subscriptionPda\": \"\",\n  \"subscriptionAuthorityAddress\": \"\",\n  \"authorizationSignature\": \"sig_example\",\n  \"status\": \"active\",\n  \"currentPeriodStartAt\": \"2026-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2026-01-01T00:00:00.000Z\"\n}",
