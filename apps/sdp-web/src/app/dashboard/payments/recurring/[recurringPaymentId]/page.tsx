@@ -1,11 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import type { CounterpartyAccount, ListCounterpartyAccountsResponse } from "@sdp/types";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { isRecurringPaymentsDashboardEnabled } from "@/lib/recurring-payments-feature";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparty } from "../../counterparty/counterparty-page.data";
 import { formatDisplayAmount, shortenAddress } from "../../payments-overview.utils";
@@ -59,10 +58,6 @@ export default async function RecurringPaymentDetailRoute({
 }: {
   params: Promise<{ recurringPaymentId: string }>;
 }) {
-  if (!isRecurringPaymentsDashboardEnabled()) {
-    notFound();
-  }
-
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());

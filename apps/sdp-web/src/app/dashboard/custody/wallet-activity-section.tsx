@@ -73,6 +73,7 @@ function TruncatedText({ value, className }: { value: string; className?: string
 export function WalletActivitySection({ walletId, initialActivity }: WalletActivitySectionProps) {
   const t = useTranslations();
   const locale = useLocale();
+  const hasInitialActivity = initialActivity.activityError === null;
   const {
     data: swrActivity,
     error: requestError,
@@ -80,7 +81,10 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
     mutate,
   } = useSWR(`wallet-activity-${walletId}`, () => fetchWalletActivity(walletId), {
     fallbackData: initialActivity,
+    revalidateOnMount: hasInitialActivity ? false : undefined,
+    revalidateIfStale: hasInitialActivity ? false : undefined,
     revalidateOnFocus: true,
+    refreshWhenHidden: false,
     refreshInterval: 20_000,
   });
   const liveActivity = swrActivity ?? initialActivity;

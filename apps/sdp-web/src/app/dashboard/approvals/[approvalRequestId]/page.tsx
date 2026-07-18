@@ -19,8 +19,11 @@ type PageContext = {
 };
 
 export default async function ApprovalRequestPage({ params }: PageContext) {
-  const t = await getTranslations();
-  const { userId, orgId, orgRole } = await auth();
+  const [t, { userId, orgId, orgRole }, { approvalRequestId }] = await Promise.all([
+    getTranslations(),
+    auth(),
+    params,
+  ]);
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
@@ -38,8 +41,12 @@ export default async function ApprovalRequestPage({ params }: PageContext) {
     );
   }
 
-  const { approvalRequestId } = await params;
   const apiClient = await createSdpApiClient();
+  const apiKeyNamesPromise = fetchApprovalApiKeyNames(apiClient);
+  // The primary request can exit through notFound() before this speculative
+  // lookup is awaited. Keep that early exit from leaving a rejected promise
+  // unobserved if the helper ever stops being fail-soft.
+  void apiKeyNamesPromise.catch(() => undefined);
   let approvalRequest: WalletApprovalRequestSummary;
   try {
     approvalRequest = await fetchApprovalRequest(apiClient, approvalRequestId);
@@ -50,7 +57,7 @@ export default async function ApprovalRequestPage({ params }: PageContext) {
 
   const [evaluation, apiKeyNames] = await Promise.all([
     fetchApprovalPolicyEvaluation(apiClient, approvalRequest),
-    fetchApprovalApiKeyNames(apiClient),
+    apiKeyNamesPromise,
   ]);
 
   return (

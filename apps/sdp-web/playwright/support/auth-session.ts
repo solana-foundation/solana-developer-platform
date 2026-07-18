@@ -2,7 +2,7 @@ import type { Browser, Page } from "@playwright/test";
 import { getE2EEnv } from "../env";
 import { authStatePath } from "./auth-state";
 import type { ClerkTestIdentity } from "./clerk-admin";
-import { ensureClerkAdminUser } from "./clerk-admin";
+import { resolveClerkTestIdentity } from "./clerk-admin";
 
 async function readClerkBearerToken(page: Page, template: string): Promise<string | null> {
   return page.evaluate(
@@ -76,7 +76,7 @@ export async function getPlaywrightAdminSession(browser: Browser): Promise<{
   bearerToken: string;
   getBearerToken: () => Promise<string>;
 }> {
-  const identity = await ensureClerkAdminUser();
+  const identity = await resolveClerkTestIdentity();
   const page = await openAuthenticatedBootstrapPage(browser);
   const bearerToken = await getClerkBearerToken(page);
   const getBearerToken = createClerkBearerTokenProvider(page);

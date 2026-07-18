@@ -5,8 +5,10 @@ import { authStatePath } from "./playwright/support/auth-state";
 
 const env = getE2EEnv();
 const fixturesPath = path.join(__dirname, "playwright/.fixtures/issuance.json");
+const useExternalApi = env.useExternalApi;
 const localApiPort = process.env.PLAYWRIGHT_API_PORT ?? "8788";
 const localApiUrl = process.env.PLAYWRIGHT_API_URL ?? `http://127.0.0.1:${localApiPort}`;
+const apiBaseUrl = useExternalApi ? env.sdpApiBaseUrl : localApiUrl;
 const apiPersistPath = process.env.PLAYWRIGHT_API_PERSIST_PATH ?? ".wrangler/state-playwright";
 const webPort = new URL(env.baseURL).port || "3001";
 const nextDistDir = process.env.PLAYWRIGHT_NEXT_DIST_DIR ?? ".next-playwright";
@@ -31,24 +33,28 @@ export default defineConfig({
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : [["list"]],
   use: {
     baseURL: env.baseURL,
-    trace: "on-first-retry",
+    trace: "retain-on-failure",
   },
   webServer: [
-    {
-      command: "node scripts/dev-local.mjs",
-      cwd: path.join(__dirname, "../sdp-api"),
-      url: `${localApiUrl}/health`,
-      reuseExistingServer: false,
-      env: {
-        ...resolveProcessEnv(),
-        SDP_API_LOCAL_PERSIST_PATH: apiPersistPath,
-        SDP_API_PORT: localApiPort,
-        SDP_API_RESET_LOCAL_STATE: "1",
-      },
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: 180_000,
-    },
+    ...(!useExternalApi
+      ? [
+          {
+            command: "node scripts/dev-local.mjs",
+            cwd: path.join(__dirname, "../sdp-api"),
+            url: `${localApiUrl}/health`,
+            reuseExistingServer: false,
+            env: {
+              ...resolveProcessEnv(),
+              SDP_API_LOCAL_PERSIST_PATH: apiPersistPath,
+              SDP_API_PORT: localApiPort,
+              SDP_API_RESET_LOCAL_STATE: "1",
+            },
+            stdout: "pipe" as const,
+            stderr: "pipe" as const,
+            timeout: 180_000,
+          },
+        ]
+      : []),
     {
       command: webCommand,
       cwd: __dirname,
@@ -58,8 +64,8 @@ export default defineConfig({
         ...resolveProcessEnv(),
         ...env.webServerEnv,
         PLAYWRIGHT_NEXT_DIST_DIR: nextDistDir,
-        SDP_API_BASE_URL: localApiUrl,
-        NEXT_PUBLIC_SDP_API_BASE_URL: localApiUrl,
+        SDP_API_BASE_URL: apiBaseUrl,
+        NEXT_PUBLIC_SDP_API_BASE_URL: apiBaseUrl,
       },
       stdout: "pipe",
       stderr: "pipe",
@@ -84,7 +90,7 @@ export default defineConfig({
     {
       name: "dashboard",
       testMatch: /.*\.e2e\.spec\.ts/,
-      testIgnore: /.*(issuance|auth-entry).*.e2e\.spec\.ts/,
+      testIgnore: /.*(issuance|auth-entry|gcp-read-only).*.e2e\.spec\.ts/,
       dependencies: ["auth-setup"],
       use: {
         ...devices["Desktop Chrome"],
@@ -100,12 +106,23 @@ export default defineConfig({
         storageState: authStatePath,
       },
     },
+    {
+      name: "gcp-read-only",
+      testMatch: /.*gcp-read-only.*\.e2e\.spec\.ts/,
+      dependencies: ["auth-setup"],
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: authStatePath,
+      },
+    },
   ],
   outputDir: path.join(__dirname, "test-results"),
   metadata: {
     authStatePath,
+    apiBaseUrl,
     fixturesPath,
     localApiUrl,
+    useExternalApi,
     webServerMode: useNextStart ? "start" : "dev",
   },
 });
