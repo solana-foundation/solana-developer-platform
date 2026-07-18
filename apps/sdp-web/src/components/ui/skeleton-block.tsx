@@ -5,5 +5,12 @@ type SkeletonBlockProps = {
 };
 
 export function SkeletonBlock({ className }: SkeletonBlockProps) {
-  return <div className={cn("animate-pulse rounded-md bg-fill-strong", className)} />;
+  return (
+    <div
+      className={cn(
+        "animate-pulse rounded-md bg-fill-strong motion-reduce:animate-none",
+        className
+      )}
+    />
+  );
 }
