@@ -7537,8 +7537,8 @@ describe("Payments routes", () => {
         counterpartyId,
         token: "USDC",
         direction: "outbound",
-        from: "2026-01-02T00:00:00.000Z",
-        to: "2026-01-03T00:00:00.000Z",
+        from: "2026-01-02T16:00:00+05:00",
+        to: "2026-01-02T08:00:00-05:00",
         sortBy: "amount",
         sortDirection: "asc",
         pageSize: "1",
@@ -7720,7 +7720,7 @@ describe("Payments routes", () => {
         signature: matchingLowSignature,
         counterpartyId,
         amount: "2",
-        createdAt: "2026-01-02T00:00:00.000Z",
+        createdAt: "2026-01-02T16:00:00.000Z",
       });
       await seedTransfer({
         id: "xfr_observed_filter_high",
@@ -7762,8 +7762,8 @@ describe("Payments routes", () => {
       const query = new URLSearchParams({
         wallet: TEST_WALLET_ID,
         search: "moonpay test",
-        from: "2026-01-01T00:00:00.000Z",
-        to: "2026-01-04T00:00:00.000Z",
+        from: "2026-01-02T20:00:00+05:00",
+        to: "2026-01-03T19:00:00-05:00",
         sortBy: "amount",
         sortDirection: "asc",
       });

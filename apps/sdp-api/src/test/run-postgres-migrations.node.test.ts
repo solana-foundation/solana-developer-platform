@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   applyPostgresMigration,
@@ -16,7 +19,49 @@ function migrationClient(options: { invalidIndex?: boolean } = {}) {
   };
 }
 
+function readMigration(migrationFile: string) {
+  const testDir = path.dirname(fileURLToPath(import.meta.url));
+  return readFileSync(path.join(testDir, "../db/migrations/postgres", migrationFile), "utf8");
+}
+
 describe("Postgres migration runner", () => {
+  it("installs pg_trgm before building each ledger index concurrently", () => {
+    const extensionMigration = "0027_payment_transfer_ledger_indexes.sql";
+    const extensionRepairMigration = "0027a_enable_pg_trgm.sql";
+    const statusIndexMigration = "0028_payment_transfers_project_status_created_id.sql";
+    const walletIndexMigration = "0029_payment_transfers_project_wallet_created_id.sql";
+    const firstTrigramIndexMigration = "0032_payment_transfers_search_trgm.sql";
+    const extensionSql = readMigration(extensionMigration);
+    const extensionRepairSql = readMigration(extensionRepairMigration);
+    const statusIndexSql = readMigration(statusIndexMigration);
+    const walletIndexSql = readMigration(walletIndexMigration);
+
+    expect(
+      [
+        extensionMigration,
+        extensionRepairMigration,
+        statusIndexMigration,
+        walletIndexMigration,
+        firstTrigramIndexMigration,
+      ].sort((left, right) => left.localeCompare(right))
+    ).toEqual([
+      extensionMigration,
+      extensionRepairMigration,
+      statusIndexMigration,
+      walletIndexMigration,
+      firstTrigramIndexMigration,
+    ]);
+    for (const sql of [extensionSql, extensionRepairSql]) {
+      expect(sql).toContain("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+      expect(sql).not.toContain("CREATE INDEX");
+      expect(getPostgresMigrationMode(sql)).toBe("transactional");
+    }
+    for (const sql of [statusIndexSql, walletIndexSql]) {
+      expect(sql.match(/CREATE INDEX CONCURRENTLY/g)).toHaveLength(1);
+      expect(getPostgresMigrationMode(sql)).toBe("non-transactional");
+    }
+  });
+
   it("keeps ordinary migrations atomic", async () => {
     const client = migrationClient();
 

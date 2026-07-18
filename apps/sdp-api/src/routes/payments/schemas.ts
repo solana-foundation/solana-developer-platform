@@ -518,6 +518,11 @@ export const transferStatusSchema = z.enum([
   "expired",
 ]);
 
+const transferFilterTimestampSchema = z
+  .string()
+  .datetime({ offset: true })
+  .transform((value) => new Date(value).toISOString());
+
 export const listTransfersQuerySchema = z.object({
   wallet: z.string().optional(),
   walletAddress: z.string().optional(),
@@ -549,8 +554,8 @@ export const listTransfersQuerySchema = z.object({
   counterpartyId: z.string().min(1).optional(),
   provider: rampProviderSchema.optional(),
   providerReference: z.string().min(1).optional(),
-  from: z.string().datetime({ offset: true }).optional(),
-  to: z.string().datetime({ offset: true }).optional(),
+  from: transferFilterTimestampSchema.optional(),
+  to: transferFilterTimestampSchema.optional(),
   includeObserved: z
     .enum(["true", "false"])
     .transform((value) => value === "true")
