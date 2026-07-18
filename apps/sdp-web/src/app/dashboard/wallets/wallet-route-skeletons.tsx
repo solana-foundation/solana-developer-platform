@@ -1,4 +1,5 @@
 import { ChevronRight } from "lucide-react";
+import { WalletActivitySkeleton } from "@/app/dashboard/custody/wallet-activity-skeleton";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
@@ -117,34 +118,42 @@ export function WalletsOnboardingSkeleton() {
 
 export function WalletSetupSkeleton() {
   return (
-    <LoadingRegion
-      layout="wallet-setup"
-      className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-6"
-    >
-      <div className="mx-auto w-full max-w-3xl space-y-6">
-        <div className="flex justify-center">
-          <Pulse className="h-9 w-56" />
-        </div>
-        <div className="grid gap-4">
-          {FIVE_ITEMS.map((provider) => (
-            <div
-              key={provider}
-              className="w-full rounded-2xl border border-border-default bg-surface-raised px-5 py-5"
-            >
-              <div className="flex items-start gap-4">
-                <Pulse className="size-11 shrink-0 rounded-full" />
-                <div className="min-w-0 flex-1 space-y-2 pt-0.5">
-                  <Pulse className="h-6 w-48 max-w-full" />
-                  <Pulse className="h-4 w-full max-w-[42rem]" />
-                </div>
-              </div>
-            </div>
-          ))}
+    <LoadingRegion layout="wallet-setup" className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6">
+        <div className="mx-auto flex w-full max-w-3xl items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <Pulse className="h-1.5 w-5 rounded-full" />
+            <Pulse className="h-1.5 w-2.5 rounded-full" />
+          </div>
+          <Pulse className="h-3 w-16" />
         </div>
       </div>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:flex-row sm:justify-between">
-        <Pulse className="h-14 w-full rounded-full sm:w-32" />
-        <Pulse className="h-14 w-full rounded-full sm:w-36" />
+      <div className="min-h-0 flex-1 overflow-hidden px-4 md:px-6">
+        <div className="mx-auto w-full max-w-3xl space-y-6 pb-8">
+          <Pulse className="h-8 w-56" />
+          <div className="grid gap-4">
+            {FIVE_ITEMS.map((provider) => (
+              <div
+                key={provider}
+                className="w-full rounded-2xl border border-border-default bg-surface-raised px-5 py-5"
+              >
+                <div className="flex items-start gap-4">
+                  <Pulse className="size-11 shrink-0 rounded-full" />
+                  <div className="min-w-0 flex-1 space-y-2 pt-0.5">
+                    <Pulse className="h-6 w-48 max-w-full" />
+                    <Pulse className="h-4 w-full max-w-[42rem]" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6">
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
+          <Pulse className="h-10 w-24 rounded-lg" />
+          <Pulse className="h-10 w-28 rounded-lg" />
+        </div>
       </div>
     </LoadingRegion>
   );
@@ -167,7 +176,7 @@ function WalletSummaryCardSkeleton({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function WalletControlsSkeleton() {
+export function WalletControlsSkeleton() {
   return (
     <section
       className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised"
@@ -195,6 +204,32 @@ function WalletControlsSkeleton() {
   );
 }
 
+export function WalletBalanceSummarySkeleton() {
+  return <WalletSummaryCardSkeleton compact />;
+}
+
+export function WalletBalancesSkeleton() {
+  return (
+    <section className="space-y-3" data-skeleton-section="wallet-balances">
+      <Pulse className="h-10 w-36" />
+      <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
+        {THREE_ITEMS.map((row) => (
+          <div
+            key={row}
+            className="flex min-h-[58px] items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0"
+          >
+            <div className="space-y-2">
+              <Pulse className="h-5 w-20" />
+              <Pulse className="h-3 w-48 sm:w-56" />
+            </div>
+            <Pulse className="h-4 w-24" />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function WalletDetailSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
@@ -204,43 +239,11 @@ export function WalletDetailSkeleton() {
         </div>
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
           <WalletSummaryCardSkeleton />
-          <WalletSummaryCardSkeleton compact />
+          <WalletBalanceSummarySkeleton />
         </div>
         <WalletControlsSkeleton />
-        <section className="space-y-3" data-skeleton-section="wallet-balances">
-          <Pulse className="h-10 w-36" />
-          <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
-            {THREE_ITEMS.map((row) => (
-              <div
-                key={row}
-                className="flex min-h-[58px] items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0"
-              >
-                <div className="space-y-2">
-                  <Pulse className="h-5 w-20" />
-                  <Pulse className="h-3 w-48 sm:w-56" />
-                </div>
-                <Pulse className="h-4 w-24" />
-              </div>
-            ))}
-          </div>
-        </section>
-        <section
-          className="rounded-2xl border border-border-default bg-surface-raised p-6"
-          data-skeleton-section="wallet-activity"
-        >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="space-y-2">
-              <Pulse className="h-7 w-40" />
-              <Pulse className="h-4 w-72 max-w-full" />
-            </div>
-            <Pulse className="h-9 w-24 rounded-lg" />
-          </div>
-          <div className="mt-6 space-y-3">
-            {THREE_ITEMS.map((row) => (
-              <Pulse key={row} className="h-10 w-full rounded-[10px]" />
-            ))}
-          </div>
-        </section>
+        <WalletBalancesSkeleton />
+        <WalletActivitySkeleton />
       </LoadingRegion>
     </DashboardWorkspaceOverviewPanel>
   );

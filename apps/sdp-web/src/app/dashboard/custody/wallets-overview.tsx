@@ -2,7 +2,6 @@
 
 import type { CustodyWalletSummary } from "@sdp/types";
 import { Plus } from "lucide-react";
-import Link from "next/link";
 import type { ReactNode } from "react";
 import {
   CUSTODY_CAPABILITY_LABEL_KEYS,
@@ -19,6 +18,7 @@ import {
 import { WalletCardBalanceValue } from "@/app/dashboard/custody/wallet-card-balance-value";
 import { formatPurpose, formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTranslations } from "@/i18n/provider";

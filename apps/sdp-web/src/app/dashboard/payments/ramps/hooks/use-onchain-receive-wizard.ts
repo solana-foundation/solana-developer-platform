@@ -1,10 +1,10 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
@@ -44,7 +44,7 @@ export function useOnchainReceiveWizard({
   counterpartyId,
   onExit,
 }: UseOnchainReceiveWizardProps) {
-  const router = useRouter();
+  const router = useDashboardRouter();
   const t = useTranslations();
   const steps = getOnchainReceiveSteps(t);
   const [stepIndex, setStepIndex] = useState(0);

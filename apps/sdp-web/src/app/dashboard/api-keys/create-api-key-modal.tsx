@@ -1,7 +1,7 @@
 "use client";
 
 import { Plus } from "lucide-react";
-import Link from "next/link";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 

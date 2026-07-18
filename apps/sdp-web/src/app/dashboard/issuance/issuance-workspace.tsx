@@ -3,9 +3,8 @@
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Plus, Search } from "lucide-react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +12,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
 import { IssuancePlaygroundLoading } from "./issuance-playground-loading";
 import { getTemplateCatalogEntry, type IssuanceTemplateId } from "./template-catalog";
@@ -132,7 +132,7 @@ export function IssuanceWorkspace({
   const t = useTranslations();
   const locale = useLocale();
   const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
-  const router = useRouter();
+  const router = useDashboardRouter();
   const [search, setSearch] = useState("");
   const [isCreateTokenModalOpen, setIsCreateTokenModalOpen] = useState(false);
   const isPlaygroundTab = issuanceTab === "playground";

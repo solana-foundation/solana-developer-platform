@@ -18,15 +18,49 @@ import {
   ShieldCheckIcon,
   WalletIcon,
 } from "lucide-react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
+import {
+  ApiKeyAuthoringSkeleton,
+  ApiKeysListSkeleton,
+} from "@/app/dashboard/api-keys/api-key-page-skeletons";
+import {
+  ApprovalDetailSkeleton,
+  ApprovalInboxSkeleton,
+} from "@/app/dashboard/approvals/approval-page-skeletons";
+import {
+  IssuanceCreateSkeleton,
+  IssuanceDetailSkeleton,
+  IssuancePageSkeleton,
+} from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
-import CounterpartyLoading from "@/app/dashboard/payments/counterparty/loading";
-import PaymentsLoading from "@/app/dashboard/payments/loading";
-import WalletsLoading from "@/app/dashboard/wallets/loading";
+import {
+  CompactOperationsCardSkeleton,
+  SettingsPageSkeleton,
+} from "@/app/dashboard/operations-card-page-skeletons";
+import { CounterpartyMenuLoading } from "@/app/dashboard/payments/counterparty-menu-loading";
+import { PaymentsPageSkeleton } from "@/app/dashboard/payments/payments-page-skeleton";
+import {
+  CounterpartyCreateSkeleton,
+  CounterpartyDetailSkeleton,
+  PaymentsDepositPageSkeleton,
+  PaymentsPayPageSkeleton,
+  RecurringPaymentCreateSkeleton,
+  RecurringPaymentDetailSkeleton,
+  RecurringPaymentsPageSkeleton,
+} from "@/app/dashboard/payments/payments-route-skeletons";
+import { PoliciesOverviewSkeleton } from "@/app/dashboard/policies/policies-overview";
+import {
+  WalletDetailSkeleton,
+  WalletPolicyAuditDetailSkeleton,
+  WalletPolicyAuditListSkeleton,
+  WalletPolicyRevisionsSkeleton,
+  WalletPolicySkeleton,
+  WalletSetupSkeleton,
+  WalletsOverviewSkeleton,
+} from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { CounterpartyHeaderTabs } from "@/components/counterparty-header-tabs";
+import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
@@ -36,6 +70,15 @@ import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import {
+  DASHBOARD_NAVIGATION_RECOVERY_TIMEOUT_MS,
+  DASHBOARD_NAVIGATION_START_EVENT,
+  DASHBOARD_PAYMENTS_SUBNAV_HREFS,
+  DASHBOARD_SIDE_NAV_HREFS,
+  type DashboardLoadingRoute,
+  type DashboardNavigationStartDetail,
+  resolveDashboardLoadingRoute,
+} from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
 
 type SubNavItem = {
@@ -60,11 +103,23 @@ type NavSection = {
 
 function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[] {
   return [
-    { label: t("Shared.dashboardShell.counterparty"), href: "/dashboard/payments/counterparty" },
-    { label: t("Shared.dashboardShell.pay"), href: "/dashboard/payments/pay" },
-    { label: t("Shared.dashboardShell.deposit"), href: "/dashboard/payments/deposit" },
-    { label: t("Shared.dashboardShell.requests"), href: "/dashboard/payments/requests" },
-    { label: t("Shared.dashboardShell.recurring"), href: "/dashboard/payments/recurring" },
+    {
+      label: t("Shared.dashboardShell.counterparty"),
+      href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.counterparty,
+    },
+    { label: t("Shared.dashboardShell.pay"), href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay },
+    {
+      label: t("Shared.dashboardShell.deposit"),
+      href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.deposit,
+    },
+    {
+      label: t("Shared.dashboardShell.requests"),
+      href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.requests,
+    },
+    {
+      label: t("Shared.dashboardShell.recurring"),
+      href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
+    },
   ];
 }
 
@@ -76,8 +131,16 @@ function getNavSections(
     {
       title: t("Shared.dashboardShell.create"),
       items: [
-        { label: t("Shared.dashboardShell.home"), href: "/dashboard", icon: LayoutDashboardIcon },
-        { label: t("Shared.dashboardShell.wallets"), href: "/dashboard/wallets", icon: WalletIcon },
+        {
+          label: t("Shared.dashboardShell.home"),
+          href: DASHBOARD_SIDE_NAV_HREFS.home,
+          icon: LayoutDashboardIcon,
+        },
+        {
+          label: t("Shared.dashboardShell.wallets"),
+          href: DASHBOARD_SIDE_NAV_HREFS.wallets,
+          icon: WalletIcon,
+        },
       ],
     },
     {
@@ -85,30 +148,30 @@ function getNavSections(
       items: [
         {
           label: t("Shared.dashboardShell.issuance"),
-          href: "/dashboard/issuance",
+          href: DASHBOARD_SIDE_NAV_HREFS.issuance,
           icon: CoinsIcon,
         },
         {
           label: t("Shared.dashboardShell.payments"),
-          href: "/dashboard/payments",
+          href: DASHBOARD_SIDE_NAV_HREFS.payments,
           icon: ArrowLeftRightIcon,
           children: getPaymentsActions(t),
         },
         {
           label: t("Shared.dashboardShell.apiKeys"),
-          href: "/dashboard/api-keys",
+          href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,
           icon: KeyRoundIcon,
         },
         {
           label: t("Shared.dashboardShell.policies"),
-          href: "/dashboard/policies",
+          href: DASHBOARD_SIDE_NAV_HREFS.policies,
           icon: ShieldCheckIcon,
         },
         ...(options.canReadApprovals
           ? [
               {
                 label: t("Shared.dashboardShell.approvals"),
-                href: "/dashboard/approvals",
+                href: DASHBOARD_SIDE_NAV_HREFS.approvals,
                 icon: CircleCheckBigIcon,
                 ...(options.pendingApprovalCount ? { badge: options.pendingApprovalCount } : {}),
               },
@@ -156,7 +219,7 @@ function HeaderBackAction({
   compactOnMobile?: boolean;
 }) {
   return (
-    <Link
+    <DashboardNavigationLink
       href={href}
       className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary"
     >
@@ -169,7 +232,7 @@ function HeaderBackAction({
       >
         {label}
       </span>
-    </Link>
+    </DashboardNavigationLink>
   );
 }
 
@@ -196,6 +259,33 @@ function SidebarToggle({
   );
 }
 
+export function CenteredDashboardTopBar({
+  leadingContent,
+  title,
+  trailingContent,
+}: {
+  leadingContent: ReactNode;
+  title: string;
+  trailingContent: ReactNode;
+}) {
+  return (
+    <div
+      className="grid min-h-[40px] min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[1fr_auto_1fr]"
+      data-dashboard-centered-topbar
+    >
+      <div className="flex min-w-0 items-center gap-3">{leadingContent}</div>
+      <div className="col-span-2 row-start-2 flex min-w-0 items-start justify-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
+        <h1 className="min-w-0 max-w-full text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
+          {title}
+        </h1>
+      </div>
+      <div className="col-start-2 row-start-1 flex min-w-0 items-center justify-end gap-2 sm:col-start-3">
+        {trailingContent}
+      </div>
+    </div>
+  );
+}
+
 function DashboardTopBar({
   isMobileSidebarOpen,
   setMobileSidebarOpen,
@@ -216,25 +306,25 @@ function DashboardTopBar({
 
   if (centeredTitle) {
     return (
-      <div className="grid min-h-[40px] grid-cols-[1fr_auto_1fr] items-start gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <SidebarToggle
-            isMobileSidebarOpen={isMobileSidebarOpen}
-            setMobileSidebarOpen={setMobileSidebarOpen}
-          />
-          {topBarLeadingContent}
-        </div>
-        <div className="flex items-start justify-center">
-          <h1 className="text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
-            {centeredTitle}
-          </h1>
-        </div>
-        <div className="flex items-center justify-end gap-2">
-          <LanguagePicker />
-          <UserButton />
-          {sandboxBadge}
-        </div>
-      </div>
+      <CenteredDashboardTopBar
+        title={centeredTitle}
+        leadingContent={
+          <>
+            <SidebarToggle
+              isMobileSidebarOpen={isMobileSidebarOpen}
+              setMobileSidebarOpen={setMobileSidebarOpen}
+            />
+            {topBarLeadingContent}
+          </>
+        }
+        trailingContent={
+          <>
+            <LanguagePicker />
+            <UserButton />
+            {sandboxBadge}
+          </>
+        }
+      />
     );
   }
 
@@ -523,13 +613,93 @@ function getDashboardPageConfig(
   return { title: t("Shared.dashboardShell.home") };
 }
 
-function resolvePageLoadingComponent(pathname: string): React.ComponentType {
-  if (pathname.startsWith("/dashboard/payments/counterparty")) return CounterpartyLoading;
-  if (pathname.startsWith("/dashboard/payments")) return PaymentsLoading;
-  if (pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody"))
-    return WalletsLoading;
-  if (pathname.startsWith("/dashboard/issuance")) return IssuancePageSkeleton;
-  return DashboardLoading;
+function ApiKeyNewLoading() {
+  return <ApiKeyAuthoringSkeleton route="api-key-new" />;
+}
+
+function ApiKeyEditLoading() {
+  return <ApiKeyAuthoringSkeleton route="api-key-edit" />;
+}
+
+function MembersLoading() {
+  return <CompactOperationsCardSkeleton route="members" />;
+}
+
+function AllowlistLoading() {
+  return <CompactOperationsCardSkeleton route="allowlist" />;
+}
+
+function CounterpartyDirectoryLoading() {
+  return <CounterpartyMenuLoading overview="counterparty-directory" />;
+}
+
+function PaymentRequestsLoading() {
+  return <CounterpartyMenuLoading overview="payment-requests" />;
+}
+
+function resolvePageLoadingComponent(route: DashboardLoadingRoute): React.ComponentType {
+  switch (route) {
+    case "home":
+      return DashboardLoading;
+    case "wallets-overview":
+      return WalletsOverviewSkeleton;
+    case "wallet-setup":
+      return WalletSetupSkeleton;
+    case "wallet-detail":
+      return WalletDetailSkeleton;
+    case "wallet-policy":
+      return WalletPolicySkeleton;
+    case "wallet-policy-audit-list":
+      return WalletPolicyAuditListSkeleton;
+    case "wallet-policy-audit-detail":
+      return WalletPolicyAuditDetailSkeleton;
+    case "wallet-policy-revisions":
+      return WalletPolicyRevisionsSkeleton;
+    case "issuance-overview":
+      return IssuancePageSkeleton;
+    case "issuance-create":
+      return IssuanceCreateSkeleton;
+    case "issuance-detail":
+      return IssuanceDetailSkeleton;
+    case "payments-overview":
+      return PaymentsPageSkeleton;
+    case "payments-pay":
+      return PaymentsPayPageSkeleton;
+    case "payments-deposit":
+      return PaymentsDepositPageSkeleton;
+    case "payment-requests":
+      return PaymentRequestsLoading;
+    case "counterparty-directory":
+      return CounterpartyDirectoryLoading;
+    case "counterparty-create":
+      return CounterpartyCreateSkeleton;
+    case "counterparty-detail":
+      return CounterpartyDetailSkeleton;
+    case "recurring-payments":
+      return RecurringPaymentsPageSkeleton;
+    case "recurring-payment-create":
+      return RecurringPaymentCreateSkeleton;
+    case "recurring-payment-detail":
+      return RecurringPaymentDetailSkeleton;
+    case "api-keys-list":
+      return ApiKeysListSkeleton;
+    case "api-key-new":
+      return ApiKeyNewLoading;
+    case "api-key-edit":
+      return ApiKeyEditLoading;
+    case "policies":
+      return PoliciesOverviewSkeleton;
+    case "approvals-list":
+      return ApprovalInboxSkeleton;
+    case "approval-detail":
+      return ApprovalDetailSkeleton;
+    case "members":
+      return MembersLoading;
+    case "settings":
+      return SettingsPageSkeleton;
+    case "allowlist":
+      return AllowlistLoading;
+  }
 }
 
 function isItemActive(pathname: string, href: string): boolean {
@@ -590,7 +760,7 @@ function SidebarGroup({
 
           return (
             <div key={item.label}>
-              <Link
+              <DashboardNavigationLink
                 href={item.href}
                 onClick={onNavigate}
                 title={isCollapsed ? item.label : undefined}
@@ -624,7 +794,7 @@ function SidebarGroup({
                     aria-hidden="true"
                   />
                 ) : null}
-              </Link>
+              </DashboardNavigationLink>
               {!isCollapsed && item.children && item.children.length > 0 && (
                 <div className="ml-5 mt-2">
                   {item.children.map((child, i, siblings) => {
@@ -647,7 +817,7 @@ function SidebarGroup({
                             <LockIcon className="ml-auto h-3 w-3" />
                           </span>
                         ) : (
-                          <Link
+                          <DashboardNavigationLink
                             href={child.href}
                             onClick={onNavigate}
                             className={cn(
@@ -656,7 +826,7 @@ function SidebarGroup({
                             )}
                           >
                             {child.label}
-                          </Link>
+                          </DashboardNavigationLink>
                         )}
                       </div>
                     );
@@ -679,6 +849,7 @@ function DashboardSidebarContent({
   onClose,
   isCollapsed,
   variant,
+  onOrganizationSwitchingChange,
 }: {
   bottomNavItems: NavItem[];
   navSections: NavSection[];
@@ -687,6 +858,7 @@ function DashboardSidebarContent({
   onClose: () => void;
   isCollapsed: boolean;
   variant: "desktop" | "mobile";
+  onOrganizationSwitchingChange: (isSwitching: boolean) => void;
 }) {
   const t = useTranslations();
   const showMobileClose = variant === "mobile";
@@ -696,7 +868,10 @@ function DashboardSidebarContent({
         <div className="py-3">
           {showMobileClose ? (
             <div className="flex items-center justify-between gap-2">
-              <WorkspaceSwitcher collapsed={false} />
+              <WorkspaceSwitcher
+                collapsed={false}
+                onOrganizationSwitchingChange={onOrganizationSwitchingChange}
+              />
               <button
                 type="button"
                 aria-label={t("Shared.dashboardShell.closeNavigation")}
@@ -707,7 +882,10 @@ function DashboardSidebarContent({
               </button>
             </div>
           ) : (
-            <WorkspaceSwitcher collapsed={isCollapsed} />
+            <WorkspaceSwitcher
+              collapsed={isCollapsed}
+              onOrganizationSwitchingChange={onOrganizationSwitchingChange}
+            />
           )}
         </div>
         {navSections.map((section, idx) => (
@@ -727,7 +905,7 @@ function DashboardSidebarContent({
         {bottomNavItems.map((item) => {
           const Icon = item.icon;
           return (
-            <Link
+            <DashboardNavigationLink
               key={item.label}
               href={item.href}
               target={item.external ? "_blank" : undefined}
@@ -742,7 +920,7 @@ function DashboardSidebarContent({
             >
               <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
               {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
-            </Link>
+            </DashboardNavigationLink>
           );
         })}
       </div>
@@ -757,13 +935,24 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
-  const PageLoadingComponent = resolvePageLoadingComponent(pathname);
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<{
+    fromPathname: string;
+    toPathname: string;
+  } | null>(null);
   const [pendingApprovalCount, setPendingApprovalCount] = useState<number | null>(null);
   const previousPathnameRef = useRef(pathname);
+  const pendingNavigationPathname =
+    pendingNavigation?.fromPathname === pathname ? pendingNavigation.toPathname : null;
+  const shellPathname = pendingNavigationPathname ?? pathname;
+  const loadingRoute = resolveDashboardLoadingRoute(shellPathname) ?? "home";
+  const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute);
+  const isNavigationPending =
+    Boolean(pendingNavigationPathname) || isProjectSwitching || isOrganizationSwitching;
   const sidebarExpandedWidth = 296;
   const sidebarCollapsedWidth = 64;
-  const pageConfig = getDashboardPageConfig(pathname, t);
+  const pageConfig = getDashboardPageConfig(shellPathname, t);
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     pendingApprovalCount,
@@ -779,7 +968,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       ? [
           {
             label: t("Shared.dashboardShell.settings"),
-            href: "/dashboard/settings",
+            href: DASHBOARD_SIDE_NAV_HREFS.settings,
             icon: Settings2Icon,
           },
         ]
@@ -796,38 +985,67 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     pageConfig.showHeaderNavRow || Boolean(backAction) || Boolean(headerNav);
   const shouldRenderTopBarBorder = Boolean(centeredTitle) && !shouldRenderHeaderNavRow;
   const shouldClipHorizontalOverflow =
-    pathname === "/dashboard/payments" ||
-    (pathname.startsWith("/dashboard/payments/") &&
-      !pathname.startsWith("/dashboard/payments/counterparty"));
+    shellPathname === "/dashboard/payments" ||
+    (shellPathname.startsWith("/dashboard/payments/") &&
+      !shellPathname.startsWith("/dashboard/payments/counterparty"));
   const isWalletDetailRoute =
-    (pathname.startsWith("/dashboard/wallets/") &&
-      pathname !== "/dashboard/wallets/setup" &&
-      pathname !== "/dashboard/wallets/switch") ||
-    (pathname.startsWith("/dashboard/custody/") &&
-      pathname !== "/dashboard/custody/setup" &&
-      pathname !== "/dashboard/custody/switch");
+    (shellPathname.startsWith("/dashboard/wallets/") &&
+      shellPathname !== "/dashboard/wallets/setup" &&
+      shellPathname !== "/dashboard/wallets/switch") ||
+    (shellPathname.startsWith("/dashboard/custody/") &&
+      shellPathname !== "/dashboard/custody/setup" &&
+      shellPathname !== "/dashboard/custody/switch");
+  const isWalletSetupRoute =
+    shellPathname === "/dashboard/wallets/setup" || shellPathname === "/dashboard/custody/setup";
   const shouldUseWorkspaceViewport =
-    pathname === "/dashboard/issuance" ||
-    pathname === "/dashboard/issuance/create" ||
-    pathname === "/dashboard/policies" ||
-    pathname === "/dashboard/api-keys/new" ||
-    (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
-    pathname === "/dashboard/payments" ||
-    pathname === "/dashboard/wallets" ||
-    pathname === "/dashboard/custody" ||
-    pathname === "/dashboard/payments/counterparty" ||
-    (pathname.startsWith("/dashboard/payments/counterparty/") &&
-      pathname !== "/dashboard/payments/counterparty/create") ||
-    pathname === "/dashboard/payments/requests" ||
-    pathname === "/dashboard/payments/recurring" ||
-    pathname.startsWith("/dashboard/approvals") ||
+    shellPathname === "/dashboard/issuance" ||
+    shellPathname === "/dashboard/issuance/create" ||
+    shellPathname === "/dashboard/policies" ||
+    shellPathname === "/dashboard/api-keys/new" ||
+    (shellPathname.startsWith("/dashboard/api-keys/") && shellPathname.endsWith("/edit")) ||
+    shellPathname === "/dashboard/payments" ||
+    shellPathname === "/dashboard/wallets" ||
+    shellPathname === "/dashboard/custody" ||
+    isWalletSetupRoute ||
+    shellPathname === "/dashboard/payments/counterparty" ||
+    (shellPathname.startsWith("/dashboard/payments/counterparty/") &&
+      shellPathname !== "/dashboard/payments/counterparty/create") ||
+    shellPathname === "/dashboard/payments/requests" ||
+    shellPathname === "/dashboard/payments/recurring" ||
+    shellPathname.startsWith("/dashboard/approvals") ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
 
   useEffect(() => {
+    const handleProgrammaticNavigation = (event: Event) => {
+      const detail = (event as CustomEvent<DashboardNavigationStartDetail>).detail;
+      if (!detail?.fromPathname || !detail.toPathname) return;
+      setPendingNavigation(detail);
+    };
+
+    window.addEventListener(DASHBOARD_NAVIGATION_START_EVENT, handleProgrammaticNavigation);
+    return () => {
+      window.removeEventListener(DASHBOARD_NAVIGATION_START_EVENT, handleProgrammaticNavigation);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pendingNavigation) return;
+
+    // A router error or middleware cancellation may never update usePathname.
+    // Restore the current page instead of leaving an indefinite loading shell.
+    const recoveryTimeout = window.setTimeout(() => {
+      setPendingNavigation((current) => (current === pendingNavigation ? null : current));
+    }, DASHBOARD_NAVIGATION_RECOVERY_TIMEOUT_MS);
+
+    return () => window.clearTimeout(recoveryTimeout);
+  }, [pendingNavigation]);
+
+  useEffect(() => {
     if (previousPathnameRef.current !== pathname) {
       previousPathnameRef.current = pathname;
+      setPendingNavigation(null);
       setMobileSidebarOpen(false);
     }
   }, [pathname]);
@@ -919,6 +1137,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   return (
     <main
+      aria-busy={isNavigationPending}
       className={[
         "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",
         shouldLockShellViewport ? "h-screen overflow-hidden" : "",
@@ -940,11 +1159,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           <DashboardSidebarContent
             bottomNavItems={bottomNavItems}
             navSections={navSections}
-            pathname={pathname}
+            pathname={shellPathname}
             onNavigate={undefined}
             onClose={() => setSidebarOpen(false)}
             isCollapsed={!isSidebarOpen}
             variant="desktop"
+            onOrganizationSwitchingChange={setOrganizationSwitching}
           />
           <button
             type="button"
@@ -972,11 +1192,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               <DashboardSidebarContent
                 bottomNavItems={bottomNavItems}
                 navSections={navSections}
-                pathname={pathname}
+                pathname={shellPathname}
                 onNavigate={() => setMobileSidebarOpen(false)}
                 onClose={() => setMobileSidebarOpen(false)}
                 isCollapsed={false}
                 variant="mobile"
+                onOrganizationSwitchingChange={setOrganizationSwitching}
               />
             </div>
           </div>
@@ -1057,6 +1278,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               ) : null}
             </div>
             <div
+              data-dashboard-page-content={isNavigationPending ? undefined : ""}
               className={[
                 "mx-auto min-w-0 w-full",
                 contentWidthClass,
@@ -1066,7 +1288,19 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 shouldLockViewportScroll ? "min-h-0 flex-1 overflow-hidden" : "",
               ].join(" ")}
             >
-              {isProjectSwitching ? <PageLoadingComponent /> : children}
+              {isNavigationPending ? (
+                <div
+                  className="h-full min-h-0"
+                  data-dashboard-navigation-pending={loadingRoute}
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span className="sr-only">{t("Shared.dashboardShell.loadingDashboard")}</span>
+                  <PageLoadingComponent />
+                </div>
+              ) : (
+                children
+              )}
             </div>
           </div>
         </section>

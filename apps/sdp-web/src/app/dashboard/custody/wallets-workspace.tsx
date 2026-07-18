@@ -2,12 +2,12 @@
 
 import type { CustodyWalletSummary } from "@sdp/types";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import type { KnownCustodyProvider } from "./provider-catalog";
 import { WalletsOverview } from "./wallets-overview";
 
@@ -49,7 +49,7 @@ export function WalletsWorkspace({
   wallets,
   walletsError,
 }: WalletsWorkspaceProps) {
-  const router = useRouter();
+  const router = useDashboardRouter();
   const { dashboardAccess, issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
     useDashboardWorkspace();
   const isPlaygroundTab = issuanceTab === "playground";

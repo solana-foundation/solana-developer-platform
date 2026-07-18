@@ -1,5 +1,5 @@
 import { type Browser, expect, type Page, test } from "@playwright/test";
-import type { Token, TokenTransaction } from "@sdp/types";
+import type { PaymentsDashboardWallet, Token, TokenTransaction } from "@sdp/types";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import {
@@ -21,6 +21,10 @@ interface MintResponse {
 
 interface TransactionResponse {
   transaction: TokenTransaction;
+}
+
+interface WalletsResponse {
+  wallets: PaymentsDashboardWallet[];
 }
 
 const E2E_POLL_TIMEOUT_MS = 180_000;
@@ -300,6 +304,77 @@ test.describe
       });
     });
 
+    test("wallet actions menu preserves page geometry", async ({ browser, page }) => {
+      const { projectId, wallet, walletLabel } = await bootstrapWalletRouteFixture(browser, {
+        labelPrefix: "Wallet Action Geometry",
+      });
+      await seedProjectCookie(page, projectId);
+      await page.setViewportSize({ width: 1280, height: 500 });
+      await page.goto(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`, {
+        waitUntil: "domcontentloaded",
+      });
+      await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+
+      const actions = page.getByRole("button", {
+        name: `Wallet actions for ${walletLabel}`,
+      });
+      const actionTrigger = page.locator(
+        '[data-slot="dropdown-menu-trigger"][aria-label^="Wallet actions for"]'
+      );
+      const walletHeading = page.locator("h2").filter({ hasText: walletLabel });
+      const pageGeometry = async () => {
+        const [root, trigger, heading] = await Promise.all([
+          page.evaluate(() => ({
+            viewportWidth: document.documentElement.clientWidth,
+            pageWidth: document.documentElement.scrollWidth,
+            bodyScrollLocked: document.body.hasAttribute("data-scroll-locked"),
+            bodyOverflow: getComputedStyle(document.body).overflow,
+            bodyPaddingRight: getComputedStyle(document.body).paddingRight,
+          })),
+          actionTrigger.boundingBox(),
+          walletHeading.boundingBox(),
+        ]);
+        if (!trigger || !heading) {
+          throw new Error("Wallet action geometry anchors did not render");
+        }
+
+        return {
+          ...root,
+          triggerLeft: trigger.x,
+          headingLeft: heading.x,
+          headingWidth: heading.width,
+        };
+      };
+
+      const baseline = await pageGeometry();
+      await actions.click();
+      await expect(page.getByRole("menu")).toBeVisible();
+      expect(await pageGeometry()).toEqual(baseline);
+
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu")).toBeHidden();
+      await expect(actions).toBeFocused();
+      expect(await pageGeometry()).toEqual(baseline);
+
+      await actions.focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("menu")).toBeVisible();
+      expect(await pageGeometry()).toEqual(baseline);
+
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu")).toBeHidden();
+      await page.setViewportSize({ width: 390, height: 844 });
+      const mobileBaseline = await pageGeometry();
+      await actions.click();
+      await expect(page.getByRole("menu")).toBeVisible();
+      expect(await pageGeometry()).toEqual(mobileBaseline);
+      await page.keyboard.press("Escape");
+      await expect(actions).toBeFocused();
+      expect(await pageGeometry()).toEqual(mobileBaseline);
+    });
+
     test("wallet policy history routes preserve navigation", async ({ browser, page }) => {
       const { projectId, wallet } = await bootstrapWalletRouteFixture(browser, {
         labelPrefix: "Wallet Policy Routes",
@@ -336,7 +411,7 @@ test.describe
     test("wallet setup routes preserve provider selection and aliases", async ({
       browser,
       page,
-    }) => {
+    }, testInfo) => {
       const session = await getPlaywrightAdminSession(browser);
       const projectId = await resolvePlaywrightProjectId(
         getBootstrapApiBaseUrl(),
@@ -347,10 +422,59 @@ test.describe
       await seedProjectCookie(page, projectId);
 
       await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
-      await expect(page.getByRole("button", { name: "Previous" })).toBeVisible({
+      await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
-      await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
+      const setupActions = page.locator("[data-wallet-setup-actions]");
+      const setupScrollRegion = page.locator("[data-wallet-setup-scroll-region]");
+      const cancelButton = page.getByRole("button", { name: "Cancel" });
+      const nextButton = page.getByRole("button", { name: "Next", exact: true });
+      await expect(setupActions).toBeVisible();
+      await expect(cancelButton).toBeVisible();
+      await expect(nextButton).toBeDisabled();
+
+      const desktopScreenshotPath = testInfo.outputPath("wallet-create-desktop.png");
+      await page.screenshot({ path: desktopScreenshotPath });
+      await testInfo.attach("wallet-create-desktop", {
+        path: desktopScreenshotPath,
+        contentType: "image/png",
+      });
+
+      const desktopActionsBox = await setupActions.boundingBox();
+      const desktopScrollBox = await setupScrollRegion.boundingBox();
+      expect(desktopActionsBox).not.toBeNull();
+      expect(desktopScrollBox).not.toBeNull();
+      expect((desktopScrollBox?.y ?? 0) + (desktopScrollBox?.height ?? 0)).toBeLessThanOrEqual(
+        (desktopActionsBox?.y ?? 0) + 1
+      );
+
+      await setupScrollRegion.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      const scrolledActionsBox = await setupActions.boundingBox();
+      expect(scrolledActionsBox?.y).toBe(desktopActionsBox?.y);
+
+      const privyProvider = page.getByRole("button", { name: /Privy/ });
+      await privyProvider.focus();
+      await page.keyboard.press("Space");
+      await expect(privyProvider).toHaveAttribute("aria-pressed", "true");
+      await expect(nextButton).toBeEnabled();
+      await nextButton.click();
+      await expect(page.getByText("Step 2 of 2", { exact: true })).toBeVisible();
+      await expect(page.getByLabel("Wallet label")).toBeVisible();
+
+      const detailsScreenshotPath = testInfo.outputPath("wallet-create-details-desktop.png");
+      await page.screenshot({ path: detailsScreenshotPath });
+      await testInfo.attach("wallet-create-details-desktop", {
+        path: detailsScreenshotPath,
+        contentType: "image/png",
+      });
+
+      await page.getByRole("button", { name: "Back", exact: true }).click();
+      await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible();
+      await expect(privyProvider).toHaveAttribute("aria-pressed", "true");
+      await cancelButton.click();
+      await expect(page).toHaveURL(/\/dashboard\/wallets$/);
 
       await page.goto("/dashboard/wallets/setup?provider=privy", {
         waitUntil: "domcontentloaded",
@@ -359,13 +483,130 @@ test.describe
         timeout: E2E_POLL_TIMEOUT_MS,
       });
 
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
+      await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+      await expect(setupActions).toBeVisible();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+        )
+      ).toBe(true);
+
+      const mobileTopScreenshotPath = testInfo.outputPath("wallet-create-mobile-top.png");
+      await page.screenshot({ path: mobileTopScreenshotPath });
+      await testInfo.attach("wallet-create-mobile-top", {
+        path: mobileTopScreenshotPath,
+        contentType: "image/png",
+      });
+
+      const mobileActionsBeforeScroll = await setupActions.boundingBox();
+      await setupScrollRegion.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      const mobileActionsAfterScroll = await setupActions.boundingBox();
+      expect(mobileActionsAfterScroll?.y).toBe(mobileActionsBeforeScroll?.y);
+      const lastProvider = setupScrollRegion.getByRole("button").last();
+      await expect(lastProvider).toBeVisible();
+      const mobileScrollBox = await setupScrollRegion.boundingBox();
+      const lastProviderBox = await lastProvider.boundingBox();
+      expect((lastProviderBox?.y ?? 0) + (lastProviderBox?.height ?? 0)).toBeLessThanOrEqual(
+        (mobileScrollBox?.y ?? 0) + (mobileScrollBox?.height ?? 0) + 1
+      );
+
+      const mobileScreenshotPath = testInfo.outputPath("wallet-create-mobile.png");
+      await page.screenshot({ path: mobileScreenshotPath });
+      await testInfo.attach("wallet-create-mobile", {
+        path: mobileScreenshotPath,
+        contentType: "image/png",
+      });
+
       for (const switchHref of ["/dashboard/wallets/switch", "/dashboard/custody/switch"]) {
         await page.goto(switchHref, { waitUntil: "domcontentloaded" });
         await expect(page).toHaveURL(/\/dashboard\/wallets\/setup$/);
-        await expect(page.getByRole("button", { name: "Previous" })).toBeVisible({
+        await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible({
           timeout: E2E_POLL_TIMEOUT_MS,
         });
       }
+    });
+
+    test("wallet setup Enter advances without creating and final Enter creates once", async ({
+      browser,
+      page,
+    }) => {
+      const session = await getPlaywrightAdminSession(browser);
+      let projectId = "";
+      try {
+        await bootstrapLocalWalletFixtures({
+          identity: session.identity,
+          bearerToken: session.getBearerToken,
+          provider: "privy",
+          walletCount: 1,
+          walletLabel: `Wallet Enter Prerequisite ${Date.now().toString(36).toUpperCase()}`,
+          tier: "enterprise",
+        });
+        projectId = await resolvePlaywrightProjectId(
+          getBootstrapApiBaseUrl(),
+          session.getBearerToken
+        );
+      } finally {
+        await session.page.close();
+      }
+
+      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken, projectId);
+      const walletLabel = `Wallet Enter ${Date.now().toString(36).toUpperCase()}`;
+      const countMatchingWallets = async () => {
+        // biome-ignore lint/security/noSecrets: Local API path with query params for wallet listing.
+        const { wallets } = await api.get<WalletsResponse>("/v1/wallets?includeAllProviders=true");
+        return wallets.filter((wallet) => wallet.label === walletLabel).length;
+      };
+      expect(await countMatchingWallets()).toBe(0);
+
+      let serverActionRequestCount = 0;
+      page.on("request", (request) => {
+        if (request.method() === "POST" && request.headers()["next-action"]) {
+          serverActionRequestCount += 1;
+        }
+      });
+
+      const advanceProviderWithEnter = async () => {
+        const privyProvider = page.getByRole("button", { name: /Privy/ });
+        await privyProvider.focus();
+        await page.keyboard.press("Space");
+        await expect(privyProvider).toHaveAttribute("aria-pressed", "true");
+        await page.keyboard.press("Enter");
+        await expect(page.getByText("Step 2 of 2", { exact: true })).toBeVisible();
+        expect(serverActionRequestCount).toBe(0);
+      };
+
+      await page.setViewportSize({ width: 390, height: 844 });
+      await seedProjectCookie(page, projectId);
+      await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
+      await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+      await advanceProviderWithEnter();
+
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
+      await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+      await advanceProviderWithEnter();
+
+      const walletLabelInput = page.getByLabel("Wallet label");
+      await walletLabelInput.fill(walletLabel);
+      await walletLabelInput.focus();
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Enter");
+
+      await expect(page).toHaveURL(/\/dashboard\/wallets$/, {
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+      expect(serverActionRequestCount).toBe(1);
+      await expect.poll(countMatchingWallets, E2E_POLL_OPTIONS).toBe(1);
     });
 
     // ponytail: quarantined until Surfpool signing stops intermittently hanging in CI.
@@ -439,6 +680,7 @@ test.describe
       await session.page.close();
 
       await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
+      await page.getByRole("heading", { name: "Recent activity" }).scrollIntoViewIfNeeded();
 
       const expectedActivityRows = [
         { operationLabel: "Burn", token: deployedToken.symbol, amount: "2" },
@@ -482,7 +724,9 @@ test.describe
       }
 
       let failNextActivityRequest = false;
+      let activityRequestCount = 0;
       await page.route(/\/api\/dashboard\/wallets\/[^/]+\/activity$/, async (route) => {
+        activityRequestCount += 1;
         if (failNextActivityRequest) {
           await route.fulfill({
             status: 503,
@@ -520,11 +764,48 @@ test.describe
         });
       });
 
+      await page.setViewportSize({ width: 1280, height: 500 });
       await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("heading", { name: wallet.label ?? "Treasury" })).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+      await expect(page.getByRole("button", { name: "Actions" })).toBeEnabled();
+      const activityRegion = page.locator("[data-wallet-activity-state]");
+      await expect(activityRegion).not.toBeInViewport();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          })
+      );
+      await expect(activityRegion).toHaveAttribute("data-wallet-activity-state", "deferred");
+      expect(activityRequestCount).toBe(0);
+
+      await page.getByRole("heading", { name: "Recent activity" }).scrollIntoViewIfNeeded();
+      await expect(activityRegion).toHaveAttribute("data-wallet-activity-state", "mounted");
+      await expect.poll(() => activityRequestCount).toBe(1);
+
       const activityRow = page.locator("tr").filter({ hasText: "5.00 USDC" });
       await expect(activityRow).toBeVisible({ timeout: 120_000 });
       await expect(activityRow).toContainText("Incoming");
       await expect(activityRow.getByRole("link")).toHaveCount(1);
+
+      await page
+        .getByRole("heading", { name: wallet.label ?? "Treasury" })
+        .scrollIntoViewIfNeeded();
+      await expect(activityRegion).not.toBeInViewport();
+      await expect(activityRegion).toHaveAttribute("data-wallet-activity-visible", "false");
+      const requestCountBeforeReconnect = activityRequestCount;
+      await page.evaluate(() => {
+        window.dispatchEvent(new Event("offline"));
+        window.dispatchEvent(new Event("online"));
+      });
+      await page.waitForTimeout(1_000);
+      expect(activityRequestCount).toBe(requestCountBeforeReconnect);
+
+      await page.getByRole("heading", { name: "Recent activity" }).scrollIntoViewIfNeeded();
+      await expect(activityRegion).toHaveAttribute("data-wallet-activity-visible", "true");
+      await expect.poll(() => activityRequestCount).toBe(requestCountBeforeReconnect + 1);
 
       failNextActivityRequest = true;
       const refreshButton = page.getByRole("button", { name: "Refresh" });

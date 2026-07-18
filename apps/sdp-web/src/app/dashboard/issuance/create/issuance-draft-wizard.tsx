@@ -2,11 +2,11 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { AnimatePresence } from "motion/react";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { createAssetDraftAction } from "./actions";
 import { ClassificationInfoRail } from "./classification-info-rail";
 import { CreateDraftConfirmDialog } from "./create-draft-confirm-dialog";
@@ -108,7 +108,7 @@ function renderStep(
 
 function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardProps) {
   const t = useTranslations();
-  const router = useRouter();
+  const router = useDashboardRouter();
   const { draft, currentStep, updatedAt, advance, goBack, reset, clearStoredDraft } =
     useIssuanceDraft();
   const [submitting, setSubmitting] = useState(false);

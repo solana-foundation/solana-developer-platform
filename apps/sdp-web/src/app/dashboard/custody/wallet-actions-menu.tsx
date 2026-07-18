@@ -155,7 +155,7 @@ export function WalletActionsMenu({
   };
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         {triggerMode === "button" ? (
           <Button

@@ -34,12 +34,12 @@ function PaymentsOverviewSkeleton() {
 
 function PaymentsTransactionsSkeleton() {
   return (
-    <section className="rounded-3xl border border-border-default bg-white/85 p-5 shadow-[0_12px_32px_rgba(28,28,29,0.04)] animate-pulse">
-      <div className="space-y-3">
+    <section className="rounded-[var(--sdp-surface-radius)] bg-surface-raised py-6 shadow-sm ring-1 ring-border-default">
+      <div className="space-y-2 px-6">
         <SkeletonBlock className="h-6 w-40" />
         <SkeletonBlock className="h-4 w-[46%]" />
       </div>
-      <div className="mt-6 space-y-3">
+      <div className="mt-6 space-y-3 px-6" data-loading-table>
         {TRANSACTION_SKELETON_IDS.map((id) => (
           <SkeletonBlock key={id} className="h-12 w-full" />
         ))}
@@ -50,11 +50,11 @@ function PaymentsTransactionsSkeleton() {
 
 export function PaymentsPageSkeleton() {
   return (
-    <DashboardWorkspaceOverviewPanel className="grid gap-6">
-      <div className="flex flex-wrap gap-3">
-        <SkeletonBlock className="h-10 w-24 rounded-full" />
-        <SkeletonBlock className="h-10 w-28 rounded-full" />
-      </div>
+    <DashboardWorkspaceOverviewPanel
+      className="grid gap-6"
+      data-loading-layout="payments-overview"
+      aria-busy="true"
+    >
       <PaymentsOverviewSkeleton />
       <PaymentsTransactionsSkeleton />
     </DashboardWorkspaceOverviewPanel>
