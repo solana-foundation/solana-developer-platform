@@ -96,14 +96,15 @@ function OverviewRow({
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/(^-|-$)/g, "")}`}
-      className="flex items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0"
+      className="flex min-w-0 items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0"
     >
-      <p className="text-[15px] text-secondary">{label}</p>
+      <p className="shrink-0 text-[15px] text-secondary">{label}</p>
       <p
         className={[
-          "text-right text-[15px] text-primary",
+          "min-w-0 truncate text-right text-[15px] text-primary",
           monospace ? "font-mono text-xs" : "",
         ].join(" ")}
+        title={value}
       >
         {value}
       </p>

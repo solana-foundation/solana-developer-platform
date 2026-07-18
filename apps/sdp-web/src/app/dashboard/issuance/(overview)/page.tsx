@@ -168,8 +168,11 @@ interface IssuancePageProps {
 }
 
 export default async function IssuancePage({ searchParams }: IssuancePageProps) {
-  const t = await getTranslations();
-  const { userId, orgId } = await auth();
+  const [t, { userId, orgId }, resolvedSearchParams] = await Promise.all([
+    getTranslations(),
+    auth(),
+    searchParams ?? Promise.resolve(undefined),
+  ]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -180,7 +183,6 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
   const trace = createTimedTrace("dashboard.issuance.page");
 
   try {
-    const resolvedSearchParams = searchParams ? await searchParams : undefined;
     const currentTab =
       resolvedSearchParams?.tab === "playground" ||
       (Array.isArray(resolvedSearchParams?.tab) && resolvedSearchParams.tab[0] === "playground")
