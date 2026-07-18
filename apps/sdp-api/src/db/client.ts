@@ -341,6 +341,7 @@ class PooledPostgresClient extends BasePostgresClient {
 
   async transaction<T>(callback: (tx: DatabaseExecutor) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
+    let releaseError: Error | undefined;
 
     try {
       await client.query("BEGIN");
@@ -349,10 +350,15 @@ class PooledPostgresClient extends BasePostgresClient {
       await client.query("COMMIT");
       return result;
     } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        releaseError =
+          rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+      }
       throw error;
     } finally {
-      client.release();
+      client.release(releaseError);
     }
   }
 

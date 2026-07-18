@@ -191,7 +191,36 @@ describe("database client connection management", () => {
       expect.objectContaining({ text: "UPDATE wallets SET updated_at = sdp_datetime_now()" }),
       "ROLLBACK",
     ]);
-    expect(client?.release).toHaveBeenCalledOnce();
+    expect(client?.release).toHaveBeenCalledWith(undefined);
+  });
+
+  it("discards the pooled connection when rollback fails", async () => {
+    const transactionFailure = new Error("write failed");
+    const rollbackFailure = new Error("connection reset during rollback");
+    let queryCount = 0;
+    pgMock.poolClientQuery = async () => {
+      queryCount += 1;
+      if (queryCount === 3) {
+        throw rollbackFailure;
+      }
+      return { rows: [], rowCount: 0 };
+    };
+    const db = createDatabaseClient("postgresql://node-rollback-connection-error/sdp");
+
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.execute("UPDATE wallets SET updated_at = datetime('now')");
+        throw transactionFailure;
+      })
+    ).rejects.toBe(transactionFailure);
+
+    const client = pgMock.pools[0]?.connectedClients[0];
+    expect(client?.queries.map(([query]) => query)).toEqual([
+      "BEGIN",
+      expect.objectContaining({ text: "UPDATE wallets SET updated_at = sdp_datetime_now()" }),
+      "ROLLBACK",
+    ]);
+    expect(client?.release).toHaveBeenCalledWith(rollbackFailure);
   });
 
   it("keeps Hyperdrive on a fresh connection for each query", async () => {
