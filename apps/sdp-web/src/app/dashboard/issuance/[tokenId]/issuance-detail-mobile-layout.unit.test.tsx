@@ -5,8 +5,11 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { AssetProfileHeader } from "./asset-profile/asset-profile-header";
 import { TokenManagementHeader } from "./token-management-header";
+import { TokenOverviewSection } from "./token-overview-section";
 
 const TOKEN_ID = "tok_d106fe22-8311-4ba6-babf-7b7082bb0529";
+const TOKEN_ADDRESS = "2rN6gKUTbzwafECJP7yRRkB6vk5jiyoYrgNtifCttm8u";
+const MINT_AUTHORITY = "F6zprzxgL3gsK19vuj6oYJPpsqbRgSzY7tR4c9vZ4m8Y";
 
 const token = {
   id: TOKEN_ID,
@@ -90,6 +93,18 @@ function renderHeaders(): string {
   );
 }
 
+function renderOverviewWithLongAddresses(): string {
+  return renderToStaticMarkup(
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      <TokenOverviewSection
+        token={{ ...token, mintAddress: TOKEN_ADDRESS, status: "active" }}
+        showTitle={false}
+        mintAuthorityValue={MINT_AUTHORITY}
+      />
+    </I18nProvider>
+  );
+}
+
 describe("issuance detail mobile layout", () => {
   it("prefers natural token ID breakpoints before emergency wrapping in both settled headers", () => {
     const markup = renderHeaders();
@@ -104,5 +119,34 @@ describe("issuance detail mobile layout", () => {
       tokenIdValueClasses.every((className) => className.includes("[overflow-wrap:anywhere]"))
     ).toBe(true);
     expect(tokenIdValueClasses.some((className) => className.includes("break-all"))).toBe(false);
+  });
+
+  it("contains long overview addresses while exposing their full values", () => {
+    const markup = renderOverviewWithLongAddresses();
+    const rowClasses = [
+      ...markup.matchAll(
+        /data-testid="overview-row-(?:token-address|mint-authority)" class="([^"]*)"/g
+      ),
+    ].map((match) => match[1] ?? "");
+    const longValueElements = [...markup.matchAll(/<p class="([^"]*)" title="([^"]*)">/g)]
+      .filter((match) => match[2] === TOKEN_ADDRESS || match[2] === MINT_AUTHORITY)
+      .map((match) => ({ className: match[1] ?? "", title: match[2] ?? "" }));
+
+    expect(rowClasses).toHaveLength(2);
+    expect(rowClasses.every((className) => className.includes("min-w-0"))).toBe(true);
+    expect(rowClasses.every((className) => className.includes("justify-between"))).toBe(true);
+    expect(longValueElements).toHaveLength(2);
+    expect(longValueElements.map(({ title }) => title)).toEqual([TOKEN_ADDRESS, MINT_AUTHORITY]);
+    expect(
+      longValueElements.every(
+        ({ className }) =>
+          className.includes("min-w-0") &&
+          className.includes("truncate") &&
+          className.includes("text-right")
+      )
+    ).toBe(true);
+    expect(
+      markup.match(/<p class="[^"]*shrink-0[^"]*">(?:Token Address|Mint Authority)<\/p>/g)
+    ).toHaveLength(2);
   });
 });
