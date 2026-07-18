@@ -304,6 +304,77 @@ test.describe
       });
     });
 
+    test("wallet actions menu preserves page geometry", async ({ browser, page }) => {
+      const { projectId, wallet, walletLabel } = await bootstrapWalletRouteFixture(browser, {
+        labelPrefix: "Wallet Action Geometry",
+      });
+      await seedProjectCookie(page, projectId);
+      await page.setViewportSize({ width: 1280, height: 500 });
+      await page.goto(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`, {
+        waitUntil: "domcontentloaded",
+      });
+      await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+
+      const actions = page.getByRole("button", {
+        name: `Wallet actions for ${walletLabel}`,
+      });
+      const actionTrigger = page.locator(
+        '[data-slot="dropdown-menu-trigger"][aria-label^="Wallet actions for"]'
+      );
+      const walletHeading = page.locator("h2").filter({ hasText: walletLabel });
+      const pageGeometry = async () => {
+        const [root, trigger, heading] = await Promise.all([
+          page.evaluate(() => ({
+            viewportWidth: document.documentElement.clientWidth,
+            pageWidth: document.documentElement.scrollWidth,
+            bodyScrollLocked: document.body.hasAttribute("data-scroll-locked"),
+            bodyOverflow: getComputedStyle(document.body).overflow,
+            bodyPaddingRight: getComputedStyle(document.body).paddingRight,
+          })),
+          actionTrigger.boundingBox(),
+          walletHeading.boundingBox(),
+        ]);
+        if (!trigger || !heading) {
+          throw new Error("Wallet action geometry anchors did not render");
+        }
+
+        return {
+          ...root,
+          triggerLeft: trigger.x,
+          headingLeft: heading.x,
+          headingWidth: heading.width,
+        };
+      };
+
+      const baseline = await pageGeometry();
+      await actions.click();
+      await expect(page.getByRole("menu")).toBeVisible();
+      expect(await pageGeometry()).toEqual(baseline);
+
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu")).toBeHidden();
+      await expect(actions).toBeFocused();
+      expect(await pageGeometry()).toEqual(baseline);
+
+      await actions.focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("menu")).toBeVisible();
+      expect(await pageGeometry()).toEqual(baseline);
+
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu")).toBeHidden();
+      await page.setViewportSize({ width: 390, height: 844 });
+      const mobileBaseline = await pageGeometry();
+      await actions.click();
+      await expect(page.getByRole("menu")).toBeVisible();
+      expect(await pageGeometry()).toEqual(mobileBaseline);
+      await page.keyboard.press("Escape");
+      await expect(actions).toBeFocused();
+      expect(await pageGeometry()).toEqual(mobileBaseline);
+    });
+
     test("wallet policy history routes preserve navigation", async ({ browser, page }) => {
       const { projectId, wallet } = await bootstrapWalletRouteFixture(browser, {
         labelPrefix: "Wallet Policy Routes",
