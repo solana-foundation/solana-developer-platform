@@ -42,7 +42,7 @@ import {
   WALLET_TRANSFER_TYPES,
 } from "@/db/repositories/payments.repository";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
+import { AppError, accountFrozen, badRequest, badRequestQuery, solanaRpcError } from "@/lib/errors";
 import { buildPaymentTransferFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import {
@@ -371,6 +371,26 @@ async function updateTransferRecord(
   }
 
   return updated;
+}
+
+/**
+ * Maps a transfer execution failure to the `AppError` the route should
+ * surface. `AppError`s thrown deeper in the stack (e.g. on-chain confirmation
+ * failures) pass through unchanged. Failures whose message carries the SPL
+ * Token / Token-2022 `AccountFrozen` program error — Kora surfaces simulation
+ * rejections as `custom program error: 0x11` (decimal code 17), the hex form
+ * from the JSON-RPC preflight response, not `@solana/kit`'s own decimal `#17`
+ * `SolanaError` formatting — are surfaced as the existing 400 `ACCOUNT_FROZEN`
+ * error instead of an opaque 502; anything else falls back to the generic
+ * `SOLANA_RPC_ERROR`.
+ */
+export function mapTransferExecutionError(error: unknown): AppError {
+  if (error instanceof AppError) {
+    return error;
+  }
+  const message = error instanceof Error ? error.message : "Unknown transfer error";
+  const programErrorCode = /custom program error: (0x[0-9a-f]+)/i.exec(message)?.[1].toLowerCase();
+  return programErrorCode === "0x11" ? accountFrozen(message) : solanaRpcError(message);
 }
 
 async function executeSolTransfer(
@@ -1623,11 +1643,7 @@ export async function createTransfer(c: AppContext) {
         blockTime: null,
       });
 
-      if (error instanceof AppError) {
-        throw error;
-      }
-
-      throw new AppError("SOLANA_RPC_ERROR", message);
+      throw mapTransferExecutionError(error);
     }
   }
 
@@ -1693,11 +1709,7 @@ export async function createTransfer(c: AppContext) {
       blockTime: null,
     });
 
-    if (error instanceof AppError) {
-      throw error;
-    }
-
-    throw new AppError("SOLANA_RPC_ERROR", message);
+    throw mapTransferExecutionError(error);
   }
 }
 

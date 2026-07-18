@@ -6913,6 +6913,53 @@ describe("Payments routes", () => {
       expect(transfers.results[0]?.status).toBe("failed");
       expect(transfers.results[0]?.error).toBeTruthy();
     });
+
+    it("returns 400 ACCOUNT_FROZEN when the source token account is frozen", async () => {
+      createFeePaymentAdapterMock.mockReturnValueOnce({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signAsFeePayer: vi.fn(),
+        signAndSend: vi
+          .fn()
+          .mockRejectedValue(
+            new Error(
+              "Failed to sign and send transaction: RPC Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x11"
+            )
+          ),
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const res = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("ACCOUNT_FROZEN");
+
+      const transfers = await getDb(env)
+        .prepare("SELECT status, error FROM payment_transfers")
+        .all<{
+          status: string;
+          error: string | null;
+        }>();
+      expect(transfers.results).toHaveLength(1);
+      expect(transfers.results[0]?.status).toBe("failed");
+      expect(transfers.results[0]?.error).toBeTruthy();
+    });
   });
 
   describe("list transfers", () => {
