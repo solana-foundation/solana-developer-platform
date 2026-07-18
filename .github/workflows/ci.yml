@@ -581,7 +581,7 @@ jobs:
           - name: Dashboard E2E (Surfpool Local)
             test_script: test:e2e:dashboard
             artifact_suffix: dashboard-surfpool
-            rpc_provider: validationcloud
+            rpc_provider: helius
           - name: Issuance E2E (Surfpool Shards)
             test_script: kora:surfpool:e2e:issuance
             artifact_suffix: issuance
