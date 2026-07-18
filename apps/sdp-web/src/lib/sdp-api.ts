@@ -1,6 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
+import type { ListProjectsResponse, Project } from "@sdp/types";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { cache } from "react";
 import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
 import {
   createTimedTrace,
@@ -49,13 +51,19 @@ export async function acquireClerkToken(getToken: ClerkGetToken): Promise<string
   return token;
 }
 
-async function getClerkToken(): Promise<string> {
-  const { getToken, orgId } = await auth();
+const getRequestAuth = cache(async () => auth());
+
+export function getSdpAuth() {
+  return getRequestAuth();
+}
+
+const getRequestClerkToken = cache(async (): Promise<string> => {
+  const { getToken, orgId } = await getRequestAuth();
   if (!orgId) {
     throw new Error("Active Clerk organization required");
   }
   return acquireClerkToken(getToken);
-}
+});
 
 type SdpApiRequestFn = (path: string, options?: RequestInit) => Promise<Response>;
 
@@ -151,9 +159,13 @@ export interface SdpApiClient {
  * build a project-scoped client outside `proxyToSdpApi` check this first so a
  * missing selection surfaces as a 400 instead of a thrown 500.
  */
-export async function getSelectedProjectId(): Promise<string | undefined> {
+const getRequestSelectedProjectId = cache(async (): Promise<string | undefined> => {
   const jar = await cookies();
   return jar.get(PROJECT_COOKIE_NAME)?.value;
+});
+
+export function getSelectedProjectId(): Promise<string | undefined> {
+  return getRequestSelectedProjectId();
 }
 
 function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {
@@ -205,8 +217,23 @@ async function buildSdpApiClient(
   projectId: string | null,
   traceContext?: TraceContext
 ): Promise<SdpApiClient> {
-  const token = await getClerkToken();
+  const token = await getRequestClerkToken();
   return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
+}
+
+const getRequestProjects = cache(async (): Promise<Project[]> => {
+  const client = assembleSdpApiClient(
+    createSdpApiRequest(await getRequestClerkToken(), null, {
+      traceId: `web_${crypto.randomUUID().replaceAll("-", "")}`,
+      source: "dashboard.projects.bootstrap",
+    })
+  );
+  const response = await client.fetch<ListProjectsResponse>("/v1/projects");
+  return response.projects;
+});
+
+export function listSdpProjects(): Promise<Project[]> {
+  return getRequestProjects();
 }
 
 /**
@@ -218,15 +245,19 @@ export function createTokenSdpApiClient(token: string): SdpApiClient {
 }
 
 /**
- * Creates a project-scoped SDP API client. Throws when no project is
- * selected — org-scoped endpoints go through `createOrgSdpApiClient` instead.
+ * Creates a project-scoped SDP API client. Throws when the project cookie is
+ * missing; project selection is established by the dashboard proxy before
+ * rendering. Org-scoped endpoints go through `createOrgSdpApiClient` instead.
  */
 export async function createSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
-  const projectId = await getSelectedProjectId();
+  const [token, projectId] = await Promise.all([
+    getRequestClerkToken(),
+    getRequestSelectedProjectId(),
+  ]);
   if (!projectId) {
     throw new Error("Selected project required");
   }
-  return buildSdpApiClient(projectId, traceContext);
+  return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
 }
 
 /**

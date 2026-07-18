@@ -223,6 +223,62 @@ export async function ensureClerkAdminUser(): Promise<ClerkTestIdentity> {
   };
 }
 
+async function resolveReadOnlyClerkAdminUser(): Promise<ClerkTestIdentity> {
+  const env = getE2EEnv();
+  if (!env.clerkOrgId) {
+    throw new Error("Read-only external identity requires E2E_CLERK_ORG_ID");
+  }
+
+  const client = createClerkClient({ secretKey: env.clerkSecretKey });
+  const users = await withTransientClerkRetry(() =>
+    client.users.getUserList({
+      emailAddress: [env.clerkTestEmail],
+      limit: 2,
+    })
+  );
+  const user = users.data.find((candidate) =>
+    candidate.emailAddresses.some(
+      (entry) => entry.emailAddress.toLowerCase() === env.clerkTestEmail.toLowerCase()
+    )
+  );
+  if (!user) {
+    throw new Error(`Read-only Clerk user '${env.clerkTestEmail}' does not exist`);
+  }
+
+  const memberships = await withTransientClerkRetry(() =>
+    client.organizations.getOrganizationMembershipList({
+      organizationId: env.clerkOrgId as string,
+      userId: [user.id],
+      limit: 2,
+    })
+  );
+  const membership = memberships.data.find((entry) => entry.publicUserData?.userId === user.id);
+  if (!membership) {
+    throw new Error(
+      `Read-only Clerk user '${env.clerkTestEmail}' is not a member of '${env.clerkOrgId}'`
+    );
+  }
+  if (membership.role !== "org:admin") {
+    throw new Error(
+      `Read-only Clerk user '${env.clerkTestEmail}' must already be org:admin in '${env.clerkOrgId}'`
+    );
+  }
+
+  return {
+    email: env.clerkTestEmail,
+    organizationId: env.clerkOrgId,
+    userId: user.id,
+  };
+}
+
+/**
+ * External GCP smoke only resolves and verifies an existing identity. It never
+ * creates users, memberships, roles, or organization metadata.
+ */
+export function resolveClerkTestIdentity(): Promise<ClerkTestIdentity> {
+  return getE2EEnv().useExternalApi ? resolveReadOnlyClerkAdminUser() : ensureClerkAdminUser();
+}
+
 export async function setClerkOrganizationTier(
   organizationId: string,
   tier: OrganizationTier
