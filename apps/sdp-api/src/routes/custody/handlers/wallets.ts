@@ -853,8 +853,7 @@ export const getWalletById = async (c: AppContext) => {
     createdAt: wallet.createdAt,
   };
   const includeBalanceQuery = c.req.query("includeBalance");
-  const includeBalance =
-    includeBalanceQuery === undefined || parseBooleanQueryParam(includeBalanceQuery);
+  const includeBalance = includeBalanceQuery?.trim().toLowerCase() !== "false";
 
   if (!includeBalance) {
     const response: CustodyWalletMetadataResponse = {

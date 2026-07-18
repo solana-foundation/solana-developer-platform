@@ -36,7 +36,7 @@ describe("OpenAPI spec", () => {
       name: "includeBalance",
       in: "query",
       required: false,
-      schema: { type: "boolean" },
+      schema: { type: "string", enum: ["true", "false"] },
     });
     expect(JSON.stringify(includeBalance)).toContain("Defaults to true");
     expect(JSON.stringify(operation?.responses?.["200"])).toContain(

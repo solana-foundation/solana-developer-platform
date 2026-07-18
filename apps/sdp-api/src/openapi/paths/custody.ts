@@ -415,10 +415,10 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       }),
       headers: projectScopeHeaders,
       query: z.object({
-        includeBalance: z.boolean().optional().openapi({
+        includeBalance: z.enum(["true", "false"]).optional().openapi({
           description:
             "Whether to resolve the current SOL balance. Defaults to true; false returns metadata without balance RPC or pricing calls.",
-          example: false,
+          example: "false",
         }),
       }),
     },

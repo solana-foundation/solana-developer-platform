@@ -332,6 +332,32 @@ describe("Custody wallet by ID route", () => {
     expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the balance-on default when includeBalance is empty", async () => {
+    const res = await app.request(
+      "/v1/wallets/para_wallet_a?includeBalance=",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        wallet: {
+          balance?: { amount: string };
+        };
+      };
+    };
+    expect(body.data.wallet.balance).toMatchObject({ amount: "4200000000" });
+    expect(createRpcMock).toHaveBeenCalledTimes(1);
+    expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
+    expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects unauthenticated requests", async () => {
     const res = await app.request(
       "/v1/wallets/para_wallet_a",
