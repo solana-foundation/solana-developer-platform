@@ -21,10 +21,24 @@ import {
   parsePostgresJsonOr,
 } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
+import { getRuntime, type SdpRuntime } from "@/lib/runtime-env";
 import type { KVStore } from "@/runtime/kv";
 import type { Env } from "@/types/env";
 
 const KV_TTL_SECONDS = 3600; // 1 hour cache
+const NODE_LAST_USED_WRITE_INTERVAL_MS = 5 * 60_000;
+
+interface LastUsedWriteState {
+  lastSucceededAt: number | null;
+  inFlight: Promise<void> | null;
+}
+
+interface LastUsedWriteCache {
+  writes: Map<string, LastUsedWriteState>;
+  nextSweepAt: number;
+}
+
+const nodeLastUsedWrites = new WeakMap<DatabaseClient, LastUsedWriteCache>();
 
 interface ApiKeyContext {
   id: string;
@@ -171,14 +185,107 @@ async function getFromDatabaseAndCache(
   return cached;
 }
 
-/**
- * Update last_used_at timestamp (fire and forget)
- */
-function updateLastUsed(db: DatabaseClient, keyId: string) {
-  db.prepare(`UPDATE api_keys SET last_used_at = datetime('now') WHERE id = ?`)
+function writeLastUsed(db: DatabaseClient, keyId: string): Promise<void> {
+  return db
+    .prepare(`UPDATE api_keys SET last_used_at = datetime('now') WHERE id = ?`)
     .bind(keyId)
     .run()
-    .catch((err) => console.error("Failed to update last_used_at:", err));
+    .then(() => {});
+}
+
+function logLastUsedWriteError(error: unknown): void {
+  console.error("Failed to update last_used_at:", error);
+}
+
+function getLastUsedWriteCache(db: DatabaseClient): LastUsedWriteCache {
+  const existing = nodeLastUsedWrites.get(db);
+  if (existing) {
+    return existing;
+  }
+
+  const cache: LastUsedWriteCache = {
+    writes: new Map(),
+    nextSweepAt: 0,
+  };
+  nodeLastUsedWrites.set(db, cache);
+  return cache;
+}
+
+function sweepExpiredLastUsedWrites(cache: LastUsedWriteCache, now: number): void {
+  if (now < cache.nextSweepAt) {
+    return;
+  }
+
+  for (const [keyId, state] of cache.writes) {
+    if (
+      !state.inFlight &&
+      state.lastSucceededAt !== null &&
+      now - state.lastSucceededAt >= NODE_LAST_USED_WRITE_INTERVAL_MS
+    ) {
+      cache.writes.delete(keyId);
+    }
+  }
+
+  cache.nextSweepAt = now + NODE_LAST_USED_WRITE_INTERVAL_MS;
+}
+
+/**
+ * Updates last_used_at without putting a write on every Node request. Workers
+ * keep their existing per-request behavior because their isolate lifetime is
+ * not a useful process-local coalescing boundary.
+ */
+export function scheduleApiKeyLastUsedUpdate(
+  db: DatabaseClient,
+  keyId: string,
+  runtime: SdpRuntime,
+  now = Date.now()
+): Promise<void> {
+  if (runtime === "cloudflare") {
+    return writeLastUsed(db, keyId).catch(logLastUsedWriteError);
+  }
+
+  const cache = getLastUsedWriteCache(db);
+  sweepExpiredLastUsedWrites(cache, now);
+  const existing = cache.writes.get(keyId);
+  if (existing?.inFlight) {
+    return existing.inFlight;
+  }
+  const lastSucceededAt = existing?.lastSucceededAt;
+  if (
+    lastSucceededAt !== null &&
+    lastSucceededAt !== undefined &&
+    now - lastSucceededAt < NODE_LAST_USED_WRITE_INTERVAL_MS
+  ) {
+    return Promise.resolve();
+  }
+
+  const state: LastUsedWriteState = existing ?? {
+    lastSucceededAt: null,
+    inFlight: null,
+  };
+  const pending = Promise.resolve()
+    .then(() => writeLastUsed(db, keyId))
+    .then(
+      () => {
+        if (cache.writes.get(keyId) === state) {
+          state.lastSucceededAt = now;
+          state.inFlight = null;
+        }
+      },
+      (error) => {
+        if (cache.writes.get(keyId) === state) {
+          state.inFlight = null;
+          if (state.lastSucceededAt === null) {
+            cache.writes.delete(keyId);
+          }
+        }
+        logLastUsedWriteError(error);
+      }
+    );
+
+  state.inFlight = pending;
+  cache.writes.set(keyId, state);
+  return pending;
 }
 
 function safeParsePermissionsArray(value: string | null | undefined): Permission[] {
@@ -290,8 +397,8 @@ export function authMiddleware() {
 
     c.set("apiKey", authContext);
 
-    // Update last used (fire and forget)
-    updateLastUsed(getDb(c.env), cachedKey.id);
+    // Update last used (fire and forget). Node coalesces this write per key.
+    void scheduleApiKeyLastUsedUpdate(getDb(c.env), cachedKey.id, getRuntime(c.env));
 
     await next();
   };
