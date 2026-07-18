@@ -6,6 +6,8 @@ import {
   ArrowRight,
   Check,
   Copy,
+  History,
+  ListChecks,
   MoreHorizontal,
   Plus,
   Search,
@@ -14,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -403,11 +406,10 @@ export function WalletPolicyStartingProfileFlow({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
-      <div className="shrink-0 px-4 py-5 md:px-6">
-        <div className="mx-auto w-full max-w-6xl">
-          <StepIndicator stepIndex={stepIndex} />
-        </div>
-      </div>
+      <WalletPolicyToolbar
+        stepIndex={stepIndex}
+        walletHref={walletDetailHref(pathname, wallet.walletId)}
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-6 md:py-8">
         <div className="mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -566,10 +568,45 @@ export function WalletPolicyStartingProfileFlow({
   );
 }
 
+export function WalletPolicyToolbar({
+  stepIndex,
+  walletHref,
+}: {
+  stepIndex: number;
+  walletHref: string;
+}) {
+  const t = useTranslations();
+
+  return (
+    <div data-wallet-policy-toolbar="true" className="shrink-0 px-4 py-3 md:px-6">
+      <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3">
+        <StepIndicator stepIndex={stepIndex} />
+        <div
+          data-wallet-policy-toolbar-actions="true"
+          className="ml-auto flex flex-wrap items-center justify-end gap-2"
+        >
+          <Button asChild variant="outline" size="sm">
+            <Link href={`${walletHref}/policy/audit`}>
+              <ListChecks className="size-4" />
+              {t("DashboardCustody.policyAuditTitle")}
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`${walletHref}/policy/revisions`}>
+              <History className="size-4" />
+              {t("DashboardCustody.policyAuditRevisionHistory")}
+            </Link>
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StepIndicator({ stepIndex }: { stepIndex: number }) {
   const t = useTranslations();
   return (
-    <div className="flex items-center gap-4">
+    <div data-wallet-policy-stepper="true" className="flex shrink-0 items-center gap-4">
       <div className="flex items-center gap-1.5" aria-hidden="true">
         {FLOW_STEPS.map((step, index) => (
           <span
