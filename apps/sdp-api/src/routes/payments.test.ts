@@ -29,7 +29,10 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { getTransferSolInstruction } from "@solana-program/system";
-import { findAssociatedTokenPda } from "@solana-program/token-2022";
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
+  findAssociatedTokenPda,
+} from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
@@ -509,6 +512,7 @@ function mockRecurringActivationRpc(options?: {
     decimals: number;
     uiAmountString: string;
   }>;
+  mintDecimals?: number;
 }) {
   const tokenAccounts = options?.tokenAccounts ?? [
     {
@@ -519,6 +523,7 @@ function mockRecurringActivationRpc(options?: {
       uiAmountString: "1000",
     },
   ];
+  const mintDecimals = options?.mintDecimals ?? 6;
 
   createRpcMock.mockReturnValue({
     getTokenAccountsByOwner: () => ({
@@ -545,7 +550,7 @@ function mockRecurringActivationRpc(options?: {
     getTokenSupply: () => ({
       send: async () => ({
         value: {
-          decimals: 6,
+          decimals: mintDecimals,
         },
       }),
     }),
@@ -2649,6 +2654,132 @@ describe("Payments routes", () => {
       getTransferSolInstruction({
         source: sourceSigner,
         destination: address(TEST_SOLANA_ADDRESSES.wallet3),
+        amount: 1_250_000_000n,
+      }).data
+    );
+    expect(syncNativeInstruction.programAddress).toBe(SPL_TOKEN_PROGRAMS["spl-token"]);
+
+    const collectionTransfer = await getDb(env)
+      .prepare("SELECT token FROM payment_transfers WHERE counterparty_id = ?")
+      .bind(counterpartyId)
+      .first<{ token: string }>();
+    expect(collectionTransfer).toEqual({ token: "SOL" });
+  });
+
+  it("creates the missing wSOL ATA in the sponsored recurring payment collection transaction", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc({
+      tokenAccounts: [],
+      mintDecimals: 9,
+    });
+    const planSignature = signature(
+      "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+    );
+    const sourceAtaActivationSignature = signature(
+      "2MAd2T6zSaHCcmstzbmY2uFw5gJtbSjz3GbASJw9XhD27K3F2JWGY4frA44oXpXbpMC5Qn2ePekemCzGH8Eb7L7J"
+    );
+    const authorizationSignature = signature(
+      "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV"
+    );
+    const collectionSignature = signature(
+      "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13"
+    );
+    const signAndSendMock = vi
+      .fn<(transaction: Uint8Array) => Promise<Signature>>()
+      .mockResolvedValueOnce(planSignature)
+      .mockResolvedValueOnce(sourceAtaActivationSignature)
+      .mockResolvedValueOnce(authorizationSignature)
+      .mockResolvedValueOnce(collectionSignature);
+    const feePaymentAdapter: ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter> = {
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(address(TEST_KORA_FEE_PAYER)),
+      signAsFeePayer: vi.fn(async (transaction: Uint8Array) => transaction),
+      signAndSend: signAndSendMock,
+    };
+    createFeePaymentAdapterMock.mockReturnValue(feePaymentAdapter);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const counterpartyId = await seedCounterparty({
+      externalId: "recurring_native_sol_missing_ata_counterparty",
+    });
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const createRes = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          sourceWalletId: TEST_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: "SOL",
+          amount: "1.25",
+          periodHours: 24,
+        }),
+      },
+      env
+    );
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as {
+      data: { recurringPayment: { id: string } };
+    };
+
+    const activateRes = await app.request(
+      `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
+      { method: "POST", headers },
+      env
+    );
+    expect(activateRes.status).toBe(200);
+    const activateBody = (await activateRes.json()) as {
+      data: { recurringPayment: { subscriptionId: string } };
+    };
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, createBody.data.recurringPayment.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activateBody.data.recurringPayment.subscriptionId)
+      .run();
+
+    const [expectedSourceAta] = await findAssociatedTokenPda({
+      owner: sourceSigner.address,
+      tokenProgram: address(SPL_TOKEN_PROGRAMS["spl-token"]),
+      mint: address(SOL_MINT),
+    });
+
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/collect`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(collectRes.status).toBe(200);
+    expect(signAndSendMock).toHaveBeenCalledTimes(4);
+    const collectionTransaction = getTransactionDecoder().decode(signAndSendMock.mock.calls[3][0]);
+    const collectionMessage = decompileTransactionMessage(
+      getCompiledTransactionMessageDecoder().decode(collectionTransaction.messageBytes),
+      { lastValidBlockHeight: 1000n }
+    );
+    const createSourceAtaInstruction = collectionMessage.instructions[0];
+    const transferInstruction = collectionMessage.instructions[1];
+    const syncNativeInstruction = collectionMessage.instructions[2];
+    expect(createSourceAtaInstruction.programAddress).toBe(ASSOCIATED_TOKEN_PROGRAM_ADDRESS);
+    expect(transferInstruction.programAddress).toBe("11111111111111111111111111111111");
+    expect(transferInstruction.data).toEqual(
+      getTransferSolInstruction({
+        source: sourceSigner,
+        destination: expectedSourceAta,
         amount: 1_250_000_000n,
       }).data
     );
