@@ -708,7 +708,7 @@ export async function fetchTransferBatches(
     cache: "no-store",
     signal: options.signal,
   });
-  const body = (await response.json()) as TransferBatchListEnvelope;
+  const body = (await response.json().catch(() => ({}))) as TransferBatchListEnvelope;
   if (!response.ok) {
     throw new Error(
       getApiError(

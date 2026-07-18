@@ -88,6 +88,21 @@ export function shortenAddress(address: string): string {
   return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
 }
 
+/**
+ * Returns true once a batch can no longer change state, so pollers can stop refreshing.
+ */
+export function isTerminalBatchStatus(status: PaymentTransferBatchStatus): boolean {
+  return status !== "pending" && status !== "processing";
+}
+
+/**
+ * Resolves a batch token mint to its well-known symbol, or the shortened mint address for custom mints.
+ */
+export function resolveBatchTokenLabel(mint: string): string {
+  const wellKnownToken = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
+  return wellKnownToken ? wellKnownToken.symbol : shortenAddress(mint);
+}
+
 const TOKEN_AMOUNT_PATTERN = /^-?\d+(?:\.\d+)?$/;
 export function formatTokenAmount(value: number | string, locale?: string): string {
   const rawValue = String(value).trim();

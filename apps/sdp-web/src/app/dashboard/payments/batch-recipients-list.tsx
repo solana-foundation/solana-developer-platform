@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 import {
   batchStatusClassName,
   formatDisplayAmount,
+  isTerminalBatchStatus,
+  resolveBatchTokenLabel,
   shortenAddress,
 } from "./payments-overview.utils";
 import {
@@ -23,10 +25,6 @@ interface BatchRecipientsListProps {
 }
 
 type Translate = ReturnType<typeof useTranslations>;
-
-function isTerminalBatchStatus(status: PaymentTransferBatchStatus): boolean {
-  return status !== "pending" && status !== "processing";
-}
 
 function recipientStatusLabel(status: PaymentTransferBatchRecipientStatus, t: Translate): string {
   switch (status) {
@@ -59,11 +57,13 @@ export function BatchRecipientsList({ batchId, batchStatus }: BatchRecipientsLis
   const recipientAccountIds = data
     ? [...new Set(data.recipients.map((recipient) => recipient.counterpartyAccountId))]
     : [];
-  const { data: counterpartyAccounts } = useSWR(
+  const { data: counterpartyAccounts, error: counterpartyAccountsError } = useSWR(
     recipientAccountIds.length > 0 ? ["batch-recipient-counterparties", batchId] : null,
     () => fetchBatchRecipients({ ids: recipientAccountIds }, t),
     { revalidateOnFocus: false, revalidateIfStale: false }
   );
+  const counterpartyNamesPending =
+    recipientAccountIds.length > 0 && !counterpartyAccounts && !counterpartyAccountsError;
   const counterpartyNameByAccountId = new Map<string, string>(
     counterpartyAccounts
       ? counterpartyAccounts.accounts.map((account) => [
@@ -81,7 +81,7 @@ export function BatchRecipientsList({ batchId, batchStatus }: BatchRecipientsLis
     return <p className="px-4 py-3 text-sm text-destructive-strong">{message}</p>;
   }
 
-  if (!data) {
+  if (!data || counterpartyNamesPending) {
     return (
       <div className="grid gap-2 px-4 py-3">
         <SkeletonBlock className="h-12 w-full" />
@@ -109,7 +109,11 @@ export function BatchRecipientsList({ batchId, batchStatus }: BatchRecipientsLis
           ? signatureByTransfer.get(recipient.transferId)
           : null;
         const counterpartyName = counterpartyNameByAccountId.get(recipient.counterpartyAccountId);
-        const amountLabel = formatDisplayAmount(recipient.amount, data.batch.token, locale);
+        const amountLabel = formatDisplayAmount(
+          recipient.amount,
+          resolveBatchTokenLabel(data.batch.token),
+          locale
+        );
 
         return (
           <div

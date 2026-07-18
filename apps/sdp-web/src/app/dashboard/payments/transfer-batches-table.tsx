@@ -21,6 +21,7 @@ import {
   batchStatusClassName,
   formatDisplayAmount,
   formatTimestamp,
+  isTerminalBatchStatus,
 } from "./payments-overview.utils";
 import { fetchTransferBatches } from "./payments-workspace.data";
 
@@ -105,7 +106,10 @@ export function TransferBatchesTable({ walletId }: { walletId?: string }) {
     ["payment-transfer-batches", walletId],
     () =>
       fetchTransferBatches({ pageSize: BATCHES_PAGE_SIZE, ...(walletId ? { walletId } : {}) }, t),
-    { refreshInterval: 10_000 }
+    {
+      refreshInterval: (latest) =>
+        latest?.some((batch) => !isTerminalBatchStatus(batch.status)) ? 10_000 : 0,
+    }
   );
 
   const toggleBatch = (batchId: string) => {
@@ -124,7 +128,7 @@ export function TransferBatchesTable({ walletId }: { walletId?: string }) {
     const message =
       error instanceof Error && error.message.length > 0
         ? error.message
-        : t("DashboardPayments.batchActivity.recipientsLoadFailed");
+        : t("DashboardPayments.batchActivity.batchesLoadFailed");
     return <p className="text-sm text-destructive-strong">{message}</p>;
   }
 
