@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getMessages, translate } from "@/i18n/messages";
 import {
   buildPolicyAuditSearchParams,
+  fetchPolicyAuditContext,
   fetchPolicyAuditList,
   fetchPolicyEvaluationNeighbors,
   parsePolicyAuditFilters,
@@ -101,6 +102,40 @@ function apiPage(
 }
 
 describe("policy audit data", () => {
+  it("uses the metadata-only wallet endpoint for audit and revision context", async () => {
+    const request = vi.fn(async (path: string) => {
+      if (path.startsWith("/v1/wallets/")) {
+        return Response.json({
+          data: {
+            wallet: {
+              id: "custody-wallet-1",
+              custodyConfigId: "custody-config-1",
+              provider: "privy",
+              walletId: "wallet/one",
+              publicKey: "11111111111111111111111111111111",
+              label: "Operations",
+              purpose: "transfer",
+              status: "active",
+              createdAt: "2026-07-15T12:00:00.000Z",
+            },
+          },
+        });
+      }
+      if (path.endsWith("/policies/revisions")) {
+        return Response.json({ data: { profile: null, revisions: [] } });
+      }
+      if (path === "/v1/api-keys") {
+        return Response.json({ data: { apiKeys: [] } });
+      }
+      return new Response(null, { status: 404 });
+    });
+
+    const result = await fetchPolicyAuditContext(request, "wallet/one");
+
+    expect(request).toHaveBeenCalledWith("/v1/wallets/wallet%2Fone?includeBalance=false");
+    expect(result.wallet).not.toHaveProperty("balance");
+  });
+
   it("parses supported URL filters and drops malformed values", () => {
     expect(
       parsePolicyAuditFilters({
