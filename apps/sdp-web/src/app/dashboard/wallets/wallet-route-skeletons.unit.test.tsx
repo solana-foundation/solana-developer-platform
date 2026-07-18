@@ -18,6 +18,8 @@ import WalletSetupLoading from "./setup/loading";
 import WalletSwitchLoading from "./switch/loading";
 import {
   WalletDetailSkeleton,
+  WalletPolicyAuditDetailSkeleton,
+  WalletPolicyAuditListSkeleton,
   WalletPolicySkeleton,
   WalletsOnboardingSkeleton,
 } from "./wallet-route-skeletons";
@@ -65,6 +67,32 @@ describe("wallet and custody route loading states", () => {
     expect(html).toContain('data-skeleton-section="policy-form"');
     expect(html).toContain('data-skeleton-section="policy-summary"');
     expect(html).toContain("<footer");
+  });
+
+  it("matches the policy audit list's mobile rows and desktop table", () => {
+    const html = renderToStaticMarkup(<WalletPolicyAuditListSkeleton />);
+
+    expect(html).toContain('data-loading-mobile-rows="true"');
+    expect(html.match(/data-loading-mobile-row="true"/g)).toHaveLength(5);
+    expect(html).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(html.match(/data-loading-mobile-badges="true"/g)).toHaveLength(5);
+    expect(html.match(/data-loading-mobile-operation="true"/g)).toHaveLength(5);
+    expect(html.match(/data-loading-mobile-metadata="true"/g)).toHaveLength(5);
+    expect(html).toContain("mt-3 grid grid-cols-2 gap-x-4 gap-y-2");
+    expect(html.match(/data-loading-mobile-chevron="true"/g)).toHaveLength(5);
+    expect(html).toContain('data-loading-desktop-table="true"');
+    expect(html).toContain('class="hidden lg:block"');
+    expect(html).toContain("[&amp;_table]:min-w-[1040px]");
+  });
+
+  it("stacks policy audit decision steps until the small breakpoint", () => {
+    const html = renderToStaticMarkup(<WalletPolicyAuditDetailSkeleton />);
+
+    expect(html.match(/data-loading-audit-step="true"/g)).toHaveLength(5);
+    expect(html).toContain("sm:grid-cols-[40px_minmax(0,1fr)_auto]");
+    expect(html).not.toContain(" grid-cols-[40px_minmax(0,1fr)_auto]");
+    expect(html).toContain('data-loading-step-icon="true"');
+    expect(html).toContain("flex items-center gap-2 sm:block");
   });
 
   it("uses the organization-sync card geometry for the onboarding fallback", () => {

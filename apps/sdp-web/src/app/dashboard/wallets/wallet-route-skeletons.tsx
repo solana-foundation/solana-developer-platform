@@ -1,19 +1,28 @@
+import { ChevronRight } from "lucide-react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
 const THREE_ITEMS = ["one", "two", "three"] as const;
 const FOUR_ITEMS = ["one", "two", "three", "four"] as const;
 const FIVE_ITEMS = ["one", "two", "three", "four", "five"] as const;
 const AUDIT_COLUMNS = [
-  "decision",
-  "operation",
-  "amount",
-  "destination",
-  "actor",
-  "revision",
-  "evaluated",
-  "open",
+  ["decision", "w-[110px]"],
+  ["operation", "w-[245px]"],
+  ["amount", "w-[145px]"],
+  ["destination", "w-[145px]"],
+  ["actor", "w-[170px]"],
+  ["revision", "w-[120px]"],
+  ["evaluated", "w-[170px]"],
+  ["open", "w-12"],
 ] as const;
 
 function Pulse({ className }: { className?: string }) {
@@ -309,6 +318,85 @@ function AuditHeaderSkeleton() {
   );
 }
 
+function MobileAuditRowsSkeleton() {
+  return (
+    <div
+      className="divide-y divide-border-default border-y border-border-default lg:hidden"
+      data-loading-mobile-rows
+    >
+      {FIVE_ITEMS.map((row) => (
+        <div
+          key={row}
+          className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 py-4"
+          data-loading-mobile-row
+        >
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2" data-loading-mobile-badges>
+              <Pulse className="h-6 w-16 rounded-full" />
+              <Pulse className="h-6 w-20 rounded-full" />
+            </div>
+            <div className="mt-3" data-loading-mobile-operation>
+              <Pulse className="h-4 w-48 max-w-full" />
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2" data-loading-mobile-metadata>
+              {FOUR_ITEMS.map((item) => (
+                <div key={item} className="min-w-0 space-y-1">
+                  <Pulse className="h-3 w-20 max-w-full" />
+                  <Pulse className="h-3 w-24 max-w-full" />
+                </div>
+              ))}
+            </div>
+          </div>
+          <ChevronRight
+            aria-hidden="true"
+            className="mt-1 size-4 text-tertiary"
+            data-loading-mobile-chevron
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DesktopAuditTableSkeleton() {
+  return (
+    <div className="hidden lg:block" data-loading-desktop-table>
+      <Table className="min-w-0 [&_table]:min-w-[1040px] [&_table]:table-fixed">
+        <TableHeader>
+          <TableRow>
+            {AUDIT_COLUMNS.map(([column, width]) => (
+              <TableHead key={column} className={width}>
+                <Pulse className="h-3 w-16" />
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {FIVE_ITEMS.map((row) => (
+            <TableRow key={row}>
+              <TableCell className="px-4 py-3">
+                <Pulse className="h-6 w-16 rounded-full" />
+              </TableCell>
+              <TableCell className="space-y-2 px-4 py-3">
+                <Pulse className="h-4 w-32" />
+                <Pulse className="h-5 w-20 rounded-full" />
+              </TableCell>
+              {FIVE_ITEMS.map((column) => (
+                <TableCell key={column} className="px-4 py-3">
+                  <Pulse className="h-4 w-24" />
+                </TableCell>
+              ))}
+              <TableCell className="px-2 py-3">
+                <Pulse className="size-4 rounded-sm" />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 export function WalletPolicyAuditListSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -332,23 +420,8 @@ export function WalletPolicyAuditListSkeleton() {
           </div>
           <Pulse className="h-4 w-28" />
         </section>
-        <section className="overflow-hidden border-y border-border-default">
-          <div className="hidden min-h-12 grid-cols-[110px_2fr_repeat(5,1fr)_48px] items-center gap-4 border-b border-border-default lg:grid">
-            {AUDIT_COLUMNS.map((column) => (
-              <Pulse key={column} className="h-3 w-16" />
-            ))}
-          </div>
-          {FIVE_ITEMS.map((row) => (
-            <div
-              key={row}
-              className="grid min-h-16 grid-cols-2 items-center gap-4 border-b border-border-default py-3 last:border-b-0 lg:grid-cols-[110px_2fr_repeat(5,1fr)_48px]"
-            >
-              {AUDIT_COLUMNS.map((column, index) => (
-                <Pulse key={column} className={cn("h-4", index > 1 ? "hidden lg:block" : "w-24")} />
-              ))}
-            </div>
-          ))}
-        </section>
+        <MobileAuditRowsSkeleton />
+        <DesktopAuditTableSkeleton />
       </LoadingRegion>
     </DashboardWorkspaceOverviewPanel>
   );
@@ -395,14 +468,20 @@ export function WalletPolicyAuditDetailSkeleton() {
                 {FIVE_ITEMS.map((step) => (
                   <div
                     key={step}
-                    className="grid min-h-20 grid-cols-[40px_minmax(0,1fr)_auto] items-start gap-3 border-b border-border-default px-5 py-4 last:border-b-0"
+                    className="grid min-h-20 gap-3 border-b border-border-default px-5 py-4 last:border-b-0 sm:grid-cols-[40px_minmax(0,1fr)_auto] sm:items-start"
+                    data-loading-audit-step
                   >
-                    <Pulse className="size-8 rounded-full" />
+                    <div className="flex items-center gap-2 sm:block" data-loading-step-icon>
+                      <Pulse className="size-7 rounded-full" />
+                      <Pulse className="mt-2 size-6 rounded-full" />
+                    </div>
                     <div className="space-y-2">
                       <Pulse className="h-4 w-40" />
                       <Pulse className="h-4 w-full" />
                     </div>
-                    <Pulse className="h-6 w-16 rounded-full" />
+                    <div className="sm:pt-0.5">
+                      <Pulse className="h-6 w-16 rounded-full" />
+                    </div>
                   </div>
                 ))}
               </div>
