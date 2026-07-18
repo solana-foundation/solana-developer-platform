@@ -44,7 +44,7 @@ import {
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
 import { buildPaymentTransferFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
-import { paginated, success } from "@/lib/response";
+import { created, paginated, success } from "@/lib/response";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIds,
@@ -213,6 +213,7 @@ async function createTransferRecord(
     organizationId: string;
     projectId: string | null;
     walletId: string;
+    counterpartyId?: string;
     sourceAddress: string;
     destinationAddress: string;
     token: string;
@@ -235,6 +236,7 @@ async function createTransferRecord(
     ? buildPaymentTransferFingerprint({
         sourceAddress: input.sourceAddress,
         destinationAddress: input.destinationAddress,
+        counterpartyId: input.counterpartyId,
         token: input.token,
         amount: input.amount,
         memo: input.memo,
@@ -261,7 +263,7 @@ async function createTransferRecord(
       organizationId: input.organizationId,
       projectId: input.projectId,
       walletId: input.walletId,
-      counterpartyId: null,
+      counterpartyId: input.counterpartyId === undefined ? null : input.counterpartyId,
       sourceAddress: input.sourceAddress,
       destinationAddress: input.destinationAddress,
       token: input.token,
@@ -1525,6 +1527,7 @@ export async function createTransfer(c: AppContext) {
       buildPaymentTransferFingerprint({
         sourceAddress: operation.sourceWallet.publicKey,
         destinationAddress: parsed.data.destination,
+        counterpartyId: parsed.data.counterpartyId,
         token: operation.token,
         amount: operation.amount,
         memo: parsed.data.memo,
@@ -1544,6 +1547,7 @@ export async function createTransfer(c: AppContext) {
     rawPayload: {
       source: parsed.data.source,
       destination: parsed.data.destination,
+      counterpartyId: parsed.data.counterpartyId,
       token: parsed.data.token,
       amount: parsed.data.amount,
     },
@@ -1578,6 +1582,7 @@ export async function createTransfer(c: AppContext) {
       organizationId: scope.auth.organizationId,
       projectId: scope.auth.projectId,
       walletId: operation.sourceWallet.walletId,
+      counterpartyId: parsed.data.counterpartyId,
       sourceAddress: operation.sourceWallet.publicKey,
       destinationAddress: parsed.data.destination,
       token: operation.token,
@@ -1611,7 +1616,7 @@ export async function createTransfer(c: AppContext) {
         error: null,
       });
 
-      return success(c, {
+      return created(c, {
         transfer: mapTransferRow(updated),
         privateTransfer: mapped.metadata,
       });
@@ -1635,6 +1640,7 @@ export async function createTransfer(c: AppContext) {
     organizationId: scope.auth.organizationId,
     projectId: scope.auth.projectId,
     walletId: operation.sourceWallet.walletId,
+    counterpartyId: parsed.data.counterpartyId,
     sourceAddress: operation.sourceWallet.publicKey,
     destinationAddress: parsed.data.destination,
     token: operation.token,
@@ -1664,7 +1670,7 @@ export async function createTransfer(c: AppContext) {
         blockTime: solResult.blockTime,
         error: null,
       });
-      return success(c, { transfer: mapTransferRow(updated) });
+      return created(c, { transfer: mapTransferRow(updated) });
     }
 
     const mintAddress = assertValidAddress(operation.token, "token");
@@ -1684,7 +1690,7 @@ export async function createTransfer(c: AppContext) {
       error: null,
     });
 
-    return success(c, { transfer: mapTransferRow(updated) });
+    return created(c, { transfer: mapTransferRow(updated) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown transfer error";
     await updateTransferRecord(c, transfer.id, {

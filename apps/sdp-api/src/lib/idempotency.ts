@@ -50,6 +50,7 @@ export const normalizeForFingerprint = (value: unknown): unknown => {
 export interface PaymentTransferFingerprintInput {
   sourceAddress: string | null;
   destinationAddress: string | null;
+  counterpartyId?: string;
   token: string;
   amount: string | null;
   memo: string | null | undefined;
@@ -78,6 +79,7 @@ export const buildPaymentTransferFingerprint = (input: PaymentTransferFingerprin
       scope: "payment_transfer",
       sourceAddress: input.sourceAddress,
       destinationAddress: input.destinationAddress,
+      counterpartyId: input.counterpartyId,
       token: input.token,
       amount: input.amount,
       memo: input.memo ?? null,

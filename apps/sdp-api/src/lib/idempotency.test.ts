@@ -67,6 +67,12 @@ describe("buildPaymentTransferFingerprint", () => {
     );
   });
 
+  it("differs when the counterparty changes", () => {
+    expect(buildPaymentTransferFingerprint({ ...base, counterpartyId: "cp_1" })).not.toBe(
+      buildPaymentTransferFingerprint({ ...base, counterpartyId: "cp_2" })
+    );
+  });
+
   it("differs when private transfer options differ", () => {
     const base = {
       sourceAddress: "Src",

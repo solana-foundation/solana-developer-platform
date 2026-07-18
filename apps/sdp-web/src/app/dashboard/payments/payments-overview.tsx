@@ -1,6 +1,10 @@
 "use client";
 
-import type { CustodyWalletAggregate, PaymentTransferSummary as TransferRecord } from "@sdp/types";
+import type {
+  Counterparty,
+  CustodyWalletAggregate,
+  PaymentTransferSummary as TransferRecord,
+} from "@sdp/types";
 import { ExternalLink, RefreshCwIcon } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useMemo } from "react";
@@ -27,6 +31,7 @@ import {
   resolveAggregateBalanceDisplayToken,
   resolveCounterparty,
   resolveTotalBalance,
+  resolveTransferTypeLabel,
   resolveUsdBalanceValue,
   selectTopAggregateBalanceRows,
 } from "./payments-overview.utils";
@@ -40,6 +45,7 @@ interface PaymentsOverviewProps {
   aggregate: CustodyWalletAggregate | null;
   aggregateError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
+  counterparties: Counterparty[];
   transfers: TransferRecord[];
   transfersError: string | null;
 }
@@ -124,6 +130,7 @@ export function PaymentsOverview({
   aggregate,
   aggregateError,
   issuedTokenSymbolsByMint,
+  counterparties,
   transfers,
   transfersError,
 }: PaymentsOverviewProps) {
@@ -191,6 +198,11 @@ export function PaymentsOverview({
   );
   const totalBalance = resolveTotalBalance(aggregateBalances);
   const walletCount = liveAggregate?.walletCount ?? 0;
+  const counterpartyNamesById = useMemo(
+    () =>
+      new Map(counterparties.map((counterparty) => [counterparty.id, counterparty.displayName])),
+    [counterparties]
+  );
 
   const handleRefresh = () => {
     void Promise.all([mutateAggregate(), mutateTransfers()]);
@@ -292,6 +304,9 @@ export function PaymentsOverview({
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-[8.75rem]">{t("DashboardPayments.status")}</TableHead>
+                      <TableHead className="hidden w-[8rem] lg:table-cell">
+                        {t("DashboardPayments.type")}
+                      </TableHead>
                       <TableHead className="w-[calc(100%-8.75rem)] lg:w-[16rem] xl:w-[20%]">
                         <span className="lg:hidden">{t("DashboardPayments.transfer")}</span>
                         <span className="hidden lg:inline">{t("DashboardPayments.asset")}</span>
@@ -312,13 +327,14 @@ export function PaymentsOverview({
                   </TableHeader>
                   <TableBody>
                     {liveTransfers.map((transfer) => {
-                      const counterparty = resolveCounterparty(transfer, t);
+                      const counterparty = resolveCounterparty(transfer, counterpartyNamesById);
                       const assetLabel = formatDisplayAmount(
                         transfer.amount,
                         transfer.token,
                         locale
                       );
                       const directionLabel = formatDirection(transfer.direction, t);
+                      const typeLabel = resolveTransferTypeLabel(transfer.type, t);
                       const createdLabel = formatTimestamp(transfer.createdAt, t, locale);
 
                       return (
@@ -329,6 +345,9 @@ export function PaymentsOverview({
                             >
                               {transfer.status}
                             </span>
+                          </TableCell>
+                          <TableCell className="hidden text-secondary lg:table-cell">
+                            {typeLabel}
                           </TableCell>
                           <TableCell className="min-w-0 max-w-0 font-medium">
                             <div className="min-w-0">
@@ -346,10 +365,9 @@ export function PaymentsOverview({
                           <TableCell className="hidden text-secondary lg:table-cell">
                             {directionLabel}
                           </TableCell>
-                          <TableCell className="hidden min-w-0 max-w-0 font-mono text-xs text-secondary xl:table-cell">
+                          <TableCell className="hidden min-w-0 max-w-0 text-secondary xl:table-cell">
                             <TruncatedTableText
                               value={counterparty}
-                              displayValue={truncateHash(counterparty)}
                               className="block max-w-full truncate"
                             />
                           </TableCell>

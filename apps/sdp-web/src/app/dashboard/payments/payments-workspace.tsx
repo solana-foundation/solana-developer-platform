@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  Counterparty,
   CustodyWalletAggregate,
   PaymentsDashboardWallet,
   PaymentTransferSummary,
@@ -36,6 +37,7 @@ interface PaymentsWorkspaceProps {
   aggregate: CustodyWalletAggregate | null;
   aggregateError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
+  counterparties: Counterparty[];
   transfers: PaymentTransferSummary[];
   transfersError: string | null;
 }
@@ -48,6 +50,7 @@ export function PaymentsWorkspace({
   aggregate,
   aggregateError,
   issuedTokenSymbolsByMint,
+  counterparties,
   transfers,
   transfersError,
 }: PaymentsWorkspaceProps) {
@@ -67,7 +70,6 @@ export function PaymentsWorkspace({
       void import("./payments-playground");
     };
 
-    // biome-ignore lint/security/noSecrets: requestIdleCallback is a browser API, not a secret.
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       const idleId = window.requestIdleCallback(preloadPlayground);
       return () => window.cancelIdleCallback(idleId);
@@ -103,6 +105,7 @@ export function PaymentsWorkspace({
           aggregate={aggregate}
           aggregateError={aggregateError}
           issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
+          counterparties={counterparties}
           transfers={transfers}
           transfersError={transfersError}
         />

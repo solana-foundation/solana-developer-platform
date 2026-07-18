@@ -6189,7 +6189,7 @@ describe("Payments routes", () => {
           env
         );
 
-        expect(res.status).toBe(200);
+        expect(res.status).toBe(201);
         const body = (await res.json()) as {
           data: {
             transfer: { status: string; signature: string | null; type: string };
@@ -6291,7 +6291,7 @@ describe("Payments routes", () => {
           env
         );
 
-        expect(first.status).toBe(200);
+        expect(first.status).toBe(201);
         expect(second.status).toBe(200);
         const firstBody = (await first.json()) as {
           data: { transfer: { id: string }; privateTransfer: unknown };
@@ -6382,7 +6382,7 @@ describe("Payments routes", () => {
           { method: "POST", headers, body: bodyB },
           env
         );
-        expect(first.status).toBe(200);
+        expect(first.status).toBe(201);
         expect(conflict.status).toBe(409);
       } finally {
         fetchSpy.mockRestore();
@@ -6456,7 +6456,7 @@ describe("Payments routes", () => {
           env
         );
 
-        expect(res.status).toBe(200);
+        expect(res.status).toBe(201);
         expect(signAndSendMock).toHaveBeenCalledTimes(1);
         const [encodedTransaction] = signAndSendMock.mock.calls[0] ?? [];
         const transaction = getTransactionDecoder().decode(encodedTransaction as Uint8Array);
@@ -6638,7 +6638,7 @@ describe("Payments routes", () => {
         env
       );
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(201);
       const body = (await res.json()) as {
         data: {
           transfer: { id: string; status: string; signature: string | null };
@@ -6654,6 +6654,67 @@ describe("Payments routes", () => {
         .first<{ status: string; signature: string | null }>();
       expect(row?.status).toBe("confirmed");
       expect(row?.signature).toBeTruthy();
+    });
+
+    it("persists and returns counterpartyId for direct transfers", async () => {
+      const counterpartyId = await seedCounterparty({
+        externalId: `direct_transfer_counterparty_${crypto.randomUUID()}`,
+      });
+      const headers = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      };
+      const createRes = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+            counterpartyId,
+          }),
+        },
+        env
+      );
+
+      expect(createRes.status).toBe(201);
+      const createBody = (await createRes.json()) as {
+        data: { transfer: { id: string; counterpartyId: string } };
+      };
+      expect(createBody.data.transfer.counterpartyId).toBe(counterpartyId);
+
+      const getRes = await app.request(
+        `/v1/payments/transfers/${createBody.data.transfer.id}`,
+        { headers },
+        env
+      );
+      expect(getRes.status).toBe(200);
+      const getBody = (await getRes.json()) as {
+        data: { transfer: { id: string; counterpartyId: string } };
+      };
+      expect(getBody.data.transfer).toMatchObject({
+        id: createBody.data.transfer.id,
+        counterpartyId,
+      });
+
+      const listRes = await app.request(
+        `/v1/payments/transfers?counterpartyId=${encodeURIComponent(counterpartyId)}`,
+        { headers },
+        env
+      );
+      expect(listRes.status).toBe(200);
+      const listBody = (await listRes.json()) as {
+        data: Array<{ id: string; counterpartyId: string }>;
+      };
+      expect(listBody.data).toContainEqual(
+        expect.objectContaining({
+          id: createBody.data.transfer.id,
+          counterpartyId,
+        })
+      );
     });
 
     it("replays a transfer when the same Idempotency-Key + body is retried", async () => {
@@ -6692,7 +6753,7 @@ describe("Payments routes", () => {
         env
       );
 
-      expect(first.status).toBe(200);
+      expect(first.status).toBe(201);
       expect(second.status).toBe(200);
       const firstJson = (await first.json()) as { data: { transfer: { id: string } } };
       const secondJson = (await second.json()) as { data: { transfer: { id: string } } };
@@ -6779,7 +6840,7 @@ describe("Payments routes", () => {
         { method: "POST", headers, body },
         env
       );
-      expect(first.status).toBe(200);
+      expect(first.status).toBe(201);
       const afterFirst = await countWalletOperations();
       expect(afterFirst).toBe(before + 1);
 
@@ -6819,7 +6880,7 @@ describe("Payments routes", () => {
         },
         env
       );
-      expect(first.status).toBe(200);
+      expect(first.status).toBe(201);
 
       const conflict = await app.request(
         "/v1/payments/transfers",

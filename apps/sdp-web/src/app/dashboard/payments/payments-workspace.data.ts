@@ -551,6 +551,7 @@ export async function createTransfer(
   input: {
     source: string;
     destination: string;
+    counterpartyId?: string;
     token: string;
     amount: string;
     memo?: string;
@@ -565,6 +566,7 @@ export async function createTransfer(
     body: JSON.stringify({
       source: input.source,
       destination: input.destination,
+      ...(input.counterpartyId ? { counterpartyId: input.counterpartyId } : {}),
       token: input.token,
       amount: input.amount,
       ...(input.memo ? { memo: input.memo } : {}),

@@ -154,6 +154,7 @@ export async function fetchPaymentTransfers(
         direction?: string;
         source?: string;
         destination?: string;
+        counterpartyId?: string;
         token?: string;
         amount?: string;
         memo?: string;
@@ -172,6 +173,7 @@ export async function fetchPaymentTransfers(
         ...(transfer.direction ? { direction: transfer.direction } : {}),
         ...(transfer.source ? { source: transfer.source } : {}),
         ...(transfer.destination ? { destination: transfer.destination } : {}),
+        ...(transfer.counterpartyId ? { counterpartyId: transfer.counterpartyId } : {}),
         ...(transfer.token ? { token: transfer.token } : {}),
         ...(transfer.amount ? { amount: transfer.amount } : {}),
         ...(transfer.memo ? { memo: transfer.memo } : {}),

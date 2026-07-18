@@ -211,6 +211,7 @@ export interface PaymentTransferRequest {
   projectId?: string;
   source: string;
   destination: string;
+  counterpartyId?: string;
   token: string;
   amount: string;
   memo?: string;

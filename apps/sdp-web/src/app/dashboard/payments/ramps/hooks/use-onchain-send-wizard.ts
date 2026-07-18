@@ -188,6 +188,7 @@ export function useOnchainSendWizard({
         {
           source: fields.walletId,
           destination: destinationAddress,
+          counterpartyId,
           token: selectedAssetBalance.mint,
           amount: fields.amount,
           ...(fields.memo.trim() ? { memo: fields.memo.trim() } : {}),

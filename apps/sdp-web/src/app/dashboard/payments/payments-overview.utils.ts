@@ -8,6 +8,11 @@ import {
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import {
+  paymentCounterpartiesMissing,
+  paymentTransferCounterpartyMissing,
+  paymentTransferTypeMissing,
+} from "@/lib/errors";
 import { toTitleCase } from "../activity-format-utils";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -205,16 +210,33 @@ export function formatDirection(direction: string | undefined, t: Translate): st
   return direction[0]?.toUpperCase() + direction.slice(1);
 }
 
-export function resolveCounterparty(transfer: TransferRecord, t: Translate): string {
+export function resolveCounterparty(
+  transfer: TransferRecord,
+  counterpartyNamesById: ReadonlyMap<string, string>
+): string {
+  if (transfer.counterpartyId) {
+    const counterpartyName = counterpartyNamesById.get(transfer.counterpartyId);
+    if (counterpartyName === undefined) {
+      throw paymentCounterpartiesMissing([transfer.counterpartyId]);
+    }
+    return counterpartyName;
+  }
+
   if (transfer.direction === "outbound") {
-    return transfer.destination ?? t("DashboardPayments.unavailable");
+    if (transfer.destination === undefined) {
+      throw paymentTransferCounterpartyMissing(transfer.id);
+    }
+    return transfer.destination;
   }
 
   if (transfer.direction === "inbound") {
-    return transfer.source ?? t("DashboardPayments.unavailable");
+    if (transfer.source === undefined) {
+      throw paymentTransferCounterpartyMissing(transfer.id);
+    }
+    return transfer.source;
   }
 
-  return transfer.destination ?? transfer.source ?? t("DashboardPayments.unavailable");
+  throw paymentTransferCounterpartyMissing(transfer.id);
 }
 
 export function resolveTransferTypeLabel(type: string | undefined, t: Translate): string {
@@ -224,7 +246,10 @@ export function resolveTransferTypeLabel(type: string | undefined, t: Translate)
   if (type === "offramp") {
     return t("DashboardPayments.pay");
   }
-  return type ? toTitleCase(type) : t("DashboardPayments.transfer");
+  if (type === undefined) {
+    throw paymentTransferTypeMissing();
+  }
+  return toTitleCase(type);
 }
 
 /** Source → destination amounts, Wise-style: what's sent vs. what's received. */

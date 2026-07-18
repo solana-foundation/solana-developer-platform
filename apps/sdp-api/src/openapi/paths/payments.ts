@@ -236,7 +236,11 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       200: {
-        description: "Transfer executed",
+        description: "Idempotent transfer replay",
+        content: jsonContent(transferResponse),
+      },
+      201: {
+        description: "Transfer executed and recorded",
         content: jsonContent(transferResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),

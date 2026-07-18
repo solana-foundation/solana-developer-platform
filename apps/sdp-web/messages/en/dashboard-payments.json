@@ -638,6 +638,7 @@
     "refresh": "Refresh",
     "noTransactions": "No transactions found yet.",
     "status": "Status",
+    "type": "Type",
     "transfer": "Transfer",
     "asset": "Asset",
     "direction": "Direction",

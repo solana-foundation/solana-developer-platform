@@ -580,6 +580,10 @@ export const createTransferRequestSchema = createTransferSchemaBase
       description: "Destination wallet address.",
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
+    counterpartyId: withOpenApi(createTransferSchemaBase.shape.counterpartyId, {
+      description: "Optional counterparty receiving the direct transfer.",
+      example: "counterparty_example",
+    }),
     token: withOpenApi(createTransferSchemaBase.shape.token, {
       description:
         "Token to transfer. Pass `SOL` for the native token, a well-known token symbol (e.g. `USDC`) resolved to the configured cluster's mint, or a base58 SPL mint address. Custom tokens must be specified by their on-chain mint.",
@@ -737,7 +741,7 @@ export const transferSchema = z
       example: "moonpay",
     }),
     counterpartyId: z.string().optional().openapi({
-      description: "Counterparty tied to a ramp transfer record.",
+      description: "Counterparty tied to the transfer record.",
       example: "counterparty_example",
     }),
     providerReference: z.string().optional().openapi({

@@ -497,6 +497,7 @@ export const createTransferSchema = z.object({
   projectId: z.string().min(1).optional(),
   source: z.string().min(1),
   destination: solanaAddressSchema("destination"),
+  counterpartyId: z.string().min(1).optional(),
   token: paymentTokenSchema,
   amount: paymentAmountSchema,
   memo: z.string().max(256).optional(),
