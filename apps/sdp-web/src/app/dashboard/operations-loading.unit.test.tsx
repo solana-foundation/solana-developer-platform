@@ -74,6 +74,23 @@ describe("operations route loading states", () => {
     expect(markup).toContain('aria-busy="true"');
   });
 
+  it("disables issuance token-card pulses when reduced motion is requested", () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <IssuanceOverviewLoading />
+      </I18nProvider>
+    );
+    const cardClasses = [
+      ...markup.matchAll(/<article class="([^"]*)" data-loading-card="issuance-token"/g),
+    ].map((match) => match[1] ?? "");
+
+    expect(cardClasses).toHaveLength(6);
+    expect(cardClasses.every((className) => className.includes("animate-pulse"))).toBe(true);
+    expect(cardClasses.every((className) => className.includes("motion-reduce:animate-none"))).toBe(
+      true
+    );
+  });
+
   it("preserves the responsive and sticky geometry of the final routes", () => {
     const markup = renderAllRouteLoadingStates();
 

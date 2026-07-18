@@ -28,7 +28,10 @@ const ISSUANCE_WIZARD_CARD_IDS = [
 
 function IssuanceTokenCardSkeleton() {
   return (
-    <article className="flex min-h-[340px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)] animate-pulse">
+    <article
+      className="flex min-h-[340px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)] animate-pulse motion-reduce:animate-none"
+      data-loading-card="issuance-token"
+    >
       <div className="mb-4 h-14 w-14 rounded-full bg-fill" />
       <SkeletonBlock className="h-4 w-16" />
       <SkeletonBlock className="mt-3 h-8 w-3/4" />
