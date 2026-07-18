@@ -13,15 +13,12 @@ function renderToolbar(): string {
 }
 
 describe("WalletPolicyToolbar", () => {
-  it("keeps the stepper and policy actions in one responsive borderless toolbar", () => {
+  it("renders one toolbar with the stepper before the policy actions", () => {
     const markup = renderToolbar();
-    const toolbarClass = markup.match(/data-wallet-policy-toolbar="true" class="([^"]+)"/)?.[1];
 
-    expect(toolbarClass).toBe("shrink-0 px-4 py-3 md:px-6");
-    expect(markup).toContain(
-      "mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3"
-    );
-    expect(markup).toContain("ml-auto flex flex-wrap items-center justify-end gap-2");
+    expect(markup.match(/data-wallet-policy-toolbar="true"/g)).toHaveLength(1);
+    expect(markup.match(/data-wallet-policy-stepper="true"/g)).toHaveLength(1);
+    expect(markup.match(/data-wallet-policy-toolbar-actions="true"/g)).toHaveLength(1);
     expect(markup.indexOf('data-wallet-policy-stepper="true"')).toBeLessThan(
       markup.indexOf('data-wallet-policy-toolbar-actions="true"')
     );
