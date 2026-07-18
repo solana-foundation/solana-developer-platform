@@ -637,6 +637,7 @@
     "refreshing": "Refreshing...",
     "refresh": "Refresh",
     "noTransactions": "No transactions found yet.",
+    "loadingCounterparties": "Loading counterparties…",
     "status": "Status",
     "type": "Type",
     "transfer": "Transfer",

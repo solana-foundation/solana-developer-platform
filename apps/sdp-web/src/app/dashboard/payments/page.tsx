@@ -5,7 +5,6 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
-import { fetchCounterparties } from "./counterparty/counterparty-page.data";
 import {
   fetchDashboardPaymentTransfers,
   fetchPaymentsAggregate,
@@ -48,7 +47,6 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
       aggregateResult,
       transfersResult,
       issuedTokenSymbolsResult,
-      counterpartiesResult,
     ] = await Promise.all([
       trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
       trace.step("fetch_payments_wallet_summaries", () =>
@@ -67,17 +65,11 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
         : trace.step("fetch_payment_token_symbols", () =>
             fetchPaymentsIssuedTokenSymbols(apiClient.request)
           ),
-      currentTab === "playground"
-        ? Promise.resolve({ ok: true as const, data: [], total: 0 })
-        : trace.step("fetch_payment_counterparties", () =>
-            fetchCounterparties(apiClient.request, { pageSize: 100 })
-          ),
     ]);
     const apiKeys = apiKeysResult.data ?? [];
     const wallets = walletsResult.data ?? [];
     const aggregate = aggregateResult.data ?? null;
     const transfers = transfersResult.data ?? [];
-    const counterparties = counterpartiesResult.data;
     const issuedTokenSymbolsByMint = Object.fromEntries(
       (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
     );
@@ -119,7 +111,6 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
           aggregate={aggregate}
           aggregateError={aggregateError}
           issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
-          counterparties={counterparties}
           transfers={transfers}
           transfersError={transfersError}
         />

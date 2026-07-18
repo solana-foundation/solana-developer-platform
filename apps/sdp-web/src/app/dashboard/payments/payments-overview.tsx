@@ -1,10 +1,6 @@
 "use client";
 
-import type {
-  Counterparty,
-  CustodyWalletAggregate,
-  PaymentTransferSummary as TransferRecord,
-} from "@sdp/types";
+import type { CustodyWalletAggregate, PaymentTransferSummary as TransferRecord } from "@sdp/types";
 import { ExternalLink, RefreshCwIcon } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useMemo } from "react";
@@ -36,6 +32,8 @@ import {
   selectTopAggregateBalanceRows,
 } from "./payments-overview.utils";
 import {
+  type CounterpartiesResult,
+  fetchAllCounterparties,
   fetchTransfers,
   fetchWalletAggregate,
   getDevnetExplorerUrl,
@@ -45,15 +43,16 @@ interface PaymentsOverviewProps {
   aggregate: CustodyWalletAggregate | null;
   aggregateError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
-  counterparties: Counterparty[];
   transfers: TransferRecord[];
   transfersError: string | null;
 }
 
 const PAYMENTS_OVERVIEW_AGGREGATE_KEY = "payments-overview-aggregate";
 const PAYMENTS_OVERVIEW_TRANSFERS_KEY = "payments-overview-transfers";
+const PAYMENTS_OVERVIEW_COUNTERPARTIES_KEY = "payments-overview-counterparties";
 const PAYMENTS_OVERVIEW_AGGREGATE_CACHE_TTL_MS = 30_000;
 const PAYMENTS_OVERVIEW_TRANSFERS_CACHE_TTL_MS = 20_000;
+const PAYMENTS_OVERVIEW_COUNTERPARTIES_CACHE_TTL_MS = 60_000;
 
 function statusClassName(status: string): string {
   switch (status.toLowerCase()) {
@@ -126,11 +125,145 @@ function TruncatedTableText({
   );
 }
 
+interface TransfersTablePanelProps {
+  transfersError: string | null;
+  transfers: TransferRecord[];
+  counterpartiesReady: boolean;
+  counterpartiesFailed: boolean;
+  counterpartyNamesById: ReadonlyMap<string, string>;
+  locale?: string;
+  t: ReturnType<typeof useTranslations>;
+}
+
+function TransfersTablePanel({
+  transfersError,
+  transfers,
+  counterpartiesReady,
+  counterpartiesFailed,
+  counterpartyNamesById,
+  locale,
+  t,
+}: TransfersTablePanelProps) {
+  if (transfersError) {
+    return <p className="text-sm text-destructive-strong">{transfersError}</p>;
+  }
+  if (transfers.length === 0) {
+    return <p className="text-sm text-secondary">{t("DashboardPayments.noTransactions")}</p>;
+  }
+  if (counterpartiesFailed) {
+    return (
+      <p className="text-sm text-destructive-strong">{t("DashboardPayments.requestFailed")}</p>
+    );
+  }
+  if (!counterpartiesReady) {
+    return <p className="text-sm text-secondary">{t("DashboardPayments.loadingCounterparties")}</p>;
+  }
+
+  return (
+    <TooltipProvider>
+      <Table className="min-w-0 [&_table]:table-fixed">
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-[8.75rem]">{t("DashboardPayments.status")}</TableHead>
+            <TableHead className="hidden w-[8rem] lg:table-cell">
+              {t("DashboardPayments.type")}
+            </TableHead>
+            <TableHead className="w-[calc(100%-8.75rem)] lg:w-[16rem] xl:w-[20%]">
+              <span className="lg:hidden">{t("DashboardPayments.transfer")}</span>
+              <span className="hidden lg:inline">{t("DashboardPayments.asset")}</span>
+            </TableHead>
+            <TableHead className="hidden w-[8rem] lg:table-cell">
+              {t("DashboardPayments.direction")}
+            </TableHead>
+            <TableHead className="hidden xl:table-cell xl:w-[26%]">
+              {t("DashboardPayments.counterpartyLabel")}
+            </TableHead>
+            <TableHead className="hidden 2xl:table-cell 2xl:w-[22%]">
+              {t("DashboardPayments.signature")}
+            </TableHead>
+            <TableHead className="hidden w-[10rem] lg:table-cell">
+              {t("DashboardPayments.createdLabel")}
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {transfers.map((transfer) => {
+            const counterparty = resolveCounterparty(transfer, counterpartyNamesById);
+            const assetLabel = formatDisplayAmount(transfer.amount, transfer.token, locale);
+            const directionLabel = formatDirection(transfer.direction, t);
+            const typeLabel = resolveTransferTypeLabel(transfer.type, t);
+            const createdLabel = formatTimestamp(transfer.createdAt, t, locale);
+
+            return (
+              <TableRow key={transfer.id}>
+                <TableCell>
+                  <span
+                    className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClassName(transfer.status)}`}
+                  >
+                    {transfer.status}
+                  </span>
+                </TableCell>
+                <TableCell className="hidden text-secondary lg:table-cell">{typeLabel}</TableCell>
+                <TableCell className="min-w-0 max-w-0 font-medium">
+                  <div className="min-w-0">
+                    <TruncatedTableText value={assetLabel} className="block max-w-full truncate" />
+                    <div className="mt-1 text-xs font-normal text-tertiary lg:hidden">
+                      <span>{directionLabel}</span>
+                      <span className="mx-1.5">·</span>
+                      <span>{createdLabel}</span>
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell className="hidden text-secondary lg:table-cell">
+                  {directionLabel}
+                </TableCell>
+                <TableCell className="hidden min-w-0 max-w-0 text-secondary xl:table-cell">
+                  <TruncatedTableText value={counterparty} className="block max-w-full truncate" />
+                </TableCell>
+                <TableCell className="hidden min-w-0 max-w-0 font-mono text-xs 2xl:table-cell">
+                  {transfer.signature ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <a
+                          href={getDevnetExplorerUrl(transfer.signature)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex min-w-0 max-w-full items-center gap-1 text-primary underline underline-offset-2"
+                        >
+                          <span className="block min-w-0 max-w-full truncate">
+                            {truncateHash(transfer.signature)}
+                          </span>
+                          <ExternalLink className="size-3 shrink-0" />
+                        </a>
+                      </TooltipTrigger>
+                      <TooltipContent
+                        side="top"
+                        align="start"
+                        className="max-w-[32rem] break-all text-xs"
+                      >
+                        {transfer.signature}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <span className="text-tertiary">{t("DashboardPayments.pending")}</span>
+                  )}
+                </TableCell>
+                <TableCell className="hidden text-secondary lg:table-cell">
+                  {createdLabel}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </TooltipProvider>
+  );
+}
+
 export function PaymentsOverview({
   aggregate,
   aggregateError,
   issuedTokenSymbolsByMint,
-  counterparties,
   transfers,
   transfersError,
 }: PaymentsOverviewProps) {
@@ -174,6 +307,19 @@ export function PaymentsOverview({
       ttlMs: PAYMENTS_OVERVIEW_TRANSFERS_CACHE_TTL_MS,
     }
   );
+  const {
+    data: counterpartiesResult,
+    isValidating: counterpartiesRefreshing,
+    mutate: mutateCounterparties,
+  } = usePersistedDashboardSWR<CounterpartiesResult>(
+    [PAYMENTS_OVERVIEW_COUNTERPARTIES_KEY, refreshSeed],
+    () => fetchAllCounterparties(),
+    { revalidateOnFocus: true },
+    {
+      key: "payments.counterparties.all",
+      ttlMs: PAYMENTS_OVERVIEW_COUNTERPARTIES_CACHE_TTL_MS,
+    }
+  );
 
   const liveAggregate = swrAggregate ?? aggregate;
   const liveTransfers = swrTransfers ?? transfers;
@@ -187,7 +333,7 @@ export function PaymentsOverview({
     : swrTransfers === undefined
       ? transfersError
       : null;
-  const isRefreshing = aggregateRefreshing || transfersRefreshing;
+  const isRefreshing = aggregateRefreshing || transfersRefreshing || counterpartiesRefreshing;
   const aggregateBalances = useMemo(
     () => normalizeAggregateBalances(liveAggregate?.balances ?? []),
     [liveAggregate]
@@ -198,14 +344,21 @@ export function PaymentsOverview({
   );
   const totalBalance = resolveTotalBalance(aggregateBalances);
   const walletCount = liveAggregate?.walletCount ?? 0;
+  const counterpartiesReady = Boolean(counterpartiesResult?.ok);
+  const counterpartiesFailed = counterpartiesResult !== undefined && !counterpartiesResult.ok;
   const counterpartyNamesById = useMemo(
     () =>
-      new Map(counterparties.map((counterparty) => [counterparty.id, counterparty.displayName])),
-    [counterparties]
+      new Map(
+        (counterpartiesResult?.data ?? []).map((counterparty) => [
+          counterparty.id,
+          counterparty.displayName,
+        ])
+      ),
+    [counterpartiesResult]
   );
 
   const handleRefresh = () => {
-    void Promise.all([mutateAggregate(), mutateTransfers()]);
+    void Promise.all([mutateAggregate(), mutateTransfers(), mutateCounterparties()]);
   };
 
   return (
@@ -294,123 +447,15 @@ export function PaymentsOverview({
             </Button>
           </CardHeader>
           <CardContent>
-            {liveTransfersError ? (
-              <p className="text-sm text-destructive-strong">{liveTransfersError}</p>
-            ) : liveTransfers.length === 0 ? (
-              <p className="text-sm text-secondary">{t("DashboardPayments.noTransactions")}</p>
-            ) : (
-              <TooltipProvider>
-                <Table className="min-w-0 [&_table]:table-fixed">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[8.75rem]">{t("DashboardPayments.status")}</TableHead>
-                      <TableHead className="hidden w-[8rem] lg:table-cell">
-                        {t("DashboardPayments.type")}
-                      </TableHead>
-                      <TableHead className="w-[calc(100%-8.75rem)] lg:w-[16rem] xl:w-[20%]">
-                        <span className="lg:hidden">{t("DashboardPayments.transfer")}</span>
-                        <span className="hidden lg:inline">{t("DashboardPayments.asset")}</span>
-                      </TableHead>
-                      <TableHead className="hidden w-[8rem] lg:table-cell">
-                        {t("DashboardPayments.direction")}
-                      </TableHead>
-                      <TableHead className="hidden xl:table-cell xl:w-[26%]">
-                        {t("DashboardPayments.counterpartyLabel")}
-                      </TableHead>
-                      <TableHead className="hidden 2xl:table-cell 2xl:w-[22%]">
-                        {t("DashboardPayments.signature")}
-                      </TableHead>
-                      <TableHead className="hidden w-[10rem] lg:table-cell">
-                        {t("DashboardPayments.createdLabel")}
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {liveTransfers.map((transfer) => {
-                      const counterparty = resolveCounterparty(transfer, counterpartyNamesById);
-                      const assetLabel = formatDisplayAmount(
-                        transfer.amount,
-                        transfer.token,
-                        locale
-                      );
-                      const directionLabel = formatDirection(transfer.direction, t);
-                      const typeLabel = resolveTransferTypeLabel(transfer.type, t);
-                      const createdLabel = formatTimestamp(transfer.createdAt, t, locale);
-
-                      return (
-                        <TableRow key={transfer.id}>
-                          <TableCell>
-                            <span
-                              className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClassName(transfer.status)}`}
-                            >
-                              {transfer.status}
-                            </span>
-                          </TableCell>
-                          <TableCell className="hidden text-secondary lg:table-cell">
-                            {typeLabel}
-                          </TableCell>
-                          <TableCell className="min-w-0 max-w-0 font-medium">
-                            <div className="min-w-0">
-                              <TruncatedTableText
-                                value={assetLabel}
-                                className="block max-w-full truncate"
-                              />
-                              <div className="mt-1 text-xs font-normal text-tertiary lg:hidden">
-                                <span>{directionLabel}</span>
-                                <span className="mx-1.5">·</span>
-                                <span>{createdLabel}</span>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="hidden text-secondary lg:table-cell">
-                            {directionLabel}
-                          </TableCell>
-                          <TableCell className="hidden min-w-0 max-w-0 text-secondary xl:table-cell">
-                            <TruncatedTableText
-                              value={counterparty}
-                              className="block max-w-full truncate"
-                            />
-                          </TableCell>
-                          <TableCell className="hidden min-w-0 max-w-0 font-mono text-xs 2xl:table-cell">
-                            {transfer.signature ? (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <a
-                                    href={getDevnetExplorerUrl(transfer.signature)}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="flex min-w-0 max-w-full items-center gap-1 text-primary underline underline-offset-2"
-                                  >
-                                    <span className="block min-w-0 max-w-full truncate">
-                                      {truncateHash(transfer.signature)}
-                                    </span>
-                                    <ExternalLink className="size-3 shrink-0" />
-                                  </a>
-                                </TooltipTrigger>
-                                <TooltipContent
-                                  side="top"
-                                  align="start"
-                                  className="max-w-[32rem] break-all text-xs"
-                                >
-                                  {transfer.signature}
-                                </TooltipContent>
-                              </Tooltip>
-                            ) : (
-                              <span className="text-tertiary">
-                                {t("DashboardPayments.pending")}
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell className="hidden text-secondary lg:table-cell">
-                            {createdLabel}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </TooltipProvider>
-            )}
+            <TransfersTablePanel
+              transfersError={liveTransfersError}
+              transfers={liveTransfers}
+              counterpartiesReady={counterpartiesReady}
+              counterpartiesFailed={counterpartiesFailed}
+              counterpartyNamesById={counterpartyNamesById}
+              locale={locale}
+              t={t}
+            />
           </CardContent>
         </Card>
       </SectionEntry>

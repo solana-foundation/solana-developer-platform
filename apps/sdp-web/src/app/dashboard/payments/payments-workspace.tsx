@@ -1,7 +1,6 @@
 "use client";
 
 import type {
-  Counterparty,
   CustodyWalletAggregate,
   PaymentsDashboardWallet,
   PaymentTransferSummary,
@@ -37,7 +36,6 @@ interface PaymentsWorkspaceProps {
   aggregate: CustodyWalletAggregate | null;
   aggregateError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
-  counterparties: Counterparty[];
   transfers: PaymentTransferSummary[];
   transfersError: string | null;
 }
@@ -50,7 +48,6 @@ export function PaymentsWorkspace({
   aggregate,
   aggregateError,
   issuedTokenSymbolsByMint,
-  counterparties,
   transfers,
   transfersError,
 }: PaymentsWorkspaceProps) {
@@ -105,7 +102,6 @@ export function PaymentsWorkspace({
           aggregate={aggregate}
           aggregateError={aggregateError}
           issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
-          counterparties={counterparties}
           transfers={transfers}
           transfersError={transfersError}
         />
