@@ -1,7 +1,14 @@
 "use client";
 
 import { ThemeProvider as NextThemeProvider, useTheme as useNextTheme } from "next-themes";
-import { type ReactNode, useCallback, useMemo, useSyncExternalStore } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
 
 export type Theme = "light" | "dark";
 
@@ -14,6 +21,10 @@ type ThemeContextValue = {
   setTheme: (theme: Theme) => void;
 };
 
+const ThemeProviderContext = createContext(false);
+
+// The no-op store intentionally changes only between the server and client snapshots.
+// React schedules the post-hydration render without an effect or a browser event listener.
 const subscribeToHydration = () => () => {};
 
 export function resolveTheme(resolvedTheme: string | undefined): Theme {
@@ -29,13 +40,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       enableSystem
       storageKey={THEME_STORAGE_KEY}
     >
-      {children}
+      <ThemeProviderContext.Provider value>{children}</ThemeProviderContext.Provider>
     </NextThemeProvider>
   );
 }
 
 export function useTheme(): ThemeContextValue {
-  const { resolvedTheme, setTheme: setNextTheme, themes } = useNextTheme();
+  const hasThemeProvider = useContext(ThemeProviderContext);
+  const { resolvedTheme, setTheme: setNextTheme } = useNextTheme();
   const hydrated = useSyncExternalStore(
     subscribeToHydration,
     () => true,
@@ -56,7 +68,7 @@ export function useTheme(): ThemeContextValue {
 
   const value = useMemo(() => ({ theme, toggleTheme, setTheme }), [setTheme, theme, toggleTheme]);
 
-  if (themes.length === 0) {
+  if (!hasThemeProvider) {
     throw new Error("useTheme must be used within a ThemeProvider");
   }
 
