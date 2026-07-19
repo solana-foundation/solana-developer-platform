@@ -1,7 +1,7 @@
 "use client";
 
 import { KeyRound } from "lucide-react";
-import Link from "next/link";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";

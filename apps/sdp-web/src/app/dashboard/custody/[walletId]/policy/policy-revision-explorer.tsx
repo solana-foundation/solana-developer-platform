@@ -4,7 +4,7 @@ import type {
   WalletControlProfileRevisionSummary,
 } from "@sdp/types";
 import { Braces, ChevronRight, Clock3, ShieldCheck, UserRound } from "lucide-react";
-import Link from "next/link";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Badge } from "@/components/ui/badge";
 import { formatDisplayLabel } from "@/lib/utils";
 import { formatPolicyDateTime, type PolicyTranslate, shortIdentifier } from "./policy-audit.shared";

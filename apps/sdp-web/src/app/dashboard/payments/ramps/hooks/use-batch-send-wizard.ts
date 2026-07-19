@@ -13,7 +13,6 @@ import {
   decimalFixedPoint,
   decimalFixedPointToString,
 } from "@solana/fixed-points";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -26,6 +25,7 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import type { BulkImportRow } from "../bulk-import";
 import { batchSendSchema, MAX_BATCH_RECIPIENTS, ONCHAIN_AMOUNT_PATTERN } from "../schema";
 import { walletBalanceAssetOptions } from "../wallet-options";
@@ -98,7 +98,7 @@ export function useBatchSendWizard({
   cluster,
   onExit,
 }: UseBatchSendWizardProps) {
-  const router = useRouter();
+  const router = useDashboardRouter();
   const t = useTranslations();
   const steps = getBatchSendSteps(t);
   const [stepIndex, setStepIndex] = useState(0);

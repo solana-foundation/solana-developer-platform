@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createOrgSdpApiClient, createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../../onboarding-status";
 import { isKnownCustodyProvider, type KnownCustodyProvider } from "../provider-catalog";
 import { WalletSetupFlow } from "./wallet-setup-flow";
@@ -57,7 +57,7 @@ async function getConnectedCustodyProviders(
 }
 
 export default async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
-  const { userId, orgId } = await auth();
+  const { getToken, userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -69,11 +69,15 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const initialProvider = parseProvider(getSearchParamValue(resolvedSearchParams, "provider"));
 
-  const orgClient = await trace.step("create_org_sdp_api_client", () =>
-    createOrgSdpApiClient(trace.childContext("dashboard.custody.setup.org.api"))
+  const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
+    createRequestScopedSdpApiClients({
+      getToken,
+      organizationTraceContext: trace.childContext("dashboard.custody.setup.org.api"),
+      projectTraceContext: trace.childContext("dashboard.custody.setup.api"),
+    })
   );
   const onboarding = await trace.step("fetch_onboarding_status", () =>
-    orgClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status")
+    organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status")
   );
 
   if (!onboarding.linked || !onboarding.organization) {
@@ -81,16 +85,16 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
   }
   const organizationId = onboarding.organization.id;
 
-  const apiClient = await trace.step("create_sdp_api_client", () =>
-    createSdpApiClient(trace.childContext("dashboard.custody.setup.api"))
-  );
+  if (!projectClient) {
+    throw new Error("Selected project required");
+  }
 
   const [configsResult, providerAccessResult] = await Promise.all([
     trace.step("fetch_custody_configs", () =>
-      settle(getConnectedCustodyProviders(apiClient.request))
+      settle(getConnectedCustodyProviders(projectClient.request))
     ),
     trace.step("fetch_provider_access", () =>
-      settle(fetchProviderAvailability(apiClient.request, organizationId))
+      settle(fetchProviderAvailability(projectClient.request, organizationId))
     ),
   ]);
 

@@ -140,7 +140,6 @@ let originalBvnkWalletId: string | undefined;
 let originalBvnkApiBaseUrl: string | undefined;
 let originalMagicBlockApiBaseUrl: string | undefined;
 let originalMagicBlockAuthToken: string | undefined;
-let originalRecurringPaymentsEnabled: string | undefined;
 
 function assertMoonPaySignature(url: URL): void {
   const signature = url.searchParams.get("signature");
@@ -698,7 +697,6 @@ describe("Payments routes", () => {
     originalBvnkApiBaseUrl = env.BVNK_API_BASE_URL;
     originalMagicBlockApiBaseUrl = env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL;
     originalMagicBlockAuthToken = env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN;
-    originalRecurringPaymentsEnabled = env.PAYMENTS_RECURRING_ENABLED;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
@@ -719,7 +717,6 @@ describe("Payments routes", () => {
     env.BVNK_API_BASE_URL = TEST_BVNK_API_BASE_URL;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = undefined;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = undefined;
-    env.PAYMENTS_RECURRING_ENABLED = undefined;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -745,38 +742,12 @@ describe("Payments routes", () => {
     env.BVNK_API_BASE_URL = originalBvnkApiBaseUrl;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = originalMagicBlockApiBaseUrl;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = originalMagicBlockAuthToken;
-    env.PAYMENTS_RECURRING_ENABLED = originalRecurringPaymentsEnabled;
 
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
   });
 
-  it("gates recurring subscription endpoints behind PAYMENTS_RECURRING_ENABLED", async () => {
-    const res = await app.request(
-      "/v1/payments/subscription-plans",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ownerWalletId: TEST_WALLET_ID,
-          token: DEVNET_USDC_MINT,
-          amount: "10.00",
-          periodHours: 24,
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("Recurring payments are not enabled");
-  });
-
   it("creates, lists, and gets recurring payment records through SDP API routes", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -854,7 +825,6 @@ describe("Payments routes", () => {
   });
 
   it("activates recurring payments through SDP API routes", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1027,7 +997,6 @@ describe("Payments routes", () => {
   });
 
   it("updates pending recurring payment terms directly and journals an audit event", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -1114,7 +1083,6 @@ describe("Payments routes", () => {
   });
 
   it("updates active recurring payment metadata in place on the existing on-chain plan", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1214,7 +1182,6 @@ describe("Payments routes", () => {
   });
 
   it("replaces active recurring payment records for term changes and cancels the old subscription", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1343,7 +1310,6 @@ describe("Payments routes", () => {
   });
 
   it("rejects active replacement next due dates before replacement transactions are submitted", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1417,7 +1383,6 @@ describe("Payments routes", () => {
   });
 
   it("rejects fresh in-flight recurring payment updates", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -1444,7 +1409,6 @@ describe("Payments routes", () => {
   });
 
   it("rejects stale recurring payment update recovery with a different payload", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1529,7 +1493,6 @@ describe("Payments routes", () => {
   });
 
   it("clamps stale metadata update retries after the subscription period advances", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1650,7 +1613,6 @@ describe("Payments routes", () => {
   });
 
   it("creates the source token account during recurring payment activation when it is missing", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1706,7 +1668,6 @@ describe("Payments routes", () => {
   });
 
   it("cancels active recurring payments through SDP API routes", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1789,7 +1750,6 @@ describe("Payments routes", () => {
   });
 
   it("resumes canceled recurring payments through SDP API routes", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1876,7 +1836,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers submitted recurring payment cancel attempts", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -1972,7 +1931,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers submitted recurring payment resume attempts", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2078,7 +2036,6 @@ describe("Payments routes", () => {
   });
 
   it("blocks recurring payment cancellation while a fresh collection is processing", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2162,7 +2119,6 @@ describe("Payments routes", () => {
   });
 
   it("resets recurring payment cancellation claims when subscription validation fails", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2224,7 +2180,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers confirmed recurring payment collections before cancellation", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2370,7 +2325,6 @@ describe("Payments routes", () => {
   });
 
   it("collects due recurring payments through SDP API routes", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2493,7 +2447,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers submitted recurring payment collection attempts", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2660,7 +2613,6 @@ describe("Payments routes", () => {
   });
 
   it("finalizes recovered recurring payment collections after cancellation", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -2828,7 +2780,6 @@ describe("Payments routes", () => {
   });
 
   it("retries recurring payment collection after pre-submission crash", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3002,7 +2953,6 @@ describe("Payments routes", () => {
   });
 
   it("does not fail fresh transferless recurring payment attempts during recovery", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3106,7 +3056,6 @@ describe("Payments routes", () => {
   });
 
   it("does not fail fresh unsigned recurring payment transfers during recovery", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3260,7 +3209,6 @@ describe("Payments routes", () => {
   });
 
   it("journals failed recovered recurring payment collection attempts and allows retry", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3440,7 +3388,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers confirmed collection transfers without reopening the due period", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3605,7 +3552,6 @@ describe("Payments routes", () => {
   });
 
   it("rejects early recurring payment collection", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3654,7 +3600,6 @@ describe("Payments routes", () => {
   });
 
   it("journals failed pre-submission recurring payment collection attempts", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -3736,7 +3681,6 @@ describe("Payments routes", () => {
   });
 
   it("journals failed activation attempts and allows activation retry", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock
@@ -3838,7 +3782,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers stale activating recurring payments without recreating the plan", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -4027,7 +3970,6 @@ describe("Payments routes", () => {
   });
 
   it("recovers stale authorized recurring payments without re-confirming old signatures", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -4187,7 +4129,6 @@ describe("Payments routes", () => {
   });
 
   it("journals failed on-chain activation attempts and retries with a fresh signature", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -4308,7 +4249,6 @@ describe("Payments routes", () => {
   });
 
   it("clears failed authorization signatures when finalization cannot find the subscription", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
@@ -4440,7 +4380,6 @@ describe("Payments routes", () => {
   });
 
   it("requires owner wallet access when updating subscription plans", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -4484,7 +4423,6 @@ describe("Payments routes", () => {
   });
 
   it("rejects archived counterparties when creating subscriptions", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -4560,7 +4498,6 @@ describe("Payments routes", () => {
   });
 
   it("requires plan wallet access when mutating subscriptions and collection attempts", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -4651,7 +4588,6 @@ describe("Payments routes", () => {
   });
 
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {
-    env.PAYMENTS_RECURRING_ENABLED = "true";
     const authHeaders = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
     };
@@ -6052,27 +5988,41 @@ describe("Payments routes", () => {
     status: string;
     signature?: string | null;
     walletId?: string;
+    counterpartyId?: string | null;
+    destination?: string;
+    source?: string;
+    token?: string;
+    amount?: string;
+    memo?: string | null;
+    type?: "transfer" | "transfer_confidential" | "transfer_batch" | "onramp" | "offramp";
+    direction?: "inbound" | "outbound";
+    provider?: "moonpay" | "lightspark" | "bvnk" | "moneygram" | "coinbase" | "mural" | "stripe";
+    providerReference?: string | null;
+    createdAt?: string;
   }): Promise<void> {
-    const now = new Date().toISOString();
+    const now = params.createdAt ?? new Date().toISOString();
     await getDb(env)
       .prepare(
         `INSERT INTO payment_transfers
-           (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, signature, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, wallet_id, counterparty_id, source_address, destination_address, token, amount, memo, type, direction, status, provider, provider_reference, signature, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         params.id,
         TEST_ORG.id,
         TEST_PROJECT.id,
         params.walletId ?? TEST_WALLET_ID,
-        TEST_SOLANA_ADDRESSES.wallet1,
-        TEST_SOLANA_ADDRESSES.wallet2,
-        "SOL",
-        "1",
-        null,
-        "transfer",
-        "outbound",
+        params.counterpartyId ?? null,
+        params.source ?? TEST_SOLANA_ADDRESSES.wallet1,
+        params.destination ?? TEST_SOLANA_ADDRESSES.wallet2,
+        params.token ?? "SOL",
+        params.amount ?? "1",
+        params.memo ?? null,
+        params.type ?? "transfer",
+        params.direction ?? "outbound",
         params.status,
+        params.provider ?? null,
+        params.providerReference ?? null,
         params.signature ?? null,
         now,
         now
@@ -7384,6 +7334,269 @@ describe("Payments routes", () => {
       expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
     });
 
+    it("scopes database-backed wallet-address history to the resolved wallet", async () => {
+      await seedTransfer({
+        id: "xfr_address_resolved_outbound",
+        status: "confirmed",
+        source: TEST_SOLANA_ADDRESSES.wallet1,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      await seedTransfer({
+        id: "xfr_address_resolved_inbound",
+        status: "confirmed",
+        source: TEST_SOLANA_ADDRESSES.wallet2,
+        destination: TEST_SOLANA_ADDRESSES.wallet1,
+        direction: "inbound",
+      });
+      await seedTransfer({
+        id: "xfr_address_other_wallet",
+        status: "confirmed",
+        walletId: "wal_payments_other",
+        source: TEST_SOLANA_ADDRESSES.wallet2,
+        destination: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+
+      const res = await app.request(
+        `/v1/payments/transfers?walletAddress=${TEST_SOLANA_ADDRESSES.wallet1}&includeObserved=false`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ id: string }>;
+        meta: { total: number };
+      };
+      expect(body.data.map((transfer) => transfer.id).sort()).toEqual([
+        "xfr_address_resolved_inbound",
+        "xfr_address_resolved_outbound",
+      ]);
+      expect(body.meta.total).toBe(2);
+      expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
+    });
+
+    it("matches either side of an unowned address in database-backed history", async () => {
+      await seedTransfer({
+        id: "xfr_address_external_outbound",
+        status: "confirmed",
+        walletId: "wal_external_outbound",
+        source: TEST_SOLANA_ADDRESSES.wallet2,
+        destination: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      await seedTransfer({
+        id: "xfr_address_external_inbound",
+        status: "confirmed",
+        walletId: "wal_external_inbound",
+        source: TEST_SOLANA_ADDRESSES.wallet3,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        direction: "inbound",
+      });
+      await seedTransfer({
+        id: "xfr_address_external_unrelated",
+        status: "confirmed",
+        walletId: "wal_external_unrelated",
+        source: TEST_SOLANA_ADDRESSES.wallet3,
+        destination: TEST_KORA_FEE_PAYER,
+      });
+
+      const res = await app.request(
+        `/v1/payments/transfers?walletAddress=${TEST_SOLANA_ADDRESSES.wallet2}&includeObserved=false`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ id: string }>;
+        meta: { total: number };
+      };
+      expect(body.data.map((transfer) => transfer.id).sort()).toEqual([
+        "xfr_address_external_inbound",
+        "xfr_address_external_outbound",
+      ]);
+      expect(body.meta.total).toBe(2);
+    });
+
+    it("enforces payments:read wallet grants for database-backed transfer lists", async () => {
+      await seedTransfer({ id: "xfr_wallet_readable", status: "confirmed" });
+      await seedTransfer({
+        id: "xfr_wallet_write_only",
+        status: "confirmed",
+        walletId: "wal_payments_write_only",
+      });
+      await seedCachedKey({
+        walletBindings: [
+          { walletId: TEST_WALLET_ID, permissions: ["payments:read"] },
+          { walletId: "wal_payments_write_only", permissions: ["payments:write"] },
+        ],
+      });
+
+      const listRes = await app.request(
+        "/v1/payments/transfers?includeObserved=false",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(listRes.status).toBe(200);
+      const listBody = (await listRes.json()) as { data: Array<{ id: string }> };
+      expect(listBody.data.map((transfer) => transfer.id)).toEqual(["xfr_wallet_readable"]);
+
+      const forbiddenRes = await app.request(
+        "/v1/payments/transfers?wallet=wal_payments_write_only&includeObserved=false",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(forbiddenRes.status).toBe(403);
+    });
+
+    it("returns no rows when selected wallets grant no payments:read access", async () => {
+      await seedTransfer({ id: "xfr_wallet_not_readable", status: "confirmed" });
+      await seedCachedKey({
+        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfers?includeObserved=false",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: unknown[]; meta: { total: number } };
+      expect(body.data).toEqual([]);
+      expect(body.meta.total).toBe(0);
+    });
+
+    it("enforces payments:read on exact provider-reference lookups", async () => {
+      await seedTransfer({
+        id: "xfr_provider_reference_private",
+        status: "completed",
+        type: "offramp",
+        provider: "moonpay",
+        providerReference: "private-provider-reference",
+      });
+      await seedCachedKey({
+        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfers?provider=moonpay&providerReference=private-provider-reference",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe("FORBIDDEN");
+      expect(body.error.message).toContain("requested wallet");
+    });
+
+    it("composes exact provider-reference lookups with every ledger filter and pagination", async () => {
+      const counterpartyId = await seedCounterparty({ id: "counterparty_exact_reference" });
+      await seedTransfer({
+        id: "xfr_exact_reference_match",
+        status: "completed",
+        counterpartyId,
+        source: TEST_SOLANA_ADDRESSES.wallet1,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "USDC",
+        memo: "Quarterly invoice",
+        type: "offramp",
+        direction: "outbound",
+        provider: "moonpay",
+        providerReference: "exact-reference-42",
+        createdAt: "2026-01-02T12:00:00.000Z",
+      });
+
+      const matchingQuery = new URLSearchParams({
+        provider: "moonpay",
+        providerReference: "exact-reference-42",
+        wallet: TEST_WALLET_ID,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        search: "quarterly",
+        status: "completed",
+        category: "ramp",
+        type: "offramp",
+        counterpartyId,
+        token: "USDC",
+        direction: "outbound",
+        from: "2026-01-02T16:00:00+05:00",
+        to: "2026-01-02T08:00:00-05:00",
+        sortBy: "amount",
+        sortDirection: "asc",
+        pageSize: "1",
+      });
+
+      const firstPageRes = await app.request(
+        `/v1/payments/transfers?${matchingQuery}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(firstPageRes.status).toBe(200);
+      const firstPage = (await firstPageRes.json()) as {
+        data: Array<{ id: string }>;
+        meta: { page: number; pageSize: number; total: number };
+      };
+      expect(firstPage.data.map((transfer) => transfer.id)).toEqual(["xfr_exact_reference_match"]);
+      expect(firstPage.meta).toMatchObject({ page: 1, pageSize: 1, total: 1 });
+
+      matchingQuery.set("page", "2");
+      const secondPageRes = await app.request(
+        `/v1/payments/transfers?${matchingQuery}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(secondPageRes.status).toBe(200);
+      const secondPage = (await secondPageRes.json()) as {
+        data: unknown[];
+        meta: { hasMore: boolean; page: number; total: number };
+      };
+      expect(secondPage.data).toEqual([]);
+      expect(secondPage.meta).toMatchObject({ hasMore: false, page: 2, total: 1 });
+
+      matchingQuery.set("page", "1");
+      matchingQuery.set("status", "failed");
+      const mismatchedFilterRes = await app.request(
+        `/v1/payments/transfers?${matchingQuery}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(mismatchedFilterRes.status).toBe(200);
+      const mismatchedFilter = (await mismatchedFilterRes.json()) as {
+        data: unknown[];
+        meta: { total: number };
+      };
+      expect(mismatchedFilter.data).toEqual([]);
+      expect(mismatchedFilter.meta.total).toBe(0);
+      expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
+    });
+
     it("filters by status when status query param is provided", async () => {
       await seedTransfer({ id: "xfr_status_confirmed", status: "confirmed" });
       await seedTransfer({ id: "xfr_status_pending", status: "pending" });
@@ -7432,6 +7645,176 @@ describe("Payments routes", () => {
       ]);
     });
 
+    it("composes search, type, provider, and stable database pagination", async () => {
+      const counterpartyId = await seedCounterparty({ id: "counterparty_searchable" });
+      await seedTransfer({
+        id: "xfr_search_old",
+        status: "completed",
+        counterpartyId,
+        type: "offramp",
+        provider: "moonpay",
+        providerReference: "merchant-reference-42",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      await seedTransfer({
+        id: "xfr_search_new",
+        status: "completed",
+        counterpartyId,
+        type: "offramp",
+        provider: "moonpay",
+        providerReference: "merchant-reference-43",
+        createdAt: "2026-01-02T00:00:00.000Z",
+      });
+      await seedTransfer({
+        id: "xfr_wrong_provider",
+        status: "completed",
+        counterpartyId,
+        type: "offramp",
+        provider: "stripe",
+      });
+
+      const query = new URLSearchParams({
+        search: "MoonPay Test Counterparty",
+        type: "offramp",
+        provider: "moonpay",
+        status: "completed",
+        sortBy: "createdAt",
+        sortDirection: "asc",
+        page: "2",
+        pageSize: "1",
+      });
+      const res = await app.request(
+        `/v1/payments/transfers?${query}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ id: string; walletId: string }>;
+        meta: { total: number; page: number; pageSize: number; hasMore: boolean };
+      };
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]).toMatchObject({
+        id: "xfr_search_new",
+        walletId: TEST_WALLET_ID,
+        counterpartyId,
+        counterpartyDisplayName: "MoonPay Test Counterparty",
+      });
+      expect(body.meta).toMatchObject({ total: 2, page: 2, pageSize: 1, hasMore: false });
+    });
+
+    it("applies search, date filters, and amount sorting to observed wallet history", async () => {
+      const counterpartyId = await seedCounterparty({ id: "counterparty_observed_search" });
+      const matchingLowSignature = "observed-filter-match-low-signature";
+      const matchingHighSignature = "observed-filter-match-high-signature";
+      const outsideDateSignature = "observed-filter-outside-date-signature";
+      const otherCounterpartySignature = "observed-filter-other-counterparty-signature";
+
+      await seedTransfer({
+        id: "xfr_observed_filter_low",
+        status: "confirmed",
+        signature: matchingLowSignature,
+        counterpartyId,
+        amount: "2",
+        createdAt: "2026-01-02T16:00:00.000Z",
+      });
+      await seedTransfer({
+        id: "xfr_observed_filter_high",
+        status: "confirmed",
+        signature: matchingHighSignature,
+        counterpartyId,
+        amount: "20",
+        createdAt: "2026-01-03T00:00:00.000Z",
+      });
+      await seedTransfer({
+        id: "xfr_observed_filter_outside_date",
+        status: "confirmed",
+        signature: outsideDateSignature,
+        counterpartyId,
+        amount: "1",
+        createdAt: "2025-12-31T23:59:59.000Z",
+      });
+      await seedTransfer({
+        id: "xfr_observed_filter_other_counterparty",
+        status: "confirmed",
+        signature: otherCounterpartySignature,
+        amount: "0.5",
+        createdAt: "2026-01-02T00:00:00.000Z",
+      });
+      getSignaturesForAddressMock.mockResolvedValueOnce(
+        [
+          matchingLowSignature,
+          matchingHighSignature,
+          outsideDateSignature,
+          otherCounterpartySignature,
+        ].map((signature, index) => ({
+          signature: signature as unknown as Signature,
+          slot: BigInt(200 + index),
+          blockTime: 1_767_225_600n + BigInt(index),
+          err: null,
+        }))
+      );
+
+      const query = new URLSearchParams({
+        wallet: TEST_WALLET_ID,
+        search: "moonpay test",
+        from: "2026-01-02T20:00:00+05:00",
+        to: "2026-01-03T19:00:00-05:00",
+        sortBy: "amount",
+        sortDirection: "asc",
+      });
+      const res = await app.request(
+        `/v1/payments/transfers?${query}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ amount: string; counterpartyDisplayName?: string; id: string }>;
+        meta: { total: number };
+      };
+      expect(body.data).toEqual([
+        expect.objectContaining({
+          id: "xfr_observed_filter_low",
+          amount: "2",
+          counterpartyDisplayName: "MoonPay Test Counterparty",
+        }),
+        expect.objectContaining({
+          id: "xfr_observed_filter_high",
+          amount: "20",
+          counterpartyDisplayName: "MoonPay Test Counterparty",
+        }),
+      ]);
+      expect(body.meta.total).toBe(2);
+    });
+
+    it("uses database-backed pagination for wallet filters when observed history is disabled", async () => {
+      await seedTransfer({ id: "xfr_wallet_recorded", status: "confirmed" });
+
+      const res = await app.request(
+        `/v1/payments/transfers?wallet=${TEST_WALLET_ID}&includeObserved=false`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ id: string }>; meta: { total: number } };
+      expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_wallet_recorded"]);
+      expect(body.meta.total).toBe(1);
+      expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
+    });
+
     it("returns bad request for invalid transfer status query param", async () => {
       const res = await app.request(
         "/v1/payments/transfers?status=settled",
@@ -7448,6 +7831,37 @@ describe("Payments routes", () => {
       };
       expect(body.error.code).toBe("BAD_REQUEST");
       expect(body.error.message).toContain("Invalid query parameters");
+    });
+
+    it("allows blank searches but rejects searches shorter than three characters", async () => {
+      await seedTransfer({ id: "xfr_search_contract", status: "confirmed" });
+
+      const blankRes = await app.request(
+        "/v1/payments/transfers?search=%20%20%20&includeObserved=false",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(blankRes.status).toBe(200);
+      const blankBody = (await blankRes.json()) as { data: Array<{ id: string }> };
+      expect(blankBody.data.map((transfer) => transfer.id)).toEqual(["xfr_search_contract"]);
+
+      const shortRes = await app.request(
+        "/v1/payments/transfers?search=xy&includeObserved=false",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(shortRes.status).toBe(400);
+      const shortBody = (await shortRes.json()) as {
+        error: { code: string; message: string };
+      };
+      expect(shortBody.error.code).toBe("BAD_REQUEST");
+      expect(shortBody.error.message).toContain("Invalid query parameters");
     });
 
     it("returns a single transfer by ID", async () => {
@@ -7468,6 +7882,26 @@ describe("Payments routes", () => {
       };
       expect(body.data.transfer.id).toBe("xfr_single_1");
       expect(body.data.transfer.status).toBe("confirmed");
+    });
+
+    it("enforces payments:read when getting a transfer by ID", async () => {
+      await seedTransfer({ id: "xfr_single_write_only", status: "confirmed" });
+      await seedCachedKey({
+        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfers/xfr_single_write_only",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("FORBIDDEN");
     });
 
     it("returns 404 when the transfer belongs to a different project in the same org", async () => {

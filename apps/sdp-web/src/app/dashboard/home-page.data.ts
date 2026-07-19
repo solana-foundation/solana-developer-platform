@@ -1,14 +1,12 @@
-import type { PaymentTransferSummary, TokenTransaction } from "@sdp/types";
+import type {
+  PaymentTransferSummary,
+  TokenTransaction,
+  TokenTransactionListItem,
+} from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { parseErrorMessage, readTransactionParam, toTitleCase } from "./activity-format-utils";
 import type { FetchResult } from "./payments/payments-page.data";
-
-interface HomeIssuanceToken {
-  id: string;
-  name: string;
-  symbol: string;
-}
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -101,11 +99,7 @@ export function computeTodaysVolume(transfers: PaymentTransferSummary[]): number
 
 export function buildHomeActivityRows(
   transfers: PaymentTransferSummary[],
-  issuanceTransactions: Array<{
-    tokenName: string;
-    tokenSymbol: string;
-    transaction: TokenTransaction;
-  }>,
+  issuanceTransactions: TokenTransactionListItem[],
   t: Translate
 ): HomeActivityRow[] {
   const paymentRows = transfers
@@ -131,11 +125,11 @@ export function buildHomeActivityRows(
         transaction: TokenTransaction & { createdAt: string };
       } => typeof entry.transaction.createdAt === "string" && entry.transaction.createdAt.length > 0
     )
-    .map(({ tokenName, tokenSymbol, transaction }) => ({
+    .map(({ token, transaction }) => ({
       id: `issuance-${transaction.id}`,
       createdAt: transaction.createdAt,
       type: toTitleCase(transaction.type),
-      token: tokenSymbol || tokenName || "—",
+      token: token.symbol || token.name || "—",
       amount: resolveIssuanceAmount(transaction),
       address: resolveIssuanceAddress(transaction),
       sourceKind: "issuance" as const,
@@ -148,14 +142,14 @@ export function buildHomeActivityRows(
     .slice(0, 10);
 }
 
-export async function fetchIssuanceTokens(
+export async function fetchOrgIssuanceActivity(
   request: SdpApiClient["request"],
   t: Translate,
-  pageSize = 100
-): Promise<FetchResult<HomeIssuanceToken[]>> {
+  pageSize = 20
+): Promise<FetchResult<TokenTransactionListItem[]>> {
   try {
     const response = await request(
-      `/v1/issuance/tokens?${new URLSearchParams({
+      `/v1/issuance/transactions?${new URLSearchParams({
         page: "1",
         pageSize: String(pageSize),
       }).toString()}`
@@ -169,98 +163,15 @@ export async function fetchIssuanceTokens(
       };
     }
 
-    const json = (await response.json()) as {
-      data?: Array<{
-        id?: string;
-        name?: string;
-        symbol?: string;
-      }>;
-    };
-
-    const tokens = (json?.data ?? [])
-      .filter(
-        (
-          token
-        ): token is {
-          id: string;
-          name?: string;
-          symbol?: string;
-        } => typeof token?.id === "string"
-      )
-      .map((token) => ({
-        id: token.id,
-        name: token.name ?? t("Shared.homeWorkspace.untitledToken"),
-        symbol: token.symbol ?? "—",
-      }));
-
-    return { ok: true, data: tokens };
+    const json = (await response.json()) as { data?: TokenTransactionListItem[] };
+    return { ok: true, data: json.data ?? [] };
   } catch (error) {
     return {
       ok: false,
       error:
         error instanceof Error
           ? error.message
-          : t("Shared.homeWorkspace.unableToLoadIssuanceTokens"),
+          : t("Shared.homeWorkspace.issuanceActivityUnavailable"),
     };
   }
-}
-
-export async function fetchOrgIssuanceActivity(
-  request: SdpApiClient["request"],
-  tokens: HomeIssuanceToken[],
-  t: Translate
-): Promise<{
-  rows: Array<{
-    tokenName: string;
-    tokenSymbol: string;
-    transaction: TokenTransaction;
-  }>;
-  error: string | null;
-}> {
-  const settledTransactions = await Promise.allSettled(
-    tokens.map(async (token) => {
-      const response = await request(
-        `/v1/issuance/tokens/${token.id}/transactions?${new URLSearchParams({
-          page: "1",
-          pageSize: "10",
-        }).toString()}`
-      );
-
-      if (!response.ok) {
-        const body = await response.text();
-        throw new Error(parseErrorMessage(body));
-      }
-
-      const json = (await response.json()) as {
-        data?: TokenTransaction[];
-      };
-
-      return (json.data ?? []).map((transaction) => ({
-        tokenName: token.name,
-        tokenSymbol: token.symbol,
-        transaction,
-      }));
-    })
-  );
-
-  const rows: Array<{
-    tokenName: string;
-    tokenSymbol: string;
-    transaction: TokenTransaction;
-  }> = [];
-  let hasFailure = false;
-
-  for (const result of settledTransactions) {
-    if (result.status === "fulfilled") {
-      rows.push(...result.value);
-      continue;
-    }
-
-    hasFailure = true;
-  }
-
-  return {
-    rows,
-    error: hasFailure ? t("Shared.homeWorkspace.someIssuanceActivityUnavailable") : null,
-  };
 }

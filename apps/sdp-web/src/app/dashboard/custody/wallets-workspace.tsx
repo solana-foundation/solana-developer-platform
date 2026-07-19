@@ -2,19 +2,23 @@
 
 import type { CustodyWalletSummary } from "@sdp/types";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import type { KnownCustodyProvider } from "./provider-catalog";
 import { WalletsOverview } from "./wallets-overview";
 
 const WalletsPlayground = dynamic(
   () => import("./wallets-playground").then((module) => module.WalletsPlayground),
   {
-    loading: () => <ApiPlaygroundShellSkeleton />,
+    loading: () => (
+      <div aria-busy="true" className="contents" data-wallet-panel="playground-pending">
+        <ApiPlaygroundShellSkeleton />
+      </div>
+    ),
   }
 );
 
@@ -45,7 +49,7 @@ export function WalletsWorkspace({
   wallets,
   walletsError,
 }: WalletsWorkspaceProps) {
-  const router = useRouter();
+  const router = useDashboardRouter();
   const { dashboardAccess, issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
     useDashboardWorkspace();
   const isPlaygroundTab = issuanceTab === "playground";
@@ -101,20 +105,22 @@ export function WalletsWorkspace({
   };
 
   return (
-    <div className="h-full min-h-0 w-full">
+    <div className="h-full min-h-0 w-full" data-wallet-root>
       <DashboardWorkspaceTabShell
         disableOverviewInitialAnimation
         isPlaygroundTab={isPlaygroundTab}
         overviewClassName="space-y-6"
         overview={
-          <WalletsOverview
-            enabledProviders={enabledProviders}
-            configsError={configsError}
-            wallets={wallets}
-            walletsError={walletsError}
-            canManageCustody={dashboardAccess.capabilities.canManageCustody}
-            onCreateWallet={openWalletSetup}
-          />
+          <div className="contents" data-wallet-panel="overview">
+            <WalletsOverview
+              enabledProviders={enabledProviders}
+              configsError={configsError}
+              wallets={wallets}
+              walletsError={walletsError}
+              canManageCustody={dashboardAccess.capabilities.canManageCustody}
+              onCreateWallet={openWalletSetup}
+            />
+          </div>
         }
         playground={
           <WalletsPlayground

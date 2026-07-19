@@ -2,6 +2,7 @@
 
 import { useClerk, useOrganization, useOrganizationList } from "@clerk/nextjs";
 import { ChevronsUpDownIcon, LockIcon, PlusIcon, Settings2Icon } from "lucide-react";
+import { useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,8 +18,8 @@ import { cn } from "@/lib/utils";
 
 function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }) {
   if (imageUrl) {
-    // biome-ignore lint/performance/noImgElement: Clerk provides external URLs not in next/image config.
     return (
+      // biome-ignore lint/performance/noImgElement: Clerk provides external URLs not in next/image config.
       <img
         src={imageUrl}
         alt=""
@@ -35,14 +36,22 @@ function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }
   );
 }
 
-export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }) {
+export function WorkspaceSwitcher({
+  collapsed = false,
+  onOrganizationSwitchingChange,
+}: {
+  collapsed?: boolean;
+  onOrganizationSwitchingChange?: (isSwitching: boolean) => void;
+}) {
   const t = useTranslations();
   const { organization: activeOrg } = useOrganization();
   const { userMemberships, setActive, isLoaded } = useOrganizationList({
     userMemberships: { infinite: true },
   });
   const { openOrganizationProfile, openCreateOrganization } = useClerk();
-  const { projects, selectedProjectId, selectProject } = useDashboardWorkspace();
+  const { projects, selectedProjectId, selectProject, isProjectSwitching } =
+    useDashboardWorkspace();
+  const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
 
   const memberships = userMemberships.data ?? [];
   const activeProject = projects.find((project) => project.id === selectedProjectId) ?? null;
@@ -52,6 +61,7 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
       <DropdownMenuTrigger asChild>
         <button
           type="button"
+          aria-busy={isOrganizationSwitching || isProjectSwitching}
           aria-label={activeOrg?.name ?? t("Shared.SharedComponents.selectOrganization")}
           className={cn(
             "flex h-10 items-center rounded-[var(--button-radius-lg)] text-left transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
@@ -87,9 +97,16 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
           return (
             <DropdownMenuItem
               key={org.id}
+              disabled={isOrganizationSwitching || isProjectSwitching}
               onSelect={() => {
                 if (!isActive && setActive) {
-                  void setActive({ organization: org.id });
+                  setOrganizationSwitching(true);
+                  onOrganizationSwitchingChange?.(true);
+                  const finishSwitch = () => {
+                    setOrganizationSwitching(false);
+                    onOrganizationSwitchingChange?.(false);
+                  };
+                  void setActive({ organization: org.id }).then(finishSwitch, finishSwitch);
                 }
               }}
               className="gap-2 text-xs"
@@ -126,7 +143,7 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
                 return (
                   <DropdownMenuItem
                     key={project.id}
-                    disabled={isProduction}
+                    disabled={isProduction || isOrganizationSwitching || isProjectSwitching}
                     onSelect={() => selectProject(project.id)}
                     className="gap-2 text-xs"
                   >

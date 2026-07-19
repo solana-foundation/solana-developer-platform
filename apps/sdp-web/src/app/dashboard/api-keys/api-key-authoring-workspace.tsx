@@ -19,7 +19,6 @@ import {
   Star,
   Wallet,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +30,7 @@ import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { cn } from "@/lib/utils";
 import { saveApiKeyAuthoringAction } from "./actions";
 import {
@@ -1129,7 +1129,7 @@ export function ApiKeyAuthoringWorkspace({
   initialKey,
 }: ApiKeyAuthoringWorkspaceProps) {
   const t = useTranslations();
-  const router = useRouter();
+  const router = useDashboardRouter();
   const { sdpEnvironment } = useDashboardWorkspace();
   const [currentStep, setCurrentStep] = useState<ApiKeyAuthoringStep>("details");
   const [draft, setDraft] = useState(() => draftFromInitialKey(initialKey));

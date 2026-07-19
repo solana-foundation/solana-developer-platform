@@ -1,14 +1,21 @@
 "use client";
 
 import type { Counterparty } from "@sdp/types";
-import { MoreHorizontalIcon, PlusIcon, Trash2Icon, UserIcon, UsersIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  MoreHorizontalIcon,
+  PlusIcon,
+  Trash2Icon,
+  UserIcon,
+  UsersIcon,
+} from "lucide-react";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -37,13 +44,17 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
+import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
+import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
+import { PaymentsRouteTabs } from "../payments-workspace-tabs";
 import type { CounterpartyPlaygroundView } from "./counterparty-playground-config";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 import { useCounterpartyDirectory } from "./use-counterparty-directory";
 
 const CounterpartyPlayground = dynamic(
   () => import("./counterparty-playground").then((module) => module.CounterpartyPlayground),
-  { loading: () => <ApiPlaygroundShellSkeleton /> }
+  { loading: () => <CounterpartyPlaygroundLoading /> }
 );
 
 interface CounterpartyApiKeyOption {
@@ -69,10 +80,10 @@ export function CounterpartyWorkspace({
 }: CounterpartyWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const router = useRouter();
-  const { counterpartyTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
-    useDashboardWorkspace();
-  const isPlaygroundTab = counterpartyTab === "playground";
+  const router = useDashboardRouter();
+  const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
+  const searchParams = useSearchParams();
+  const isPlaygroundTab = searchParams.get("tab") === "playground";
 
   const {
     page,
@@ -85,8 +96,8 @@ export function CounterpartyWorkspace({
   } = useCounterpartyDirectory(initialCounterparties, initialTotal);
 
   useEffect(() => {
-    setPlaygroundApiKeys(apiKeys);
-  }, [apiKeys, setPlaygroundApiKeys]);
+    syncPlaygroundApiKeysForActiveTab(isPlaygroundTab, apiKeys, setPlaygroundApiKeys);
+  }, [apiKeys, isPlaygroundTab, setPlaygroundApiKeys]);
 
   useEffect(() => {
     if (isPlaygroundTab) return;
@@ -153,12 +164,18 @@ export function CounterpartyWorkspace({
     <>
       <DashboardWorkspaceTabShell
         isPlaygroundTab={isPlaygroundTab}
+        tabNavigation={
+          <PaymentsRouteTabs
+            basePath="/dashboard/payments/counterparty"
+            value={isPlaygroundTab ? "playground" : "overview"}
+          />
+        }
         overviewClassName="flex min-h-0 flex-col overflow-hidden"
         overviewKey="counterparty-overview-tab"
         playgroundKey="counterparty-playground-tab"
         overview={
-          <Card className="flex min-h-0 flex-1 flex-col">
-            <CardHeader>
+          <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised py-0 shadow-none ring-0">
+            <CardHeader className="p-4">
               <CardTitle>{t("DashboardPayments.counterparty.directory")}</CardTitle>
               <CardDescription>
                 {t("DashboardPayments.counterparty.directoryDescription")}
@@ -175,9 +192,9 @@ export function CounterpartyWorkspace({
                 </CardAction>
               )}
             </CardHeader>
-            <CardContent className="flex min-h-0 flex-1 flex-col">
+            <CardContent className="flex min-h-0 flex-1 flex-col px-0">
               {total === 0 ? (
-                <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-strong py-16 text-center">
+                <div className="flex flex-1 flex-col items-center justify-center gap-4 py-16 text-center">
                   <UsersIcon className="h-10 w-10 text-muted" />
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-primary">
@@ -197,7 +214,35 @@ export function CounterpartyWorkspace({
                 </div>
               ) : (
                 <div className="min-h-0 flex-1 overflow-y-auto">
-                  <Table className="[&_table]:table-fixed">
+                  <div className="divide-y divide-border-default md:hidden">
+                    {counterparties.map((cp) => (
+                      <button
+                        key={cp.id}
+                        type="button"
+                        onClick={() => router.push(`/dashboard/payments/counterparty/${cp.id}`)}
+                        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
+                      >
+                        <span className="min-w-0 flex-1 space-y-1">
+                          <span className="flex items-center gap-2">
+                            <span className="truncate text-sm font-medium text-primary">
+                              {cp.displayName}
+                            </span>
+                            <span className="shrink-0 text-xs text-tertiary">
+                              {cp.entityType === "individual"
+                                ? t("DashboardPayments.counterparty.individual")
+                                : t("DashboardPayments.counterparty.business")}
+                            </span>
+                          </span>
+                          <span className="block truncate text-xs text-secondary">{cp.email}</span>
+                        </span>
+                        <ChevronRightIcon className="size-4 shrink-0 text-tertiary" />
+                      </button>
+                    ))}
+                  </div>
+                  <Table
+                    className="hidden rounded-none border-0 [&_table]:min-w-[880px] [&_table]:table-fixed md:block"
+                    data-counterparty-directory-table
+                  >
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-[30%]">
@@ -224,17 +269,17 @@ export function CounterpartyWorkspace({
                           <TableCell className="font-medium">
                             <span className="block truncate">{cp.displayName}</span>
                           </TableCell>
-                          <TableCell className="text-sm">
-                            <span className="block truncate">
+                          <TableCell>
+                            <Badge>
                               {cp.entityType === "individual"
                                 ? t("DashboardPayments.counterparty.individual")
                                 : t("DashboardPayments.counterparty.business")}
-                            </span>
+                            </Badge>
                           </TableCell>
-                          <TableCell className="text-sm">
+                          <TableCell className="text-sm text-secondary">
                             <span className="block truncate">{cp.email}</span>
                           </TableCell>
-                          <TableCell className="font-mono text-sm">
+                          <TableCell className="font-mono text-xs text-secondary">
                             <span className="block truncate">{cp.externalId ?? "—"}</span>
                           </TableCell>
                           <TableCell className="text-sm text-secondary">
@@ -286,7 +331,7 @@ export function CounterpartyWorkspace({
               )}
             </CardContent>
             {total > 0 && (
-              <CardFooter className="shrink-0 border-t border-border-default">
+              <CardFooter className="shrink-0 border-t border-border-default px-4 py-3">
                 <ArrowPagination
                   className="w-full"
                   page={page}

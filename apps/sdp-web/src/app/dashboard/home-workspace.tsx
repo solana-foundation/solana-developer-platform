@@ -1,9 +1,9 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import Link from "next/link";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {

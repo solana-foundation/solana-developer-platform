@@ -5,7 +5,6 @@ import type {
   PaymentsDashboardWallet,
   PaymentTransferSummary,
 } from "@sdp/types";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -15,6 +14,7 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { useZodForm } from "@/lib/use-zod-form";
 import { onchainDestinationSchema, onchainDetailsSchema, onchainSendSchema } from "../schema";
 import { walletBalanceAssetOptions } from "../wallet-options";
@@ -67,7 +67,7 @@ export function useOnchainSendWizard({
   counterpartyId,
   onExit,
 }: UseOnchainSendWizardProps) {
-  const router = useRouter();
+  const router = useDashboardRouter();
   const t = useTranslations();
   const steps = getOnchainSendSteps(t);
   const [stepIndex, setStepIndex] = useState(0);

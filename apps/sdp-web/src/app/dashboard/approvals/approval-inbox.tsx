@@ -7,9 +7,9 @@ import type {
 } from "@sdp/types";
 import { ChevronLeft, ChevronRight, RotateCw } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import {
   Table,

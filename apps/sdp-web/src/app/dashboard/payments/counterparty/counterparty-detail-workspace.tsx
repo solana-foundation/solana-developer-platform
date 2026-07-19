@@ -30,7 +30,6 @@ import {
   WalletIcon,
 } from "lucide-react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -47,6 +46,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
 import {
@@ -303,7 +303,7 @@ function CounterpartyTransactions({
   return (
     <section className="space-y-3">
       {transfers.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong py-10 text-center">
+        <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong py-10 text-center">
           <ReceiptTextIcon className="size-7 text-muted" />
           <p className="text-sm text-tertiary">
             {t("DashboardPayments.counterparty.noTransactions")}
@@ -352,7 +352,7 @@ function CounterpartyTransactions({
             </div>
           ) : null}
 
-          <div className="overflow-x-auto rounded-2xl border border-border-default bg-surface-raised shadow-sm">
+          <div className="overflow-x-auto rounded-lg border border-border-default bg-surface-raised">
             <table className="w-full min-w-[760px] table-fixed border-collapse">
               <thead>
                 <tr className="border-b border-border-default">
@@ -795,7 +795,7 @@ export function CounterpartyDetailWorkspace({
 }: CounterpartyDetailWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const router = useRouter();
+  const router = useDashboardRouter();
   const { copy, copied } = useCopy(1200);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState(initialAccounts);
@@ -820,220 +820,222 @@ export function CounterpartyDetailWorkspace({
   }
 
   return (
-    <DashboardWorkspaceOverviewPanel className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h2 className="text-3xl font-medium tracking-tight text-primary">
-            {counterparty.displayName}
-          </h2>
-          <p className="text-sm text-secondary">
-            {toTitleCase(counterparty.entityType)} · {t("DashboardPayments.counterpartyLabel")}
-          </p>
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button type="button" variant="outline" size="sm" iconRight={<ChevronDownIcon />}>
-              {t("DashboardPayments.counterparty.manage")}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuItem
-              className="text-error focus:text-error [&_svg]:size-4"
-              onSelect={() => setDeleteOpen(true)}
-            >
-              <Trash2Icon />
-              {t("DashboardPayments.counterparty.deleteCounterparty")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      <div className="flex gap-6 border-b border-border-default">
-        {(["details", "transactions"] as const).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setActiveTab(tab)}
-            className={cn(
-              "relative pb-3 text-sm font-medium transition-colors",
-              activeTab === tab ? "text-primary" : "text-secondary hover:text-primary"
-            )}
-          >
-            {tab === "details"
-              ? t("DashboardPayments.counterparty.details")
-              : t("DashboardPayments.counterparty.transactions")}
-            {activeTab === tab ? (
-              <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-primary" />
-            ) : null}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === "transactions" ? (
-        <CounterpartyTransactions
-          transfers={initialTransfers}
-          counterpartyName={counterparty.displayName}
-        />
-      ) : (
-        <>
-          <div className="grid gap-6 lg:grid-cols-2">
-            <section className="space-y-3">
-              <h3 className="text-2xl font-medium text-primary">
-                {t("DashboardPayments.counterparty.identity")}
-              </h3>
-              <div className="rounded-2xl border border-border-default bg-surface-raised p-5 shadow-sm">
-                <FieldList
-                  rows={[
-                    {
-                      label: t("DashboardPayments.counterparty.displayName"),
-                      value: counterparty.displayName,
-                      icon: <UserIcon />,
-                    },
-                    {
-                      label: t("DashboardPayments.counterparty.transferType"),
-                      value: toTitleCase(counterparty.entityType),
-                      icon: <UsersIcon />,
-                    },
-                    {
-                      label: t("DashboardPayments.counterparty.email"),
-                      value: counterparty.email,
-                      icon: <MailIcon />,
-                    },
-                    {
-                      label: t("DashboardPayments.counterparty.externalId"),
-                      value: counterparty.externalId ?? "—",
-                      icon: <HashIcon />,
-                    },
-                    {
-                      label: t("DashboardPayments.counterparty.transferStatus"),
-                      value: toTitleCase(counterparty.status),
-                      icon: <ShieldCheckIcon />,
-                    },
-                    {
-                      label: t("DashboardPayments.counterparty.createdLabel"),
-                      value: new Date(counterparty.createdAt).toLocaleDateString(locale, {
-                        month: "short",
-                        day: "2-digit",
-                        year: "numeric",
-                      }),
-                      icon: <CalendarIcon />,
-                    },
-                  ]}
-                />
-              </div>
-            </section>
-
-            <section className="space-y-3">
-              <h3 className="text-2xl font-medium text-primary">
-                {t("DashboardPayments.counterparty.personalInformation")}
-              </h3>
-              <div className="rounded-2xl border border-border-default bg-surface-raised p-5 shadow-sm">
-                {personalInfoRows.length > 0 ? (
-                  <FieldList rows={personalInfoRows} />
-                ) : (
-                  <p className="text-sm text-tertiary">
-                    {t("DashboardPayments.counterparty.noPersonalInformation")}
-                  </p>
-                )}
-              </div>
-            </section>
+    <DashboardWorkspaceOverviewPanel>
+      <div className="mx-auto max-w-6xl space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h2 className="text-3xl font-medium tracking-tight text-primary">
+              {counterparty.displayName}
+            </h2>
+            <p className="text-sm text-secondary">
+              {toTitleCase(counterparty.entityType)} · {t("DashboardPayments.counterpartyLabel")}
+            </p>
           </div>
-
-          <section className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-2xl font-medium text-primary">
-                {t("DashboardPayments.counterparty.externalAccounts")}
-              </h3>
-              <Button
-                type="button"
-                size="sm"
-                iconLeft={<PlusIcon />}
-                onClick={() => setAddOpen(true)}
-              >
-                {t("DashboardPayments.counterparty.addExternalAccountTitle")}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="outline" size="sm" iconRight={<ChevronDownIcon />}>
+                {t("DashboardPayments.counterparty.manage")}
               </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem
+                className="text-error focus:text-error [&_svg]:size-4"
+                onSelect={() => setDeleteOpen(true)}
+              >
+                <Trash2Icon />
+                {t("DashboardPayments.counterparty.deleteCounterparty")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        <div className="flex gap-6 border-b border-border-default">
+          {(["details", "transactions"] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={cn(
+                "relative pb-3 text-sm font-medium transition-colors",
+                activeTab === tab ? "text-primary" : "text-secondary hover:text-primary"
+              )}
+            >
+              {tab === "details"
+                ? t("DashboardPayments.counterparty.details")
+                : t("DashboardPayments.counterparty.transactions")}
+              {activeTab === tab ? (
+                <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-primary" />
+              ) : null}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === "transactions" ? (
+          <CounterpartyTransactions
+            transfers={initialTransfers}
+            counterpartyName={counterparty.displayName}
+          />
+        ) : (
+          <>
+            <div className="grid gap-6 lg:grid-cols-2">
+              <section className="space-y-3">
+                <h3 className="text-2xl font-medium text-primary">
+                  {t("DashboardPayments.counterparty.identity")}
+                </h3>
+                <div className="rounded-lg border border-border-default bg-surface-raised p-5">
+                  <FieldList
+                    rows={[
+                      {
+                        label: t("DashboardPayments.counterparty.displayName"),
+                        value: counterparty.displayName,
+                        icon: <UserIcon />,
+                      },
+                      {
+                        label: t("DashboardPayments.counterparty.transferType"),
+                        value: toTitleCase(counterparty.entityType),
+                        icon: <UsersIcon />,
+                      },
+                      {
+                        label: t("DashboardPayments.counterparty.email"),
+                        value: counterparty.email,
+                        icon: <MailIcon />,
+                      },
+                      {
+                        label: t("DashboardPayments.counterparty.externalId"),
+                        value: counterparty.externalId ?? "—",
+                        icon: <HashIcon />,
+                      },
+                      {
+                        label: t("DashboardPayments.counterparty.transferStatus"),
+                        value: toTitleCase(counterparty.status),
+                        icon: <ShieldCheckIcon />,
+                      },
+                      {
+                        label: t("DashboardPayments.counterparty.createdLabel"),
+                        value: new Date(counterparty.createdAt).toLocaleDateString(locale, {
+                          month: "short",
+                          day: "2-digit",
+                          year: "numeric",
+                        }),
+                        icon: <CalendarIcon />,
+                      },
+                    ]}
+                  />
+                </div>
+              </section>
+
+              <section className="space-y-3">
+                <h3 className="text-2xl font-medium text-primary">
+                  {t("DashboardPayments.counterparty.personalInformation")}
+                </h3>
+                <div className="rounded-lg border border-border-default bg-surface-raised p-5">
+                  {personalInfoRows.length > 0 ? (
+                    <FieldList rows={personalInfoRows} />
+                  ) : (
+                    <p className="text-sm text-tertiary">
+                      {t("DashboardPayments.counterparty.noPersonalInformation")}
+                    </p>
+                  )}
+                </div>
+              </section>
             </div>
-            {accounts.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong py-10 text-center">
-                <WalletIcon className="size-7 text-muted" />
-                <p className="text-sm text-tertiary">
-                  {t("DashboardPayments.counterparty.noExternalAccounts")}
-                </p>
+
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-2xl font-medium text-primary">
+                  {t("DashboardPayments.counterparty.externalAccounts")}
+                </h3>
+                <Button
+                  type="button"
+                  size="sm"
+                  iconLeft={<PlusIcon />}
+                  onClick={() => setAddOpen(true)}
+                >
+                  {t("DashboardPayments.counterparty.addExternalAccountTitle")}
+                </Button>
               </div>
-            ) : (
-              <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised shadow-sm">
-                {accounts.map((account) => {
-                  const details = account.details as { network?: string; address?: string };
-                  return (
-                    <div
-                      key={account.id}
-                      className="flex items-center justify-between gap-4 border-b border-border-default px-4 py-2.5 last:border-b-0"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-primary">
-                          {account.label ?? t("DashboardPayments.counterparty.cryptoWallet")}
-                        </p>
-                        <div className="flex h-5 items-center gap-1">
-                          <p className="truncate font-mono text-xs text-secondary">
-                            {details.address}
+              {accounts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong py-10 text-center">
+                  <WalletIcon className="size-7 text-muted" />
+                  <p className="text-sm text-tertiary">
+                    {t("DashboardPayments.counterparty.noExternalAccounts")}
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-lg border border-border-default bg-surface-raised">
+                  {accounts.map((account) => {
+                    const details = account.details as { network?: string; address?: string };
+                    return (
+                      <div
+                        key={account.id}
+                        className="flex items-center justify-between gap-4 border-b border-border-default px-4 py-2.5 last:border-b-0"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-primary">
+                            {account.label ?? t("DashboardPayments.counterparty.cryptoWallet")}
                           </p>
-                          {details.address && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              className="size-5"
-                              aria-label={t("DashboardPayments.counterparty.copyAddress")}
-                              onClick={() => {
-                                if (!details.address) return;
-                                setCopiedId(account.id);
-                                void copy(details.address);
-                                toast.success(t("DashboardPayments.counterparty.addressCopied"), {
-                                  position: "bottom-right",
-                                });
-                              }}
-                            >
-                              {copied && copiedId === account.id ? (
-                                <CheckIcon className="text-success" />
-                              ) : (
-                                <CopyIcon />
-                              )}
-                            </Button>
-                          )}
+                          <div className="flex h-5 items-center gap-1">
+                            <p className="truncate font-mono text-xs text-secondary">
+                              {details.address}
+                            </p>
+                            {details.address && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                className="size-5"
+                                aria-label={t("DashboardPayments.counterparty.copyAddress")}
+                                onClick={() => {
+                                  if (!details.address) return;
+                                  setCopiedId(account.id);
+                                  void copy(details.address);
+                                  toast.success(t("DashboardPayments.counterparty.addressCopied"), {
+                                    position: "bottom-right",
+                                  });
+                                }}
+                              >
+                                {copied && copiedId === account.id ? (
+                                  <CheckIcon className="text-success" />
+                                ) : (
+                                  <CopyIcon />
+                                )}
+                              </Button>
+                            )}
+                          </div>
                         </div>
+                        <span className="flex shrink-0 items-center gap-1.5 text-xs text-secondary">
+                          <Image
+                            src="/landing/solana-logo.svg"
+                            alt=""
+                            width={16}
+                            height={14}
+                            className="h-3.5 w-auto"
+                          />
+                          Solana
+                        </span>
                       </div>
-                      <span className="flex shrink-0 items-center gap-1.5 text-xs text-secondary">
-                        <Image
-                          src="/landing/solana-logo.svg"
-                          alt=""
-                          width={16}
-                          height={14}
-                          className="h-3.5 w-auto"
-                        />
-                        Solana
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        </>
-      )}
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </>
+        )}
 
-      <AddExternalAccountDialog
-        isOpen={addOpen}
-        counterpartyId={counterparty.id}
-        onAdded={(account) => setAccounts((prev) => [account, ...prev])}
-        onClose={() => setAddOpen(false)}
-      />
+        <AddExternalAccountDialog
+          isOpen={addOpen}
+          counterpartyId={counterparty.id}
+          onAdded={(account) => setAccounts((prev) => [account, ...prev])}
+          onClose={() => setAddOpen(false)}
+        />
 
-      <DeleteCounterpartyDialog
-        isOpen={deleteOpen}
-        displayName={counterparty.displayName}
-        onConfirm={confirmDelete}
-        onClose={() => setDeleteOpen(false)}
-      />
+        <DeleteCounterpartyDialog
+          isOpen={deleteOpen}
+          displayName={counterparty.displayName}
+          onConfirm={confirmDelete}
+          onClose={() => setDeleteOpen(false)}
+        />
+      </div>
     </DashboardWorkspaceOverviewPanel>
   );
 }

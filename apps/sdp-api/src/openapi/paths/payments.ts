@@ -378,7 +378,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Recurring Payments (feature-flagged)
+  // Recurring Payments
   // ═══════════════════════════════════════════════════════════════════════════
 
   registry.registerPath({
@@ -564,7 +564,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Recurring Subscriptions (feature-flagged)
+  // Recurring Subscriptions
   // ═══════════════════════════════════════════════════════════════════════════
 
   registry.registerPath({
@@ -574,7 +574,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create subscription plan",
     operationId: "createPaymentSubscriptionPlan",
     description:
-      "Creates a feature-flagged recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
+      "Creates a recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -598,7 +598,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "List subscription plans",
     operationId: "listPaymentSubscriptionPlans",
-    description: "Lists feature-flagged recurring-payment subscription plans.",
+    description: "Lists recurring-payment subscription plans.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -692,7 +692,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create subscription",
     operationId: "createPaymentSubscription",
     description:
-      "Creates a feature-flagged recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
+      "Creates a recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
