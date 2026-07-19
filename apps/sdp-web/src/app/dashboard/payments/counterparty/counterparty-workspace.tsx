@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -238,7 +239,10 @@ export function CounterpartyWorkspace({
                       </button>
                     ))}
                   </div>
-                  <Table className="hidden [&_table]:table-fixed md:block">
+                  <Table
+                    className="hidden rounded-none border-0 [&_table]:min-w-[880px] [&_table]:table-fixed md:block"
+                    data-counterparty-directory-table
+                  >
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-[30%]">
@@ -265,17 +269,17 @@ export function CounterpartyWorkspace({
                           <TableCell className="font-medium">
                             <span className="block truncate">{cp.displayName}</span>
                           </TableCell>
-                          <TableCell className="text-sm">
-                            <span className="block truncate">
+                          <TableCell>
+                            <Badge>
                               {cp.entityType === "individual"
                                 ? t("DashboardPayments.counterparty.individual")
                                 : t("DashboardPayments.counterparty.business")}
-                            </span>
+                            </Badge>
                           </TableCell>
-                          <TableCell className="text-sm">
+                          <TableCell className="text-sm text-secondary">
                             <span className="block truncate">{cp.email}</span>
                           </TableCell>
-                          <TableCell className="font-mono text-sm">
+                          <TableCell className="font-mono text-xs text-secondary">
                             <span className="block truncate">{cp.externalId ?? "—"}</span>
                           </TableCell>
                           <TableCell className="text-sm text-secondary">

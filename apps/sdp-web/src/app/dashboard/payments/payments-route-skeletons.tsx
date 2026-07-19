@@ -92,7 +92,7 @@ const TABLE_SKELETON_CONFIGS: Record<TableSkeletonVariant, TableSkeletonConfig> 
     ],
   },
   "counterparty-directory": {
-    tableClassName: "[&_table]:table-fixed",
+    tableClassName: "rounded-none border-0 [&_table]:min-w-[880px] [&_table]:table-fixed",
     containerClassName: "min-h-0 flex-1 overflow-y-auto",
     columns: [
       {
