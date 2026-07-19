@@ -687,6 +687,9 @@ export const transferSchema = z
   .object({
     id: transferIdParamSchema,
     organizationId: orgIdParamSchema,
+    walletId: walletIdParamSchema.openapi({
+      description: "Source or receiving SDP wallet associated with the transfer.",
+    }),
     projectId: projectIdParamSchema
       .optional()
       .openapi({ description: "Project identifier for the transfer." }),
@@ -737,8 +740,12 @@ export const transferSchema = z
       example: "moonpay",
     }),
     counterpartyId: z.string().optional().openapi({
-      description: "Counterparty tied to a ramp transfer record.",
+      description: "Counterparty tied to the transfer record, when available.",
       example: "counterparty_example",
+    }),
+    counterpartyDisplayName: z.string().optional().openapi({
+      description: "Current display name of the counterparty tied to the transfer.",
+      example: "Acme Studio",
     }),
     providerReference: z.string().optional().openapi({
       description: "Provider quote or transaction reference used for ramp correlation.",
@@ -1709,6 +1716,11 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
       description: "Filter by wallet address.",
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
+    search: withOpenApi(listTransfersQuerySchemaBase.shape.search, {
+      description:
+        "Search transfer ID, signature, provider reference, source or destination address, memo, counterparty ID, or counterparty display name. Use at least 3 non-whitespace characters; a blank value is treated as no search filter.",
+      example: "xfr_example",
+    }),
     token: withOpenApi(listTransfersQuerySchemaBase.shape.token, {
       description: "Filter by token symbol or mint.",
       example: "USDC",
@@ -1725,13 +1737,16 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
       description: "Filter by wallet transfers or ramp transfers.",
       example: "ramp",
     }),
+    type: withOpenApi(listTransfersQuerySchemaBase.shape.type, {
+      description: "Filter by one or more comma-separated transfer types.",
+      example: "transfer,transfer_batch",
+    }),
     counterpartyId: withOpenApi(listTransfersQuerySchemaBase.shape.counterpartyId, {
       description: "Filter transfers tied to a specific counterparty.",
       example: "counterparty_example",
     }),
     provider: withOpenApi(listTransfersQuerySchemaBase.shape.provider, {
-      description:
-        "Filter ramp transfers by provider. Use with providerReference to look up a quote-backed transfer exactly.",
+      description: "Filter ramp transfers by provider.",
       example: "lightspark",
     }),
     providerReference: withOpenApi(listTransfersQuerySchemaBase.shape.providerReference, {
@@ -1746,6 +1761,19 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
     to: withOpenApi(listTransfersQuerySchemaBase.shape.to, {
       description: "Filter to timestamp.",
       example: "2025-01-02T00:00:00.000Z",
+    }),
+    includeObserved: withOpenApi(listTransfersQuerySchemaBase.shape.includeObserved, {
+      description:
+        "When filtering a wallet, include RPC-observed on-chain activity that has not been recorded by SDP. Disable for stable database-backed pagination.",
+      example: false,
+    }),
+    sortBy: withOpenApi(listTransfersQuerySchemaBase.shape.sortBy, {
+      description: "Field used to sort the transfer list.",
+      example: "createdAt",
+    }),
+    sortDirection: withOpenApi(listTransfersQuerySchemaBase.shape.sortDirection, {
+      description: "Sort direction.",
+      example: "desc",
     }),
     page: withOpenApi(listTransfersQuerySchemaBase.shape.page, {
       description: "Page number (1-based).",

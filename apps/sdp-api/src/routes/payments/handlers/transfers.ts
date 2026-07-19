@@ -1,3 +1,4 @@
+import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import { getSolanaConfig } from "@sdp/rpc";
 import { withHeliusApiKey } from "@sdp/rpc/relay";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -33,7 +34,6 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
-  isRampTransferType,
   RAMP_TRANSFER_TYPES,
   type PaymentTransferDirection as TransferDirection,
   type PaymentTransferRow as TransferRow,
@@ -47,7 +47,7 @@ import { buildPaymentTransferFingerprint, resolveIdempotencyReplay } from "@/lib
 import { paginated, success } from "@/lib/response";
 import {
   assertApiKeyWalletAccess,
-  getAllowedApiKeyWalletIds,
+  getAllowedApiKeyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
 import {
   assertPaymentProjectScope,
@@ -1510,6 +1510,56 @@ function buildTransferReplayPayload(replay: TransferRow) {
     : { transfer: mapTransferRow(replay) };
 }
 
+function transferMatchesSearch(row: TransferRow, search: string): boolean {
+  const normalizedSearch = search.toLowerCase();
+  return [
+    row.id,
+    row.signature,
+    row.provider_reference,
+    row.source_address,
+    row.destination_address,
+    row.memo,
+    row.counterparty_id,
+    row.counterparty_display_name,
+  ].some((value) => value?.toLowerCase().includes(normalizedSearch));
+}
+
+function compareTransferRows(
+  left: TransferRow,
+  right: TransferRow,
+  sortBy: "amount" | "createdAt" | "status" | "updatedAt",
+  sortDirection: "asc" | "desc"
+): number {
+  let primaryComparison: number;
+
+  if (sortBy === "amount") {
+    const leftAmount = left.amount?.trim() || null;
+    const rightAmount = right.amount?.trim() || null;
+    if (leftAmount === null || rightAmount === null) {
+      if (leftAmount === rightAmount) {
+        primaryComparison = 0;
+      } else {
+        return leftAmount === null ? 1 : -1;
+      }
+    } else {
+      primaryComparison = compareDecimalAmounts(leftAmount, rightAmount);
+    }
+  } else if (sortBy === "status") {
+    primaryComparison = left.status.localeCompare(right.status);
+  } else if (sortBy === "updatedAt") {
+    primaryComparison = left.updated_at.localeCompare(right.updated_at);
+  } else {
+    primaryComparison = left.created_at.localeCompare(right.created_at);
+  }
+
+  if (primaryComparison !== 0) {
+    return sortDirection === "asc" ? primaryComparison : -primaryComparison;
+  }
+
+  const createdAtComparison = right.created_at.localeCompare(left.created_at);
+  return createdAtComparison || right.id.localeCompare(left.id);
+}
+
 export async function createTransfer(c: AppContext) {
   const body = await c.req.json();
   const parsed = createTransferSchema.safeParse(body);
@@ -1718,43 +1768,58 @@ export async function listTransfers(c: AppContext) {
   const auth = getAuth(c);
   const query = listTransfersQuerySchema.safeParse(c.req.query());
   if (!query.success) throw badRequestQuery();
-  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:read"]);
 
   const {
     page,
     pageSize,
     wallet: walletId,
     walletAddress,
+    search,
     token,
     direction,
     status: statuses,
     category,
+    type: requestedTypes,
     counterpartyId,
     provider,
     providerReference,
     from,
     to,
+    includeObserved,
+    sortBy,
+    sortDirection,
   } = query.data;
   const repo = getPaymentsRepository(c);
   const offset = (page - 1) * pageSize;
-  const transferTypes =
+  const categoryTypes =
     category === "wallet"
       ? WALLET_TRANSFER_TYPES
       : category === "ramp"
         ? RAMP_TRANSFER_TYPES
         : undefined;
+  const transferTypes = requestedTypes ?? categoryTypes;
+  if (
+    requestedTypes &&
+    categoryTypes &&
+    requestedTypes.some((type) => !categoryTypes.includes(type as never))
+  ) {
+    throw new AppError("BAD_REQUEST", "type must match the requested transfer category");
+  }
   const transferTypeSet = transferTypes ? new Set<TransferType>(transferTypes) : undefined;
   const hasProvider = provider !== undefined;
   const hasProviderReference = providerReference !== undefined;
+  const hasExactProviderReference = hasProvider && hasProviderReference;
 
-  if (hasProvider !== hasProviderReference) {
-    throw new AppError(
-      "BAD_REQUEST",
-      "provider and providerReference are both required for provider reference lookup"
-    );
+  if (walletId && allowedWalletIds && !allowedWalletIds.includes(walletId)) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
   }
 
-  if (hasProvider && hasProviderReference) {
+  if (hasProviderReference && !hasProvider) {
+    throw new AppError("BAD_REQUEST", "provider is required for provider reference lookup");
+  }
+
+  if (hasExactProviderReference) {
     const row = await repo.getTransferByProviderReference({
       provider,
       providerReference,
@@ -1762,26 +1827,15 @@ export async function listTransfers(c: AppContext) {
       projectId: auth.projectId,
     });
 
-    if (!row) {
-      return paginated(c, [], { total: 0, page, pageSize });
-    }
-    if (allowedWalletIds && !allowedWalletIds.includes(row.wallet_id)) {
+    if (row && allowedWalletIds && !allowedWalletIds.includes(row.wallet_id)) {
       throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
     }
-    if (category === "wallet" && isRampTransferType(row.type)) {
-      return paginated(c, [], { total: 0, page, pageSize });
-    }
-    if (category === "ramp" && !isRampTransferType(row.type)) {
-      return paginated(c, [], { total: 0, page, pageSize });
-    }
-
-    return paginated(c, [mapTransferRow(row)], { total: 1, page, pageSize });
   }
 
   let transferRows: TransferRow[];
   let total: number;
 
-  if (walletId || walletAddress) {
+  if ((walletId || walletAddress) && includeObserved && !hasExactProviderReference) {
     // Helius-backed path: fetch on-chain signatures for the wallet address, then
     // cross-reference with our DB. Append pending/processing/failed from DB (not on-chain yet).
     //
@@ -1793,10 +1847,6 @@ export async function listTransfers(c: AppContext) {
     const scope = await resolveScope(c);
 
     if (walletId) {
-      if (allowedWalletIds && !allowedWalletIds.includes(walletId)) {
-        throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-      }
-
       const wallet = resolveWallet(scope.wallets, walletId);
       assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:read"]);
       sourceAddress = wallet.publicKey;
@@ -1906,14 +1956,18 @@ export async function listTransfers(c: AppContext) {
         projectId: auth.projectId,
         walletId: resolvedWalletId,
         walletIds: resolvedWalletId ? undefined : (allowedWalletIds ?? undefined),
-        sourceAddress: resolvedWalletId ? undefined : walletAddress,
+        walletAddress: resolvedWalletId ? undefined : walletAddress,
         counterpartyId,
+        search,
         statuses: nonChainStatuses,
         types: transferTypes,
+        provider,
         token,
         direction,
         createdAtFrom: from,
         createdAtTo: to,
+        sortBy,
+        sortDirection,
         limit: 100,
         offset: 0,
       });
@@ -1951,32 +2005,75 @@ export async function listTransfers(c: AppContext) {
     // 5. Apply remaining filters and sort
     const filtered = merged
       .filter((row) => {
+        if (search && !transferMatchesSearch(row, search)) return false;
         if (counterpartyId && row.counterparty_id !== counterpartyId) return false;
+        if (provider && row.provider !== provider) return false;
         if (statuses && !statuses.includes(row.status)) return false;
         if (token && row.token !== token) return false;
         if (direction && row.direction !== direction) return false;
         if (transferTypeSet && !transferTypeSet.has(row.type)) return false;
+        if (from && row.created_at < from) return false;
+        if (to && row.created_at > to) return false;
         return true;
       })
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+      .sort((left, right) => compareTransferRows(left, right, sortBy, sortDirection));
 
     total = filtered.length;
     transferRows = filtered.slice(offset, offset + pageSize);
   } else {
     // DB-only path for org-scoped queries without a specific wallet
+    let resolvedDatabaseWalletId = walletId;
+    let unresolvedDatabaseWalletAddress: string | undefined;
+
+    if (!resolvedDatabaseWalletId && walletAddress) {
+      const scope = await resolveScope(c);
+      const matchedWallet = scope.wallets.find((wallet) => wallet.publicKey === walletAddress);
+
+      if (matchedWallet) {
+        if (allowedWalletIds && !allowedWalletIds.includes(matchedWallet.walletId)) {
+          throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+        }
+        resolvedDatabaseWalletId = matchedWallet.walletId;
+      } else {
+        if (allowedWalletIds) {
+          throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+        }
+        unresolvedDatabaseWalletAddress = walletAddress;
+      }
+    }
+
+    if (
+      !resolvedDatabaseWalletId &&
+      !unresolvedDatabaseWalletAddress &&
+      allowedWalletIds?.length === 0
+    ) {
+      return paginated(c, [], { total: 0, page, pageSize });
+    }
+
+    const queryStartedAt = performance.now();
     const result = await repo.listTransfers({
       organizationId: auth.organizationId,
       projectId: auth.projectId,
-      walletIds: allowedWalletIds ?? undefined,
+      walletId: resolvedDatabaseWalletId,
+      walletIds: resolvedDatabaseWalletId ? undefined : (allowedWalletIds ?? undefined),
+      walletAddress: walletId ? walletAddress : unresolvedDatabaseWalletAddress,
       counterpartyId,
+      search,
       token,
       direction,
       statuses,
       types: transferTypes,
+      provider,
+      providerReference,
       createdAtFrom: from,
       createdAtTo: to,
+      sortBy,
+      sortDirection,
       limit: pageSize,
       offset,
+    });
+    c.header("Server-Timing", `db;dur=${(performance.now() - queryStartedAt).toFixed(1)}`, {
+      append: true,
     });
     total = result.total;
     transferRows = result.rows;
@@ -1988,7 +2085,7 @@ export async function listTransfers(c: AppContext) {
 
 export async function getTransfer(c: AppContext) {
   const auth = getAuth(c);
-  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:read"]);
   const params = transferIdParamsSchema.safeParse(c.req.param());
   const repo = getPaymentsRepository(c);
 

@@ -16,6 +16,102 @@ function buildInClause(length: number): string {
   return Array.from({ length }, () => "?").join(", ");
 }
 
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+function paymentTransferSearchExpression(alias: string): string {
+  return `(
+    ${alias}.id || ' ' ||
+    COALESCE(${alias}.signature, '') || ' ' ||
+    COALESCE(${alias}.provider_reference, '') || ' ' ||
+    COALESCE(${alias}.source_address, '') || ' ' ||
+    COALESCE(${alias}.destination_address, '') || ' ' ||
+    COALESCE(${alias}.memo, '') || ' ' ||
+    COALESCE(${alias}.counterparty_id, '')
+  )`;
+}
+
+function buildTransferListWhere(params: ListTransfersInput): {
+  whereClause: string;
+  values: unknown[];
+} {
+  const clauses = ["pt.organization_id = ?"];
+  const values: unknown[] = [params.organizationId];
+  const addEquals = (column: string, value: unknown) => {
+    if (value === undefined) return;
+    clauses.push(`${column} = ?`);
+    values.push(value);
+  };
+  const addIn = (column: string, entries: readonly unknown[] | undefined) => {
+    if (!entries?.length) return;
+    clauses.push(`${column} IN (${buildInClause(entries.length)})`);
+    values.push(...entries);
+  };
+
+  addEquals("pt.project_id", params.projectId ?? undefined);
+  addEquals("pt.wallet_id", params.walletId);
+  addIn("pt.wallet_id", params.walletIds);
+  addEquals("pt.counterparty_id", params.counterpartyId);
+
+  if (params.walletAddress) {
+    clauses.push("(pt.source_address = ? OR pt.destination_address = ?)");
+    values.push(params.walletAddress, params.walletAddress);
+  }
+
+  if (params.search) {
+    const searchPattern = `%${escapeLikePattern(params.search)}%`;
+    const transferScope = ["search_pt.organization_id = ?"];
+    const counterpartyScope = ["search_c.organization_id = ?"];
+    const transferScopeValues: unknown[] = [params.organizationId];
+    const counterpartyScopeValues: unknown[] = [params.organizationId];
+
+    if (params.projectId) {
+      transferScope.push("search_pt.project_id = ?");
+      counterpartyScope.push("search_c.project_id = ?");
+      transferScopeValues.push(params.projectId);
+      counterpartyScopeValues.push(params.projectId);
+    }
+
+    clauses.push(
+      `pt.id IN (
+         SELECT search_pt.id
+         FROM payment_transfers search_pt
+         WHERE ${transferScope.join(" AND ")}
+           AND ${paymentTransferSearchExpression("search_pt")} ILIKE ? ESCAPE '\\'
+         UNION
+         SELECT named_pt.id
+         FROM counterparties search_c
+         JOIN payment_transfers named_pt
+           ON named_pt.counterparty_id = search_c.id
+          AND named_pt.organization_id = search_c.organization_id
+          AND named_pt.project_id IS NOT DISTINCT FROM search_c.project_id
+         WHERE ${counterpartyScope.join(" AND ")}
+           AND search_c.display_name ILIKE ? ESCAPE '\\'
+       )`
+    );
+    values.push(...transferScopeValues, searchPattern, ...counterpartyScopeValues, searchPattern);
+  }
+
+  addEquals("pt.token", params.token);
+  addEquals("pt.direction", params.direction);
+  addIn("pt.status", params.statuses);
+  addIn("pt.type", params.types);
+  addEquals("pt.provider", params.provider);
+  addEquals("pt.provider_reference", params.providerReference);
+
+  if (params.createdAtFrom) {
+    clauses.push("pt.created_at >= ?");
+    values.push(params.createdAtFrom);
+  }
+  if (params.createdAtTo) {
+    clauses.push("pt.created_at <= ?");
+    values.push(params.createdAtTo);
+  }
+
+  return { whereClause: clauses.join(" AND "), values };
+}
+
 function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
   return {
     id: row.id as string,
@@ -23,6 +119,7 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
     project_id: (row.project_id as string | null | undefined) ?? null,
     wallet_id: row.wallet_id as string,
     counterparty_id: row.counterparty_id as string | null,
+    counterparty_display_name: row.counterparty_display_name as string | null | undefined,
     source_address: row.source_address as string | null,
     destination_address: row.destination_address as string | null,
     token: row.token as string,
@@ -65,14 +162,16 @@ function mapPolicyRow(row: Record<string, unknown>): PaymentWalletPolicyRow {
 function buildTransferScopeWhere(params: {
   organizationId: string;
   projectId: string | null;
+  tableAlias?: string;
   extraClauses?: string[];
   extraValues?: unknown[];
 }) {
-  const clauses = ["organization_id = ?"];
+  const prefix = params.tableAlias ? `${params.tableAlias}.` : "";
+  const clauses = [`${prefix}organization_id = ?`];
   const values: unknown[] = [params.organizationId];
 
   if (params.projectId) {
-    clauses.push("project_id = ?");
+    clauses.push(`${prefix}project_id = ?`);
     values.push(params.projectId);
   }
 
@@ -337,12 +436,21 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
       const scope = buildTransferScopeWhere({
         organizationId: params.organizationId,
         projectId: params.projectId,
-        extraClauses: [`signature IN (${buildInClause(params.signatures.length)})`],
+        tableAlias: "pt",
+        extraClauses: [`pt.signature IN (${buildInClause(params.signatures.length)})`],
         extraValues: params.signatures,
       });
 
       const rows = await db
-        .prepare(`SELECT * FROM payment_transfers WHERE ${scope.where}`)
+        .prepare(
+          `SELECT pt.*, c.display_name AS counterparty_display_name
+           FROM payment_transfers pt
+           LEFT JOIN counterparties c
+             ON c.id = pt.counterparty_id
+            AND c.organization_id = pt.organization_id
+            AND c.project_id IS NOT DISTINCT FROM pt.project_id
+           WHERE ${scope.where}`
+        )
         .bind(...scope.values)
         .all<Record<string, unknown>>();
 
@@ -350,71 +458,38 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
     },
 
     async listTransfers(params: ListTransfersInput): Promise<ListTransfersResult> {
-      const clauses = ["organization_id = ?"];
-      const values: unknown[] = [params.organizationId];
-
-      if (params.projectId) {
-        clauses.push("project_id = ?");
-        values.push(params.projectId);
-      }
-      if (params.walletId) {
-        clauses.push("wallet_id = ?");
-        values.push(params.walletId);
-      }
-      if (params.walletIds?.length) {
-        clauses.push(`wallet_id IN (${buildInClause(params.walletIds.length)})`);
-        values.push(...params.walletIds);
-      }
-      if (params.counterpartyId) {
-        clauses.push("counterparty_id = ?");
-        values.push(params.counterpartyId);
-      }
-      if (params.sourceAddress) {
-        clauses.push("source_address = ?");
-        values.push(params.sourceAddress);
-      }
-      if (params.token) {
-        clauses.push("token = ?");
-        values.push(params.token);
-      }
-      if (params.direction) {
-        clauses.push("direction = ?");
-        values.push(params.direction);
-      }
-      if (params.statuses?.length) {
-        clauses.push(`status IN (${buildInClause(params.statuses.length)})`);
-        values.push(...params.statuses);
-      }
-      if (params.types?.length) {
-        clauses.push(`type IN (${buildInClause(params.types.length)})`);
-        values.push(...params.types);
-      }
-      if (params.createdAtFrom) {
-        clauses.push("created_at >= ?");
-        values.push(params.createdAtFrom);
-      }
-      if (params.createdAtTo) {
-        clauses.push("created_at <= ?");
-        values.push(params.createdAtTo);
-      }
-
-      const whereClause = clauses.join(" AND ");
+      const { whereClause, values } = buildTransferListWhere(params);
       const paginationValues = [...values, params.limit, params.offset];
+      const sort = {
+        amount: { column: "NULLIF(pt.amount, '')::numeric", nulls: " NULLS LAST" },
+        createdAt: { column: "pt.created_at", nulls: "" },
+        status: { column: "pt.status", nulls: "" },
+        updatedAt: { column: "pt.updated_at", nulls: "" },
+      }[params.sortBy ?? "createdAt"] ?? { column: "pt.created_at", nulls: "" };
+      const sortDirection = params.sortDirection === "asc" ? "ASC" : "DESC";
 
       const [rows, countRow] = await Promise.all([
         db
           .prepare(
-            `SELECT *
-             FROM payment_transfers
+            `SELECT pt.*, c.display_name AS counterparty_display_name
+             FROM payment_transfers pt
+             LEFT JOIN counterparties c
+               ON c.id = pt.counterparty_id
+              AND c.organization_id = pt.organization_id
+              AND c.project_id IS NOT DISTINCT FROM pt.project_id
              WHERE ${whereClause}
-             ORDER BY created_at DESC
+             ORDER BY ${sort.column} ${sortDirection}${sort.nulls}, pt.created_at DESC, pt.id DESC
              LIMIT ?
              OFFSET ?`
           )
           .bind(...paginationValues)
           .all<Record<string, unknown>>(),
         db
-          .prepare(`SELECT COUNT(*) AS count FROM payment_transfers WHERE ${whereClause}`)
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM payment_transfers pt
+             WHERE ${whereClause}`
+          )
           .bind(...values)
           .first<{ count: number }>(),
       ]);
