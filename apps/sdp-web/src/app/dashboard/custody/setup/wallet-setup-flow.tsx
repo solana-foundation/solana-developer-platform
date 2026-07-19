@@ -125,7 +125,7 @@ function ProviderStep({
               "group w-full cursor-pointer rounded-2xl border px-5 py-5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default focus-visible:ring-offset-2",
               isSelected
                 ? "border-primary bg-fill-subtle"
-                : "border-border-default bg-white hover:bg-fill-subtle"
+                : "border-border-default bg-surface-raised hover:bg-fill-subtle"
             )}
             aria-pressed={isSelected}
           >
@@ -139,7 +139,7 @@ function ProviderStep({
                     {provider.label}
                   </span>
                   {isConnected ? (
-                    <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-secondary ring-1 ring-border-subtle">
+                    <span className="rounded-full bg-surface-raised px-3 py-1 text-xs font-medium text-secondary ring-1 ring-border-subtle">
                       {t("DashboardCustody.active")}
                     </span>
                   ) : null}
@@ -297,7 +297,7 @@ export function WalletSetupFlow({
   if (enabledProviderEntries.length === 0) {
     return (
       <div className="h-full overflow-y-auto px-4 py-6 md:px-6">
-        <div className="mx-auto max-w-3xl rounded-lg border border-border-default bg-white p-6">
+        <div className="mx-auto max-w-3xl rounded-lg border border-border-default bg-surface-raised p-6">
           <p className="text-lg font-medium text-primary">
             {t("DashboardCustody.noWalletProvidersEnabled")}
           </p>
@@ -330,7 +330,7 @@ export function WalletSetupFlow({
           value={walletLabel}
           onChange={(event) => setWalletLabel(event.currentTarget.value)}
           placeholder={t("DashboardCustody.walletLabelPlaceholder")}
-          className="h-12 rounded-2xl border-border-default bg-white px-4 shadow-none"
+          className="h-12 rounded-2xl border-border-default bg-surface-raised px-4 shadow-none"
           required
         />
       </div>

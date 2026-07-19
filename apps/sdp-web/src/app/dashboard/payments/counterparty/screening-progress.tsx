@@ -99,7 +99,7 @@ function ScreeningRow({ result, index, resolved, checkingLabel }: ScreeningRowPr
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.1 }}
-      className="flex items-center justify-between gap-3 rounded-xl bg-[rgba(255,255,255,0.6)] px-3 py-2 text-sm"
+      className="flex items-center justify-between gap-3 rounded-xl bg-surface-raised/60 px-3 py-2 text-sm"
     >
       <span className="flex items-center gap-2 font-medium text-primary">
         {logo ? (

@@ -139,7 +139,7 @@ export function TokenSettingsSection({
       ) : null}
 
       {mode === "permissions" ? (
-        <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
+        <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
           {permissionRows.map((row) => (
             <div
               key={row.id}
@@ -190,7 +190,7 @@ export function TokenSettingsSection({
               <div
                 key={column.key}
                 className={cn(
-                  "overflow-hidden border-x border-border-default bg-white",
+                  "overflow-hidden border-x border-border-default bg-surface-raised",
                   isFirstColumn && "rounded-t-2xl border-t",
                   isLastColumn && "rounded-b-2xl border-b",
                   "md:rounded-2xl md:border"

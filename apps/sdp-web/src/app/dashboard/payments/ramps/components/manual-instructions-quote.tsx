@@ -97,7 +97,7 @@ function QuoteSummaryField({
 
   return (
     <div className="flex items-start gap-3 rounded-xl bg-fill-subtle px-4 py-3">
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white text-secondary">
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-raised text-secondary">
         {icon}
       </span>
       <div className="min-w-0">
