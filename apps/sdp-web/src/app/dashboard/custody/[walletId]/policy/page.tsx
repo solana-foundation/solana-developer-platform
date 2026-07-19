@@ -1,16 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
 import type {
-  CustodyWalletByIdResponse,
+  CustodyWalletMetadataResponse,
   CustodyWalletTokenBalance,
   PaymentWalletPolicy,
 } from "@sdp/types";
-import { History, ListChecks } from "lucide-react";
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient, getSelectedProjectId, type SdpApiClient } from "@/lib/sdp-api";
+import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { WalletPolicyStartingProfileFlow } from "./wallet-policy-starting-profile-flow";
 
 interface WalletPolicyResult {
@@ -27,8 +24,8 @@ interface WalletBalancesResponse {
 async function getWalletDetail(
   request: SdpApiClient["request"],
   walletId: string
-): Promise<CustodyWalletByIdResponse["wallet"]> {
-  const response = await request(`/v1/wallets/${encodeURIComponent(walletId)}`);
+): Promise<CustodyWalletMetadataResponse["wallet"]> {
+  const response = await request(getWalletMetadataPath(walletId));
   if (response.status === 404) {
     notFound();
   }
@@ -37,7 +34,7 @@ async function getWalletDetail(
     throw new Error(`SDP API request failed (${response.status}): ${body}`);
   }
 
-  const json = (await response.json()) as { data?: CustodyWalletByIdResponse };
+  const json = (await response.json()) as { data?: CustodyWalletMetadataResponse };
   const wallet = json.data?.wallet;
   if (!wallet) {
     notFound();
@@ -123,7 +120,6 @@ export default async function WalletPolicyPage({
   if (!projectId) {
     redirect("/dashboard");
   }
-  const t = await getTranslations();
   const apiClient = await createSdpApiClient();
   const [wallet, policyResult, walletAssets] = await Promise.all([
     getWalletDetail(apiClient.request, resolvedWalletId),
@@ -132,41 +128,21 @@ export default async function WalletPolicyPage({
   ]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap justify-end gap-2 border-b border-border-default px-4 py-3 md:px-6">
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}/policy/audit`}>
-            <ListChecks className="size-4" />
-            {t("DashboardCustody.policyAuditTitle")}
-          </Link>
-        </Button>
-        <Button asChild variant="outline" size="sm">
-          <Link
-            href={`/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}/policy/revisions`}
-          >
-            <History className="size-4" />
-            {t("DashboardCustody.policyAuditRevisionHistory")}
-          </Link>
-        </Button>
-      </div>
-      <div className="min-h-0 flex-1">
-        <WalletPolicyStartingProfileFlow
-          projectId={projectId}
-          wallet={{
-            walletId: wallet.walletId,
-            publicKey: wallet.publicKey,
-            label: wallet.label,
-            provider: wallet.provider ?? null,
-          }}
-          walletAssets={walletAssets.map((asset) => ({
-            token: asset.token,
-            mint: asset.mint,
-            uiAmount: asset.uiAmount,
-          }))}
-          initialPolicy={policyResult.policy}
-          policyError={policyResult.error}
-        />
-      </div>
-    </div>
+    <WalletPolicyStartingProfileFlow
+      projectId={projectId}
+      wallet={{
+        walletId: wallet.walletId,
+        publicKey: wallet.publicKey,
+        label: wallet.label,
+        provider: wallet.provider ?? null,
+      }}
+      walletAssets={walletAssets.map((asset) => ({
+        token: asset.token,
+        mint: asset.mint,
+        uiAmount: asset.uiAmount,
+      }))}
+      initialPolicy={policyResult.policy}
+      policyError={policyResult.error}
+    />
   );
 }

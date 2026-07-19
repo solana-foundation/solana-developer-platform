@@ -45,10 +45,15 @@ export function deriveTokenOptions(cluster: SolanaCluster): PaymentRequestTokenO
  *   network error) `{ ok: false, data: [], total: 0, error }` — never throws.
  */
 export async function fetchPaymentRequests(
-  request: SdpApiClient["request"]
+  request: SdpApiClient["request"],
+  options: { pageSize?: number; status?: PaymentRequest["status"] } = {}
 ): Promise<PaymentRequestsResult> {
   try {
-    const response = await request(`/v1/payments/requests?pageSize=${PAYMENT_REQUESTS_PAGE_SIZE}`);
+    const query = new URLSearchParams({
+      pageSize: String(options.pageSize ?? PAYMENT_REQUESTS_PAGE_SIZE),
+      ...(options.status ? { status: options.status } : {}),
+    });
+    const response = await request(`/v1/payments/requests?${query.toString()}`);
     if (!response.ok) {
       return { ok: false, data: [], total: 0, error: await response.text() };
     }

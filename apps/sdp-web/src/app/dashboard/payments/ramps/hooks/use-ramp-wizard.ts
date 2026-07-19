@@ -7,7 +7,6 @@ import type {
   RampProviderId,
 } from "@sdp/types";
 import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -28,6 +27,7 @@ import {
   type SelectedRampPair,
   toRampCryptoToken,
 } from "@/lib/ramps";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { useZodForm } from "@/lib/use-zod-form";
 import { type RampFields, rampSelectionSchema } from "../schema";
 import { useCounterpartyRequirements } from "./use-counterparty-requirements";
@@ -141,7 +141,7 @@ export function useRampWizard<TId extends string>(
   }: UseRampWizardProps,
   config: RampWizardConfig<TId>
 ) {
-  const router = useRouter();
+  const router = useDashboardRouter();
   const t = useTranslations();
 
   const [stepIndex, setStepIndex] = useState(0);
