@@ -28,7 +28,7 @@ export function CounterpartyCreateDialog({
     >
       <div className="px-6 pt-12 pb-6">
         <CounterpartyCreateProvider onCreated={onCreated}>
-          <CounterpartyCreatePage />
+          <CounterpartyCreatePage embedded onCancel={onClose} />
         </CounterpartyCreateProvider>
       </div>
     </Modal>

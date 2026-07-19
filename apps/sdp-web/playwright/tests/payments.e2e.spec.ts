@@ -16,10 +16,8 @@ import {
   getBootstrapApiBaseUrl,
 } from "../support/local-issuance-bootstrap";
 
-const recurringPaymentsEnabled = process.env.NEXT_PUBLIC_PAYMENTS_RECURRING_ENABLED === "true";
-
 test.describe
-  .serial("dashboard recurring payments feature flag", () => {
+  .serial("dashboard recurring payments", () => {
     let bootstrapProjectId = "";
     let recurringPaymentId = "";
     let recurringCounterpartyName = "";
@@ -30,45 +28,37 @@ test.describe
     test.beforeAll(async ({ browser }) => {
       const session = await getPlaywrightAdminSession(browser);
       await ensureLinkedOrg(session.identity, { tier: "enterprise" });
-      if (recurringPaymentsEnabled) {
-        const fixtures = await bootstrapLocalPaymentFixtures({
-          identity: session.identity,
-          bearerToken: session.getBearerToken,
-          tier: "enterprise",
-        });
-        const api = createLocalApiClient(
-          getBootstrapApiBaseUrl(),
-          session.getBearerToken,
-          fixtures.projectId
-        );
+      const fixtures = await bootstrapLocalPaymentFixtures({
+        identity: session.identity,
+        bearerToken: session.getBearerToken,
+        tier: "enterprise",
+      });
+      const api = createLocalApiClient(
+        getBootstrapApiBaseUrl(),
+        session.getBearerToken,
+        fixtures.projectId
+      );
 
-        await api.post(`/v1/issuance/tokens/${fixtures.token.id}/mint`, {
-          mint: {
-            destination: fixtures.wallets.treasury.publicKey,
-            amount: "25",
-          },
-        });
+      await api.post(`/v1/issuance/tokens/${fixtures.token.id}/mint`, {
+        mint: {
+          destination: fixtures.wallets.treasury.publicKey,
+          amount: "25",
+        },
+      });
 
-        const suffix = randomUUID().slice(0, 8);
-        recurringAccountLabel = `E2E Subscription ${suffix}`;
-        const seededCounterparty = await seedCounterpartyWithSolanaAccount(api, {
-          displayName: `E2E Recurring ${suffix}`,
-          email: `e2e-recurring-${suffix}@example.com`,
-          accountLabel: recurringAccountLabel,
-          destinationAddress: fixtures.wallets.treasury.publicKey,
-        });
+      const suffix = randomUUID().slice(0, 8);
+      recurringAccountLabel = `E2E Subscription ${suffix}`;
+      const seededCounterparty = await seedCounterpartyWithSolanaAccount(api, {
+        displayName: `E2E Recurring ${suffix}`,
+        email: `e2e-recurring-${suffix}@example.com`,
+        accountLabel: recurringAccountLabel,
+        destinationAddress: fixtures.wallets.treasury.publicKey,
+      });
 
-        bootstrapProjectId = fixtures.projectId;
-        recurringCounterpartyName = seededCounterparty.displayName;
-        recurringWalletLabel =
-          fixtures.wallets.treasury.label ?? fixtures.wallets.treasury.publicKey;
-        recurringTokenSymbol = fixtures.token.symbol;
-      } else {
-        bootstrapProjectId = await resolvePlaywrightProjectId(
-          getBootstrapApiBaseUrl(),
-          session.getBearerToken
-        );
-      }
+      bootstrapProjectId = fixtures.projectId;
+      recurringCounterpartyName = seededCounterparty.displayName;
+      recurringWalletLabel = fixtures.wallets.treasury.label ?? fixtures.wallets.treasury.publicKey;
+      recurringTokenSymbol = fixtures.token.symbol;
       await session.page.close();
     });
 
@@ -76,37 +66,7 @@ test.describe
       await seedProjectCookie(page, bootstrapProjectId);
     });
 
-    test("hides recurring payments when the dashboard feature flag is disabled", async ({
-      page,
-    }) => {
-      test.skip(recurringPaymentsEnabled, "Covered by the feature-enabled recurring payment test");
-
-      await page.goto("/dashboard/payments");
-
-      await expect(page.getByRole("link", { name: "Recurring" })).toHaveCount(0);
-
-      await page.goto("/dashboard/payments/recurring");
-      await expect(
-        page.getByRole("heading", { name: "Recurring payments unavailable" })
-      ).toBeVisible();
-      await expect(page.getByText("No recurring payments yet.")).toHaveCount(0);
-
-      await page.goto("/dashboard/payments/recurring/prp_disabled_flag_test");
-      await expect(
-        page.getByRole("heading", { name: "Recurring payments unavailable" })
-      ).toBeVisible();
-
-      await page.goto("/dashboard/payments/recurring/create");
-      await expect(
-        page.getByRole("heading", { name: "Recurring payments unavailable" })
-      ).toBeVisible();
-    });
-
-    test("shows recurring payments when the dashboard feature flag is enabled", async ({
-      page,
-    }) => {
-      test.skip(!recurringPaymentsEnabled, "Requires NEXT_PUBLIC_PAYMENTS_RECURRING_ENABLED=true");
-
+    test("creates and displays a recurring payment", async ({ page }) => {
       await page.goto("/dashboard/payments");
 
       await expect(page.getByRole("link", { name: "Recurring" })).toBeVisible();

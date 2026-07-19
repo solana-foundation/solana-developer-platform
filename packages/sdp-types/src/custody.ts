@@ -306,9 +306,12 @@ export interface CustodyWalletTokenBalance {
   usdValue?: number;
 }
 
-export interface CustodyWalletWithBalance extends CustodyWalletSummary {
+export interface CustodyWalletMetadata extends CustodyWalletSummary {
   custodyConfigId: string;
   provider: CustodyProvider;
+}
+
+export interface CustodyWalletWithBalance extends CustodyWalletMetadata {
   balance: CustodyWalletBalance;
 }
 
@@ -347,6 +350,10 @@ export interface CustodyWalletAggregateResponse {
 
 export interface CustodyWalletByIdResponse {
   wallet: CustodyWalletWithBalance;
+}
+
+export interface CustodyWalletMetadataResponse {
+  wallet: CustodyWalletMetadata;
 }
 
 export interface CustodyConfigsResponse {

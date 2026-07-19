@@ -1,5 +1,5 @@
 import type {
-  CustodyWalletByIdResponse,
+  CustodyWalletMetadataResponse,
   ListApiKeysResponse,
   PolicyDecision,
   WalletControlProfileRevisionHistory,
@@ -8,6 +8,7 @@ import type {
   WalletPolicyEvaluationDetail,
 } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
+import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 
 export const POLICY_AUDIT_PAGE_SIZE = 25;
 const POLICY_AUDIT_API_PAGE_SIZE = 100;
@@ -60,10 +61,12 @@ export interface PolicyAuditListResult {
 }
 
 export interface PolicyAuditContext {
-  wallet: CustodyWalletByIdResponse["wallet"];
+  wallet: CustodyWalletMetadataResponse["wallet"];
   revisionHistory: WalletControlProfileRevisionHistory;
   apiKeyNames: Record<string, string>;
 }
+
+export type PolicyRevisionContext = Pick<PolicyAuditContext, "wallet" | "revisionHistory">;
 
 export interface PolicyAuditNeighbor {
   id: string;
@@ -320,12 +323,12 @@ export async function fetchPolicyAuditList(
 async function fetchWallet(
   request: SdpApiClient["request"],
   walletId: string
-): Promise<CustodyWalletByIdResponse["wallet"]> {
-  const response = await request(`/v1/wallets/${encodeURIComponent(walletId)}`);
+): Promise<CustodyWalletMetadataResponse["wallet"]> {
+  const response = await request(getWalletMetadataPath(walletId));
   if (!response.ok) {
     throw new PolicyAuditRequestError(await readError(response), response.status);
   }
-  const body = (await response.json()) as { data?: CustodyWalletByIdResponse };
+  const body = (await response.json()) as { data?: CustodyWalletMetadataResponse };
   if (!body.data?.wallet) {
     throw new PolicyAuditRequestError("Wallet not found", 404);
   }
@@ -361,12 +364,22 @@ export async function fetchPolicyAuditContext(
   request: SdpApiClient["request"],
   walletId: string
 ): Promise<PolicyAuditContext> {
-  const [wallet, revisionHistory, apiKeyNames] = await Promise.all([
-    fetchWallet(request, walletId),
-    fetchRevisionHistory(request, walletId),
+  const [revisionContext, apiKeyNames] = await Promise.all([
+    fetchPolicyRevisionContext(request, walletId),
     fetchApiKeyNames(request),
   ]);
-  return { wallet, revisionHistory, apiKeyNames };
+  return { ...revisionContext, apiKeyNames };
+}
+
+export async function fetchPolicyRevisionContext(
+  request: SdpApiClient["request"],
+  walletId: string
+): Promise<PolicyRevisionContext> {
+  const [wallet, revisionHistory] = await Promise.all([
+    fetchWallet(request, walletId),
+    fetchRevisionHistory(request, walletId),
+  ]);
+  return { wallet, revisionHistory };
 }
 
 export async function fetchPolicyEvaluation(

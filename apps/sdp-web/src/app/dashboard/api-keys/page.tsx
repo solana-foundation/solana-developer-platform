@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import Link from "next/link";
 import { redirect } from "next/navigation";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -23,8 +23,7 @@ import { type ApiKeyRecord, ApiKeysTableClient } from "./api-keys-table-client";
 export const dynamic = "force-dynamic";
 
 export default async function ApiKeysPage() {
-  const t = await getTranslations();
-  const { userId, orgId, orgRole } = await auth();
+  const [t, { userId, orgId, orgRole }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }

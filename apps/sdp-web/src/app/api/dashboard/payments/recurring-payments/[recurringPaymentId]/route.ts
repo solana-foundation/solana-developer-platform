@@ -1,20 +1,8 @@
-import { NextResponse } from "next/server";
-import { isRecurringPaymentsDashboardEnabled } from "@/lib/recurring-payments-feature";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 type RouteContext = { params: Promise<{ recurringPaymentId: string }> };
 
-function disabledResponse() {
-  return NextResponse.json(
-    { error: { message: "Recurring payments are not enabled" } },
-    { status: 404 }
-  );
-}
-
 export async function GET(request: Request, context: RouteContext) {
-  if (!isRecurringPaymentsDashboardEnabled()) {
-    return disabledResponse();
-  }
   const { recurringPaymentId } = await context.params;
   return proxyToSdpApi({
     request,
@@ -24,9 +12,6 @@ export async function GET(request: Request, context: RouteContext) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  if (!isRecurringPaymentsDashboardEnabled()) {
-    return disabledResponse();
-  }
   const { recurringPaymentId } = await context.params;
   return proxyToSdpApi({
     request,

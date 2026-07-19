@@ -299,6 +299,7 @@ export async function updateWalletLabelAction(
 
     revalidatePath("/dashboard/custody");
     revalidatePath("/dashboard/wallets");
+    revalidatePath(`/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}`);
 
     return {
       status: "success",

@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import {
   buildHomeActivityRows,
   computeTodaysVolume,
-  fetchIssuanceTokens,
   fetchOrgIssuanceActivity,
 } from "@/app/dashboard/home-page.data";
 import { fetchDashboardPaymentTransfers } from "@/app/dashboard/payments/payments-page.data";
@@ -18,40 +17,30 @@ export async function GET(request: Request) {
     const apiClient = await createSdpApiClient(
       trace.childContext("route.dashboard.home.activity.api")
     );
-    const [transfersResult, issuanceTokensResult] = await Promise.all([
+    const [transfersResult, issuanceActivityResult] = await Promise.all([
       trace.step("fetch_payment_transfers", () =>
         fetchDashboardPaymentTransfers(apiClient.request, 20)
       ),
-      trace.step("fetch_issuance_tokens", () => fetchIssuanceTokens(apiClient.request, t, 20)),
+      trace.step("fetch_issuance_activity", () =>
+        fetchOrgIssuanceActivity(apiClient.request, t, 20)
+      ),
     ]);
-
-    const issuanceTokens = issuanceTokensResult.data ?? [];
-    const issuanceActivityResult =
-      issuanceTokensResult.ok && issuanceTokens.length > 0
-        ? await trace.step("fetch_issuance_activity", () =>
-            fetchOrgIssuanceActivity(apiClient.request, issuanceTokens, t)
-          )
-        : { rows: [], error: null };
 
     const transfersError = transfersResult.ok
       ? null
       : t("Shared.homeWorkspace.paymentsActivityUnavailable");
-    const issuanceTokensError = issuanceTokensResult.ok
+    const issuanceActivityError = issuanceActivityResult.ok
       ? null
       : t("Shared.homeWorkspace.issuanceActivityUnavailable");
 
     const activityRows = buildHomeActivityRows(
       transfersResult.data ?? [],
-      issuanceActivityResult.rows,
+      issuanceActivityResult.data ?? [],
       t
     );
     const activityError =
-      activityRows.length === 0
-        ? (transfersError ?? issuanceTokensError ?? issuanceActivityResult.error)
-        : null;
-    const activityNotice = [transfersError, issuanceTokensError, issuanceActivityResult.error]
-      .filter(Boolean)
-      .join(" ");
+      activityRows.length === 0 ? (transfersError ?? issuanceActivityError) : null;
+    const activityNotice = [transfersError, issuanceActivityError].filter(Boolean).join(" ");
 
     const response = NextResponse.json(
       {
@@ -72,7 +61,7 @@ export async function GET(request: Request) {
 
     logRouteResult(trace, 200, {
       transferCount: transfersResult.data?.length ?? 0,
-      issuanceTokenCount: issuanceTokens.length,
+      issuanceTransactionCount: issuanceActivityResult.data?.length ?? 0,
       activityRowCount: activityRows.length,
     });
 

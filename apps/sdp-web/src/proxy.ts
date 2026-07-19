@@ -6,7 +6,13 @@ import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
 import { PROJECT_COOKIE_NAME, PROJECT_COOKIE_OPTIONS } from "@/lib/project-cookie";
 import { acquireClerkToken, createTokenSdpApiClient } from "@/lib/sdp-api";
 
-const isPublicRoute = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)", "/", "/docs(.*)"]);
+export const isPublicRoute = createRouteMatcher([
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/pay/:token",
+  "/",
+  "/docs(.*)",
+]);
 
 const needsSelectedProject = createRouteMatcher([
   "/dashboard(.*)",
