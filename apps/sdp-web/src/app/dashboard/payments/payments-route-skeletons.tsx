@@ -105,7 +105,7 @@ const TABLE_SKELETON_CONFIGS: Record<TableSkeletonVariant, TableSkeletonConfig> 
         id: "type",
         headerClassName: "w-[12%]",
         headerSkeletonClassName: "h-4 w-12",
-        cellSkeletonClassName: "h-4 w-16 max-w-full",
+        cellSkeletonClassName: "h-4 w-16 max-w-full rounded-full",
       },
       {
         id: "email",
