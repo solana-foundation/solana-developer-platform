@@ -601,7 +601,7 @@ export function PaymentRequestsWorkspace({
                       );
                     })}
                   </div>
-                  <Table className="hidden [&_table]:table-fixed md:block">
+                  <Table className="hidden rounded-none border-0 [&_table]:min-w-[800px] [&_table]:table-fixed md:block">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-[16%]">{t("DashboardPayments.status")}</TableHead>
