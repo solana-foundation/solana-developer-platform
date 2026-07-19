@@ -85,17 +85,22 @@ export function TokenManagementHeader({
               </span>
             </div>
             <div
-              className="mt-2 flex flex-wrap items-center gap-2 text-[14px] text-secondary"
+              className="mt-2 flex min-w-0 items-center gap-2 text-[14px] text-secondary"
               data-testid="token-id-row"
             >
-              <span className="text-[13px] font-medium tracking-[-0.1px] text-tertiary">
+              <span className="shrink-0 text-[13px] font-medium tracking-[-0.1px] text-tertiary">
                 {t("DashboardIssuance.header.tokenId")}:
               </span>
-              <span className="font-mono text-[13px] tracking-[-0.1px]">{tokenId}</span>
+              <span
+                className="min-w-0 flex-1 font-mono text-[13px] tracking-[-0.1px] [overflow-wrap:anywhere]"
+                data-token-id-value
+              >
+                {tokenId}
+              </span>
               <button
                 type="button"
                 onClick={onCopyTokenId}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-[10px] border border-border-default bg-white text-secondary transition-colors hover:text-primary"
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] border border-border-default bg-white text-secondary transition-colors hover:text-primary"
                 aria-label={t("DashboardIssuance.header.copyTokenId")}
               >
                 <Copy className="h-3.5 w-3.5" />

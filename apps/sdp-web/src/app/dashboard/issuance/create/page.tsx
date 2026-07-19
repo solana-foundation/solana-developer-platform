@@ -9,12 +9,11 @@ import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import { IssuanceDraftWizard } from "./issuance-draft-wizard";
 
 export default async function CreateAssetPage() {
-  const t = await getTranslations();
   if (!isAssetProfilesUiEnabled()) {
     notFound();
   }
 
-  const { userId, orgId } = await auth();
+  const [t, { userId, orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }

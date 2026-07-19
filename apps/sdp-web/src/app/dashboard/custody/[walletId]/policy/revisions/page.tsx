@@ -1,14 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
 import { History } from "lucide-react";
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import {
-  fetchPolicyAuditContext,
+  fetchPolicyRevisionContext,
   firstSearchParam,
   PolicyAuditRequestError,
 } from "../policy-audit.data";
@@ -42,7 +42,7 @@ export default async function WalletPolicyRevisionsPage({
 
   try {
     const apiClient = await createSdpApiClient();
-    const context = await fetchPolicyAuditContext(apiClient.request, walletId);
+    const context = await fetchPolicyRevisionContext(apiClient.request, walletId);
     return (
       <DashboardWorkspaceOverviewPanel>
         <div className="mx-auto w-full max-w-[1500px] space-y-6">

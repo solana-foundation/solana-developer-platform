@@ -1,12 +1,12 @@
 "use client";
 
 import type { Counterparty, CounterpartyResponse, CreateCounterpartyRequest } from "@sdp/types";
-import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { createContext, useContext, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { useZodForm, type ZodFormApi } from "@/lib/use-zod-form";
 import {
   defaultAddress,
@@ -62,7 +62,7 @@ export function CounterpartyCreateProvider({
   children,
   onCreated,
 }: CounterpartyCreateProviderProps) {
-  const router = useRouter();
+  const router = useDashboardRouter();
   const t = useTranslations();
 
   const resolveValidationMessage = useMemo(

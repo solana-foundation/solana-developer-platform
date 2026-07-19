@@ -12,6 +12,7 @@ import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { PaymentsOverview } from "./payments-overview";
+import type { PaymentsWorkspaceTab } from "./payments-workspace-tabs";
 
 const PaymentsPlayground = dynamic(
   () => import("./payments-playground").then((module) => module.PaymentsPlayground),
@@ -29,6 +30,7 @@ interface PaymentsApiKeyOption {
 }
 
 interface PaymentsWorkspaceProps {
+  activeTab: PaymentsWorkspaceTab;
   apiBaseUrl: string | null;
   apiKeys: PaymentsApiKeyOption[];
   wallets: PaymentsDashboardWallet[];
@@ -41,6 +43,7 @@ interface PaymentsWorkspaceProps {
 }
 
 export function PaymentsWorkspace({
+  activeTab,
   apiBaseUrl,
   apiKeys,
   wallets,
@@ -51,31 +54,12 @@ export function PaymentsWorkspace({
   transfers,
   transfersError,
 }: PaymentsWorkspaceProps) {
-  const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
-  const isPlaygroundTab = issuanceTab === "playground";
+  const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
+  const isPlaygroundTab = activeTab === "playground";
 
   useEffect(() => {
     setPlaygroundApiKeys(apiKeys);
   }, [apiKeys, setPlaygroundApiKeys]);
-
-  useEffect(() => {
-    if (isPlaygroundTab) {
-      return;
-    }
-
-    const preloadPlayground = () => {
-      void import("./payments-playground");
-    };
-
-    // biome-ignore lint/security/noSecrets: requestIdleCallback is a browser API, not a secret.
-    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      const idleId = window.requestIdleCallback(preloadPlayground);
-      return () => window.cancelIdleCallback(idleId);
-    }
-
-    const timeoutId = globalThis.setTimeout(preloadPlayground, 600);
-    return () => globalThis.clearTimeout(timeoutId);
-  }, [isPlaygroundTab]);
 
   const selectedPlaygroundApiKey = useMemo(
     () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,

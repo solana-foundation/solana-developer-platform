@@ -1,8 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { isRecurringPaymentsDashboardEnabled } from "@/lib/recurring-payments-feature";
 import { fetchCounterparties } from "../../counterparty/counterparty-page.data";
 import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../../payments-page.data";
 import { RecurringPaymentCreateWorkspace } from "../recurring-payment-create-workspace";
@@ -10,10 +9,6 @@ import { RecurringPaymentCreateWorkspace } from "../recurring-payment-create-wor
 export const dynamic = "force-dynamic";
 
 export default async function RecurringPaymentCreatePage() {
-  if (!isRecurringPaymentsDashboardEnabled()) {
-    notFound();
-  }
-
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());

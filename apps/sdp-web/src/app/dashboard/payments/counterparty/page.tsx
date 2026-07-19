@@ -8,7 +8,11 @@ import { CounterpartyWorkspace } from "./counterparty-workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function CounterpartyPage() {
+interface CounterpartyPageProps {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function CounterpartyPage({ searchParams }: CounterpartyPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -18,20 +22,29 @@ export default async function CounterpartyPage() {
   }
 
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const isPlayground =
+    resolvedSearchParams?.tab === "playground" ||
+    (Array.isArray(resolvedSearchParams?.tab) && resolvedSearchParams.tab[0] === "playground");
 
   return withDashboardPageTrace("dashboard.counterparty.page", async ({ trace, apiClient }) => {
-    const [counterpartiesResult, apiKeysResult] = await Promise.all([
-      trace.step("fetch_counterparties", () => fetchCounterparties(apiClient.request)),
-      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
-    ]);
+    const counterpartiesPromise = trace.step("fetch_counterparties", () =>
+      fetchCounterparties(apiClient.request)
+    );
+    const [counterpartiesResult, apiKeysResult] = isPlayground
+      ? await Promise.all([
+          counterpartiesPromise,
+          trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+        ])
+      : [await counterpartiesPromise, null];
 
     trace.log({
       ok: true,
       counterpartiesOk: counterpartiesResult.ok,
       counterpartiesCount: counterpartiesResult.data.length,
       counterpartiesTotal: counterpartiesResult.total,
-      apiKeysOk: apiKeysResult.ok,
-      apiKeysCount: apiKeysResult.data?.length ?? 0,
+      apiKeysOk: apiKeysResult?.ok ?? true,
+      apiKeysCount: apiKeysResult?.data?.length ?? 0,
     });
 
     return (
@@ -39,7 +52,7 @@ export default async function CounterpartyPage() {
         <CounterpartyWorkspace
           initialCounterparties={counterpartiesResult.data}
           initialTotal={counterpartiesResult.total}
-          apiKeys={apiKeysResult.data ?? []}
+          apiKeys={apiKeysResult?.data ?? []}
           apiBaseUrl={apiBaseUrl}
         />
       </div>
