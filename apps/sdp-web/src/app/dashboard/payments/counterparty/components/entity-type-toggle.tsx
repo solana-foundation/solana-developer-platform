@@ -34,7 +34,7 @@ export function EntityTypeToggle({ value, onChange }: EntityTypeToggleProps) {
               onClick={() => onChange(type)}
               className={cn(
                 "flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium capitalize transition-all",
-                active ? "bg-primary text-white shadow-sm" : "text-tertiary hover:text-primary"
+                active ? "bg-primary text-on-primary shadow-sm" : "text-tertiary hover:text-primary"
               )}
             >
               <Icon className="size-4" />

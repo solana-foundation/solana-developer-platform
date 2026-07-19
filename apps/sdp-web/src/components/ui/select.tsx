@@ -100,7 +100,7 @@ function Select({
       </BaseSelect.Trigger>
       <BaseSelect.Portal>
         <BaseSelect.Positioner className="z-50" sideOffset={4} alignItemWithTrigger={false}>
-          <BaseSelect.Popup className="max-h-[var(--available-height)] min-w-[var(--anchor-width)] overflow-y-auto rounded-xl border border-border-default bg-white p-1 shadow-lg outline-none">
+          <BaseSelect.Popup className="max-h-[var(--available-height)] min-w-[var(--anchor-width)] overflow-y-auto rounded-xl border border-border-default bg-surface-raised p-1 shadow-lg outline-none">
             {children}
           </BaseSelect.Popup>
         </BaseSelect.Positioner>

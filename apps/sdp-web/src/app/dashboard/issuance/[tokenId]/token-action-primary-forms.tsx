@@ -378,7 +378,7 @@ function ActionField({
         inputMode={inputMode}
         aria-invalid={Boolean(error)}
         onChange={(event) => onChange(event.currentTarget.value)}
-        className="h-11 rounded-[12px] border-border-default bg-white px-4 shadow-none"
+        className="h-11 rounded-[12px] border-border-default bg-surface-raised px-4 shadow-none"
       />
       <TokenValidationMessage message={error ?? null} />
     </div>

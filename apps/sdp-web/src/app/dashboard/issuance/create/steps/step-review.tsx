@@ -230,7 +230,7 @@ function ReviewSection({ section, onEdit }: { section: Section; onEdit: () => vo
   const t = useTranslations();
   const Icon = section.icon;
   return (
-    <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
+    <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
       <div className="flex items-start justify-between gap-4 border-b border-border-subtle px-5 py-4">
         <div className="flex items-start gap-3.5">
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-primary">
@@ -277,7 +277,7 @@ function FieldRow({ field }: { field: Field }) {
           <img
             src={field.preview ?? undefined}
             alt=""
-            className="h-10 w-10 shrink-0 rounded-lg bg-white object-cover ring-1 ring-black/5"
+            className="h-10 w-10 shrink-0 rounded-lg bg-[white] object-cover ring-1 ring-black/5"
           />
         ) : hasValue && field.href ? (
           <a

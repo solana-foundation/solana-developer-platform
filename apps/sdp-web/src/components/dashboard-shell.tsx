@@ -67,6 +67,7 @@ import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -338,8 +339,8 @@ function DashboardTopBar({
   const isSandbox = sdpEnvironment === "sandbox";
   const sandboxBadge = isSandbox ? (
     <>
-      <span aria-hidden="true" className="h-4 w-px bg-fill-strong" />
-      <Badge>{t("Shared.dashboardShell.sandbox")}</Badge>
+      <span aria-hidden="true" className="hidden h-4 w-px bg-fill-strong sm:block" />
+      <Badge className="hidden sm:inline-flex">{t("Shared.dashboardShell.sandbox")}</Badge>
     </>
   ) : null;
 
@@ -358,6 +359,9 @@ function DashboardTopBar({
         }
         trailingContent={
           <>
+            <div className="lg:hidden">
+              <ThemeToggle variant="header" />
+            </div>
             <LanguagePicker />
             <UserButton />
             {sandboxBadge}
@@ -379,6 +383,9 @@ function DashboardTopBar({
       }
       trailingContent={
         <>
+          <div className="lg:hidden">
+            <ThemeToggle variant="header" />
+          </div>
           <LanguagePicker />
           <UserButton />
           {sandboxBadge}
@@ -772,7 +779,7 @@ function isItemActive(pathname: string, href: string): boolean {
 
 const navItemBase =
   "relative flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors";
-const navItemActive = "border border-border-subtle bg-white text-primary";
+const navItemActive = "border border-border-subtle bg-surface-raised text-primary";
 const navItemInactive = "text-secondary hover:bg-fill-strong hover:text-primary";
 
 function SidebarGroup({
@@ -849,7 +856,7 @@ function SidebarGroup({
                     <>
                       <span className="whitespace-nowrap">{item.label}</span>
                       {item.badge ? (
-                        <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-medium text-white">
+                        <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-medium text-on-primary">
                           {item.badge > 99 ? "99+" : item.badge}
                         </span>
                       ) : null}
@@ -857,7 +864,7 @@ function SidebarGroup({
                   )}
                   {isCollapsed && item.badge ? (
                     <span
-                      className="absolute top-1 right-1 size-2 rounded-full border border-white bg-primary"
+                      className="absolute top-1 right-1 size-2 rounded-full border border-on-primary bg-primary"
                       aria-hidden="true"
                     />
                   ) : null}
@@ -957,7 +964,7 @@ function DashboardSidebarContent({
   const showMobileClose = variant === "mobile";
   return (
     <>
-      <div className="space-y-6 p-3">
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain p-3">
         <div className="py-3">
           {showMobileClose ? (
             <div className="flex items-center justify-between gap-2">
@@ -996,7 +1003,7 @@ function DashboardSidebarContent({
           />
         ))}
       </div>
-      <div className="space-y-0.5 px-3 pb-1">
+      <div className="shrink-0 space-y-0.5 px-3 pb-1">
         <SentryFeedbackWidget collapsed={isCollapsed} />
         {bottomNavItems.map((item) => {
           const Icon = item.icon;
@@ -1019,6 +1026,7 @@ function DashboardSidebarContent({
             </DashboardNavigationLink>
           );
         })}
+        {variant === "desktop" ? <ThemeToggle collapsed={isCollapsed} /> : null}
       </div>
     </>
   );
@@ -1200,7 +1208,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   if (!isLoaded) {
     return (
       <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
-        <div className="mx-auto max-w-5xl border border-border-subtle bg-white/70 p-6">
+        <div className="mx-auto max-w-5xl border border-border-subtle bg-surface-raised/70 p-6">
           <p className="text-sm text-tertiary">{t("Shared.dashboardShell.loadingDashboard")}</p>
         </div>
       </main>
@@ -1210,7 +1218,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   if (!isSignedIn) {
     return (
       <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
-        <div className="mx-auto max-w-3xl border border-border-subtle bg-white/70 p-6">
+        <div className="mx-auto max-w-3xl border border-border-subtle bg-surface-raised/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             {t("Shared.dashboardShell.signInToContinue")}
           </h1>
@@ -1221,7 +1229,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             <SignInButton mode="modal">
               <button
                 type="button"
-                className="inline-flex h-10 items-center justify-center rounded-[var(--button-radius-lg)] bg-primary px-[18px] text-[15px] font-semibold leading-[15px] text-white transition hover:opacity-90"
+                className="inline-flex h-10 items-center justify-center rounded-[var(--button-radius-lg)] bg-primary px-[18px] text-[15px] font-semibold leading-[15px] text-on-primary transition hover:opacity-90"
               >
                 {t("Shared.dashboardShell.signIn")}
               </button>
@@ -1235,7 +1243,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   if (!orgId) {
     return (
       <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
-        <div className="mx-auto max-w-3xl border border-border-subtle bg-white/70 p-6">
+        <div className="mx-auto max-w-3xl border border-border-subtle bg-surface-raised/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             {t("Shared.dashboardShell.selectOrganization")}
           </h1>
@@ -1324,7 +1332,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
         <section
           className={[
-            "relative min-w-0 rounded-2xl border border-border-subtle bg-white/80 lg:rounded-tl-[16px]",
+            "relative min-w-0 rounded-2xl border border-border-subtle bg-surface-raised/80 lg:rounded-tl-[16px]",
             shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "px-3 py-5 md:p-6",
           ].join(" ")}
         >

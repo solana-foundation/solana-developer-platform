@@ -229,13 +229,13 @@ export function IssuanceWorkspace({
                   const value = event.currentTarget.value;
                   setSearch(value);
                 }}
-                className="h-10 rounded-[10px] border-border-default bg-white pl-9"
+                className="h-10 rounded-[10px] border-border-default bg-surface-raised pl-9"
                 placeholder={t("DashboardIssuance.workspace.search")}
               />
             </div>
             <Button
               type="button"
-              className="h-10 rounded-[10px] bg-primary px-4 text-white hover:opacity-90"
+              className="h-10 rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90"
               onClick={startTokenCreation}
             >
               {t("DashboardIssuance.workspace.createDraft")}
@@ -260,7 +260,7 @@ export function IssuanceWorkspace({
 
                   return (
                     <div className="mb-4 flex items-start justify-between gap-3">
-                      <div className="h-14 w-14 overflow-hidden rounded-full border border-border-default bg-white">
+                      <div className="h-14 w-14 overflow-hidden rounded-full border border-border-default bg-[white]">
                         {token.imageUrl ? (
                           // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
                           <img

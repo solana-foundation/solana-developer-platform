@@ -31,7 +31,7 @@ export function SelectionCard({
         "flex flex-col rounded-2xl border p-3.5 text-left transition-colors",
         selected
           ? "border-primary bg-fill-subtle"
-          : "border-border-default bg-white hover:bg-fill-subtle"
+          : "border-border-default bg-surface-raised hover:bg-fill-subtle"
       )}
     >
       <div className="flex items-start justify-between gap-3">
