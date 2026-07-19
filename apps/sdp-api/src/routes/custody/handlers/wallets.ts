@@ -33,6 +33,7 @@ import { type AppContext, parseBooleanQueryParam, resolveActor } from "../contex
 import {
   type CustodyWalletAggregateResponse,
   type CustodyWalletByIdResponse,
+  type CustodyWalletMetadataResponse,
   type CustodyWalletResponse,
   type CustodyWalletsResponse,
   createWalletSchema,
@@ -839,6 +840,28 @@ export const getWalletById = async (c: AppContext) => {
     throw error;
   }
 
+  const walletMetadata: CustodyWalletMetadataResponse["wallet"] = {
+    id: wallet.id,
+    custodyConfigId: wallet.custodyConfigId,
+    provider: wallet.provider,
+    isDefaultProvider: wallet.isDefaultProvider,
+    walletId: wallet.walletId,
+    publicKey: wallet.publicKey,
+    label: wallet.label,
+    purpose: wallet.purpose,
+    status: wallet.status,
+    createdAt: wallet.createdAt,
+  };
+  const includeBalanceQuery = c.req.query("includeBalance");
+  const includeBalance = includeBalanceQuery?.trim().toLowerCase() !== "false";
+
+  if (!includeBalance) {
+    const response: CustodyWalletMetadataResponse = {
+      wallet: walletMetadata,
+    };
+    return success(c, response);
+  }
+
   let lamports = 0n;
 
   try {
@@ -877,16 +900,7 @@ export const getWalletById = async (c: AppContext) => {
 
   const response: CustodyWalletByIdResponse = {
     wallet: {
-      id: wallet.id,
-      custodyConfigId: wallet.custodyConfigId,
-      provider: wallet.provider,
-      isDefaultProvider: wallet.isDefaultProvider,
-      walletId: wallet.walletId,
-      publicKey: wallet.publicKey,
-      label: wallet.label,
-      purpose: wallet.purpose,
-      status: wallet.status,
-      createdAt: wallet.createdAt,
+      ...walletMetadata,
       balance: pricedSolBalance,
     },
   };

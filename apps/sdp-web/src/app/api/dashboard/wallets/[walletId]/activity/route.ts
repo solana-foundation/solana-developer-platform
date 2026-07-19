@@ -5,6 +5,7 @@ import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { getTranslations } from "@/i18n/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 
 interface VisibilityResult {
   ok: boolean;
@@ -20,7 +21,7 @@ async function verifyWalletVisibility(
   t: Translate
 ): Promise<VisibilityResult> {
   try {
-    const response = await request(`/v1/wallets/${encodeURIComponent(walletId)}`);
+    const response = await request(getWalletMetadataPath(walletId));
     if (!response.ok) {
       const body = await response.text();
       return {

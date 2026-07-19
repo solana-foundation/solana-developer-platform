@@ -5,10 +5,10 @@ import { motion } from "motion/react";
 import Image from "next/image";
 import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/payments/counterparty/counterparty-create-dialog";
+import { PaymentsWizardFrame } from "@/app/dashboard/payments/payments-wizard-frame";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
-import { cn } from "@/lib/utils";
 import { CancelTransactionDialog } from "./cancel-transaction-dialog";
 
 export function PoweredByRampProvider({ provider }: { provider: RampProviderId }) {
@@ -77,88 +77,61 @@ export function RampWizardShell({
   const t = useTranslations();
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   return (
-    <div className="mx-auto flex h-[80vh] w-full max-w-5xl flex-col py-6">
-      <div className="mx-auto w-full max-w-3xl flex-1 space-y-6 overflow-y-auto px-1.5">
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              {steps.map((step, index) => (
-                <div
-                  key={step.label}
-                  className={cn(
-                    "h-1.5 rounded-full transition-all duration-200",
-                    index === stepIndex
-                      ? "w-4 bg-primary"
-                      : index < stepIndex
-                        ? "w-1.5 bg-primary"
-                        : "w-1.5 bg-fill-strong"
-                  )}
-                />
-              ))}
+    <>
+      <PaymentsWizardFrame
+        steps={steps}
+        currentStep={stepIndex}
+        progressLabel={t("DashboardPayments.counterparty.stepProgress", {
+          current: stepIndex + 1,
+          total: steps.length,
+        })}
+        header={header}
+        footer={
+          <div className="flex items-center justify-between gap-3">
+            {hideSecondary ? (
+              <div />
+            ) : (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={secondaryDisabled}
+                onClick={confirmSecondary ? () => setCancelConfirmOpen(true) : onSecondary}
+              >
+                {secondaryLabel ??
+                  (stepIndex === 0
+                    ? t("DashboardPayments.counterparty.cancel")
+                    : t("DashboardPayments.previous"))}
+              </Button>
+            )}
+            <div className="ml-auto flex items-center gap-3">
+              {footerActions}
+              {hidePrimary ? null : (
+                <Button type="button" disabled={primaryDisabled} onClick={onPrimary}>
+                  {primaryLabel}
+                </Button>
+              )}
             </div>
-            <span className="text-xs text-muted">
-              {t("DashboardPayments.counterparty.stepProgress", {
-                current: stepIndex + 1,
-                total: steps.length,
-              })}
-            </span>
           </div>
-          <div className="flex items-center justify-between gap-4">
-            <p className="text-3xl font-medium leading-tight tracking-tight text-primary">
-              {steps[stepIndex]?.title}
-            </p>
-            {header}
-          </div>
-        </div>
+        }
+      >
+        <div className="space-y-6">
+          {walletsError ? (
+            <div className="rounded-lg border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
+              {walletsError}
+            </div>
+          ) : null}
 
-        {walletsError ? (
-          <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
-            {walletsError}
-          </div>
-        ) : null}
-
-        <motion.div
-          key={stepIndex}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
-          className="space-y-6"
-        >
-          {children}
-        </motion.div>
-      </div>
-
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 pt-4 pb-1 sm:flex-row sm:justify-between">
-        {hideSecondary ? (
-          <div />
-        ) : (
-          <Button
-            type="button"
-            variant="secondary"
-            className="h-14 rounded-full text-base"
-            disabled={secondaryDisabled}
-            onClick={confirmSecondary ? () => setCancelConfirmOpen(true) : onSecondary}
+          <motion.div
+            key={stepIndex}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="space-y-6"
           >
-            {secondaryLabel ??
-              (stepIndex === 0
-                ? t("DashboardPayments.counterparty.cancel")
-                : t("DashboardPayments.previous"))}
-          </Button>
-        )}
-        <div className="flex flex-col gap-3 sm:flex-row">
-          {footerActions}
-          {hidePrimary ? null : (
-            <Button
-              type="button"
-              className="h-14 rounded-full text-base"
-              disabled={primaryDisabled}
-              onClick={onPrimary}
-            >
-              {primaryLabel}
-            </Button>
-          )}
+            {children}
+          </motion.div>
         </div>
-      </div>
+      </PaymentsWizardFrame>
 
       <CounterpartyCreateDialog
         open={counterpartyDialogOpen}
@@ -174,6 +147,6 @@ export function RampWizardShell({
           onSecondary();
         }}
       />
-    </div>
+    </>
   );
 }

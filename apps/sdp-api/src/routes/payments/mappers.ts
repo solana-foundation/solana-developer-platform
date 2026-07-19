@@ -10,6 +10,7 @@ export function mapTransferRow(row: TransferRow) {
   const base = {
     id: row.id,
     organizationId: row.organization_id,
+    walletId: row.wallet_id,
     ...(row.project_id ? { projectId: row.project_id } : {}),
     type: row.type,
     direction: row.direction,
@@ -30,6 +31,10 @@ export function mapTransferRow(row: TransferRow) {
       : {}),
     ...(row.source_address ? { source: row.source_address } : {}),
     ...(row.destination_address ? { destination: row.destination_address } : {}),
+    ...(row.counterparty_id ? { counterpartyId: row.counterparty_id } : {}),
+    ...(row.counterparty_display_name
+      ? { counterpartyDisplayName: row.counterparty_display_name }
+      : {}),
     ...(row.memo ? { memo: row.memo } : {}),
     token: row.token,
     ...(row.amount ? { amount: row.amount } : {}),
@@ -50,7 +55,6 @@ export function mapTransferRow(row: TransferRow) {
   return {
     ...base,
     provider: row.provider,
-    ...(row.counterparty_id ? { counterpartyId: row.counterparty_id } : {}),
     ...(row.provider_reference ? { providerReference: row.provider_reference } : {}),
     ...(row.delivery_mode ? { deliveryMode: row.delivery_mode } : {}),
     ...(row.fiat_currency ? { fiatCurrency: row.fiat_currency } : {}),
