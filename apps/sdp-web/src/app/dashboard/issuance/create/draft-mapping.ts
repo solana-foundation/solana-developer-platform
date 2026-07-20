@@ -435,7 +435,9 @@ export function getRequiredAssetDetailKeys(draft: DraftState): Set<keyof DraftSt
 // An enabled setting with a required, still-empty parameter (e.g. a transfer fee
 // toggled on but no basis-points entered). Drives the Continue gate and the
 // editor's inline field errors.
-export function advancedSettingsHaveMissingParams(advancedSettings: AdvancedSettingsDraft): boolean {
+export function advancedSettingsHaveMissingParams(
+  advancedSettings: AdvancedSettingsDraft
+): boolean {
   for (const [key, selection] of Object.entries(advancedSettings)) {
     const setting: AdvancedSetting = ADVANCED_SETTINGS[key as SettingKey];
     if (!setting?.params) {

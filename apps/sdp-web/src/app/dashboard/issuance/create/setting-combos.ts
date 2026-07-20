@@ -165,9 +165,15 @@ export function getComboConflict(
     if (!withSettingKey) {
       continue;
     }
+    // Every pair in INCOMPATIBLE_EXTENSION_PAIRS has a reason key; guard the
+    // lookup anyway so the value narrows to `string` for ComboConflict.reasonKey.
+    const reasonKey = CONFLICT_REASON_KEY[`${pair[0]}|${pair[1]}`];
+    if (!reasonKey) {
+      continue;
+    }
     return {
       withLabelKey: (ADVANCED_SETTINGS[withSettingKey] as AdvancedSetting).labelKey,
-      reasonKey: CONFLICT_REASON_KEY[`${pair[0]}|${pair[1]}`],
+      reasonKey,
     };
   }
   return null;
