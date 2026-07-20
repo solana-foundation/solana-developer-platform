@@ -186,15 +186,16 @@ export const updateAssetProfile = async (c: AppContext) => {
   const typeChanged = nextCategory !== current.asset_category || nextType !== current.asset_type;
   const metadataChanged = parsed.data.issuanceMetadata !== undefined;
 
-  // Reject any advanced setting the effective asset type does not support. Runs
-  // whenever the settings OR the type could invalidate the selection — so a type
-  // change that makes an existing selection unsupported is caught even when the
-  // patch does not touch metadata.
+  // Reject any advanced setting the effective asset type does not support, or any
+  // expert param value outside its catalog bounds. Runs whenever the settings OR
+  // the type could invalidate the selection — so a type change that makes an
+  // existing selection unsupported is caught even when the patch does not touch
+  // metadata.
   if (metadataChanged || typeChanged) {
     const effectiveMetadata = parsed.data.issuanceMetadata ?? current.issuance_metadata;
     const settingErrors = validateAdvancedSettings(nextCategory, nextType, effectiveMetadata);
     if (settingErrors.length > 0) {
-      throw badRequest("Unsupported advanced settings", { errors: settingErrors });
+      throw badRequest("Invalid advanced settings", { errors: settingErrors });
     }
     const buildErrors = resolveAdvancedSettings(nextCategory, nextType, effectiveMetadata);
     if (buildErrors.length > 0) {

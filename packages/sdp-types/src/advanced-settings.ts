@@ -44,6 +44,10 @@ export interface ParamFieldSpec {
   options?: readonly { value: string; labelKey: string }[];
   min?: number;
   max?: number;
+  // When true, `min` is a strict lower bound: the value must be > min, not >= min.
+  // Used for factors that must be positive but have no natural inclusive floor,
+  // e.g. a scaled-UI multiplier (min: 0, exclusiveMin ⇒ any value greater than 0).
+  exclusiveMin?: boolean;
   // When true, the field must be filled once its setting is enabled — the editor
   // marks it and the create wizard blocks Continue until it has a value.
   required?: boolean;

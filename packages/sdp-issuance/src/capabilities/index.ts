@@ -5,6 +5,8 @@ import type {
   AdvancedSetting,
   AssetCapability,
   AssetCategory,
+  ParamFieldSpec,
+  SelectedSetting,
   SettingAvailability,
 } from "@sdp/types";
 import { ASSET_TYPES } from "@sdp/types";
@@ -128,9 +130,7 @@ export function isSettingAllowed(
   }
   const availability = capability.settings[settingKey];
   return (
-    availability === "locked" ||
-    availability === "recommended" ||
-    availability === "available"
+    availability === "locked" || availability === "recommended" || availability === "available"
   );
 }
 
@@ -173,6 +173,90 @@ export function validateSelectedSettings(
       errors.push({ settingKey: key, reason: "unknown" });
     } else if (!isSettingAllowed(category, type, key)) {
       errors.push({ settingKey: key, reason: "unsupported" });
+    }
+  }
+  return errors;
+}
+
+export type ParamRejectionReason = "not_a_number" | "below_min" | "above_max" | "invalid_option";
+
+export interface ParamValidationError {
+  settingKey: string;
+  paramKey: string;
+  reason: ParamRejectionReason;
+  // The catalog bound that was violated (below_min ⇒ min, above_max ⇒ max), so
+  // callers can render a precise message without re-reading the catalog. Omitted
+  // for the non-range reasons.
+  limit?: number;
+}
+
+// Parse a param value to a finite number the way the resolver's toNumber does
+// (number as-is, non-empty numeric string coerced), but return null instead of a
+// fallback so the caller can reject it rather than silently defaulting.
+function coerceParamNumber(value: string | number): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (value.trim() !== "" && !Number.isNaN(Number(value))) {
+    return Number(value);
+  }
+  return null;
+}
+
+// Reason a single supplied param value violates its ParamFieldSpec, or null if
+// it is within bounds. `undefined` values are skipped by the caller (presence is
+// the editor/resolver's concern, not a bound).
+function checkParamValue(
+  spec: ParamFieldSpec,
+  value: string | number
+): { reason: ParamRejectionReason; limit?: number } | null {
+  if (spec.kind === "number") {
+    const n = coerceParamNumber(value);
+    if (n === null) {
+      return { reason: "not_a_number" };
+    }
+    if (spec.min !== undefined && (spec.exclusiveMin ? n <= spec.min : n < spec.min)) {
+      return { reason: "below_min", limit: spec.min };
+    }
+    if (spec.max !== undefined && n > spec.max) {
+      return { reason: "above_max", limit: spec.max };
+    }
+    return null;
+  }
+  if (spec.kind === "select") {
+    const allowed = spec.options?.some((option) => option.value === value) ?? false;
+    return allowed ? null : { reason: "invalid_option" };
+  }
+  return null;
+}
+
+// Validate expert-override param VALUES against the catalog's ParamFieldSpec —
+// the server-side counterpart to the editor's advisory HTML min/max attributes.
+// A programmatic caller (or crafted payload) can send basisPoints: -1 or 99999,
+// which the client bounds do not stop; those values otherwise flow through the
+// resolver's toNumber() straight into the deploy config. Only KNOWN settings'
+// supplied params are checked — unknown keys are reported by the key-level check,
+// and an absent param's presence is the editor/resolver's concern, not a bound.
+export function validateSettingParams(
+  selected: Record<string, SelectedSetting>
+): ParamValidationError[] {
+  const errors: ParamValidationError[] = [];
+  for (const [settingKey, selection] of Object.entries(selected)) {
+    if (!(settingKey in ADVANCED_SETTINGS)) {
+      continue;
+    }
+    const setting: AdvancedSetting = ADVANCED_SETTINGS[settingKey as SettingKey];
+    const specs = setting.params ?? [];
+    const params = selection?.params ?? {};
+    for (const spec of specs) {
+      const value = params[spec.key];
+      if (value === undefined) {
+        continue;
+      }
+      const violation = checkParamValue(spec, value);
+      if (violation) {
+        errors.push({ settingKey, paramKey: spec.key, ...violation });
+      }
     }
   }
   return errors;

@@ -38,10 +38,12 @@ const visibilityMetadataSchema = z.object({
 });
 
 // Advanced settings selection persisted under `settings`. This validates SHAPE
-// only; whether each selected key is allowed for the asset type is checked
-// against the capability registry in the create/update handlers (that check
-// needs the effective category/type, which the schema does not have). `version`
-// is server-stamped, so it is optional on input.
+// only; whether each selected key is allowed for the asset type — and whether
+// each expert param value is within its catalog bounds (e.g. transferFee
+// basisPoints ∈ [0, 10_000]) — is checked against the capability registry in the
+// create/update handlers (that check needs the effective category/type and the
+// catalog's ParamFieldSpec, neither of which the schema has). `version` is
+// server-stamped, so it is optional on input.
 const settingSelectionSchema = z
   .object({
     params: z.record(z.string(), z.union([z.string(), z.number()])).optional(),

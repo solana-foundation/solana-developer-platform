@@ -20,6 +20,7 @@ import {
   resolveSettingsToExtensions,
   SETTING_KEYS,
   validateSelectedSettings,
+  validateSettingParams,
 } from "./index";
 
 describe("advanced settings capability registry", () => {
@@ -123,6 +124,73 @@ describe("advanced settings capability registry", () => {
     // an unknown asset type rejects every key as unsupported.
     assert.deepEqual(validateSelectedSettings("stablecoin", "not_a_type", ["freezeTransfers"]), [
       { settingKey: "freezeTransfers", reason: "unsupported" },
+    ]);
+  });
+
+  it("range-checks numeric expert params against the catalog bounds", () => {
+    // basisPoints catalog range is [0, 10_000]. In-range passes.
+    assert.deepEqual(
+      validateSettingParams({ transferFee: { params: { basisPoints: 250, maxFee: "0" } } }),
+      []
+    );
+    // Below the min and above the max are each rejected, with the violated bound echoed.
+    assert.deepEqual(validateSettingParams({ transferFee: { params: { basisPoints: -1 } } }), [
+      { settingKey: "transferFee", paramKey: "basisPoints", reason: "below_min", limit: 0 },
+    ]);
+    assert.deepEqual(validateSettingParams({ transferFee: { params: { basisPoints: 99999 } } }), [
+      { settingKey: "transferFee", paramKey: "basisPoints", reason: "above_max", limit: 10_000 },
+    ]);
+  });
+
+  it("rejects out-of-range values sent as numeric strings, not just numbers", () => {
+    // The selection schema permits string OR number; a crafted "99999" must not
+    // slip past the bound the same way the number 99999 doesn't.
+    assert.deepEqual(validateSettingParams({ transferFee: { params: { basisPoints: "99999" } } }), [
+      { settingKey: "transferFee", paramKey: "basisPoints", reason: "above_max", limit: 10_000 },
+    ]);
+    // A non-numeric string for a number param is rejected rather than silently
+    // coerced to the resolver's fallback.
+    assert.deepEqual(validateSettingParams({ transferFee: { params: { basisPoints: "abc" } } }), [
+      { settingKey: "transferFee", paramKey: "basisPoints", reason: "not_a_number" },
+    ]);
+  });
+
+  it("ignores absent params and params of unknown settings", () => {
+    // basisPoints is required in the editor, but presence is enforced elsewhere —
+    // bounds only apply to supplied values, so an empty params map is clean here.
+    assert.deepEqual(validateSettingParams({ transferFee: { params: {} } }), []);
+    assert.deepEqual(validateSettingParams({ transferFee: {} }), []);
+    // An unknown setting key is the key-level check's concern; its params are skipped.
+    assert.deepEqual(validateSettingParams({ made_up: { params: { basisPoints: 99999 } } }), []);
+  });
+
+  it("requires scaledUiAmount.multiplier to be strictly positive (exclusive min 0)", () => {
+    // Any value above 0 is valid, including fractional scale-downs.
+    assert.deepEqual(validateSettingParams({ scaledUiAmount: { params: { multiplier: 2 } } }), []);
+    assert.deepEqual(
+      validateSettingParams({ scaledUiAmount: { params: { multiplier: 0.5 } } }),
+      []
+    );
+    // Exactly 0 is rejected (it would zero every displayed balance), as are negatives.
+    assert.deepEqual(validateSettingParams({ scaledUiAmount: { params: { multiplier: 0 } } }), [
+      { settingKey: "scaledUiAmount", paramKey: "multiplier", reason: "below_min", limit: 0 },
+    ]);
+    assert.deepEqual(validateSettingParams({ scaledUiAmount: { params: { multiplier: -1 } } }), [
+      { settingKey: "scaledUiAmount", paramKey: "multiplier", reason: "below_min", limit: 0 },
+    ]);
+  });
+
+  it("bounds interestBearing.rate to the on-chain i16 basis-points range", () => {
+    // Negative rates are valid (demurrage), so the full signed-16-bit span passes.
+    assert.deepEqual(validateSettingParams({ interestBearing: { params: { rate: -32_768 } } }), []);
+    assert.deepEqual(validateSettingParams({ interestBearing: { params: { rate: 32_767 } } }), []);
+    assert.deepEqual(validateSettingParams({ interestBearing: { params: { rate: 500 } } }), []);
+    // Values that would overflow the i16 are rejected before deploy.
+    assert.deepEqual(validateSettingParams({ interestBearing: { params: { rate: 32_768 } } }), [
+      { settingKey: "interestBearing", paramKey: "rate", reason: "above_max", limit: 32_767 },
+    ]);
+    assert.deepEqual(validateSettingParams({ interestBearing: { params: { rate: -32_769 } } }), [
+      { settingKey: "interestBearing", paramKey: "rate", reason: "below_min", limit: -32_768 },
     ]);
   });
 

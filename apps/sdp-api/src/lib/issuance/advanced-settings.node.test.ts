@@ -37,6 +37,37 @@ describe("advanced settings persistence helpers", () => {
       expect(validateAdvancedSettings("generic", "generic", { asset: { name: "X" } })).toEqual([]);
       expect(validateAdvancedSettings("generic", "generic", {})).toEqual([]);
     });
+
+    it("rejects an out-of-range numeric param on an otherwise-supported setting", () => {
+      // transferFee is allowed for generic assets, so the key check passes; the
+      // catalog bound (basisPoints ∈ [0, 10_000]) is what rejects 99999. This is
+      // the hole a crafted payload would otherwise use — the client min/max is
+      // advisory only.
+      const metadata: IssuanceMetadata = {
+        settings: { selected: { transferFee: { params: { basisPoints: 99999 } } } },
+      };
+      expect(validateAdvancedSettings("generic", "generic", metadata)).toEqual([
+        { settingKey: "transferFee", paramKey: "basisPoints", reason: "above_max", limit: 10_000 },
+      ]);
+    });
+
+    it("accepts an in-range numeric param", () => {
+      const metadata: IssuanceMetadata = {
+        settings: { selected: { transferFee: { params: { basisPoints: 250, maxFee: "0" } } } },
+      };
+      expect(validateAdvancedSettings("generic", "generic", metadata)).toEqual([]);
+    });
+
+    it("does not re-flag params of a setting already rejected at the key level", () => {
+      // transferFee is unsupported on a stablecoin: report the key once, and skip
+      // its param bounds rather than piling on a second (redundant) error.
+      const metadata: IssuanceMetadata = {
+        settings: { selected: { transferFee: { params: { basisPoints: 99999 } } } },
+      };
+      expect(validateAdvancedSettings("stablecoin", "fiat_backed", metadata)).toEqual([
+        { settingKey: "transferFee", reason: "unsupported" },
+      ]);
+    });
   });
 
   describe("stampAdvancedSettingsVersion", () => {

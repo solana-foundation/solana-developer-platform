@@ -62,6 +62,12 @@ export const ADVANCED_SETTINGS = {
         kind: "number",
         labelKey: config("interestBearingRate"), // NEW
         hintKey: config("interestBearingRateHint"), // NEW
+        // Rate is stored on-chain as a Token-2022 i16 basis-points value
+        // (InterestBearingConfig.current_rate), so the valid range is the full
+        // signed-16-bit span. Negative rates are intentional (demurrage). Bounding
+        // here rejects values that would overflow the i16 before deploy.
+        min: -32_768,
+        max: 32_767,
         required: true,
       },
     ],
@@ -80,6 +86,11 @@ export const ADVANCED_SETTINGS = {
         // biome-ignore lint/security/noSecrets: i18n message key, not a secret.
         labelKey: config("scaledUiAmountMultiplier"), // NEW
         defaultValue: 1,
+        // The multiplier is an on-chain f64 scaling factor; it must be strictly
+        // positive. A multiplier of 0 would zero every displayed balance and a
+        // negative one is meaningless, so bound it to (0, ∞) — exclusive at 0.
+        min: 0,
+        exclusiveMin: true,
       },
     ],
   },

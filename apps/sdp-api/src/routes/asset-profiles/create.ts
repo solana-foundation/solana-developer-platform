@@ -53,11 +53,12 @@ export const createTokenWithAssetProfile = async (c: AppContext) => {
     throw internalError("Missing registry entry for a validated asset type");
   }
 
-  // Reject any selected advanced setting the asset type does not support before
-  // touching custody or resolving extensions.
+  // Reject any selected advanced setting the asset type does not support, or any
+  // expert param value outside its catalog bounds, before touching custody or
+  // resolving extensions.
   const settingErrors = validateAdvancedSettings(assetCategory, assetType, issuanceMetadata ?? {});
   if (settingErrors.length > 0) {
-    throw badRequest("Unsupported advanced settings", { errors: settingErrors });
+    throw badRequest("Invalid advanced settings", { errors: settingErrors });
   }
 
   const signingWalletId = resolveApiKeySigningWalletId(auth, tokenInput.signingWalletId, [
