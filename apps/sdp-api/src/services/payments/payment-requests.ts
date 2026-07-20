@@ -135,21 +135,3 @@ export async function reconcilePaymentRequest(
   }
   return current;
 }
-
-// Read-path wrapper: a transient RPC failure while reconciling one row must not
-// take down a whole list (Promise.all) or the public pay page. Degrade to the
-// stored row and log; the next read retries.
-export async function reconcilePaymentRequestBestEffort(
-  env: Env,
-  row: PaymentRequestRow
-): Promise<PaymentRequestRow> {
-  try {
-    return await reconcilePaymentRequest(env, row);
-  } catch (err) {
-    console.error("reconcilePaymentRequestBestEffort: reconcile failed, returning stored row", {
-      paymentRequestId: row.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return row;
-  }
-}

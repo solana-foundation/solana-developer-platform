@@ -9,6 +9,7 @@ import type { Address } from "@solana/kit";
 import {
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
+  createNoopSigner,
   createTransactionMessage,
   getCompiledTransactionMessageDecoder,
   getCompiledTransactionMessageEncoder,
@@ -795,7 +796,7 @@ async function executeSplTransfer(
       destination: destinationAddress,
       mint: mintAddress,
       amount,
-      feePayer,
+      ataRentPayer: createNoopSigner(feePayer),
     });
 
   const message = pipe(

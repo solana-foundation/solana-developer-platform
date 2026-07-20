@@ -2,7 +2,7 @@ import { type createRpc, getAccountInfo } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
-import { type Address, createNoopSigner, type TransactionSigner } from "@solana/kit";
+import type { Address, TransactionSigner } from "@solana/kit";
 import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
@@ -275,9 +275,9 @@ export async function resolveSourceTokenAccountOrAta(
 }
 
 /**
- * Build the standard fee-sponsored SPL transfer instruction pair: an
- * idempotent ATA creation for the destination (rent paid by the fee payer)
- * followed by a transferChecked from the authority's largest token account.
+ * Build the standard SPL transfer instruction pair: an idempotent ATA
+ * creation for the destination (rent paid by `ataRentPayer`) followed by a
+ * transferChecked from the authority's largest token account.
  */
 export async function buildSplTransferInstructions(
   rpc: ReturnType<typeof createRpc>,
@@ -286,7 +286,7 @@ export async function buildSplTransferInstructions(
     destination: Address;
     mint: Address;
     amount: string;
-    feePayer: Address;
+    ataRentPayer: TransactionSigner;
   }
 ) {
   const tokenProgram = await resolveMintTokenProgram(rpc, input.mint);
@@ -309,7 +309,7 @@ export async function buildSplTransferInstructions(
 
   return {
     createDestinationAtaInstruction: getCreateAssociatedTokenIdempotentInstruction({
-      payer: createNoopSigner(input.feePayer),
+      payer: input.ataRentPayer,
       ata: destinationTokenAccount,
       owner: input.destination,
       mint: input.mint,

@@ -3,7 +3,7 @@ import { getSolanaConfig } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { WELL_KNOWN_TOKENS } from "@sdp/types";
+import { getSdpDocsOrigin, WELL_KNOWN_TOKENS } from "@sdp/types";
 import {
   type AccountMeta,
   AccountRole,
@@ -26,7 +26,7 @@ import { createPaymentRequestsRepository } from "@/db/repositories/repository-fa
 import { badRequest, notFound } from "@/lib/errors";
 import {
   isPaymentRequestExpired,
-  reconcilePaymentRequestBestEffort,
+  reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
 import {
@@ -36,6 +36,7 @@ import {
 } from "./payments/token-accounts";
 
 const REQUEST_LABEL = "Solana Developer Platform";
+const REQUEST_ICON = `${getSdpDocsOrigin()}/icon.svg`;
 
 const transactionRequestBodySchema = z.object({ account: z.string() });
 
@@ -48,7 +49,7 @@ pay.get("/:token", async (c) => {
   if (!existing) {
     throw notFound("Payment request");
   }
-  const request = await reconcilePaymentRequestBestEffort(c.env, existing);
+  const request = await reconcilePaymentRequest(c.env, existing);
 
   const expired = isPaymentRequestExpired(request.expires_at);
   const status = expired && request.status === "awaiting_payment" ? "expired" : request.status;
@@ -57,6 +58,7 @@ pay.get("/:token", async (c) => {
   let solanaPayUrl: string | null = null;
   if (payable) {
     const link = new URL(`/pay/${c.req.param("token")}/tx`, c.req.url);
+    link.protocol = "https:";
     solanaPayUrl = encodeURL({ link }).toString();
   }
 
@@ -74,7 +76,7 @@ pay.get("/:token", async (c) => {
 });
 
 pay.get("/:token/tx", (c) => {
-  return c.json({ label: REQUEST_LABEL });
+  return c.json({ label: REQUEST_LABEL, icon: REQUEST_ICON });
 });
 
 pay.post("/:token/tx", async (c) => {
@@ -84,13 +86,16 @@ pay.post("/:token/tx", async (c) => {
   if (!existing) {
     throw notFound("Payment request");
   }
-  const request = await reconcilePaymentRequestBestEffort(c.env, existing);
+  const request = await reconcilePaymentRequest(c.env, existing);
   if (request.status !== "awaiting_payment" || isPaymentRequestExpired(request.expires_at)) {
     throw badRequest("Payment request is no longer payable");
   }
 
-  const { account } = transactionRequestBodySchema.parse(await c.req.json());
-  const payer = assertValidAddress(account, "account");
+  const body = transactionRequestBodySchema.safeParse(await c.req.json());
+  if (!body.success) {
+    throw badRequest("account is required");
+  }
+  const payer = assertValidAddress(body.data.account, "account");
   const recipient = assertValidAddress(request.destination_address, "destinationAddress");
   const reference = assertValidAddress(request.reference, "reference");
   const withReference = (instruction: Instruction & { accounts: readonly AccountMeta[] }) => ({
@@ -98,6 +103,7 @@ pay.post("/:token/tx", async (c) => {
     accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
   });
 
+  const payerSigner = createNoopSigner(payer);
   const rpc = solanaRpc.createRpc(c.env);
   const feePayment = createFeePaymentAdapter(c.env);
   const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
@@ -112,7 +118,7 @@ pay.post("/:token/tx", async (c) => {
       throw badRequest("Transfer amount must be greater than zero");
     }
     const transferInstruction = getTransferSolInstruction({
-      source: createNoopSigner(payer),
+      source: payerSigner,
       destination: recipient,
       amount: lamports,
     });
@@ -120,11 +126,11 @@ pay.post("/:token/tx", async (c) => {
   } else {
     const { createDestinationAtaInstruction, transferInstruction } =
       await buildSplTransferInstructions(rpc, {
-        authority: createNoopSigner(payer),
+        authority: payerSigner,
         destination: recipient,
         mint: assertValidAddress(request.token, "token"),
         amount: request.amount,
-        feePayer,
+        ataRentPayer: payerSigner,
       });
     instructions = [createDestinationAtaInstruction, withReference(transferInstruction)];
   }

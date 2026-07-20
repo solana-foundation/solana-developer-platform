@@ -10,7 +10,7 @@ import { created, success } from "@/lib/response";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import {
   isPaymentRequestExpired,
-  reconcilePaymentRequestBestEffort,
+  reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import type { AppContext } from "../context";
 import { paymentAmountSchema } from "../schemas";
@@ -61,9 +61,7 @@ export async function listPaymentRequests(c: AppContext) {
     offset: (page - 1) * pageSize,
   });
 
-  const reconciledRows = await Promise.all(
-    rows.map((row) => reconcilePaymentRequestBestEffort(c.env, row))
-  );
+  const reconciledRows = await Promise.all(rows.map((row) => reconcilePaymentRequest(c.env, row)));
 
   const response: ListPaymentRequestsResponse = {
     paymentRequests: reconciledRows.map(mapPaymentRequest),
