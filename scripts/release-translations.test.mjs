@@ -203,6 +203,58 @@ test("returns when Eve completes a result without closing the stream", {
   assert.equal(streamCancelled, true);
 });
 
+test("cancels the stream when Eve reports a failure", { timeout: 1_000 }, async () => {
+  const missing = [
+    {
+      locale: "fr",
+      sourceFile: "en.json",
+      targetFile: "fr.json",
+      key: "Home.title",
+      source: "Hello {name}",
+    },
+  ];
+  let streamCancelled = false;
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        new TextEncoder().encode(
+          `${JSON.stringify({
+            type: "turn.failed",
+            data: { message: "model unavailable" },
+          })}\n`
+        )
+      );
+    },
+    cancel() {
+      streamCancelled = true;
+    },
+  });
+
+  await assert.rejects(
+    translateMissingEntries({
+      missing,
+      agentUrl: "https://translation.example.test",
+      agentUsername: "test-user",
+      agentPassword: "test-password",
+      maxRetries: 0,
+      fetchImpl: async (url) =>
+        url.endsWith("/eve/v1/session")
+          ? {
+              ok: true,
+              status: 200,
+              json: async () => ({ sessionId: "session-1" }),
+            }
+          : {
+              ok: true,
+              status: 200,
+              body,
+            },
+    }),
+    /Translation agent failed: model unavailable/
+  );
+  assert.equal(streamCancelled, true);
+});
+
 test("rejects an Eve result that changes placeholders", async () => {
   await assert.rejects(
     translateMissingEntries({

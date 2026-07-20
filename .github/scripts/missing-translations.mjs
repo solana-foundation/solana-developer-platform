@@ -405,6 +405,7 @@ function parseAgentResult(body) {
     const translations = parseAgentEvent(line);
     if (translations !== undefined) {
       completed = translations;
+      break;
     }
   }
   if (completed === undefined) {
