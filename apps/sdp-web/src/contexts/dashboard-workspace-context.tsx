@@ -22,6 +22,7 @@ import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashb
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { reconcileProjectCookieAction, selectProjectAction } from "@/lib/project-cookie-action";
+import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
 export type CounterpartyWorkspaceTab = "overview" | "playground";
@@ -67,7 +68,7 @@ function DashboardScopeRefreshFallback() {
 
   return (
     <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
-      <div className="mx-auto max-w-5xl space-y-4 border border-border-subtle bg-white/70 p-6">
+      <div className="mx-auto max-w-5xl space-y-4 border border-border-subtle bg-surface-raised/70 p-6">
         <p className="text-sm text-tertiary">{t("Shared.dashboardShell.loadingDashboard")}</p>
         <Button type="button" variant="ghost" size="sm" onClick={() => router.refresh()}>
           {t("Shared.SharedComponents.retry")}
@@ -192,9 +193,16 @@ export function DashboardWorkspaceProvider({
 
   const previousPathnameRef = useRef(pathname);
   useEffect(() => {
-    if (previousPathnameRef.current === pathname) return;
+    const previousPathname = previousPathnameRef.current;
+    if (previousPathname === pathname) return;
     previousPathnameRef.current = pathname;
-    if (searchParams.has("tab")) {
+    if (
+      shouldClearDashboardTabAfterPathnameChange({
+        previousPathname,
+        pathname,
+        tab: searchParams.get("tab"),
+      })
+    ) {
       replaceSearchParams({ tab: null });
     }
   }, [pathname, searchParams, replaceSearchParams]);

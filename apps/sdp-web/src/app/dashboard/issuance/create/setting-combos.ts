@@ -121,7 +121,9 @@ export function isComboActive(
   );
 }
 
-const CONFLICT_REASON_KEY: Record<string, string> = {
+// The plain-language reason (i18n key) each incompatible pair can't coexist,
+// keyed by "extA|extB" in the order they appear in INCOMPATIBLE_EXTENSION_PAIRS.
+const CONFLICT_REASON_KEY: Record<string, string | undefined> = {
   "interestBearing|scaledUiAmount": "DashboardIssuance.config.comboConflictReasonBalanceDisplay",
   "nonTransferable|transferFee": "DashboardIssuance.config.comboConflictReasonNonTransferableFee",
   "nonTransferable|transferHook": "DashboardIssuance.config.comboConflictReasonNonTransferableHook",

@@ -69,10 +69,9 @@ export const createTokenWithAssetProfile = async (c: AppContext) => {
   // transaction (it may reach an external custody provider that cannot roll back).
   // The signer address is the controlled wallet that authority-valued extensions
   // (e.g. permanentDelegate) resolve to, so no placeholder is ever stored.
-  const signer =
-    signingWalletId != null
-      ? await createOrgSigner(c.env, orgId, projectId, signingWalletId)
-      : null;
+  const signer = signingWalletId
+    ? await createOrgSigner(c.env, orgId, projectId, signingWalletId)
+    : null;
 
   // Extensions come from the profile's advanced settings when the manager has
   // selected any (the profile is the source of truth); otherwise fall back to the

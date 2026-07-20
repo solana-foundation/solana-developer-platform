@@ -1,5 +1,7 @@
 import type { CustodyWalletTokenBalance } from "@sdp/types";
+import { Children, type ComponentProps, isValidElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
 
 const { mockAuth, mockLoadWalletActivity, mockRequest } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -74,6 +76,28 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function findWalletLabelEditor(
+  node: ReactNode
+): ComponentProps<typeof WalletLabelInlineEditor> | null {
+  if (!isValidElement(node)) {
+    return null;
+  }
+
+  if (node.type === WalletLabelInlineEditor) {
+    return node.props as ComponentProps<typeof WalletLabelInlineEditor>;
+  }
+
+  const { children } = node.props as { children?: ReactNode };
+  for (const child of Children.toArray(children)) {
+    const editorProps = findWalletLabelEditor(child);
+    if (editorProps) {
+      return editorProps;
+    }
+  }
+
+  return null;
+}
+
 beforeEach(() => {
   mockAuth.mockReset();
   mockLoadWalletActivity.mockReset();
@@ -110,6 +134,24 @@ beforeEach(() => {
 });
 
 describe("WalletDetailPage critical path", () => {
+  it.each([
+    ["org:admin", true],
+    ["org:member", false],
+  ])("reuses the wallet label editor for %s users", async (orgRole, canEdit) => {
+    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole });
+
+    const page = await WalletDetailPage({
+      params: Promise.resolve({ walletId: "wallet%2Fone" }),
+    });
+
+    expect(findWalletLabelEditor(page)).toEqual({
+      canEdit,
+      emptyLabel: "DashboardCustody.untitledWallet",
+      label: "Fast wallet",
+      walletId: "wallet/one",
+    });
+  });
+
   it("loads metadata only and leaves wallet activity off the initial render path", async () => {
     await WalletDetailPage({ params: Promise.resolve({ walletId: "wallet%2Fone" }) });
 

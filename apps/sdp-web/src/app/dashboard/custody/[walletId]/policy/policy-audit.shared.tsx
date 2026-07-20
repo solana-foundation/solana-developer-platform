@@ -4,7 +4,7 @@ import type {
   WalletOperationStatus,
   WalletPolicyEvaluationDetail,
 } from "@sdp/types";
-import Link from "next/link";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";

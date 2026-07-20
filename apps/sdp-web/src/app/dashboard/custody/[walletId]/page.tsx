@@ -5,7 +5,6 @@ import type {
   PaymentWalletPolicy,
 } from "@sdp/types";
 import { SlidersHorizontal } from "lucide-react";
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
 import {
@@ -19,16 +18,19 @@ import { WalletActivityViewport } from "@/app/dashboard/custody/wallet-activity-
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { WalletCategoryBadge } from "@/app/dashboard/custody/wallet-category-badge";
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
+import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import {
   WalletBalanceSummarySkeleton,
   WalletBalancesSkeleton,
   WalletControlsSkeleton,
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { formatDisplayLabel } from "@/lib/utils";
@@ -183,7 +185,7 @@ export default async function WalletDetailPage({
 }: {
   params: Promise<{ walletId: string }>;
 }) {
-  const [t, { userId, orgId }, { walletId }] = await Promise.all([
+  const [t, { userId, orgId, orgRole }, { walletId }] = await Promise.all([
     getTranslations(),
     auth(),
     params,
@@ -221,6 +223,7 @@ export default async function WalletDetailPage({
   const providerLabel = provider
     ? formatCustodyProviderName(provider)
     : t("DashboardCustody.unknown");
+  const canManageCustody = resolveDashboardAccess(orgRole).capabilities.canManageCustody;
 
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
@@ -237,15 +240,26 @@ export default async function WalletDetailPage({
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-        <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
+        <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
           <div className="space-y-6 p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex items-start gap-4">
                 {provider ? <WalletProviderMark provider={provider} /> : null}
                 <div className="space-y-2">
-                  <h2 className="text-[36px] leading-[1.02] font-medium tracking-[-0.04em] text-primary">
-                    {wallet.label?.trim() || t("DashboardCustody.untitledWallet")}
-                  </h2>
+                  {/* biome-ignore lint/a11y/useSemanticElements: The inline editor can render a block-level input wrapper, which is invalid inside h2. */}
+                  <div
+                    role="heading"
+                    aria-level={2}
+                    aria-label={wallet.label?.trim() || t("DashboardCustody.untitledWallet")}
+                    className="max-w-full text-[36px] leading-[1.02] font-medium tracking-[-0.04em] text-primary"
+                  >
+                    <WalletLabelInlineEditor
+                      canEdit={canManageCustody}
+                      emptyLabel={t("DashboardCustody.untitledWallet")}
+                      label={wallet.label?.trim() || null}
+                      walletId={wallet.walletId}
+                    />
+                  </div>
                   <p className="text-sm text-tertiary">
                     {provider ? formatCustodyProviderName(provider) : t("DashboardCustody.wallet")}
                   </p>
@@ -449,7 +463,7 @@ async function WalletControlsPanel({
   const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
+    <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
       <div className="flex flex-col gap-5 p-6 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
