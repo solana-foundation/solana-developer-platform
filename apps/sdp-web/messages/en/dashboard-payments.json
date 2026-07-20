@@ -239,7 +239,7 @@
       "searchWallets": "Search wallets",
       "amount": "Amount",
       "asset": "Asset",
-      "selectAsset": "Select an asset",
+      "selectAsset": "Select",
       "memoOptional": "Memo (optional)",
       "memoPlaceholder": "Add a note for this transfer",
       "to": "To",

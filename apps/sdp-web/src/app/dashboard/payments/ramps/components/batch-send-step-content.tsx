@@ -419,7 +419,7 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
                     <span className="font-medium text-primary">
                       {t("DashboardPayments.batchSend.sponsoredFee")}
                     </span>
-                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-secondary">
+                    <span className="rounded-full bg-surface-raised px-2 py-0.5 text-xs font-medium text-secondary">
                       {t("DashboardPayments.batchSend.sponsoredBy")}
                     </span>
                   </>

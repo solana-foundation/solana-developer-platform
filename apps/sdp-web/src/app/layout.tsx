@@ -1,16 +1,12 @@
-import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { Toaster } from "sonner";
+import { AppToaster } from "@/components/app-toaster";
+import { ClerkClientProvider } from "@/components/clerk-client-provider";
+import { THEME_NO_FLASH_SCRIPT, ThemeProvider } from "@/contexts/theme-context";
 import { I18nProvider } from "@/i18n/provider";
 import { getI18nRequest, getTranslations } from "@/i18n/server";
 import { shouldLoadClerkForPath } from "@/lib/auth-entry";
 import "./globals.css";
-
-const ALLOWED_SATELLITE_REDIRECT_ORIGINS = [
-  "https://ecosystem.solana.com",
-  "https://bookface-git-main-solana-foundation.vercel.app",
-];
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations();
@@ -28,28 +24,25 @@ export default async function RootLayout({
   const pathname = (await headers()).get("x-sdp-pathname") ?? "/";
   const { locale, messages } = await getI18nRequest();
   const shouldLoadClerk = await shouldLoadClerkForPath(pathname);
-  const content = shouldLoadClerk ? (
-    <ClerkProvider
-      signInUrl="/sign-in"
-      signUpUrl="/sign-up"
-      signInFallbackRedirectUrl="/dashboard"
-      signUpFallbackRedirectUrl="/dashboard"
-      allowedRedirectOrigins={ALLOWED_SATELLITE_REDIRECT_ORIGINS}
-      afterSignOutUrl="/sign-in"
-    >
-      {children}
-    </ClerkProvider>
+  const appContent = shouldLoadClerk ? (
+    <ClerkClientProvider>{children}</ClerkClientProvider>
   ) : (
     children
   );
 
   return (
-    <html lang={locale}>
+    <html lang={locale} suppressHydrationWarning>
+      <head>
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: render-blocking theme script must run before hydration to avoid a flash of the wrong theme. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_NO_FLASH_SCRIPT }} />
+      </head>
       <body>
-        <I18nProvider locale={locale} messages={messages}>
-          {content}
-          <Toaster position="bottom-right" richColors closeButton />
-        </I18nProvider>
+        <ThemeProvider>
+          <I18nProvider locale={locale} messages={messages}>
+            {appContent}
+            <AppToaster />
+          </I18nProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

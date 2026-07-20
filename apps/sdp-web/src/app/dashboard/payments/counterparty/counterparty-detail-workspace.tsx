@@ -211,8 +211,8 @@ function FilterChip({
       className={cn(
         "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
         active
-          ? "border-primary bg-primary text-white"
-          : "border-border-default bg-white text-secondary hover:text-primary"
+          ? "border-primary bg-primary text-on-primary"
+          : "border-border-default bg-surface-raised text-secondary hover:text-primary"
       )}
     >
       {children}
