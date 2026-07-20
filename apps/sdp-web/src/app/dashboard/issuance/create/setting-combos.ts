@@ -123,11 +123,27 @@ export function isComboActive(
 
 // The plain-language reason (i18n key) each incompatible pair can't coexist,
 // keyed by "extA|extB" in the order they appear in INCOMPATIBLE_EXTENSION_PAIRS.
-const CONFLICT_REASON_KEY: Record<string, string | undefined> = {
+// Must cover every pair — the dev-time assertion below enforces that, so adding a
+// pair without a reason fails fast instead of silently dropping the UI conflict.
+const CONFLICT_REASON_KEY: Record<string, string> = {
   "interestBearing|scaledUiAmount": "DashboardIssuance.config.comboConflictReasonBalanceDisplay",
   "nonTransferable|transferFee": "DashboardIssuance.config.comboConflictReasonNonTransferableFee",
   "nonTransferable|transferHook": "DashboardIssuance.config.comboConflictReasonNonTransferableHook",
 };
+
+// Dev-time completeness guard (skipped in production): every incompatible pair
+// must have a reason key, or getComboConflict would surface a conflict the UI
+// can't explain. Mirrors the capability-registry assertion in @sdp/issuance.
+if (process.env.NODE_ENV !== "production") {
+  for (const [a, b] of INCOMPATIBLE_EXTENSION_PAIRS) {
+    if (!CONFLICT_REASON_KEY[`${a}|${b}`]) {
+      throw new Error(
+        `setting-combos: INCOMPATIBLE_EXTENSION_PAIRS has (${a}, ${b}) but CONFLICT_REASON_KEY ` +
+          `has no "${a}|${b}" entry — add its reason i18n key.`
+      );
+    }
+  }
+}
 
 export interface ComboConflict {
   withLabelKey: string;
@@ -165,15 +181,11 @@ export function getComboConflict(
     if (!withSettingKey) {
       continue;
     }
-    // Every pair in INCOMPATIBLE_EXTENSION_PAIRS has a reason key; guard the
-    // lookup anyway so the value narrows to `string` for ComboConflict.reasonKey.
-    const reasonKey = CONFLICT_REASON_KEY[`${pair[0]}|${pair[1]}`];
-    if (!reasonKey) {
-      continue;
-    }
     return {
       withLabelKey: (ADVANCED_SETTINGS[withSettingKey] as AdvancedSetting).labelKey,
-      reasonKey,
+      // Total by construction — CONFLICT_REASON_KEY covers every incompatible pair
+      // (enforced by the dev-time assertion above).
+      reasonKey: CONFLICT_REASON_KEY[`${pair[0]}|${pair[1]}`],
     };
   }
   return null;
