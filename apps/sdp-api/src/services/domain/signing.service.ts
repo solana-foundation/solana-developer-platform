@@ -1431,7 +1431,7 @@ export class SigningService {
     await this.assertProviderEnabled(orgId, config.provider);
     assertCustodyProviderCanCreateWallet(config.provider);
 
-    const parsed = await parseConfigRecord(this.env, orgId, config);
+    const parsed = await parseConfigRecord(this.env, orgId, config, this.getCustodyCipher());
     const { walletId, publicKey } = await createProviderWallet({
       env: this.env,
       orgId,
@@ -1440,6 +1440,7 @@ export class SigningService {
         label: params.label,
       },
       parsed,
+      cipher: this.getCustodyCipher(),
     });
 
     let wallet: CustodyWallet;
@@ -1515,7 +1516,7 @@ export class SigningService {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
 
-    const parsed = await parseConfigRecord(this.env, orgId, config);
+    const parsed = await parseConfigRecord(this.env, orgId, config, this.getCustodyCipher());
     const deactivateResult = await this.configStore.deactivateWalletIfNotLast(
       config.id,
       targetWallet.walletId
@@ -1592,11 +1593,14 @@ export class SigningService {
     const db = getDb(this.env);
     const cipher = this.getCustodyCipher();
     const encryptedConfig = await cipher.encrypt(existing.organizationId, JSON.stringify(config));
+    const encryptionVersion = encryptedConfig.startsWith("v2.")
+      ? "sdp-custody-kms-v2"
+      : "sdp-custody-encryption-v1";
     await db
       .prepare(
         "UPDATE custody_configs SET config_encrypted = ?, encryption_version = ?, updated_at = datetime('now') WHERE id = ?"
       )
-      .bind(encryptedConfig, "sdp-custody-encryption-v1", configId)
+      .bind(encryptedConfig, encryptionVersion, configId)
       .run();
   }
 
@@ -1633,7 +1637,12 @@ export class SigningService {
       return cached;
     }
 
-    const adapter = await createAdapterFromEncryptedConfig(this.env, orgId, config);
+    const adapter = await createAdapterFromEncryptedConfig(
+      this.env,
+      orgId,
+      config,
+      this.getCustodyCipher()
+    );
 
     this.providerCache.set(cacheKey, adapter);
     return adapter;
@@ -1872,7 +1881,12 @@ export class SigningService {
     }
 
     // Use encrypted config handler to properly decrypt credentials
-    const adapter = await createAdapterFromEncryptedConfig(this.env, record.organizationId, config);
+    const adapter = await createAdapterFromEncryptedConfig(
+      this.env,
+      record.organizationId,
+      config,
+      this.getCustodyCipher()
+    );
 
     if (!adapter.getSignStatus) {
       return { status: "pending" };

@@ -30,7 +30,7 @@ import {
   KeychainUtilaAdapter,
   type SigningConfigRecord,
 } from "@/services/adapters";
-import { createCustodyCipher } from "@/services/custody-cipher/cipher-router";
+import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type { Env } from "@/types/env";
 import {
   type ProviderConfigRecord,
@@ -43,6 +43,7 @@ type AdapterFactoryContext<TParsed extends ProviderConfigRecord = ProviderConfig
   orgId: string;
   record: SigningConfigRecord;
   parsed: TParsed;
+  cipher: CustodyCipher;
 };
 
 type AdapterFactory<TParsed extends ProviderConfigRecord = ProviderConfigRecord> = (
@@ -72,7 +73,7 @@ class LifecycleOnlyAdapter implements SigningPort {
 }
 
 const providerAdapterFactories = {
-  local: async ({ env, orgId, parsed }) => {
+  local: async ({ orgId, parsed, cipher }) => {
     if (!("encryptedPrivateKey" in parsed) || !parsed.encryptedPrivateKey) {
       throw new SigningError(
         "Local custody config missing encrypted private key",
@@ -80,11 +81,10 @@ const providerAdapterFactories = {
       );
     }
 
-    const cipher = createCustodyCipher(env);
     const privateKeyBase58 = await cipher.decrypt(orgId, parsed.encryptedPrivateKey);
     return KeychainMemoryAdapter.fromBase58(privateKeyBase58);
   },
-  fireblocks: async ({ env, orgId, parsed }) => {
+  fireblocks: async ({ orgId, parsed, cipher }) => {
     if (!("apiSecretEncrypted" in parsed) || !parsed.apiSecretEncrypted) {
       throw new SigningError(
         "Fireblocks config missing encrypted API secret",
@@ -92,7 +92,6 @@ const providerAdapterFactories = {
       );
     }
 
-    const cipher = createCustodyCipher(env);
     const apiSecretPem = await cipher.decrypt(orgId, parsed.apiSecretEncrypted);
 
     return new KeychainFireblocksAdapter({
@@ -289,13 +288,14 @@ const providerAdapterFactories = {
 export async function createAdapterFromEncryptedConfig(
   env: Env,
   orgId: string,
-  record: SigningConfigRecord
+  record: SigningConfigRecord,
+  cipher: CustodyCipher = createCustodyCipher(env)
 ): Promise<SigningPort> {
-  const parsed = await parseConfigRecord(env, orgId, record);
+  const parsed = await parseConfigRecord(env, orgId, record, cipher);
   const factory = providerAdapterFactories[parsed.provider] as AdapterFactory;
   // `return await`, not bare `return`: factories are async and can reject before
   // their first await. workerd (unlike Node) reports the adopted, briefly
   // handler-less promise as an unhandled rejection — dropping the await fails
   // the workers-pool test runs and would log rejection noise in production.
-  return await factory({ env, orgId, record, parsed });
+  return await factory({ env, orgId, record, parsed, cipher });
 }
