@@ -1,5 +1,5 @@
 import { closeDatabasePools, getDb } from "../src/db";
-import { registerFallbackKeys, withProcessEnvFallback } from "../src/lib/runtime-env";
+import { withProcessEnvFallback } from "../src/lib/runtime-env";
 import { createCustodyCipher } from "../src/services/custody-cipher/cipher-router";
 import type { Env } from "../src/types/env";
 
@@ -64,12 +64,6 @@ async function migrateCustodyConfigs(env: Env): Promise<number> {
 }
 
 async function main(): Promise<void> {
-  registerFallbackKeys(
-    "CUSTODY_KMS_KEY_NAME",
-    "CUSTODY_KMS_API_BASE_URL",
-    "CUSTODY_KMS_METADATA_TOKEN_URL"
-  );
-
   const env = withProcessEnvFallback({} as Env);
 
   if (!env.CUSTODY_ENCRYPTION_KEY) {
