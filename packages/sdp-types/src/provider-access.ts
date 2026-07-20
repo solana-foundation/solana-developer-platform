@@ -20,7 +20,17 @@ export const RAMP_PROVIDERS = [
 ] as const;
 export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
 
-export const ORGANIZATION_PROVIDER_FAMILIES = ["custody", "rpc", "compliance", "ramps"] as const;
+/** Vault-infra partners fronting Earn yield strategies. */
+export const EARN_PROVIDERS = ["veda", "upshift", "perena", "ground"] as const;
+export type EarnProviderId = (typeof EARN_PROVIDERS)[number];
+
+export const ORGANIZATION_PROVIDER_FAMILIES = [
+  "custody",
+  "rpc",
+  "compliance",
+  "ramps",
+  "earn",
+] as const;
 export type OrganizationProviderFamily = (typeof ORGANIZATION_PROVIDER_FAMILIES)[number];
 
 export interface OrganizationProviderOverrides {
@@ -28,6 +38,7 @@ export interface OrganizationProviderOverrides {
   rpc?: Partial<Record<OrganizationRpcProvider, boolean>>;
   compliance?: Partial<Record<ComplianceProviderId, boolean>>;
   ramps?: Partial<Record<RampProviderId, boolean>>;
+  earn?: Partial<Record<EarnProviderId, boolean>>;
 }
 
 export interface ProviderAvailabilityEntry {
@@ -41,6 +52,7 @@ export interface OrganizationProviderAvailability {
   rpc: Record<OrganizationRpcProvider, ProviderAvailabilityEntry>;
   compliance: Record<ComplianceProviderId, ProviderAvailabilityEntry>;
   ramps: Record<RampProviderId, ProviderAvailabilityEntry>;
+  earn: Record<EarnProviderId, ProviderAvailabilityEntry>;
 }
 
 export interface OrganizationProviderEntitlements {
@@ -48,6 +60,7 @@ export interface OrganizationProviderEntitlements {
   rpc: Record<OrganizationRpcProvider, boolean>;
   compliance: Record<ComplianceProviderId, boolean>;
   ramps: Record<RampProviderId, boolean>;
+  earn: Record<EarnProviderId, boolean>;
 }
 
 export interface OrganizationProviderAvailabilityResponse {
@@ -93,6 +106,7 @@ const INDIVIDUAL_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
   rpc: createBooleanRecord(ORGANIZATION_RPC_PROVIDERS, ["default", "helius", "triton"]),
   compliance: createBooleanRecord(COMPLIANCE_PROVIDERS, []),
   ramps: createBooleanRecord(RAMP_PROVIDERS, ["moonpay", "moneygram", "stripe"]),
+  earn: createBooleanRecord(EARN_PROVIDERS, []),
 };
 
 const ENTERPRISE_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
@@ -130,6 +144,7 @@ const ENTERPRISE_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
     "mural",
     "stripe",
   ]),
+  earn: createBooleanRecord(EARN_PROVIDERS, ["veda", "upshift", "perena", "ground"]),
 };
 
 export function resolveOrganizationProviderEntitlements(input: {
@@ -147,6 +162,7 @@ export function resolveOrganizationProviderEntitlements(input: {
       rpc: applyOverrides(defaults.rpc, input.providerOverrides?.rpc),
       compliance: applyOverrides(defaults.compliance, input.providerOverrides?.compliance),
       ramps: applyOverrides(defaults.ramps, input.providerOverrides?.ramps),
+      earn: applyOverrides(defaults.earn, input.providerOverrides?.earn),
     },
   };
 }

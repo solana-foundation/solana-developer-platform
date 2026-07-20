@@ -17,6 +17,7 @@ import {
   PanelRightIcon,
   Settings2Icon,
   ShieldCheckIcon,
+  TrendingUpIcon,
   WalletIcon,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
@@ -29,6 +30,11 @@ import {
   ApprovalDetailSkeleton,
   ApprovalInboxSkeleton,
 } from "@/app/dashboard/approvals/approval-page-skeletons";
+import {
+  EarnDepositSkeleton,
+  EarnOverviewSkeleton,
+  EarnStrategyDetailSkeleton,
+} from "@/app/dashboard/earn/earn-route-skeletons";
 import {
   IssuanceCreateSkeleton,
   IssuanceDetailSkeleton,
@@ -81,6 +87,7 @@ import {
   type DashboardNavigationStartDetail,
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
+import { isEarnUiEnabled } from "@/lib/earn-feature";
 import { cn } from "@/lib/utils";
 
 type SubNavItem = {
@@ -168,6 +175,15 @@ function getNavSections(
           icon: ArrowLeftRightIcon,
           children: getPaymentsActions(t),
         },
+        ...(isEarnUiEnabled()
+          ? [
+              {
+                label: t("Shared.dashboardShell.earn"),
+                href: DASHBOARD_SIDE_NAV_HREFS.earn,
+                icon: TrendingUpIcon,
+              },
+            ]
+          : []),
         {
           label: t("Shared.dashboardShell.apiKeys"),
           href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,
@@ -416,6 +432,12 @@ function getCounterpartyRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
+  if (pathname === "/dashboard/payments/counterparty") {
+    return {
+      title: t("Shared.dashboardShell.counterparty"),
+      contentWidthClass: "max-w-none",
+    };
+  }
   if (pathname === "/dashboard/payments/counterparty/create") {
     return actionPageConfig({
       centeredTitle: t("Shared.dashboardShell.newCounterparty"),
@@ -432,6 +454,27 @@ function getCounterpartyRoutePageConfig(
         href: "/dashboard/payments/counterparty",
         label: t("Shared.dashboardShell.backToCounterparty"),
       },
+    };
+  }
+  return null;
+}
+
+function getEarnRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/earn/deposit") {
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.earnNewDeposit"),
+      backHref: "/dashboard/earn",
+      backLabel: t("Shared.dashboardShell.backToEarn"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (pathname === "/dashboard/earn" || pathname.startsWith("/dashboard/earn/")) {
+    return {
+      title: t("Shared.dashboardShell.earn"),
+      contentWidthClass: "max-w-none",
     };
   }
   return null;
@@ -588,12 +631,6 @@ function getDashboardPageConfig(
       },
     };
   }
-  if (pathname === "/dashboard/payments/counterparty") {
-    return {
-      title: t("Shared.dashboardShell.counterparty"),
-      contentWidthClass: "max-w-none",
-    };
-  }
   const counterpartyRouteConfig = getCounterpartyRoutePageConfig(pathname, t);
   if (counterpartyRouteConfig) {
     return counterpartyRouteConfig;
@@ -603,6 +640,10 @@ function getDashboardPageConfig(
       title: t("Shared.dashboardShell.payments"),
       contentWidthClass: "max-w-none",
     };
+  }
+  const earnRouteConfig = getEarnRoutePageConfig(pathname, t);
+  if (earnRouteConfig) {
+    return earnRouteConfig;
   }
   if (pathname === "/dashboard/payments/transactions") {
     return {
@@ -723,6 +764,12 @@ function resolvePageLoadingComponent(
       return IssuanceDetailSkeleton;
     case "payments-overview":
       return PaymentsPageSkeleton;
+    case "earn-overview":
+      return EarnOverviewSkeleton;
+    case "earn-deposit":
+      return EarnDepositSkeleton;
+    case "earn-strategy-detail":
+      return EarnStrategyDetailSkeleton;
     case "payments-transactions":
       return PaymentsTransactionsPageSkeleton;
     case "payments-pay":
@@ -1114,6 +1161,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     shellPathname === "/dashboard/api-keys/new" ||
     (shellPathname.startsWith("/dashboard/api-keys/") && shellPathname.endsWith("/edit")) ||
     shellPathname.startsWith("/dashboard/payments") ||
+    shellPathname === "/dashboard/earn/deposit" ||
     shellPathname === "/dashboard/wallets" ||
     shellPathname === "/dashboard/custody" ||
     isWalletSetupRoute ||

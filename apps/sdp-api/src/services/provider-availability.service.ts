@@ -3,6 +3,8 @@ import {
   type ComplianceProviderId,
   CUSTODY_PROVIDERS,
   type CustodyProvider,
+  EARN_PROVIDERS,
+  type EarnProviderId,
   normalizeOrganizationTier,
   ORGANIZATION_RPC_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
@@ -41,6 +43,7 @@ type ProviderAvailabilityDefinitions = {
   rpc: Record<OrganizationRpcProvider, ProviderAvailabilityDefinition>;
   compliance: Record<ComplianceProviderId, ProviderAvailabilityDefinition>;
   ramps: Record<RampProviderId, ProviderAvailabilityDefinition>;
+  earn: Record<EarnProviderId, ProviderAvailabilityDefinition>;
 };
 
 function hasEnv(env: Env, key: keyof Env): boolean {
@@ -240,6 +243,48 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
         hasAllEnv(env, ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"]),
     },
   },
+  earn: {
+    veda: {
+      label: "Veda",
+      isConfigured: (env, testMode) => {
+        const prod = hasEnv(env, "VEDA_API_KEY");
+        const sandbox = hasEnv(env, "VEDA_SANDBOX_API_KEY");
+        if (testMode === true) return sandbox;
+        if (testMode === false) return prod;
+        return prod || sandbox;
+      },
+    },
+    upshift: {
+      label: "Upshift",
+      isConfigured: (env, testMode) => {
+        const prod = hasEnv(env, "UPSHIFT_API_KEY");
+        const sandbox = hasEnv(env, "UPSHIFT_SANDBOX_API_KEY");
+        if (testMode === true) return sandbox;
+        if (testMode === false) return prod;
+        return prod || sandbox;
+      },
+    },
+    perena: {
+      label: "Perena",
+      isConfigured: (env, testMode) => {
+        const prod = hasEnv(env, "PERENA_API_KEY");
+        const sandbox = hasEnv(env, "PERENA_SANDBOX_API_KEY");
+        if (testMode === true) return sandbox;
+        if (testMode === false) return prod;
+        return prod || sandbox;
+      },
+    },
+    ground: {
+      label: "Ground",
+      isConfigured: (env, testMode) => {
+        const prod = hasEnv(env, "GROUND_API_KEY");
+        const sandbox = hasEnv(env, "GROUND_SANDBOX_API_KEY");
+        if (testMode === true) return sandbox;
+        if (testMode === false) return prod;
+        return prod || sandbox;
+      },
+    },
+  },
 } as const satisfies ProviderAvailabilityDefinitions;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -332,6 +377,11 @@ export function parseProviderOverridesFromClerkMetadata(
     next.ramps = ramps;
   }
 
+  const earn = parseBooleanOverrides(record.earn, EARN_PROVIDERS);
+  if (earn) {
+    next.earn = earn;
+  }
+
   return hasOwnEntries(next as Record<string, unknown>) ? next : undefined;
 }
 
@@ -389,6 +439,7 @@ function getConfiguredProviders(env: Env) {
     rpc: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.rpc, env),
     compliance: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.compliance, env),
     ramps: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.ramps, env),
+    earn: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.earn, env),
   };
 }
 
@@ -459,6 +510,7 @@ export async function getProviderAvailability(
       rpc: applySelfHostedEntitlements(entitled.rpc, overrides?.rpc),
       compliance: applySelfHostedEntitlements(entitled.compliance, overrides?.compliance),
       ramps: applySelfHostedEntitlements(entitled.ramps, overrides?.ramps),
+      earn: applySelfHostedEntitlements(entitled.earn, overrides?.earn),
     };
   }
 
@@ -469,6 +521,7 @@ export async function getProviderAvailability(
       rpc: buildAvailabilityEntries(entitled.rpc, configured.rpc),
       compliance: buildAvailabilityEntries(entitled.compliance, configured.compliance),
       ramps: buildAvailabilityEntries(entitled.ramps, configured.ramps),
+      earn: buildAvailabilityEntries(entitled.earn, configured.earn),
     },
   };
 }
@@ -531,6 +584,14 @@ export async function assertProviderAvailable(
   env: Env,
   db: DatabaseClient,
   organizationId: string,
+  family: "earn",
+  providerId: EarnProviderId,
+  testMode: boolean
+): Promise<void>;
+export async function assertProviderAvailable(
+  env: Env,
+  db: DatabaseClient,
+  organizationId: string,
   family: OrganizationProviderFamily,
   providerId: string,
   testMode?: boolean
@@ -557,12 +618,17 @@ export async function assertProviderAvailable(
     );
   }
 
-  // Secondary mode-specific check for ramps: the general availability check uses
-  // a union of sandbox + production credentials, but the runtime handler only uses
-  // credentials for the requested mode. Re-check with the specific mode so callers
-  // get a clear PROVIDER_NOT_CONFIGURED (503) instead of a silent runtime failure.
-  if (family === "ramps" && testMode !== undefined) {
-    const def = PROVIDER_AVAILABILITY_DEFINITIONS.ramps[providerId as RampProviderId];
+  // Secondary mode-specific check for ramps/earn: the general availability check
+  // uses a union of sandbox + production credentials, but the runtime handler only
+  // uses credentials for the requested mode. Re-check with the specific mode so
+  // callers get a clear PROVIDER_NOT_CONFIGURED (503) instead of a silent runtime
+  // failure.
+  if ((family === "ramps" || family === "earn") && testMode !== undefined) {
+    const definitions = PROVIDER_AVAILABILITY_DEFINITIONS[family] as Record<
+      string,
+      ProviderAvailabilityDefinition
+    >;
+    const def = definitions[providerId];
     if (def && !def.isConfigured(env, testMode)) {
       const mode = testMode ? "sandbox" : "production";
       throw new AppError(
@@ -570,6 +636,28 @@ export async function assertProviderAvailable(
         `${def.label} is not configured for ${mode} mode.`
       );
     }
+  }
+}
+
+/**
+ * Exit-safety gate for Earn withdrawals: money OUT must keep working when a
+ * provider is commercially disabled for an organization (entitlement off), so
+ * funds can never be trapped behind a sales/tier decision. Only the
+ * credential/mode check applies here — deposits use the full
+ * assertProviderAvailable gate.
+ */
+export function assertEarnProviderConfigured(
+  env: Env,
+  providerId: EarnProviderId,
+  testMode: boolean
+): void {
+  const def = PROVIDER_AVAILABILITY_DEFINITIONS.earn[providerId];
+  if (!def?.isConfigured(env, testMode)) {
+    const mode = testMode ? "sandbox" : "production";
+    throw new AppError(
+      "PROVIDER_NOT_CONFIGURED",
+      `${def?.label ?? providerId} is not configured for ${mode} mode.`
+    );
   }
 }
 
@@ -584,6 +672,7 @@ export async function getEnabledProviders(env: Env, db: DatabaseClient, organiza
       (provider) => access.providers.compliance[provider]?.enabled
     ),
     ramps: RAMP_PROVIDERS.filter((provider) => access.providers.ramps[provider]?.enabled),
+    earn: EARN_PROVIDERS.filter((provider) => access.providers.earn[provider]?.enabled),
   };
 }
 
