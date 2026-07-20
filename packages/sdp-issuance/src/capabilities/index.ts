@@ -178,7 +178,12 @@ export function validateSelectedSettings(
   return errors;
 }
 
-export type ParamRejectionReason = "not_a_number" | "below_min" | "above_max" | "invalid_option";
+export type ParamRejectionReason =
+  | "missing"
+  | "not_a_number"
+  | "below_min"
+  | "above_max"
+  | "invalid_option";
 
 export interface ParamValidationError {
   settingKey: string;
@@ -253,7 +258,13 @@ export function validateSettingParams(
     const params = selection?.params ?? {};
     for (const spec of specs) {
       const value = params[spec.key];
-      if (value === undefined) {
+      // Absent or blank: a required param is rejected (its resolver fallback — e.g.
+      // transferHook.programId → the system program — would produce a permanently
+      // broken token), an optional one just skips bounds.
+      if (value === undefined || (typeof value === "string" && value.trim() === "")) {
+        if (spec.required) {
+          errors.push({ settingKey, paramKey: spec.key, reason: "missing" });
+        }
         continue;
       }
       const violation = checkParamValue(spec, value);

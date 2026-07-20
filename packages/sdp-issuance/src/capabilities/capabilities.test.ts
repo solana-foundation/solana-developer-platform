@@ -155,13 +155,40 @@ describe("advanced settings capability registry", () => {
     ]);
   });
 
-  it("ignores absent params and params of unknown settings", () => {
-    // basisPoints is required in the editor, but presence is enforced elsewhere —
-    // bounds only apply to supplied values, so an empty params map is clean here.
-    assert.deepEqual(validateSettingParams({ transferFee: { params: {} } }), []);
-    assert.deepEqual(validateSettingParams({ transferFee: {} }), []);
+  it("ignores absent optional params and params of unknown settings", () => {
+    // maxFee is optional (has a default), so omitting it is fine once the required
+    // basisPoints is present — bounds only apply to supplied values.
+    assert.deepEqual(validateSettingParams({ transferFee: { params: { basisPoints: 50 } } }), []);
+    // scaledUiAmount.multiplier is optional too; an empty params map is clean.
+    assert.deepEqual(validateSettingParams({ scaledUiAmount: { params: {} } }), []);
     // An unknown setting key is the key-level check's concern; its params are skipped.
     assert.deepEqual(validateSettingParams({ made_up: { params: { basisPoints: 99999 } } }), []);
+  });
+
+  it("rejects a selected setting missing a required param (presence enforced server-side)", () => {
+    // transferHook.programId is required and has no safe default — absent it, the
+    // resolver would fall back to the system program and brick every transfer.
+    assert.deepEqual(validateSettingParams({ transferHook: { params: {} } }), [
+      { settingKey: "transferHook", paramKey: "programId", reason: "missing" },
+    ]);
+    assert.deepEqual(validateSettingParams({ transferHook: {} }), [
+      { settingKey: "transferHook", paramKey: "programId", reason: "missing" },
+    ]);
+    // A blank / whitespace-only string doesn't satisfy a required field either.
+    assert.deepEqual(validateSettingParams({ transferHook: { params: { programId: "  " } } }), [
+      { settingKey: "transferHook", paramKey: "programId", reason: "missing" },
+    ]);
+    // Required numeric params are enforced the same way (transferFee.basisPoints).
+    assert.deepEqual(validateSettingParams({ transferFee: { params: { maxFee: "0" } } }), [
+      { settingKey: "transferFee", paramKey: "basisPoints", reason: "missing" },
+    ]);
+    // A supplied required param passes (string params have no bounds to check).
+    assert.deepEqual(
+      validateSettingParams({
+        transferHook: { params: { programId: "Hook11111111111111111111111111111111111111" } },
+      }),
+      []
+    );
   });
 
   it("requires scaledUiAmount.multiplier to be strictly positive (exclusive min 0)", () => {
@@ -260,6 +287,25 @@ describe("advanced settings capability registry", () => {
       scaledUiAmount: { params: { multiplier: 2 } },
     });
     assert.equal(ok.extensions?.scaledUiAmount?.multiplier, 2);
+  });
+
+  it("omits transferHook rather than emit a bricking placeholder when programId is absent", () => {
+    // A direct caller (bypassing validateSettingParams) that selects transferHook
+    // without a programId must not get the system-program placeholder, which would
+    // fail every transfer. The extension is dropped instead of shipped broken.
+    const missing = resolveSettingsToExtensions("generic", "generic", {
+      transferHook: { params: {} },
+    });
+    assert.deepEqual(missing.errors, []);
+    assert.equal(missing.extensions?.transferHook, undefined);
+    // A real programId resolves normally.
+    const withId = resolveSettingsToExtensions("generic", "generic", {
+      transferHook: { params: { programId: "Hook11111111111111111111111111111111111111" } },
+    });
+    assert.equal(
+      withId.extensions?.transferHook?.programId,
+      "Hook11111111111111111111111111111111111111"
+    );
   });
 
   it("injects the provided authority and passes through decimals/allowlist", () => {

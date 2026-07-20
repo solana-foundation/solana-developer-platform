@@ -84,10 +84,15 @@ function toOverride(
       return { interestBearing: { rate: toNumber(params.rate, 0) } };
     case "nonTransferable":
       return { nonTransferable: true };
-    case "transferHook":
-      return {
-        transferHook: { programId: toStringValue(params.programId, PLACEHOLDER_AUTHORITY) },
-      };
+    case "transferHook": {
+      // Unlike permanentDelegate (whose placeholder resolves to the custody wallet
+      // at deploy), a hook program id has no valid default — the system-program
+      // placeholder would brick every transfer. Omit the extension when it's
+      // absent rather than emit a broken one. The API path rejects a missing
+      // programId upstream (validateSettingParams); this is the direct-caller backstop.
+      const programId = toStringValue(params.programId, "");
+      return programId ? { transferHook: { programId } } : {};
+    }
     default:
       return {};
   }
