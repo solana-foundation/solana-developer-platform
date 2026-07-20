@@ -39,7 +39,9 @@ const MODULE_METADATA = [
     name: "sdp-web",
     directory: "apps/sdp-web",
     purpose: "Dashboard application.",
-    allowedDependencies: ["@sdp/solana", "@sdp/types"],
+    // @sdp/issuance is imported only through its mosaic-free `capabilities`
+    // subpath (the advanced-settings catalog + lookups the editor renders).
+    allowedDependencies: ["@sdp/issuance", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/api-integration",
