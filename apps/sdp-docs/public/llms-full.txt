@@ -4882,7 +4882,7 @@ Resources for integrating with SDP: API endpoints, supported token templates, pr
 ### Issuance Token Types
 Source: https://platform.solana.com/docs/reference/issuance-token-types
 
-> Supported issuance templates and default controls.
+> How to choose a token template, and the default controls each one applies.
 
 The public issuance surface currently exposes three token templates:
 
@@ -4893,6 +4893,59 @@ The public issuance surface currently exposes three token templates:
 | `custom` | 9 decimals default (up to 18 max), extension set is fully configurable | Use when your requirements do not match preset templates. |
 
 These defaults are sourced from the API implementation in `apps/sdp-api/src/services/issuance/templates/definitions.ts`.
+
+## Selecting a template
+
+Each template is a vetted, fixed composition of Token-2022 extensions for a specific class of
+asset, rather than an à-la-carte menu. The appropriate template is determined by the nature of
+the instrument being issued. The `custom` template applies to assets that do not fit the
+stablecoin or tokenized-security models.
+
+### Stablecoin
+
+Intended for tokens pegged to a fiat currency and redeemable at par (1:1). The template applies
+the compliance controls typical of regulated fiat tokens: a **pausable** extension (transfers
+can be frozen in an emergency) and a **permanent delegate** (tokens can be seized or clawed back
+in response to a compliance event). A blocklist applies by default.
+
+Stablecoins cannot pay interest or yield to holders. This reflects payment-stablecoin frameworks
+such as the U.S. GENIUS Act and the EU's MiCA, which prohibit issuers from paying interest on the
+token itself. Interest- or yield-bearing products are issued as tokenized securities (typically
+funds) rather than stablecoins.
+
+### Tokenized security
+
+Intended for regulated instruments — equity, debt, or fund shares. The template applies the
+stablecoin controls together with stronger defaults: an **allowlist is required**, new accounts
+are **frozen by default** (holders must be approved before transacting), and the **scaled UI
+amount** extension is added for corporate actions such as splits or share-class rebasing.
+Interest- and yield-bearing instruments (for example debt or fund tokens) also fall under this
+template.
+
+### Custom
+
+Corresponds to the **Non-Security Digital Asset** classification in the issuance interface —
+assets that are neither fiat stablecoins nor regulated securities, such as commodities, real
+estate, or collectibles. The template exposes the full Token-2022 extension set (transfer fees,
+transfer hooks, non-transferable behaviour, interest, and others) and applies where the preset
+templates do not match the instrument.
+
+### Summary
+
+| Instrument | Template |
+| --- | --- |
+| Pegged to a fiat currency, redeemable 1:1, with no yield | `stablecoin` |
+| Regulated security (equity, debt, or fund), or an instrument that pays a return | `tokenized-security` |
+| Any other asset, or one requiring extensions the presets do not offer | `custom` (Non-Security Digital Asset) |
+
+<Callout type="warn">
+Token-2022 extensions are set when the mint is created and cannot be changed afterward. The
+template selection is therefore permanent for a given token; changing it requires issuing a new
+token.
+</Callout>
+
+This page provides general guidance and is not legal advice; regulatory treatment depends on the
+jurisdiction and on how the instrument is structured.
 
 ## Amount format
 
@@ -5090,10 +5143,6 @@ Source: https://platform.solana.com/docs/reference/api/api-keys
 | `DELETE` | `/v1/api-keys/{keyId}` | Deactivate API key |
 | `GET` | `/v1/api-keys/{keyId}` | Get API key |
 | `PATCH` | `/v1/api-keys/{keyId}` | Update API key |
-| `PUT` | `/v1/api-keys/{keyId}/policy-bindings` | Replace or clear API-key policy bindings |
-| `POST` | `/v1/api-keys/{keyId}/policy-profiles` | Create API-key policy profile |
-| `POST` | `/v1/api-keys/{keyId}/policy-profiles/{profileId}/revisions` | Create API-key policy revision |
-| `POST` | `/v1/api-keys/{keyId}/policy-profiles/{profileId}/revisions/{revisionId}/activate` | Activate API-key policy revision |
 | `POST` | `/v1/api-keys/{keyId}/rotate` | Rotate API key |
 
 ---
@@ -5111,11 +5160,6 @@ Source: https://platform.solana.com/docs/reference/api/wallets
 | `GET` | `/v1/wallets/{walletId}` | Get wallet by ID |
 | `PATCH` | `/v1/wallets/{walletId}` | Update wallet |
 | `GET` | `/v1/wallets/aggregate` | Aggregate wallet balances |
-| `GET` | `/v1/wallets/approval-requests` | List wallet approval requests |
-| `GET` | `/v1/wallets/approval-requests/{approvalRequestId}` | Get wallet approval request |
-| `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/approve` | Approve wallet approval request |
-| `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/cancel` | Cancel wallet approval request |
-| `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/reject` | Reject wallet approval request |
 | `GET` | `/v1/wallets/config` | Get wallet signing config |
 | `GET` | `/v1/wallets/configs` | List wallet signing configs |
 | `POST` | `/v1/wallets/default-wallet` | Set default wallet |
@@ -5135,6 +5179,7 @@ Source: https://platform.solana.com/docs/reference/api/projects
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `GET` | `/v1/projects` | List projects |
+| `POST` | `/v1/projects` | Create project |
 | `DELETE` | `/v1/projects/{projectId}` | Archive project |
 | `GET` | `/v1/projects/{projectId}` | Get project |
 | `PATCH` | `/v1/projects/{projectId}` | Update project |
@@ -5230,23 +5275,10 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/transfers` | List transfers |
 | `POST` | `/v1/payments/transfers` | Execute transfer (custody) |
 | `GET` | `/v1/payments/transfers/{transferId}` | Get transfer |
+| `POST` | `/v1/payments/transfers/prepare` | Prepare transfer (unsigned) |
 | `GET` | `/v1/payments/wallets/{walletId}/balances` | Get wallet balances |
 | `GET` | `/v1/payments/wallets/{walletId}/policies` | Get wallet policy |
 | `PUT` | `/v1/payments/wallets/{walletId}/policies` | Update wallet policy |
-| `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations` | List wallet policy evaluations |
-| `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations/{policyEvaluationId}` | Get wallet policy evaluation |
-| `GET` | `/v1/payments/wallets/{walletId}/policies/revisions` | List wallet policy revisions |
-
----
-
-### Policies
-Source: https://platform.solana.com/docs/reference/api/policies
-
-> Wallet and API-key policy-control inventory.
-
-| Method | Endpoint | Summary |
-| --- | --- | --- |
-| `GET` | `/v1/policies` | List policy controls |
 
 ---
 
@@ -5273,7 +5305,6 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 | `DELETE` | `/v1/issuance/asset-profiles/{profileId}` | Archive asset profile |
 | `GET` | `/v1/issuance/asset-profiles/{profileId}` | Get asset profile |
 | `PATCH` | `/v1/issuance/asset-profiles/{profileId}` | Update asset profile |
-| `GET` | `/v1/issuance/asset-profiles/by-token/{tokenId}` | Get asset profile by token |
 | `GET` | `/v1/issuance/asset-profiles/field-options` | Get asset profile field options |
 
 ## Notes
