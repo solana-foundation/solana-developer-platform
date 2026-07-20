@@ -332,9 +332,11 @@ export class CustodyConfigStore implements SigningConfigStore {
 
     const configJson = JSON.stringify(config);
     const encryptedConfig = await this.getCustodyCipher().encrypt(orgId, configJson);
+    const encryptionVersion = encryptedConfig.startsWith("v2.")
+      ? "sdp-custody-kms-v2"
+      : "sdp-custody-encryption-v1";
 
     if (existing) {
-      // Update existing config
       await this.db
         .prepare(
           `UPDATE custody_configs
@@ -344,7 +346,7 @@ export class CustodyConfigStore implements SigningConfigStore {
         .bind(
           config.provider,
           encryptedConfig,
-          "sdp-custody-encryption-v1",
+          encryptionVersion,
           config.defaultWalletId ?? null,
           existing.id
         )
@@ -353,7 +355,6 @@ export class CustodyConfigStore implements SigningConfigStore {
       return existing.id;
     }
 
-    // Create new config
     const id = `cust_${crypto.randomUUID()}`;
 
     await this.db
@@ -367,7 +368,7 @@ export class CustodyConfigStore implements SigningConfigStore {
         normalizedProjectId,
         config.provider,
         encryptedConfig,
-        "sdp-custody-encryption-v1",
+        encryptionVersion,
         config.defaultWalletId ?? null
       )
       .run();
@@ -738,6 +739,7 @@ export class CustodyConfigStore implements SigningConfigStore {
       projectId: row.project_id,
       provider: row.provider as SigningProviderType,
       config: row.config_encrypted,
+      encryptionVersion: row.encryption_version,
       defaultWalletId: row.default_wallet_id,
       status: row.status as "active" | "inactive",
       createdAt: row.created_at,
