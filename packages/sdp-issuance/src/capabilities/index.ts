@@ -1,11 +1,5 @@
-// @sdp/issuance/capabilities
-//
-// The Advanced Settings capability foundation (ticket B): the manager-facing
-// setting catalog, the per-asset-type capability registry, and the pure lookups
-// over them. Importable without @solana/mosaic-sdk (this module touches only
-// @sdp/types and ./templates/definitions), so the API, web, and tests can use it
-// freely. The settings->extension resolver (ticket A), persistence/validation
-// (C), and UI (D/E) build on top of what this module exports.
+// Advanced Settings capability foundation: setting catalog, capability registry, lookups.
+// Mosaic-free (only @sdp/types + templates), safe for API/web/tests.
 
 import type {
   AdvancedSetting,
@@ -44,10 +38,7 @@ export {
 export type { SettingKey, TemplateOverrideError };
 export { ADVANCED_SETTINGS, ASSET_CAPABILITIES, SETTING_KEYS };
 
-// Drop settings that would form an incompatible extension pair, keeping the
-// earlier-listed one; unknown keys are dropped too. Order-preserving. Used to
-// sanitise a persisted selection on load, so stale storage can't restore a
-// conflicting combination the editor would never let you build interactively.
+// Drop incompatible settings; sanitizes persisted selections on load.
 export function pruneIncompatibleSettings(settingKeys: readonly string[]): SettingKey[] {
   const kept: SettingKey[] = [];
   const keptExtensions = new Set<string>();
@@ -73,10 +64,7 @@ export function pruneIncompatibleSettings(settingKeys: readonly string[]): Setti
   return kept;
 }
 
-// Setting keys whose extension clashes with `settingKey`'s — the two cannot be
-// enabled together on one token. Drives the editor's conflict disabling. Derived
-// from INCOMPATIBLE_EXTENSION_PAIRS by mapping each conflicting extension back to
-// the setting(s) that configure it.
+// Settings whose extensions clash with this one (derived from INCOMPATIBLE_EXTENSION_PAIRS).
 export function getConflictingSettingKeys(settingKey: SettingKey): SettingKey[] {
   const source: AdvancedSetting = ADVANCED_SETTINGS[settingKey];
   const blocked = new Set<SettingKey>();
@@ -99,7 +87,6 @@ export function getConflictingSettingKeys(settingKey: SettingKey): SettingKey[] 
   return [...blocked];
 }
 
-// The capability entry for an asset type, or undefined for an unknown pair.
 export function resolveAssetCapability(
   category: AssetCategory,
   type: string
@@ -107,9 +94,6 @@ export function resolveAssetCapability(
   return ASSET_CAPABILITIES.find((c) => c.category === category && c.type === type);
 }
 
-// Settings that default ON for an asset type — the pre-checked selection.
-// Includes both `locked` (forced on) and `recommended` (default on, deselectable)
-// settings; the caller pre-fills these with their default params.
 export function getRecommendedSettings(category: AssetCategory, type: string): SettingKey[] {
   const capability = resolveAssetCapability(category, type);
   if (!capability) {
@@ -156,8 +140,6 @@ export interface GroupedSetting {
   availability: SettingAvailability;
 }
 
-// The settings an asset type can show, dropping `unsupported` ones. The editor
-// UI (E) groups these by `setting.group`.
 export function listSettingsForType(category: AssetCategory, type: string): GroupedSetting[] {
   const capability = resolveAssetCapability(category, type);
   if (!capability) {
@@ -170,12 +152,7 @@ export function listSettingsForType(category: AssetCategory, type: string): Grou
   }));
 }
 
-// --- Persistence contract --------------------------------------------------
-
-// The version stamped onto a stored advanced-settings payload. Bump when the
-// SHAPE of the settings selection changes (independent of asset_type_version,
-// which tracks the asset type's metadata shape). Persistence stamps this so a
-// stored selection records the schema it was written under.
+// The version stamped onto advanced-settings; bump if selection shape changes.
 export const ADVANCED_SETTINGS_VERSION = 1;
 
 export type SettingRejectionReason = "unknown" | "unsupported";
@@ -185,10 +162,6 @@ export interface SettingValidationError {
   reason: SettingRejectionReason;
 }
 
-// Validate a set of selected setting keys against an asset type's capability.
-// "unknown" ⇒ not a catalog setting; "unsupported" ⇒ the type forbids it. An
-// empty result means every key is allowed. This is the single gate the API
-// calls to reject a bad selection early (persistence ticket C).
 export function validateSelectedSettings(
   category: AssetCategory,
   type: string,
@@ -205,21 +178,8 @@ export function validateSelectedSettings(
   return errors;
 }
 
-// --- Dev-time completeness assertion ---------------------------------------
-//
-// Fail fast in development if the registry drifts. Mirrors the guard in
-// apps/sdp-web/.../asset-taxonomy.ts. Guarantees:
-//   1. every ASSET_TYPES pair has exactly one capability entry;
-//   2. every setting an entry references exists in the catalog;
-//   3. every locked/recommended/available setting names only extensions the
-//      entry's baseTemplate can actually build — i.e. present in
-//      `required ∪ available` and not in `incompatible`. This mirrors
-//      resolveTemplateConfig's own override check, so a selection the capability
-//      offers can never be one the resolver would reject at deploy.
-//   4. every extension the baseTemplate lists as `required` (the guarded builder
-//      forces it on unconditionally) is covered by a `locked` setting — so a
-//      forced extension can never be surfaced as an optional, deselectable box
-//      whose unticking has no on-chain effect.
+// Dev-time assertion: registry consistency — every ASSET_TYPES pair has a capability,
+// all settings exist, locked settings cover all template-forced extensions.
 if (process.env.NODE_ENV !== "production") {
   const seen = new Set<string>();
 
@@ -263,7 +223,6 @@ if (process.env.NODE_ENV !== "production") {
       }
     }
 
-    // (4) Every template-required extension must be locked, not merely offered.
     for (const required of template.extensions.required) {
       if (!lockedExtensions.has(required)) {
         throw new Error(

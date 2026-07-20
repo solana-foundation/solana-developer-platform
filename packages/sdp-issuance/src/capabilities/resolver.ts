@@ -1,12 +1,5 @@
-// The settings → extension-config resolver (ticket A). Converts a stored
-// advanced-settings selection into a deployment-ready TokenExtensionsConfig by
-// mapping each selected setting to its ExtensionOverrides fragment and running
-// the existing resolveTemplateConfig against the asset type's base template.
-//
-// Pure and mosaic-free (only @sdp/types + ./templates/definitions), so it runs
-// both at settings-save time (validation: surface resolver errors early) and at
-// deploy time (produce the payload, with real authorities injected).
-//
+// Settings → extension-config resolver: maps settings to ExtensionOverrides,
+// validates at save time, injects real authorities at deploy time.
 // See docs/decisions/0002-asset-advanced-settings.md.
 
 import type {
@@ -21,16 +14,9 @@ import { resolveTemplateConfig, type TemplateOverrideError } from "../templates/
 import { ASSET_CAPABILITIES } from "./capabilities";
 import { ADVANCED_SETTINGS, findIncompatibleExtensionPair, type SettingKey } from "./settings";
 
-// Authority-valued extension config isn't known until deploy (SDP resolves the
-// controlled wallet then). When absent — e.g. validating a draft before deploy —
-// a placeholder stands in so resolveTemplateConfig can validate the extension
-// key; the value is never persisted and deploy injects the real authority.
-// resolveTemplateConfig validates keys, not values, so any non-empty string works.
+// Placeholder for authority-valued extensions (resolved at deploy time).
 const PLACEHOLDER_AUTHORITY = "11111111111111111111111111111111";
 
-// Authorities injected for authority-valued extensions. At token create the
-// caller passes the controlled signing wallet (which becomes custody at deploy),
-// so no placeholder is ever stored for e.g. permanentDelegate.
 export interface ExtensionAuthorities {
   permanentDelegate?: string;
 }
@@ -69,7 +55,6 @@ function toStringValue(value: string | number | undefined, fallback: string): st
   return fallback;
 }
 
-// Map one selected setting to the ExtensionOverrides fragment it enables.
 function toOverride(
   key: SettingKey,
   params: Record<string, string | number>,
@@ -146,10 +131,7 @@ export function resolveSettingsToExtensions(
     options.decimals
   );
 
-  // Pairwise conflict check: two individually-valid extensions that can't coexist
-  // on one mint (e.g. interestBearing + scaledUiAmount). The per-template check
-  // in resolveTemplateConfig can't catch this, so surface it here — early at
-  // settings-save and again defensively at deploy.
+  // Pairwise extension conflict check (template-level check can't catch this).
   const errors = [...result.errors];
   const conflict = findIncompatibleExtensionPair(Object.keys(extensions) as TokenExtensionName[]);
   if (conflict) {

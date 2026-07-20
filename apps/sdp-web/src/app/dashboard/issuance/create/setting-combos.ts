@@ -7,17 +7,8 @@ import type { AdvancedSetting, AssetCategory, TokenExtensionName } from "@sdp/ty
 import { CAPACITY_META } from "./asset-details-config";
 import type { AdvancedSettingsDraft, CapacityKey } from "./issuance-draft-wizard.types";
 
-// A Basic-mode preset: a curated bundle of optional on-chain settings + off-chain
-// capacities for a realistic issuance scenario. Combos are conflict-free by
-// construction and scoped to a category (all types in a category share the same
-// capability). Required/locked on-chain settings — e.g. freeze + reclaim on a
-// stablecoin — are always on regardless, so they aren't listed here; a combo's
-// value is the optional bundle around them.
-//
-// Selecting combos is purely presentational: it enables the underlying individual
-// settings, which the Detailed and Expert views then show and let the manager
-// refine. Multiple combos can be selected — their settings union — and the same
-// extension-conflict validation used everywhere else blocks an incompatible pick.
+// Basic-mode preset: curated bundle of optional settings + capacities.
+// Enables underlying settings shown in Detailed/Expert; multiple combos' settings union.
 export interface SettingCombo {
   key: string;
   category: AssetCategory;
@@ -30,7 +21,6 @@ export interface SettingCombo {
 const cfg = (leaf: string): string => `DashboardIssuance.config.${leaf}`;
 
 export const SETTING_COMBOS: readonly SettingCombo[] = [
-  // --- stablecoin (freeze + reclaim always on) -----------------------------
   {
     key: "regulatedStablecoin",
     category: "stablecoin",
@@ -39,7 +29,6 @@ export const SETTING_COMBOS: readonly SettingCombo[] = [
     settings: [],
     capacities: ["kyc", "issueRetireControls", "redemptionApprovals", "investorReporting"],
   },
-  // --- tokenized_security (freeze + reclaim always on) ---------------------
   {
     key: "publicSecurityOffering",
     category: "tokenized_security",
@@ -70,9 +59,6 @@ export const SETTING_COMBOS: readonly SettingCombo[] = [
     category: "generic",
     labelKey: cfg("comboGatedAccess"),
     descriptionKey: cfg("comboGatedAccessDescription"),
-    // Permissioned via default-frozen accounts (freezeTransfers) rather than a
-    // transfer-hook program, so Basic never has to ask a manager for a program
-    // ID. restrictTradingHours is its unique defining item (see deselect model).
     settings: ["freezeTransfers"],
     capacities: ["kyc", "restrictTradingHours"],
   },
@@ -106,9 +92,6 @@ export function getCombosForCategory(category: AssetCategory): SettingCombo[] {
   return SETTING_COMBOS.filter((combo) => combo.category === category);
 }
 
-// The preset applied by default when a type is chosen, so the initial state
-// matches a combo (Basic shows it checked). Generic has none — it starts blank
-// and the manager picks a preset.
 const DEFAULT_COMBO_KEY: Partial<Record<AssetCategory, string>> = {
   stablecoin: "regulatedStablecoin",
   tokenized_security: "publicSecurityOffering",
@@ -119,8 +102,6 @@ export function getDefaultCombo(category: AssetCategory): SettingCombo | undefin
   return key ? SETTING_COMBOS.find((combo) => combo.key === key) : undefined;
 }
 
-// The i18n label keys a combo bundles (settings then capacities), for its
-// "Includes …" summary. Manager-facing labels only.
 export function comboItemLabelKeys(combo: SettingCombo): string[] {
   const settingKeys = combo.settings.map(
     (key) => (ADVANCED_SETTINGS[key] as AdvancedSetting).labelKey
@@ -129,7 +110,6 @@ export function comboItemLabelKeys(combo: SettingCombo): string[] {
   return [...settingKeys, ...capacityKeys];
 }
 
-// A combo is "active" when every setting and capacity it bundles is currently on.
 export function isComboActive(
   combo: SettingCombo,
   settings: AdvancedSettingsDraft,
@@ -141,8 +121,6 @@ export function isComboActive(
   );
 }
 
-// The plain-language reason (i18n key) each incompatible pair can't coexist,
-// keyed by "extA|extB" in the order they appear in INCOMPATIBLE_EXTENSION_PAIRS.
 const CONFLICT_REASON_KEY: Record<string, string> = {
   "interestBearing|scaledUiAmount": "DashboardIssuance.config.comboConflictReasonBalanceDisplay",
   "nonTransferable|transferFee": "DashboardIssuance.config.comboConflictReasonNonTransferableFee",
@@ -150,15 +128,10 @@ const CONFLICT_REASON_KEY: Record<string, string> = {
 };
 
 export interface ComboConflict {
-  // The already-enabled setting this combo clashes with (its manager label key).
   withLabelKey: string;
-  // Why the two can't coexist.
   reasonKey: string;
 }
 
-// If enabling this combo would clash with an already-enabled setting, describe
-// the conflict: which setting it collides with and why. Null when there's no
-// clash. Uses the same INCOMPATIBLE_EXTENSION_PAIRS as Detailed/Expert.
 export function getComboConflict(
   combo: SettingCombo,
   settings: AdvancedSettingsDraft
@@ -209,7 +182,6 @@ function defaultParamsFor(key: SettingKey): Record<string, string> {
   return params;
 }
 
-// Enable a combo's settings (seeding default params) and capacities.
 export function applyCombo(
   combo: SettingCombo,
   settings: AdvancedSettingsDraft,
@@ -229,8 +201,6 @@ export function applyCombo(
   return { settings: nextSettings, capacities: nextCapacities };
 }
 
-// Disable a combo's settings/capacities, keeping any still needed by another
-// active combo (so deselecting one preset doesn't strip a shared control).
 export function removeCombo(
   combo: SettingCombo,
   settings: AdvancedSettingsDraft,

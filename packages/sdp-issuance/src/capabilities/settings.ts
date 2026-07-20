@@ -1,27 +1,13 @@
-// The Advanced Settings catalog: the single source of truth mapping each
-// manager-facing setting to its Token-2022 extension(s), the SDP actions it
-// unlocks, its signing/fallback story, and any expert-override params.
-//
-// This is CODE, not a table — adding a setting is a change to this file, never a
-// migration (mirrors ASSET_TYPE_REGISTRY). i18n keys point at
-// apps/sdp-web/messages/en/dashboard-issuance.json under `config`; keys marked
-// NEW are added by the manager-names/UI work (tickets D/E), not this step.
-//
+// Advanced Settings catalog: manager-facing settings → Token-2022 extensions.
+// CODE not table (no migrations). i18n keys in dashboard-issuance.json under `config`.
 // See docs/decisions/0002-asset-advanced-settings.md.
 
 import type { AdvancedSetting, TokenExtensionName } from "@sdp/types";
 
-// Build a fully-qualified message key for a `config.*` entry. Keeping the leaf
-// as the only literal avoids repeating the namespace on every entry (and keeps
-// each string literal short, which the linter's secret heuristic prefers).
 const config = (leaf: string): string => `DashboardIssuance.config.${leaf}`;
-// The paired description key for a setting whose label uses the same leaf.
 const desc = (leaf: string): string => config(`${leaf}Description`);
 
 export const ADVANCED_SETTINGS = {
-  // On/off. The pausable extension backs emergency freezes. (defaultAccountState
-  // is template-managed via the allowlist setting, not configured here.) Reuses
-  // existing i18n keys.
   freezeTransfers: {
     group: "compliance",
     labelKey: config("freezeTransfers"),
@@ -30,7 +16,6 @@ export const ADVANCED_SETTINGS = {
     actions: ["pause", "unpause", "freeze", "unfreeze"],
     signing: "custodial-or-wallet",
   },
-  // Lets a controlled authority seize or force-burn tokens (compliance events).
   permanentDelegate: {
     group: "controls",
     labelKey: config("permanentDelegate"), // NEW
@@ -39,7 +24,6 @@ export const ADVANCED_SETTINGS = {
     actions: ["seize", "force_burn"],
     signing: "custodial-or-wallet",
   },
-  // Parametric: a percentage fee withheld on every transfer.
   transferFee: {
     group: "economics",
     labelKey: config("transferFee"), // NEW
@@ -65,7 +49,6 @@ export const ADVANCED_SETTINGS = {
       },
     ],
   },
-  // Parametric: token balance accrues interest at a fixed rate.
   interestBearing: {
     group: "economics",
     labelKey: config("interestBearing"), // NEW
@@ -83,7 +66,6 @@ export const ADVANCED_SETTINGS = {
       },
     ],
   },
-  // Parametric: a UI multiplier applied to displayed balances (e.g. for splits).
   scaledUiAmount: {
     group: "economics",
     labelKey: config("scaledUiAmount"), // NEW
@@ -101,7 +83,6 @@ export const ADVANCED_SETTINGS = {
       },
     ],
   },
-  // On/off: tokens can never be transferred once held (soulbound).
   nonTransferable: {
     group: "controls",
     labelKey: config("nonTransferable"), // NEW
@@ -110,7 +91,6 @@ export const ADVANCED_SETTINGS = {
     actions: [],
     signing: "custodial-only",
   },
-  // Parametric: route every transfer through a custom on-chain program.
   transferHook: {
     group: "controls",
     labelKey: config("transferHook"), // NEW
@@ -134,17 +114,8 @@ export type SettingKey = keyof typeof ADVANCED_SETTINGS;
 
 export const SETTING_KEYS = Object.keys(ADVANCED_SETTINGS) as SettingKey[];
 
-// Extension pairs that cannot coexist on a single mint — pairwise and symmetric.
-// Unlike a template's `incompatible` list (which says "this extension doesn't
-// belong on this template"), these are conflicts *between two extensions*
-// regardless of template:
-//
-//   interestBearing + scaledUiAmount — a hard on-chain conflict: both define the
-//     raw→displayed amount conversion, so mint init rejects a mint carrying both.
-//   nonTransferable + transferFee / transferHook — logical conflicts: a token
-//     that can never transfer has no transfers to charge a fee on or route
-//     through a hook, so pairing them is nonsensical. Blocked so the editor
-//     can't offer meaningless combinations.
+// Extension pairs that can't coexist: interestBearing+scaledUiAmount (on-chain),
+// or nonTransferable+{transferFee,transferHook} (logical conflicts).
 export const INCOMPATIBLE_EXTENSION_PAIRS: readonly (readonly [
   TokenExtensionName,
   TokenExtensionName,
@@ -154,8 +125,6 @@ export const INCOMPATIBLE_EXTENSION_PAIRS: readonly (readonly [
   ["nonTransferable", "transferHook"],
 ];
 
-// The first incompatible pair fully present in `extensions`, or null if none
-// clash. Symmetric — order of the inputs doesn't matter.
 export function findIncompatibleExtensionPair(
   extensions: Iterable<TokenExtensionName>
 ): readonly [TokenExtensionName, TokenExtensionName] | null {
