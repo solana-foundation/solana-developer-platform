@@ -96,7 +96,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
         }}
       />
 
-      <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-border-subtle bg-white shadow-[0_24px_70px_-24px_rgba(28,28,29,0.22)]">
+      <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-border-subtle bg-surface-raised shadow-[0_24px_70px_-24px_rgba(28,28,29,0.22)]">
         <div className="p-8">
           <div className="flex items-center justify-center border-b border-border-default pb-6">
             <span className="text-sm font-semibold tracking-tight text-primary">
@@ -121,13 +121,13 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
 
           {payUrl ? (
             <div className="mt-7 flex flex-col items-center gap-5">
-              <div className="rounded-2xl border border-border-default bg-white p-4 shadow-[0_2px_12px_rgba(28,28,29,0.05)]">
+              <div className="rounded-2xl border border-border-default bg-[white] p-4 shadow-[0_2px_12px_rgba(28,28,29,0.05)]">
                 <PayQrCode url={payUrl} size={208} />
               </div>
               <p className="text-sm text-secondary">{t("Shared.pay.scanWallet")}</p>
               <a
                 href={payUrl}
-                className="hidden h-12 w-full items-center justify-center rounded-full bg-primary text-sm font-semibold text-white transition hover:opacity-90 pointer-coarse:flex"
+                className="hidden h-12 w-full items-center justify-center rounded-full bg-primary text-sm font-semibold text-on-primary transition hover:opacity-90 pointer-coarse:flex"
               >
                 {t("Shared.pay.openWallet")}
               </a>

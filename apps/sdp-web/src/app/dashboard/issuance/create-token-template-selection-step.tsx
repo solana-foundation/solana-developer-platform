@@ -67,7 +67,7 @@ function TemplateCard({
     <button
       type="button"
       onClick={() => onSelect(descriptor.template as TemplateSelection)}
-      className="cursor-pointer flex w-full items-center justify-between rounded-2xl border border-border-default bg-white px-5 py-4 text-left transition-colors hover:bg-fill-subtle"
+      className="cursor-pointer flex w-full items-center justify-between rounded-2xl border border-border-default bg-surface-raised px-5 py-4 text-left transition-colors hover:bg-fill-subtle"
     >
       <div className="flex min-w-0 items-center gap-4">
         <div
