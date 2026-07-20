@@ -144,6 +144,65 @@ test("uses the Eve structured session API and preserves placeholders", async () 
   assert.equal(result.translations[0].value, "Bonjour {name}");
 });
 
+test("returns when Eve completes a result without closing the stream", {
+  timeout: 1_000,
+}, async () => {
+  const missing = [
+    {
+      locale: "fr",
+      sourceFile: "en.json",
+      targetFile: "fr.json",
+      key: "Home.title",
+      source: "Hello {name}",
+    },
+  ];
+  let streamCancelled = false;
+  const body = new ReadableStream({
+    start(controller) {
+      const event = new TextEncoder().encode(
+        `${JSON.stringify({
+          type: "result.completed",
+          data: {
+            result: {
+              translations: [{ file: "en.json", key: "Home.title", translation: "Bonjour {name}" }],
+            },
+          },
+        })}\n`
+      );
+      const midpoint = Math.floor(event.length / 2);
+      controller.enqueue(event.slice(0, midpoint));
+      controller.enqueue(event.slice(midpoint));
+    },
+    cancel() {
+      streamCancelled = true;
+    },
+  });
+
+  const result = await translateMissingEntries({
+    missing,
+    agentUrl: "https://translation.example.test",
+    agentUsername: "test-user",
+    agentPassword: "test-password",
+    maxRetries: 0,
+    fetchImpl: async (url) =>
+      url.endsWith("/eve/v1/session")
+        ? {
+            ok: true,
+            status: 200,
+            json: async () => ({ sessionId: "session-1" }),
+          }
+        : {
+            ok: true,
+            status: 200,
+            body,
+            text: () => new Promise(() => {}),
+          },
+  });
+
+  assert.equal(result.translations[0].value, "Bonjour {name}");
+  assert.equal(streamCancelled, true);
+});
+
 test("rejects an Eve result that changes placeholders", async () => {
   await assert.rejects(
     translateMissingEntries({
