@@ -4,6 +4,7 @@ import type { z } from "zod";
 import {
   createRecurringPaymentSchema,
   createTransferSchema,
+  listTransfersQuerySchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
   updateRecurringPaymentSchema,
   updateWalletPolicySchema,
@@ -24,6 +25,18 @@ describe("payments schema inferred types", () => {
 
     expectTypeOf<CreateTransfer["destination"]>().toEqualTypeOf<string>();
     expectTypeOf<UpdateWalletPolicy["destinationAllowlist"]>().toEqualTypeOf<string[]>();
+  });
+});
+
+describe("transfer list timestamp filters", () => {
+  it("normalizes offset timestamps to UTC before ledger filtering", () => {
+    const query = listTransfersQuerySchema.parse({
+      from: "2026-01-02T20:00:00+05:00",
+      to: "2026-01-02T12:30:00-05:00",
+    });
+
+    expect(query.from).toBe("2026-01-02T15:00:00.000Z");
+    expect(query.to).toBe("2026-01-02T17:30:00.000Z");
   });
 });
 

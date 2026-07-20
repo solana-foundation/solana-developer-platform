@@ -7,9 +7,9 @@ import type {
 } from "@sdp/types";
 import { ChevronLeft, ChevronRight, RotateCw } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -41,7 +41,7 @@ import {
 } from "./approval-requests.data";
 
 const filterControlClassName =
-  "h-10 w-full rounded-md border border-border-default bg-white px-3 text-sm text-primary outline-none transition-[border-color,box-shadow] duration-150 focus:border-primary focus:ring-2 focus:ring-primary/10";
+  "h-10 w-full rounded-md border border-border-default bg-surface-raised px-3 text-sm text-primary outline-none transition-[border-color,box-shadow] duration-150 focus:border-primary focus:ring-2 focus:ring-primary/10";
 
 function approvalRequestHref(approvalRequestId: string): string {
   return `/dashboard/approvals/${encodeURIComponent(approvalRequestId)}`;

@@ -57,7 +57,7 @@ export function LanguagePicker({ variant = "topbar" }: { variant?: "topbar" | "l
           className={cn(
             "flex items-center justify-center outline-none transition-colors focus-visible:ring-2",
             isLanding
-              ? "h-9 w-9 justify-center rounded-lg text-[rgba(28,28,29,0.6)] hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d] focus-visible:ring-[rgba(28,28,29,0.18)]"
+              ? "h-9 w-9 justify-center rounded-lg text-secondary hover:bg-fill-subtle hover:text-primary focus-visible:ring-border-strong"
               : "h-8 w-8 rounded-lg text-text-medium hover:bg-border-light hover:text-text-extra-high focus-visible:ring-border-medium"
           )}
         >

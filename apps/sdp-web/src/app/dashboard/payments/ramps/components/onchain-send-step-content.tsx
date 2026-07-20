@@ -34,7 +34,7 @@ function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; val
   return (
     <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
       <span className="flex items-center gap-2.5 text-sm text-tertiary">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white text-secondary">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-raised text-secondary">
           {icon}
         </span>
         {label}
@@ -93,7 +93,7 @@ export function OnchainSendStepContent({
         <button
           type="button"
           onClick={() => setAddAccountOpen(true)}
-          className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
+          className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         >
           <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary">
             <PlusIcon className="size-4" />

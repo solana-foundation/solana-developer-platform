@@ -617,7 +617,7 @@ function ActionField({
         inputMode={inputMode}
         aria-invalid={Boolean(error)}
         onChange={(event) => onChange(event.currentTarget.value)}
-        className="h-11 rounded-[12px] border-border-default bg-white px-4 shadow-none"
+        className="h-11 rounded-[12px] border-border-default bg-surface-raised px-4 shadow-none"
       />
       <TokenValidationMessage message={error ?? null} />
     </div>
@@ -649,7 +649,7 @@ function ActionSelect({
         id={fieldId}
         value={value}
         onChange={(event) => onChange(event.currentTarget.value)}
-        className="h-11 w-full rounded-[12px] border border-border-default bg-white px-4 text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
+        className="h-11 w-full rounded-[12px] border border-border-default bg-surface-raised px-4 text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>

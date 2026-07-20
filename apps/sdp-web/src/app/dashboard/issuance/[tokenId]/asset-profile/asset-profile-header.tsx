@@ -77,7 +77,7 @@ export function AssetProfileHeader({
             className="h-16 w-16 shrink-0 rounded-full object-cover ring-1 ring-black/5"
           />
         ) : (
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary text-2xl font-semibold text-white ring-1 ring-black/5">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary text-2xl font-semibold text-on-primary ring-1 ring-black/5">
             {token.symbol.slice(0, 1).toUpperCase() || "?"}
           </div>
         )}
@@ -186,7 +186,7 @@ function ClassificationChip({
   label: string;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-border-default bg-white px-3 py-1 text-[13px] font-medium text-secondary">
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-border-default bg-surface-raised px-3 py-1 text-[13px] font-medium text-secondary">
       <Icon className="h-3.5 w-3.5 text-tertiary" />
       {label}
     </span>

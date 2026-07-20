@@ -316,7 +316,7 @@ export function AssetManagementWorkspace({
         onClose={ops.closeFundManagementModal}
       >
         {ops.fundManagementModalAction === "deploy" ? (
-          <div className="rounded-2xl border border-border-default bg-white p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
+          <div className="rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
             <p className="pr-12 text-[20px] leading-[1.2] font-medium text-primary">
               {t("DashboardIssuance.workspace.deployToken")}
             </p>
@@ -335,7 +335,7 @@ export function AssetManagementWorkspace({
                   type="button"
                   onClick={ops.closeFundManagementModal}
                   disabled={ops.isPending}
-                  className="inline-flex h-10 items-center rounded-[12px] border border-border-default bg-white px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
+                  className="inline-flex h-10 items-center rounded-[12px] border border-border-default bg-surface-raised px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
                 >
                   {t("DashboardIssuance.workspace.cancel")}
                 </button>
@@ -343,7 +343,7 @@ export function AssetManagementWorkspace({
                   type="button"
                   onClick={() => ops.submitFundManagementAction("deploy")}
                   disabled={ops.isPending || Boolean(ops.deploySignerSelection.unavailableReason)}
-                  className="inline-flex h-10 items-center rounded-[12px] bg-primary px-4 text-sm font-medium text-white transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
+                  className="inline-flex h-10 items-center rounded-[12px] bg-primary px-4 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
                 >
                   {t("DashboardIssuance.workspace.deployNow")}
                 </button>
@@ -370,7 +370,7 @@ export function AssetManagementWorkspace({
       />
 
       {ops.isPending ? (
-        <div className="fixed right-4 bottom-4 z-30 inline-flex items-center gap-2 rounded-lg border border-border-default bg-white px-3 py-2 text-sm shadow-lg">
+        <div className="fixed right-4 bottom-4 z-30 inline-flex items-center gap-2 rounded-lg border border-border-default bg-surface-raised px-3 py-2 text-sm shadow-lg">
           <Loader2 className="h-4 w-4 animate-spin" />
           {t("DashboardIssuance.workspace.runningAction")}
         </div>

@@ -367,7 +367,7 @@ export function OrganizationRpcSettingsForm({
             <select
               id="rpcProvider"
               name="rpcProvider"
-              className="h-10 w-full min-w-0 rounded-lg border border-border-default bg-white px-3 text-sm text-primary"
+              className="h-10 w-full min-w-0 rounded-lg border border-border-default bg-surface-raised px-3 text-sm text-primary"
               value={selectedProvider}
               disabled={!canManageSettings || !hasEnabledProviders || isSaving || isTesting}
               onChange={(event) => {

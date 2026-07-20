@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchDashboardPaymentTransfersForWallets } from "./payments-page.data";
+import {
+  fetchDashboardPaymentTransfersForWallets,
+  fetchPaymentTransfers,
+} from "./payments-page.data";
 
 describe("fetchDashboardPaymentTransfersForWallets", () => {
   it("reuses preloaded wallets while preserving wallet-scoped transfer history", async () => {
@@ -41,5 +44,64 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
       "/v1/payments/transfers?page=1&pageSize=20&wallet=wallet-1",
       "/v1/payments/transfers?page=1&pageSize=20&wallet=wallet-2",
     ]);
+  });
+});
+
+describe("fetchPaymentTransfers", () => {
+  it("uses one bounded database-backed request for the overview preview", async () => {
+    const request = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    await fetchPaymentTransfers(request, 5, { includeObserved: false });
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith(
+      "/v1/payments/transfers?page=1&pageSize=5&includeObserved=false"
+    );
+  });
+
+  it("preserves transfer metadata used by the command center", async () => {
+    const request = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "transfer-1",
+                walletId: "wallet-1",
+                status: "confirmed",
+                signature: "signature-1",
+                type: "onramp",
+                provider: "mural",
+                counterpartyId: "counterparty-1",
+                counterpartyDisplayName: "Northstar Labs",
+                providerReference: "provider-reference-1",
+                deliveryMode: "crypto",
+                fiatCurrency: "USD",
+                fiatAmount: "1250",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+    );
+
+    const result = await fetchPaymentTransfers(request, 5, { includeObserved: false });
+
+    expect(result.data?.[0]).toMatchObject({
+      walletId: "wallet-1",
+      provider: "mural",
+      counterpartyId: "counterparty-1",
+      counterpartyDisplayName: "Northstar Labs",
+      providerReference: "provider-reference-1",
+      deliveryMode: "crypto",
+      fiatCurrency: "USD",
+      fiatAmount: "1250",
+    });
   });
 });
