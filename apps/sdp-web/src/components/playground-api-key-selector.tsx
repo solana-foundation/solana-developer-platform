@@ -1,7 +1,7 @@
 "use client";
 
 import { KeyRound } from "lucide-react";
-import Link from "next/link";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
@@ -54,7 +54,7 @@ export function PlaygroundApiKeySelector() {
   return (
     <div className="w-full min-w-[260px] lg:max-w-[360px]">
       <div className="relative">
-        <div className="pointer-events-none flex h-11 w-full items-center rounded-[14px] border border-border-default bg-white px-4 shadow-none">
+        <div className="pointer-events-none flex h-11 w-full items-center rounded-[14px] border border-border-default bg-surface-raised px-4 shadow-none">
           <span className="flex min-w-0 items-center gap-2 pr-8">
             <KeyRound className="h-4 w-4 text-tertiary" />
             <span className="truncate text-left text-sm font-medium text-primary">

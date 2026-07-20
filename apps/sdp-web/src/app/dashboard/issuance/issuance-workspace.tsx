@@ -3,10 +3,8 @@
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Plus, Search } from "lucide-react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +12,9 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
+import { IssuancePlaygroundLoading } from "./issuance-playground-loading";
 import { getTemplateCatalogEntry, type IssuanceTemplateId } from "./template-catalog";
 
 // Draft creation is a full-page wizard (V2 issuance direction) gated behind the
@@ -25,7 +25,7 @@ const CREATE_DRAFT_PATH = "/dashboard/issuance/create";
 const IssuancePlayground = dynamic(
   () => import("./issuance-playground").then((module) => module.IssuancePlayground),
   {
-    loading: () => <ApiPlaygroundShellSkeleton />,
+    loading: () => <IssuancePlaygroundLoading />,
   }
 );
 
@@ -132,7 +132,7 @@ export function IssuanceWorkspace({
   const t = useTranslations();
   const locale = useLocale();
   const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
-  const router = useRouter();
+  const router = useDashboardRouter();
   const [search, setSearch] = useState("");
   const [isCreateTokenModalOpen, setIsCreateTokenModalOpen] = useState(false);
   const isPlaygroundTab = issuanceTab === "playground";
@@ -229,13 +229,13 @@ export function IssuanceWorkspace({
                   const value = event.currentTarget.value;
                   setSearch(value);
                 }}
-                className="h-10 rounded-[10px] border-border-default bg-white pl-9"
+                className="h-10 rounded-[10px] border-border-default bg-surface-raised pl-9"
                 placeholder={t("DashboardIssuance.workspace.search")}
               />
             </div>
             <Button
               type="button"
-              className="h-10 rounded-[10px] bg-primary px-4 text-white hover:opacity-90"
+              className="h-10 rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90"
               onClick={startTokenCreation}
             >
               {t("DashboardIssuance.workspace.createDraft")}
@@ -260,7 +260,7 @@ export function IssuanceWorkspace({
 
                   return (
                     <div className="mb-4 flex items-start justify-between gap-3">
-                      <div className="h-14 w-14 overflow-hidden rounded-full border border-border-default bg-white">
+                      <div className="h-14 w-14 overflow-hidden rounded-full border border-border-default bg-[white]">
                         {token.imageUrl ? (
                           // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
                           <img

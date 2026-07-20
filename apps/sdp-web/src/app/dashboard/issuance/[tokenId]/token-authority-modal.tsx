@@ -332,7 +332,7 @@ function AuthorityTargetSection({
           <Label className="grid gap-2">
             <span>{t("DashboardIssuance.authority.new")}</span>
             <select
-              className="h-11 w-full rounded-[12px] border border-border-default bg-white px-4 text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
+              className="h-11 w-full rounded-[12px] border border-border-default bg-surface-raised px-4 text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
               value={selectedWalletValue}
               required
               onChange={(event) => {

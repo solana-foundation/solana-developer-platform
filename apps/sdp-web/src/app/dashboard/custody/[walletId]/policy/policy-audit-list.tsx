@@ -1,7 +1,7 @@
 import type { WalletControlProfileRevisionHistory, WalletPolicyEvaluationDetail } from "@sdp/types";
 import { ChevronLeft, ChevronRight, History } from "lucide-react";
-import Link from "next/link";
 import type { ReactNode } from "react";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -229,10 +229,10 @@ export function PolicyAuditList({
               <Table className="min-w-0 [&_table]:min-w-[1040px] [&_table]:table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[110px]">
+                    <TableHead className="w-[160px]">
                       {t("DashboardCustody.policyAuditDecision")}
                     </TableHead>
-                    <TableHead className="w-[245px]">
+                    <TableHead className="w-[195px]">
                       {t("DashboardCustody.policyAuditOperation")}
                     </TableHead>
                     <TableHead className="w-[145px]">
@@ -297,7 +297,11 @@ export function PolicyAuditList({
                           </span>
                         </AuditCell>
                         <AuditCell>
-                          <p>
+                          <p
+                            className="min-w-0 truncate"
+                            data-policy-audit-actor
+                            title={actor.value || undefined}
+                          >
                             {actor.type === "api_key" && !actor.name
                               ? shortIdentifier(actor.id ?? actor.value)
                               : actor.value || "-"}
@@ -367,7 +371,7 @@ export function PolicyAuditList({
 }
 
 const filterControlClassName =
-  "h-10 w-full rounded-md border border-border-default bg-white px-3 text-sm text-primary outline-none transition-colors focus:border-primary";
+  "h-10 w-full rounded-md border border-border-default bg-surface-raised px-3 text-sm text-primary outline-none transition-colors focus:border-primary";
 
 function MobileAuditRow({
   evaluation,
@@ -443,7 +447,7 @@ function FilterField({ label, children }: { label: string; children: ReactNode }
 
 function AuditCell({ children }: { children: ReactNode }) {
   return (
-    <TableCell className="!whitespace-normal px-4 py-3 text-sm font-normal text-primary">
+    <TableCell className="min-w-0 !whitespace-normal px-4 py-3 text-sm font-normal text-primary">
       {children}
     </TableCell>
   );

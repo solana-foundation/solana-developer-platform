@@ -53,6 +53,37 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     repo = createPostgresPaymentsRepository(db);
   });
 
+  it("installs the indexed payment-ledger search plan", async () => {
+    const extension = await getDb(env)
+      .prepare("SELECT extname FROM pg_extension WHERE extname = 'pg_trgm'")
+      .first<{ extname: string }>();
+    const indexes = await getDb(env)
+      .prepare(
+        `SELECT indexname, indexdef
+         FROM pg_indexes
+         WHERE indexname IN (
+           'idx_payment_transfers_project_source_created_id',
+           'idx_payment_transfers_project_destination_created_id',
+           'idx_payment_transfers_search_trgm',
+           'idx_counterparties_display_name_trgm'
+         )`
+      )
+      .all<{ indexdef: string; indexname: string }>();
+
+    expect(extension?.extname).toBe("pg_trgm");
+    expect(indexes.results.map((index) => index.indexname).sort()).toEqual([
+      "idx_counterparties_display_name_trgm",
+      "idx_payment_transfers_project_destination_created_id",
+      "idx_payment_transfers_project_source_created_id",
+      "idx_payment_transfers_search_trgm",
+    ]);
+    expect(
+      indexes.results
+        .filter((index) => index.indexname.endsWith("_trgm"))
+        .every((index) => index.indexdef.includes("gin_trgm_ops"))
+    ).toBe(true);
+  });
+
   async function seedTransfer(input: {
     id: string;
     status: string;

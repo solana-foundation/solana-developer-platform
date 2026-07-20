@@ -1602,7 +1602,7 @@ export function TokenManagementWorkspace({
         onClose={closeFundManagementModal}
       >
         {fundManagementModalAction === "deploy" ? (
-          <div className="rounded-2xl border border-border-default bg-white p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
+          <div className="rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
             <p className="pr-12 text-[20px] leading-[1.2] font-medium text-primary">
               {t("DashboardIssuance.management.deployToken")}
             </p>
@@ -1622,7 +1622,7 @@ export function TokenManagementWorkspace({
                   type="button"
                   onClick={closeFundManagementModal}
                   disabled={isPending}
-                  className="inline-flex h-10 items-center rounded-[12px] border border-border-default bg-white px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
+                  className="inline-flex h-10 items-center rounded-[12px] border border-border-default bg-surface-raised px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
                 >
                   {t("DashboardIssuance.workspace.cancel")}
                 </button>
@@ -1631,7 +1631,7 @@ export function TokenManagementWorkspace({
                     type="button"
                     onClick={() => deployToken("wallet")}
                     disabled={isPending || Boolean(deploySignerSelection.unavailableReason)}
-                    className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-border-default bg-white px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
+                    className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-border-default bg-surface-raised px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
                   >
                     <WalletIcon className="size-4" />
                     {t("DashboardIssuance.management.deployWithWallet")}
@@ -1642,7 +1642,7 @@ export function TokenManagementWorkspace({
                     <button
                       type="button"
                       disabled
-                      className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-medium text-white transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
+                      className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
                     >
                       <SparklesIcon className="size-4" />
                       {t("DashboardIssuance.management.deployWithKora")}
@@ -1720,7 +1720,7 @@ export function TokenManagementWorkspace({
       />
 
       {isPending ? (
-        <div className="fixed right-4 bottom-4 z-30 inline-flex items-center gap-2 rounded-lg border border-border-default bg-white px-3 py-2 text-sm shadow-lg">
+        <div className="fixed right-4 bottom-4 z-30 inline-flex items-center gap-2 rounded-lg border border-border-default bg-surface-raised px-3 py-2 text-sm shadow-lg">
           <Loader2Icon className="h-4 w-4 animate-spin" />
           {t("DashboardIssuance.workspace.runningAction")}
         </div>
@@ -1751,7 +1751,7 @@ function ActionSelector({
             className={[
               "inline-flex h-10 items-center rounded-[12px] px-4 text-sm font-medium transition-colors",
               activeAction === action.id
-                ? "bg-primary text-white"
+                ? "bg-primary text-on-primary"
                 : "bg-fill text-primary hover:bg-fill-strong disabled:pointer-events-none disabled:opacity-50",
             ].join(" ")}
           >

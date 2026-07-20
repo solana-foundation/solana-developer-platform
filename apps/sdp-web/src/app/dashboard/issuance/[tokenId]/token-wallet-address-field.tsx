@@ -95,7 +95,7 @@ export function TokenWalletAddressField({
               setIsOpen(true);
             }
           }}
-          className="h-11 rounded-[12px] border-border-default bg-white pr-20 shadow-none"
+          className="h-11 rounded-[12px] border-border-default bg-surface-raised pr-20 shadow-none"
         />
         {value.trim() ? (
           <button
@@ -123,7 +123,7 @@ export function TokenWalletAddressField({
           </button>
         ) : null}
         {visibleWallets.length > 0 ? (
-          <div className="absolute z-20 mt-2 max-h-64 w-full overflow-auto rounded-[14px] border border-border-default bg-white py-2 shadow-[0_16px_40px_rgba(28,28,29,0.12)]">
+          <div className="absolute z-20 mt-2 max-h-64 w-full overflow-auto rounded-[14px] border border-border-default bg-surface-raised py-2 shadow-[0_16px_40px_rgba(28,28,29,0.12)]">
             {visibleWallets.map((wallet) => (
               <button
                 key={wallet.id}

@@ -3,8 +3,10 @@ import { expect, test } from "@playwright/test";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
+  bootstrapLocalWalletFixtures,
   createExternalSolanaAddress,
   ensureLinkedOrg,
+  getPlaywrightCustodyProvider,
   resolvePlaywrightProjectId,
   seedCounterpartyWithSolanaAccount,
   seedProjectCookie,
@@ -14,10 +16,8 @@ import {
   getBootstrapApiBaseUrl,
 } from "../support/local-issuance-bootstrap";
 
-const recurringPaymentsEnabled = process.env.NEXT_PUBLIC_PAYMENTS_RECURRING_ENABLED === "true";
-
 test.describe
-  .serial("dashboard recurring payments feature flag", () => {
+  .serial("dashboard recurring payments", () => {
     let bootstrapProjectId = "";
     let recurringPaymentId = "";
     let recurringCounterpartyName = "";
@@ -28,45 +28,37 @@ test.describe
     test.beforeAll(async ({ browser }) => {
       const session = await getPlaywrightAdminSession(browser);
       await ensureLinkedOrg(session.identity, { tier: "enterprise" });
-      if (recurringPaymentsEnabled) {
-        const fixtures = await bootstrapLocalPaymentFixtures({
-          identity: session.identity,
-          bearerToken: session.getBearerToken,
-          tier: "enterprise",
-        });
-        const api = createLocalApiClient(
-          getBootstrapApiBaseUrl(),
-          session.getBearerToken,
-          fixtures.projectId
-        );
+      const fixtures = await bootstrapLocalPaymentFixtures({
+        identity: session.identity,
+        bearerToken: session.getBearerToken,
+        tier: "enterprise",
+      });
+      const api = createLocalApiClient(
+        getBootstrapApiBaseUrl(),
+        session.getBearerToken,
+        fixtures.projectId
+      );
 
-        await api.post(`/v1/issuance/tokens/${fixtures.token.id}/mint`, {
-          mint: {
-            destination: fixtures.wallets.treasury.publicKey,
-            amount: "25",
-          },
-        });
+      await api.post(`/v1/issuance/tokens/${fixtures.token.id}/mint`, {
+        mint: {
+          destination: fixtures.wallets.treasury.publicKey,
+          amount: "25",
+        },
+      });
 
-        const suffix = randomUUID().slice(0, 8);
-        recurringAccountLabel = `E2E Subscription ${suffix}`;
-        const seededCounterparty = await seedCounterpartyWithSolanaAccount(api, {
-          displayName: `E2E Recurring ${suffix}`,
-          email: `e2e-recurring-${suffix}@example.com`,
-          accountLabel: recurringAccountLabel,
-          destinationAddress: fixtures.wallets.treasury.publicKey,
-        });
+      const suffix = randomUUID().slice(0, 8);
+      recurringAccountLabel = `E2E Subscription ${suffix}`;
+      const seededCounterparty = await seedCounterpartyWithSolanaAccount(api, {
+        displayName: `E2E Recurring ${suffix}`,
+        email: `e2e-recurring-${suffix}@example.com`,
+        accountLabel: recurringAccountLabel,
+        destinationAddress: fixtures.wallets.treasury.publicKey,
+      });
 
-        bootstrapProjectId = fixtures.projectId;
-        recurringCounterpartyName = seededCounterparty.displayName;
-        recurringWalletLabel =
-          fixtures.wallets.treasury.label ?? fixtures.wallets.treasury.publicKey;
-        recurringTokenSymbol = fixtures.token.symbol;
-      } else {
-        bootstrapProjectId = await resolvePlaywrightProjectId(
-          getBootstrapApiBaseUrl(),
-          session.getBearerToken
-        );
-      }
+      bootstrapProjectId = fixtures.projectId;
+      recurringCounterpartyName = seededCounterparty.displayName;
+      recurringWalletLabel = fixtures.wallets.treasury.label ?? fixtures.wallets.treasury.publicKey;
+      recurringTokenSymbol = fixtures.token.symbol;
       await session.page.close();
     });
 
@@ -74,37 +66,7 @@ test.describe
       await seedProjectCookie(page, bootstrapProjectId);
     });
 
-    test("hides recurring payments when the dashboard feature flag is disabled", async ({
-      page,
-    }) => {
-      test.skip(recurringPaymentsEnabled, "Covered by the feature-enabled recurring payment test");
-
-      await page.goto("/dashboard/payments");
-
-      await expect(page.getByRole("link", { name: "Recurring" })).toHaveCount(0);
-
-      await page.goto("/dashboard/payments/recurring");
-      await expect(
-        page.getByRole("heading", { name: "Recurring payments unavailable" })
-      ).toBeVisible();
-      await expect(page.getByText("No recurring payments yet.")).toHaveCount(0);
-
-      await page.goto("/dashboard/payments/recurring/prp_disabled_flag_test");
-      await expect(
-        page.getByRole("heading", { name: "Recurring payments unavailable" })
-      ).toBeVisible();
-
-      await page.goto("/dashboard/payments/recurring/create");
-      await expect(
-        page.getByRole("heading", { name: "Recurring payments unavailable" })
-      ).toBeVisible();
-    });
-
-    test("shows recurring payments when the dashboard feature flag is enabled", async ({
-      page,
-    }) => {
-      test.skip(!recurringPaymentsEnabled, "Requires NEXT_PUBLIC_PAYMENTS_RECURRING_ENABLED=true");
-
+    test("creates and displays a recurring payment", async ({ page }) => {
       await page.goto("/dashboard/payments");
 
       await expect(page.getByRole("link", { name: "Recurring" })).toBeVisible();
@@ -164,9 +126,9 @@ test.describe
       recurringPaymentId = page.url().split("/").pop() ?? "";
       expect(recurringPaymentId).toMatch(/^prp_/);
       await expect(page.getByText(recurringCounterpartyName)).toBeVisible();
-      await expect(page.getByText(`7.50 ${recurringTokenSymbol}`)).toBeVisible();
-      await expect(page.getByText("Pending activation")).toBeVisible();
-      await expect(page.getByText("Every day")).toBeVisible();
+      await expect(page.getByText(`7.50 ${recurringTokenSymbol}`, { exact: true })).toBeVisible();
+      await expect(page.getByText("Pending activation", { exact: true })).toBeVisible();
+      await expect(page.getByText("Every day", { exact: true })).toBeVisible();
 
       await page.getByRole("link", { name: "Back to recurring payments" }).click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
@@ -182,10 +144,11 @@ test.describe
         page.locator("main").getByRole("heading", { level: 1, name: "Recurring payment" })
       ).toBeVisible();
       await expect(page.getByRole("link", { name: "Back to recurring payments" })).toBeVisible();
-      await expect(page.getByText("Payment reference")).toBeVisible();
-      await expect(page.getByText("Billing setup")).toBeVisible();
-      await expect(page.getByText("Plan reference")).toBeVisible();
-      await expect(page.getByText("Authorization transaction")).toBeVisible();
+      await expect(page.getByText("Payment reference", { exact: true })).toBeVisible();
+      await expect(page.getByText("Billing interval", { exact: true })).toBeVisible();
+      await expect(page.getByText("Currency", { exact: true })).toBeVisible();
+      await expect(page.getByText("Funding wallet", { exact: true })).toBeVisible();
+      await expect(page.getByText("Receiving wallet", { exact: true })).toBeVisible();
       await expect(page.locator("main").getByText("Token mint", { exact: true })).toHaveCount(0);
       await expect(page.locator("main").getByText("Plan PDA", { exact: true })).toHaveCount(0);
       await expect(page.locator("main").getByText("Subscription PDA", { exact: true })).toHaveCount(
@@ -206,28 +169,29 @@ test.describe
 
     test.beforeAll(async ({ browser }) => {
       const session = await getPlaywrightAdminSession(browser);
-      const fixtures = await bootstrapLocalPaymentFixtures({
+      const walletBootstrap = await bootstrapLocalWalletFixtures({
         identity: session.identity,
         bearerToken: session.getBearerToken,
+        provider: getPlaywrightCustodyProvider(),
+        walletCount: 1,
+        fundSourceWallet: true,
+        fundSourceAmountSol: 0.05,
         tier: "enterprise",
       });
-      const api = createLocalApiClient(
+      const projectId = await resolvePlaywrightProjectId(
         getBootstrapApiBaseUrl(),
-        session.getBearerToken,
-        fixtures.projectId
+        session.getBearerToken
       );
+      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
+      const sourceWallet = walletBootstrap.wallets[0];
+      if (!sourceWallet) {
+        throw new Error("Payment bootstrap did not create a source wallet");
+      }
 
-      await api.post(`/v1/issuance/tokens/${fixtures.token.id}/mint`, {
-        mint: {
-          destination: fixtures.wallets.treasury.publicKey,
-          amount: "25",
-        },
-      });
-
-      sourceWalletLabel = fixtures.wallets.treasury.label ?? fixtures.wallets.treasury.publicKey;
-      sourceWalletId = fixtures.wallets.treasury.walletId;
-      transferTokenSymbol = fixtures.token.symbol;
-      bootstrapProjectId = fixtures.projectId;
+      sourceWalletLabel = sourceWallet.label ?? sourceWallet.publicKey;
+      sourceWalletId = sourceWallet.walletId;
+      transferTokenSymbol = "SOL";
+      bootstrapProjectId = projectId;
 
       destinationAddress = await createExternalSolanaAddress();
       const suffix = randomUUID().slice(0, 8);
@@ -285,7 +249,7 @@ test.describe
       await app.getByRole("button", { name: "Asset" }).click();
       await page.getByRole("button", { name: transferTokenSymbol, exact: true }).click();
 
-      await app.getByLabel("Amount", { exact: true }).fill("1");
+      await app.getByLabel("Amount", { exact: true }).fill("0.01");
       await expect(next).toBeEnabled({ timeout: 120_000 });
       await next.click();
 
@@ -302,6 +266,6 @@ test.describe
 
       const transferRow = app.locator("tbody tr").filter({ hasText: destinationAddress }).first();
       await expect(transferRow).toBeVisible({ timeout: 120_000 });
-      await expect(transferRow).toContainText("1.00");
+      await expect(transferRow).toContainText("0.01");
     });
   });

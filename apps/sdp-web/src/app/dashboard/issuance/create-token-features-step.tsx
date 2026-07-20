@@ -82,7 +82,7 @@ export function CreateTokenFeaturesStep({
                 value={draft.signingWalletId}
                 onChange={(event) => onSigningWalletChange(event.currentTarget.value)}
                 required
-                className="h-12 w-full rounded-[14px] border border-border-default bg-white px-4 text-base text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
+                className="h-12 w-full rounded-[14px] border border-border-default bg-surface-raised px-4 text-base text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
               >
                 <option value="" disabled>
                   {t("DashboardIssuance.create.selectSignerWallet")}
@@ -188,7 +188,7 @@ function AccessControlOption({
       onClick={onSelect}
       className={[
         "rounded-3xl border p-5 text-left transition-colors",
-        isSelected ? "border-primary bg-fill-subtle" : "border-border-default bg-white",
+        isSelected ? "border-primary bg-fill-subtle" : "border-border-default bg-surface-raised",
         "cursor-pointer hover:bg-fill-subtle",
       ].join(" ")}
     >
