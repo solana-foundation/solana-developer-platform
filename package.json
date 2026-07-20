@@ -1,6 +1,6 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.41.0",
+  "version": "0.42.0",
   "private": true,
   "packageManager": "pnpm@10.16.0",
   "engines": {
@@ -19,7 +19,8 @@
       "postcss": "^8.5.10"
     },
     "patchedDependencies": {
-      "@solana/mosaic-sdk@0.1.1": "patches/@solana__mosaic-sdk@0.1.1.patch"
+      "@solana/mosaic-sdk@0.1.1": "patches/@solana__mosaic-sdk@0.1.1.patch",
+      "next-themes@0.4.6": "patches/next-themes@0.4.6.patch"
     }
   },
   "scripts": {
