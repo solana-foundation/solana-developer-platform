@@ -14,12 +14,12 @@ import { resolveTemplateConfig, type TemplateOverrideError } from "../templates/
 import { ASSET_CAPABILITIES } from "./capabilities";
 import { ADVANCED_SETTINGS, findIncompatibleExtensionPair, type SettingKey } from "./settings";
 
-// Placeholder for authority-valued extensions (resolved at deploy time).
-const PLACEHOLDER_AUTHORITY = "11111111111111111111111111111111";
-
 export interface ExtensionAuthorities {
   permanentDelegate?: string;
 }
+
+// Authority-valued settings: resolver injects real wallet; placeholder would brick token.
+export const AUTHORITY_VALUED_SETTINGS: readonly SettingKey[] = ["permanentDelegate"];
 
 export interface ResolveSettingsOptions {
   authorities?: ExtensionAuthorities;
@@ -35,12 +35,7 @@ export interface SettingsResolution {
   errors: TemplateOverrideError[];
 }
 
-// Coerce to a FINITE number, else the fallback. The API path validates params
-// (coerceParamNumber) before reaching here, but resolveSettingsToExtensions is
-// exported and callable directly, so both branches guard with Number.isFinite —
-// NaN and ±Infinity (including string forms like "Infinity") fall back rather
-// than land in an immutable, post-deploy Token-2022 extension (e.g. a
-// scaledUiAmount.multiplier of Infinity that would display every balance as ∞).
+// Coerce to finite number else fallback; rejects NaN/±Infinity before post-deploy fields.
 function toNumber(value: string | number | undefined, fallback: number): number {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : fallback;
@@ -70,7 +65,10 @@ function toOverride(
     case "freezeTransfers":
       return { pausable: {} };
     case "permanentDelegate":
-      return { permanentDelegate: authorities.permanentDelegate ?? PLACEHOLDER_AUTHORITY };
+      // Authority-valued: emit only with real wallet; omit to avoid bricking.
+      return authorities.permanentDelegate
+        ? { permanentDelegate: authorities.permanentDelegate }
+        : {};
     case "scaledUiAmount":
       return { scaledUiAmount: { multiplier: toNumber(params.multiplier, 1) } };
     case "transferFee":
@@ -85,11 +83,7 @@ function toOverride(
     case "nonTransferable":
       return { nonTransferable: true };
     case "transferHook": {
-      // Unlike permanentDelegate (whose placeholder resolves to the custody wallet
-      // at deploy), a hook program id has no valid default — the system-program
-      // placeholder would brick every transfer. Omit the extension when it's
-      // absent rather than emit a broken one. The API path rejects a missing
-      // programId upstream (validateSettingParams); this is the direct-caller backstop.
+      // No valid default; omit when absent to avoid bricking transfers.
       const programId = toStringValue(params.programId, "");
       return programId ? { transferHook: { programId } } : {};
     }
@@ -98,12 +92,8 @@ function toOverride(
   }
 }
 
-// Resolve a selection into a deployment-ready extension config (plus decimals,
-// allowlist, and any template errors). The base template comes from the asset
-// type's capability — the profile is the source of truth. Unknown setting keys
-// are skipped defensively (the caller validates them against the capability
-// first). Pass the controlled wallet in `options.authorities` so authority-valued
-// extensions resolve to a real address rather than a placeholder.
+// Resolve to deployment-ready config (extensions, decimals, allowlist, errors).
+// Base template from capability; unknown keys skipped; inject authorities for real wallets.
 export function resolveSettingsToExtensions(
   category: AssetCategory,
   type: string,
@@ -142,7 +132,7 @@ export function resolveSettingsToExtensions(
     options.decimals
   );
 
-  // Pairwise extension conflict check (template-level check can't catch this).
+  // Catch pairwise extension conflicts not covered by template checks.
   const errors = [...result.errors];
   const conflict = findIncompatibleExtensionPair(Object.keys(extensions) as TokenExtensionName[]);
   if (conflict) {

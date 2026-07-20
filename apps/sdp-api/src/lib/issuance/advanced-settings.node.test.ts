@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   getSelectedSettings,
   resolveAdvancedSettings,
+  selectedAuthorityValuedSettings,
   stampAdvancedSettingsVersion,
   validateAdvancedSettings,
 } from "./advanced-settings";
@@ -104,6 +105,31 @@ describe("advanced settings persistence helpers", () => {
     it("returns an empty object when there is no selection", () => {
       expect(getSelectedSettings({ asset: { name: "X" } })).toEqual({});
       expect(getSelectedSettings({})).toEqual({});
+    });
+  });
+
+  describe("selectedAuthorityValuedSettings", () => {
+    it("flags permanentDelegate — its authority needs a real signing wallet", () => {
+      // create.ts rejects this when no signer resolves, so the resolver never emits a
+      // placeholder authority into an immutable extension.
+      const metadata: IssuanceMetadata = {
+        settings: { selected: { freezeTransfers: {}, permanentDelegate: {} } },
+      };
+      expect(selectedAuthorityValuedSettings(metadata)).toEqual(["permanentDelegate"]);
+    });
+
+    it("returns empty for selections with no authority-valued setting", () => {
+      const metadata: IssuanceMetadata = {
+        settings: {
+          selected: { freezeTransfers: {}, transferFee: { params: { basisPoints: 10 } } },
+        },
+      };
+      expect(selectedAuthorityValuedSettings(metadata)).toEqual([]);
+    });
+
+    it("returns empty when there is no selection", () => {
+      expect(selectedAuthorityValuedSettings({ asset: { name: "X" } })).toEqual([]);
+      expect(selectedAuthorityValuedSettings({})).toEqual([]);
     });
   });
 

@@ -5,6 +5,7 @@
 
 import {
   ADVANCED_SETTINGS_VERSION,
+  AUTHORITY_VALUED_SETTINGS,
   type ParamValidationError,
   resolveSettingsToExtensions,
   type SettingValidationError,
@@ -32,6 +33,11 @@ function readSettings(metadata: Metadata): SettingsNamespace | undefined {
 export function getSelectedSettings(metadata: Metadata): Record<string, SelectedSetting> {
   const settings = readSettings(metadata);
   return (settings?.selected as Record<string, SelectedSetting> | undefined) ?? {};
+}
+
+export function selectedAuthorityValuedSettings(metadata: Metadata): string[] {
+  const selected = getSelectedSettings(metadata);
+  return AUTHORITY_VALUED_SETTINGS.filter((key) => key in selected);
 }
 
 export function validateAdvancedSettings(

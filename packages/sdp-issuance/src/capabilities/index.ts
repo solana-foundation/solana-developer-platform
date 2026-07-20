@@ -24,6 +24,7 @@ import {
 } from "./settings";
 
 export {
+  AUTHORITY_VALUED_SETTINGS,
   type ExtensionAuthorities,
   type ResolveSettingsOptions,
   resolveSettingsToExtensions,
@@ -40,7 +41,7 @@ export {
 export type { SettingKey, TemplateOverrideError };
 export { ADVANCED_SETTINGS, ASSET_CAPABILITIES, SETTING_KEYS };
 
-// Drop incompatible settings; sanitizes persisted selections on load.
+// Drop conflicting settings; sanitizes persisted selections.
 export function pruneIncompatibleSettings(settingKeys: readonly string[]): SettingKey[] {
   const kept: SettingKey[] = [];
   const keptExtensions = new Set<string>();
@@ -106,8 +107,7 @@ export function getRecommendedSettings(category: AssetCategory, type: string): S
   );
 }
 
-// Settings an asset type forces on and does not let the manager deselect. The
-// editor renders these checked-and-disabled; persistence keeps them selected.
+// Settings forced on (checked-and-disabled); undeselectable.
 export function getLockedSettings(category: AssetCategory, type: string): SettingKey[] {
   const capability = resolveAssetCapability(category, type);
   if (!capability) {
@@ -116,9 +116,7 @@ export function getLockedSettings(category: AssetCategory, type: string): Settin
   return SETTING_KEYS.filter((key) => capability.settings[key] === "locked");
 }
 
-// Whether an asset type permits a setting at all (locked, recommended, or
-// available). The single gate the persistence/validation layer (C) calls to
-// reject an unsupported selection early.
+// Single gate to check if an asset type permits a setting (locked/recommended/available).
 export function isSettingAllowed(
   category: AssetCategory,
   type: string,
@@ -189,18 +187,12 @@ export interface ParamValidationError {
   settingKey: string;
   paramKey: string;
   reason: ParamRejectionReason;
-  // The catalog bound that was violated (below_min ⇒ min, above_max ⇒ max), so
-  // callers can render a precise message without re-reading the catalog. Omitted
-  // for the non-range reasons.
+  // Violated bound (min/max); omitted for non-range reasons.
   limit?: number;
 }
 
-// Parse a param value to a FINITE number the way the resolver's toNumber does
-// (number as-is, non-empty numeric string coerced), but return null instead of a
-// fallback so the caller can reject it rather than silently defaulting. Both
-// branches use Number.isFinite so NaN and ±Infinity are rejected — including the
-// string forms ("Infinity", "1e999"), which Number.isNaN alone would let through
-// and which would otherwise pass an unbounded field like scaledUiAmount.multiplier.
+// Coerce to finite number; return null to let caller reject (not silently default).
+// Rejects NaN, ±Infinity, and string forms like "Infinity" before post-deploy immutable fields.
 function coerceParamNumber(value: string | number): number | null {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
@@ -211,9 +203,7 @@ function coerceParamNumber(value: string | number): number | null {
   return null;
 }
 
-// Reason a single supplied param value violates its ParamFieldSpec, or null if
-// it is within bounds. `undefined` values are skipped by the caller (presence is
-// the editor/resolver's concern, not a bound).
+// Check param against bounds; undefined skipped (presence is editor/resolver's concern).
 function checkParamValue(
   spec: ParamFieldSpec,
   value: string | number
@@ -238,13 +228,8 @@ function checkParamValue(
   return null;
 }
 
-// Validate expert-override param VALUES against the catalog's ParamFieldSpec —
-// the server-side counterpart to the editor's advisory HTML min/max attributes.
-// A programmatic caller (or crafted payload) can send basisPoints: -1 or 99999,
-// which the client bounds do not stop; those values otherwise flow through the
-// resolver's toNumber() straight into the deploy config. Only KNOWN settings'
-// supplied params are checked — unknown keys are reported by the key-level check,
-// and an absent param's presence is the editor/resolver's concern, not a bound.
+// Validate param values; server-side gate for expert overrides that bypass client bounds.
+// Unknown settings skipped (key-level check handles them); presence is editor/resolver's concern.
 export function validateSettingParams(
   selected: Record<string, SelectedSetting>
 ): ParamValidationError[] {
@@ -258,9 +243,7 @@ export function validateSettingParams(
     const params = selection?.params ?? {};
     for (const spec of specs) {
       const value = params[spec.key];
-      // Absent or blank: a required param is rejected (its resolver fallback — e.g.
-      // transferHook.programId → the system program — would produce a permanently
-      // broken token), an optional one just skips bounds.
+      // Absent/blank required param is rejected; optional param skips bounds.
       if (value === undefined || (typeof value === "string" && value.trim() === "")) {
         if (spec.required) {
           errors.push({ settingKey, paramKey: spec.key, reason: "missing" });
@@ -276,8 +259,7 @@ export function validateSettingParams(
   return errors;
 }
 
-// Dev-time assertion: registry consistency — every ASSET_TYPES pair has a capability,
-// all settings exist, locked settings cover all template-forced extensions.
+// Dev-time assertion: registry consistency (every ASSET_TYPES pair, all settings, locked coverage).
 if (process.env.NODE_ENV !== "production") {
   const seen = new Set<string>();
 

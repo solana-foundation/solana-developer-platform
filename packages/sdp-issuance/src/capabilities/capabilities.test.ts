@@ -25,8 +25,7 @@ import {
 
 describe("advanced settings capability registry", () => {
   it("loads without throwing the dev-time completeness assertion", () => {
-    // Importing ./index runs the assertion (NODE_ENV !== 'production'); if the
-    // registry drifted, the import above would already have thrown.
+    // Importing ./index runs the dev-time assertion; drift would throw.
     assert.ok(ASSET_CAPABILITIES.length > 0);
     assert.ok(SETTING_KEYS.length > 0);
   });
@@ -143,8 +142,7 @@ describe("advanced settings capability registry", () => {
   });
 
   it("rejects out-of-range values sent as numeric strings, not just numbers", () => {
-    // The selection schema permits string OR number; a crafted "99999" must not
-    // slip past the bound the same way the number 99999 doesn't.
+    // String "99999" bounds-checked the same as number 99999.
     assert.deepEqual(validateSettingParams({ transferFee: { params: { basisPoints: "99999" } } }), [
       { settingKey: "transferFee", paramKey: "basisPoints", reason: "above_max", limit: 10_000 },
     ]);
@@ -268,9 +266,7 @@ describe("advanced settings capability registry", () => {
   });
 
   it("falls back to a safe default when a direct caller bypasses the validator with a non-finite param", () => {
-    // resolveSettingsToExtensions is exported and callable without validateSettingParams,
-    // so its toNumber must not pass a non-finite value into an immutable extension. A
-    // multiplier of Infinity (number or "Infinity" string) resolves to the default 1.
+    // Direct callers can bypass validator; toNumber must guard against non-finite immutable fields.
     for (const bad of [Number.POSITIVE_INFINITY, "Infinity", "1e999"] as const) {
       const result = resolveSettingsToExtensions("generic", "generic", {
         scaledUiAmount: { params: { multiplier: bad } },
@@ -290,9 +286,7 @@ describe("advanced settings capability registry", () => {
   });
 
   it("omits transferHook rather than emit a bricking placeholder when programId is absent", () => {
-    // A direct caller (bypassing validateSettingParams) that selects transferHook
-    // without a programId must not get the system-program placeholder, which would
-    // fail every transfer. The extension is dropped instead of shipped broken.
+    // Direct caller bypassing validator; missing programId drops extension instead of bricking transfers.
     const missing = resolveSettingsToExtensions("generic", "generic", {
       transferHook: { params: {} },
     });
@@ -329,10 +323,15 @@ describe("advanced settings capability registry", () => {
     assert.equal(result.requiresAllowlist, true);
   });
 
+  it("omits permanentDelegate when no authority is provided (never a placeholder)", () => {
+    // Authority-valued: no wallet ⇒ drop extension, never a bricking placeholder.
+    const result = resolveSettingsToExtensions("generic", "generic", { permanentDelegate: {} });
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.extensions?.permanentDelegate, undefined);
+  });
+
   it("surfaces a template error for a selection the substrate can't build", () => {
-    // Bypassing the capability check, a transferFee on the stablecoin template
-    // (which doesn't offer it) is rejected by the resolver — the production
-    // safety net behind the dev-time assertion.
+    // Bypassing capability check; resolver catches unsupported extension on template.
     const result = resolveSettingsToExtensions("stablecoin", "fiat_backed", {
       transferFee: { params: { basisPoints: 10, maxFee: "1" } },
     });
@@ -346,8 +345,7 @@ describe("advanced settings capability registry", () => {
   });
 
   it("rejects two extensions that cannot coexist on one mint", () => {
-    // interestBearing + scaledUiAmount both define the raw→UI amount conversion,
-    // so they conflict even though each is individually valid on a generic asset.
+    // Both define raw→UI amount conversion; conflict despite being individually valid.
     assert.deepEqual(getConflictingSettingKeys("interestBearing"), ["scaledUiAmount"]);
     assert.deepEqual(getConflictingSettingKeys("scaledUiAmount"), ["interestBearing"]);
     // nonTransferable can't pair with a fee or a hook (no transfers to act on).
@@ -375,8 +373,7 @@ describe("advanced settings capability registry", () => {
   });
 
   it("prunes a conflicting pair to a valid subset (keeping the earlier one)", () => {
-    // Simulates re-validating a stale persisted selection with both conflicting
-    // extensions checked: the earlier-listed one is kept, the later dropped.
+    // Stale persisted selection; earlier-listed kept, later dropped.
     assert.deepEqual(pruneIncompatibleSettings(["interestBearing", "scaledUiAmount"]), [
       "interestBearing",
     ]);

@@ -18,16 +18,16 @@ export const ADVANCED_SETTINGS = {
   },
   permanentDelegate: {
     group: "controls",
-    labelKey: config("permanentDelegate"), // NEW
-    descriptionKey: desc("permanentDelegate"), // NEW
+    labelKey: config("permanentDelegate"),
+    descriptionKey: desc("permanentDelegate"),
     extensions: ["permanentDelegate"],
     actions: ["seize", "force_burn"],
     signing: "custodial-or-wallet",
   },
   transferFee: {
     group: "economics",
-    labelKey: config("transferFee"), // NEW
-    descriptionKey: desc("transferFee"), // NEW
+    labelKey: config("transferFee"),
+    descriptionKey: desc("transferFee"),
     extensions: ["transferFee"],
     actions: ["update_authority"],
     signing: "custodial-or-wallet",
@@ -35,8 +35,8 @@ export const ADVANCED_SETTINGS = {
       {
         key: "basisPoints",
         kind: "number",
-        labelKey: config("transferFeeBasisPoints"), // NEW
-        hintKey: config("transferFeeBasisPointsHint"), // NEW
+        labelKey: config("transferFeeBasisPoints"),
+        hintKey: config("transferFeeBasisPointsHint"),
         min: 0,
         max: 10_000,
         required: true,
@@ -44,15 +44,15 @@ export const ADVANCED_SETTINGS = {
       {
         key: "maxFee",
         kind: "string",
-        labelKey: config("transferFeeMaxFee"), // NEW
+        labelKey: config("transferFeeMaxFee"),
         defaultValue: "0",
       },
     ],
   },
   interestBearing: {
     group: "economics",
-    labelKey: config("interestBearing"), // NEW
-    descriptionKey: desc("interestBearing"), // NEW
+    labelKey: config("interestBearing"),
+    descriptionKey: desc("interestBearing"),
     extensions: ["interestBearing"],
     actions: ["update_authority"],
     signing: "custodial-or-wallet",
@@ -60,12 +60,10 @@ export const ADVANCED_SETTINGS = {
       {
         key: "rate",
         kind: "number",
-        labelKey: config("interestBearingRate"), // NEW
-        hintKey: config("interestBearingRateHint"), // NEW
-        // Rate is stored on-chain as a Token-2022 i16 basis-points value
-        // (InterestBearingConfig.current_rate), so the valid range is the full
-        // signed-16-bit span. Negative rates are intentional (demurrage). Bounding
-        // here rejects values that would overflow the i16 before deploy.
+        labelKey: config("interestBearingRate"),
+        hintKey: config("interestBearingRateHint"),
+        // On-chain i16 basis-points value; valid range is full signed-16-bit span.
+        // Negative rates are valid (demurrage); bounds reject pre-deploy overflow.
         min: -32_768,
         max: 32_767,
         required: true,
@@ -74,8 +72,8 @@ export const ADVANCED_SETTINGS = {
   },
   scaledUiAmount: {
     group: "economics",
-    labelKey: config("scaledUiAmount"), // NEW
-    descriptionKey: desc("scaledUiAmount"), // NEW
+    labelKey: config("scaledUiAmount"),
+    descriptionKey: desc("scaledUiAmount"),
     extensions: ["scaledUiAmount"],
     actions: ["update_authority"],
     signing: "custodial-or-wallet",
@@ -84,11 +82,10 @@ export const ADVANCED_SETTINGS = {
         key: "multiplier",
         kind: "number",
         // biome-ignore lint/security/noSecrets: i18n message key, not a secret.
-        labelKey: config("scaledUiAmountMultiplier"), // NEW
+        labelKey: config("scaledUiAmountMultiplier"),
         defaultValue: 1,
-        // The multiplier is an on-chain f64 scaling factor; it must be strictly
-        // positive. A multiplier of 0 would zero every displayed balance and a
-        // negative one is meaningless, so bound it to (0, ∞) — exclusive at 0.
+        // On-chain f64 scaling; must be strictly positive (0 would zero balances).
+        // Bound to (0, ∞) exclusive at 0.
         min: 0,
         exclusiveMin: true,
       },
@@ -96,16 +93,16 @@ export const ADVANCED_SETTINGS = {
   },
   nonTransferable: {
     group: "controls",
-    labelKey: config("nonTransferable"), // NEW
-    descriptionKey: desc("nonTransferable"), // NEW
+    labelKey: config("nonTransferable"),
+    descriptionKey: desc("nonTransferable"),
     extensions: ["nonTransferable"],
     actions: [],
     signing: "custodial-only",
   },
   transferHook: {
     group: "controls",
-    labelKey: config("transferHook"), // NEW
-    descriptionKey: desc("transferHook"), // NEW
+    labelKey: config("transferHook"),
+    descriptionKey: desc("transferHook"),
     extensions: ["transferHook"],
     actions: ["update_authority"],
     signing: "custodial-or-wallet",
@@ -113,7 +110,7 @@ export const ADVANCED_SETTINGS = {
       {
         key: "programId",
         kind: "string",
-        labelKey: config("transferHookProgramId"), // NEW
+        labelKey: config("transferHookProgramId"),
         required: true,
       },
     ],
