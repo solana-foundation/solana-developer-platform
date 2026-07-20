@@ -109,6 +109,10 @@ interface AdvancedSettingsEditorProps {
   onCapacitiesChange: (next: Record<CapacityKey, boolean>) => void;
   // Reveal required-but-empty param errors (after a failed Continue attempt).
   showErrors?: boolean;
+  // Lock the on-chain settings (a deployed token: extensions are immutable) while
+  // leaving the off-chain capacities editable. Also hides the Basic preset view,
+  // whose combos bundle on-chain settings that can no longer change.
+  settingsReadOnly?: boolean;
   disabled?: boolean;
 }
 
@@ -231,10 +235,11 @@ export function AdvancedSettingsEditor({
   capacities,
   onCapacitiesChange,
   showErrors,
+  settingsReadOnly,
   disabled,
 }: AdvancedSettingsEditorProps) {
   const t = useTranslations();
-  const [mode, setMode] = useState<Mode>("basic");
+  const [mode, setMode] = useState<Mode>(settingsReadOnly ? "detailed" : "basic");
 
   if (!category || !type) {
     return null;
@@ -242,6 +247,12 @@ export function AdvancedSettingsEditor({
 
   const permanent = listSettingsForType(category, type);
   const expert = mode === "expert";
+  // With on-chain settings locked (a deployed token), the Basic preset view can't
+  // function — its combos bundle on-chain settings that can no longer change — so
+  // offer only Detailed and Expert.
+  const availableModes: Mode[] = settingsReadOnly
+    ? ["detailed", "expert"]
+    : ["basic", "detailed", "expert"];
 
   // Combos (Basic view). Toggling one enables/disables its underlying settings
   // and capacities; deselecting keeps items still needed by another active combo.
@@ -322,19 +333,20 @@ export function AdvancedSettingsEditor({
 
   return (
     <div className="rounded-2xl border border-border-default bg-white p-5">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0">
           <p className="text-base font-medium text-primary">
             {t("DashboardIssuance.config.advancedSettingsTitle")}
           </p>
         </div>
-        {/* Basic / Detailed / Expert toggle (flat segmented control — no shadow). */}
+        {/* Basic / Detailed / Expert toggle (flat segmented control — no shadow).
+            Full-width on mobile, compact right-aligned control from sm up. */}
         <div
-          className="inline-flex shrink-0 rounded-lg border border-border-default bg-fill-subtle p-0.5"
+          className="flex w-full shrink-0 rounded-lg border border-border-default bg-fill-subtle p-0.5 sm:inline-flex sm:w-auto"
           role="tablist"
           aria-label={t("DashboardIssuance.config.settingsModeAria")}
         >
-          {(["basic", "detailed", "expert"] as Mode[]).map((m) => {
+          {availableModes.map((m) => {
             const Icon = m === "basic" ? Briefcase : m === "detailed" ? ListChecks : GraduationCap;
             const labelKey: MessageKey =
               m === "basic"
@@ -350,7 +362,7 @@ export function AdvancedSettingsEditor({
                 aria-selected={mode === m}
                 onClick={() => setMode(m)}
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                  "inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors sm:flex-none",
                   mode === m ? "bg-white text-primary" : "text-tertiary hover:text-primary"
                 )}
               >
@@ -366,7 +378,6 @@ export function AdvancedSettingsEditor({
         // Basic · curated multi-select presets. Picking one enables its
         // underlying settings; conflicting presets are blocked, same as Detailed.
         <section className="mt-5">
-          <p className="text-xs text-tertiary">{t("DashboardIssuance.config.comboIntro")}</p>
           {hasCustomSelection ? (
             <p className="mt-3 rounded-lg border border-border-default bg-fill-subtle px-3 py-2 text-[11px] text-secondary">
               {t("DashboardIssuance.config.comboCustomSelection")}
@@ -451,7 +462,11 @@ export function AdvancedSettingsEditor({
               )}
             </p>
             <p className="mt-0.5 text-xs text-tertiary">
-              {t("DashboardIssuance.config.settingsPermanentSubtitle")}
+              {t(
+                settingsReadOnly
+                  ? "DashboardIssuance.config.settingsPermanentLockedSubtitle"
+                  : "DashboardIssuance.config.settingsPermanentSubtitle"
+              )}
             </p>
             <div className="mt-3 grid gap-2.5">
               {permanent.map((entry) => (
@@ -461,7 +476,7 @@ export function AdvancedSettingsEditor({
                   selection={settings[entry.key]}
                   expert={expert}
                   showErrors={showErrors}
-                  disabled={disabled}
+                  disabled={disabled || settingsReadOnly}
                   conflictWith={conflictBlocker(entry.key)}
                   onToggle={(enabled) => setEnabled(entry, enabled)}
                   onParam={setParam}
