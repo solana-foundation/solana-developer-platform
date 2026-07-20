@@ -53,8 +53,11 @@ export class KmsEnvelopeCipher {
     if (!ciphertext.startsWith(PREFIX)) {
       throw new EnvelopeCipherError("ciphertext is not a v2 envelope");
     }
-    const [, wrappedPart, blobPart] = ciphertext.split(".");
-    if (!wrappedPart || !blobPart) throw new EnvelopeCipherError("malformed v2 envelope");
+    const parts = ciphertext.split(".");
+    const [, wrappedPart, blobPart] = parts;
+    if (parts.length !== 3 || !wrappedPart || !blobPart) {
+      throw new EnvelopeCipherError("malformed v2 envelope");
+    }
     const dek = await this.kms.decrypt(wrappedPart, `org:${orgId}`);
     const key = await crypto.subtle.importKey("raw", dek, "AES-GCM", false, ["decrypt"]);
     const blob = unb64url(blobPart);

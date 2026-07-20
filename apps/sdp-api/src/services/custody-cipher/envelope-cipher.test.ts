@@ -35,4 +35,10 @@ describe("KmsEnvelopeCipher", () => {
     const cipher = new KmsEnvelopeCipher({ kms: fakeKms() });
     await expect(cipher.decrypt("org1", "not-v2")).rejects.toThrow(/v2/i);
   });
+
+  it("rejects a v2 envelope with the wrong number of segments", async () => {
+    const cipher = new KmsEnvelopeCipher({ kms: fakeKms() });
+    await expect(cipher.decrypt("org1", "v2.only-two")).rejects.toThrow(/malformed/i);
+    await expect(cipher.decrypt("org1", "v2.a.b.c")).rejects.toThrow(/malformed/i);
+  });
 });

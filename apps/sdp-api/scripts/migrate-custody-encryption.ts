@@ -48,9 +48,10 @@ async function migrateCustodyConfigs(env: Env): Promise<number> {
                encryption_version = 'sdp-custody-kms-v2',
                updated_at = datetime('now')
            WHERE id = ?
-             AND encryption_version = 'sdp-custody-encryption-v1'`
+             AND encryption_version = 'sdp-custody-encryption-v1'
+             AND config_encrypted = ?`
         )
-        .bind(reEncrypted, row.id)
+        .bind(reEncrypted, row.id, row.config_encrypted)
         .run();
 
       if (updated > 0) {
