@@ -61,7 +61,9 @@ export async function listPaymentRequests(c: AppContext) {
     offset: (page - 1) * pageSize,
   });
 
-  const reconciledRows = await Promise.all(rows.map((row) => reconcilePaymentRequest(c.env, row)));
+  const reconciledRows = await Promise.all(
+    rows.map((row) => reconcilePaymentRequest(c.env, row, { bestEffort: true }))
+  );
 
   const response: ListPaymentRequestsResponse = {
     paymentRequests: reconciledRows.map(mapPaymentRequest),

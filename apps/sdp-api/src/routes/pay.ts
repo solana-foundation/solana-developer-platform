@@ -49,7 +49,7 @@ pay.get("/:token", async (c) => {
   if (!existing) {
     throw notFound("Payment request");
   }
-  const request = await reconcilePaymentRequest(c.env, existing);
+  const request = await reconcilePaymentRequest(c.env, existing, { bestEffort: true });
 
   const expired = isPaymentRequestExpired(request.expires_at);
   const status = expired && request.status === "awaiting_payment" ? "expired" : request.status;
@@ -86,7 +86,7 @@ pay.post("/:token/tx", async (c) => {
   if (!existing) {
     throw notFound("Payment request");
   }
-  const request = await reconcilePaymentRequest(c.env, existing);
+  const request = await reconcilePaymentRequest(c.env, existing, { bestEffort: false });
   if (request.status !== "awaiting_payment" || isPaymentRequestExpired(request.expires_at)) {
     throw badRequest("Payment request is no longer payable");
   }
@@ -130,7 +130,7 @@ pay.post("/:token/tx", async (c) => {
         destination: recipient,
         mint: assertValidAddress(request.token, "token"),
         amount: request.amount,
-        ataRentPayer: payerSigner,
+        ataRentPayer: feePayer,
       });
     instructions = [createDestinationAtaInstruction, withReference(transferInstruction)];
   }

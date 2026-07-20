@@ -2,7 +2,7 @@ import { type createRpc, getAccountInfo } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
-import type { Address, TransactionSigner } from "@solana/kit";
+import { type Address, createNoopSigner, type TransactionSigner } from "@solana/kit";
 import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
@@ -286,7 +286,7 @@ export async function buildSplTransferInstructions(
     destination: Address;
     mint: Address;
     amount: string;
-    ataRentPayer: TransactionSigner;
+    ataRentPayer: Address;
   }
 ) {
   const tokenProgram = await resolveMintTokenProgram(rpc, input.mint);
@@ -309,7 +309,7 @@ export async function buildSplTransferInstructions(
 
   return {
     createDestinationAtaInstruction: getCreateAssociatedTokenIdempotentInstruction({
-      payer: input.ataRentPayer,
+      payer: createNoopSigner(input.ataRentPayer),
       ata: destinationTokenAccount,
       owner: input.destination,
       mint: input.mint,
