@@ -1,102 +1,68 @@
-// Advanced Settings: the manager-facing "advanced" token configuration layer
-// that sits on top of an Asset Profile (see asset-profiles.ts) and, at deploy,
-// drives the on-chain Token-2022 extension config.
-//
-// This file holds SHAPES ONLY. The concrete catalog data, the per-asset-type
-// capability registry, the lookups, and the settings->extension resolver live
-// in @sdp/issuance/capabilities — the package that is allowed to import both
-// these shapes and the template resolver (resolveTemplateConfig). Placing the
-// logic here instead would force @sdp/types to import @sdp/issuance, which
-// already imports @sdp/types, i.e. a dependency cycle. Shapes stay in the leaf;
-// logic lives where its dependencies are.
-//
+// Manager-facing token configuration layer on top of Asset Profiles, drives on-chain Token-2022 extension config.
+// SHAPES ONLY — logic lives in @sdp/issuance/capabilities to avoid circular dependency (@sdp/types imports @sdp/issuance, which imports @sdp/types).
 // See docs/decisions/0002-asset-advanced-settings.md.
 
 import type { AssetCategory } from "./asset-profiles";
 import type { TokenExtensionName, TokenTemplate, TokenTransactionType } from "./tokens";
 
-// Whether a setting is forced on, on by default, opt-in, or forbidden for an
-// asset type. "locked" is on and non-deselectable: the base template's guarded
-// builder always applies the extension (e.g. permanentDelegate + pausable on a
-// stablecoin), so the editor renders it checked-and-disabled rather than as an
-// optional box the manager can untick with no on-chain effect.
+// "locked" = enforced by base template (checked-disabled UI); others = opt-in/default/forbidden.
 export type SettingAvailability = "locked" | "recommended" | "available" | "unsupported";
 
-// Who signs the transaction that realizes a setting. "custodial-or-wallet"
-// means the platform's custody wallet signs by default and the manager can fall
-// back to signing in their own wallet extension when no custody wallet holds the
-// required authority; "custodial-only" has no self-sign fallback.
+// "custodial-or-wallet" = platform signs by default, manager can self-sign if no custody authority; "custodial-only" = platform only.
 export type SettingSigning = "custodial-only" | "custodial-or-wallet";
 
-// Manager-friendly grouping used by the settings editor UI (ticket E). The
-// catalog is the single source of grouping so the UI never hardcodes it.
+// UI grouping — sourced from catalog, never hardcoded in editor.
 export type SettingGroup = "economics" | "compliance" | "controls";
 
-// Descriptor for one expert-override parameter of a setting (e.g. transfer-fee
-// basis points). B declares the descriptor so the editor (E) can render the
-// field and persistence (C) can attach runtime validation; the app-level
-// per-extension zod is not importable from a package, so it is wired in C.
+// Expert-override parameter descriptor (e.g., transfer-fee basis points). Wired to editor UI and server validation.
 export interface ParamFieldSpec {
   key: string;
   kind: "number" | "string" | "select";
   labelKey: string;
   defaultValue?: string | number;
   options?: readonly { value: string; labelKey: string }[];
+  // Server-side validation format: "u64" = base-10 uint64; "base58-pubkey" = Solana address. Pre-flight to turn deploy errors into 400s.
+  format?: "u64" | "base58-pubkey";
   min?: number;
   max?: number;
-  // When true, `min` is a strict lower bound: the value must be > min, not >= min.
-  // Used for factors that must be positive but have no natural inclusive floor,
-  // e.g. a scaled-UI multiplier (min: 0, exclusiveMin ⇒ any value greater than 0).
+  // When true, min is strict (> not >=); for factors that must be positive with no inclusive floor.
   exclusiveMin?: boolean;
-  // When true, the field must be filled once its setting is enabled — the editor
-  // marks it and the create wizard blocks Continue until it has a value.
+  // When true, editor marks it and wizard blocks Continue until filled.
   required?: boolean;
-  // A short manager-facing helper shown under the field in Basic/Detailed — e.g.
-  // clarifying that a value is entered in basis points. Expert mode shows the
-  // technical spec caption instead. Optional.
+  // Manager-facing helper under field (Basic/Detailed); Expert mode shows technical spec instead.
   hintKey?: string;
 }
 
-// One manager-facing advanced setting: its plain-language copy, the Token-2022
-// extension(s) it configures (an internal detail — never rendered raw), the SDP
-// actions it unlocks, its signing/fallback story, and optional expert params.
+// Manager-facing setting: copy, Token-2022 extensions (internal), SDP actions, signing rules, optional expert params.
 export interface AdvancedSetting {
   group: SettingGroup;
-  // i18n MessageKeys. The copy describes EFFECTS ("Freeze tokens in response to
-  // compliance events"), never mechanics ("enables the pausable extension").
+  // Copy describes effects, never mechanics (e.g., "Freeze tokens" not "enable pausable extension").
   labelKey: string;
   descriptionKey: string;
   extensions: readonly TokenExtensionName[];
   actions: readonly TokenTransactionType[];
   signing: SettingSigning;
-  // Absent ⇒ a plain on/off toggle. Present ⇒ the setting exposes expert fields.
+  // Absent = plain toggle; present = exposes expert fields.
   params?: readonly ParamFieldSpec[];
 }
 
-// Per-(category, type) capability declaration: which template it deploys as, and
-// which settings it recommends / allows / forbids. Composed à la carte rather
-// than pinned to a fixed template — `baseTemplate` is only the deploy substrate.
+// Per-(category, type) declaration: deploy template and per-setting availability (à la carte, not pinned).
 export interface AssetCapability {
   category: AssetCategory;
   type: string;
   baseTemplate: TokenTemplate;
-  // Keyed by settingKey. The keys are validated against the catalog by a
-  // dev-time completeness assertion in @sdp/issuance/capabilities.
+  // Keys validated against catalog at dev-time.
   settings: Record<string, SettingAvailability>;
 }
 
-// --- Stored selection (persistence, ticket C) ------------------------------
+// --- Stored selection ----
 
-// One selected setting. Presence of the key in `StoredAdvancedSettings.selected`
-// means the setting is enabled; `params` carries the expert-override values for
-// parametric settings (validated against the catalog's ParamFieldSpec).
+// Selected setting: presence in StoredAdvancedSettings.selected means enabled.
 export interface SelectedSetting {
   params?: Record<string, string | number>;
 }
 
-// The manager's advanced-settings selection as persisted under
-// `issuance_metadata.settings`. `version` is server-stamped
-// (ADVANCED_SETTINGS_VERSION); clients need not send it.
+// Persisted under issuance_metadata.settings; version server-stamped, clients omit.
 export interface StoredAdvancedSettings {
   version: number;
   selected: Record<string, SelectedSetting>;

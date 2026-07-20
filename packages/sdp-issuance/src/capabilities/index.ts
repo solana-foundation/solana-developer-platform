@@ -181,7 +181,8 @@ export type ParamRejectionReason =
   | "not_a_number"
   | "below_min"
   | "above_max"
-  | "invalid_option";
+  | "invalid_option"
+  | "invalid_format";
 
 export interface ParamValidationError {
   settingKey: string;
@@ -203,7 +204,26 @@ function coerceParamNumber(value: string | number): number | null {
   return null;
 }
 
-// Check param against bounds; undefined skipped (presence is editor/resolver's concern).
+// Largest unsigned 64-bit integer — ceiling for u64-format params (e.g. transfer-fee maxFee).
+const U64_MAX = 18_446_744_073_709_551_615n;
+const BASE58_PUBKEY = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+// Whether a string-kind param satisfies its declared on-chain format. Without this,
+// arbitrary strings pass every server check and fail opaquely at the Solana layer.
+function matchesStringFormat(
+  format: NonNullable<ParamFieldSpec["format"]>,
+  value: string
+): boolean {
+  switch (format) {
+    case "u64":
+      // Base-10 digits only (rejects signs, decimals, "Infinity", 1e9) within u64 range.
+      return /^\d+$/.test(value) && BigInt(value) <= U64_MAX;
+    case "base58-pubkey":
+      return BASE58_PUBKEY.test(value);
+  }
+}
+
+// Check param against bounds/format; undefined skipped (presence is editor/resolver's concern).
 function checkParamValue(
   spec: ParamFieldSpec,
   value: string | number
@@ -224,6 +244,10 @@ function checkParamValue(
   if (spec.kind === "select") {
     const allowed = spec.options?.some((option) => option.value === value) ?? false;
     return allowed ? null : { reason: "invalid_option" };
+  }
+  if (spec.kind === "string" && spec.format) {
+    const asString = typeof value === "number" ? String(value) : value;
+    return matchesStringFormat(spec.format, asString) ? null : { reason: "invalid_format" };
   }
   return null;
 }

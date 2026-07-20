@@ -44,6 +44,7 @@ export const ADVANCED_SETTINGS = {
       {
         key: "maxFee",
         kind: "string",
+        format: "u64",
         labelKey: config("transferFeeMaxFee"),
         defaultValue: "0",
       },
@@ -110,6 +111,7 @@ export const ADVANCED_SETTINGS = {
       {
         key: "programId",
         kind: "string",
+        format: "base58-pubkey",
         labelKey: config("transferHookProgramId"),
         required: true,
       },

@@ -59,6 +59,17 @@ describe("advanced settings persistence helpers", () => {
       expect(validateAdvancedSettings("generic", "generic", metadata)).toEqual([]);
     });
 
+    it("rejects a malformed string param before it reaches the Solana layer", () => {
+      // transferHook.programId is a base58 pubkey; an arbitrary string clears the zod
+      // shape check but must be rejected here rather than fail opaquely at deploy.
+      const metadata: IssuanceMetadata = {
+        settings: { selected: { transferHook: { params: { programId: "not-a-pubkey" } } } },
+      };
+      expect(validateAdvancedSettings("generic", "generic", metadata)).toEqual([
+        { settingKey: "transferHook", paramKey: "programId", reason: "invalid_format" },
+      ]);
+    });
+
     it("does not re-flag params of a setting already rejected at the key level", () => {
       // transferFee is unsupported on a stablecoin: report the key once, and skip
       // its param bounds rather than piling on a second (redundant) error.

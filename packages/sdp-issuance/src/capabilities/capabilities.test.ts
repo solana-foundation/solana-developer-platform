@@ -180,12 +180,59 @@ describe("advanced settings capability registry", () => {
     assert.deepEqual(validateSettingParams({ transferFee: { params: { maxFee: "0" } } }), [
       { settingKey: "transferFee", paramKey: "basisPoints", reason: "missing" },
     ]);
-    // A supplied required param passes (string params have no bounds to check).
+    // A supplied required param passes (this programId is valid base58 — see format test).
     assert.deepEqual(
       validateSettingParams({
         transferHook: { params: { programId: "Hook11111111111111111111111111111111111111" } },
       }),
       []
+    );
+  });
+
+  it("validates string param formats (u64 maxFee, base58 programId)", () => {
+    // Arbitrary strings pass shape validation and would fail opaquely at the Solana
+    // layer, so format is enforced here. maxFee is a u64 base-unit amount.
+    assert.deepEqual(
+      validateSettingParams({ transferFee: { params: { basisPoints: 100, maxFee: "1000000" } } }),
+      []
+    );
+    assert.deepEqual(
+      validateSettingParams({ transferFee: { params: { basisPoints: 100, maxFee: "-1" } } }),
+      [{ settingKey: "transferFee", paramKey: "maxFee", reason: "invalid_format" }]
+    );
+    assert.deepEqual(
+      validateSettingParams({ transferFee: { params: { basisPoints: 100, maxFee: "1.5" } } }),
+      [{ settingKey: "transferFee", paramKey: "maxFee", reason: "invalid_format" }]
+    );
+    assert.deepEqual(
+      validateSettingParams({
+        transferFee: { params: { basisPoints: 100, maxFee: "notanumber" } },
+      }),
+      [{ settingKey: "transferFee", paramKey: "maxFee", reason: "invalid_format" }]
+    );
+    // 2^64 is one past the u64 ceiling; 2^64 - 1 is the largest valid value.
+    assert.deepEqual(
+      validateSettingParams({
+        transferFee: { params: { basisPoints: 100, maxFee: "18446744073709551616" } },
+      }),
+      [{ settingKey: "transferFee", paramKey: "maxFee", reason: "invalid_format" }]
+    );
+    assert.deepEqual(
+      validateSettingParams({
+        transferFee: { params: { basisPoints: 100, maxFee: "18446744073709551615" } },
+      }),
+      []
+    );
+    // programId must be a base58 pubkey; a too-short / non-base58 string is rejected.
+    assert.deepEqual(
+      validateSettingParams({ transferHook: { params: { programId: "not-a-key!" } } }),
+      [{ settingKey: "transferHook", paramKey: "programId", reason: "invalid_format" }]
+    );
+    assert.deepEqual(
+      validateSettingParams({
+        transferHook: { params: { programId: "0OIl0000000000000000000000000000" } },
+      }),
+      [{ settingKey: "transferHook", paramKey: "programId", reason: "invalid_format" }]
     );
   });
 
