@@ -145,6 +145,21 @@ describe("credentialAdminAuthMiddleware", () => {
     expect(wasHandlerReached()).toBe(false);
   });
 
+  it("returns unauthorized for a Clerk token without organization context", async () => {
+    const { app, token, wasHandlerReached } = buildProbe({
+      sub: "clerk_user_admin",
+    });
+
+    const response = await app.request(
+      "/probe",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(response.status).toBe(401);
+    expect(wasHandlerReached()).toBe(false);
+  });
+
   it.each([
     ["standard", "api_developer", ["custody:admin"]],
     ["wildcard admin", "api_admin", ["*"]],
