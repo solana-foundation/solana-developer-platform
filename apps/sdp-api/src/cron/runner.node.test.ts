@@ -82,29 +82,16 @@ describe("startCron", () => {
     expect(scheduleMock.mock.calls[0][0]).toBe(PENDING_TRANSFERS_CRON);
   });
 
-  it("does not schedule recurring collection unless both recurring flags are enabled", () => {
-    startCron({
-      env: { PAYMENTS_RECURRING_ENABLED: "true" } as Env,
-      bg: makeBg(),
-    });
-    startCron({
-      env: { PAYMENTS_RECURRING_COLLECTION_ENABLED: "true" } as Env,
-      bg: makeBg(),
-    });
+  it("does not schedule recurring collection unless collection is enabled", () => {
+    startCron({ env: {} as Env, bg: makeBg() });
 
-    expect(scheduleMock).toHaveBeenCalledTimes(2);
-    expect(scheduleMock.mock.calls.map((call) => call[0])).toEqual([
-      PENDING_TRANSFERS_CRON,
-      PENDING_TRANSFERS_CRON,
-    ]);
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
+    expect(scheduleMock.mock.calls[0][0]).toBe(PENDING_TRANSFERS_CRON);
   });
 
-  it("schedules recurring collection when both recurring flags are enabled", () => {
+  it("schedules recurring collection when collection is enabled", () => {
     startCron({
-      env: {
-        PAYMENTS_RECURRING_ENABLED: "true",
-        PAYMENTS_RECURRING_COLLECTION_ENABLED: "true",
-      } as Env,
+      env: { PAYMENTS_RECURRING_COLLECTION_ENABLED: "true" } as Env,
       bg: makeBg(),
     });
 
@@ -154,10 +141,7 @@ describe("startCron", () => {
 
   it("recurring tick invokes runRecurringPaymentsCollection with the supplied deps", () => {
     const bg = makeBg();
-    const env = {
-      PAYMENTS_RECURRING_ENABLED: "true",
-      PAYMENTS_RECURRING_COLLECTION_ENABLED: "true",
-    } as Env;
+    const env = { PAYMENTS_RECURRING_COLLECTION_ENABLED: "true" } as Env;
     const observability = makeObservability();
     startCron({ env, bg, observability });
     const tick = scheduleMock.mock.calls[1][1] as () => void;
@@ -195,10 +179,7 @@ describe("startCron", () => {
 
   it("returned handle.stop() stops every scheduled task", async () => {
     const handle = startCron({
-      env: {
-        PAYMENTS_RECURRING_ENABLED: "true",
-        PAYMENTS_RECURRING_COLLECTION_ENABLED: "true",
-      } as Env,
+      env: { PAYMENTS_RECURRING_COLLECTION_ENABLED: "true" } as Env,
       bg: makeBg(),
     });
     expect(handle).not.toBeNull();

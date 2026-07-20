@@ -139,7 +139,21 @@
     "send": "Envoyer",
     "backToPayments": "Retour aux paiements",
     "members": "Membres",
-    "allowlist": "Allowlist"
+    "allowlist": "Allowlist",
+    "transactions": "Transactions",
+    "policies": "Politiques",
+    "newApiKey": "Nouvelle clé API",
+    "editApiKey": "Modifier la clé API",
+    "backToApiKeys": "Retour aux clés API",
+    "approvals": "Approbations",
+    "pendingApprovals": "{count} approbations en attente",
+    "colorTheme": "Thème de couleur",
+    "darkMode": "Mode sombre",
+    "expandPaymentsMenu": "Développer le menu Paiements",
+    "collapsePaymentsMenu": "Réduire le menu Paiements",
+    "backToWallet": "Retour au portefeuille",
+    "walletControls": "Contrôles du portefeuille",
+    "backToApprovals": "Retour aux approbations"
   },
   "validation": {
     "allowlistValueRequired": "La valeur Allowlist est requise",

@@ -1,30 +1,38 @@
 import type { AppLocale } from "@/i18n/config";
-import enDashboardCustody from "../../messages/en/dashboard-custody.json";
-import enDashboardIssuance from "../../messages/en/dashboard-issuance.json";
-import enDashboardPayments from "../../messages/en/dashboard-payments.json";
-import enShared from "../../messages/en/shared.json";
+import dashboardApprovals from "../../messages/en/dashboard-approvals.json";
+import dashboardCustody from "../../messages/en/dashboard-custody.json";
+import dashboardIssuance from "../../messages/en/dashboard-issuance.json";
+import dashboardPayments from "../../messages/en/dashboard-payments.json";
+import dashboardPolicies from "../../messages/en/dashboard-policies.json";
+import shared from "../../messages/en/shared.json";
 import en from "../../messages/en.json";
+import frDashboardApprovals from "../../messages/fr/dashboard-approvals.json";
 import frDashboardCustody from "../../messages/fr/dashboard-custody.json";
 import frDashboardIssuance from "../../messages/fr/dashboard-issuance.json";
 import frDashboardPayments from "../../messages/fr/dashboard-payments.json";
+import frDashboardPolicies from "../../messages/fr/dashboard-policies.json";
 import frShared from "../../messages/fr/shared.json";
 import fr from "../../messages/fr.json";
 
 const enMessages = {
   ...en,
-  ...enDashboardCustody,
-  ...enDashboardIssuance,
-  ...enDashboardPayments,
-  Shared: enShared,
+  ...dashboardApprovals,
+  ...dashboardCustody,
+  ...dashboardIssuance,
+  ...dashboardPayments,
+  ...dashboardPolicies,
+  Shared: shared,
 };
 
 export type Messages = typeof enMessages;
 
 const frMessages = {
   ...fr,
+  ...frDashboardApprovals,
   ...frDashboardCustody,
   ...frDashboardIssuance,
   ...frDashboardPayments,
+  ...frDashboardPolicies,
   Shared: frShared,
 } as Messages;
 

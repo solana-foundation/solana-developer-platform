@@ -24,6 +24,8 @@ import {
   paymentTransferBatchIdParamsSchema,
   paymentTransferIdParamsSchema,
   paymentWalletIdParamsSchema,
+  paymentWalletPolicyEvaluationListQuerySchema,
+  paymentWalletPolicyEvaluationParamsSchema,
   prepareSubscriptionAuthorizationRequestSchema,
   prepareSubscriptionCollectionRequestSchema,
   prepareSubscriptionLifecycleRequestSchema,
@@ -34,7 +36,12 @@ import {
   updateSubscriptionRequestSchema,
   updateWalletPolicyRequestSchema,
 } from "../schemas";
-import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
+import {
+  errorResponses,
+  jsonContent,
+  projectScopeHeaders,
+  projectScopeWithIdempotencyHeaders,
+} from "./helpers";
 import {
   offrampCurrenciesResponse,
   onrampCurrenciesResponse,
@@ -59,6 +66,9 @@ import {
   transferListResponse,
   transferResponse,
   walletBalancesResponse,
+  walletControlProfileRevisionHistoryResponse,
+  walletPolicyEvaluationListResponse,
+  walletPolicyEvaluationResponse,
   walletPolicyResponse,
 } from "./responses";
 
@@ -112,6 +122,73 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
+    method: "get",
+    path: "/v1/payments/wallets/{walletId}/policies/revisions",
+    tags: ["Payments"],
+    summary: "List wallet policy revisions",
+    operationId: "listPaymentWalletPolicyRevisions",
+    description:
+      "Returns immutable revisions for the wallet control profile in newest-first order, including the currently active revision reference.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentWalletIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Wallet policy revision history",
+        content: jsonContent(walletControlProfileRevisionHistoryResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/wallets/{walletId}/policies/evaluations",
+    tags: ["Payments"],
+    summary: "List wallet policy evaluations",
+    operationId: "listPaymentWalletPolicyEvaluations",
+    description:
+      "Returns paginated, filterable policy audit history for one wallet. Evaluation context is redacted and excludes raw provider payloads.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentWalletIdParamsSchema,
+      query: paymentWalletPolicyEvaluationListQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Wallet policy evaluation history",
+        content: jsonContent(walletPolicyEvaluationListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/wallets/{walletId}/policies/evaluations/{policyEvaluationId}",
+    tags: ["Payments"],
+    summary: "Get wallet policy evaluation",
+    operationId: "getPaymentWalletPolicyEvaluation",
+    description:
+      "Returns one policy evaluation with matched rules, redacted evaluation context, revision references, decision, status, reason, and approval linkage.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentWalletPolicyEvaluationParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Wallet policy evaluation detail",
+        content: jsonContent(walletPolicyEvaluationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
     method: "put",
     path: "/v1/payments/wallets/{walletId}/policies",
     tags: ["Payments"],
@@ -148,10 +225,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
     description:
-      "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster.",
+      "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original transfer, while reusing the key for a different request returns 409.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(createTransferRequestSchema),
@@ -162,7 +239,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer executed",
         content: jsonContent(transferResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
     },
   });
 
@@ -240,10 +317,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create transfer batch",
     operationId: "createPaymentTransferBatch",
     description:
-      "Creates a custody-executed outbound transfer batch to counterparty crypto-wallet accounts. This route is scaffolded; execution is not implemented yet.",
+      "Executes a custody-signed outbound transfer batch to counterparty crypto-wallet accounts, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original batch without another on-chain submission, while reusing the key for a different request returns 409.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(createTransferBatchRequestSchema),
@@ -254,7 +331,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer batch created",
         content: jsonContent(transferBatchResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -301,7 +378,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Recurring Payments (feature-flagged)
+  // Recurring Payments
   // ═══════════════════════════════════════════════════════════════════════════
 
   registry.registerPath({
@@ -487,7 +564,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Recurring Subscriptions (feature-flagged)
+  // Recurring Subscriptions
   // ═══════════════════════════════════════════════════════════════════════════
 
   registry.registerPath({
@@ -497,7 +574,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create subscription plan",
     operationId: "createPaymentSubscriptionPlan",
     description:
-      "Creates a feature-flagged recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
+      "Creates a recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -521,7 +598,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "List subscription plans",
     operationId: "listPaymentSubscriptionPlans",
-    description: "Lists feature-flagged recurring-payment subscription plans.",
+    description: "Lists recurring-payment subscription plans.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -615,7 +692,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create subscription",
     operationId: "createPaymentSubscription",
     description:
-      "Creates a feature-flagged recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
+      "Creates a recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

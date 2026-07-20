@@ -40,7 +40,7 @@ const NETWORK_DEBUG_META_COPY_CLASS =
   "shrink-0 text-tertiary underline decoration-tertiary/60 underline-offset-2 hover:text-primary hover:decoration-primary";
 
 const NETWORK_DEBUG_PAYLOAD_COPY_BUTTON_CLASS =
-  "absolute top-2 right-2 z-10 inline-flex w-fit shrink-0 items-center gap-1 rounded-md border border-border-default bg-white px-2 py-0.5 text-xs font-medium text-primary shadow-sm hover:bg-surface-sunken";
+  "absolute top-2 right-2 z-10 inline-flex w-fit shrink-0 items-center gap-1 rounded-md border border-border-default bg-surface-raised px-2 py-0.5 text-xs font-medium text-primary shadow-sm hover:bg-surface-sunken";
 
 function NetworkDebugMetaInterpunct() {
   return (
@@ -191,7 +191,7 @@ export function NetworkDebugToggle({ collapsed = false }: { collapsed?: boolean 
       >
         <span
           className={cn(
-            "absolute top-1/2 size-3.5 -translate-y-1/2 rounded-full bg-white shadow-sm transition-transform",
+            "absolute top-1/2 size-3.5 -translate-y-1/2 rounded-full bg-surface-raised shadow-sm transition-transform",
             enabled ? "translate-x-4.5" : "translate-x-0.5"
           )}
         />
@@ -239,7 +239,7 @@ function NetworkDebugExpandedPanel({
       key="network-debug-panel"
       layoutId="network-debug-shell"
       layout="position"
-      className="pointer-events-auto absolute right-0 bottom-0 flex h-full w-full overflow-hidden rounded-2xl border border-border-default bg-white shadow-lg"
+      className="pointer-events-auto absolute right-0 bottom-0 flex h-full w-full overflow-hidden rounded-2xl border border-border-default bg-surface-raised shadow-lg"
       style={{ borderRadius: PANEL_RADIUS }}
       transition={PANEL_TRANSITION}
     >

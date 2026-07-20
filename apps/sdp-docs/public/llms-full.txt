@@ -1875,14 +1875,396 @@ Both modes support the `Idempotency-Key` header. For execute mode, the key preve
 
 ---
 
+## Wallet operations
+
+### Wallet operations
+Source: https://platform.solana.com/docs/wallet-operations
+
+> Configure custody-wallet controls, operation permissions, and balances.
+
+Wallet operations are the controls and observability attached to a custody wallet, independent of the product flow that uses it. A policy can govern payments, ramps, issuance, and signing operations when SDP evaluates them for the selected wallet.
+
+## What's in this section
+
+- [Wallet policies](/docs/wallet-operations/policies) — configure default decisions, destination controls, amount limits, operation permissions, approval requirements, and audit visibility.
+- [Wallet balances](/docs/wallet-operations/balances) — retrieve token balances and optional USD valuations for a custody wallet.
+
+## API surface
+
+The current wallet-policy and balance endpoints remain under `/v1/payments/wallets` because they were introduced with the Payments API. Their behavior is wallet-wide: policy operation families include payment, ramp, issuance, raw signing, program interactions, and provider administration.
+
+## Related
+
+- [Set up wallets](/docs/guides/setup-wallets) — provision the wallet before configuring controls.
+- [Payments](/docs/payments) — payment and ramp flows that can use a policy-controlled wallet.
+- [Manage API keys](/docs/guides/manage-api-keys) — configure caller permissions separately from wallet operation permissions.
+
+---
+
+### Wallet policies
+Source: https://platform.solana.com/docs/wallet-operations/policies
+
+> Wallet controls, operation permissions, and policy audit visibility.
+
+Wallet policies constrain how a custody wallet can move funds and execute supported operations. SDP starts from default allow, then applies the active wallet control profile and any policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before wallet operations execute.
+
+Use policies for treasury wallets, automated payout wallets, or any custody wallet where unbounded outbound flow would be a liability.
+
+## Reading a wallet's policies
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash
+curl https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
+  { headers: { Authorization: "Bearer sk_test_..." } }
+);
+const { data } = await response.json();
+// data.policy.destinationAllowlist: string[]
+// data.policy.maxTransferAmount?: string
+// data.policy.maxDailyAmount?: string
+// data.policy.controlProfile?.providerMappingStatus
+// data.policy.audit?.recentEvaluations
+```
+</Tab>
+</Tabs>
+
+The payload is wrapped in the standard `data` / `meta` envelope, with the policy under a `policy` key:
+
+```json
+{
+  "data": {
+    "policy": {
+      "walletId": "wal_abc123",
+      "destinationAllowlist": ["7xKXz...9fGh", "5aBCd...2eFg"],
+      "maxTransferAmount": "100.00",
+      "maxDailyAmount": "1000.00",
+      "defaultAction": "allow",
+      "controlProfile": {
+        "id": "wcp_abc123",
+        "status": "active",
+        "activeRevisionId": "wcpr_abc123",
+        "revisionId": "wcpr_abc123",
+        "revisionNumber": 3,
+        "defaultAction": "allow",
+        "rules": [
+          {
+            "id": "approval-required",
+            "kind": "approval",
+            "families": ["payment", "ramp"],
+            "action": "approval_required",
+            "name": "Approval checks"
+          }
+        ],
+        "providerMappingStatus": "not_applicable",
+        "createdAt": "2026-05-14T08:00:00Z",
+        "updatedAt": "2026-05-14T10:15:00Z",
+        "activatedAt": "2026-05-14T10:15:00Z"
+      },
+      "audit": {
+        "recentEvaluations": [
+          {
+            "walletOperationId": "wop_abc123",
+            "policyEvaluationId": "peval_abc123",
+            "operationFamily": "payment",
+            "operationType": "payment_transfer_execute",
+            "asset": "USDC",
+            "amount": "100.00",
+            "destination": "7xKXz...9fGh",
+            "status": "pending_approval",
+            "decision": "approval_required",
+            "reasonCode": "wallet_policy_match",
+            "reason": "Payment matched approval policy.",
+            "requiresApproval": true,
+            "approvalRequestId": "appr_abc123",
+            "operationCreatedAt": "2026-05-14T10:20:00Z",
+            "operationUpdatedAt": "2026-05-14T10:20:00Z",
+            "evaluatedAt": "2026-05-14T10:20:00Z"
+          }
+        ]
+      },
+      "createdAt": "2026-05-14T08:00:00Z",
+      "updatedAt": "2026-05-14T10:15:00Z"
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-18T00:00:00.000Z" }
+}
+```
+
+Amount fields are **UI-unit decimal strings** (`"100.00"` means 100 tokens, regardless of the mint's decimals — matching the transfer-request convention). The configured value is a **single threshold**, but enforcement is **per token**: `maxDailyAmount` sums each token's outbound transfers separately within the day window, so a wallet with `maxDailyAmount: "1000"` can send up to 1000 USDC *and* 1000 SOL in the same UTC day — there is no aggregate cap across mints. If you need different per-token thresholds (e.g., 10,000 USDC daily but 50 SOL daily), partition into separate wallets.
+
+## Default allow and active controls
+
+Wallet policy evaluation starts from default allow. If no wallet control profile exists, supported wallet operations continue to run unless another product-specific check rejects them. When you activate a control profile, SDP evaluates its rules first and returns the resulting `decision` as one of `allow`, `deny`, `approval_required`, `provider_approval_required`, `review`, or `not_evaluated`.
+
+The `controlProfile` object shows the active immutable revision. Treat `revisionId` and `revisionNumber` as audit references: a policy evaluation records which revision was active when the wallet operation was checked.
+
+### Dashboard actions
+
+The dashboard authoring flow exposes three actions: **Allow**, **Deny**, and **Require approval**. Choose **Require approval** when an operator must decide whether an operation can continue; it holds the operation and creates an approval request.
+
+`review` remains a possible API evaluation result for legacy or safety paths, such as an unrecognized policy rule. It is visible in audit records, but it is not a dashboard authoring option or a separate human-review workflow. Do not use it to model operator approval; use `approval_required` instead.
+
+## Operation permissions
+
+Wallet policies can match operations at two levels:
+
+- **Operation family** rules apply to every evaluated operation in a broad product area.
+- **Operation type** rules match one exact operation identifier and take precedence when you need a narrower decision.
+
+These are wallet-policy selectors, not API-key permissions. API-key permissions such as `payments:write` and `tokens:write` determine whether a caller may invoke an endpoint; operation permissions determine what the selected wallet may do after the request is authorized. See [Manage API keys](/docs/guides/manage-api-keys) for caller permissions.
+
+### Operation families
+
+| Family | Description | Current evaluated operations |
+| --- | --- | --- |
+| `payment` | Outbound single and batch payments. | Single and batch transfer execution |
+| `ramp` | Fiat-to-crypto and crypto-to-fiat ramp activity. | On-ramp and off-ramp quote creation |
+| `issuance` | Token lifecycle actions signed by the wallet. | Mint execution and authority updates |
+| `raw_sign` | Low-level signing and signer verification. | Custody signer checks |
+| `transfer` | Generic direct-transfer family reserved for operations outside the payment workflow. | No current public operation type |
+| `program` | General Solana program interactions. | No current public operation type |
+| `provider_admin` | Custody-provider administration. | No current public operation type |
+
+Family values with no current public operation type are valid policy values, but they do not match a public SDP flow until an operation is emitted in that family.
+
+### Exact operation types
+
+| Operation type | Family | What it controls |
+| --- | --- | --- |
+| `payment_transfer_execute` | `payment` | Executes one outbound payment transfer from the wallet. |
+| `payment_transfer_batch_execute` | `payment` | Executes an outbound batch and evaluates the aggregate amount before submission. |
+| `ramp_onramp_quote` | `ramp` | Creates an on-ramp quote that delivers crypto to the destination wallet. |
+| `ramp_offramp_quote` | `ramp` | Creates an off-ramp quote that draws crypto from the source wallet. |
+| `issuance_mint_execute` | `issuance` | Executes a token mint using the configured signing wallet. |
+| `issuance_update_authority_execute` | `issuance` | Changes a token authority using the current authority wallet. |
+| `custody_signer_check` | `raw_sign` | Runs the custody signer-check transaction for the wallet. |
+
+Operation-type matching is exact and case-sensitive. The API accepts custom strings up to 120 characters so future or privately integrated operations can be represented, but a rule only affects an operation when SDP emits the same identifier. For current public flows, use one of the identifiers above.
+
+## Policy evaluation and audit records
+
+Each supported wallet operation records a wallet operation row before policy evaluation and a policy evaluation row after SDP decides what should happen. `audit.recentEvaluations` exposes the most recent decisions for the wallet so support and customer operators can review:
+
+- what operation was evaluated (`walletOperationId`, `operationFamily`, `operationType`)
+- what decision SDP made (`decision`, `reasonCode`, `reason`, `requiresApproval`)
+- whether an approval request was created (`approvalRequestId`)
+- when the operation was created, updated, and evaluated
+
+Use these records to explain allow, deny, approval-required, and review outcomes. They are an operational audit summary, not the full raw provider payload.
+
+## Provider mapping status
+
+`providerMappingStatus` describes whether an SDP policy revision has also been mapped into a custody or ramp provider's native policy system. Current payment wallet controls are SDP-enforced first. A value of `not_applicable` means there is no provider-native mapping for that revision. `pending`, `partial`, or `failed` mean SDP still evaluates the operation, but you should not assume the same rule has been fully synced to the provider.
+
+## Destination allowlist
+
+The allowlist is a list of on-chain destination addresses (32-44 character base-58 Solana pubkeys). When set, `POST /v1/payments/transfers` rejects any destination not in the list.
+
+- Maximum entries: **500 addresses per wallet**.
+- Each entry is a single on-chain address — no patterns, ranges, or address books.
+- Empty allowlist (`[]`) means no destination restriction. To enable enforcement, populate at least one entry.
+
+The allowlist exists to bound risk on automated wallets (a hot wallet that should only ever pay a known set of counterparties) and to enforce treasury controls (only the corporate cold-storage address can drain the operating wallet).
+
+## Transfer limits
+
+Two limits, both optional:
+
+- **`maxTransferAmount`** — per-transfer cap. Any single `POST /v1/payments/transfers` exceeding this amount is rejected. Compared against the request's `amount` directly, so it is naturally per-token.
+- **`maxDailyAmount`** — UTC-calendar-day cap, **enforced per token**. The day window resets at 00:00 UTC; the projected total is the sum of that wallet's outbound transfers for the **same token** in the current day (`pending`/`processing`/`confirmed`/`finalized`) plus the new request's `amount`. Different tokens are summed independently — see the per-token note under [Reading a wallet's policies](#reading-a-wallets-policies).
+
+Set both for defense in depth: a per-transaction cap that catches obvious mistakes, plus a daily cap that bounds blast radius if many small transfers are submitted in a coordinated attack.
+
+## Updating policies
+
+`PUT /v1/payments/wallets/{walletId}/policies` has **full-replace** semantics — the request body becomes the new policy state in its entirety. To remove the allowlist, send `destinationAllowlist: []`. To drop a transfer limit, omit the field on the next PUT.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash
+curl -X PUT https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "destinationAllowlist": [
+      "7xKXz...9fGh",
+      "5aBCd...2eFg"
+    ],
+    "maxTransferAmount": "100.00",
+    "maxDailyAmount": "1000.00"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch(
+  "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
+  {
+    method: "PUT",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      destinationAllowlist: ["7xKXz...9fGh", "5aBCd...2eFg"],
+      maxTransferAmount: "100.00",
+      maxDailyAmount: "1000.00",
+    }),
+  }
+);
+```
+</Tab>
+</Tabs>
+
+Because PUT is full-replace, treat policy edits like ordinary form submissions: read the current state, present it for editing, and PUT the complete updated object. Don't construct partial patches.
+
+## Interaction with compliance
+
+Wallet policies enforce **structural** constraints (where funds can go, how much, how fast). They do not replace compliance screening. If your organization has compliance screening enabled, screening happens on the destination address as a separate check, in addition to the allowlist match. A transfer can be rejected by either layer; both must pass to reach the network.
+
+See the [Compliance API reference](/docs/reference/api/compliance) for address-screening flows that complement policies.
+
+## Related
+
+- [Payouts and disbursements](/docs/payments/send-payouts) — running an outbound batch from a policy-constrained wallet.
+- [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint subject to policy enforcement.
+- [Wallet balances](/docs/wallet-operations/balances) — current balance, useful to size transfer limits.
+
+---
+
+### Wallet balances
+Source: https://platform.solana.com/docs/wallet-operations/balances
+
+> Per-wallet token balances with optional USD valuation via SDP.
+
+`GET /v1/payments/wallets/{walletId}/balances` returns the wallet's native **SOL** balance plus every **SPL token** balance held by a custody wallet — raw amount, human-readable amount, decimals, and optional USD valuation when a price source is configured. SOL is always prepended as the first entry and is represented with `token: "SOL"` and `mint: "So11111111111111111111111111111111111111112"`.
+
+## Request
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl https://api.solana.com/v1/payments/wallets/wal_abc123/balances \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/payments/wallets/wal_abc123/balances",
+  { headers: { Authorization: "Bearer sk_test_..." } }
+);
+const { data } = await response.json();
+// data.walletBalances.balances: TokenBalance[]
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/payments/wallets/wal_abc123/balances"))
+    .header("Authorization", "Bearer sk_test_...")
+    .GET()
+    .build();
+```
+</Tab>
+</Tabs>
+
+## Response shape
+
+The payload is wrapped in the standard `data` / `meta` envelope, with the balances under a `walletBalances` key:
+
+```json
+{
+  "data": {
+    "walletBalances": {
+      "walletId": "wal_abc123",
+      "address": "3xYZa...2aBc",
+      "balances": [
+        {
+          "token": "SOL",
+          "mint": "So11111111111111111111111111111111111111112",
+          "amount": "2500000000",
+          "uiAmount": "2.5",
+          "decimals": 9
+        },
+        {
+          "token": "USDC",
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": "1500000000",
+          "uiAmount": "1500.00",
+          "decimals": 6,
+          "usdPrice": 1.0,
+          "usdValue": 1500.0
+        }
+      ]
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-18T00:00:00.000Z" }
+}
+```
+
+Per-balance fields:
+
+| Field | Notes |
+| --- | --- |
+| `token` | Token symbol if known, otherwise the on-chain mint. |
+| `mint` | On-chain mint address. |
+| `amount` | Raw amount in the smallest unit (string to preserve precision). |
+| `uiAmount` | Human-readable decimal string — `amount / 10^decimals`. |
+| `decimals` | Token's decimal count. |
+| `usdPrice` | Per-token USD price; omitted when no pricing data is available. |
+| `usdValue` | Total USD value (= `usdPrice * uiAmount`); omitted when pricing is unavailable. |
+| `confidential` | Reserved for confidential transfer balances; absent for standard balances. |
+
+## Use cases
+
+- **Account dashboards** — display the contents of a custody wallet to its operator.
+- **Pre-transfer balance checks** — validate that a wallet has enough of a specific token before kicking off a payout batch.
+- **Treasury accounting** — periodic snapshots into an internal ledger.
+
+## Pricing freshness
+
+When USD valuation is populated, the price comes from SDP's configured price source and reflects the most recent quote available. The cadence and source depend on deployment configuration — do not rely on `usdValue` for downstream balance-sheet decisions without confirming the price source's freshness with your operations team. When in doubt, treat `amount` / `uiAmount` as authoritative and convert with your own price feed.
+
+If no price source is configured, the `usdPrice` and `usdValue` fields are simply absent rather than zero — falling back to "I don't know" rather than "$0.00" so downstream consumers can decide how to handle the gap.
+
+## Comparison to on-chain RPC
+
+You can also enumerate SPL token balances by calling `getTokenAccountsByOwner` against a Solana RPC and decoding the returned token-account data. Reasons to use SDP's `balances` endpoint instead:
+
+- **Token resolution** — SDP resolves the mint to a symbol when it knows one; raw RPC returns mints only.
+- **USD pricing** — RPC has no concept of price.
+- **No RPC dependency in your stack** — one fewer external integration when you are already calling SDP.
+
+Reasons to skip SDP and go to RPC directly:
+
+- **Cluster-of-truth** — you want the wallet's state at a specific slot for an audit.
+- **Confidential transfer balances** — full extension support is RPC-side.
+- **Latency-sensitive paths** — RPC is one hop closer to the cluster.
+
+## Related
+
+- [Wallet policies](/docs/wallet-operations/policies) — set transfer caps based on balance bounds.
+- [Payouts and disbursements](/docs/payments/send-payouts) — balance-check before running a batch.
+- [Set Up Wallets](/docs/guides/setup-wallets) — provision the wallets whose balances this endpoint reports.
+
+---
+
 ## Payments
 
 ### Payments
 Source: https://platform.solana.com/docs/payments
 
-> Build payments on Solana with SDP — concepts, send, accept, ramps, and wallet operations.
+> Build payments on Solana with SDP — concepts, send, accept, and ramps.
 
-SDP provides a Solana-native payments stack: stablecoin transfers, fiat on-ramps and off-ramps, wallet policies, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
+SDP provides a Solana-native payments stack: stablecoin transfers, fiat on-ramps and off-ramps, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
 
 If you have not yet provisioned a custody wallet or token, start with [Set Up Wallets](/docs/guides/setup-wallets) and [Tokenize an Asset](/docs/guides/tokenize-an-asset).
 
@@ -1900,9 +2282,8 @@ If you have not yet provisioned a custody wallet or token, start with [Set Up Wa
 - **Ramps** — fiat on-ramps and off-ramps.
   - [Ramps overview](/docs/payments/ramps) — onramp and offramp request shape, KYC handoff, status states.
   - [Ramp providers](/docs/payments/ramps-providers) — MoonPay, Lightspark, and BVNK configuration.
-- **Wallet operations**
-  - [Wallet policies](/docs/payments/wallet-policies) — destination allowlist and transfer limits.
-  - [Wallet balances](/docs/payments/wallet-balances) — per-wallet token balances with optional USD valuation.
+
+Wallet-wide controls and balances are documented in [Wallet operations](/docs/wallet-operations).
 
 ## Underlying API
 
@@ -2034,7 +2415,7 @@ Build the request body:
 
 ```typescript
 const body = {
-  source: "wal_example",              // SDP custody wallet ID
+  source: "privy_wallet_123",              // `walletId` from GET /v1/wallets
   destination: "7xKXz...9fGh",         // recipient wallet (owner) address
   token: "9aBCd...4eEf",               // onchain mint address
   amount: "100.00",                    // human-readable units
@@ -2072,7 +2453,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "source": "wal_example",
+    "source": "privy_wallet_123",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
     "amount": "100.00",
@@ -2091,7 +2472,7 @@ const response = await fetch(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      source: "wal_example",
+      source: "privy_wallet_123",
       destination: "7xKXz...9fGh",
       token: "9aBCd...4eEf",
       amount: "100.00",
@@ -2111,7 +2492,7 @@ HttpRequest request = HttpRequest.newBuilder()
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
-          "source": "wal_example",
+          "source": "privy_wallet_123",
           "destination": "7xKXz...9fGh",
           "token": "9aBCd...4eEf",
           "amount": "100.00",
@@ -2210,7 +2591,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "source": "wal_example",
+    "source": "privy_wallet_123",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
     "amount": "100.00",
@@ -2229,7 +2610,7 @@ const response = await fetch(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      source: "wal_example",
+      source: "privy_wallet_123",
       destination: "7xKXz...9fGh",
       token: "9aBCd...4eEf",
       amount: "100.00",
@@ -2248,7 +2629,7 @@ HttpRequest request = HttpRequest.newBuilder()
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
-          "source": "wal_example",
+          "source": "privy_wallet_123",
           "destination": "7xKXz...9fGh",
           "token": "9aBCd...4eEf",
           "amount": "100.00",
@@ -2330,7 +2711,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "source": "wal_example",
+    "source": "privy_wallet_123",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
     "amount": "150.00",
@@ -2439,7 +2820,7 @@ Per-transfer outcomes you should expect to handle:
 - [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint.
 - [Payment with memo](/docs/payments/send-payment-with-memo) — the memo field used above to tag a batch.
 - [Indexing and reconciliation](/docs/payments/accept-indexing) — the same list endpoint, used inbound.
-- [Wallet policies](/docs/payments/wallet-policies) — destination allowlist and daily-limit guardrails for payout wallets.
+- [Wallet policies](/docs/wallet-operations/policies) — destination allowlist and daily-limit guardrails for payout wallets.
 
 ---
 
@@ -2459,7 +2840,7 @@ The receiving address is a custody wallet you control. Two scopings to choose be
 - **One wallet per order** *(recommended for accept flows)* — provision a fresh custody wallet (or sub-account) per order or per customer and use the destination address itself as the correlation key. The inbound transfer's `destination` field maps 1:1 to your order row, so you do not depend on memo or reference fields that SDP does not surface for inbound payments.
 - **One wallet per merchant scope** — for marketplaces, one custody wallet per seller; for treasury operations, one per ledger account. Reasonable when correlation isn't required (treasury, settlement) or when you accept a single fixed-amount payment per merchant.
 
-The address you publish is the on-chain `address` of the custody wallet (you can fetch it from [`GET /v1/wallets/{walletId}`](/docs/reference/api/wallets)). You publish that address; senders use it as the destination of a normal SPL token transfer. SDP indexes the inbound transfer and exposes it in [`GET /v1/payments/transfers`](/docs/payments/accept-indexing) with `direction=inbound`.
+The address you publish is the on-chain `address` of the custody wallet. Fetch it with [`GET /v1/wallets/{walletId}`](/docs/reference/api/wallets); when you only need wallet metadata, add `?includeBalance=false` to avoid a balance RPC and pricing lookup. You publish that address; senders use it as the destination of a normal SPL token transfer. SDP indexes the inbound transfer and exposes it in [`GET /v1/payments/transfers`](/docs/payments/accept-indexing) with `direction=inbound`.
 
 **Correlation caveats.** For *customer-initiated* inbound transfers, SDP today does **not** populate `Transfer.memo` (Solana memo-program instructions aren't extracted into the record) and does **not** expose a reference field on the inbound record. The reliable on-record correlation key is the inbound transfer's `destination` — hence the per-order receiving-address recommendation. If you need memo- or reference-based correlation (e.g., for a Solana Pay URL that carries an order pubkey), read the on-chain transaction directly via Solana RPC using the transfer's `signature`.
 
@@ -2474,7 +2855,7 @@ There are two ways customers can land a payment on the address you control:
 
 - **Indexed inbound transfers** — `GET /v1/payments/transfers?direction=inbound` returns all received transfers across your custody wallets, with filters for token, status, wallet, and date range. See [Indexing and reconciliation](/docs/payments/accept-indexing).
 - **Per-transfer status reads** — `GET /v1/payments/transfers/{id}` for a single payment's lifecycle. See [Verifying a payment](/docs/payments/accept-verification).
-- **Wallet balances** — `GET /v1/payments/wallets/{walletId}/balances` for the current per-token balance on a receiving wallet. See [Wallet balances](/docs/payments/wallet-balances).
+- **Wallet balances** — `GET /v1/payments/wallets/{walletId}/balances` for the current per-token balance on a receiving wallet. See [Wallet balances](/docs/wallet-operations/balances).
 - **Address-based correlation** — the inbound transfer's `destination` is the on-record correlation key for accept flows. Pair with per-order receiving addresses (see above) to map inbound transfers to orders without depending on memo. `Transfer.memo` is populated only for SDP-initiated transfers (outbound or internal); for customer-initiated inbound transfers the field is **omitted** from the response (it's optional in the schema, not nullable). Read the on-chain transaction via Solana RPC if you need memo or Solana Pay reference correlation.
 
 ## What SDP does not give you yet
@@ -2988,321 +3369,6 @@ For self-hosted deployments where only a subset of providers will ever be config
 
 ---
 
-## Payments — Wallet Operations
-
-### Wallet policies
-Source: https://platform.solana.com/docs/payments/wallet-policies
-
-> Wallet controls, default-allow rollout, and policy audit visibility.
-
-Wallet policies constrain how a custody wallet can move funds. SDP starts from default allow, then applies the active wallet control profile and any payment policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before wallet operations execute.
-
-Use policies for treasury wallets, automated payout wallets, or any custody wallet where unbounded outbound flow would be a liability.
-
-## Reading a wallet's policies
-
-<Tabs items={["curl", "TypeScript"]}>
-<Tab value="curl">
-```bash
-curl https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
-  -H "Authorization: Bearer sk_test_..."
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript
-const response = await fetch(
-  "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
-  { headers: { Authorization: "Bearer sk_test_..." } }
-);
-const { data } = await response.json();
-// data.policy.destinationAllowlist: string[]
-// data.policy.maxTransferAmount?: string
-// data.policy.maxDailyAmount?: string
-// data.policy.controlProfile?.providerMappingStatus
-// data.policy.audit?.recentEvaluations
-```
-</Tab>
-</Tabs>
-
-The payload is wrapped in the standard `data` / `meta` envelope, with the policy under a `policy` key:
-
-```json
-{
-  "data": {
-    "policy": {
-      "walletId": "wal_abc123",
-      "destinationAllowlist": ["7xKXz...9fGh", "5aBCd...2eFg"],
-      "maxTransferAmount": "100.00",
-      "maxDailyAmount": "1000.00",
-      "defaultAction": "allow",
-      "controlProfile": {
-        "id": "wcp_abc123",
-        "status": "active",
-        "activeRevisionId": "wcpr_abc123",
-        "revisionId": "wcpr_abc123",
-        "revisionNumber": 3,
-        "defaultAction": "allow",
-        "rules": [
-          {
-            "id": "approval-required",
-            "kind": "approval",
-            "families": ["payment", "ramp"],
-            "action": "approval_required",
-            "name": "Approval checks"
-          }
-        ],
-        "providerMappingStatus": "not_applicable",
-        "createdAt": "2026-05-14T08:00:00Z",
-        "updatedAt": "2026-05-14T10:15:00Z",
-        "activatedAt": "2026-05-14T10:15:00Z"
-      },
-      "audit": {
-        "recentEvaluations": [
-          {
-            "walletOperationId": "wop_abc123",
-            "policyEvaluationId": "peval_abc123",
-            "operationFamily": "payment",
-            "operationType": "payment_transfer",
-            "asset": "USDC",
-            "amount": "100.00",
-            "destination": "7xKXz...9fGh",
-            "status": "pending_approval",
-            "decision": "approval_required",
-            "reasonCode": "wallet_policy_match",
-            "reason": "Payment matched approval policy.",
-            "requiresApproval": true,
-            "approvalRequestId": "appr_abc123",
-            "operationCreatedAt": "2026-05-14T10:20:00Z",
-            "operationUpdatedAt": "2026-05-14T10:20:00Z",
-            "evaluatedAt": "2026-05-14T10:20:00Z"
-          }
-        ]
-      },
-      "createdAt": "2026-05-14T08:00:00Z",
-      "updatedAt": "2026-05-14T10:15:00Z"
-    }
-  },
-  "meta": { "requestId": "req_...", "timestamp": "2026-05-18T00:00:00.000Z" }
-}
-```
-
-Amount fields are **UI-unit decimal strings** (`"100.00"` means 100 tokens, regardless of the mint's decimals — matching the transfer-request convention). The configured value is a **single threshold**, but enforcement is **per token**: `maxDailyAmount` sums each token's outbound transfers separately within the day window, so a wallet with `maxDailyAmount: "1000"` can send up to 1000 USDC *and* 1000 SOL in the same UTC day — there is no aggregate cap across mints. If you need different per-token thresholds (e.g., 10,000 USDC daily but 50 SOL daily), partition into separate wallets.
-
-## Default allow and active controls
-
-Wallet policy evaluation starts from default allow. If no wallet control profile exists, supported payment and ramp operations continue to run unless another product-specific check rejects them. When you activate a control profile, SDP evaluates its rules first and returns the resulting `decision` as one of `allow`, `deny`, `approval_required`, `provider_approval_required`, `review`, or `not_evaluated`.
-
-The `controlProfile` object shows the active immutable revision. Treat `revisionId` and `revisionNumber` as audit references: a policy evaluation records which revision was active when the wallet operation was checked.
-
-## Policy evaluation and audit records
-
-Each supported wallet operation records a wallet operation row before policy evaluation and a policy evaluation row after SDP decides what should happen. `audit.recentEvaluations` exposes the most recent decisions for the wallet so support and customer operators can review:
-
-- what operation was evaluated (`walletOperationId`, `operationFamily`, `operationType`)
-- what decision SDP made (`decision`, `reasonCode`, `reason`, `requiresApproval`)
-- whether an approval request was created (`approvalRequestId`)
-- when the operation was created, updated, and evaluated
-
-Use these records to explain allow, deny, approval-required, and review outcomes. They are an operational audit summary, not the full raw provider payload.
-
-## Provider mapping status
-
-`providerMappingStatus` describes whether an SDP policy revision has also been mapped into a custody or ramp provider's native policy system. Current payment wallet controls are SDP-enforced first. A value of `not_applicable` means there is no provider-native mapping for that revision. `pending`, `partial`, or `failed` mean SDP still evaluates the operation, but you should not assume the same rule has been fully synced to the provider.
-
-## Destination allowlist
-
-The allowlist is a list of on-chain destination addresses (32-44 character base-58 Solana pubkeys). When set, `POST /v1/payments/transfers` rejects any destination not in the list.
-
-- Maximum entries: **500 addresses per wallet**.
-- Each entry is a single on-chain address — no patterns, ranges, or address books.
-- Empty allowlist (`[]`) means no destination restriction. To enable enforcement, populate at least one entry.
-
-The allowlist exists to bound risk on automated wallets (a hot wallet that should only ever pay a known set of counterparties) and to enforce treasury controls (only the corporate cold-storage address can drain the operating wallet).
-
-## Transfer limits
-
-Two limits, both optional:
-
-- **`maxTransferAmount`** — per-transfer cap. Any single `POST /v1/payments/transfers` exceeding this amount is rejected. Compared against the request's `amount` directly, so it is naturally per-token.
-- **`maxDailyAmount`** — UTC-calendar-day cap, **enforced per token**. The day window resets at 00:00 UTC; the projected total is the sum of that wallet's outbound transfers for the **same token** in the current day (`pending`/`processing`/`confirmed`/`finalized`) plus the new request's `amount`. Different tokens are summed independently — see the per-token note under [Reading a wallet's policies](#reading-a-wallets-policies).
-
-Set both for defense in depth: a per-transaction cap that catches obvious mistakes, plus a daily cap that bounds blast radius if many small transfers are submitted in a coordinated attack.
-
-## Updating policies
-
-`PUT /v1/payments/wallets/{walletId}/policies` has **full-replace** semantics — the request body becomes the new policy state in its entirety. To remove the allowlist, send `destinationAllowlist: []`. To drop a transfer limit, omit the field on the next PUT.
-
-<Tabs items={["curl", "TypeScript"]}>
-<Tab value="curl">
-```bash
-curl -X PUT https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "destinationAllowlist": [
-      "7xKXz...9fGh",
-      "5aBCd...2eFg"
-    ],
-    "maxTransferAmount": "100.00",
-    "maxDailyAmount": "1000.00"
-  }'
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript
-await fetch(
-  "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
-  {
-    method: "PUT",
-    headers: {
-      "Authorization": "Bearer sk_test_...",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      destinationAllowlist: ["7xKXz...9fGh", "5aBCd...2eFg"],
-      maxTransferAmount: "100.00",
-      maxDailyAmount: "1000.00",
-    }),
-  }
-);
-```
-</Tab>
-</Tabs>
-
-Because PUT is full-replace, treat policy edits like ordinary form submissions: read the current state, present it for editing, and PUT the complete updated object. Don't construct partial patches.
-
-## Interaction with compliance
-
-Wallet policies enforce **structural** constraints (where funds can go, how much, how fast). They do not replace compliance screening. If your organization has compliance screening enabled, screening happens on the destination address as a separate check, in addition to the allowlist match. A transfer can be rejected by either layer; both must pass to reach the network.
-
-See the [Compliance API reference](/docs/reference/api/compliance) for address-screening flows that complement policies.
-
-## Related
-
-- [Payouts and disbursements](/docs/payments/send-payouts) — running an outbound batch from a policy-constrained wallet.
-- [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint subject to policy enforcement.
-- [Wallet balances](/docs/payments/wallet-balances) — current balance, useful to size transfer limits.
-
----
-
-### Wallet balances
-Source: https://platform.solana.com/docs/payments/wallet-balances
-
-> Per-wallet token balances with optional USD valuation via SDP.
-
-`GET /v1/payments/wallets/{walletId}/balances` returns the wallet's native **SOL** balance plus every **SPL token** balance held by a custody wallet — raw amount, human-readable amount, decimals, and optional USD valuation when a price source is configured. SOL is always prepended as the first entry and is represented with `token: "SOL"` and `mint: "So11111111111111111111111111111111111111112"`.
-
-## Request
-
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
-```bash
-curl https://api.solana.com/v1/payments/wallets/wal_abc123/balances \
-  -H "Authorization: Bearer sk_test_..."
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript
-const response = await fetch(
-  "https://api.solana.com/v1/payments/wallets/wal_abc123/balances",
-  { headers: { Authorization: "Bearer sk_test_..." } }
-);
-const { data } = await response.json();
-// data.walletBalances.balances: TokenBalance[]
-```
-</Tab>
-<Tab value="Java">
-```java
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/wallets/wal_abc123/balances"))
-    .header("Authorization", "Bearer sk_test_...")
-    .GET()
-    .build();
-```
-</Tab>
-</Tabs>
-
-## Response shape
-
-The payload is wrapped in the standard `data` / `meta` envelope, with the balances under a `walletBalances` key:
-
-```json
-{
-  "data": {
-    "walletBalances": {
-      "walletId": "wal_abc123",
-      "address": "3xYZa...2aBc",
-      "balances": [
-        {
-          "token": "SOL",
-          "mint": "So11111111111111111111111111111111111111112",
-          "amount": "2500000000",
-          "uiAmount": "2.5",
-          "decimals": 9
-        },
-        {
-          "token": "USDC",
-          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-          "amount": "1500000000",
-          "uiAmount": "1500.00",
-          "decimals": 6,
-          "usdPrice": 1.0,
-          "usdValue": 1500.0
-        }
-      ]
-    }
-  },
-  "meta": { "requestId": "req_...", "timestamp": "2026-05-18T00:00:00.000Z" }
-}
-```
-
-Per-balance fields:
-
-| Field | Notes |
-| --- | --- |
-| `token` | Token symbol if known, otherwise the on-chain mint. |
-| `mint` | On-chain mint address. |
-| `amount` | Raw amount in the smallest unit (string to preserve precision). |
-| `uiAmount` | Human-readable decimal string — `amount / 10^decimals`. |
-| `decimals` | Token's decimal count. |
-| `usdPrice` | Per-token USD price; omitted when no pricing data is available. |
-| `usdValue` | Total USD value (= `usdPrice * uiAmount`); omitted when pricing is unavailable. |
-| `confidential` | Reserved for confidential transfer balances; absent for standard balances. |
-
-## Use cases
-
-- **Account dashboards** — display the contents of a custody wallet to its operator.
-- **Pre-transfer balance checks** — validate that a wallet has enough of a specific token before kicking off a payout batch.
-- **Treasury accounting** — periodic snapshots into an internal ledger.
-
-## Pricing freshness
-
-When USD valuation is populated, the price comes from SDP's configured price source and reflects the most recent quote available. The cadence and source depend on deployment configuration — do not rely on `usdValue` for downstream balance-sheet decisions without confirming the price source's freshness with your operations team. When in doubt, treat `amount` / `uiAmount` as authoritative and convert with your own price feed.
-
-If no price source is configured, the `usdPrice` and `usdValue` fields are simply absent rather than zero — falling back to "I don't know" rather than "$0.00" so downstream consumers can decide how to handle the gap.
-
-## Comparison to on-chain RPC
-
-You can also enumerate SPL token balances by calling `getTokenAccountsByOwner` against a Solana RPC and decoding the returned token-account data. Reasons to use SDP's `balances` endpoint instead:
-
-- **Token resolution** — SDP resolves the mint to a symbol when it knows one; raw RPC returns mints only.
-- **USD pricing** — RPC has no concept of price.
-- **No RPC dependency in your stack** — one fewer external integration when you are already calling SDP.
-
-Reasons to skip SDP and go to RPC directly:
-
-- **Cluster-of-truth** — you want the wallet's state at a specific slot for an audit.
-- **Confidential transfer balances** — full extension support is RPC-side.
-- **Latency-sensitive paths** — RPC is one hop closer to the cluster.
-
-## Related
-
-- [Wallet policies](/docs/payments/wallet-policies) — set transfer caps based on balance bounds.
-- [Payouts and disbursements](/docs/payments/send-payouts) — balance-check before running a batch.
-- [Set Up Wallets](/docs/guides/setup-wallets) — provision the wallets whose balances this endpoint reports.
-
----
-
 ## Tutorials
 
 ### Issue a Regulated Stablecoin
@@ -3354,17 +3420,25 @@ From the dashboard, mint an org-scoped API key with **Role: Admin**, **Environme
 
 <Step>
 
-With the Admin key, call `POST /v1/projects` to create your project (`{ name, slug, environment: "sandbox" }`). The response carries the project ID you'll need in the next step:
+With the Admin key, call `GET /v1/projects` and pick the project with slug `default-sandbox`. Every organization is provisioned with exactly one sandbox and one production project automatically — isolation between workloads comes from separate organizations, not additional projects. The project ID is what you'll need in the next step:
 
 ```json
 {
   "data": {
-    "project": {
-      "id": "prj_3bc13bcb-...",
-      "slug": "treasury-pilot-usd",
-      "environment": "sandbox",
-      "status": "active"
-    }
+    "projects": [
+      {
+        "id": "prj_3bc13bcb-...",
+        "slug": "default-sandbox",
+        "environment": "sandbox",
+        "status": "active"
+      },
+      {
+        "id": "prj_8a201d47-...",
+        "slug": "default-production",
+        "environment": "production",
+        "status": "active"
+      }
+    ]
   }
 }
 ```
@@ -4043,7 +4117,7 @@ The work between `sk_test_` and `sk_live_` is not a flag flip. It is the moment 
 
 Your sandbox setup is built around six artifacts that all swap for production equivalents:
 
-- **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys minted from a production project. Use the Section 2 bootstrap pattern with a fresh Admin key, a fresh `POST /v1/projects` call against `environment: "production"`, and fresh project-scoped keys minted under it.
+- **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys minted from your production project. Use the Section 2 bootstrap pattern with a fresh Admin key, selecting the `default-production` project from `GET /v1/projects` instead of `default-sandbox`, and fresh project-scoped keys minted under it.
 - **Custody provider**. Production reads `provider` as your federally chartered custodian (Anchorage Digital Bank for most US institutional issuers), bound to your organization through the Anchorage onboarding flow. The Privy sandbox wallets do not carry over.
 - **Solana network**. Mainnet-beta replaces devnet. The custody address gets funded by your custody bank as part of standard operational support, not by a faucet.
 - **API base URL**. `https://api.solana.com` is the canonical production base. While the custom domain is in rollout, requests route through `https://sdp-api-production.solana.workers.dev`. Code paths are identical; only the hostname changes.
@@ -4305,8 +4379,13 @@ In your Clerk development app:
 - Copy the publishable key, secret key, and issuer into the
   [configurator](/docs/self-hosting/configurator).
 - Create a JWT template named `sdp-api`.
+- Expose your local API with the webhook tunnel: reserve a free stable domain
+  at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains), set it
+  as `WEBHOOK_INGEST_DOMAIN` in `apps/sdp-api/.dev.vars`, and run
+  `pnpm dev:webhooks`.
 - Create a webhook endpoint that points at
-  `http://localhost:8787/webhooks/clerk/link-orgs` for local testing.
+  `https://<your-domain>/webhooks/clerk/link-orgs` — Clerk delivers over the
+  public internet and cannot reach `localhost` directly.
 - Copy the webhook signing secret into `CLERK_WEBHOOK_SECRET`.
 
 `CLERK_WEBHOOK_SECRET` is optional at raw env-validation level, but this tutorial
@@ -4981,6 +5060,7 @@ Source: https://platform.solana.com/docs/reference/api
 - [Projects](/docs/reference/api/projects)
 - [Issuance](/docs/reference/api/issuance)
 - [Payments](/docs/reference/api/payments)
+- [Policies](/docs/reference/api/policies)
 - [Compliance](/docs/reference/api/compliance)
 - [Asset Profiles](/docs/reference/api/asset-profiles)
 
@@ -5010,6 +5090,10 @@ Source: https://platform.solana.com/docs/reference/api/api-keys
 | `DELETE` | `/v1/api-keys/{keyId}` | Deactivate API key |
 | `GET` | `/v1/api-keys/{keyId}` | Get API key |
 | `PATCH` | `/v1/api-keys/{keyId}` | Update API key |
+| `PUT` | `/v1/api-keys/{keyId}/policy-bindings` | Replace or clear API-key policy bindings |
+| `POST` | `/v1/api-keys/{keyId}/policy-profiles` | Create API-key policy profile |
+| `POST` | `/v1/api-keys/{keyId}/policy-profiles/{profileId}/revisions` | Create API-key policy revision |
+| `POST` | `/v1/api-keys/{keyId}/policy-profiles/{profileId}/revisions/{revisionId}/activate` | Activate API-key policy revision |
 | `POST` | `/v1/api-keys/{keyId}/rotate` | Rotate API key |
 
 ---
@@ -5027,6 +5111,11 @@ Source: https://platform.solana.com/docs/reference/api/wallets
 | `GET` | `/v1/wallets/{walletId}` | Get wallet by ID |
 | `PATCH` | `/v1/wallets/{walletId}` | Update wallet |
 | `GET` | `/v1/wallets/aggregate` | Aggregate wallet balances |
+| `GET` | `/v1/wallets/approval-requests` | List wallet approval requests |
+| `GET` | `/v1/wallets/approval-requests/{approvalRequestId}` | Get wallet approval request |
+| `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/approve` | Approve wallet approval request |
+| `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/cancel` | Cancel wallet approval request |
+| `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/reject` | Reject wallet approval request |
 | `GET` | `/v1/wallets/config` | Get wallet signing config |
 | `GET` | `/v1/wallets/configs` | List wallet signing configs |
 | `POST` | `/v1/wallets/default-wallet` | Set default wallet |
@@ -5046,7 +5135,6 @@ Source: https://platform.solana.com/docs/reference/api/projects
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `GET` | `/v1/projects` | List projects |
-| `POST` | `/v1/projects` | Create project |
 | `DELETE` | `/v1/projects/{projectId}` | Archive project |
 | `GET` | `/v1/projects/{projectId}` | Get project |
 | `PATCH` | `/v1/projects/{projectId}` | Update project |
@@ -5145,6 +5233,20 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/wallets/{walletId}/balances` | Get wallet balances |
 | `GET` | `/v1/payments/wallets/{walletId}/policies` | Get wallet policy |
 | `PUT` | `/v1/payments/wallets/{walletId}/policies` | Update wallet policy |
+| `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations` | List wallet policy evaluations |
+| `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations/{policyEvaluationId}` | Get wallet policy evaluation |
+| `GET` | `/v1/payments/wallets/{walletId}/policies/revisions` | List wallet policy revisions |
+
+---
+
+### Policies
+Source: https://platform.solana.com/docs/reference/api/policies
+
+> Wallet and API-key policy-control inventory.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/policies` | List policy controls |
 
 ---
 
@@ -5166,12 +5268,13 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `GET` | `/v1/asset-profiles` | List asset profiles |
-| `POST` | `/v1/asset-profiles` | Create asset profile |
-| `DELETE` | `/v1/asset-profiles/{profileId}` | Archive asset profile |
-| `GET` | `/v1/asset-profiles/{profileId}` | Get asset profile |
-| `PATCH` | `/v1/asset-profiles/{profileId}` | Update asset profile |
-| `GET` | `/v1/asset-profiles/metadata` | Get asset profile field options |
+| `GET` | `/v1/issuance/asset-profiles` | List asset profiles |
+| `POST` | `/v1/issuance/asset-profiles` | Create token with asset profile |
+| `DELETE` | `/v1/issuance/asset-profiles/{profileId}` | Archive asset profile |
+| `GET` | `/v1/issuance/asset-profiles/{profileId}` | Get asset profile |
+| `PATCH` | `/v1/issuance/asset-profiles/{profileId}` | Update asset profile |
+| `GET` | `/v1/issuance/asset-profiles/by-token/{tokenId}` | Get asset profile by token |
+| `GET` | `/v1/issuance/asset-profiles/field-options` | Get asset profile field options |
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.

@@ -17,6 +17,7 @@ import {
 } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
+import { isSolanaCryptoAsset, SOLANA_ASSET_TO_RAIL } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { PaymentRampEstimate, PaymentRampQuote, RampProviderEstimateResult } from "@sdp/types";
@@ -27,7 +28,11 @@ import {
   RAMP_SUPPORT_HASH,
   type RampFiatCurrency,
 } from "@sdp/types/generated/ramp-support";
-import type { RampProviderDirectionSupport } from "@sdp/types/payment-rails";
+import type {
+  OfframpPairSupport,
+  OnrampPairSupport,
+  RampProviderDirectionSupport,
+} from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
@@ -46,6 +51,7 @@ import {
   counterpartyNotProvisioned,
   internalError,
   notFound,
+  unsupportedRampCorridor,
 } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
@@ -130,7 +136,7 @@ function buildProviderDetails(
 }
 
 function providersFromPairs(
-  pairs: readonly (OnrampCurrencyPair | OfframpCurrencyPair)[]
+  pairs: readonly { providers: readonly RampProviderId[] }[]
 ): RampProviderId[] {
   return uniqueSorted(pairs.flatMap((row) => row.providers));
 }
@@ -152,6 +158,41 @@ export async function assertRampProviderAvailable(
 }
 
 type RampQuoteDirection = "onramp" | "offramp";
+
+/**
+ * Throws unless the committed corridor-support matrix (the same tables estimate
+ * selects providers from) lists the provider for the requested crypto/fiat pair.
+ * When fiatCurrency is omitted (off-ramp quotes may defer fiat selection to the
+ * provider), the provider must support the crypto rail for at least one fiat.
+ */
+function assertRampCorridorSupported(
+  direction: RampQuoteDirection,
+  input: { provider: RampProviderId; cryptoToken: string; fiatCurrency?: RampFiatCurrency }
+): void {
+  const symbol = input.cryptoToken.trim().toUpperCase();
+  if (!isSolanaCryptoAsset(symbol)) {
+    throw badRequest(
+      `cryptoToken must be one of: ${Object.keys(SOLANA_ASSET_TO_RAIL).join(", ")}.`
+    );
+  }
+  const rail = SOLANA_ASSET_TO_RAIL[symbol];
+  const pairs: readonly (OnrampPairSupport | OfframpPairSupport)[] =
+    direction === "onramp" ? ONRAMP_SUPPORT : OFFRAMP_SUPPORT;
+  const fiat = input.fiatCurrency;
+  const matched = pairs.filter((pair) => {
+    const railSide = direction === "onramp" ? pair.dest : pair.source;
+    const fiatSide = direction === "onramp" ? pair.source : pair.dest;
+    return railSide === rail && (fiat === undefined || fiatSide === fiat);
+  });
+  const supportedProviders = providersFromPairs(matched);
+  if (!supportedProviders.includes(input.provider)) {
+    throw unsupportedRampCorridor(input.provider, direction, {
+      assetRail: rail,
+      fiatCurrency: fiat,
+      supportedProviders,
+    });
+  }
+}
 type ScopedRampWallet = ResolvedScope["wallets"][number];
 
 type RampPolicyOperationType = "ramp_onramp_quote" | "ramp_offramp_quote";
@@ -288,6 +329,7 @@ export async function advanceCounterpartyRequirements(
       const customer = await ensureLightsparkCustomer(c, {
         counterparty: input.counterparty,
         projectId: input.projectId,
+        collectedData: input.direction === "offramp" ? input.collectedData : undefined,
       });
       if (input.direction === "offramp") {
         await ensureLightsparkPayoutAccount(c, {
@@ -458,6 +500,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
   }
 
   const input = parsed.data;
+  assertRampCorridorSupported("onramp", input);
   const scope = await resolveScope(c);
   await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
 
@@ -621,6 +664,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
   }
 
   const input = parsed.data;
+  assertRampCorridorSupported("offramp", input);
   const scope = await resolveScope(c);
   await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
 

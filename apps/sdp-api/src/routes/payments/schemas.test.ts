@@ -1,9 +1,10 @@
-import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { type PolicyRule, SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {
   createRecurringPaymentSchema,
   createTransferSchema,
+  listTransfersQuerySchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
   updateRecurringPaymentSchema,
   updateWalletPolicySchema,
@@ -24,6 +25,18 @@ describe("payments schema inferred types", () => {
 
     expectTypeOf<CreateTransfer["destination"]>().toEqualTypeOf<string>();
     expectTypeOf<UpdateWalletPolicy["destinationAllowlist"]>().toEqualTypeOf<string[]>();
+  });
+});
+
+describe("transfer list timestamp filters", () => {
+  it("normalizes offset timestamps to UTC before ledger filtering", () => {
+    const query = listTransfersQuerySchema.parse({
+      from: "2026-01-02T20:00:00+05:00",
+      to: "2026-01-02T12:30:00-05:00",
+    });
+
+    expect(query.from).toBe("2026-01-02T15:00:00.000Z");
+    expect(query.to).toBe("2026-01-02T17:30:00.000Z");
   });
 });
 
@@ -235,5 +248,68 @@ describe("wallet policy destinationAllowlist schema", () => {
       const messages = result.error.issues.map((issue) => issue.message);
       expect(messages).toContain("destinationAllowlist entry must be a base58 Solana address");
     }
+  });
+});
+
+describe("wallet policy rule schema", () => {
+  it("accepts operation_type and standalone asset rules", () => {
+    const rules = [
+      {
+        id: "deny-payment-execution",
+        kind: "operation_type",
+        operationType: "payment_transfer_execute",
+        action: "deny",
+      },
+      {
+        id: "approve-usdc",
+        kind: "asset",
+        assets: ["USDC", USDC_MINT],
+        action: "approval_required",
+      },
+    ] satisfies PolicyRule[];
+
+    const parsed = updateWalletPolicySchema.parse({ destinationAllowlist: [], rules });
+
+    expect(parsed.rules).toEqual(rules);
+  });
+
+  it("rejects invalid operation_type and asset values with field-specific errors", () => {
+    const result = updateWalletPolicySchema.safeParse({
+      destinationAllowlist: [],
+      rules: [
+        { kind: "operation_type", operationType: "" },
+        { kind: "asset", assets: [""] },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ["rules", 0, "operationType"],
+            message: "operationType must not be empty",
+          }),
+          expect.objectContaining({
+            path: ["rules", 1, "assets", 0],
+            message: "assets entries must not be empty",
+          }),
+        ])
+      );
+    }
+  });
+
+  it("keeps all existing public rule kinds backward-compatible", () => {
+    const rules = [
+      { kind: "operation_family", family: "payment", action: "allow" },
+      { kind: "destination", destination: VALID_DESTINATION, action: "deny" },
+      { kind: "amount", max: "100", asset: "USDC", action: "approval_required" },
+      { kind: "approval", families: ["payment"], approvalGroupId: "group-1" },
+      { kind: "always", action: "review" },
+    ] satisfies PolicyRule[];
+
+    const parsed = updateWalletPolicySchema.parse({ destinationAllowlist: [], rules });
+
+    expect(parsed.rules).toEqual(rules);
   });
 });

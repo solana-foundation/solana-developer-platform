@@ -1,7 +1,4 @@
-import type { Next } from "hono";
-import { type Context, Hono } from "hono";
-import { AppError } from "@/lib/errors";
-import { isRecurringPaymentsEnabled } from "@/lib/feature-flags";
+import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
@@ -29,6 +26,7 @@ import {
   getTransferBatch,
   getWalletBalances,
   getWalletPolicy,
+  getWalletPolicyEvaluation,
   listOfframpCurrencies,
   listOnrampCurrencies,
   listPaymentRequests,
@@ -38,6 +36,8 @@ import {
   listSubscriptions,
   listTransferBatches,
   listTransfers,
+  listWalletControlProfileRevisions,
+  listWalletPolicyEvaluations,
   prepareCancelSubscription,
   prepareCreateSubscriptionPlan,
   prepareResumeSubscription,
@@ -54,22 +54,8 @@ import {
 
 const payments = new Hono<{ Bindings: Env }>();
 
-async function requireRecurringPaymentsFeature(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!isRecurringPaymentsEnabled(c.env)) {
-    throw new AppError("FORBIDDEN", "Recurring payments are not enabled for this environment");
-  }
-
-  await next();
-}
-
 payments.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 payments.use("*", projectContextMiddleware());
-payments.use("/subscription-plans", requireRecurringPaymentsFeature);
-payments.use("/subscription-plans/*", requireRecurringPaymentsFeature);
-payments.use("/subscriptions", requireRecurringPaymentsFeature);
-payments.use("/subscriptions/*", requireRecurringPaymentsFeature);
-payments.use("/recurring-payments", requireRecurringPaymentsFeature);
-payments.use("/recurring-payments/*", requireRecurringPaymentsFeature);
 
 payments.get(
   "/wallets/:walletId/balances",
@@ -80,6 +66,21 @@ payments.get(
   "/wallets/:walletId/policies",
   requirePermissions("wallets:read", "payments:read"),
   getWalletPolicy
+);
+payments.get(
+  "/wallets/:walletId/policies/revisions",
+  requirePermissions("wallets:read", "payments:read"),
+  listWalletControlProfileRevisions
+);
+payments.get(
+  "/wallets/:walletId/policies/evaluations",
+  requirePermissions("wallets:read", "payments:read"),
+  listWalletPolicyEvaluations
+);
+payments.get(
+  "/wallets/:walletId/policies/evaluations/:policyEvaluationId",
+  requirePermissions("wallets:read", "payments:read"),
+  getWalletPolicyEvaluation
 );
 payments.put(
   "/wallets/:walletId/policies",

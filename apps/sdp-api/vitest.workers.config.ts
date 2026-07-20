@@ -66,6 +66,10 @@ export default defineConfig({
           API_KEY_PEPPER: "test-pepper-for-unit-tests",
           SOLANA_MOCK: "true",
           RUN_INTEGRATION_TESTS: "false",
+          SOLANA_NETWORK: "devnet",
+          SOLANA_RPC_URL: "https://solana-rpc.mock.invalid",
+          FEE_PAYMENT_PROVIDER: "kora",
+          KORA_RPC_URL: "https://kora-rpc.mock.invalid",
         },
         hyperdrives: {
           HYPERDRIVE: testDatabaseUrl,

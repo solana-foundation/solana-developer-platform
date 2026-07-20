@@ -9,6 +9,7 @@ import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
+import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import type { FieldDescriptor } from "./asset-details-config";
@@ -37,7 +38,7 @@ export function FormCard({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-border-default bg-white p-5">
+    <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
       <div className="flex items-start gap-3">
         {Icon ? (
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-primary">
@@ -124,37 +125,6 @@ export function ReadOnlyField({
   );
 }
 
-export function ToggleSwitch({
-  checked,
-  onChange,
-  disabled,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "relative h-6 w-11 shrink-0 rounded-full transition-colors",
-        checked ? "bg-primary" : "bg-border-strong"
-      )}
-    >
-      <span
-        className={cn(
-          "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform",
-          checked ? "translate-x-5" : "translate-x-0"
-        )}
-      />
-    </button>
-  );
-}
-
 export function DetailField({
   field,
   draft,
@@ -175,13 +145,17 @@ export function DetailField({
 
   if (field.control === "toggle") {
     const checked = Boolean(raw);
+    const toggleId = `issuance-field-${String(field.key)}`;
+    const toggleLabel = t(field.labelKey);
     return (
       <div>
-        <Label>{t(field.labelKey)}</Label>
+        <Label htmlFor={toggleId}>{toggleLabel}</Label>
         <div className="mt-1.5 flex items-center gap-2">
           <ToggleSwitch
+            id={toggleId}
             checked={checked}
             disabled={disabled}
+            aria-label={toggleLabel}
             onChange={(next) => updateDraft({ [field.key]: next } as Partial<DraftState>)}
           />
           <span className="text-sm text-tertiary">

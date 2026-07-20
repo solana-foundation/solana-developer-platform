@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { rotateApiKeyAction } from "./actions";
 import { DeleteApiKeyModal } from "./delete-api-key-modal";
 
@@ -29,6 +30,7 @@ export function ApiKeyActionsMenu({
   onDeleted,
 }: ApiKeyActionsMenuProps) {
   const t = useTranslations();
+  const router = useDashboardRouter();
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const rotateFormRef = useRef<HTMLFormElement | null>(null);
 
@@ -52,6 +54,11 @@ export function ApiKeyActionsMenu({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-[200px]">
+          <DropdownMenuItem
+            onSelect={() => router.push(`/dashboard/api-keys/${encodeURIComponent(keyId)}/edit`)}
+          >
+            {t("DashboardCustody.editApiKey")}
+          </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() => {
               if (canRotate) {

@@ -25,6 +25,25 @@ describe("OpenAPI spec", () => {
     expect(refreshPath?.operationId).toBe("refreshTokenSupply");
   });
 
+  it("documents the wallet metadata fast path and balance-on default", () => {
+    const doc = createOpenApiDocument();
+    const operation = doc.paths?.["/v1/wallets/{walletId}"]?.get;
+    const includeBalance = operation?.parameters?.find(
+      (parameter) => "name" in parameter && parameter.name === "includeBalance"
+    );
+
+    expect(includeBalance).toMatchObject({
+      name: "includeBalance",
+      in: "query",
+      required: false,
+      schema: { type: "string", enum: ["true", "false"] },
+    });
+    expect(JSON.stringify(includeBalance)).toContain("Defaults to true");
+    expect(JSON.stringify(operation?.responses?.["200"])).toContain(
+      "Omitted when includeBalance=false"
+    );
+  });
+
   it("documents counterparty ramp requirements", () => {
     const doc = createOpenApiDocument();
 
@@ -32,6 +51,30 @@ describe("OpenAPI spec", () => {
     expect(requirementsPath).toBeDefined();
     expect(requirementsPath?.operationId).toBe("getCounterpartyRequirements");
     expect(requirementsPath?.responses?.["200"]).toMatchSnapshot();
+  });
+
+  it("documents every supported public wallet policy rule kind", () => {
+    const doc = createPublicOpenApiDocument();
+    const policyPath = doc.paths?.["/v1/payments/wallets/{walletId}/policies"];
+    const serializedUpdate = JSON.stringify(policyPath?.put);
+    const serializedResponse = JSON.stringify(policyPath?.get?.responses?.["200"]);
+
+    for (const kind of [
+      "operation_family",
+      "operation_type",
+      "asset",
+      "destination",
+      "amount",
+      "approval",
+      "always",
+    ]) {
+      expect(serializedUpdate).toContain(`"${kind}"`);
+      expect(serializedResponse).toContain(`"${kind}"`);
+    }
+
+    for (const field of ["operationType", "operationTypes", "asset", "assets"]) {
+      expect(serializedResponse).toContain(`"${field}"`);
+    }
   });
 
   it("limits the public document to supported public API families", () => {
@@ -44,6 +87,7 @@ describe("OpenAPI spec", () => {
       "Projects",
       "Issuance",
       "Payments",
+      "Policies",
       "Compliance",
       "Counterparties",
       "Asset Profiles",
@@ -61,5 +105,6 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/health"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/wallets"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/payments/transfers"]?.post).toBeDefined();
+    expect(doc.paths?.["/v1/policies"]?.get).toBeDefined();
   });
 });

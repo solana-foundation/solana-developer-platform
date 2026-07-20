@@ -12,14 +12,14 @@ import {
 } from "@/app/dashboard/playground-api-data";
 import {
   WalletsOnboardingSkeleton,
-  WalletsPageSkeleton,
-} from "@/app/dashboard/wallets/wallets-page-skeleton";
+  WalletsOverviewSkeleton,
+} from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createOrgSdpApiClient, createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../onboarding-status";
 import { WalletsWorkspace } from "./wallets-workspace";
 
@@ -57,7 +57,6 @@ async function getCustodyWallets(
   request: SdpApiClient["request"]
 ): Promise<CustodyWalletSummary[]> {
   // Wallet cards refresh balances client-side; avoid blocking the overview render on balance RPCs.
-  // biome-ignore lint/security/noSecrets: Public API path with query flags for wallet listing.
   const res = await request("/v1/wallets?includeAllProviders=true");
   if (!res.ok) {
     const body = await res.text();
@@ -97,7 +96,7 @@ async function OnboardingGateSection({ orgId }: { orgId: string }) {
   const organization = await getClerkOrganizationSummary(orgId);
 
   return (
-    <Card className="rounded-[24px] border-border-subtle shadow-none">
+    <Card className="rounded-[24px] ring-border-subtle shadow-none">
       <CardHeader>
         <CardTitle>{t("DashboardCustody.waitingForOrganizationSync")}</CardTitle>
         <CardDescription>{t("DashboardCustody.organizationSyncDescription")}</CardDescription>
@@ -128,8 +127,7 @@ async function OnboardingGateSection({ orgId }: { orgId: string }) {
 }
 
 export default async function CustodyPage() {
-  const t = await getTranslations();
-  const { userId, orgId } = await auth();
+  const [t, { getToken, userId, orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -140,11 +138,15 @@ export default async function CustodyPage() {
   const trace = createTimedTrace("dashboard.custody.page");
 
   try {
-    const orgClient = await trace.step("create_org_sdp_api_client", () =>
-      createOrgSdpApiClient(trace.childContext("dashboard.custody.org.api"))
+    const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
+      createRequestScopedSdpApiClients({
+        getToken,
+        organizationTraceContext: trace.childContext("dashboard.custody.org.api"),
+        projectTraceContext: trace.childContext("dashboard.custody.api"),
+      })
     );
     const onboarding = await trace.step("fetch_onboarding_status", () =>
-      orgClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status")
+      organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status")
     );
 
     if (!onboarding.linked) {
@@ -160,16 +162,16 @@ export default async function CustodyPage() {
       );
     }
 
-    const apiClient = await trace.step("create_sdp_api_client", () =>
-      createSdpApiClient(trace.childContext("dashboard.custody.api"))
-    );
+    if (!projectClient) {
+      throw new Error("Selected project required");
+    }
     const [configsResult, walletsResult, apiKeysResult, providerAccessResult] = await Promise.all([
-      trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(apiClient.request))),
-      trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(apiClient.request))),
-      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+      trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(projectClient.request))),
+      trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(projectClient.request))),
+      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(projectClient.request)),
       trace.step("fetch_provider_access", () =>
         onboarding.organization
-          ? settle(fetchProviderAvailability(apiClient.request, onboarding.organization.id))
+          ? settle(fetchProviderAvailability(projectClient.request, onboarding.organization.id))
           : Promise.resolve({
               ok: false as const,
               error: new Error("Organization is not linked"),
@@ -209,7 +211,7 @@ export default async function CustodyPage() {
     });
 
     return (
-      <Suspense fallback={<WalletsPageSkeleton />}>
+      <Suspense fallback={<WalletsOverviewSkeleton />}>
         <WalletsWorkspace
           apiBaseUrl={resolvePlaygroundApiBaseUrl()}
           apiKeys={apiKeys}

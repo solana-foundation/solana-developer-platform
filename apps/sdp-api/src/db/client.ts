@@ -1,4 +1,4 @@
-import { Client, type QueryResult, types } from "pg";
+import { Client, Pool, type QueryResult, types } from "pg";
 
 types.setTypeParser(20, (value) => Number.parseInt(value, 10));
 
@@ -47,7 +47,17 @@ type Queryable = {
   query: (args: QueryArgs) => Promise<QueryResult>;
 };
 
-const clients = new Map<string, DatabaseClient>();
+const pooledClients = new Map<string, PooledPostgresClient>();
+const hyperdriveClients = new Map<string, HyperdrivePostgresClient>();
+
+const NODE_POOL_OPTIONS = {
+  max: 10,
+  connectionTimeoutMillis: 5_000,
+  idleTimeoutMillis: 30_000,
+  maxLifetimeSeconds: 300,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10_000,
+} as const;
 
 class ConnectionCoordinator implements Queryable {
   private pending: Promise<void> = Promise.resolve();
@@ -261,15 +271,7 @@ class PostgresExecutor implements DatabaseExecutor {
   }
 }
 
-class PostgresClient extends PostgresExecutor implements DatabaseClient {
-  private readonly coordinator: ConnectionCoordinator;
-
-  constructor(private readonly connectionString: string) {
-    const coordinator = new ConnectionCoordinator(connectionString);
-    super(coordinator);
-    this.coordinator = coordinator;
-  }
-
+abstract class BasePostgresClient extends PostgresExecutor implements DatabaseClient {
   async batch(statements: readonly PreparedStatement[]): Promise<number[]> {
     return this.transaction(async (tx) => {
       const results: number[] = [];
@@ -282,6 +284,18 @@ class PostgresClient extends PostgresExecutor implements DatabaseClient {
       }
       return results;
     });
+  }
+
+  abstract transaction<T>(callback: (tx: DatabaseExecutor) => Promise<T>): Promise<T>;
+}
+
+class HyperdrivePostgresClient extends BasePostgresClient {
+  private readonly coordinator: ConnectionCoordinator;
+
+  constructor(private readonly connectionString: string) {
+    const coordinator = new ConnectionCoordinator(connectionString);
+    super(coordinator);
+    this.coordinator = coordinator;
   }
 
   async transaction<T>(callback: (tx: DatabaseExecutor) => Promise<T>): Promise<T> {
@@ -304,6 +318,52 @@ class PostgresClient extends PostgresExecutor implements DatabaseClient {
         await client.end().catch(() => {});
       }
     });
+  }
+}
+
+class PooledPostgresClient extends BasePostgresClient {
+  private readonly pool: Pool;
+
+  constructor(connectionString: string) {
+    const pool = new Pool({
+      connectionString,
+      ...NODE_POOL_OPTIONS,
+    });
+    super(pool);
+    this.pool = pool;
+
+    // Idle pool errors are EventEmitter errors; without a listener Node treats
+    // them as uncaught exceptions and terminates the process.
+    this.pool.on("error", (error) => {
+      console.error("Idle PostgreSQL pool client error:", error);
+    });
+  }
+
+  async transaction<T>(callback: (tx: DatabaseExecutor) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    let releaseError: Error | undefined;
+
+    try {
+      await client.query("BEGIN");
+      const executor = new PostgresExecutor(client);
+      const result = await callback(executor);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        releaseError =
+          rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+      }
+      throw error;
+    } finally {
+      client.release(releaseError);
+    }
+  }
+
+  close(): Promise<void> {
+    return this.pool.end();
   }
 }
 
@@ -358,20 +418,40 @@ export function getConnectionString(bindings: DatabaseBindings): string {
 }
 
 export function createDatabaseClient(connectionString: string): DatabaseClient {
-  const existing = clients.get(connectionString);
+  const existing = pooledClients.get(connectionString);
   if (existing) {
     return existing;
   }
 
-  const client = new PostgresClient(connectionString);
-  clients.set(connectionString, client);
+  const client = new PooledPostgresClient(connectionString);
+  pooledClients.set(connectionString, client);
   return client;
 }
 
 export function getDb(bindings: DatabaseBindings): DatabaseClient {
+  const hyperdriveUrl = bindings.HYPERDRIVE?.connectionString?.trim();
+  if (hyperdriveUrl) {
+    const existing = hyperdriveClients.get(hyperdriveUrl);
+    if (existing) {
+      return existing;
+    }
+
+    const client = new HyperdrivePostgresClient(hyperdriveUrl);
+    hyperdriveClients.set(hyperdriveUrl, client);
+    return client;
+  }
+
   return createDatabaseClient(getConnectionString(bindings));
 }
 
 export async function closeDatabasePools(): Promise<void> {
-  clients.clear();
+  const pools = [...pooledClients.values()];
+  pooledClients.clear();
+  hyperdriveClients.clear();
+
+  const results = await Promise.allSettled(pools.map((client) => client.close()));
+  const errors = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+  if (errors.length > 0) {
+    throw new AggregateError(errors, "Failed to close PostgreSQL pools");
+  }
 }

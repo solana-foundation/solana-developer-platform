@@ -1,9 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyWalletByIdResponse, PaymentWalletPolicy } from "@sdp/types";
+import type {
+  CustodyWalletMetadataResponse,
+  CustodyWalletTokenBalance,
+  PaymentWalletPolicy,
+} from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, getSelectedProjectId, type SdpApiClient } from "@/lib/sdp-api";
+import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { WalletPolicyStartingProfileFlow } from "./wallet-policy-starting-profile-flow";
 
 interface WalletPolicyResult {
@@ -11,11 +15,17 @@ interface WalletPolicyResult {
   error: string | null;
 }
 
+interface WalletBalancesResponse {
+  walletBalances?: {
+    balances?: CustodyWalletTokenBalance[];
+  };
+}
+
 async function getWalletDetail(
   request: SdpApiClient["request"],
   walletId: string
-): Promise<CustodyWalletByIdResponse["wallet"]> {
-  const response = await request(`/v1/wallets/${encodeURIComponent(walletId)}`);
+): Promise<CustodyWalletMetadataResponse["wallet"]> {
+  const response = await request(getWalletMetadataPath(walletId));
   if (response.status === 404) {
     notFound();
   }
@@ -24,7 +34,7 @@ async function getWalletDetail(
     throw new Error(`SDP API request failed (${response.status}): ${body}`);
   }
 
-  const json = (await response.json()) as { data?: CustodyWalletByIdResponse };
+  const json = (await response.json()) as { data?: CustodyWalletMetadataResponse };
   const wallet = json.data?.wallet;
   if (!wallet) {
     notFound();
@@ -77,6 +87,20 @@ async function getWalletPolicy(
   }
 }
 
+async function getWalletAssets(
+  request: SdpApiClient["request"],
+  walletId: string
+): Promise<CustodyWalletTokenBalance[]> {
+  try {
+    const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/balances`);
+    if (!response.ok) return [];
+    const json = (await response.json()) as { data?: WalletBalancesResponse };
+    return json.data?.walletBalances?.balances ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export default async function WalletPolicyPage({
   params,
 }: {
@@ -92,24 +116,33 @@ export default async function WalletPolicyPage({
 
   const { walletId } = await params;
   const resolvedWalletId = decodeURIComponent(walletId);
+  const projectId = await getSelectedProjectId();
+  if (!projectId) {
+    redirect("/dashboard");
+  }
   const apiClient = await createSdpApiClient();
-  const [wallet, policyResult] = await Promise.all([
+  const [wallet, policyResult, walletAssets] = await Promise.all([
     getWalletDetail(apiClient.request, resolvedWalletId),
     getWalletPolicy(apiClient.request, resolvedWalletId),
+    getWalletAssets(apiClient.request, resolvedWalletId),
   ]);
 
   return (
-    <DashboardWorkspaceOverviewPanel className="p-0">
-      <WalletPolicyStartingProfileFlow
-        wallet={{
-          walletId: wallet.walletId,
-          publicKey: wallet.publicKey,
-          label: wallet.label,
-          provider: wallet.provider ?? null,
-        }}
-        initialPolicy={policyResult.policy}
-        policyError={policyResult.error}
-      />
-    </DashboardWorkspaceOverviewPanel>
+    <WalletPolicyStartingProfileFlow
+      projectId={projectId}
+      wallet={{
+        walletId: wallet.walletId,
+        publicKey: wallet.publicKey,
+        label: wallet.label,
+        provider: wallet.provider ?? null,
+      }}
+      walletAssets={walletAssets.map((asset) => ({
+        token: asset.token,
+        mint: asset.mint,
+        uiAmount: asset.uiAmount,
+      }))}
+      initialPolicy={policyResult.policy}
+      policyError={policyResult.error}
+    />
   );
 }

@@ -15,9 +15,6 @@ if (mode !== "unit" && mode !== "integration") {
 
 const rootDir = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const localApiEnvPath = path.resolve(rootDir, "apps/sdp-api/.dev.vars");
-const isDopplerRun = Boolean(
-  process.env.DOPPLER_CONFIG || process.env.DOPPLER_ENVIRONMENT || process.env.DOPPLER_TOKEN
-);
 
 function loadLocalEnvFile(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -52,13 +49,6 @@ localDatabaseUrl.username = "sdp";
 localDatabaseUrl.password = "sdp";
 const databaseUrl =
   process.env.DATABASE_URL ?? localEnv.DATABASE_URL ?? localDatabaseUrl.toString();
-
-if (isDopplerRun && fs.existsSync(localApiEnvPath)) {
-  console.error(
-    "Legacy apps/sdp-api/.dev.vars detected while running tests under Doppler. Remove or rename it so Wrangler can use process env from `doppler run`."
-  );
-  process.exit(1);
-}
 
 const resolvedEnv = {
   ...localEnv,

@@ -55,7 +55,7 @@ export function OperationsTab({ ops }: { ops: TokenOperations }) {
 
   return (
     <div className="space-y-5">
-      <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
+      <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
         {operationRows.map((row) => {
           const Icon = row.icon;
           return (

@@ -7,6 +7,8 @@ import {
 } from "@sdp/types";
 
 export interface DashboardCapabilities {
+  canReadApprovals: boolean;
+  canDecideApprovals: boolean;
   canManageApiKeys: boolean;
   canManageCustody: boolean;
   canManageOrgSettings: boolean;
@@ -32,6 +34,8 @@ export function resolveDashboardAccess(role: string | null | undefined): Dashboa
     role: resolvedRole,
     permissions,
     capabilities: {
+      canReadApprovals: hasPermission(permissions, "wallets:read"),
+      canDecideApprovals: hasPermission(permissions, "wallets:write"),
       canManageApiKeys: hasPermission(permissions, "api-keys:write"),
       canManageCustody: hasPermission(permissions, "custody:admin"),
       canManageOrgSettings: hasPermission(permissions, "org:write"),

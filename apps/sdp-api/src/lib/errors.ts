@@ -47,7 +47,8 @@ export type ErrorCode =
   | "SIGNING_PENDING"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
-  | "ESTIMATE_NOT_AVAILABLE";
+  | "ESTIMATE_NOT_AVAILABLE"
+  | "UNSUPPORTED_CORRIDOR";
 
 export interface ApiError {
   code: ErrorCode;
@@ -101,6 +102,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 503,
   ESTIMATE_NOT_AVAILABLE: 503,
+  UNSUPPORTED_CORRIDOR: 400,
 };
 
 const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
@@ -147,6 +149,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",
   ESTIMATE_NOT_AVAILABLE:
     "An indicative estimate is not available; the rate is known at quote time",
+  UNSUPPORTED_CORRIDOR: "Provider does not support this currency corridor",
 };
 
 export class AppError extends Error {
@@ -240,6 +243,18 @@ export function estimateNotAvailable(
   return new AppError("ESTIMATE_NOT_AVAILABLE", message, details);
 }
 
+export function unsupportedRampCorridor(
+  provider: RampProviderId,
+  direction: RampDirection,
+  details: Record<string, unknown>
+): AppError {
+  return new AppError(
+    "UNSUPPORTED_CORRIDOR",
+    `${provider} does not support this ${direction} corridor. Use the estimate endpoint to discover supported provider and currency pairs.`,
+    { ...details, provider, direction }
+  );
+}
+
 export function unsupportedCounterparty(
   provider: RampProviderId,
   direction: RampDirection,
@@ -258,4 +273,27 @@ export function counterpartyNotProvisioned(
     `Counterparty is not provisioned for ${provider} ${direction}. Complete the counterparty requirements (POST /counterparties/:counterpartyId/requirements) before requesting a quote.`,
     { ...details, provider, direction }
   );
+}
+
+/**
+ * Resolves a promise whose expected miss is signalled by throwing a specific
+ * error class.
+ *
+ * @param promise - The in-flight operation.
+ * @param expected - The error class that represents an expected miss.
+ * @returns The result, or null when the operation threw an instance of
+ *   `expected`; any other error rethrows.
+ */
+export async function nullOnExpected<T>(
+  promise: Promise<T>,
+  expected: new (message?: string) => Error
+): Promise<T | null> {
+  try {
+    return await promise;
+  } catch (err) {
+    if (err instanceof expected) {
+      return null;
+    }
+    throw err;
+  }
 }

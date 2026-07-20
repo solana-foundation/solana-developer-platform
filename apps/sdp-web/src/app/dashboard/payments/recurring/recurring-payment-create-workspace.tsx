@@ -1,8 +1,7 @@
 "use client";
 
 import type { Counterparty, CounterpartyAccount, PaymentsDashboardWallet } from "@sdp/types";
-import { CreditCardIcon, PlusIcon, RepeatIcon, WalletIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { PlusIcon, RepeatIcon, WalletIcon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
@@ -10,6 +9,7 @@ import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
 import { isSolBalance, shortenAddress } from "../payments-overview.utils";
 import {
@@ -18,6 +18,7 @@ import {
   fetchCounterpartyAccounts,
   fetchWallets,
 } from "../payments-workspace.data";
+import { AmountBalanceReadout } from "../ramps/components/amount-balance-readout";
 import { CounterpartyPicker } from "../ramps/components/counterparty-picker";
 import { RampWizardShell } from "../ramps/components/ramp-wizard-shell";
 import {
@@ -61,6 +62,20 @@ function resolveAccountAddress(account: CounterpartyAccount | null): string {
   }
   const address = account.details.address;
   return typeof address === "string" ? address : "";
+}
+
+function recurringPaymentAssetOptions(
+  wallet: PaymentsDashboardWallet | null,
+  issuedTokenSymbolsByMint: Record<string, string>,
+  t: ReturnType<typeof useTranslations>
+): ComboboxOption[] {
+  const walletWithoutSol = wallet
+    ? { ...wallet, balances: wallet.balances?.filter((balance) => !isSolBalance(balance)) }
+    : null;
+
+  return walletBalanceAssetOptions(walletWithoutSol, issuedTokenSymbolsByMint, t, {
+    hideUnresolvedMints: true,
+  });
 }
 
 function resolvePeriodHours(fields: RecurringPaymentCreateFields): number | null {
@@ -203,7 +218,7 @@ export function RecurringPaymentCreateWorkspace({
       description: t("DashboardPayments.recurring.customScheduleDescription"),
     },
   ] as const satisfies readonly { value: SchedulePreset; label: string; description: string }[];
-  const router = useRouter();
+  const router = useDashboardRouter();
   const [stepIndex, setStepIndex] = useState(0);
   const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
   const [destinationAccountDialogOpen, setDestinationAccountDialogOpen] = useState(false);
@@ -272,11 +287,12 @@ export function RecurringPaymentCreateWorkspace({
     availableWallets.find((wallet) => wallet.walletId === fields.walletId) ?? null;
 
   const assetOptions = useMemo<ComboboxOption[]>(
-    () =>
-      walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t, {
-        hideUnresolvedMints: true,
-      }),
+    () => recurringPaymentAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t),
     [issuedTokenSymbolsByMint, selectedWallet, t]
+  );
+  const assetSelectOptions = useMemo(
+    () => assetOptions.map((asset) => ({ value: asset.value, label: asset.label })),
+    [assetOptions]
   );
   const nonSolBalanceCount =
     selectedWallet?.balances?.filter((balance) => !isSolBalance(balance)).length ?? 0;
@@ -289,6 +305,9 @@ export function RecurringPaymentCreateWorkspace({
         : null,
     [fields.token, selectedAsset, selectedWallet]
   );
+  const availableAmount = selectedAssetBalance ? Number(selectedAssetBalance.uiAmount) : null;
+  const exceedsBalance =
+    fields.amount.length > 0 && availableAmount !== null && Number(fields.amount) > availableAmount;
   const periodHours = resolvePeriodHours(fields);
   const currentStep = createSteps[stepIndex];
 
@@ -333,9 +352,7 @@ export function RecurringPaymentCreateWorkspace({
 
   const selectWallet = (walletId: string) => {
     const wallet = availableWallets.find((entry) => entry.walletId === walletId) ?? null;
-    const nextAssets = walletBalanceAssetOptions(wallet, issuedTokenSymbolsByMint, t, {
-      hideUnresolvedMints: true,
-    });
+    const nextAssets = recurringPaymentAssetOptions(wallet, issuedTokenSymbolsByMint, t);
     setFields((current) => ({
       ...current,
       walletId,
@@ -573,7 +590,7 @@ export function RecurringPaymentCreateWorkspace({
             <button
               type="button"
               onClick={() => setDestinationAccountDialogOpen(true)}
-              className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
+              className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
             >
               <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary">
                 <PlusIcon className="size-4" />
@@ -622,22 +639,61 @@ export function RecurringPaymentCreateWorkspace({
             disabled={availableWallets.length === 0}
           />
 
-          <Combobox
-            label={t("DashboardPayments.recurring.asset")}
-            value={fields.token || null}
-            onChange={(value) => setField("token", value)}
-            options={assetOptions}
-            placeholder={
-              fields.walletId
-                ? assetOptions.length === 0
-                  ? t("DashboardPayments.recurring.noTokenBalances")
-                  : t("DashboardPayments.recurring.selectAsset")
-                : t("DashboardPayments.recurring.selectWalletFirst")
-            }
-            searchPlaceholder={t("DashboardPayments.recurring.searchAssets")}
-            icon={<CreditCardIcon />}
-            disabled={!fields.walletId || assetOptions.length === 0}
-          />
+          <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
+            <div className="flex flex-col gap-2">
+              <Label
+                className="text-sm font-medium text-tertiary"
+                htmlFor="recurring-payment-amount"
+              >
+                {t("DashboardPayments.recurring.amount")}
+              </Label>
+              <Input
+                id="recurring-payment-amount"
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="any"
+                value={fields.amount}
+                onChange={(event) => setField("amount", event.currentTarget.value)}
+                placeholder="1.0"
+                size="xl"
+                className="h-[var(--input-height-xl)] shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
+                action={
+                  availableAmount !== null ? (
+                    <AmountBalanceReadout
+                      available={selectedAssetBalance?.uiAmount ?? "0"}
+                      assetLabel={selectedAsset?.label ?? fields.token}
+                      exceeds={exceedsBalance}
+                      onMax={
+                        availableAmount > 0
+                          ? () => setField("amount", selectedAssetBalance?.uiAmount ?? "")
+                          : undefined
+                      }
+                    />
+                  ) : undefined
+                }
+              />
+              {fields.amount && !amountIsValid(fields.amount) ? (
+                <FieldHint tone="error">{t("DashboardPayments.recurring.invalidAmount")}</FieldHint>
+              ) : null}
+            </div>
+
+            <Combobox
+              label={t("DashboardPayments.recurring.asset")}
+              value={fields.token || null}
+              onChange={(value) => setField("token", value)}
+              options={assetSelectOptions}
+              placeholder={
+                fields.walletId
+                  ? assetOptions.length === 0
+                    ? t("DashboardPayments.recurring.noTokenBalances")
+                    : t("DashboardPayments.recurring.selectAsset")
+                  : t("DashboardPayments.recurring.selectWalletFirst")
+              }
+              searchable={false}
+              disabled={!fields.walletId || assetSelectOptions.length === 0}
+            />
+          </div>
           {fields.walletId && assetOptions.length === 0 ? (
             <FieldHint tone="error">
               {nonSolBalanceCount > 0
@@ -646,45 +702,36 @@ export function RecurringPaymentCreateWorkspace({
             </FieldHint>
           ) : null}
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="recurring-payment-amount">
-                {t("DashboardPayments.recurring.amount")}
-              </Label>
-              <Input
-                id="recurring-payment-amount"
-                inputMode="decimal"
-                value={fields.amount}
-                onChange={(event) => setField("amount", event.currentTarget.value)}
-                placeholder="0.00"
-              />
-              {fields.amount && !amountIsValid(fields.amount) ? (
-                <FieldHint tone="error">{t("DashboardPayments.recurring.invalidAmount")}</FieldHint>
-              ) : null}
-            </div>
-
-            <Combobox
-              label={t("DashboardPayments.recurring.billingInterval")}
-              value={fields.schedulePreset}
-              onChange={(value) => setField("schedulePreset", value as SchedulePreset)}
-              options={schedulePresets}
-              searchable={false}
-              icon={<RepeatIcon />}
-              size="lg"
-            />
-          </div>
+          <Combobox
+            label={t("DashboardPayments.recurring.billingInterval")}
+            value={fields.schedulePreset}
+            onChange={(value) => setField("schedulePreset", value as SchedulePreset)}
+            options={schedulePresets}
+            searchable={false}
+            icon={<RepeatIcon />}
+            size="xl"
+          />
 
           {fields.schedulePreset === "custom" ? (
-            <div className="space-y-2">
-              <Label htmlFor="recurring-payment-period-hours">
+            <div className="flex flex-col gap-2">
+              <Label
+                className="text-sm font-medium text-tertiary"
+                htmlFor="recurring-payment-period-hours"
+              >
                 {t("DashboardPayments.recurring.intervalHours")}
               </Label>
               <Input
                 id="recurring-payment-period-hours"
+                type="number"
                 inputMode="numeric"
+                min="1"
+                max={24 * 365}
+                step="1"
                 value={fields.customPeriodHours}
                 onChange={(event) => setField("customPeriodHours", event.currentTarget.value)}
                 placeholder="24"
+                size="xl"
+                className="shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
               />
               {fields.customPeriodHours && !resolvePeriodHours(fields) ? (
                 <FieldHint tone="error">
@@ -694,9 +741,12 @@ export function RecurringPaymentCreateWorkspace({
             </div>
           ) : null}
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="recurring-payment-first-collection">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <Label
+                className="text-sm font-medium text-tertiary"
+                htmlFor="recurring-payment-first-collection"
+              >
                 {t("DashboardPayments.recurring.firstPayment")}
               </Label>
               <Input
@@ -704,6 +754,8 @@ export function RecurringPaymentCreateWorkspace({
                 type="datetime-local"
                 value={fields.firstCollectionAt}
                 onChange={(event) => setField("firstCollectionAt", event.currentTarget.value)}
+                size="xl"
+                className="shadow-none ring-0 [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
               />
               {fields.firstCollectionAt && !firstCollectionAtIsValid(fields.firstCollectionAt) ? (
                 <FieldHint tone="error">
@@ -714,15 +766,21 @@ export function RecurringPaymentCreateWorkspace({
               )}
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="recurring-payment-metadata">
+            <div className="flex flex-col gap-2">
+              <Label
+                className="text-sm font-medium text-tertiary"
+                htmlFor="recurring-payment-metadata"
+              >
                 {t("DashboardPayments.recurring.metadataUrl")}
               </Label>
               <Input
                 id="recurring-payment-metadata"
+                type="url"
                 value={fields.metadataUri}
                 onChange={(event) => setField("metadataUri", event.currentTarget.value)}
                 placeholder={t("DashboardPayments.recurring.metadataUrlPlaceholder")}
+                size="xl"
+                className="shadow-none ring-0 [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
               />
               {fields.metadataUri && !metadataUriIsValid(fields.metadataUri) ? (
                 <FieldHint tone="error">
@@ -739,7 +797,7 @@ export function RecurringPaymentCreateWorkspace({
       {currentStep.id === "review" ? (
         <div className="space-y-5">
           <ReviewSummaryCard rows={reviewRows} />
-          <div className="rounded-2xl border border-border-default bg-white px-4 py-3 text-sm text-secondary">
+          <div className="rounded-2xl border border-border-default bg-surface-raised px-4 py-3 text-sm text-secondary">
             {t("DashboardPayments.recurring.pendingRecordDescription")}
           </div>
         </div>

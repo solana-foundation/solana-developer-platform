@@ -5,6 +5,7 @@
     "introduction",
     "guides",
     "tokens",
+    "wallet-operations",
     "payments",
     "tutorials",
     "self-hosting",
@@ -16,6 +17,7 @@
     "reference/api/projects",
     "reference/api/issuance",
     "reference/api/payments",
+    "reference/api/policies",
     "reference/api/compliance",
     "reference/api/asset-profiles"
   ]

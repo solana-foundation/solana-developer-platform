@@ -258,9 +258,13 @@ export const custodyWalletByIdResponseSchema = z
               example: 9,
             }),
           })
-          .openapi({ description: "Current SOL balance for the wallet public key." }),
+          .optional()
+          .openapi({
+            description:
+              "Current SOL balance for the wallet public key. Omitted when includeBalance=false.",
+          }),
       })
-      .openapi({ description: "Wallet details with provider and SOL balance." }),
+      .openapi({ description: "Wallet details with provider and optional SOL balance." }),
   })
   .openapi({ description: "Wallet details by ID response payload." });
 

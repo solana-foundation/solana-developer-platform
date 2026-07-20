@@ -33,8 +33,7 @@ type ProjectListResponse = {
 };
 
 export default async function SettingsPage() {
-  const t = await getTranslations();
-  const { userId, orgId, orgRole } = await auth();
+  const [t, { userId, orgId, orgRole }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }

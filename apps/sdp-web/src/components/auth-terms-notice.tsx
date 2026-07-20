@@ -13,7 +13,7 @@ export async function AuthTermsNotice() {
         href={TOS_HREF}
         target="_blank"
         rel="noreferrer"
-        className="font-medium text-primary underline underline-offset-2 transition-colors hover:text-black"
+        className="font-medium text-primary underline underline-offset-2 transition-colors hover:text-primary"
       >
         {t("Shared.authTerms.link")}
       </Link>

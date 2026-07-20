@@ -1,9 +1,9 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import Link from "next/link";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -58,7 +58,7 @@ function MetricCard({
   const t = useTranslations();
   const locale = useLocale();
   return (
-    <Card className="gap-0 rounded-[18px] border-border-default py-0 shadow-none">
+    <Card className="gap-0 rounded-[18px] py-0 shadow-none">
       <CardContent className="space-y-2 px-6 py-6">
         <p className="text-[15px] text-tertiary">{label}</p>
         <p className="text-[24px] leading-none font-medium tracking-[-0.03em] text-primary sm:text-[30px]">
@@ -128,11 +128,13 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
             <CreateApiKeyModal
               triggerLabel={t("Shared.SharedComponents.createApiKey")}
               triggerVariant="secondary"
-              wallets={wallets}
             />
           ) : null}
           {dashboardAccess.capabilities.canManageCustody ? (
-            <Button asChild className="!text-white hover:!text-white visited:!text-white">
+            <Button
+              asChild
+              className="!text-on-primary hover:!text-on-primary visited:!text-on-primary"
+            >
               <Link href="/dashboard/wallets">{t("Shared.homeWorkspace.createWallet")}</Link>
             </Button>
           ) : null}

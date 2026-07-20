@@ -1,0 +1,21 @@
+---
+title: Wallet operations
+description: Configure custody-wallet controls, operation permissions, and balances.
+---
+
+Wallet operations are the controls and observability attached to a custody wallet, independent of the product flow that uses it. A policy can govern payments, ramps, issuance, and signing operations when SDP evaluates them for the selected wallet.
+
+## What's in this section
+
+- [Wallet policies](/docs/wallet-operations/policies) — configure default decisions, destination controls, amount limits, operation permissions, approval requirements, and audit visibility.
+- [Wallet balances](/docs/wallet-operations/balances) — retrieve token balances and optional USD valuations for a custody wallet.
+
+## API surface
+
+The current wallet-policy and balance endpoints remain under `/v1/payments/wallets` because they were introduced with the Payments API. Their behavior is wallet-wide: policy operation families include payment, ramp, issuance, raw signing, program interactions, and provider administration.
+
+## Related
+
+- [Set up wallets](/docs/guides/setup-wallets) — provision the wallet before configuring controls.
+- [Payments](/docs/payments) — payment and ramp flows that can use a policy-controlled wallet.
+- [Manage API keys](/docs/guides/manage-api-keys) — configure caller permissions separately from wallet operation permissions.
