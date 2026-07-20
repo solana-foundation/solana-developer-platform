@@ -175,7 +175,7 @@ function SettingShell({
   return (
     <div
       className={cn(
-        "rounded-xl border bg-white p-3 transition-colors",
+        "rounded-xl border bg-surface-raised p-3 transition-colors",
         checked ? "border-primary" : "border-border-default"
       )}
     >
@@ -302,7 +302,7 @@ export function AdvancedSettingsEditor({
   };
 
   return (
-    <div className="rounded-2xl border border-border-default bg-white p-5">
+    <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0">
           <p className="text-base font-medium text-primary">
@@ -331,7 +331,7 @@ export function AdvancedSettingsEditor({
                 onClick={() => setMode(m)}
                 className={cn(
                   "inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors sm:flex-none",
-                  mode === m ? "bg-white text-primary" : "text-tertiary hover:text-primary"
+                  mode === m ? "bg-surface-raised text-primary" : "text-tertiary hover:text-primary"
                 )}
               >
                 <Icon className="h-3.5 w-3.5" />
@@ -585,7 +585,7 @@ function ParamField({
   const t = useTranslations();
   const inputId = `setting-${settingKey}-${param.key}`;
   const inputClass = cn(
-    "rounded-lg border bg-white px-3 py-2 text-sm text-primary outline-none transition-colors",
+    "rounded-lg border bg-surface-raised px-3 py-2 text-sm text-primary outline-none transition-colors",
     invalid ? "border-destructive" : "border-border-default focus:border-border-strong"
   );
   return (
