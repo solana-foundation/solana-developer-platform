@@ -1,15 +1,15 @@
 import {
-  CUSTODY_PROVIDER_CATALOG as SHARED_CUSTODY_PROVIDER_CATALOG,
+  CUSTODY_PROVIDER_CAPABILITIES,
   CUSTODY_PROVIDER_CATEGORIES,
   CUSTODY_PROVIDER_CATEGORY_DETAILS,
-  CUSTODY_PROVIDER_CAPABILITIES,
   CUSTODY_PROVIDER_USE_CASE_LABEL_KEYS,
   type CustodyProvider,
-  type CustodyProviderCategory,
   type CustodyProviderCapabilities,
+  type CustodyProviderCategory,
   type CustodyProviderSetupField,
   type CustodyProviderSetupFieldOption,
   type CustodyProviderUseCase,
+  CUSTODY_PROVIDER_CATALOG as SHARED_CUSTODY_PROVIDER_CATALOG,
 } from "@sdp/types";
 import type { MessageKey } from "@/i18n/messages";
 
@@ -62,8 +62,7 @@ export interface CustodyProviderCatalogEntry {
 export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] =
   SHARED_CUSTODY_PROVIDER_CATALOG.map((provider) => ({
     ...provider,
-    supportsAdditionalWallets:
-      provider.technicalCapabilities.supportsAdditionalWalletCreation,
+    supportsAdditionalWallets: provider.technicalCapabilities.supportsAdditionalWalletCreation,
     supportsSigning: provider.technicalCapabilities.supportsSigning,
     capabilities: provider.useCases,
   }));
