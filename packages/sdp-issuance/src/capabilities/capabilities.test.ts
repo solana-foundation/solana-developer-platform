@@ -180,6 +180,31 @@ describe("advanced settings capability registry", () => {
     ]);
   });
 
+  it("rejects non-finite values on a max-unbounded param (multiplier: Infinity)", () => {
+    // multiplier has no max, so a non-finite value would pass a bare min check and
+    // deploy a token that permanently displays every balance as ∞. Both the number
+    // Infinity and its string forms must be rejected as not_a_number.
+    for (const bad of [
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      Number.NaN,
+      "Infinity",
+      "-Infinity",
+      "1e999",
+    ] as const) {
+      assert.deepEqual(
+        validateSettingParams({ scaledUiAmount: { params: { multiplier: bad } } }),
+        [{ settingKey: "scaledUiAmount", paramKey: "multiplier", reason: "not_a_number" }],
+        `expected multiplier ${String(bad)} to be rejected`
+      );
+    }
+    // A finite string multiplier still passes.
+    assert.deepEqual(
+      validateSettingParams({ scaledUiAmount: { params: { multiplier: "2" } } }),
+      []
+    );
+  });
+
   it("bounds interestBearing.rate to the on-chain i16 basis-points range", () => {
     // Negative rates are valid (demurrage), so the full signed-16-bit span passes.
     assert.deepEqual(validateSettingParams({ interestBearing: { params: { rate: -32_768 } } }), []);

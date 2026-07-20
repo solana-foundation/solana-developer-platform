@@ -190,14 +190,17 @@ export interface ParamValidationError {
   limit?: number;
 }
 
-// Parse a param value to a finite number the way the resolver's toNumber does
+// Parse a param value to a FINITE number the way the resolver's toNumber does
 // (number as-is, non-empty numeric string coerced), but return null instead of a
-// fallback so the caller can reject it rather than silently defaulting.
+// fallback so the caller can reject it rather than silently defaulting. Both
+// branches use Number.isFinite so NaN and ±Infinity are rejected — including the
+// string forms ("Infinity", "1e999"), which Number.isNaN alone would let through
+// and which would otherwise pass an unbounded field like scaledUiAmount.multiplier.
 function coerceParamNumber(value: string | number): number | null {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
   }
-  if (value.trim() !== "" && !Number.isNaN(Number(value))) {
+  if (value.trim() !== "" && Number.isFinite(Number(value))) {
     return Number(value);
   }
   return null;
