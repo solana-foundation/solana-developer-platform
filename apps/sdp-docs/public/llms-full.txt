@@ -5143,6 +5143,10 @@ Source: https://platform.solana.com/docs/reference/api/api-keys
 | `DELETE` | `/v1/api-keys/{keyId}` | Deactivate API key |
 | `GET` | `/v1/api-keys/{keyId}` | Get API key |
 | `PATCH` | `/v1/api-keys/{keyId}` | Update API key |
+| `PUT` | `/v1/api-keys/{keyId}/policy-bindings` | Replace or clear API-key policy bindings |
+| `POST` | `/v1/api-keys/{keyId}/policy-profiles` | Create API-key policy profile |
+| `POST` | `/v1/api-keys/{keyId}/policy-profiles/{profileId}/revisions` | Create API-key policy revision |
+| `POST` | `/v1/api-keys/{keyId}/policy-profiles/{profileId}/revisions/{revisionId}/activate` | Activate API-key policy revision |
 | `POST` | `/v1/api-keys/{keyId}/rotate` | Rotate API key |
 
 ---
@@ -5160,6 +5164,11 @@ Source: https://platform.solana.com/docs/reference/api/wallets
 | `GET` | `/v1/wallets/{walletId}` | Get wallet by ID |
 | `PATCH` | `/v1/wallets/{walletId}` | Update wallet |
 | `GET` | `/v1/wallets/aggregate` | Aggregate wallet balances |
+| `GET` | `/v1/wallets/approval-requests` | List wallet approval requests |
+| `GET` | `/v1/wallets/approval-requests/{approvalRequestId}` | Get wallet approval request |
+| `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/approve` | Approve wallet approval request |
+| `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/cancel` | Cancel wallet approval request |
+| `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/reject` | Reject wallet approval request |
 | `GET` | `/v1/wallets/config` | Get wallet signing config |
 | `GET` | `/v1/wallets/configs` | List wallet signing configs |
 | `POST` | `/v1/wallets/default-wallet` | Set default wallet |
@@ -5179,7 +5188,6 @@ Source: https://platform.solana.com/docs/reference/api/projects
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `GET` | `/v1/projects` | List projects |
-| `POST` | `/v1/projects` | Create project |
 | `DELETE` | `/v1/projects/{projectId}` | Archive project |
 | `GET` | `/v1/projects/{projectId}` | Get project |
 | `PATCH` | `/v1/projects/{projectId}` | Update project |
@@ -5275,10 +5283,23 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/transfers` | List transfers |
 | `POST` | `/v1/payments/transfers` | Execute transfer (custody) |
 | `GET` | `/v1/payments/transfers/{transferId}` | Get transfer |
-| `POST` | `/v1/payments/transfers/prepare` | Prepare transfer (unsigned) |
 | `GET` | `/v1/payments/wallets/{walletId}/balances` | Get wallet balances |
 | `GET` | `/v1/payments/wallets/{walletId}/policies` | Get wallet policy |
 | `PUT` | `/v1/payments/wallets/{walletId}/policies` | Update wallet policy |
+| `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations` | List wallet policy evaluations |
+| `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations/{policyEvaluationId}` | Get wallet policy evaluation |
+| `GET` | `/v1/payments/wallets/{walletId}/policies/revisions` | List wallet policy revisions |
+
+---
+
+### Policies
+Source: https://platform.solana.com/docs/reference/api/policies
+
+> Wallet and API-key policy-control inventory.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/policies` | List policy controls |
 
 ---
 
@@ -5305,6 +5326,7 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 | `DELETE` | `/v1/issuance/asset-profiles/{profileId}` | Archive asset profile |
 | `GET` | `/v1/issuance/asset-profiles/{profileId}` | Get asset profile |
 | `PATCH` | `/v1/issuance/asset-profiles/{profileId}` | Update asset profile |
+| `GET` | `/v1/issuance/asset-profiles/by-token/{tokenId}` | Get asset profile by token |
 | `GET` | `/v1/issuance/asset-profiles/field-options` | Get asset profile field options |
 
 ## Notes
