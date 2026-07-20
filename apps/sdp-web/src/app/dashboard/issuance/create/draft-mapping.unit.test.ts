@@ -31,8 +31,44 @@ describe("getDefaultPublicFields", () => {
     ]);
   });
 
+  it("exposes on-chain collateral posture by default for crypto-backed", () => {
+    // Crypto-backing's trust comes from transparent collateral, so backing type,
+    // collateral assets, and target ratio are public by default.
+    expect(getDefaultPublicFields("stablecoin", "crypto_backed")).toEqual([
+      "asset.name",
+      "asset.pegCurrency",
+      "asset.backingType",
+      "asset.reserveAsset",
+      "asset.collateralizationRatio",
+      "chain.decimals",
+      "asset.website",
+    ]);
+  });
+
   it("returns an empty list for an unknown type", () => {
     expect(getDefaultPublicFields("stablecoin", "not_a_type")).toEqual([]);
+  });
+});
+
+describe("getPublicFieldCandidates (crypto-backed collateral)", () => {
+  it("surfaces the crypto collateral fields with their values", () => {
+    const draft = draftWith({
+      assetType: "crypto_backed",
+      backingType: "crypto",
+      reserveAsset: "SOL, wBTC",
+      collateralizationRatio: "150",
+      oracleProvider: "Pyth",
+      publicFields: [],
+    });
+    const paths = getPublicFieldCandidates(draft, t).map((candidate) => candidate.path);
+    expect(paths).toContain("asset.collateralizationRatio");
+    expect(paths).toContain("asset.oracleProvider");
+    expect(paths).toContain("asset.reserveAsset");
+    // Select-backed backingType shows its human label, not the raw value.
+    const backing = getPublicFieldCandidates(draft, t).find(
+      (candidate) => candidate.path === "asset.backingType"
+    );
+    expect(backing?.value).toBe("Crypto-backed");
   });
 });
 

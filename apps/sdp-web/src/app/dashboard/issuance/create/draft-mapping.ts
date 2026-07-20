@@ -179,16 +179,33 @@ export function buildIssuanceMetadata(draft: DraftState): IssuanceMetadata {
     description: draft.description.trim(),
     website: draft.website.trim(),
     issuerName: draft.issuerName.trim(),
+    // Set from the chosen sub-type at classification time for typed stablecoins
+    // (see impliedBackingType) so it can't contradict the type; issuer-entered
+    // for a generic stablecoin. Reflected verbatim here to keep load-then-save
+    // idempotent — no value is synthesized during the metadata build.
     backingType: draft.backingType,
     pegCurrency: draft.pegCurrency,
     pegTarget: draft.pegTarget.trim(),
     reserveAsset: draft.reserveAsset.trim(),
     reserveCustodian: draft.reserveCustodian.trim(),
     redemptionEnabled: draft.redemptionEnabled ? true : undefined,
+    collateralizationRatio: draft.collateralizationRatio.trim(),
+    oracleProvider: draft.oracleProvider.trim(),
+    liquidationThreshold: draft.liquidationThreshold.trim(),
     jurisdiction: draft.jurisdiction,
     offeringType: draft.offeringType,
+    shareClass: draft.shareClass.trim(),
+    votingRights: draft.votingRights ? true : undefined,
+    couponRate: draft.couponRate.trim(),
+    maturityDate: draft.maturityDate.trim(),
+    seniority: draft.seniority,
+    fundStrategy: draft.fundStrategy,
+    managementFee: draft.managementFee.trim(),
+    netAssetValue: draft.netAssetValue.trim(),
     underlyingAsset: draft.underlyingAsset.trim(),
     custodian: draft.custodian.trim(),
+    propertyType: draft.propertyType,
+    propertyLocation: draft.propertyLocation.trim(),
     documents: draft.documents
       .filter((doc) => doc.name.trim() || doc.url.trim())
       .map((doc) => ({ type: doc.docType.trim(), name: doc.name.trim(), url: doc.url.trim() })),
@@ -311,11 +328,23 @@ const PATH_LABEL_KEYS: Record<string, MessageKey> = {
   "asset.backingType": "DashboardIssuance.config.backingType",
   "asset.reserveAsset": "DashboardIssuance.config.reserveAsset",
   "asset.reserveCustodian": "DashboardIssuance.config.reserveCustodian",
+  "asset.collateralizationRatio": "DashboardIssuance.config.collateralizationRatio",
+  "asset.oracleProvider": "DashboardIssuance.config.oracleProvider",
+  "asset.liquidationThreshold": "DashboardIssuance.config.liquidationThreshold",
   "asset.website": "DashboardIssuance.review.website",
   "asset.jurisdiction": "DashboardIssuance.config.jurisdiction",
   "asset.offeringType": "DashboardIssuance.config.offeringType",
+  "asset.shareClass": "DashboardIssuance.config.shareClass",
+  "asset.couponRate": "DashboardIssuance.config.couponRate",
+  "asset.maturityDate": "DashboardIssuance.config.maturityDate",
+  "asset.seniority": "DashboardIssuance.config.seniority",
+  "asset.fundStrategy": "DashboardIssuance.config.fundStrategy",
+  "asset.managementFee": "DashboardIssuance.config.managementFee",
+  "asset.netAssetValue": "DashboardIssuance.config.netAssetValue",
   "asset.underlyingAsset": "DashboardIssuance.config.underlyingAsset",
   "asset.custodian": "DashboardIssuance.config.custodian",
+  "asset.propertyType": "DashboardIssuance.config.propertyType",
+  "asset.propertyLocation": "DashboardIssuance.config.propertyLocation",
   "chain.decimals": "DashboardIssuance.create.decimals",
 };
 
@@ -329,11 +358,26 @@ export const PUBLIC_FIELD_POOL: readonly { path: string; labelKey: MessageKey }[
   { path: "asset.backingType", labelKey: PATH_LABEL_KEYS["asset.backingType"] },
   { path: "asset.reserveAsset", labelKey: PATH_LABEL_KEYS["asset.reserveAsset"] },
   { path: "asset.reserveCustodian", labelKey: PATH_LABEL_KEYS["asset.reserveCustodian"] },
+  {
+    path: "asset.collateralizationRatio",
+    labelKey: PATH_LABEL_KEYS["asset.collateralizationRatio"],
+  },
+  { path: "asset.oracleProvider", labelKey: PATH_LABEL_KEYS["asset.oracleProvider"] },
+  { path: "asset.liquidationThreshold", labelKey: PATH_LABEL_KEYS["asset.liquidationThreshold"] },
   { path: "asset.website", labelKey: PATH_LABEL_KEYS["asset.website"] },
   { path: "asset.jurisdiction", labelKey: PATH_LABEL_KEYS["asset.jurisdiction"] },
   { path: "asset.offeringType", labelKey: PATH_LABEL_KEYS["asset.offeringType"] },
+  { path: "asset.shareClass", labelKey: PATH_LABEL_KEYS["asset.shareClass"] },
+  { path: "asset.couponRate", labelKey: PATH_LABEL_KEYS["asset.couponRate"] },
+  { path: "asset.maturityDate", labelKey: PATH_LABEL_KEYS["asset.maturityDate"] },
+  { path: "asset.seniority", labelKey: PATH_LABEL_KEYS["asset.seniority"] },
+  { path: "asset.fundStrategy", labelKey: PATH_LABEL_KEYS["asset.fundStrategy"] },
+  { path: "asset.managementFee", labelKey: PATH_LABEL_KEYS["asset.managementFee"] },
+  { path: "asset.netAssetValue", labelKey: PATH_LABEL_KEYS["asset.netAssetValue"] },
   { path: "asset.underlyingAsset", labelKey: PATH_LABEL_KEYS["asset.underlyingAsset"] },
   { path: "asset.custodian", labelKey: PATH_LABEL_KEYS["asset.custodian"] },
+  { path: "asset.propertyType", labelKey: PATH_LABEL_KEYS["asset.propertyType"] },
+  { path: "asset.propertyLocation", labelKey: PATH_LABEL_KEYS["asset.propertyLocation"] },
 ];
 
 export function pathLabel(path: string, t: Translate): string {
@@ -435,7 +479,9 @@ export function getRequiredAssetDetailKeys(draft: DraftState): Set<keyof DraftSt
 // An enabled setting with a required, still-empty parameter (e.g. a transfer fee
 // toggled on but no basis-points entered). Drives the Continue gate and the
 // editor's inline field errors.
-export function advancedSettingsHaveMissingParams(advancedSettings: AdvancedSettingsDraft): boolean {
+export function advancedSettingsHaveMissingParams(
+  advancedSettings: AdvancedSettingsDraft
+): boolean {
   for (const [key, selection] of Object.entries(advancedSettings)) {
     const setting: AdvancedSetting = ADVANCED_SETTINGS[key as SettingKey];
     if (!setting?.params) {

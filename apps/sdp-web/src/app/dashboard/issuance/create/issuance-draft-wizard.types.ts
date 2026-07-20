@@ -73,13 +73,31 @@ export interface DraftState {
   reserveAsset: string;
   reserveCustodian: string;
   redemptionEnabled: boolean;
+  // Step 2 — crypto-backed stablecoin collateral & oracle (over-collateralized,
+  // on-chain backing rather than off-chain fiat reserves)
+  collateralizationRatio: string;
+  oracleProvider: string;
+  liquidationThreshold: string;
   // Step 2 — tokenized-security details
   issuerName: string;
   jurisdiction: string;
   offeringType: string;
+  // Step 2 — tokenized-security instrument terms (per sub-type: equity / debt /
+  // fund)
+  shareClass: string;
+  votingRights: boolean;
+  couponRate: string;
+  maturityDate: string;
+  seniority: string;
+  fundStrategy: string;
+  managementFee: string;
+  netAssetValue: string;
   // Step 2 — non-security digital asset details
   underlyingAsset: string;
   custodian: string;
+  // Step 2 — tokenized real-estate details
+  propertyType: string;
+  propertyLocation: string;
   // Step 2 — documents & references
   documents: DocumentRow[];
   // Step 2 — compliance & access
@@ -125,11 +143,24 @@ export function createInitialDraft(): DraftState {
     reserveAsset: "",
     reserveCustodian: "",
     redemptionEnabled: false,
+    collateralizationRatio: "",
+    oracleProvider: "",
+    liquidationThreshold: "",
     issuerName: "",
     jurisdiction: "",
     offeringType: "",
+    shareClass: "",
+    votingRights: false,
+    couponRate: "",
+    maturityDate: "",
+    seniority: "",
+    fundStrategy: "",
+    managementFee: "",
+    netAssetValue: "",
     underlyingAsset: "",
     custodian: "",
+    propertyType: "",
+    propertyLocation: "",
     documents: [],
     accessControl: "",
     capacities: createInitialCapacities(),

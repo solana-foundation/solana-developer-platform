@@ -11,7 +11,7 @@ import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { TokenSignerSelect } from "../../[tokenId]/token-signer-select";
 import { AdvancedSettingsEditor } from "../advanced-settings-editor";
-import { ACCESS_CONTROL_OPTIONS, getCategorySections } from "../asset-details-config";
+import { ACCESS_CONTROL_OPTIONS, getDetailSections } from "../asset-details-config";
 import { DocumentRows } from "../document-rows";
 import {
   buildIssuanceMetadata,
@@ -64,7 +64,7 @@ export function StepAssetDetails({
   const { draft, updateDraft } = useIssuanceDraft();
   const [tab, setTab] = useState<string>("overview");
   const [jsonOpen, setJsonOpen] = useState(false);
-  const sections = getCategorySections(draft.assetCategory);
+  const sections = getDetailSections(draft.assetCategory, draft.assetType);
   const metadata = buildIssuanceMetadata(draft);
   const errors = getAssetDetailsErrors(draft, t);
   const requiredKeys = getRequiredAssetDetailKeys(draft);
