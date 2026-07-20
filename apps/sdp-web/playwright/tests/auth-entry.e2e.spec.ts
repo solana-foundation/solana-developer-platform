@@ -10,6 +10,13 @@ test.describe("public auth entry e2e", () => {
   });
 
   test("system dark mode keeps landing artwork and Clerk sign-in legible", async ({ page }) => {
+    const themeScriptErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error" && /script tag while rendering/i.test(message.text())) {
+        themeScriptErrors.push(message.text());
+      }
+    });
+
     await page.addInitScript(() => window.localStorage.removeItem("sdp-theme"));
     await page.emulateMedia({ colorScheme: "dark" });
     await page.goto("/");
@@ -36,6 +43,7 @@ test.describe("public auth entry e2e", () => {
 
     await expect(page.getByLabel("Sign in with GitHub")).not.toHaveCSS("filter", "none");
     await expect(page.getByLabel("Sign in with Google")).toHaveCSS("filter", "none");
+    expect(themeScriptErrors).toEqual([]);
   });
 
   test("direct sign-in link renders for signed-out users", async ({ page }) => {
