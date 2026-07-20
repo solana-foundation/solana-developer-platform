@@ -61,6 +61,7 @@ const SIGNING_LABEL: Record<SettingSigning, string> = {
 };
 
 const AVAILABILITY_CELL: Record<SettingAvailability, string> = {
+  locked: "req",
   recommended: "rec",
   available: "opt",
   unsupported: "—",
@@ -109,7 +110,8 @@ export function renderSupportMatrixMarkdown(matrix: SupportMatrix = buildSupport
   lines.push("## Availability by asset type");
   lines.push("");
   lines.push(
-    "Legend: `rec` = recommended (default on) · `opt` = available (opt-in) · `—` = unsupported."
+    "Legend: `req` = locked (forced on) · `rec` = recommended (default on) · " +
+      "`opt` = available (opt-in) · `—` = unsupported."
   );
   lines.push("");
   lines.push(row(["Asset type", "Template", ...SETTING_KEYS]));

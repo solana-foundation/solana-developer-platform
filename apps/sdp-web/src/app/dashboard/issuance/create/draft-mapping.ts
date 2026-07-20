@@ -1,4 +1,11 @@
-import { ADVANCED_SETTINGS, getRecommendedSettings } from "@sdp/issuance/capabilities";
+import {
+  ADVANCED_SETTINGS,
+  findIncompatibleExtensionPair,
+  getRecommendedSettings,
+  isSettingAllowed,
+  pruneIncompatibleSettings,
+  type SettingKey,
+} from "@sdp/issuance/capabilities";
 import {
   type AdvancedSetting,
   type AssetCategory,
@@ -32,6 +39,34 @@ export function getRecommendedAdvancedSettings(
       }
     }
     result[key] = Object.keys(params).length > 0 ? { params } : {};
+  }
+  return result;
+}
+
+// Re-validate a persisted advanced-settings selection against the current rules.
+// Drops settings the asset type no longer allows and any that would form an
+// incompatible extension pair (keeping the earlier one). Runs on hydration so a
+// stale localStorage draft can't restore a combination the editor would never
+// let you build — e.g. two conflicting extensions both left checked.
+export function sanitizeAdvancedSettings(
+  category: AssetCategory | null,
+  type: string | null,
+  advancedSettings: AdvancedSettingsDraft
+): AdvancedSettingsDraft {
+  const original = Object.keys(advancedSettings);
+  // 1. Keep only keys valid for the type (or, before a type is chosen, only
+  //    known catalog keys).
+  const allowed =
+    category && type
+      ? original.filter((key) => isSettingAllowed(category, type, key))
+      : original.filter((key) => key in ADVANCED_SETTINGS);
+  // 2. Drop conflicting settings, keeping the earlier-listed one.
+  const kept = new Set<string>(pruneIncompatibleSettings(allowed));
+  const result: AdvancedSettingsDraft = {};
+  for (const key of original) {
+    if (kept.has(key)) {
+      result[key] = advancedSettings[key];
+    }
   }
   return result;
 }
@@ -397,6 +432,24 @@ export function getRequiredAssetDetailKeys(draft: DraftState): Set<keyof DraftSt
   return keys;
 }
 
+// An enabled setting with a required, still-empty parameter (e.g. a transfer fee
+// toggled on but no basis-points entered). Drives the Continue gate and the
+// editor's inline field errors.
+export function advancedSettingsHaveMissingParams(advancedSettings: AdvancedSettingsDraft): boolean {
+  for (const [key, selection] of Object.entries(advancedSettings)) {
+    const setting: AdvancedSetting = ADVANCED_SETTINGS[key as SettingKey];
+    if (!setting?.params) {
+      continue;
+    }
+    for (const param of setting.params) {
+      if (param.required && !String(selection.params?.[param.key] ?? "").trim()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // Per-field validation for the required Asset-details fields — empty or badly
 // formatted entries map to a user-facing message, keyed by draft field. Drives
 // the form's inline errors, the Continue gate, and the review blockers.
@@ -443,6 +496,21 @@ export function getAssetDetailsErrors(
         errors[field] = t("DashboardIssuance.errors.fieldRequired", { field: pathLabel(path, t) });
       }
     }
+  }
+
+  if (advancedSettingsHaveMissingParams(draft.advancedSettings)) {
+    errors.advancedSettings = t("DashboardIssuance.errors.settingValuesRequired");
+  }
+
+  // Two enabled settings whose extensions can't coexist on one mint (e.g.
+  // interest-bearing + scaled display). The editor blocks selecting both, but a
+  // hydrated/legacy draft could still carry the pair — reject it here too.
+  const selectedExtensions = Object.keys(draft.advancedSettings).flatMap((key) => {
+    const setting: AdvancedSetting = ADVANCED_SETTINGS[key as SettingKey];
+    return setting ? [...setting.extensions] : [];
+  });
+  if (findIncompatibleExtensionPair(selectedExtensions)) {
+    errors.advancedSettings = t("DashboardIssuance.errors.settingConflict");
   }
 
   return errors;

@@ -13,12 +13,13 @@ import type {
   AssetCategory,
   ExtensionOverrides,
   SelectedSetting,
+  TokenExtensionName,
   TokenExtensionsConfig,
   TokenTemplate,
 } from "@sdp/types";
 import { resolveTemplateConfig, type TemplateOverrideError } from "../templates/definitions";
 import { ASSET_CAPABILITIES } from "./capabilities";
-import { ADVANCED_SETTINGS, type SettingKey } from "./settings";
+import { ADVANCED_SETTINGS, findIncompatibleExtensionPair, type SettingKey } from "./settings";
 
 // Authority-valued extension config isn't known until deploy (SDP resolves the
 // controlled wallet then). When absent — e.g. validating a draft before deploy —
@@ -144,11 +145,26 @@ export function resolveSettingsToExtensions(
     options.requiresAllowlist,
     options.decimals
   );
+
+  // Pairwise conflict check: two individually-valid extensions that can't coexist
+  // on one mint (e.g. interestBearing + scaledUiAmount). The per-template check
+  // in resolveTemplateConfig can't catch this, so surface it here — early at
+  // settings-save and again defensively at deploy.
+  const errors = [...result.errors];
+  const conflict = findIncompatibleExtensionPair(Object.keys(extensions) as TokenExtensionName[]);
+  if (conflict) {
+    errors.push({
+      code: "EXTENSION_NOT_ALLOWED",
+      message: `${conflict[0]} and ${conflict[1]} cannot be combined on the same token.`,
+      extension: conflict[1],
+    });
+  }
+
   return {
     template: result.template,
     decimals: result.decimals,
     requiresAllowlist: result.requiresAllowlist,
     extensions: result.extensions,
-    errors: result.errors,
+    errors,
   };
 }

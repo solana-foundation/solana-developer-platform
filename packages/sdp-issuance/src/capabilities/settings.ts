@@ -9,7 +9,7 @@
 //
 // See docs/decisions/0002-asset-advanced-settings.md.
 
-import type { AdvancedSetting } from "@sdp/types";
+import type { AdvancedSetting, TokenExtensionName } from "@sdp/types";
 
 // Build a fully-qualified message key for a `config.*` entry. Keeping the leaf
 // as the only literal avoids repeating the namespace on every entry (and keeps
@@ -52,9 +52,10 @@ export const ADVANCED_SETTINGS = {
         key: "basisPoints",
         kind: "number",
         labelKey: config("transferFeeBasisPoints"), // NEW
-        defaultValue: 0,
+        hintKey: config("transferFeeBasisPointsHint"), // NEW
         min: 0,
         max: 10_000,
+        required: true,
       },
       {
         key: "maxFee",
@@ -77,7 +78,8 @@ export const ADVANCED_SETTINGS = {
         key: "rate",
         kind: "number",
         labelKey: config("interestBearingRate"), // NEW
-        defaultValue: 0,
+        hintKey: config("interestBearingRateHint"), // NEW
+        required: true,
       },
     ],
   },
@@ -121,6 +123,7 @@ export const ADVANCED_SETTINGS = {
         key: "programId",
         kind: "string",
         labelKey: config("transferHookProgramId"), // NEW
+        required: true,
       },
     ],
   },
@@ -130,3 +133,37 @@ export const ADVANCED_SETTINGS = {
 export type SettingKey = keyof typeof ADVANCED_SETTINGS;
 
 export const SETTING_KEYS = Object.keys(ADVANCED_SETTINGS) as SettingKey[];
+
+// Extension pairs that cannot coexist on a single mint — pairwise and symmetric.
+// Unlike a template's `incompatible` list (which says "this extension doesn't
+// belong on this template"), these are conflicts *between two extensions*
+// regardless of template:
+//
+//   interestBearing + scaledUiAmount — a hard on-chain conflict: both define the
+//     raw→displayed amount conversion, so mint init rejects a mint carrying both.
+//   nonTransferable + transferFee / transferHook — logical conflicts: a token
+//     that can never transfer has no transfers to charge a fee on or route
+//     through a hook, so pairing them is nonsensical. Blocked so the editor
+//     can't offer meaningless combinations.
+export const INCOMPATIBLE_EXTENSION_PAIRS: readonly (readonly [
+  TokenExtensionName,
+  TokenExtensionName,
+])[] = [
+  ["interestBearing", "scaledUiAmount"],
+  ["nonTransferable", "transferFee"],
+  ["nonTransferable", "transferHook"],
+];
+
+// The first incompatible pair fully present in `extensions`, or null if none
+// clash. Symmetric — order of the inputs doesn't matter.
+export function findIncompatibleExtensionPair(
+  extensions: Iterable<TokenExtensionName>
+): readonly [TokenExtensionName, TokenExtensionName] | null {
+  const present = new Set(extensions);
+  for (const pair of INCOMPATIBLE_EXTENSION_PAIRS) {
+    if (present.has(pair[0]) && present.has(pair[1])) {
+      return pair;
+    }
+  }
+  return null;
+}

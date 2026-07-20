@@ -28,12 +28,12 @@ function settings(
   return result;
 }
 
-// Stablecoin template allows only permanentDelegate + pausable, so freeze
-// (pausable) and permanentDelegate are recommended and everything else is
-// unsupported.
+// Stablecoin template forces permanentDelegate + pausable (the guarded builder
+// always applies them), so freeze (pausable) and permanentDelegate are `locked`
+// — on and non-deselectable — and everything else is unsupported.
 const STABLECOIN_SETTINGS = settings({
-  freezeTransfers: "recommended",
-  permanentDelegate: "recommended",
+  freezeTransfers: "locked",
+  permanentDelegate: "locked",
   transferFee: "unsupported",
   interestBearing: "unsupported",
   scaledUiAmount: "unsupported",
@@ -41,10 +41,12 @@ const STABLECOIN_SETTINGS = settings({
   transferHook: "unsupported",
 });
 
-// Tokenized-security template allows permanentDelegate + pausable + scaledUiAmount.
+// Tokenized-security template forces permanentDelegate + pausable (`locked`);
+// scaledUiAmount is conditional in the builder, so it is `recommended` (default
+// on, deselectable) rather than locked.
 const SECURITY_SETTINGS = settings({
-  freezeTransfers: "recommended",
-  permanentDelegate: "recommended",
+  freezeTransfers: "locked",
+  permanentDelegate: "locked",
   scaledUiAmount: "recommended",
   transferFee: "unsupported",
   interestBearing: "unsupported",

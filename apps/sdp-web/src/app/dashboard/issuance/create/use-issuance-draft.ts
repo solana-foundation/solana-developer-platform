@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { sanitizeAdvancedSettings } from "./draft-mapping";
 import {
   createInitialDraft,
   type DraftState,
@@ -21,7 +22,11 @@ import {
 } from "./issuance-draft-wizard.types";
 
 const STORAGE_KEY = "sdp:issuance:create-draft:v1";
-const STORAGE_VERSION = 1;
+// Bump when the draft's meaning changes so stale drafts are discarded rather than
+// hydrated into an inconsistent state. v2: advanced settings are combo-driven and
+// reset per category, so pre-combo drafts (e.g. security extensions left on a
+// generic asset) must not carry over.
+const STORAGE_VERSION = 2;
 
 interface WizardState {
   draft: DraftState;
@@ -143,6 +148,14 @@ function readStoredState(): WizardState | null {
     }
 
     const draft: DraftState = { ...createInitialDraft(), ...parsed.draft };
+    // Re-validate persisted advanced settings against the current rules so stale
+    // storage can't restore a now-invalid combination (e.g. two conflicting
+    // extensions both left checked before conflict validation existed).
+    draft.advancedSettings = sanitizeAdvancedSettings(
+      draft.assetCategory,
+      draft.assetType,
+      draft.advancedSettings
+    );
     const ceiling = furthestReachableStep(draft);
     const storedCurrent = isWizardStep(parsed.currentStep) ? parsed.currentStep : "classification";
     const storedMax = isWizardStep(parsed.maxStepReached) ? parsed.maxStepReached : storedCurrent;

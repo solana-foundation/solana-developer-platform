@@ -20,7 +20,12 @@ import {
   type TemplateOverrideError,
 } from "../templates/definitions";
 import { ASSET_CAPABILITIES } from "./capabilities";
-import { ADVANCED_SETTINGS, SETTING_KEYS, type SettingKey } from "./settings";
+import {
+  ADVANCED_SETTINGS,
+  INCOMPATIBLE_EXTENSION_PAIRS,
+  SETTING_KEYS,
+  type SettingKey,
+} from "./settings";
 
 export {
   type ExtensionAuthorities,
@@ -28,6 +33,7 @@ export {
   resolveSettingsToExtensions,
   type SettingsResolution,
 } from "./resolver";
+export { findIncompatibleExtensionPair, INCOMPATIBLE_EXTENSION_PAIRS } from "./settings";
 export {
   buildSupportMatrix,
   renderSupportMatrixMarkdown,
@@ -38,6 +44,61 @@ export {
 export type { SettingKey, TemplateOverrideError };
 export { ADVANCED_SETTINGS, ASSET_CAPABILITIES, SETTING_KEYS };
 
+// Drop settings that would form an incompatible extension pair, keeping the
+// earlier-listed one; unknown keys are dropped too. Order-preserving. Used to
+// sanitise a persisted selection on load, so stale storage can't restore a
+// conflicting combination the editor would never let you build interactively.
+export function pruneIncompatibleSettings(settingKeys: readonly string[]): SettingKey[] {
+  const kept: SettingKey[] = [];
+  const keptExtensions = new Set<string>();
+  for (const key of settingKeys) {
+    if (!(key in ADVANCED_SETTINGS)) {
+      continue;
+    }
+    const setting: AdvancedSetting = ADVANCED_SETTINGS[key as SettingKey];
+    const conflicts = setting.extensions.some((extension) =>
+      INCOMPATIBLE_EXTENSION_PAIRS.some(
+        ([a, b]) =>
+          (extension === a && keptExtensions.has(b)) || (extension === b && keptExtensions.has(a))
+      )
+    );
+    if (conflicts) {
+      continue;
+    }
+    kept.push(key as SettingKey);
+    for (const extension of setting.extensions) {
+      keptExtensions.add(extension);
+    }
+  }
+  return kept;
+}
+
+// Setting keys whose extension clashes with `settingKey`'s — the two cannot be
+// enabled together on one token. Drives the editor's conflict disabling. Derived
+// from INCOMPATIBLE_EXTENSION_PAIRS by mapping each conflicting extension back to
+// the setting(s) that configure it.
+export function getConflictingSettingKeys(settingKey: SettingKey): SettingKey[] {
+  const source: AdvancedSetting = ADVANCED_SETTINGS[settingKey];
+  const blocked = new Set<SettingKey>();
+  for (const pair of INCOMPATIBLE_EXTENSION_PAIRS) {
+    const other = source.extensions.includes(pair[0])
+      ? pair[1]
+      : source.extensions.includes(pair[1])
+        ? pair[0]
+        : null;
+    if (!other) {
+      continue;
+    }
+    for (const key of SETTING_KEYS) {
+      const candidate: AdvancedSetting = ADVANCED_SETTINGS[key];
+      if (key !== settingKey && candidate.extensions.includes(other)) {
+        blocked.add(key);
+      }
+    }
+  }
+  return [...blocked];
+}
+
 // The capability entry for an asset type, or undefined for an unknown pair.
 export function resolveAssetCapability(
   category: AssetCategory,
@@ -46,18 +107,32 @@ export function resolveAssetCapability(
   return ASSET_CAPABILITIES.find((c) => c.category === category && c.type === type);
 }
 
-// Settings that default ON for an asset type (the pre-checked selection).
+// Settings that default ON for an asset type — the pre-checked selection.
+// Includes both `locked` (forced on) and `recommended` (default on, deselectable)
+// settings; the caller pre-fills these with their default params.
 export function getRecommendedSettings(category: AssetCategory, type: string): SettingKey[] {
   const capability = resolveAssetCapability(category, type);
   if (!capability) {
     return [];
   }
-  return SETTING_KEYS.filter((key) => capability.settings[key] === "recommended");
+  return SETTING_KEYS.filter(
+    (key) => capability.settings[key] === "recommended" || capability.settings[key] === "locked"
+  );
 }
 
-// Whether an asset type permits a setting at all (recommended or available).
-// The single gate the persistence/validation layer (C) calls to reject an
-// unsupported selection early.
+// Settings an asset type forces on and does not let the manager deselect. The
+// editor renders these checked-and-disabled; persistence keeps them selected.
+export function getLockedSettings(category: AssetCategory, type: string): SettingKey[] {
+  const capability = resolveAssetCapability(category, type);
+  if (!capability) {
+    return [];
+  }
+  return SETTING_KEYS.filter((key) => capability.settings[key] === "locked");
+}
+
+// Whether an asset type permits a setting at all (locked, recommended, or
+// available). The single gate the persistence/validation layer (C) calls to
+// reject an unsupported selection early.
 export function isSettingAllowed(
   category: AssetCategory,
   type: string,
@@ -68,7 +143,11 @@ export function isSettingAllowed(
     return false;
   }
   const availability = capability.settings[settingKey];
-  return availability === "recommended" || availability === "available";
+  return (
+    availability === "locked" ||
+    availability === "recommended" ||
+    availability === "available"
+  );
 }
 
 export interface GroupedSetting {
@@ -132,11 +211,15 @@ export function validateSelectedSettings(
 // apps/sdp-web/.../asset-taxonomy.ts. Guarantees:
 //   1. every ASSET_TYPES pair has exactly one capability entry;
 //   2. every setting an entry references exists in the catalog;
-//   3. every recommended/available setting names only extensions the entry's
-//      baseTemplate can actually build — i.e. present in `required ∪ available`
-//      and not in `incompatible`. This mirrors resolveTemplateConfig's own
-//      override check, so a selection the capability offers can never be one the
-//      resolver would reject at deploy.
+//   3. every locked/recommended/available setting names only extensions the
+//      entry's baseTemplate can actually build — i.e. present in
+//      `required ∪ available` and not in `incompatible`. This mirrors
+//      resolveTemplateConfig's own override check, so a selection the capability
+//      offers can never be one the resolver would reject at deploy.
+//   4. every extension the baseTemplate lists as `required` (the guarded builder
+//      forces it on unconditionally) is covered by a `locked` setting — so a
+//      forced extension can never be surfaced as an optional, deselectable box
+//      whose unticking has no on-chain effect.
 if (process.env.NODE_ENV !== "production") {
   const seen = new Set<string>();
 
@@ -151,6 +234,7 @@ if (process.env.NODE_ENV !== "production") {
     const template = TEMPLATE_DEFINITIONS[normalizeTemplateId(capability.baseTemplate)];
     const incompatible = new Set(template.extensions.incompatible);
     const buildable = new Set([...template.extensions.required, ...template.extensions.available]);
+    const lockedExtensions = new Set<string>();
 
     for (const [settingKey, availability] of Object.entries(capability.settings)) {
       const setting = ADVANCED_SETTINGS[settingKey as SettingKey];
@@ -163,6 +247,11 @@ if (process.env.NODE_ENV !== "production") {
       if (availability === "unsupported") {
         continue;
       }
+      if (availability === "locked") {
+        for (const extension of setting.extensions) {
+          lockedExtensions.add(extension);
+        }
+      }
       for (const extension of setting.extensions) {
         if (incompatible.has(extension) || !buildable.has(extension)) {
           throw new Error(
@@ -171,6 +260,17 @@ if (process.env.NODE_ENV !== "production") {
               `template (allowed: ${[...buildable].join(", ") || "none"}).`
           );
         }
+      }
+    }
+
+    // (4) Every template-required extension must be locked, not merely offered.
+    for (const required of template.extensions.required) {
+      if (!lockedExtensions.has(required)) {
+        throw new Error(
+          `capabilities: (${pairKey}) deploys as ${capability.baseTemplate}, which forces ` +
+            `"${required}", but no locked setting covers it — it would render as a ` +
+            `deselectable box with no on-chain effect. Mark the covering setting "locked".`
+        );
       }
     }
   }

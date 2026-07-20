@@ -805,7 +805,7 @@ function FieldRow({
 
   if (!hasToggle) {
     return (
-      <div className={cn("flex items-start gap-3 px-4 py-3", locked && "bg-fill-subtle")}>
+      <div className={cn("flex items-center gap-3 px-4 py-3", locked && "bg-fill-subtle")}>
         {body}
       </div>
     );
@@ -824,7 +824,7 @@ function FieldRow({
       onClick={onToggle}
       disabled={disabled}
       className={cn(
-        "group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors",
+        "group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors",
         disabled
           ? "cursor-default"
           : "cursor-pointer hover:bg-fill-subtle focus-visible:bg-fill-subtle focus-visible:outline-none"
@@ -851,7 +851,7 @@ function RoundCheck({
     <span
       aria-hidden="true"
       className={cn(
-        "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors",
+        "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors",
         checked
           ? "border-primary bg-primary text-white"
           : "border-border-strong bg-white text-transparent",

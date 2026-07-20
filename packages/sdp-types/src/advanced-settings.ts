@@ -15,8 +15,12 @@
 import type { AssetCategory } from "./asset-profiles";
 import type { TokenExtensionName, TokenTemplate, TokenTransactionType } from "./tokens";
 
-// Whether a setting is on by default, opt-in, or forbidden for an asset type.
-export type SettingAvailability = "recommended" | "available" | "unsupported";
+// Whether a setting is forced on, on by default, opt-in, or forbidden for an
+// asset type. "locked" is on and non-deselectable: the base template's guarded
+// builder always applies the extension (e.g. permanentDelegate + pausable on a
+// stablecoin), so the editor renders it checked-and-disabled rather than as an
+// optional box the manager can untick with no on-chain effect.
+export type SettingAvailability = "locked" | "recommended" | "available" | "unsupported";
 
 // Who signs the transaction that realizes a setting. "custodial-or-wallet"
 // means the platform's custody wallet signs by default and the manager can fall
@@ -40,6 +44,13 @@ export interface ParamFieldSpec {
   options?: readonly { value: string; labelKey: string }[];
   min?: number;
   max?: number;
+  // When true, the field must be filled once its setting is enabled — the editor
+  // marks it and the create wizard blocks Continue until it has a value.
+  required?: boolean;
+  // A short manager-facing helper shown under the field in Basic/Detailed — e.g.
+  // clarifying that a value is entered in basis points. Expert mode shows the
+  // technical spec caption instead. Optional.
+  hintKey?: string;
 }
 
 // One manager-facing advanced setting: its plain-language copy, the Token-2022

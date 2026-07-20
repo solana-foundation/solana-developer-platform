@@ -18,7 +18,7 @@ Manager-facing advanced settings, the SDP actions and Token-2022 extensions each
 
 ## Availability by asset type
 
-Legend: `rec` = recommended (default on) · `opt` = available (opt-in) · `—` = unsupported.
+Legend: `req` = locked (forced on) · `rec` = recommended (default on) · `opt` = available (opt-in) · `—` = unsupported.
 
 | Asset type | Template | freezeTransfers | permanentDelegate | transferFee | interestBearing | scaledUiAmount | nonTransferable | transferHook |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -26,13 +26,13 @@ Legend: `rec` = recommended (default on) · `opt` = available (opt-in) · `—` 
 | generic/commodity | custom | opt | opt | opt | opt | opt | opt | opt |
 | generic/real_estate | custom | opt | opt | opt | opt | opt | opt | opt |
 | generic/collectible | custom | opt | opt | opt | opt | opt | opt | opt |
-| stablecoin/fiat_backed | stablecoin | rec | rec | — | — | — | — | — |
-| stablecoin/crypto_backed | stablecoin | rec | rec | — | — | — | — | — |
-| stablecoin/generic | stablecoin | rec | rec | — | — | — | — | — |
-| tokenized_security/generic | tokenized-security | rec | rec | — | — | rec | — | — |
-| tokenized_security/equity | tokenized-security | rec | rec | — | — | rec | — | — |
-| tokenized_security/debt | tokenized-security | rec | rec | — | — | rec | — | — |
-| tokenized_security/fund | tokenized-security | rec | rec | — | — | rec | — | — |
+| stablecoin/fiat_backed | stablecoin | req | req | — | — | — | — | — |
+| stablecoin/crypto_backed | stablecoin | req | req | — | — | — | — | — |
+| stablecoin/generic | stablecoin | req | req | — | — | — | — | — |
+| tokenized_security/generic | tokenized-security | req | req | — | — | rec | — | — |
+| tokenized_security/equity | tokenized-security | req | req | — | — | rec | — | — |
+| tokenized_security/debt | tokenized-security | req | req | — | — | rec | — | — |
+| tokenized_security/fund | tokenized-security | req | req | — | — | rec | — | — |
 
 ## Unsupported gaps
 

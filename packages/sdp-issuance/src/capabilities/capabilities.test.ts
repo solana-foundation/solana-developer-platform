@@ -9,9 +9,12 @@ import {
   ADVANCED_SETTINGS,
   ADVANCED_SETTINGS_VERSION,
   ASSET_CAPABILITIES,
+  getConflictingSettingKeys,
+  getLockedSettings,
   getRecommendedSettings,
   isSettingAllowed,
   listSettingsForType,
+  pruneIncompatibleSettings,
   renderSupportMatrixMarkdown,
   resolveAssetCapability,
   resolveSettingsToExtensions,
@@ -61,6 +64,31 @@ describe("advanced settings capability registry", () => {
 
     // generic assets force nothing on.
     assert.deepEqual(getRecommendedSettings("generic", "generic"), []);
+  });
+
+  it("locks the extensions the guarded template forces on", () => {
+    // Stablecoin forces permanentDelegate + pausable, so both covering settings
+    // are locked (on and non-deselectable), not merely recommended.
+    const stablecoin = resolveAssetCapability("stablecoin", "fiat_backed");
+    assert.equal(stablecoin?.settings.permanentDelegate, "locked");
+    assert.equal(stablecoin?.settings.freezeTransfers, "locked");
+    assert.deepEqual(getLockedSettings("stablecoin", "fiat_backed").sort(), [
+      "freezeTransfers",
+      "permanentDelegate",
+    ]);
+
+    // Locked settings are still "allowed" and still pre-selected (default on).
+    assert.equal(isSettingAllowed("stablecoin", "fiat_backed", "permanentDelegate"), true);
+    assert.ok(getRecommendedSettings("stablecoin", "fiat_backed").includes("permanentDelegate"));
+
+    // scaledUiAmount is conditional in the security builder, so it stays
+    // recommended (deselectable), not locked.
+    const security = resolveAssetCapability("tokenized_security", "equity");
+    assert.equal(security?.settings.scaledUiAmount, "recommended");
+    assert.equal(security?.settings.permanentDelegate, "locked");
+
+    // generic assets deploy as custom (nothing forced) — no locked settings.
+    assert.deepEqual(getLockedSettings("generic", "generic"), []);
   });
 
   it("lists settings for a type without the unsupported ones", () => {
@@ -154,6 +182,51 @@ describe("advanced settings capability registry", () => {
   it("returns an error for an unknown asset type", () => {
     const result = resolveSettingsToExtensions("generic", "not_a_type", { freezeTransfers: {} });
     assert.ok(result.errors.length > 0);
+  });
+
+  it("rejects two extensions that cannot coexist on one mint", () => {
+    // interestBearing + scaledUiAmount both define the raw→UI amount conversion,
+    // so they conflict even though each is individually valid on a generic asset.
+    assert.deepEqual(getConflictingSettingKeys("interestBearing"), ["scaledUiAmount"]);
+    assert.deepEqual(getConflictingSettingKeys("scaledUiAmount"), ["interestBearing"]);
+    // nonTransferable can't pair with a fee or a hook (no transfers to act on).
+    assert.deepEqual(getConflictingSettingKeys("nonTransferable").sort(), [
+      "transferFee",
+      "transferHook",
+    ]);
+    // A setting with no conflicts returns an empty list.
+    assert.deepEqual(getConflictingSettingKeys("freezeTransfers"), []);
+
+    const result = resolveSettingsToExtensions("generic", "generic", {
+      interestBearing: { params: { rate: 5 } },
+      scaledUiAmount: { params: { multiplier: 2 } },
+    });
+    assert.ok(
+      result.errors.some((e) => e.code === "EXTENSION_NOT_ALLOWED"),
+      "expected a conflict error for interestBearing + scaledUiAmount"
+    );
+
+    // Either one alone resolves cleanly.
+    const single = resolveSettingsToExtensions("generic", "generic", {
+      interestBearing: { params: { rate: 5 } },
+    });
+    assert.deepEqual(single.errors, []);
+  });
+
+  it("prunes a conflicting pair to a valid subset (keeping the earlier one)", () => {
+    // Simulates re-validating a stale persisted selection with both conflicting
+    // extensions checked: the earlier-listed one is kept, the later dropped.
+    assert.deepEqual(pruneIncompatibleSettings(["interestBearing", "scaledUiAmount"]), [
+      "interestBearing",
+    ]);
+    assert.deepEqual(pruneIncompatibleSettings(["scaledUiAmount", "interestBearing"]), [
+      "scaledUiAmount",
+    ]);
+    // Non-conflicting keys pass through; unknown keys are dropped.
+    assert.deepEqual(pruneIncompatibleSettings(["freezeTransfers", "made_up", "transferFee"]), [
+      "freezeTransfers",
+      "transferFee",
+    ]);
   });
 
   it("keeps the committed support matrix in sync with the registry", () => {
