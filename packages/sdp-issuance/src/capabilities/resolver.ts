@@ -35,11 +35,17 @@ export interface SettingsResolution {
   errors: TemplateOverrideError[];
 }
 
+// Coerce to a FINITE number, else the fallback. The API path validates params
+// (coerceParamNumber) before reaching here, but resolveSettingsToExtensions is
+// exported and callable directly, so both branches guard with Number.isFinite —
+// NaN and ±Infinity (including string forms like "Infinity") fall back rather
+// than land in an immutable, post-deploy Token-2022 extension (e.g. a
+// scaledUiAmount.multiplier of Infinity that would display every balance as ∞).
 function toNumber(value: string | number | undefined, fallback: number): number {
   if (typeof value === "number") {
-    return value;
+    return Number.isFinite(value) ? value : fallback;
   }
-  if (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) {
+  if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) {
     return Number(value);
   }
   return fallback;

@@ -240,6 +240,28 @@ describe("advanced settings capability registry", () => {
     assert.ok(stablecoin.extensions?.pausable, "pausable should be enabled");
   });
 
+  it("falls back to a safe default when a direct caller bypasses the validator with a non-finite param", () => {
+    // resolveSettingsToExtensions is exported and callable without validateSettingParams,
+    // so its toNumber must not pass a non-finite value into an immutable extension. A
+    // multiplier of Infinity (number or "Infinity" string) resolves to the default 1.
+    for (const bad of [Number.POSITIVE_INFINITY, "Infinity", "1e999"] as const) {
+      const result = resolveSettingsToExtensions("generic", "generic", {
+        scaledUiAmount: { params: { multiplier: bad } },
+      });
+      assert.deepEqual(result.errors, []);
+      assert.equal(
+        result.extensions?.scaledUiAmount?.multiplier,
+        1,
+        `multiplier ${String(bad)} should fall back to 1`
+      );
+    }
+    // A finite value still flows through unchanged.
+    const ok = resolveSettingsToExtensions("generic", "generic", {
+      scaledUiAmount: { params: { multiplier: 2 } },
+    });
+    assert.equal(ok.extensions?.scaledUiAmount?.multiplier, 2);
+  });
+
   it("injects the provided authority and passes through decimals/allowlist", () => {
     const result = resolveSettingsToExtensions(
       "generic",
