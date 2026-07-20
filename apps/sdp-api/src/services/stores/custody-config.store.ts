@@ -7,6 +7,7 @@
 
 import { SigningError, type SignStatus } from "@sdp/custody/signing";
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
+import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type {
   CreateSigningRequestParams,
   SigningConfigStore,
@@ -14,7 +15,7 @@ import type {
   SigningRequestRecord,
   SigningRequestStore,
 } from "@/services/domain/signing.service";
-import { createEncryptionService, type EncryptionService } from "@/services/encryption.service";
+import type { Env } from "@/types/env";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -111,11 +112,11 @@ interface CustodyScopeDefaultRow {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class CustodyConfigStore implements SigningConfigStore {
-  private encryptionService: EncryptionService | null = null;
+  private custodyCipher: CustodyCipher | null = null;
 
   constructor(
     private db: DatabaseClient,
-    private encryptionKey?: string
+    private env: Env
   ) {}
 
   /**
@@ -330,8 +331,7 @@ export class CustodyConfigStore implements SigningConfigStore {
       .first<{ id: string }>();
 
     const configJson = JSON.stringify(config);
-    const encryption = this.getEncryptionService();
-    const encryptedConfig = await encryption.encrypt(orgId, configJson);
+    const encryptedConfig = await this.getCustodyCipher().encrypt(orgId, configJson);
 
     if (existing) {
       // Update existing config
@@ -343,7 +343,7 @@ export class CustodyConfigStore implements SigningConfigStore {
         )
         .bind(
           config.provider,
-          encryptedConfig.ciphertext,
+          encryptedConfig,
           "sdp-custody-encryption-v1",
           config.defaultWalletId ?? null,
           existing.id
@@ -366,7 +366,7 @@ export class CustodyConfigStore implements SigningConfigStore {
         orgId,
         normalizedProjectId,
         config.provider,
-        encryptedConfig.ciphertext,
+        encryptedConfig,
         "sdp-custody-encryption-v1",
         config.defaultWalletId ?? null
       )
@@ -745,11 +745,11 @@ export class CustodyConfigStore implements SigningConfigStore {
     };
   }
 
-  private getEncryptionService(): EncryptionService {
-    if (!this.encryptionService) {
-      this.encryptionService = createEncryptionService(this.encryptionKey);
+  private getCustodyCipher(): CustodyCipher {
+    if (!this.custodyCipher) {
+      this.custodyCipher = createCustodyCipher(this.env);
     }
-    return this.encryptionService;
+    return this.custodyCipher;
   }
 
   private async getScopeDefaultRow(

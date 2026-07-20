@@ -8,7 +8,7 @@ import {
   RuntimeEnvCredentialSecretStore,
   resolveCredentialSecretStoreBackend,
 } from "./credential-secret-store";
-import { createEncryptionService } from "./encryption.service";
+import { createCustodyCipher } from "./custody-cipher/cipher-router";
 
 function encodeBase64(value: string): string {
   let binary = "";
@@ -310,7 +310,7 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
 describe("EncryptedDbCredentialSecretStore", () => {
   it("stores only ciphertext and decrypts with the organization key scope", async () => {
     const store = new EncryptedDbCredentialSecretStore(
-      createEncryptionService(testEncryptionKey())
+      createCustodyCipher({ CUSTODY_ENCRYPTION_KEY: testEncryptionKey() } as Env)
     );
     const payload = {
       appId: "privy-app-id",
@@ -334,7 +334,9 @@ describe("EncryptedDbCredentialSecretStore", () => {
   });
 
   it("wraps encryption failures in CredentialSecretStoreError", async () => {
-    const store = new EncryptedDbCredentialSecretStore(createEncryptionService("not-a-valid-key"));
+    const store = new EncryptedDbCredentialSecretStore(
+      createCustodyCipher({ CUSTODY_ENCRYPTION_KEY: "not-a-valid-key" } as Env)
+    );
 
     await expect(
       store.write({
@@ -348,7 +350,7 @@ describe("EncryptedDbCredentialSecretStore", () => {
 
   it("does not expose external version deletion for DB-backed storage", async () => {
     const store = new EncryptedDbCredentialSecretStore(
-      createEncryptionService(testEncryptionKey())
+      createCustodyCipher({ CUSTODY_ENCRYPTION_KEY: testEncryptionKey() } as Env)
     );
 
     await expect(

@@ -30,7 +30,7 @@ import {
   KeychainUtilaAdapter,
   type SigningConfigRecord,
 } from "@/services/adapters";
-import { createEncryptionService } from "@/services/encryption.service";
+import { createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type { Env } from "@/types/env";
 import {
   type ProviderConfigRecord,
@@ -80,8 +80,8 @@ const providerAdapterFactories = {
       );
     }
 
-    const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
-    const privateKeyBase58 = await encryption.decryptPrivateKey(orgId, parsed.encryptedPrivateKey);
+    const cipher = createCustodyCipher(env);
+    const privateKeyBase58 = await cipher.decrypt(orgId, parsed.encryptedPrivateKey);
     return KeychainMemoryAdapter.fromBase58(privateKeyBase58);
   },
   fireblocks: async ({ env, orgId, parsed }) => {
@@ -92,8 +92,8 @@ const providerAdapterFactories = {
       );
     }
 
-    const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
-    const apiSecretPem = await encryption.decryptPrivateKey(orgId, parsed.apiSecretEncrypted);
+    const cipher = createCustodyCipher(env);
+    const apiSecretPem = await cipher.decrypt(orgId, parsed.apiSecretEncrypted);
 
     return new KeychainFireblocksAdapter({
       apiKey: parsed.apiKey,

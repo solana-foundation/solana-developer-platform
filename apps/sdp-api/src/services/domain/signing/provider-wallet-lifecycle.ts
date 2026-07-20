@@ -28,7 +28,7 @@ import {
   provisionTurnkeyPrivateKey,
   provisionUtilaWallet,
 } from "@/services/custody/provisioning";
-import { createEncryptionService } from "@/services/encryption.service";
+import { createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type { Env } from "@/types/env";
 import type { ProviderConfigRecord } from "./provider-config";
 
@@ -69,8 +69,8 @@ const providerWalletLifecycleRegistry = {
         );
       }
 
-      const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
-      const apiSecretPem = await encryption.decryptPrivateKey(orgId, parsed.apiSecretEncrypted);
+      const cipher = createCustodyCipher(env);
+      const apiSecretPem = await cipher.decrypt(orgId, parsed.apiSecretEncrypted);
       const provisioned = await withProvisioningError("Fireblocks", () =>
         provisionFireblocksVaultAccount(env, {
           orgId,
