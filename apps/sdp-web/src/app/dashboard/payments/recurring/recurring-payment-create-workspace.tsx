@@ -578,7 +578,7 @@ export function RecurringPaymentCreateWorkspace({
             <button
               type="button"
               onClick={() => setDestinationAccountDialogOpen(true)}
-              className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
+              className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
             >
               <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary">
                 <PlusIcon className="size-4" />
@@ -783,7 +783,7 @@ export function RecurringPaymentCreateWorkspace({
       {currentStep.id === "review" ? (
         <div className="space-y-5">
           <ReviewSummaryCard rows={reviewRows} />
-          <div className="rounded-2xl border border-border-default bg-white px-4 py-3 text-sm text-secondary">
+          <div className="rounded-2xl border border-border-default bg-surface-raised px-4 py-3 text-sm text-secondary">
             {t("DashboardPayments.recurring.pendingRecordDescription")}
           </div>
         </div>

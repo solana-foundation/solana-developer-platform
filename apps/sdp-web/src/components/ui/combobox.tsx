@@ -158,7 +158,7 @@ export function Combobox({
       disabled={disabled}
       onClick={variant === "dialog" ? () => handleOpenChange(!open) : undefined}
       className={cn(
-        "flex w-full items-center gap-2 border border-border-default bg-transparent text-base transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-white/50",
+        "flex w-full items-center gap-2 border border-border-default bg-transparent text-base transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50",
         SIZE_CLASSES[size],
         className,
         validationError && "border-error-border hover:border-error-border"

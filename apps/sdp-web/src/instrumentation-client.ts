@@ -8,6 +8,7 @@ const sentryDsn =
   process.env.NODE_ENV === "development" || process.env.NEXT_PUBLIC_DISABLE_SENTRY === "1"
     ? undefined
     : process.env.NEXT_PUBLIC_SENTRY_DSN;
+const initialFeedbackTheme = document.documentElement.classList.contains("dark") ? "dark" : "light";
 
 if (sentryDsn) {
   Sentry.init({
@@ -24,7 +25,7 @@ if (sentryDsn) {
         autoInject: false,
         showBranding: false,
         enableScreenshot: true,
-        colorScheme: "light",
+        colorScheme: initialFeedbackTheme,
         showName: false,
         showEmail: false,
         useSentryUser: {

@@ -104,7 +104,7 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
 
   return (
     <aside className="lg:sticky lg:top-4">
-      <div className="rounded-2xl border border-border-default bg-white p-5">
+      <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
         <p className="text-base font-medium text-primary">{t("DashboardIssuance.summary.title")}</p>
 
         <div className="mt-3">

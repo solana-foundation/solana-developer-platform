@@ -68,7 +68,7 @@ function DashboardScopeRefreshFallback() {
 
   return (
     <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
-      <div className="mx-auto max-w-5xl space-y-4 border border-border-subtle bg-white/70 p-6">
+      <div className="mx-auto max-w-5xl space-y-4 border border-border-subtle bg-surface-raised/70 p-6">
         <p className="text-sm text-tertiary">{t("Shared.dashboardShell.loadingDashboard")}</p>
         <Button type="button" variant="ghost" size="sm" onClick={() => router.refresh()}>
           {t("Shared.SharedComponents.retry")}

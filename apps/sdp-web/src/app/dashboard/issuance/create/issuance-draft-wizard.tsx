@@ -316,7 +316,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-border-default bg-white/80 px-4 py-4 md:px-6">
+      <div className="shrink-0 border-t border-border-default bg-surface-raised/80 px-4 py-4 md:px-6">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3">
           <Button
             type="button"

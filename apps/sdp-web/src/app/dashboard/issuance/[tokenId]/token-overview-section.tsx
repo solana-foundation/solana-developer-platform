@@ -52,7 +52,7 @@ export function TokenOverviewSection({
           ) : null}
         </div>
       ) : null}
-      <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
+      <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
         <OverviewRow
           label={t("DashboardIssuance.overview.tokenAddress")}
           value={token.mintAddress ?? t("DashboardIssuance.header.notDeployed")}

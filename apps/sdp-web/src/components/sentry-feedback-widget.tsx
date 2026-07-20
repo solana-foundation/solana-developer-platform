@@ -3,12 +3,19 @@
 import * as Sentry from "@sentry/nextjs";
 import { MessageSquarePlus } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { useTheme } from "@/contexts/theme-context";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 export function SentryFeedbackWidget({ collapsed = false }: { collapsed?: boolean }) {
   const ref = useRef<HTMLButtonElement>(null);
   const t = useTranslations();
+  const { theme } = useTheme();
+
+  useEffect(() => {
+    const feedback = Sentry.getFeedback();
+    feedback?.setTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     const feedback = Sentry.getFeedback();
