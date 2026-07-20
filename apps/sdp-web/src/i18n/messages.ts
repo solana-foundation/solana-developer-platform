@@ -34,7 +34,7 @@ const frMessages = {
   ...frDashboardPayments,
   ...frDashboardPolicies,
   Shared: frShared,
-} as Messages;
+} satisfies Messages;
 
 export type MessageKeyFor<TValue> = TValue extends string
   ? ""
