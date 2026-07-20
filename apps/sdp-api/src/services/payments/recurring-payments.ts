@@ -12,10 +12,11 @@ import {
   type RecurringPaymentLifecycleOperation,
   resolveRecurringPaymentCollectionSchedule,
 } from "@sdp/payments/recurring-payment-lifecycle";
+import { getSolanaConfig } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import type { UpdatePaymentRecurringPaymentRequest } from "@sdp/types";
+import { type UpdatePaymentRecurringPaymentRequest, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import {
   type Address,
   addSignersToTransactionMessage,
@@ -44,6 +45,7 @@ import {
   createPostgresPaymentRecurringPaymentsRepository,
   createPostgresPaymentSubscriptionsRepository,
   createPostgresPaymentsRepository,
+  createTokenRepository,
   type PaymentRecurringPaymentActivationAttemptRow,
   type PaymentRecurringPaymentActivationAttemptStage,
   type PaymentRecurringPaymentLifecycleAttemptRow,
@@ -63,7 +65,11 @@ import {
   resolveMintTokenProgram,
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
-import { normalizePaymentToken, SOL_MINT } from "@/services/payment-operation.service";
+import {
+  isNativePaymentToken,
+  normalizePaymentToken,
+  parseU64String,
+} from "@/services/payment-operation.service";
 import { assertWalletPolicyAllowsTransferWithRepository } from "@/services/payments/wallet-policy";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -74,18 +80,42 @@ import {
   parsePositiveIntegerConfig,
 } from "./recurring-payment-config";
 
-const U64_MAX = 18_446_744_073_709_551_615n;
 const COLLECTION_STALE_AFTER_MS = RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS;
 
 type RecurringCollectionSource = "manual" | "automated";
 
-function assertRecurringPaymentTokenMint(token: string, env: Env): string {
-  const normalized = normalizePaymentToken(token, env);
-  if (normalized === "SOL" || normalized === SOL_MINT) {
-    throw badRequest("Recurring payments require an SPL token mint");
+const RECURRING_PAYMENT_TOKEN_ERROR =
+  "Recurring payments support USD stablecoins and tokens issued in this project; native SOL is not supported";
+
+/**
+ * Resolves a recurring-payment token to its mint, allowing only well-known USD
+ * stablecoins on the configured cluster or active tokens issued in the project.
+ */
+async function assertRecurringPaymentTokenMint(
+  token: string,
+  projectId: string,
+  env: Env
+): Promise<string> {
+  if (isNativePaymentToken(token)) {
+    throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
   }
 
-  return assertValidAddress(normalized, "token");
+  const mint = assertValidAddress(normalizePaymentToken(token, env), "token");
+  const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
+  if (wellKnown) {
+    const cluster = getSolanaConfig(env).network;
+    if (wellKnown.isUsdStable && wellKnown.mints[cluster] === mint) {
+      return mint;
+    }
+    throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
+  }
+
+  const issuedTokenStatus = await createTokenRepository(env).getStatusByMint(projectId, mint);
+  if (issuedTokenStatus !== "active") {
+    throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
+  }
+
+  return mint;
 }
 
 function generateProgramPlanId(): string {
@@ -101,18 +131,6 @@ function generateProgramPlanId(): string {
   }
 
   return value.toString();
-}
-
-function parseU64String(value: string, fieldName: string): bigint {
-  try {
-    const parsed = BigInt(value);
-    if (parsed < 0n || parsed > U64_MAX) {
-      throw new Error("out of range");
-    }
-    return parsed;
-  } catch {
-    throw badRequest(`${fieldName} must fit in an unsigned 64-bit integer`);
-  }
 }
 
 async function sendSubscriptionInstructions(input: {
@@ -1346,25 +1364,26 @@ async function resolveRecurringPaymentUpdate(input: {
     throw badRequest("Recurring payment source wallet does not match request");
   }
 
-  const token =
-    input.request.token !== undefined
-      ? assertRecurringPaymentTokenMint(input.request.token, input.env)
-      : input.recurringPayment.token;
   const counterpartyId = input.request.counterpartyId ?? input.recurringPayment.counterparty_id;
   const counterpartyAccountId =
     input.request.counterpartyAccountId ?? input.recurringPayment.counterparty_account_id;
   const accountChanged =
     counterpartyId !== input.recurringPayment.counterparty_id ||
     counterpartyAccountId !== input.recurringPayment.counterparty_account_id;
-  const destination = accountChanged
-    ? await resolveSolanaCounterpartyAccount({
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        counterpartyId,
-        counterpartyAccountId,
-      })
-    : { destinationAddress: input.recurringPayment.destination_address };
+  const [token, destination] = await Promise.all([
+    input.request.token !== undefined
+      ? assertRecurringPaymentTokenMint(input.request.token, input.projectId, input.env)
+      : input.recurringPayment.token,
+    accountChanged
+      ? resolveSolanaCounterpartyAccount({
+          env: input.env,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          counterpartyId,
+          counterpartyAccountId,
+        })
+      : { destinationAddress: input.recurringPayment.destination_address },
+  ]);
   const amount = input.request.amount ?? input.recurringPayment.amount;
   const periodHours = input.request.periodHours ?? input.recurringPayment.period_hours;
   const firstCollectionAt =
@@ -2705,14 +2724,16 @@ export async function createRecurringPayment(input: {
   metadataUri?: string | null;
   createdBy: string | null;
 }): Promise<PaymentRecurringPaymentRow> {
-  const tokenMint = assertRecurringPaymentTokenMint(input.token, input.env);
-  const destination = await resolveSolanaCounterpartyAccount({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    counterpartyId: input.counterpartyId,
-    counterpartyAccountId: input.counterpartyAccountId,
-  });
+  const [tokenMint, destination] = await Promise.all([
+    assertRecurringPaymentTokenMint(input.token, input.projectId, input.env),
+    resolveSolanaCounterpartyAccount({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      counterpartyId: input.counterpartyId,
+      counterpartyAccountId: input.counterpartyAccountId,
+    }),
+  ]);
 
   await assertWalletPolicyAllowsTransferWithRepository(createPaymentsRepository(input.env), {
     organizationId: input.organizationId,
