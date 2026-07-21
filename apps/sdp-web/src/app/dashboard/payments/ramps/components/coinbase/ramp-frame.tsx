@@ -46,7 +46,7 @@ export function CoinbaseRampFrame({ orderId, src }: { orderId: string; src: stri
 
   return (
     <div
-      className={`overflow-hidden rounded-lg transition-all duration-300 ${expanded ? "max-w-lg" : "max-w-xs"}`}
+      className={`mx-auto overflow-hidden rounded-lg transition-all duration-300 ${expanded ? "max-w-lg" : "max-w-xs"}`}
     >
       <iframe
         title={t("DashboardPayments.ramps.coinbaseOnramp")}
