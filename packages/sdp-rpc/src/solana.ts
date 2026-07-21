@@ -298,72 +298,32 @@ export async function sendAndConfirmTransaction(
     pollIntervalMs?: number;
   }
 ): Promise<TransactionConfirmation> {
-  const commitment = options?.commitment ?? "confirmed";
-  const timeoutMs = options?.timeoutMs ?? 60000;
-  const pollIntervalMs = options?.pollIntervalMs ?? 1000;
-
-  // Send the transaction
   const signature = await sendTransaction(rpc, signedTransaction, {
     skipPreflight: options?.skipPreflight,
     maxRetries: options?.maxRetries,
   });
 
-  // Poll for confirmation
-  const startTime = Date.now();
-
-  while (Date.now() - startTime < timeoutMs) {
-    const result = await getSignatureStatusOrNull(rpc, signature);
-
-    if (result) {
-      // Check if confirmed to required level
-      const isConfirmed =
-        result.confirmationStatus === commitment ||
-        (commitment === "confirmed" && result.confirmationStatus === "finalized") ||
-        result.confirmationStatus === "finalized";
-
-      if (isConfirmed) {
-        return {
-          signature,
-          slot: result.slot,
-          confirmationStatus: result.confirmationStatus ?? commitment,
-          err: result.err,
-        };
-      }
-
-      // Check for error
-      if (result.err) {
-        return {
-          signature,
-          slot: result.slot,
-          confirmationStatus: result.confirmationStatus ?? "processed",
-          err: result.err,
-        };
-      }
-    }
-
-    // Wait before polling again
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-  }
-
-  throw solanaRpcError(`Transaction ${signature} confirmation timed out after ${timeoutMs}ms`);
+  return pollForConfirmation(rpc, signature, options);
 }
 
-/**
- * Confirm an already-sent transaction
- */
-export async function confirmTransaction(
+export type ConfirmTransactionOptions = {
+  commitment?: Commitment;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+};
+
+async function pollForConfirmation(
   rpc: SolanaRpc,
   signature: Signature,
-  options?: {
-    commitment?: Commitment;
-    timeoutMs?: number;
-    pollIntervalMs?: number;
-  }
+  options: ConfirmTransactionOptions | undefined,
+  resend?: () => Promise<unknown>
 ): Promise<TransactionConfirmation> {
   const commitment = options?.commitment ?? "confirmed";
   const timeoutMs = options?.timeoutMs ?? 60000;
   const pollIntervalMs = options?.pollIntervalMs ?? 1000;
+  const resendIntervalMs = 5000;
   const startTime = Date.now();
+  let lastSendTime = startTime;
 
   while (Date.now() - startTime < timeoutMs) {
     const result = await getSignatureStatusOrNull(rpc, signature);
@@ -384,10 +344,44 @@ export async function confirmTransaction(
       }
     }
 
+    if (!result && resend && Date.now() - lastSendTime >= resendIntervalMs) {
+      lastSendTime = Date.now();
+      await resend().catch(() => undefined);
+    }
+
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
 
   throw solanaRpcError(`Transaction ${signature} confirmation timed out after ${timeoutMs}ms`);
+}
+
+/**
+ * Confirm an already-sent transaction
+ */
+export async function confirmTransaction(
+  rpc: SolanaRpc,
+  signature: Signature,
+  options?: ConfirmTransactionOptions
+): Promise<TransactionConfirmation> {
+  return pollForConfirmation(rpc, signature, options);
+}
+
+/**
+ * Confirm an already-sent transaction, resubmitting it every few seconds
+ * while the signature has no status yet. Validators occasionally drop an
+ * accepted transaction, and redundantly sending the identical bytes is the
+ * standard recovery — same message, same signature, so resends are
+ * idempotent. Resend failures are ignored because duplicate submissions of
+ * an already-landed transaction can be rejected while the original still
+ * confirms; the poll loop alone decides the outcome.
+ */
+export async function confirmTransactionWithResend(
+  rpc: SolanaRpc,
+  signature: Signature,
+  resend: () => Promise<unknown>,
+  options?: ConfirmTransactionOptions
+): Promise<TransactionConfirmation> {
+  return pollForConfirmation(rpc, signature, options, resend);
 }
 
 /**

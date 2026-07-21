@@ -416,7 +416,7 @@ jobs:
             custody_provider: privy
           - name: Surfpool / Issuance
             provider: surfpool
-            test_files: src/tests/issuance-endpoints.test.ts src/tests/token2022.test.ts
+            test_files: src/tests/issuance-crud.test.ts src/tests/issuance-prepare.test.ts src/tests/issuance-execute.test.ts src/tests/token2022.test.ts
             rpc_provider: quicknode
             custody_provider: local
           - name: Surfpool / Mosaic

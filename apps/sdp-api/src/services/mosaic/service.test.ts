@@ -252,12 +252,12 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       vi.spyOn(Kit, "getTransactionEncoder").mockReturnValue({
         encode: () => new Uint8Array([1, 2, 3]),
       } as never);
-      const confirmSpy = vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
+      const confirmSpy = vi.spyOn(RpcModule, "confirmTransactionWithResend").mockResolvedValue({
         signature: koraSignature,
         slot: 7n,
         confirmationStatus: "confirmed",
         err: null,
-      } as Awaited<ReturnType<typeof RpcModule.confirmTransaction>>);
+      } as Awaited<ReturnType<typeof RpcModule.confirmTransactionWithResend>>);
 
       const result = await service.createToken(srfc37Options());
 
@@ -280,12 +280,12 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
         encode: () => new Uint8Array([1, 2, 3]),
       } as never);
       const onChainError = { InstructionError: [0, { Custom: 6001 }] };
-      vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
+      vi.spyOn(RpcModule, "confirmTransactionWithResend").mockResolvedValue({
         signature: koraSignature,
         slot: 7n,
         confirmationStatus: "confirmed",
         err: onChainError,
-      } as Awaited<ReturnType<typeof RpcModule.confirmTransaction>>);
+      } as Awaited<ReturnType<typeof RpcModule.confirmTransactionWithResend>>);
 
       const error = await service.createToken(srfc37Options()).then(
         () => {
@@ -323,12 +323,12 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       } as never);
       vi.spyOn(Kit, "getBase64EncodedWireTransaction").mockReturnValue("base64-tx" as never);
       const onChainError = { InstructionError: [1, { Custom: 42 }] };
-      vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
+      vi.spyOn(RpcModule, "confirmTransactionWithResend").mockResolvedValue({
         signature: directSignature,
         slot: 9n,
         confirmationStatus: "confirmed",
         err: onChainError,
-      } as Awaited<ReturnType<typeof RpcModule.confirmTransaction>>);
+      } as Awaited<ReturnType<typeof RpcModule.confirmTransactionWithResend>>);
 
       const error = await unsponsored.createToken(srfc37Options()).then(
         () => {
