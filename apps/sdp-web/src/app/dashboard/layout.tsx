@@ -27,8 +27,9 @@ async function loadOnboardingStatus(): Promise<OrganizationOnboardingStatus | nu
     const client = await createOrgSdpApiClient();
     const response = await client.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
     return response.setup?.status ?? "not_started";
-  } catch {
-    return null;
+  } catch (error) {
+    console.error("Failed to load onboarding status; gating dashboard until it recovers", error);
+    return "not_started";
   }
 }
 

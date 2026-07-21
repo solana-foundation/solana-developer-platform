@@ -341,6 +341,7 @@
     "onboardingNoRpcProviders": "Aucun fournisseur RPC n'est configuré pour cet environnement. Contactez votre administrateur SDP avant de continuer.",
     "onboardingNoCustodyProviders": "Aucun fournisseur de conservation généralement disponible n'est configuré pour cet environnement. Contactez votre administrateur SDP avant de continuer.",
     "onboardingFinish": "Terminer la configuration",
+    "onboardingDefaultWalletLabel": "Wallet par défaut",
     "onboardingFinishError": "Impossible de terminer la configuration de l'organisation.",
     "onboardingSaving": "Enregistrement...",
     "onboardingPreparingTitle": "Préparation de votre organisation",

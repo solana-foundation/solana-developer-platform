@@ -30,7 +30,7 @@ export async function completeOrganizationOnboardingAction(
   const t = await getTranslations();
   const formData = new FormData();
   formData.set("provider", provider);
-  formData.set("walletLabel", "Default wallet");
+  formData.set("walletLabel", t("DashboardCustody.onboardingDefaultWalletLabel"));
   const walletResult = await initializeOnboardingCustodyAction(formData);
   if (walletResult.status === "error") {
     return walletResult;

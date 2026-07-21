@@ -459,6 +459,7 @@
     "onboardingNoRpcProviders": "No RPC providers are configured for this environment. Contact your SDP administrator before continuing.",
     "onboardingNoCustodyProviders": "No generally available custody providers are configured for this environment. Contact your SDP administrator before continuing.",
     "onboardingFinish": "Finish setup",
+    "onboardingDefaultWalletLabel": "Default wallet",
     "onboardingFinishError": "Unable to finish organization setup.",
     "onboardingSaving": "Saving...",
     "onboardingPreparingTitle": "Preparing your organization",

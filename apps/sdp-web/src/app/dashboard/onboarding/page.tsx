@@ -1,5 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyProvider, OrganizationRpcProvider } from "@sdp/types";
+import {
+  type CustodyProvider,
+  GENERAL_PROVIDER_DEFAULTS,
+  type OrganizationRpcProvider,
+} from "@sdp/types";
 import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -8,12 +12,9 @@ import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../onboarding-status";
 import { OrganizationOnboardingFlow } from "./organization-onboarding-flow";
 
-const GENERAL_CUSTODY_PROVIDERS = [
-  "privy",
-  "coinbase_cdp",
-  "para",
-  "turnkey",
-] as const satisfies readonly CustodyProvider[];
+const GENERAL_CUSTODY_PROVIDERS = Object.entries(GENERAL_PROVIDER_DEFAULTS.custody)
+  .filter(([, enabled]) => enabled)
+  .map(([provider]) => provider as CustodyProvider);
 
 export default async function OrganizationOnboardingPage() {
   const t = await getTranslations();

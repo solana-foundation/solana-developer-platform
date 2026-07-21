@@ -88,7 +88,7 @@ function applyOverrides<T extends string>(
   return next;
 }
 
-const GENERAL_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
+export const GENERAL_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
   custody: createBooleanRecord(CUSTODY_PROVIDERS, ["privy", "coinbase_cdp", "para", "turnkey"]),
   rpc: createBooleanRecord(ORGANIZATION_RPC_PROVIDERS, ORGANIZATION_RPC_PROVIDERS),
   compliance: createBooleanRecord(COMPLIANCE_PROVIDERS, []),
