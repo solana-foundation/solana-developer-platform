@@ -6,6 +6,13 @@ import dashboardPayments from "../../messages/en/dashboard-payments.json";
 import dashboardPolicies from "../../messages/en/dashboard-policies.json";
 import shared from "../../messages/en/shared.json";
 import en from "../../messages/en.json";
+import frDashboardApprovals from "../../messages/fr/dashboard-approvals.json";
+import frDashboardCustody from "../../messages/fr/dashboard-custody.json";
+import frDashboardIssuance from "../../messages/fr/dashboard-issuance.json";
+import frDashboardPayments from "../../messages/fr/dashboard-payments.json";
+import frDashboardPolicies from "../../messages/fr/dashboard-policies.json";
+import frShared from "../../messages/fr/shared.json";
+import fr from "../../messages/fr.json";
 
 const enMessages = {
   ...en,
@@ -19,6 +26,16 @@ const enMessages = {
 
 export type Messages = typeof enMessages;
 
+const frMessages = {
+  ...fr,
+  ...frDashboardApprovals,
+  ...frDashboardCustody,
+  ...frDashboardIssuance,
+  ...frDashboardPayments,
+  ...frDashboardPolicies,
+  Shared: frShared,
+} satisfies Messages;
+
 export type MessageKeyFor<TValue> = TValue extends string
   ? ""
   : {
@@ -30,7 +47,10 @@ export type MessageKeyFor<TValue> = TValue extends string
 export type MessageKey = MessageKeyFor<Messages>;
 export type TranslationValues = Record<string, string | number>;
 
-const messagesByLocale: Record<AppLocale, Messages> = { en: enMessages };
+const messagesByLocale: Record<AppLocale, Messages> = {
+  en: enMessages,
+  fr: frMessages,
+};
 
 export function getMessages(locale: AppLocale): Messages {
   return messagesByLocale[locale];

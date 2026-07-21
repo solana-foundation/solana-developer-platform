@@ -1,0 +1,28 @@
+{
+  "Metadata": {
+    "title": "Solana Developer Platform",
+    "description": "Tableau de bord SDP"
+  },
+  "Home": {
+    "solanaLogo": "Solana",
+    "docs": "Docs",
+    "dashboard": "Dashboard",
+    "title": "Construisez tout produit financier, sans gérer l’infrastructure",
+    "description": "Émission de stablecoin, paiements transfrontaliers ou tokenisation d’actifs réels : SDP fournit les APIs et l’infra les plus fiables pour y parvenir.",
+    "joinWaitlist": "Rejoindre la liste d’attente"
+  },
+  "NotFound": {
+    "solanaLogo": "Solana",
+    "title": "Page introuvable",
+    "description": "Cette page n’existe pas ou a été déplacée.",
+    "backToDashboard": "Retour au dashboard",
+    "goHome": "Accueil"
+  },
+  "Feedback": {
+    "label": "Feedback"
+  },
+  "Error": {
+    "tryAgain": "Réessayer",
+    "reportIssue": "Signaler le problème"
+  }
+}
