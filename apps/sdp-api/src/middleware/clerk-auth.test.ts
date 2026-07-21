@@ -198,7 +198,12 @@ describe("Clerk auth request cache", () => {
             id: "clerk_org_new",
             name: "New Clerk Organization",
             slug: "new-clerk-organization",
-            private_metadata: {},
+            private_metadata: {
+              sdp: {
+                tier: "enterprise",
+                providerOverrides: { ramps: { coinbase: false } },
+              },
+            },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
@@ -235,6 +240,15 @@ describe("Clerk auth request cache", () => {
       .bind("clerk_org_new")
       .first<{ organization_id: string }>();
     expect(mapping?.organization_id).toBe(body.organizationId);
+
+    const organization = await getDb(env)
+      .prepare("SELECT tier, settings FROM organizations WHERE id = ?")
+      .bind(body.organizationId)
+      .first<{ tier: string; settings: string | null }>();
+    expect(organization?.tier).toBe("enterprise");
+    expect(JSON.parse(organization?.settings ?? "{}")).toEqual({
+      providerOverrides: { ramps: { coinbase: false } },
+    });
 
     const projects = await getDb(env)
       .prepare("SELECT slug FROM projects WHERE organization_id = ? ORDER BY slug")

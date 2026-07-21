@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { retryProjectBootstrap } from "./project-bootstrap-retry";
+import {
+  PROXY_PROJECT_BOOTSTRAP_RETRY_DELAYS_MS,
+  retryProjectBootstrap,
+} from "./project-bootstrap-retry";
 
 describe("retryProjectBootstrap", () => {
   it("keeps waiting through missing and failed project loads", async () => {
     const load = vi
       .fn<() => Promise<string[]>>()
-      .mockRejectedValueOnce(new Error("organization is not linked"))
+      .mockRejectedValueOnce(
+        Object.assign(new Error("organization is not linked"), { status: 404 })
+      )
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(["prj_sandbox"]);
     const wait = vi.fn(async () => undefined);
@@ -34,5 +39,45 @@ describe("retryProjectBootstrap", () => {
       })
     ).resolves.toBeNull();
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("rethrows permanent failures without waiting", async () => {
+    const error = Object.assign(new Error("unauthorized"), { status: 401 });
+    const load = vi.fn(async () => Promise.reject(error));
+    const wait = vi.fn(async () => undefined);
+
+    await expect(
+      retryProjectBootstrap({
+        load,
+        isReady: () => false,
+        delaysMs: [0, 250, 500],
+        wait,
+      })
+    ).rejects.toBe(error);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(wait).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a retryable failure when every attempt fails", async () => {
+    const error = Object.assign(new Error("service unavailable"), { status: 503 });
+    const load = vi.fn(async () => Promise.reject(error));
+
+    await expect(
+      retryProjectBootstrap({
+        load,
+        isReady: () => false,
+        delaysMs: [0, 1],
+        wait: async () => undefined,
+      })
+    ).rejects.toBe(error);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps proxy delay below the minimum five-second execution budget", () => {
+    const deliberateDelayMs = PROXY_PROJECT_BOOTSTRAP_RETRY_DELAYS_MS.reduce(
+      (total, delay) => total + delay,
+      0
+    );
+    expect(deliberateDelayMs).toBeLessThan(5000);
   });
 });

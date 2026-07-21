@@ -288,7 +288,11 @@ export function DashboardWorkspaceProvider({
   return (
     <DashboardWorkspaceContext.Provider value={value}>
       <SWRConfig key={swrScopeKey} value={scopedSwrConfig}>
-        {shouldRenderScopeRefreshFallback ? <FullscreenLoadingIndicator /> : children}
+        {shouldRenderScopeRefreshFallback ? (
+          <FullscreenLoadingIndicator allowDelayedReload />
+        ) : (
+          children
+        )}
       </SWRConfig>
     </DashboardWorkspaceContext.Provider>
   );

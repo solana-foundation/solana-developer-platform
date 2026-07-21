@@ -28,13 +28,18 @@ export async function selectProjectAction(projectId: string | null): Promise<voi
  * previous org's server-component output.
  */
 export async function reconcileProjectCookieAction(): Promise<boolean> {
-  const projects = await retryProjectBootstrap({
-    load: async () => {
-      const client = await createOrgSdpApiClient();
-      return (await client.fetch<ListProjectsResponse>("/v1/projects")).projects;
-    },
-    isReady: (value) => value.length > 0,
-  });
+  let projects: ListProjectsResponse["projects"] | null;
+  try {
+    projects = await retryProjectBootstrap({
+      load: async () => {
+        const client = await createOrgSdpApiClient();
+        return (await client.fetch<ListProjectsResponse>("/v1/projects")).projects;
+      },
+      isReady: (value) => value.length > 0,
+    });
+  } catch {
+    return false;
+  }
   if (!projects) return false;
 
   const store = await cookies();
