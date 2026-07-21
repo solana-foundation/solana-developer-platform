@@ -51,7 +51,6 @@ services:
       # Core
       ENVIRONMENT: ${ENVIRONMENT:-development}
       API_VERSION: ${API_VERSION:-local-compose}
-      SDP_RUNTIME: node
       SDP_DEPLOYMENT_MODE: ${SDP_DEPLOYMENT_MODE:-self_hosted}
       DATABASE_URL: postgresql://sdp:sdp@postgres:5432/sdp
       REDIS_URL: redis://redis:6379

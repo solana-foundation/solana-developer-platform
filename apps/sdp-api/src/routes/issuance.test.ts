@@ -332,8 +332,8 @@ describe("Issuance Routes", () => {
 
   describe("GET /v1/issuance/transactions", () => {
     async function cacheProjectApiKey(overrides: Record<string, unknown>) {
-      const apiKeysKV = (env as { SDP_API_KEYS: KVNamespace }).SDP_API_KEYS;
-      await apiKeysKV.put(
+      const { apiKeys } = createKVStoreSet(env);
+      await apiKeys.put(
         `key:${apiKeyHash}`,
         JSON.stringify({
           ...TEST_PROJECT_CACHED_KEY,

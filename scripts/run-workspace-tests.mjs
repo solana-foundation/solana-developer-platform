@@ -14,7 +14,7 @@ if (mode !== "unit" && mode !== "integration") {
 }
 
 const rootDir = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
-const localApiEnvPath = path.resolve(rootDir, "apps/sdp-api/.dev.vars");
+const localApiEnvPath = path.resolve(rootDir, "apps/sdp-api/.env.local");
 
 function loadLocalEnvFile(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -49,13 +49,13 @@ localDatabaseUrl.username = "sdp";
 localDatabaseUrl.password = "sdp";
 const databaseUrl =
   process.env.DATABASE_URL ?? localEnv.DATABASE_URL ?? localDatabaseUrl.toString();
+const redisUrl = process.env.REDIS_URL ?? localEnv.REDIS_URL ?? "redis://127.0.0.1:6379";
 
 const resolvedEnv = {
   ...localEnv,
   ...process.env,
   DATABASE_URL: databaseUrl,
-  CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: databaseUrl,
-  CLOUDFLARE_INCLUDE_PROCESS_ENV: "true",
+  REDIS_URL: redisUrl,
 };
 
 function run(command, args, options = {}) {

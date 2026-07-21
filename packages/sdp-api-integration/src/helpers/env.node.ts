@@ -5,7 +5,6 @@ const { getDb } = apiTestSupport;
 function readEnvFromProcess(): ApiTestEnv {
   const proc: Record<string, string | undefined> = { ...process.env };
   proc.DATABASE_URL = proc.TEST_DATABASE_URL ?? proc.DATABASE_URL;
-  proc.SDP_RUNTIME = "node";
   return proc as unknown as ApiTestEnv;
 }
 

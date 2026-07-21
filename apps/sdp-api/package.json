@@ -8,10 +8,7 @@
     "dev:local": "node scripts/dev-local.mjs",
     "dev:db": "pnpm -w db:postgres:up && pnpm -w db:postgres:logs",
     "dev:webhook": "bash scripts/dev-webhook.sh",
-    "build": "wrangler deploy --dry-run --outdir=dist",
-    "deploy": "wrangler deploy",
-    "deploy:dev": "wrangler deploy --env dev",
-    "deploy:production": "wrangler deploy --env production",
+    "build": "node scripts/build-node.mjs",
     "db:migrate:local": "DATABASE_URL=${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp} node scripts/migrate-postgres.mjs",
     "db:migrate:test": "node scripts/migrate-postgres-test.mjs",
     "db:migrate:dev": "node scripts/migrate-postgres.mjs",
@@ -28,17 +25,11 @@
     "rails:discover": "doppler run --config ${DOPPLER_CONFIG:-dev} -- tsx scripts/discover-ramp-rails.ts discover",
     "rails:generate": "tsx scripts/discover-ramp-rails.ts generate",
     "rails:drift": "tsx scripts/discover-ramp-rails.ts drift",
-    "test": "pnpm db:migrate:test && pnpm test:workers && pnpm test:node",
-    "test:workers": "vitest run --config vitest.workers.config.ts",
-    "test:node": "vitest run --config vitest.node.config.ts",
-    "test:serial": "vitest run --config vitest.workers.config.ts --no-file-parallelism --maxWorkers=1",
-    "test:watch": "vitest --config vitest.workers.config.ts",
-    "test:coverage": "pnpm test:coverage:workers && pnpm test:coverage:node",
-    "test:coverage:workers": "vitest run --config vitest.workers.config.ts --coverage",
-    "test:coverage:node": "vitest run --config vitest.node.config.ts --coverage",
-    "dev:node": "tsx watch src/server.ts",
-    "build:node": "node scripts/build-node.mjs",
-    "start:node": "node dist/server.js"
+    "test": "vitest run",
+    "test:serial": "vitest run --no-file-parallelism --maxWorkers=1",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "start": "node dist/server.js"
   },
   "dependencies": {
     "@clerk/backend": "3.5.0",
@@ -52,7 +43,6 @@
     "@sdp/rpc": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
-    "@sentry/cloudflare": "^10.64.0",
     "@sentry/node": "^10.64.0",
     "@solana-program/system": "catalog:",
     "@solana-program/token-2022": "catalog:",
@@ -86,10 +76,9 @@
   },
   "devDependencies": {
     "@asteasolutions/zod-to-openapi": "8.5.0",
-    "@cloudflare/vitest-pool-workers": "^0.16.14",
-    "@cloudflare/workers-types": "^4.20260609.1",
     "@testcontainers/postgresql": "12.0.1",
     "@testcontainers/redis": "12.0.1",
+    "@types/node": "^25.9.2",
     "@types/pg": "^8.15.6",
     "@types/react": "^19.2.17",
     "@vitest/coverage-istanbul": "4.1.8",
@@ -98,7 +87,6 @@
     "testcontainers": "12.0.1",
     "tsx": "4.22.4",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8",
-    "wrangler": "^4.99.0"
+    "vitest": "^4.1.8"
   }
 }

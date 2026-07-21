@@ -2,6 +2,11 @@ name: Deploy sdp-api to Cloud Run (prod)
 
 on:
   workflow_dispatch:
+    inputs:
+      image_sha:
+        description: "Existing 40-character Git SHA image tag to redeploy (run from main)"
+        type: string
+        required: true
   push:
     branches: [main]
 
@@ -15,13 +20,14 @@ concurrency:
 
 jobs:
   deploy:
-    name: Build and deploy
+    name: Deploy production image
     if: >-
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'workflow_dispatch' ||
        startsWith(github.event.head_commit.message, 'chore(main): release '))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: production
     env:
       PROJECT_ID: solana-developer-platform
@@ -31,7 +37,19 @@ jobs:
       JOB: sdp-prod-api-public-cron
       MIGRATE_JOB: sdp-prod-api-public-migrate
     steps:
+      - name: Validate deploy image SHA
+        env:
+          DEPLOY_IMAGE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.image_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${DEPLOY_IMAGE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "image_sha must be a lowercase 40-character Git SHA." >&2
+            exit 1
+          fi
+          echo "DEPLOY_IMAGE_SHA=${DEPLOY_IMAGE_SHA}" >> "${GITHUB_ENV}"
+
       - name: Checkout
+        if: ${{ github.event_name == 'push' }}
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Authenticate to GCP
@@ -44,32 +62,186 @@ jobs:
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Configure Docker for Artifact Registry
+        if: ${{ github.event_name == 'push' }}
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
       - name: Build and push image
+        if: ${{ github.event_name == 'push' }}
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
-          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${VERSION}"
+          VERSION_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${VERSION}"
+          SHA_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${GITHUB_SHA}"
           docker build -f apps/sdp-api/Dockerfile --build-arg GIT_SHA="${GITHUB_SHA}" \
-            -t "${IMAGE}" -t "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${GITHUB_SHA}" .
-          docker push "${IMAGE}"
-          docker push "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${GITHUB_SHA}"
-          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+            -t "${VERSION_IMAGE}" -t "${SHA_IMAGE}" .
+          docker push "${VERSION_IMAGE}"
+          docker push "${SHA_IMAGE}"
+
+      - name: Resolve immutable deploy image
+        run: |
+          set -euo pipefail
+          image_base="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public"
+          tagged_image="${image_base}:${DEPLOY_IMAGE_SHA}"
+          resolved_image="$(
+            gcloud artifacts docker images describe "${tagged_image}" \
+              --project "${PROJECT_ID}" \
+              --format='value(image_summary.fully_qualified_digest)'
+          )"
+          expected_prefix="${image_base}@"
+          if [[ "${resolved_image}" != "${expected_prefix}"* ]]; then
+            echo "Artifact Registry returned an unexpected image reference for ${tagged_image}." >&2
+            exit 1
+          fi
+          digest="${resolved_image:${#expected_prefix}}"
+          if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Artifact Registry returned an invalid digest for ${tagged_image}." >&2
+            exit 1
+          fi
+          echo "IMAGE=${resolved_image}" >> "${GITHUB_ENV}"
+          echo "Deploying ${tagged_image} as ${resolved_image}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Run database migrations
+        if: ${{ github.event_name == 'push' }}
         run: |
           gcloud run jobs update "${MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
           gcloud run jobs execute "${MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --wait
 
-      - name: Deploy service
+      - name: Capture rollback state
         run: |
-          gcloud run services update "${SERVICE}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+          set -euo pipefail
+          service_json="$(
+            gcloud run services describe "${SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --format=json
+          )"
+          previous_traffic="$(
+            jq -er '
+              [.status.traffic[]
+                | select((.percent // 0) > 0)
+                | "\(.revisionName)=\(.percent)"]
+              | if length > 0 then join(",") else error("service has no active traffic targets") end
+            ' <<<"${service_json}"
+          )"
+          previous_cron_image="$(
+            gcloud run jobs describe "${JOB}" \
+              --region "${REGION}" --project "${PROJECT_ID}" \
+              --format='value(spec.template.template.containers[0].image)'
+          )"
+          if [[ -z "${previous_cron_image}" ]]; then
+            echo "Could not resolve the current cron job image." >&2
+            exit 1
+          fi
+          echo "PREVIOUS_TRAFFIC=${previous_traffic}" >> "${GITHUB_ENV}"
+          echo "PREVIOUS_CRON_IMAGE=${previous_cron_image}" >> "${GITHUB_ENV}"
 
-      - name: Update cron job image
+      - name: Deploy candidate without production traffic
         run: |
+          set -euo pipefail
+          candidate_tag="candidate-${DEPLOY_IMAGE_SHA:0:12}"
+          gcloud run services update "${SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}" \
+            --no-traffic --tag "${candidate_tag}"
+
+          service_json="$(
+            gcloud run services describe "${SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --format=json
+          )"
+          candidate_revision="$(
+            jq -er --arg tag "${candidate_tag}" '
+              [.status.traffic[] | select(.tag == $tag)][0].revisionName
+                // error("candidate traffic tag is missing a revision")
+            ' <<<"${service_json}"
+          )"
+          candidate_url="$(
+            jq -er --arg tag "${candidate_tag}" '
+              [.status.traffic[] | select(.tag == $tag)][0].url
+                // error("candidate traffic tag is missing a URL")
+            ' <<<"${service_json}"
+          )"
+          revision_digest="$(
+            gcloud run revisions describe "${candidate_revision}" \
+              --region "${REGION}" --project "${PROJECT_ID}" \
+              --format='value(status.imageDigest)'
+          )"
+          expected_digest="${IMAGE##*@}"
+          if [[ "${revision_digest##*@}" != "${expected_digest}" ]]; then
+            echo "Candidate ${candidate_revision} resolved to ${revision_digest}, expected ${expected_digest}." >&2
+            exit 1
+          fi
+          echo "CANDIDATE_REVISION=${candidate_revision}" >> "${GITHUB_ENV}"
+          echo "CANDIDATE_URL=${candidate_url}" >> "${GITHUB_ENV}"
+          echo "Candidate revision: ${candidate_revision}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Verify candidate readiness
+        run: |
+          set -euo pipefail
+          for attempt in {1..12}; do
+            if response="$(
+              curl --fail --silent --show-error --max-time 10 \
+                "${CANDIDATE_URL}/health/ready"
+            )" && jq -e --arg revision "${CANDIDATE_REVISION}" '
+              .status == "ready"
+              and .revision == $revision
+              and .checks.database == "ok"
+              and .checks.redis == "ok"
+            ' <<<"${response}" >/dev/null; then
+              echo "Candidate ${CANDIDATE_REVISION} passed Postgres and Redis readiness."
+              exit 0
+            fi
+            if [[ "${attempt}" -eq 12 ]]; then
+              echo "Candidate readiness check failed after ${attempt} attempts." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
+      - name: Promote service and cron with rollback
+        run: |
+          set -eEuo pipefail
+          rollback() {
+            failure_status=$?
+            trap - ERR
+            set +e
+            echo "Promotion failed; restoring service traffic and cron image." >&2
+            gcloud run services update-traffic "${SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" \
+              --to-revisions "${PREVIOUS_TRAFFIC}"
+            service_rollback_status=$?
+            gcloud run jobs update "${JOB}" \
+              --region "${REGION}" --project "${PROJECT_ID}" \
+              --image "${PREVIOUS_CRON_IMAGE}"
+            cron_rollback_status=$?
+            if [[ "${service_rollback_status}" -ne 0 || "${cron_rollback_status}" -ne 0 ]]; then
+              echo "Automatic rollback was incomplete; escalate immediately." >&2
+            fi
+            exit "${failure_status}"
+          }
+          trap rollback ERR
+
+          gcloud run services update-traffic "${SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --to-revisions "${CANDIDATE_REVISION}=100"
+
+          for attempt in {1..12}; do
+            if response="$(
+              curl --fail --silent --show-error --max-time 10 \
+                "https://api.solana.com/health/ready"
+            )" && jq -e --arg revision "${CANDIDATE_REVISION}" '
+              .status == "ready"
+              and .revision == $revision
+              and .checks.database == "ok"
+              and .checks.redis == "ok"
+            ' <<<"${response}" >/dev/null; then
+              break
+            fi
+            if [[ "${attempt}" -eq 12 ]]; then
+              echo "Canonical production traffic did not reach ${CANDIDATE_REVISION}." >&2
+              false
+            fi
+            sleep 10
+          done
+
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+          trap - ERR

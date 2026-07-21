@@ -21,7 +21,6 @@ import {
   parsePostgresJsonOr,
 } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
-import { getRuntime, type SdpRuntime } from "@/lib/runtime-env";
 import type { KVStore } from "@/runtime/kv";
 import type { Env } from "@/types/env";
 
@@ -229,21 +228,12 @@ function sweepExpiredLastUsedWrites(cache: LastUsedWriteCache, now: number): voi
   cache.nextSweepAt = now + NODE_LAST_USED_WRITE_INTERVAL_MS;
 }
 
-/**
- * Updates last_used_at without putting a write on every Node request. Workers
- * keep their existing per-request behavior because their isolate lifetime is
- * not a useful process-local coalescing boundary.
- */
+/** Updates last_used_at without putting a write on every request. */
 export function scheduleApiKeyLastUsedUpdate(
   db: DatabaseClient,
   keyId: string,
-  runtime: SdpRuntime,
   now = Date.now()
 ): Promise<void> {
-  if (runtime === "cloudflare") {
-    return writeLastUsed(db, keyId).catch(logLastUsedWriteError);
-  }
-
   const cache = getLastUsedWriteCache(db);
   sweepExpiredLastUsedWrites(cache, now);
   const existing = cache.writes.get(keyId);
@@ -398,7 +388,7 @@ export function authMiddleware() {
     c.set("apiKey", authContext);
 
     // Update last used (fire and forget). Node coalesces this write per key.
-    void scheduleApiKeyLastUsedUpdate(getDb(c.env), cachedKey.id, getRuntime(c.env));
+    void scheduleApiKeyLastUsedUpdate(getDb(c.env), cachedKey.id);
 
     await next();
   };
