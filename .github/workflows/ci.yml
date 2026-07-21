@@ -406,7 +406,6 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      max-parallel: 2
       matrix:
         include:
           - name: Kora / Live Smoke
@@ -414,10 +413,20 @@ jobs:
             test_files: src/tests/kora.test.ts src/tests/kora-flow.test.ts
             rpc_provider: alchemy
             custody_provider: privy
-          - name: Surfpool / Issuance
+          - name: Surfpool / Issuance Core
             provider: surfpool
-            test_files: src/tests/issuance-crud.test.ts src/tests/issuance-prepare.test.ts src/tests/issuance-execute.test.ts src/tests/token2022.test.ts
+            test_files: src/tests/issuance-crud.test.ts src/tests/token2022.test.ts
             rpc_provider: quicknode
+            custody_provider: local
+          - name: Surfpool / Issuance Prepare
+            provider: surfpool
+            test_files: src/tests/issuance-prepare.test.ts
+            rpc_provider: triton
+            custody_provider: local
+          - name: Surfpool / Issuance Execute
+            provider: surfpool
+            test_files: src/tests/issuance-execute.test.ts
+            rpc_provider: alchemy
             custody_provider: local
           - name: Surfpool / Mosaic
             provider: surfpool
