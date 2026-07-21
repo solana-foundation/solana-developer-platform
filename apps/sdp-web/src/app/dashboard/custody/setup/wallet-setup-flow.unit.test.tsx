@@ -42,6 +42,8 @@ describe("WalletSetupFlow", () => {
     expect(markup.indexOf('data-wallet-setup-scroll-region="true"')).toBeLessThan(
       markup.indexOf('data-wallet-setup-actions="true"')
     );
+    expect(markup).toContain("bg-surface-raised/95");
+    expect(markup).not.toContain("bg-white/95");
     expect(markup).toContain("Cancel");
     expect(markup).toContain("Next");
     expect(markup).toContain('id="wallet-provider-form"');
