@@ -184,7 +184,7 @@ describe("Compliance routes", () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("Compliance screening is only available");
+    expect(body.error.message).toContain("requires manual provider activation");
   });
 
   it("returns a self-hosted-flavored 403 when no compliance providers are configured in self-hosted mode", async () => {
@@ -215,8 +215,7 @@ describe("Compliance routes", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("at least one configured compliance provider");
-    // Importantly, must NOT mention "enterprise tier" — that wording is wrong in self-hosted mode
-    expect(body.error.message).not.toContain("enterprise tier");
+    expect(body.error.message).not.toContain("manual provider activation");
   });
 
   it("returns a Range risk score when Range API is configured", async () => {
