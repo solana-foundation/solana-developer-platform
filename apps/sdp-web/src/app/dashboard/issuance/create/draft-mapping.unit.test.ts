@@ -112,6 +112,36 @@ describe("getPublicFieldCandidates", () => {
       "Issuer name"
     );
   });
+
+  it("surfaces the votingRights toggle as an Enabled candidate when on", () => {
+    const draft = draftWith({
+      assetCategory: "tokenized_security",
+      assetType: "equity",
+      shareClass: "Class A common",
+      votingRights: true,
+      publicFields: ["asset.votingRights"],
+    });
+    const candidate = getPublicFieldCandidates(draft, t).find(
+      (entry) => entry.path === "asset.votingRights"
+    );
+    expect(candidate).toMatchObject({
+      label: "Voting rights",
+      // Boolean toggle renders a human label, not the literal "true".
+      value: "Enabled",
+      enabled: true,
+    });
+  });
+
+  it("omits the votingRights toggle when off", () => {
+    const draft = draftWith({
+      assetCategory: "tokenized_security",
+      assetType: "equity",
+      votingRights: false,
+    });
+    expect(
+      getPublicFieldCandidates(draft, t).some((entry) => entry.path === "asset.votingRights")
+    ).toBe(false);
+  });
 });
 
 describe("buildIssuanceMetadata visibility", () => {

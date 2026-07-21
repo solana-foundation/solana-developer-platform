@@ -335,6 +335,7 @@ const PATH_LABEL_KEYS: Record<string, MessageKey> = {
   "asset.jurisdiction": "DashboardIssuance.config.jurisdiction",
   "asset.offeringType": "DashboardIssuance.config.offeringType",
   "asset.shareClass": "DashboardIssuance.config.shareClass",
+  "asset.votingRights": "DashboardIssuance.config.votingRights",
   "asset.couponRate": "DashboardIssuance.config.couponRate",
   "asset.maturityDate": "DashboardIssuance.config.maturityDate",
   "asset.seniority": "DashboardIssuance.config.seniority",
@@ -368,6 +369,7 @@ export const PUBLIC_FIELD_POOL: readonly { path: string; labelKey: MessageKey }[
   { path: "asset.jurisdiction", labelKey: PATH_LABEL_KEYS["asset.jurisdiction"] },
   { path: "asset.offeringType", labelKey: PATH_LABEL_KEYS["asset.offeringType"] },
   { path: "asset.shareClass", labelKey: PATH_LABEL_KEYS["asset.shareClass"] },
+  { path: "asset.votingRights", labelKey: PATH_LABEL_KEYS["asset.votingRights"] },
   { path: "asset.couponRate", labelKey: PATH_LABEL_KEYS["asset.couponRate"] },
   { path: "asset.maturityDate", labelKey: PATH_LABEL_KEYS["asset.maturityDate"] },
   { path: "asset.seniority", labelKey: PATH_LABEL_KEYS["asset.seniority"] },
@@ -406,6 +408,21 @@ export function getPublicFieldCandidates(draft: DraftState, t: Translate): Publi
   const enabled = new Set(draft.publicFields);
   return PUBLIC_FIELD_POOL.flatMap(({ path, labelKey }) => {
     const raw = getByPath(metadata, path);
+    // Boolean toggles (e.g. voting rights) only reach here when true — a false
+    // toggle is pruned to undefined in the metadata — so show a human "Enabled"
+    // rather than the literal "true".
+    if (typeof raw === "boolean") {
+      return raw
+        ? [
+            {
+              path,
+              label: t(labelKey),
+              value: t("DashboardIssuance.review.enabled"),
+              enabled: enabled.has(path),
+            },
+          ]
+        : [];
+    }
     const rawValue = typeof raw === "string" ? raw.trim() : raw == null ? "" : String(raw);
     if (!rawValue) {
       return [];
