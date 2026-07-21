@@ -891,7 +891,6 @@ export type PaymentRampQuote =
       sessionToken: string;
       sessionId: string;
       widgetUrl: string;
-      sdkUrl: string;
     })
   | (BasePaymentRampQuote & {
       provider: "stripe";
@@ -919,6 +918,14 @@ export type CoinbaseRampEvent =
 
 export type MoneygramRampEvent =
   | { kind: "signed"; sessionId: string; cryptoTransferId: string }
+  | {
+      kind: "onramp_completed";
+      sessionId: string;
+      transactionId: string;
+      status: string;
+      amount: number;
+      referenceNumber?: string;
+    }
   | {
       kind: "completed";
       sessionId: string;
