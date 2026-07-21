@@ -15,7 +15,7 @@ import {
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 describe("Auth Middleware", () => {
   let validKeyHash: string;
@@ -38,7 +38,7 @@ describe("Auth Middleware", () => {
 
   afterEach(async () => {
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
   });
 
   describe("key extraction", () => {

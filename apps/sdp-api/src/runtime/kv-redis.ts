@@ -1,18 +1,12 @@
 /**
- * Redis-backed KVStore implementation. Matches WorkersKVStore's surface
- * with a different backend. One ioredis client per REDIS_URL is shared
+ * Redis-backed KVStore implementation. One ioredis client per REDIS_URL is shared
  * across the four logical stores (apiKeys / rateLimits / cache / sessions);
  * each store prefixes its keys so list() doesn't bleed across domains.
  *
  * ioredis is loaded lazily — the top-level `import type` is erased at emit
  * time, and the real module is fetched via `await import("ioredis")` inside
- * ensureClient on first use. That keeps ioredis out of the static module
- * graph; otherwise the Cloudflare Workers test pool (miniflare) trips on
- * ioredis's debug.js with "Maximum call stack size exceeded" during
- * transformation.
- *
- * Cloudflare KV serves stale reads for up to 60s after a key expires; Redis
- * doesn't. Anything that accidentally relied on that grace will surface.
+ * ensureClient on first use. This avoids opening a connection until a store is
+ * actually used.
  */
 
 import type { Redis } from "ioredis";
@@ -86,12 +80,11 @@ export class RedisKVStore implements KVStore {
   async put(key: string, value: string, options?: KVPutOptions): Promise<void> {
     const client = await this.clientPromise;
     const namespacedKey = this.namespaced(key);
-    // expirationTtl is seconds (parity with CF KV's KVNamespacePutOptions);
-    // PX expects milliseconds.
+    // expirationTtl is seconds; Redis PX expects milliseconds.
     if (options?.expirationTtl !== undefined) {
       await client.set(namespacedKey, value, "PX", options.expirationTtl * 1000);
     } else {
-      // Match CF KV: omitting expirationTtl persists indefinitely.
+      // Omitting expirationTtl persists indefinitely.
       await client.set(namespacedKey, value);
     }
   }
@@ -109,7 +102,7 @@ export class RedisKVStore implements KVStore {
     let cursor = "0";
     // SCAN is cursor-based and non-blocking; loop until cursor returns "0".
     // Strip the prefix on the way out so callers can round-trip list()
-    // output through delete(name), matching WorkersKVStore.
+    // output through delete(name).
     do {
       const [nextCursor, batch] = await client.scan(cursor, "MATCH", pattern, "COUNT", SCAN_COUNT);
       for (const namespaced of batch) {
@@ -137,7 +130,7 @@ export function createRedisKVStoreSet(env: Env): KVStoreSet {
   const url = env.REDIS_URL?.trim();
   if (!url) {
     throw new Error(
-      "REDIS_URL missing for runtime=node. Set it in the environment (e.g. redis://localhost:6379)."
+      "REDIS_URL is required. Set it in the environment (e.g. redis://localhost:6379)."
     );
   }
   const clientPromise = ensureClient(url);
@@ -147,6 +140,18 @@ export function createRedisKVStoreSet(env: Env): KVStoreSet {
     cache: new RedisKVStore(clientPromise, STORE_PREFIXES.cache),
     sessions: new RedisKVStore(clientPromise, STORE_PREFIXES.sessions),
   };
+}
+
+/** Verify that the configured Redis backend is reachable. */
+export async function pingRedis(env: Env): Promise<void> {
+  const url = env.REDIS_URL?.trim();
+  if (!url) {
+    throw new Error("REDIS_URL is required for the Redis readiness check.");
+  }
+  const response = await (await ensureClient(url)).ping();
+  if (response !== "PONG") {
+    throw new Error(`Unexpected Redis PING response: ${response}`);
+  }
 }
 
 /**

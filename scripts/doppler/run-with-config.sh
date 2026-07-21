@@ -4,14 +4,14 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 env_files=()
-for env_file in "$root"/apps/*/.dev.vars "$root"/apps/*/.env.local; do
+for env_file in "$root"/apps/*/.env.local; do
   if [ -f "$env_file" ]; then
     env_files+=("${env_file#"$root"/}")
   fi
 done
 
 # Exports KEY=VALUE lines with the same inert-data semantics as every other
-# consumer of these files (wrangler, Next.js, dev-local.mjs): split on the
+# consumer of these files (Next.js and dev-local.mjs): split on the
 # first "=", keep the value literal. Never `source` them — shell parsing would
 # expand/execute characters like $, #, and backticks inside secret values.
 load_env_files() {

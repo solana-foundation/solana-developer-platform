@@ -163,7 +163,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260609.1",
+    "@types/node": "^25.9.2",
     "tsx": "4.22.4",
     "typescript": "^6.0.3"
   }
