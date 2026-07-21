@@ -1,9 +1,9 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import Link from "next/link";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -131,7 +131,10 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
             />
           ) : null}
           {dashboardAccess.capabilities.canManageCustody ? (
-            <Button asChild className="!text-white hover:!text-white visited:!text-white">
+            <Button
+              asChild
+              className="!text-on-primary hover:!text-on-primary visited:!text-on-primary"
+            >
               <Link href="/dashboard/wallets">{t("Shared.homeWorkspace.createWallet")}</Link>
             </Button>
           ) : null}

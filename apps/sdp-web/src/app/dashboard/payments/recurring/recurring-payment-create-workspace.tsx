@@ -2,7 +2,6 @@
 
 import type { Counterparty, CounterpartyAccount, PaymentsDashboardWallet } from "@sdp/types";
 import { PlusIcon, RepeatIcon, WalletIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
@@ -10,6 +9,7 @@ import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
 import { isSolBalance, shortenAddress } from "../payments-overview.utils";
 import {
@@ -64,7 +64,7 @@ function resolveAccountAddress(account: CounterpartyAccount | null): string {
   return typeof address === "string" ? address : "";
 }
 
-function recurringPaymentAssetOptions(
+export function recurringPaymentAssetOptions(
   wallet: PaymentsDashboardWallet | null,
   issuedTokenSymbolsByMint: Record<string, string>,
   t: ReturnType<typeof useTranslations>
@@ -218,7 +218,7 @@ export function RecurringPaymentCreateWorkspace({
       description: t("DashboardPayments.recurring.customScheduleDescription"),
     },
   ] as const satisfies readonly { value: SchedulePreset; label: string; description: string }[];
-  const router = useRouter();
+  const router = useDashboardRouter();
   const [stepIndex, setStepIndex] = useState(0);
   const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
   const [destinationAccountDialogOpen, setDestinationAccountDialogOpen] = useState(false);
@@ -590,7 +590,7 @@ export function RecurringPaymentCreateWorkspace({
             <button
               type="button"
               onClick={() => setDestinationAccountDialogOpen(true)}
-              className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
+              className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
             >
               <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary">
                 <PlusIcon className="size-4" />
@@ -797,7 +797,7 @@ export function RecurringPaymentCreateWorkspace({
       {currentStep.id === "review" ? (
         <div className="space-y-5">
           <ReviewSummaryCard rows={reviewRows} />
-          <div className="rounded-2xl border border-border-default bg-white px-4 py-3 text-sm text-secondary">
+          <div className="rounded-2xl border border-border-default bg-surface-raised px-4 py-3 text-sm text-secondary">
             {t("DashboardPayments.recurring.pendingRecordDescription")}
           </div>
         </div>

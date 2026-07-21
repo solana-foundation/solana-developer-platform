@@ -12,6 +12,7 @@ import {
   RAMP_PROVIDERS,
 } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
+import { getI64Encoder, getU64Encoder } from "@solana/kit";
 import { z } from "zod";
 import { SOL_MINT } from "@/services/payment-operation.service";
 
@@ -209,7 +210,8 @@ const u64StringSchema = z
   .regex(/^\d+$/, { message: "Value must be an unsigned integer string" })
   .refine((value) => {
     try {
-      return BigInt(value) <= 18_446_744_073_709_551_615n;
+      getU64Encoder().encode(BigInt(value));
+      return true;
     } catch {
       return false;
     }
@@ -219,8 +221,8 @@ const i64StringSchema = z
   .regex(/^-?\d+$/, { message: "Value must be a signed integer string" })
   .refine((value) => {
     try {
-      const parsed = BigInt(value);
-      return parsed >= -9_223_372_036_854_775_808n && parsed <= 9_223_372_036_854_775_807n;
+      getI64Encoder().encode(BigInt(value));
+      return true;
     } catch {
       return false;
     }
@@ -518,9 +520,22 @@ export const transferStatusSchema = z.enum([
   "expired",
 ]);
 
+const transferFilterTimestampSchema = z
+  .string()
+  .datetime({ offset: true })
+  .transform((value) => new Date(value).toISOString());
+
 export const listTransfersQuerySchema = z.object({
   wallet: z.string().optional(),
   walletAddress: z.string().optional(),
+  search: z
+    .string()
+    .trim()
+    .max(200)
+    .refine((value) => value.length === 0 || value.length >= 3, {
+      message: "Search must be blank or contain at least 3 characters",
+    })
+    .optional(),
   token: z.string().optional(),
   direction: transferDirectionSchema.optional(),
   status: z
@@ -529,11 +544,26 @@ export const listTransfersQuerySchema = z.object({
     .pipe(z.array(transferStatusSchema).min(1))
     .optional(),
   category: z.enum(["wallet", "ramp"]).optional(),
+  type: z
+    .string()
+    .transform((value) => value.split(","))
+    .pipe(
+      z
+        .array(z.enum(["transfer", "transfer_confidential", "transfer_batch", "onramp", "offramp"]))
+        .min(1)
+    )
+    .optional(),
   counterpartyId: z.string().min(1).optional(),
   provider: rampProviderSchema.optional(),
   providerReference: z.string().min(1).optional(),
-  from: z.string().datetime({ offset: true }).optional(),
-  to: z.string().datetime({ offset: true }).optional(),
+  from: transferFilterTimestampSchema.optional(),
+  to: transferFilterTimestampSchema.optional(),
+  includeObserved: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .default(true),
+  sortBy: z.enum(["createdAt", "updatedAt", "amount", "status"]).default("createdAt"),
+  sortDirection: z.enum(["asc", "desc"]).default("desc"),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -677,6 +707,14 @@ export const createOfframpQuoteSchema = z.object({
 });
 
 export const moneygramRampEventSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("onramp_completed"),
+    sessionId: z.string().min(1),
+    transactionId: z.string().min(1),
+    status: z.string().min(1),
+    amount: z.number().positive(),
+    referenceNumber: z.string().min(1).optional(),
+  }),
   z.object({
     kind: z.literal("signed"),
     sessionId: z.string().min(1),

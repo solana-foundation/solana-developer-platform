@@ -143,7 +143,7 @@ export function DetailsTab({
             placeholder={t("DashboardIssuance.assetDetails.descriptionPlaceholder")}
             aria-invalid={descriptionError ? true : undefined}
             className={cn(
-              "w-full rounded-[14px] border bg-white px-4 py-3 text-sm text-primary outline-none transition-[box-shadow,border-color] placeholder:text-muted",
+              "w-full rounded-[14px] border bg-surface-raised px-4 py-3 text-sm text-primary outline-none transition-[box-shadow,border-color] placeholder:text-muted",
               descriptionError
                 ? "border-destructive focus:border-destructive focus:ring-2 focus:ring-destructive-border"
                 : "border-border-default focus:border-border-strong focus:ring-2 focus:ring-border-default"

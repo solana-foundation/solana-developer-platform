@@ -1,10 +1,5 @@
-// Support-matrix generator for the advanced-settings catalog (ticket D:
-// "map manager terms to SDP actions" + "document unsupported setting gaps").
-//
-// Derives a human-readable matrix purely from ADVANCED_SETTINGS ×
-// ASSET_CAPABILITIES — the same data the dev-time assertion validates — so the
-// committed SUPPORT_MATRIX.md stays a faithful, drift-checked reflection of the
-// registry. Regenerate with `pnpm --filter @sdp/issuance matrix:generate`.
+// Support-matrix generator: derives human-readable matrix from ADVANCED_SETTINGS × ASSET_CAPABILITIES.
+// Regenerate with `pnpm --filter @sdp/issuance matrix:generate`.
 
 import type { AssetCategory, SettingAvailability, SettingSigning } from "@sdp/types";
 import { ASSET_CAPABILITIES } from "./capabilities";
@@ -30,7 +25,7 @@ export interface SupportMatrix {
   availability: SupportMatrixAvailabilityRow[];
 }
 
-// Structured matrix — the data the markdown renderer (and any consumer) reads.
+// Build structured matrix for markdown rendering and consumption.
 export function buildSupportMatrix(): SupportMatrix {
   const settings: SupportMatrixSettingRow[] = SETTING_KEYS.map((key) => {
     const setting = ADVANCED_SETTINGS[key];
@@ -71,8 +66,7 @@ function row(cells: string[]): string {
   return `| ${cells.join(" | ")} |`;
 }
 
-// Render the matrix as the committed SUPPORT_MATRIX.md. Deterministic (no dates
-// or environment) so the drift test can compare byte-for-byte.
+// Render matrix as SUPPORT_MATRIX.md; deterministic for byte-for-byte drift checks.
 export function renderSupportMatrixMarkdown(matrix: SupportMatrix = buildSupportMatrix()): string {
   const lines: string[] = [];
 

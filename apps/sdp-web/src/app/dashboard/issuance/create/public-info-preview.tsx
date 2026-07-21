@@ -353,7 +353,7 @@ export function PublicInfoPreview({
             </span>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-border-default bg-white">
+          <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
             {/* Coverage meter sits inside the card so its top edge aligns with the preview card. */}
             <div className="border-b border-border-subtle px-4 py-3">
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-fill">
@@ -384,7 +384,7 @@ export function PublicInfoPreview({
           </div>
 
           {optionalInteractive.length > 0 ? (
-            <div className="mt-3 overflow-hidden rounded-2xl border border-border-default bg-white">
+            <div className="mt-3 overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
               <button
                 type="button"
                 onClick={() => setShowOptional((value) => !value)}
@@ -438,7 +438,7 @@ export function PublicInfoPreview({
             </p>
             <SurfaceSwitch value={surface} onChange={setSurface} />
           </div>
-          <div className="rounded-2xl border border-border-default bg-white p-5">
+          <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
             {surface === "wallet" ? <WalletPreview {...previewProps} /> : null}
             {surface === "explorer" ? <ExplorerPreview {...previewProps} /> : null}
             {surface === "token" ? <TokenPreview {...previewProps} /> : null}
@@ -480,7 +480,7 @@ function SurfaceSwitch({
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
               active
-                ? "border-border-subtle bg-white text-primary"
+                ? "border-border-subtle bg-surface-raised text-primary"
                 : "border-transparent text-tertiary hover:text-primary"
             )}
           >
@@ -873,8 +873,8 @@ function RoundCheck({
       className={cn(
         "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors",
         checked
-          ? "border-primary bg-primary text-white"
-          : "border-border-strong bg-white text-transparent",
+          ? "border-primary bg-primary text-on-primary"
+          : "border-border-strong bg-surface-raised text-transparent",
         interactive && !checked && "group-hover:border-primary group-hover:bg-fill",
         disabled && "opacity-60"
       )}

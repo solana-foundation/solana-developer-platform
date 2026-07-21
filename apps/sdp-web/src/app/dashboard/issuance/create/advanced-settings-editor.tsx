@@ -56,7 +56,6 @@ import {
 type Mode = "basic" | "detailed" | "expert";
 type SettingSelection = AdvancedSettingsDraft[string];
 
-// Per-combo decoration for the Basic (preset) view.
 const COMBO_ICONS: Record<string, LucideIcon> = {
   regulatedStablecoin: ShieldCheck,
   publicSecurityOffering: Landmark,
@@ -68,8 +67,7 @@ const COMBO_ICONS: Record<string, LucideIcon> = {
   gatedAccess: Lock,
 };
 
-// Per-setting decoration. Icons keep the list scannable without leaning on
-// colour (SDP reserves colour for status).
+// Icons keep the list scannable (SDP reserves colour for status).
 const SETTING_ICONS: Record<string, LucideIcon> = {
   freezeTransfers: Snowflake,
   permanentDelegate: Undo2,
@@ -89,9 +87,7 @@ const CAPACITY_ICONS: Record<CapacityKey, LucideIcon> = {
   transferApprovals: CheckCheck,
 };
 
-// Off-chain capacities whose technical name (shown in Expert view) differs from
-// the manager-facing label used everywhere else. Omitted keys read the same in
-// both modes.
+// Expert view uses technical names when they differ from manager-facing labels.
 const CAPACITY_EXPERT_LABELS: Partial<Record<CapacityKey, MessageKey>> = {
   kyc: "DashboardIssuance.config.kycExpert",
   issueRetireControls: "DashboardIssuance.config.issueRetireControlsExpert",
@@ -109,10 +105,13 @@ interface AdvancedSettingsEditorProps {
   onCapacitiesChange: (next: Record<CapacityKey, boolean>) => void;
   // Reveal required-but-empty param errors (after a failed Continue attempt).
   showErrors?: boolean;
+  // Lock the on-chain settings (a deployed token: extensions are immutable) while
+  // leaving the off-chain capacities editable. Also hides the Basic preset view,
+  // whose combos bundle on-chain settings that can no longer change.
+  settingsReadOnly?: boolean;
   disabled?: boolean;
 }
 
-// A small neutral pill (Required / Recommended). Borderless, status-free.
 function Pill({ children }: { children: ReactNode }) {
   return (
     <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-[11px] font-medium text-secondary">
@@ -121,7 +120,6 @@ function Pill({ children }: { children: ReactNode }) {
   );
 }
 
-// A monospace-free identifier tag for the Expert strip (extension / action names).
 function Tag({ children }: { children: ReactNode }) {
   return (
     <span className="rounded bg-fill-subtle px-1.5 py-0.5 text-[11px] font-medium text-secondary">
@@ -130,20 +128,15 @@ function Tag({ children }: { children: ReactNode }) {
   );
 }
 
-// "permanentDelegate" → "permanent delegate": the raw Token-2022 extension name
-// decamelised into plain words.
 function humanizeExtension(name: string): string {
   return name.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
 }
 
-// The card title in Expert mode: the extension name(s), sentence-cased —
-// e.g. ["pausable"] → "Pausable", ["permanentDelegate"] → "Permanent delegate".
 function extensionTitle(extensions: readonly string[]): string {
   const text = extensions.map(humanizeExtension).join(", ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-// The tinted icon tile that leads each row.
 function IconTile({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) {
   return (
     <span
@@ -157,8 +150,7 @@ function IconTile({ icon: Icon, active }: { icon: LucideIcon; active: boolean })
   );
 }
 
-// Shared card shell: leading checkbox + icon + label/description, with a
-// full-width footer slot for the Expert strip and inline params.
+// Card shell with checkbox, icon, label, and footer for params/expert info.
 function SettingShell({
   icon,
   checked,
@@ -183,7 +175,7 @@ function SettingShell({
   return (
     <div
       className={cn(
-        "rounded-xl border bg-white p-3 transition-colors",
+        "rounded-xl border bg-surface-raised p-3 transition-colors",
         checked ? "border-primary" : "border-border-default"
       )}
     >
@@ -215,14 +207,7 @@ function SettingShell({
   );
 }
 
-// The unified advanced-settings editor (ticket E). Three view modes:
-//   • Basic    — curated multi-select presets (combos) that bundle on-chain +
-//                off-chain settings for realistic scenarios; picking them enables
-//                the underlying individual settings.
-//   • Detailed — every individual setting, manager-facing terms, split by
-//                permanence, with inline required value fields.
-//   • Expert   — the same individual settings with Token-2022 extension names,
-//                the SDP actions each unlocks, and its mechanism revealed.
+// Three views: Basic (curated presets), Detailed (individual settings), Expert (with extension names).
 export function AdvancedSettingsEditor({
   category,
   type,
@@ -231,10 +216,11 @@ export function AdvancedSettingsEditor({
   capacities,
   onCapacitiesChange,
   showErrors,
+  settingsReadOnly,
   disabled,
 }: AdvancedSettingsEditorProps) {
   const t = useTranslations();
-  const [mode, setMode] = useState<Mode>("basic");
+  const [mode, setMode] = useState<Mode>(settingsReadOnly ? "detailed" : "basic");
 
   if (!category || !type) {
     return null;
@@ -242,9 +228,11 @@ export function AdvancedSettingsEditor({
 
   const permanent = listSettingsForType(category, type);
   const expert = mode === "expert";
+  // Deployed tokens can't use Basic mode (its combos require writable on-chain settings).
+  const availableModes: Mode[] = settingsReadOnly
+    ? ["detailed", "expert"]
+    : ["basic", "detailed", "expert"];
 
-  // Combos (Basic view). Toggling one enables/disables its underlying settings
-  // and capacities; deselecting keeps items still needed by another active combo.
   const combos = getCombosForCategory(category);
   const activeCombos = combos.filter((combo) => isComboActive(combo, settings, capacities));
   const toggleCombo = (combo: SettingCombo, enabled: boolean) => {
@@ -260,9 +248,7 @@ export function AdvancedSettingsEditor({
     onCapacitiesChange(next.capacities);
   };
 
-  // A custom state: individual settings/capacities are on (beyond the always-on
-  // locked ones) but no preset matches them, so Basic can't represent it fully.
-  // Surface a note rather than silently showing an empty preset list.
+  // Detect when selections don't match any preset (show custom selection note in Basic view).
   const lockedKeys = new Set(
     permanent.filter((entry) => entry.availability === "locked").map((entry) => entry.key)
   );
@@ -274,7 +260,7 @@ export function AdvancedSettingsEditor({
   const setEnabled = (entry: GroupedSetting, enabled: boolean) => {
     const next = { ...settings };
     if (enabled) {
-      // Seed default param values on enable so non-required fields aren't blank.
+      // Populate default param values on enable.
       const params: Record<string, string> = {};
       for (const param of entry.setting.params ?? []) {
         if (param.defaultValue !== undefined) {
@@ -296,19 +282,14 @@ export function AdvancedSettingsEditor({
     });
   };
 
-  // Settings currently on (locked or explicitly selected) — the basis for
-  // blocking a conflicting partner from being enabled at the same time.
   const selectedKeys = permanent
     .filter((entry) => entry.availability === "locked" || settings[entry.key] !== undefined)
     .map((entry) => entry.key);
   const labelByKey = new Map<string, string>(
     permanent.map((entry) => [entry.key, t(entry.setting.labelKey as MessageKey)])
   );
-  // Catalog lookup so a Basic combo card can render the required value field(s)
-  // of the settings it enables (e.g. transfer-fee basis points).
   const settingByKey = new Map(permanent.map((entry) => [entry.key, entry.setting]));
-  // For a not-yet-selected row, the label of an enabled setting it conflicts with
-  // (blocks the checkbox), or undefined when the row is free to toggle.
+  // Return the label of any enabled setting that conflicts with this key, if any.
   const conflictBlocker = (key: SettingKey): string | undefined => {
     if (settings[key] !== undefined) {
       return undefined;
@@ -321,20 +302,19 @@ export function AdvancedSettingsEditor({
   };
 
   return (
-    <div className="rounded-2xl border border-border-default bg-white p-5">
-      <div className="flex items-start justify-between gap-4">
+    <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0">
           <p className="text-base font-medium text-primary">
             {t("DashboardIssuance.config.advancedSettingsTitle")}
           </p>
         </div>
-        {/* Basic / Detailed / Expert toggle (flat segmented control — no shadow). */}
         <div
-          className="inline-flex shrink-0 rounded-lg border border-border-default bg-fill-subtle p-0.5"
+          className="flex w-full shrink-0 rounded-lg border border-border-default bg-fill-subtle p-0.5 sm:inline-flex sm:w-auto"
           role="tablist"
           aria-label={t("DashboardIssuance.config.settingsModeAria")}
         >
-          {(["basic", "detailed", "expert"] as Mode[]).map((m) => {
+          {availableModes.map((m) => {
             const Icon = m === "basic" ? Briefcase : m === "detailed" ? ListChecks : GraduationCap;
             const labelKey: MessageKey =
               m === "basic"
@@ -350,8 +330,8 @@ export function AdvancedSettingsEditor({
                 aria-selected={mode === m}
                 onClick={() => setMode(m)}
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors",
-                  mode === m ? "bg-white text-primary" : "text-tertiary hover:text-primary"
+                  "inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors sm:flex-none",
+                  mode === m ? "bg-surface-raised text-primary" : "text-tertiary hover:text-primary"
                 )}
               >
                 <Icon className="h-3.5 w-3.5" />
@@ -363,10 +343,7 @@ export function AdvancedSettingsEditor({
       </div>
 
       {mode === "basic" ? (
-        // Basic · curated multi-select presets. Picking one enables its
-        // underlying settings; conflicting presets are blocked, same as Detailed.
         <section className="mt-5">
-          <p className="text-xs text-tertiary">{t("DashboardIssuance.config.comboIntro")}</p>
           {hasCustomSelection ? (
             <p className="mt-3 rounded-lg border border-border-default bg-fill-subtle px-3 py-2 text-[11px] text-secondary">
               {t("DashboardIssuance.config.comboCustomSelection")}
@@ -378,9 +355,7 @@ export function AdvancedSettingsEditor({
               const conflict = active ? null : getComboConflict(combo, settings);
               const blocked = conflict !== null;
               const includeKeys = comboItemLabelKeys(combo);
-              // Required value fields for the settings an active combo enables —
-              // shown inline so a manager can complete them without leaving Basic.
-              // (Optional params keep their seeded defaults and stay hidden here.)
+              // Show required param fields inline for active combos.
               const paramRows = active
                 ? combo.settings.flatMap((sk) =>
                     (settingByKey.get(sk)?.params ?? [])
@@ -441,7 +416,6 @@ export function AdvancedSettingsEditor({
         </section>
       ) : (
         <>
-          {/* Permanent · on-chain, set at creation --------------------------- */}
           <section className="mt-5">
             <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
               {t(
@@ -451,7 +425,11 @@ export function AdvancedSettingsEditor({
               )}
             </p>
             <p className="mt-0.5 text-xs text-tertiary">
-              {t("DashboardIssuance.config.settingsPermanentSubtitle")}
+              {t(
+                settingsReadOnly
+                  ? "DashboardIssuance.config.settingsPermanentLockedSubtitle"
+                  : "DashboardIssuance.config.settingsPermanentSubtitle"
+              )}
             </p>
             <div className="mt-3 grid gap-2.5">
               {permanent.map((entry) => (
@@ -461,7 +439,7 @@ export function AdvancedSettingsEditor({
                   selection={settings[entry.key]}
                   expert={expert}
                   showErrors={showErrors}
-                  disabled={disabled}
+                  disabled={disabled || settingsReadOnly}
                   conflictWith={conflictBlocker(entry.key)}
                   onToggle={(enabled) => setEnabled(entry, enabled)}
                   onParam={setParam}
@@ -470,7 +448,6 @@ export function AdvancedSettingsEditor({
             </div>
           </section>
 
-          {/* Ongoing · off-chain, changeable anytime ------------------------- */}
           <section className="mt-6">
             <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
               {t(
@@ -485,8 +462,6 @@ export function AdvancedSettingsEditor({
             <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
               {CAPACITY_KEYS.map((key) => {
                 const meta = CAPACITY_META[key];
-                // Expert view reveals the technical name where it differs from
-                // the manager-facing label (e.g. "Verified holders" → "KYC").
                 const expertLabel = CAPACITY_EXPERT_LABELS[key];
                 return (
                   <SettingShell
@@ -508,9 +483,7 @@ export function AdvancedSettingsEditor({
   );
 }
 
-// A single on-chain (permanent) setting row. Locked settings render checked and
-// non-deselectable; Expert reveals the mechanics; enabled parametric settings
-// show their required value fields inline.
+// Locked settings are checked and non-deselectable; expert mode reveals mechanics.
 function PermanentRow({
   entry,
   selection,
@@ -560,7 +533,6 @@ function PermanentRow({
           <Tag>{conflictWith}</Tag>
         </p>
       ) : null}
-      {/* Inline value fields — visible in both modes once the setting is on. */}
       {checked && params.length > 0 ? (
         <div className="mt-2.5 grid items-start gap-x-3 gap-y-2 border-t border-border-subtle pt-2.5 sm:grid-cols-2">
           {params.map((param) => (
@@ -581,7 +553,6 @@ function PermanentRow({
         </div>
       ) : null}
 
-      {/* Expert: the SDP actions this setting unlocks. */}
       {expert && setting.actions.length > 0 ? (
         <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border-subtle pt-2 text-[11px]">
           <span className="text-tertiary">
@@ -596,7 +567,6 @@ function PermanentRow({
   );
 }
 
-// One expert-override value field, required-aware.
 function ParamField({
   param,
   settingKey,
@@ -615,7 +585,7 @@ function ParamField({
   const t = useTranslations();
   const inputId = `setting-${settingKey}-${param.key}`;
   const inputClass = cn(
-    "rounded-lg border bg-white px-3 py-2 text-sm text-primary outline-none transition-colors",
+    "rounded-lg border bg-surface-raised px-3 py-2 text-sm text-primary outline-none transition-colors",
     invalid ? "border-destructive" : "border-border-default focus:border-border-strong"
   );
   return (

@@ -55,7 +55,7 @@ export function OverviewTab({
   return (
     <div className="space-y-4">
       {/* Identity hero — same grammar as the creation flow's public preview */}
-      <div className="rounded-2xl border border-border-default bg-white p-5">
+      <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
         <div className="grid gap-5 md:grid-cols-2">
           <div className="flex min-w-0 flex-col">
             <p
@@ -137,7 +137,7 @@ export function OverviewTab({
         )}
       >
         {category || subType ? (
-          <div className="grid overflow-hidden rounded-2xl border border-border-default bg-white sm:grid-cols-2 sm:divide-x sm:divide-border-subtle">
+          <div className="grid overflow-hidden rounded-2xl border border-border-default bg-surface-raised sm:grid-cols-2 sm:divide-x sm:divide-border-subtle">
             {category ? (
               <ClassificationCell
                 icon={category.icon}
@@ -156,7 +156,7 @@ export function OverviewTab({
         ) : null}
         {ops.canDeployToken ? (
           deployBlockers.length > 0 ? (
-            <div className="rounded-2xl border border-border-default bg-white p-4">
+            <div className="rounded-2xl border border-border-default bg-surface-raised p-4">
               <div className="flex items-center gap-2">
                 <TriangleAlert className="h-4.5 w-4.5 shrink-0 text-warning" />
                 <p className="text-[15px] font-semibold text-primary">
@@ -175,7 +175,7 @@ export function OverviewTab({
             <button
               type="button"
               onClick={onDeploy}
-              className="group flex cursor-pointer flex-col rounded-2xl border border-border-default bg-white p-4 text-left transition-colors hover:border-border-strong hover:bg-fill-subtle"
+              className="group flex cursor-pointer flex-col rounded-2xl border border-border-default bg-surface-raised p-4 text-left transition-colors hover:border-border-strong hover:bg-fill-subtle"
             >
               <div className="flex items-center gap-2">
                 <CircleCheck className="h-4.5 w-4.5 shrink-0 text-success" />

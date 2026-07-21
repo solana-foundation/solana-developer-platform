@@ -14,7 +14,7 @@ export function HomeSignedInCard() {
 
   if (!orgId) {
     return (
-      <div className="rounded-[var(--sdp-surface-radius)] border border-border-default bg-white p-6 shadow-sm">
+      <div className="rounded-[var(--sdp-surface-radius)] border border-border-default bg-surface-raised p-6 shadow-sm">
         <h2 className="text-[19px] leading-6 font-medium text-primary">
           {t("Shared.homeSignedIn.selectOrganization")}
         </h2>
@@ -29,7 +29,7 @@ export function HomeSignedInCard() {
   }
 
   return (
-    <div className="rounded-[var(--sdp-surface-radius)] border border-border-default bg-white p-6 shadow-sm">
+    <div className="rounded-[var(--sdp-surface-radius)] border border-border-default bg-surface-raised p-6 shadow-sm">
       <AutoDashboardRedirect />
       <p className="text-sm text-secondary">{t("Shared.homeSignedIn.loadingDashboard")}</p>
     </div>

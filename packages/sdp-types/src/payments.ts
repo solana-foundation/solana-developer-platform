@@ -163,6 +163,7 @@ export interface MoneygramTransferDetails {
 
 export interface PaymentTransferSummary {
   id: string;
+  walletId?: string;
   status: string;
   signature: string | null;
   type?: string;
@@ -174,6 +175,7 @@ export interface PaymentTransferSummary {
   memo?: string;
   provider?: RampProviderId;
   counterpartyId?: string;
+  counterpartyDisplayName?: string;
   providerReference?: string;
   deliveryMode?: PaymentRampQuoteDeliveryMode;
   fiatCurrency?: string;
@@ -889,7 +891,6 @@ export type PaymentRampQuote =
       sessionToken: string;
       sessionId: string;
       widgetUrl: string;
-      sdkUrl: string;
     })
   | (BasePaymentRampQuote & {
       provider: "stripe";
@@ -917,6 +918,14 @@ export type CoinbaseRampEvent =
 
 export type MoneygramRampEvent =
   | { kind: "signed"; sessionId: string; cryptoTransferId: string }
+  | {
+      kind: "onramp_completed";
+      sessionId: string;
+      transactionId: string;
+      status: string;
+      amount: number;
+      referenceNumber?: string;
+    }
   | {
       kind: "completed";
       sessionId: string;

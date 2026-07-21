@@ -20,12 +20,12 @@ import {
   resolveSettingsToExtensions,
   SETTING_KEYS,
   validateSelectedSettings,
+  validateSettingParams,
 } from "./index";
 
 describe("advanced settings capability registry", () => {
   it("loads without throwing the dev-time completeness assertion", () => {
-    // Importing ./index runs the assertion (NODE_ENV !== 'production'); if the
-    // registry drifted, the import above would already have thrown.
+    // Importing ./index runs the dev-time assertion; drift would throw.
     assert.ok(ASSET_CAPABILITIES.length > 0);
     assert.ok(SETTING_KEYS.length > 0);
   });
@@ -126,6 +126,171 @@ describe("advanced settings capability registry", () => {
     ]);
   });
 
+  it("range-checks numeric expert params against the catalog bounds", () => {
+    // basisPoints catalog range is [0, 10_000]. In-range passes.
+    assert.deepEqual(
+      validateSettingParams({ transferFee: { params: { basisPoints: 250, maxFee: "0" } } }),
+      []
+    );
+    // Below the min and above the max are each rejected, with the violated bound echoed.
+    assert.deepEqual(validateSettingParams({ transferFee: { params: { basisPoints: -1 } } }), [
+      { settingKey: "transferFee", paramKey: "basisPoints", reason: "below_min", limit: 0 },
+    ]);
+    assert.deepEqual(validateSettingParams({ transferFee: { params: { basisPoints: 99999 } } }), [
+      { settingKey: "transferFee", paramKey: "basisPoints", reason: "above_max", limit: 10_000 },
+    ]);
+  });
+
+  it("rejects out-of-range values sent as numeric strings, not just numbers", () => {
+    // String "99999" bounds-checked the same as number 99999.
+    assert.deepEqual(validateSettingParams({ transferFee: { params: { basisPoints: "99999" } } }), [
+      { settingKey: "transferFee", paramKey: "basisPoints", reason: "above_max", limit: 10_000 },
+    ]);
+    // A non-numeric string for a number param is rejected rather than silently
+    // coerced to the resolver's fallback.
+    assert.deepEqual(validateSettingParams({ transferFee: { params: { basisPoints: "abc" } } }), [
+      { settingKey: "transferFee", paramKey: "basisPoints", reason: "not_a_number" },
+    ]);
+  });
+
+  it("ignores absent optional params and params of unknown settings", () => {
+    // maxFee is optional (has a default), so omitting it is fine once the required
+    // basisPoints is present — bounds only apply to supplied values.
+    assert.deepEqual(validateSettingParams({ transferFee: { params: { basisPoints: 50 } } }), []);
+    // scaledUiAmount.multiplier is optional too; an empty params map is clean.
+    assert.deepEqual(validateSettingParams({ scaledUiAmount: { params: {} } }), []);
+    // An unknown setting key is the key-level check's concern; its params are skipped.
+    assert.deepEqual(validateSettingParams({ made_up: { params: { basisPoints: 99999 } } }), []);
+  });
+
+  it("rejects a selected setting missing a required param (presence enforced server-side)", () => {
+    // transferHook.programId is required and has no safe default — absent it, the
+    // resolver would fall back to the system program and brick every transfer.
+    assert.deepEqual(validateSettingParams({ transferHook: { params: {} } }), [
+      { settingKey: "transferHook", paramKey: "programId", reason: "missing" },
+    ]);
+    assert.deepEqual(validateSettingParams({ transferHook: {} }), [
+      { settingKey: "transferHook", paramKey: "programId", reason: "missing" },
+    ]);
+    // A blank / whitespace-only string doesn't satisfy a required field either.
+    assert.deepEqual(validateSettingParams({ transferHook: { params: { programId: "  " } } }), [
+      { settingKey: "transferHook", paramKey: "programId", reason: "missing" },
+    ]);
+    // Required numeric params are enforced the same way (transferFee.basisPoints).
+    assert.deepEqual(validateSettingParams({ transferFee: { params: { maxFee: "0" } } }), [
+      { settingKey: "transferFee", paramKey: "basisPoints", reason: "missing" },
+    ]);
+    // A supplied required param passes (this programId is valid base58 — see format test).
+    assert.deepEqual(
+      validateSettingParams({
+        transferHook: { params: { programId: "Hook11111111111111111111111111111111111111" } },
+      }),
+      []
+    );
+  });
+
+  it("validates string param formats (u64 maxFee, base58 programId)", () => {
+    // Arbitrary strings pass shape validation and would fail opaquely at the Solana
+    // layer, so format is enforced here. maxFee is a u64 base-unit amount.
+    assert.deepEqual(
+      validateSettingParams({ transferFee: { params: { basisPoints: 100, maxFee: "1000000" } } }),
+      []
+    );
+    assert.deepEqual(
+      validateSettingParams({ transferFee: { params: { basisPoints: 100, maxFee: "-1" } } }),
+      [{ settingKey: "transferFee", paramKey: "maxFee", reason: "invalid_format" }]
+    );
+    assert.deepEqual(
+      validateSettingParams({ transferFee: { params: { basisPoints: 100, maxFee: "1.5" } } }),
+      [{ settingKey: "transferFee", paramKey: "maxFee", reason: "invalid_format" }]
+    );
+    assert.deepEqual(
+      validateSettingParams({
+        transferFee: { params: { basisPoints: 100, maxFee: "notanumber" } },
+      }),
+      [{ settingKey: "transferFee", paramKey: "maxFee", reason: "invalid_format" }]
+    );
+    // 2^64 is one past the u64 ceiling; 2^64 - 1 is the largest valid value.
+    assert.deepEqual(
+      validateSettingParams({
+        transferFee: { params: { basisPoints: 100, maxFee: "18446744073709551616" } },
+      }),
+      [{ settingKey: "transferFee", paramKey: "maxFee", reason: "invalid_format" }]
+    );
+    assert.deepEqual(
+      validateSettingParams({
+        transferFee: { params: { basisPoints: 100, maxFee: "18446744073709551615" } },
+      }),
+      []
+    );
+    // programId must be a base58 pubkey; a too-short / non-base58 string is rejected.
+    assert.deepEqual(
+      validateSettingParams({ transferHook: { params: { programId: "not-a-key!" } } }),
+      [{ settingKey: "transferHook", paramKey: "programId", reason: "invalid_format" }]
+    );
+    assert.deepEqual(
+      validateSettingParams({
+        transferHook: { params: { programId: "0OIl0000000000000000000000000000" } },
+      }),
+      [{ settingKey: "transferHook", paramKey: "programId", reason: "invalid_format" }]
+    );
+  });
+
+  it("requires scaledUiAmount.multiplier to be strictly positive (exclusive min 0)", () => {
+    // Any value above 0 is valid, including fractional scale-downs.
+    assert.deepEqual(validateSettingParams({ scaledUiAmount: { params: { multiplier: 2 } } }), []);
+    assert.deepEqual(
+      validateSettingParams({ scaledUiAmount: { params: { multiplier: 0.5 } } }),
+      []
+    );
+    // Exactly 0 is rejected (it would zero every displayed balance), as are negatives.
+    assert.deepEqual(validateSettingParams({ scaledUiAmount: { params: { multiplier: 0 } } }), [
+      { settingKey: "scaledUiAmount", paramKey: "multiplier", reason: "below_min", limit: 0 },
+    ]);
+    assert.deepEqual(validateSettingParams({ scaledUiAmount: { params: { multiplier: -1 } } }), [
+      { settingKey: "scaledUiAmount", paramKey: "multiplier", reason: "below_min", limit: 0 },
+    ]);
+  });
+
+  it("rejects non-finite values on a max-unbounded param (multiplier: Infinity)", () => {
+    // multiplier has no max, so a non-finite value would pass a bare min check and
+    // deploy a token that permanently displays every balance as ∞. Both the number
+    // Infinity and its string forms must be rejected as not_a_number.
+    for (const bad of [
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      Number.NaN,
+      "Infinity",
+      "-Infinity",
+      "1e999",
+    ] as const) {
+      assert.deepEqual(
+        validateSettingParams({ scaledUiAmount: { params: { multiplier: bad } } }),
+        [{ settingKey: "scaledUiAmount", paramKey: "multiplier", reason: "not_a_number" }],
+        `expected multiplier ${String(bad)} to be rejected`
+      );
+    }
+    // A finite string multiplier still passes.
+    assert.deepEqual(
+      validateSettingParams({ scaledUiAmount: { params: { multiplier: "2" } } }),
+      []
+    );
+  });
+
+  it("bounds interestBearing.rate to the on-chain i16 basis-points range", () => {
+    // Negative rates are valid (demurrage), so the full signed-16-bit span passes.
+    assert.deepEqual(validateSettingParams({ interestBearing: { params: { rate: -32_768 } } }), []);
+    assert.deepEqual(validateSettingParams({ interestBearing: { params: { rate: 32_767 } } }), []);
+    assert.deepEqual(validateSettingParams({ interestBearing: { params: { rate: 500 } } }), []);
+    // Values that would overflow the i16 are rejected before deploy.
+    assert.deepEqual(validateSettingParams({ interestBearing: { params: { rate: 32_768 } } }), [
+      { settingKey: "interestBearing", paramKey: "rate", reason: "above_max", limit: 32_767 },
+    ]);
+    assert.deepEqual(validateSettingParams({ interestBearing: { params: { rate: -32_769 } } }), [
+      { settingKey: "interestBearing", paramKey: "rate", reason: "below_min", limit: -32_768 },
+    ]);
+  });
+
   it("exposes a positive settings version for persistence stamping", () => {
     assert.ok(Number.isInteger(ADVANCED_SETTINGS_VERSION) && ADVANCED_SETTINGS_VERSION > 0);
   });
@@ -145,6 +310,43 @@ describe("advanced settings capability registry", () => {
     });
     assert.deepEqual(stablecoin.errors, []);
     assert.ok(stablecoin.extensions?.pausable, "pausable should be enabled");
+  });
+
+  it("falls back to a safe default when a direct caller bypasses the validator with a non-finite param", () => {
+    // Direct callers can bypass validator; toNumber must guard against non-finite immutable fields.
+    for (const bad of [Number.POSITIVE_INFINITY, "Infinity", "1e999"] as const) {
+      const result = resolveSettingsToExtensions("generic", "generic", {
+        scaledUiAmount: { params: { multiplier: bad } },
+      });
+      assert.deepEqual(result.errors, []);
+      assert.equal(
+        result.extensions?.scaledUiAmount?.multiplier,
+        1,
+        `multiplier ${String(bad)} should fall back to 1`
+      );
+    }
+    // A finite value still flows through unchanged.
+    const ok = resolveSettingsToExtensions("generic", "generic", {
+      scaledUiAmount: { params: { multiplier: 2 } },
+    });
+    assert.equal(ok.extensions?.scaledUiAmount?.multiplier, 2);
+  });
+
+  it("omits transferHook rather than emit a bricking placeholder when programId is absent", () => {
+    // Direct caller bypassing validator; missing programId drops extension instead of bricking transfers.
+    const missing = resolveSettingsToExtensions("generic", "generic", {
+      transferHook: { params: {} },
+    });
+    assert.deepEqual(missing.errors, []);
+    assert.equal(missing.extensions?.transferHook, undefined);
+    // A real programId resolves normally.
+    const withId = resolveSettingsToExtensions("generic", "generic", {
+      transferHook: { params: { programId: "Hook11111111111111111111111111111111111111" } },
+    });
+    assert.equal(
+      withId.extensions?.transferHook?.programId,
+      "Hook11111111111111111111111111111111111111"
+    );
   });
 
   it("injects the provided authority and passes through decimals/allowlist", () => {
@@ -168,10 +370,15 @@ describe("advanced settings capability registry", () => {
     assert.equal(result.requiresAllowlist, true);
   });
 
+  it("omits permanentDelegate when no authority is provided (never a placeholder)", () => {
+    // Authority-valued: no wallet ⇒ drop extension, never a bricking placeholder.
+    const result = resolveSettingsToExtensions("generic", "generic", { permanentDelegate: {} });
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.extensions?.permanentDelegate, undefined);
+  });
+
   it("surfaces a template error for a selection the substrate can't build", () => {
-    // Bypassing the capability check, a transferFee on the stablecoin template
-    // (which doesn't offer it) is rejected by the resolver — the production
-    // safety net behind the dev-time assertion.
+    // Bypassing capability check; resolver catches unsupported extension on template.
     const result = resolveSettingsToExtensions("stablecoin", "fiat_backed", {
       transferFee: { params: { basisPoints: 10, maxFee: "1" } },
     });
@@ -185,8 +392,7 @@ describe("advanced settings capability registry", () => {
   });
 
   it("rejects two extensions that cannot coexist on one mint", () => {
-    // interestBearing + scaledUiAmount both define the raw→UI amount conversion,
-    // so they conflict even though each is individually valid on a generic asset.
+    // Both define raw→UI amount conversion; conflict despite being individually valid.
     assert.deepEqual(getConflictingSettingKeys("interestBearing"), ["scaledUiAmount"]);
     assert.deepEqual(getConflictingSettingKeys("scaledUiAmount"), ["interestBearing"]);
     // nonTransferable can't pair with a fee or a hook (no transfers to act on).
@@ -214,8 +420,7 @@ describe("advanced settings capability registry", () => {
   });
 
   it("prunes a conflicting pair to a valid subset (keeping the earlier one)", () => {
-    // Simulates re-validating a stale persisted selection with both conflicting
-    // extensions checked: the earlier-listed one is kept, the later dropped.
+    // Stale persisted selection; earlier-listed kept, later dropped.
     assert.deepEqual(pruneIncompatibleSettings(["interestBearing", "scaledUiAmount"]), [
       "interestBearing",
     ]);

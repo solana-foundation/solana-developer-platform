@@ -1,16 +1,12 @@
-// @sdp/issuance/capabilities
-//
-// The Advanced Settings capability foundation (ticket B): the manager-facing
-// setting catalog, the per-asset-type capability registry, and the pure lookups
-// over them. Importable without @solana/mosaic-sdk (this module touches only
-// @sdp/types and ./templates/definitions), so the API, web, and tests can use it
-// freely. The settings->extension resolver (ticket A), persistence/validation
-// (C), and UI (D/E) build on top of what this module exports.
+// Advanced Settings capability foundation: setting catalog, capability registry, lookups.
+// Mosaic-free (only @sdp/types + templates), safe for API/web/tests.
 
 import type {
   AdvancedSetting,
   AssetCapability,
   AssetCategory,
+  ParamFieldSpec,
+  SelectedSetting,
   SettingAvailability,
 } from "@sdp/types";
 import { ASSET_TYPES } from "@sdp/types";
@@ -28,6 +24,7 @@ import {
 } from "./settings";
 
 export {
+  AUTHORITY_VALUED_SETTINGS,
   type ExtensionAuthorities,
   type ResolveSettingsOptions,
   resolveSettingsToExtensions,
@@ -44,10 +41,7 @@ export {
 export type { SettingKey, TemplateOverrideError };
 export { ADVANCED_SETTINGS, ASSET_CAPABILITIES, SETTING_KEYS };
 
-// Drop settings that would form an incompatible extension pair, keeping the
-// earlier-listed one; unknown keys are dropped too. Order-preserving. Used to
-// sanitise a persisted selection on load, so stale storage can't restore a
-// conflicting combination the editor would never let you build interactively.
+// Drop conflicting settings; sanitizes persisted selections.
 export function pruneIncompatibleSettings(settingKeys: readonly string[]): SettingKey[] {
   const kept: SettingKey[] = [];
   const keptExtensions = new Set<string>();
@@ -73,10 +67,7 @@ export function pruneIncompatibleSettings(settingKeys: readonly string[]): Setti
   return kept;
 }
 
-// Setting keys whose extension clashes with `settingKey`'s — the two cannot be
-// enabled together on one token. Drives the editor's conflict disabling. Derived
-// from INCOMPATIBLE_EXTENSION_PAIRS by mapping each conflicting extension back to
-// the setting(s) that configure it.
+// Settings whose extensions clash with this one (derived from INCOMPATIBLE_EXTENSION_PAIRS).
 export function getConflictingSettingKeys(settingKey: SettingKey): SettingKey[] {
   const source: AdvancedSetting = ADVANCED_SETTINGS[settingKey];
   const blocked = new Set<SettingKey>();
@@ -99,7 +90,6 @@ export function getConflictingSettingKeys(settingKey: SettingKey): SettingKey[] 
   return [...blocked];
 }
 
-// The capability entry for an asset type, or undefined for an unknown pair.
 export function resolveAssetCapability(
   category: AssetCategory,
   type: string
@@ -107,9 +97,6 @@ export function resolveAssetCapability(
   return ASSET_CAPABILITIES.find((c) => c.category === category && c.type === type);
 }
 
-// Settings that default ON for an asset type — the pre-checked selection.
-// Includes both `locked` (forced on) and `recommended` (default on, deselectable)
-// settings; the caller pre-fills these with their default params.
 export function getRecommendedSettings(category: AssetCategory, type: string): SettingKey[] {
   const capability = resolveAssetCapability(category, type);
   if (!capability) {
@@ -120,8 +107,7 @@ export function getRecommendedSettings(category: AssetCategory, type: string): S
   );
 }
 
-// Settings an asset type forces on and does not let the manager deselect. The
-// editor renders these checked-and-disabled; persistence keeps them selected.
+// Settings forced on (checked-and-disabled); undeselectable.
 export function getLockedSettings(category: AssetCategory, type: string): SettingKey[] {
   const capability = resolveAssetCapability(category, type);
   if (!capability) {
@@ -130,9 +116,7 @@ export function getLockedSettings(category: AssetCategory, type: string): Settin
   return SETTING_KEYS.filter((key) => capability.settings[key] === "locked");
 }
 
-// Whether an asset type permits a setting at all (locked, recommended, or
-// available). The single gate the persistence/validation layer (C) calls to
-// reject an unsupported selection early.
+// Single gate to check if an asset type permits a setting (locked/recommended/available).
 export function isSettingAllowed(
   category: AssetCategory,
   type: string,
@@ -144,9 +128,7 @@ export function isSettingAllowed(
   }
   const availability = capability.settings[settingKey];
   return (
-    availability === "locked" ||
-    availability === "recommended" ||
-    availability === "available"
+    availability === "locked" || availability === "recommended" || availability === "available"
   );
 }
 
@@ -156,8 +138,6 @@ export interface GroupedSetting {
   availability: SettingAvailability;
 }
 
-// The settings an asset type can show, dropping `unsupported` ones. The editor
-// UI (E) groups these by `setting.group`.
 export function listSettingsForType(category: AssetCategory, type: string): GroupedSetting[] {
   const capability = resolveAssetCapability(category, type);
   if (!capability) {
@@ -170,12 +150,7 @@ export function listSettingsForType(category: AssetCategory, type: string): Grou
   }));
 }
 
-// --- Persistence contract --------------------------------------------------
-
-// The version stamped onto a stored advanced-settings payload. Bump when the
-// SHAPE of the settings selection changes (independent of asset_type_version,
-// which tracks the asset type's metadata shape). Persistence stamps this so a
-// stored selection records the schema it was written under.
+// The version stamped onto advanced-settings; bump if selection shape changes.
 export const ADVANCED_SETTINGS_VERSION = 1;
 
 export type SettingRejectionReason = "unknown" | "unsupported";
@@ -185,10 +160,6 @@ export interface SettingValidationError {
   reason: SettingRejectionReason;
 }
 
-// Validate a set of selected setting keys against an asset type's capability.
-// "unknown" ⇒ not a catalog setting; "unsupported" ⇒ the type forbids it. An
-// empty result means every key is allowed. This is the single gate the API
-// calls to reject a bad selection early (persistence ticket C).
 export function validateSelectedSettings(
   category: AssetCategory,
   type: string,
@@ -205,21 +176,114 @@ export function validateSelectedSettings(
   return errors;
 }
 
-// --- Dev-time completeness assertion ---------------------------------------
-//
-// Fail fast in development if the registry drifts. Mirrors the guard in
-// apps/sdp-web/.../asset-taxonomy.ts. Guarantees:
-//   1. every ASSET_TYPES pair has exactly one capability entry;
-//   2. every setting an entry references exists in the catalog;
-//   3. every locked/recommended/available setting names only extensions the
-//      entry's baseTemplate can actually build — i.e. present in
-//      `required ∪ available` and not in `incompatible`. This mirrors
-//      resolveTemplateConfig's own override check, so a selection the capability
-//      offers can never be one the resolver would reject at deploy.
-//   4. every extension the baseTemplate lists as `required` (the guarded builder
-//      forces it on unconditionally) is covered by a `locked` setting — so a
-//      forced extension can never be surfaced as an optional, deselectable box
-//      whose unticking has no on-chain effect.
+export type ParamRejectionReason =
+  | "missing"
+  | "not_a_number"
+  | "below_min"
+  | "above_max"
+  | "invalid_option"
+  | "invalid_format";
+
+export interface ParamValidationError {
+  settingKey: string;
+  paramKey: string;
+  reason: ParamRejectionReason;
+  // Violated bound (min/max); omitted for non-range reasons.
+  limit?: number;
+}
+
+// Coerce to finite number; return null to let caller reject (not silently default).
+// Rejects NaN, ±Infinity, and string forms like "Infinity" before post-deploy immutable fields.
+function coerceParamNumber(value: string | number): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (value.trim() !== "" && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  return null;
+}
+
+// Largest unsigned 64-bit integer — ceiling for u64-format params (e.g. transfer-fee maxFee).
+const U64_MAX = 18_446_744_073_709_551_615n;
+const BASE58_PUBKEY = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+// Whether a string-kind param satisfies its declared on-chain format. Without this,
+// arbitrary strings pass every server check and fail opaquely at the Solana layer.
+function matchesStringFormat(
+  format: NonNullable<ParamFieldSpec["format"]>,
+  value: string
+): boolean {
+  switch (format) {
+    case "u64":
+      // Base-10 digits only (rejects signs, decimals, "Infinity", 1e9) within u64 range.
+      return /^\d+$/.test(value) && BigInt(value) <= U64_MAX;
+    case "base58-pubkey":
+      return BASE58_PUBKEY.test(value);
+  }
+}
+
+// Check param against bounds/format; undefined skipped (presence is editor/resolver's concern).
+function checkParamValue(
+  spec: ParamFieldSpec,
+  value: string | number
+): { reason: ParamRejectionReason; limit?: number } | null {
+  if (spec.kind === "number") {
+    const n = coerceParamNumber(value);
+    if (n === null) {
+      return { reason: "not_a_number" };
+    }
+    if (spec.min !== undefined && (spec.exclusiveMin ? n <= spec.min : n < spec.min)) {
+      return { reason: "below_min", limit: spec.min };
+    }
+    if (spec.max !== undefined && n > spec.max) {
+      return { reason: "above_max", limit: spec.max };
+    }
+    return null;
+  }
+  if (spec.kind === "select") {
+    const allowed = spec.options?.some((option) => option.value === value) ?? false;
+    return allowed ? null : { reason: "invalid_option" };
+  }
+  if (spec.kind === "string" && spec.format) {
+    const asString = typeof value === "number" ? String(value) : value;
+    return matchesStringFormat(spec.format, asString) ? null : { reason: "invalid_format" };
+  }
+  return null;
+}
+
+// Validate param values; server-side gate for expert overrides that bypass client bounds.
+// Unknown settings skipped (key-level check handles them); presence is editor/resolver's concern.
+export function validateSettingParams(
+  selected: Record<string, SelectedSetting>
+): ParamValidationError[] {
+  const errors: ParamValidationError[] = [];
+  for (const [settingKey, selection] of Object.entries(selected)) {
+    if (!(settingKey in ADVANCED_SETTINGS)) {
+      continue;
+    }
+    const setting: AdvancedSetting = ADVANCED_SETTINGS[settingKey as SettingKey];
+    const specs = setting.params ?? [];
+    const params = selection?.params ?? {};
+    for (const spec of specs) {
+      const value = params[spec.key];
+      // Absent/blank required param is rejected; optional param skips bounds.
+      if (value === undefined || (typeof value === "string" && value.trim() === "")) {
+        if (spec.required) {
+          errors.push({ settingKey, paramKey: spec.key, reason: "missing" });
+        }
+        continue;
+      }
+      const violation = checkParamValue(spec, value);
+      if (violation) {
+        errors.push({ settingKey, paramKey: spec.key, ...violation });
+      }
+    }
+  }
+  return errors;
+}
+
+// Dev-time assertion: registry consistency (every ASSET_TYPES pair, all settings, locked coverage).
 if (process.env.NODE_ENV !== "production") {
   const seen = new Set<string>();
 
@@ -263,7 +327,6 @@ if (process.env.NODE_ENV !== "production") {
       }
     }
 
-    // (4) Every template-required extension must be locked, not merely offered.
     for (const required of template.extensions.required) {
       if (!lockedExtensions.has(required)) {
         throw new Error(

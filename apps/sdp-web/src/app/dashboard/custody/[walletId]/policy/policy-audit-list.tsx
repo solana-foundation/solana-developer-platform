@@ -1,7 +1,7 @@
 import type { WalletControlProfileRevisionHistory, WalletPolicyEvaluationDetail } from "@sdp/types";
 import { ChevronLeft, ChevronRight, History } from "lucide-react";
-import Link from "next/link";
 import type { ReactNode } from "react";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -371,7 +371,7 @@ export function PolicyAuditList({
 }
 
 const filterControlClassName =
-  "h-10 w-full rounded-md border border-border-default bg-white px-3 text-sm text-primary outline-none transition-colors focus:border-primary";
+  "h-10 w-full rounded-md border border-border-default bg-surface-raised px-3 text-sm text-primary outline-none transition-colors focus:border-primary";
 
 function MobileAuditRow({
   evaluation,

@@ -1,23 +1,11 @@
-// The per-asset-type capability registry: one AssetCapability for every
-// (category, type) pair in ASSET_TYPES. Declares the deploy substrate and, for
-// each catalog setting, whether it is recommended (default on), available
-// (opt-in), or unsupported (hidden/rejected).
-//
-// Regulated types deploy via their guarded Mosaic template, which supports a
-// fixed extension set (stablecoin: permanentDelegate + pausable; security: +
-// scaledUiAmount). Settings whose extension the guarded template can't build are
-// therefore `unsupported` — the dev-time assertion in index.ts enforces that no
-// recommended/available setting names an extension outside the template. Generic
-// types deploy via the `custom` substrate and compose the full set freely.
-//
+// Per-asset-type capability registry: setting availability by (category, type).
+// Regulated types use guarded templates (fixed extension sets), generics use custom.
 // See docs/decisions/0002-asset-advanced-settings.md.
 
 import type { AssetCapability, SettingAvailability } from "@sdp/types";
 import { SETTING_KEYS, type SettingKey } from "./settings";
 
-// Build a complete availability map from a partial override; unlisted settings
-// default to "available". Using Record<SettingKey, …> makes the compiler flag
-// any setting a type forgot to classify.
+// Build availability map from partial override; unlisted default to "available".
 function settings(
   overrides: Partial<Record<SettingKey, SettingAvailability>>
 ): Record<SettingKey, SettingAvailability> {
@@ -28,9 +16,6 @@ function settings(
   return result;
 }
 
-// Stablecoin template forces permanentDelegate + pausable (the guarded builder
-// always applies them), so freeze (pausable) and permanentDelegate are `locked`
-// — on and non-deselectable — and everything else is unsupported.
 const STABLECOIN_SETTINGS = settings({
   freezeTransfers: "locked",
   permanentDelegate: "locked",
@@ -41,9 +26,6 @@ const STABLECOIN_SETTINGS = settings({
   transferHook: "unsupported",
 });
 
-// Tokenized-security template forces permanentDelegate + pausable (`locked`);
-// scaledUiAmount is conditional in the builder, so it is `recommended` (default
-// on, deselectable) rather than locked.
 const SECURITY_SETTINGS = settings({
   freezeTransfers: "locked",
   permanentDelegate: "locked",
@@ -54,17 +36,14 @@ const SECURITY_SETTINGS = settings({
   transferHook: "unsupported",
 });
 
-// Generic assets deploy via the custom substrate: everything opt-in, nothing forced.
 const GENERIC_SETTINGS = settings({});
 
 export const ASSET_CAPABILITIES: readonly AssetCapability[] = [
-  // --- generic (custom substrate, free composition) ------------------------
   { category: "generic", type: "generic", baseTemplate: "custom", settings: GENERIC_SETTINGS },
   { category: "generic", type: "commodity", baseTemplate: "custom", settings: GENERIC_SETTINGS },
   { category: "generic", type: "real_estate", baseTemplate: "custom", settings: GENERIC_SETTINGS },
   { category: "generic", type: "collectible", baseTemplate: "custom", settings: GENERIC_SETTINGS },
 
-  // --- stablecoin (guarded template) ---------------------------------------
   {
     category: "stablecoin",
     type: "fiat_backed",
@@ -84,7 +63,6 @@ export const ASSET_CAPABILITIES: readonly AssetCapability[] = [
     settings: STABLECOIN_SETTINGS,
   },
 
-  // --- tokenized_security (guarded template) -------------------------------
   {
     category: "tokenized_security",
     type: "generic",

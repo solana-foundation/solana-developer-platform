@@ -16,8 +16,7 @@ import {
 
 const assetProfiles = new Hono<{ Bindings: Env }>();
 
-// Gate the whole family behind the Asset Profiles feature flag until it is ready
-// for prime time. Off by default; enable per-environment via ASSET_PROFILES_ENABLED.
+// Gate routes behind feature flag; off by default.
 async function requireAssetProfilesFeature(c: Context<{ Bindings: Env }>, next: Next) {
   if (!isAssetProfilesEnabled(c.env)) {
     throw new AppError("FORBIDDEN", "Asset Profiles are not enabled for this environment");

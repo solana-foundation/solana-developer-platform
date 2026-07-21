@@ -3,6 +3,69 @@ import path from "node:path";
 import pg from "pg";
 
 const { Client } = pg;
+const NON_TRANSACTIONAL_DIRECTIVE = /^--\s*sdp:migration-mode:\s*non-transactional\s*$/m;
+
+export function getPostgresMigrationMode(sql) {
+  return NON_TRANSACTIONAL_DIRECTIVE.test(sql) ? "non-transactional" : "transactional";
+}
+
+function concurrentIndexName(sql, migrationFile) {
+  const withoutComments = sql
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/--.*$/gm, "")
+    .trim();
+  const statements = withoutComments
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+  const match = statements[0]?.match(
+    /^CREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)\b/i
+  );
+
+  if (statements.length !== 1 || !match?.[1]) {
+    throw new Error(
+      `${migrationFile} must contain exactly one CREATE INDEX CONCURRENTLY IF NOT EXISTS statement`
+    );
+  }
+
+  return match[1];
+}
+
+async function applyNonTransactionalMigration({ client, migrationFile, sql }) {
+  const indexName = concurrentIndexName(sql, migrationFile);
+  const validity = await client.query(
+    `SELECT indisvalid
+     FROM pg_index
+     WHERE indexrelid = to_regclass($1)`,
+    [indexName]
+  );
+
+  // PostgreSQL can leave an INVALID index behind if a concurrent build is
+  // interrupted. IF NOT EXISTS would otherwise skip it forever on retry.
+  if (validity.rows[0]?.indisvalid === false) {
+    await client.query(`DROP INDEX CONCURRENTLY IF EXISTS "${indexName}"`);
+  }
+
+  await client.query(sql);
+  await client.query("INSERT INTO schema_migrations (version) VALUES ($1)", [migrationFile]);
+}
+
+export async function applyPostgresMigration({ client, migrationFile, sql }) {
+  if (getPostgresMigrationMode(sql) === "non-transactional") {
+    await applyNonTransactionalMigration({ client, migrationFile, sql });
+    return;
+  }
+
+  await client.query("BEGIN");
+  try {
+    await client.query(sql);
+    await client.query("INSERT INTO schema_migrations (version) VALUES ($1)", [migrationFile]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
 
 export async function runPostgresMigrations({ databaseUrl, migrationsDir }) {
   const migrationFiles = fs
@@ -30,15 +93,7 @@ export async function runPostgresMigrations({ databaseUrl, migrationsDir }) {
       }
 
       const sql = fs.readFileSync(path.join(migrationsDir, migrationFile), "utf8");
-      await client.query("BEGIN");
-      try {
-        await client.query(sql);
-        await client.query("INSERT INTO schema_migrations (version) VALUES ($1)", [migrationFile]);
-        await client.query("COMMIT");
-      } catch (error) {
-        await client.query("ROLLBACK");
-        throw error;
-      }
+      await applyPostgresMigration({ client, migrationFile, sql });
     }
   } finally {
     await client.end().catch(() => {});

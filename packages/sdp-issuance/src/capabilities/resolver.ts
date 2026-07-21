@@ -1,12 +1,5 @@
-// The settings → extension-config resolver (ticket A). Converts a stored
-// advanced-settings selection into a deployment-ready TokenExtensionsConfig by
-// mapping each selected setting to its ExtensionOverrides fragment and running
-// the existing resolveTemplateConfig against the asset type's base template.
-//
-// Pure and mosaic-free (only @sdp/types + ./templates/definitions), so it runs
-// both at settings-save time (validation: surface resolver errors early) and at
-// deploy time (produce the payload, with real authorities injected).
-//
+// Settings → extension-config resolver: maps settings to ExtensionOverrides,
+// validates at save time, injects real authorities at deploy time.
 // See docs/decisions/0002-asset-advanced-settings.md.
 
 import type {
@@ -21,19 +14,12 @@ import { resolveTemplateConfig, type TemplateOverrideError } from "../templates/
 import { ASSET_CAPABILITIES } from "./capabilities";
 import { ADVANCED_SETTINGS, findIncompatibleExtensionPair, type SettingKey } from "./settings";
 
-// Authority-valued extension config isn't known until deploy (SDP resolves the
-// controlled wallet then). When absent — e.g. validating a draft before deploy —
-// a placeholder stands in so resolveTemplateConfig can validate the extension
-// key; the value is never persisted and deploy injects the real authority.
-// resolveTemplateConfig validates keys, not values, so any non-empty string works.
-const PLACEHOLDER_AUTHORITY = "11111111111111111111111111111111";
-
-// Authorities injected for authority-valued extensions. At token create the
-// caller passes the controlled signing wallet (which becomes custody at deploy),
-// so no placeholder is ever stored for e.g. permanentDelegate.
 export interface ExtensionAuthorities {
   permanentDelegate?: string;
 }
+
+// Authority-valued settings: resolver injects real wallet; placeholder would brick token.
+export const AUTHORITY_VALUED_SETTINGS: readonly SettingKey[] = ["permanentDelegate"];
 
 export interface ResolveSettingsOptions {
   authorities?: ExtensionAuthorities;
@@ -49,11 +35,12 @@ export interface SettingsResolution {
   errors: TemplateOverrideError[];
 }
 
+// Coerce to finite number else fallback; rejects NaN/±Infinity before post-deploy fields.
 function toNumber(value: string | number | undefined, fallback: number): number {
   if (typeof value === "number") {
-    return value;
+    return Number.isFinite(value) ? value : fallback;
   }
-  if (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) {
+  if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) {
     return Number(value);
   }
   return fallback;
@@ -69,7 +56,6 @@ function toStringValue(value: string | number | undefined, fallback: string): st
   return fallback;
 }
 
-// Map one selected setting to the ExtensionOverrides fragment it enables.
 function toOverride(
   key: SettingKey,
   params: Record<string, string | number>,
@@ -79,7 +65,10 @@ function toOverride(
     case "freezeTransfers":
       return { pausable: {} };
     case "permanentDelegate":
-      return { permanentDelegate: authorities.permanentDelegate ?? PLACEHOLDER_AUTHORITY };
+      // Authority-valued: emit only with real wallet; omit to avoid bricking.
+      return authorities.permanentDelegate
+        ? { permanentDelegate: authorities.permanentDelegate }
+        : {};
     case "scaledUiAmount":
       return { scaledUiAmount: { multiplier: toNumber(params.multiplier, 1) } };
     case "transferFee":
@@ -93,21 +82,18 @@ function toOverride(
       return { interestBearing: { rate: toNumber(params.rate, 0) } };
     case "nonTransferable":
       return { nonTransferable: true };
-    case "transferHook":
-      return {
-        transferHook: { programId: toStringValue(params.programId, PLACEHOLDER_AUTHORITY) },
-      };
+    case "transferHook": {
+      // No valid default; omit when absent to avoid bricking transfers.
+      const programId = toStringValue(params.programId, "");
+      return programId ? { transferHook: { programId } } : {};
+    }
     default:
       return {};
   }
 }
 
-// Resolve a selection into a deployment-ready extension config (plus decimals,
-// allowlist, and any template errors). The base template comes from the asset
-// type's capability — the profile is the source of truth. Unknown setting keys
-// are skipped defensively (the caller validates them against the capability
-// first). Pass the controlled wallet in `options.authorities` so authority-valued
-// extensions resolve to a real address rather than a placeholder.
+// Resolve to deployment-ready config (extensions, decimals, allowlist, errors).
+// Base template from capability; unknown keys skipped; inject authorities for real wallets.
 export function resolveSettingsToExtensions(
   category: AssetCategory,
   type: string,
@@ -146,10 +132,7 @@ export function resolveSettingsToExtensions(
     options.decimals
   );
 
-  // Pairwise conflict check: two individually-valid extensions that can't coexist
-  // on one mint (e.g. interestBearing + scaledUiAmount). The per-template check
-  // in resolveTemplateConfig can't catch this, so surface it here — early at
-  // settings-save and again defensively at deploy.
+  // Catch pairwise extension conflicts not covered by template checks.
   const errors = [...result.errors];
   const conflict = findIncompatibleExtensionPair(Object.keys(extensions) as TokenExtensionName[]);
   if (conflict) {

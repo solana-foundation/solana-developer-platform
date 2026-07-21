@@ -1,5 +1,5 @@
-import { PaymentRequestsPageSkeleton } from "../payments-route-skeletons";
+import { CounterpartyMenuLoading } from "../counterparty-menu-loading";
 
 export default function PaymentRequestsLoading() {
-  return <PaymentRequestsPageSkeleton />;
+  return <CounterpartyMenuLoading overview="payment-requests" />;
 }

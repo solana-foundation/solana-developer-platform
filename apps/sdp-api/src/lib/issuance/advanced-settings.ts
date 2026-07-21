@@ -1,27 +1,20 @@
-// Server-side handling of the advanced-settings selection stored under
-// `issuance_metadata.settings` (persistence, ticket C).
-//
-// Two concerns the Zod schema can't cover on its own:
-//   - validation of each selected setting against the asset type's capability
-//     (needs the effective category/type), and
-//   - stamping the server-owned settings version.
-//
-// The catalog + capability lookups live in the mosaic-free
-// @sdp/issuance/capabilities subpath, so importing them here is safe in the
-// Workers runtime.
+// Server handling of advanced-settings in issuance_metadata.settings:
+// - Validates selections against asset type capabilities
+// - Stamps the server version
+// Safe to import @sdp/issuance/capabilities here (mosaic-free).
 
 import {
   ADVANCED_SETTINGS_VERSION,
+  AUTHORITY_VALUED_SETTINGS,
+  type ParamValidationError,
   resolveSettingsToExtensions,
   type SettingValidationError,
   type TemplateOverrideError,
   validateSelectedSettings,
+  validateSettingParams,
 } from "@sdp/issuance/capabilities";
 import type { AssetCategory, IssuanceMetadata, SelectedSetting } from "@sdp/types";
 
-// The loose issuance-metadata object the settings namespace lives inside. Using
-// IssuanceMetadata (rather than a bare Record) keeps the stamped result
-// assignable at the repository boundary.
 type Metadata = IssuanceMetadata;
 
 interface SettingsNamespace {
@@ -29,7 +22,6 @@ interface SettingsNamespace {
   selected?: Record<string, unknown>;
 }
 
-// Read the `settings` namespace defensively (metadata is loosely typed JSONB).
 function readSettings(metadata: Metadata): SettingsNamespace | undefined {
   const settings = metadata.settings;
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
@@ -38,33 +30,38 @@ function readSettings(metadata: Metadata): SettingsNamespace | undefined {
   return settings as SettingsNamespace;
 }
 
-// The selected settings map (settingKey → selection), or {} when absent. Used at
-// token create to drive the token's extension config from the profile.
 export function getSelectedSettings(metadata: Metadata): Record<string, SelectedSetting> {
   const settings = readSettings(metadata);
   return (settings?.selected as Record<string, SelectedSetting> | undefined) ?? {};
 }
 
-// Validate the selected settings in `metadata` against the (category, type)
-// capability. Empty result ⇒ nothing selected, or every selection is allowed.
+export function selectedAuthorityValuedSettings(metadata: Metadata): string[] {
+  const selected = getSelectedSettings(metadata);
+  return AUTHORITY_VALUED_SETTINGS.filter((key) => key in selected);
+}
+
 export function validateAdvancedSettings(
   category: AssetCategory,
   type: string,
   metadata: Metadata
-): SettingValidationError[] {
+): (SettingValidationError | ParamValidationError)[] {
   const settings = readSettings(metadata);
   if (!settings?.selected) {
     return [];
   }
-  return validateSelectedSettings(category, type, Object.keys(settings.selected));
+  const selected = settings.selected as Record<string, SelectedSetting>;
+  const keyErrors = validateSelectedSettings(category, type, Object.keys(selected));
+  // Range-check only the params of settings that passed the key check: an unknown
+  // or unsupported setting is already reported, so re-flagging its params is noise.
+  const rejected = new Set(keyErrors.map((error) => error.settingKey));
+  const checkable = Object.fromEntries(
+    Object.entries(selected).filter(([key]) => !rejected.has(key))
+  );
+  return [...keyErrors, ...validateSettingParams(checkable)];
 }
 
-// Resolve the selected settings into a token extension config and return any
-// template-level build errors — the resolver-driven half of "flag unsupported
-// combinations early". The dev-time assertion keeps the capability registry
-// consistent with the templates, but that assertion is skipped in production, so
-// this runtime check is the production safety net against a selection the deploy
-// resolver couldn't build. Empty result ⇒ nothing selected, or it builds cleanly.
+// Resolve settings to extension config; returns build errors if any.
+// This is the production safety net (dev assertion is skipped in prod).
 export function resolveAdvancedSettings(
   category: AssetCategory,
   type: string,
@@ -82,9 +79,6 @@ export function resolveAdvancedSettings(
   return errors;
 }
 
-// Return metadata with the settings version stamped to the current server
-// version. No-op when there is no settings selection. Never mutates the input;
-// generic so the caller's metadata type is preserved across the repo boundary.
 export function stampAdvancedSettingsVersion<T extends Metadata>(metadata: T): T {
   const settings = readSettings(metadata);
   if (!settings?.selected) {

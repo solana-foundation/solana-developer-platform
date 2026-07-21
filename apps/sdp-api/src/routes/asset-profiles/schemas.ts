@@ -1,14 +1,12 @@
 import { ASSET_CATEGORIES, isAssetTypeSupported } from "@sdp/types";
 import { z } from "zod";
 
-// Free-form JSON object (a namespace bucket inside issuance metadata). Mirrors
-// the JSONB columns' `jsonb_typeof(...) = 'object'` DB constraint.
+// Free-form JSON object; mirrors JSONB `= 'object'` DB constraint.
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 
 export const assetCategorySchema = z.enum(ASSET_CATEGORIES);
 
-// Asset type is validated against the registry (per category) in the create /
-// update refinements below, so the field itself only checks basic shape here.
+// Registry validation in create/update refinements; shape only here.
 export const assetTypeSchema = z.string().min(1).max(128);
 
 export const assetProfileIdSchema = z.string().min(1);
@@ -21,27 +19,19 @@ export const assetProfileTokenIdParamsSchema = z.object({
   tokenId: z.string().min(1),
 });
 
-// custom.* is namespaced so customer and integration fields can never collide
-// with SDP-defined fields. Each namespace is an open object.
+// Namespaced to prevent collisions with SDP fields; each namespace open.
 const customMetadataSchema = z.object({
   customer: jsonObjectSchema.optional(),
   integration: jsonObjectSchema.optional(),
 });
 
-// Issuer-controlled public/private field selection. `public` lists the
-// issuance_metadata dot-paths (e.g. "asset.issuerName") the issuer chose to
-// expose. Absent ⇒ the asset type's registry default is used. The application
-// layer clamps these to public-safe namespaces (asset.* and chain.decimals)
-// before projecting, so compliance.* and custom.* can never be exposed.
+// Issuer-controlled field list; app layer clamps to public-safe namespaces (asset.*, chain.decimals).
 const visibilityMetadataSchema = z.object({
   public: z.array(z.string()).optional(),
 });
 
-// Advanced settings selection persisted under `settings`. This validates SHAPE
-// only; whether each selected key is allowed for the asset type is checked
-// against the capability registry in the create/update handlers (that check
-// needs the effective category/type, which the schema does not have). `version`
-// is server-stamped, so it is optional on input.
+// Validates shape only; catalog bounds (allowance, param ranges) checked in handlers.
+// Version is server-stamped, optional on input.
 const settingSelectionSchema = z
   .object({
     params: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
@@ -55,9 +45,7 @@ const advancedSettingsSchema = z
   })
   .strict();
 
-// Strict on the SDP-owned namespaces, but loose *within* them for v1 (the PRD
-// defers instrument-specific field modelling). `z.looseObject` allows unknown
-// top-level namespaces to pass through without a schema change.
+// Strict namespaces, loose within for v1; looseObject allows future top-level fields.
 export const issuanceMetadataSchema = z.looseObject({
   asset: jsonObjectSchema.optional(),
   compliance: jsonObjectSchema.optional(),
@@ -71,7 +59,7 @@ export function assertAssetTypeSupported(
   value: { assetCategory?: string; assetType?: string },
   ctx: z.RefinementCtx
 ): void {
-  // Defaults are applied before refinement runs, so both are present here.
+  // Defaults applied before refinement; both present here.
   const category = value.assetCategory as (typeof ASSET_CATEGORIES)[number];
   const type = value.assetType ?? "";
   if (!isAssetTypeSupported(category, type)) {
@@ -94,11 +82,7 @@ export const updateAssetProfileSchema = updateAssetProfileObjectSchema
     message: "At least one field must be provided",
   })
   .superRefine((value, ctx) => {
-    // Only validate the pair when BOTH halves are present in the patch. If just
-    // one changes, it must be checked against the existing row's other half,
-    // which only the handler can do after loading the current profile.
-    // NOTE: the update handler MUST re-run isAssetTypeSupported() on the merged
-    // (existing + patch) category/type before persisting.
+    // Only validate pair when both present; handler checks merged state vs current row.
     if (value.assetCategory === undefined || value.assetType === undefined) {
       return;
     }

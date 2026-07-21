@@ -1,6 +1,7 @@
 "use client";
 
 import { isMuralSandboxPayinCurrency } from "@sdp/types";
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { DollarSignIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
@@ -8,6 +9,7 @@ import { toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
+import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { hasOnboardingLifecycle, simulateActionLabels } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
@@ -42,6 +44,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     collectedData,
     setCollectedField,
     requirementsBlocker,
+    refreshQuote,
   } = wizard;
 
   if (currentStepId === "DEPOSIT") {
@@ -112,6 +115,32 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         <StripeOnrampFrame
           clientSecret={quote.clientSecret}
           publishableKey={quote.publishableKey}
+        />
+        <div className="border-t border-border-default pt-5">
+          <RampStatusPanel direction="onramp" transfer={transferStatus} />
+        </div>
+      </div>
+    );
+  }
+
+  if (currentStepId === "PROVIDER" && quote?.provider === "moneygram") {
+    if (!selectedWallet) {
+      return <RampQuoteSkeleton />;
+    }
+    return (
+      <div className="space-y-6">
+        <MoneygramRampWidget
+          direction="onramp"
+          quote={quote}
+          counterparty={selectedCounterparty}
+          sourceWalletId={fields.walletId}
+          sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
+          sourceWalletAddress={selectedWallet.publicKey}
+          sourceTokenMint={null}
+          cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
+          cryptoAmount={fields.amount.trim()}
+          fiatCurrency={selectedRampPair.fiatCurrency}
+          onSessionExpiring={refreshQuote}
         />
         <div className="border-t border-border-default pt-5">
           <RampStatusPanel direction="onramp" transfer={transferStatus} />

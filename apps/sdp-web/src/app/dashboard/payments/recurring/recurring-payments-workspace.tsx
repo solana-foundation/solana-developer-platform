@@ -13,6 +13,7 @@ import {
   AlertCircleIcon,
   BanIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   CopyIcon,
   CreditCardIcon,
   ExternalLinkIcon,
@@ -25,10 +26,10 @@ import {
   RotateCcwIcon,
   WalletIcon,
 } from "lucide-react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -53,15 +54,17 @@ import {
 } from "@/components/ui/table";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
-import { walletBalanceAssetOptions } from "../ramps/wallet-options";
+import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
 import {
   type RecurringPaymentAction,
   runRecurringPaymentAction,
   updateRecurringPayment,
 } from "./recurring-payments.data";
+import { RECURRING_NEXT_PAYMENT_COLUMN_VISIBILITY } from "./recurring-payments-table-layout";
 
 const STATUS_VARIANTS = {
   pending_activation: "warning",
@@ -721,7 +724,7 @@ export function RecurringPaymentsWorkspace({
   counterparties,
 }: RecurringPaymentsWorkspaceProps) {
   const t = useTranslations();
-  const router = useRouter();
+  const router = useDashboardRouter();
 
   const walletById = useMemo(
     () => new Map(wallets.map((wallet) => [wallet.walletId, wallet])),
@@ -753,9 +756,9 @@ export function RecurringPaymentsWorkspace({
     );
 
   return (
-    <div className="h-full min-h-0 w-full px-3 pt-6 pb-5 md:px-6 md:pb-6">
-      <Card className="flex h-full min-h-0 flex-col">
-        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <DashboardWorkspaceOverviewPanel className="flex min-h-0 flex-col overflow-hidden">
+      <Card className="flex h-full min-h-0 flex-col gap-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised py-0 shadow-none ring-0">
+        <CardHeader className="flex flex-col gap-4 p-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1.5">
             <CardTitle>{t("DashboardPayments.recurring.recurringPayments")}</CardTitle>
             <CardDescription>{countLabel}</CardDescription>
@@ -767,7 +770,7 @@ export function RecurringPaymentsWorkspace({
             </Link>
           </Button>
         </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col">
+        <CardContent className="flex min-h-0 flex-1 flex-col px-0">
           {initialError ? (
             <div
               role="alert"
@@ -777,7 +780,7 @@ export function RecurringPaymentsWorkspace({
               <p className="mt-1">{initialError}</p>
             </div>
           ) : initialRecurringPayments.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border-strong py-16 text-center">
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 py-16 text-center">
               <RepeatIcon className="h-10 w-10 text-muted" />
               <div className="space-y-1">
                 <p className="text-sm font-medium text-primary">
@@ -795,27 +798,57 @@ export function RecurringPaymentsWorkspace({
               </Button>
             </div>
           ) : (
-            <div className="min-h-0 flex-1 overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-y-auto">
               {lookupError ? <p className="mb-3 text-sm text-warning">{lookupError}</p> : null}
-              <Table className="w-full [&_table]:table-fixed">
+              <div className="divide-y divide-border-default md:hidden">
+                {initialRecurringPayments.map((recurringPayment) => (
+                  <button
+                    key={recurringPayment.id}
+                    type="button"
+                    onClick={() =>
+                      router.push(
+                        `/dashboard/payments/recurring/${encodeURIComponent(recurringPayment.id)}`
+                      )
+                    }
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
+                  >
+                    <span className="min-w-0 flex-1 space-y-1.5">
+                      <span className="flex items-center justify-between gap-3">
+                        <RecurringPaymentStatusBadge status={recurringPayment.status} />
+                        <span className="truncate text-sm font-medium text-primary">
+                          {getAmountLabel(recurringPayment)}
+                        </span>
+                      </span>
+                      <span className="block truncate text-xs text-secondary">
+                        {getCounterpartyLabel(recurringPayment)} ·{" "}
+                        {getWalletLabel(recurringPayment)}
+                      </span>
+                    </span>
+                    <ChevronRightIcon className="size-4 shrink-0 text-tertiary" />
+                  </button>
+                ))}
+              </div>
+              <Table className="hidden w-full [&_table]:table-fixed md:block">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[34%] md:w-[26%] lg:w-[21%] xl:w-[18%]">
+                    <TableHead className="w-[34%] md:w-[26%] lg:w-[21%] xl:w-[18%] 2xl:w-[15%]">
                       {t("DashboardPayments.status")}
                     </TableHead>
-                    <TableHead className="w-[26%] md:w-[22%] lg:w-[20%] xl:w-[18%]">
+                    <TableHead className="w-[26%] md:w-[22%] lg:w-[20%] xl:w-[18%] 2xl:w-[15%]">
                       {t("DashboardPayments.recurring.amount")}
                     </TableHead>
-                    <TableHead className="w-[40%] md:w-[34%] lg:w-[31%] xl:w-[24%]">
+                    <TableHead className="w-[40%] md:w-[34%] lg:w-[31%] xl:w-[24%] 2xl:w-[20%]">
                       {t("DashboardPayments.counterpartyLabel")}
                     </TableHead>
-                    <TableHead className="hidden lg:table-cell lg:w-[28%] xl:w-[22%]">
+                    <TableHead className="hidden lg:table-cell lg:w-[28%] xl:w-[22%] 2xl:w-[18%]">
                       {t("DashboardPayments.recurring.fundingWallet")}
                     </TableHead>
-                    <TableHead className="hidden xl:table-cell xl:w-[18%]">
+                    <TableHead className="hidden xl:table-cell xl:w-[18%] 2xl:w-[16%]">
                       {t("DashboardPayments.recurring.interval")}
                     </TableHead>
-                    <TableHead className="hidden md:table-cell md:w-[18%] xl:hidden 2xl:table-cell 2xl:w-[18%]">
+                    <TableHead
+                      className={`${RECURRING_NEXT_PAYMENT_COLUMN_VISIBILITY} md:w-[18%] 2xl:w-[16%]`}
+                    >
                       {t("DashboardPayments.recurring.nextPayment")}
                     </TableHead>
                   </TableRow>
@@ -858,7 +891,9 @@ export function RecurringPaymentsWorkspace({
                       <TableCell className="hidden text-sm text-secondary xl:table-cell">
                         {formatPeriodHours(recurringPayment.periodHours, t)}
                       </TableCell>
-                      <TableCell className="hidden text-sm text-secondary md:table-cell xl:hidden 2xl:table-cell">
+                      <TableCell
+                        className={`${RECURRING_NEXT_PAYMENT_COLUMN_VISIBILITY} text-sm text-secondary`}
+                      >
                         {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt, t)}
                       </TableCell>
                     </TableRow>
@@ -869,7 +904,7 @@ export function RecurringPaymentsWorkspace({
           )}
         </CardContent>
       </Card>
-    </div>
+    </DashboardWorkspaceOverviewPanel>
   );
 }
 
@@ -887,7 +922,7 @@ export function RecurringPaymentDetailWorkspace({
   collectionAttemptsError,
 }: RecurringPaymentDetailWorkspaceProps) {
   const t = useTranslations();
-  const router = useRouter();
+  const router = useDashboardRouter();
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
@@ -925,7 +960,7 @@ export function RecurringPaymentDetailWorkspace({
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
   const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceWalletId);
-  const assetOptions = walletBalanceAssetOptions(wallet, {}, t);
+  const assetOptions = recurringPaymentAssetOptions(wallet, {}, t);
   const receivingAccount =
     counterpartyAccounts.find((account) => account.id === recurringPayment.counterpartyAccountId) ??
     null;
@@ -1222,7 +1257,7 @@ export function RecurringPaymentDetailWorkspace({
   };
 
   return (
-    <div className="h-full min-h-0 w-full overflow-auto px-3 pt-6 pb-5 md:px-6 md:pb-6">
+    <DashboardWorkspaceOverviewPanel>
       <div className="mx-auto max-w-6xl space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 space-y-1">
@@ -1258,7 +1293,7 @@ export function RecurringPaymentDetailWorkspace({
 
         <RecurringPaymentLifecycleBand status={recurringPayment.status} actionError={actionError} />
 
-        <div className="rounded-xl border border-border-default px-4">
+        <div className="rounded-lg border border-border-default bg-surface-raised px-4">
           <div className="divide-y divide-border-default">
             <DetailRow label={t("DashboardPayments.status")}>
               <RecurringPaymentStatusBadge status={recurringPayment.status} />
@@ -1858,7 +1893,7 @@ export function RecurringPaymentDetailWorkspace({
           </div>
         </Modal>
       </div>
-    </div>
+    </DashboardWorkspaceOverviewPanel>
   );
 }
 const STATUS_TRANSLATION_KEYS = {

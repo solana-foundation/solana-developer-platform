@@ -1,14 +1,12 @@
-import { getSolanaConfig } from "@sdp/rpc";
-import { withHeliusApiKey } from "@sdp/rpc/relay";
+import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { formatDecimalAmount, MAX_SAFE_BASE_UNITS, parseDecimalAmount } from "@sdp/solana/amount";
-import { type Permission, type PrivateTransferRequest, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { MAX_SAFE_BASE_UNITS, parseDecimalAmount } from "@sdp/solana/amount";
+import type { Permission, PrivateTransferRequest } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import {
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
-  createNoopSigner,
   createTransactionMessage,
   getCompiledTransactionMessageDecoder,
   getCompiledTransactionMessageEncoder,
@@ -24,16 +22,9 @@ import {
   partiallySignTransactionWithSigners,
 } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
-import {
-  findAssociatedTokenPda,
-  getCreateAssociatedTokenIdempotentInstruction,
-  getTransferCheckedInstruction,
-} from "@solana-program/token-2022";
 import { z } from "zod";
-import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
-  isRampTransferType,
   RAMP_TRANSFER_TYPES,
   type PaymentTransferDirection as TransferDirection,
   type PaymentTransferRow as TransferRow,
@@ -47,7 +38,7 @@ import { buildPaymentTransferFingerprint, resolveIdempotencyReplay } from "@/lib
 import { paginated, success } from "@/lib/response";
 import {
   assertApiKeyWalletAccess,
-  getAllowedApiKeyWalletIds,
+  getAllowedApiKeyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
 import {
   assertPaymentProjectScope,
@@ -66,7 +57,6 @@ import {
 } from "@/services/private-transfers";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import type { Env } from "@/types/env";
 import { type AppContext, getFeePayment, getPaymentsRepository } from "../context";
 import { mapTransferRow } from "../mappers";
 import { assertWalletPolicyAllowsTransfer } from "../policy";
@@ -77,79 +67,17 @@ import {
   walletIdParamsSchema,
 } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
-import {
-  resolveMintDecimals,
-  resolveMintTokenProgram,
-  resolveSourceTokenAccount,
-} from "../token-accounts";
+import { resolveMintDecimals, resolveMintTokenProgram } from "../token-accounts";
 import { type ResolvedScope, resolveScope, resolveWallet } from "../wallets";
-
-const SIGNATURE_HISTORY_LOOKUP_CONCURRENCY = 5;
-
-interface ParsedInstructionPayload {
-  info?: Record<string, unknown>;
-  type?: string;
-}
-
-interface ParsedInstructionRecord {
-  parsed?: ParsedInstructionPayload;
-  program?: string;
-}
-
-interface ParsedInstructionGroup {
-  instructions?: ParsedInstructionRecord[];
-}
-
-interface ParsedAccountKey {
-  pubkey?: string;
-}
-
-interface RpcTokenBalanceAmount {
-  amount?: string;
-  decimals?: number;
-  uiAmountString?: string | null;
-}
-
-interface RpcTokenBalanceRecord {
-  accountIndex?: number;
-  mint?: string;
-  owner?: string;
-  uiTokenAmount?: RpcTokenBalanceAmount;
-}
-
-interface ParsedTransactionResponse {
-  error?: {
-    message?: string;
-  };
-  result?: {
-    blockTime?: number | null;
-    meta?: {
-      err?: unknown;
-      fee?: number;
-      innerInstructions?: ParsedInstructionGroup[];
-      postBalances?: number[];
-      postTokenBalances?: RpcTokenBalanceRecord[];
-      preBalances?: number[];
-      preTokenBalances?: RpcTokenBalanceRecord[];
-    } | null;
-    slot?: number;
-    transaction?: {
-      message?: {
-        accountKeys?: Array<string | ParsedAccountKey>;
-        instructions?: ParsedInstructionRecord[];
-      };
-    };
-  } | null;
-}
-
-interface ObservedTransferContext {
-  organizationId: string;
-  projectId: string | null;
-  tokenSymbolsByMint: Map<string, string>;
-  walletIdsByAddress: Map<string, string>;
-}
-
-type SignatureHistoryEntry = Awaited<ReturnType<typeof solanaRpc.getSignaturesForAddress>>[number];
+import {
+  buildObservedTransfersForSignatures,
+  createSignatureHistoryRpc,
+  dedupeSignatureHistory,
+  mapSettledWithConcurrency,
+  resolveObservedTokenSymbols,
+  resolveWalletTokenAccountAddresses,
+  SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
+} from "./observed-transfers";
 
 type PreparedPrivateTransferMetadata = {
   provider: "magicblock";
@@ -161,19 +89,6 @@ type PreparedPrivateTransferMetadata = {
     validator?: string;
   };
 };
-
-function resolveWalletIdForTokenAccount(
-  context: ObservedTransferContext,
-  tokenAccountAddress: string,
-  ownerAddress: string | null
-): string | null {
-  if (ownerAddress) {
-    const ownerWalletId = context.walletIdsByAddress.get(ownerAddress);
-    if (ownerWalletId) return ownerWalletId;
-  }
-
-  return context.walletIdsByAddress.get(tokenAccountAddress) ?? null;
-}
 
 export async function resolveWalletFromParams(
   c: AppContext,
@@ -795,47 +710,18 @@ async function executeSplTransfer(
   }
 
   const rpc = solanaRpc.createRpc(c.env);
-  const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
-  const sourceTokenAccount = await resolveSourceTokenAccount(
-    rpc,
-    signer.address,
-    mintAddress,
-    tokenProgram
-  );
-  const transferAmount = parseDecimalAmount(amount, sourceTokenAccount.decimals);
-
-  if (transferAmount <= 0n) {
-    throw badRequest("Transfer amount must be greater than zero");
-  }
-
-  const [destinationTokenAccount] = await findAssociatedTokenPda({
-    owner: destinationAddress,
-    tokenProgram,
-    mint: mintAddress,
-  });
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayment = getFeePayment(c);
   const feePayer = await feePayment.getFeePayer();
-  const feePayerSigner = createNoopSigner(feePayer);
 
-  const createDestinationAtaInstruction = getCreateAssociatedTokenIdempotentInstruction({
-    payer: feePayerSigner,
-    ata: destinationTokenAccount,
-    owner: destinationAddress,
-    mint: mintAddress,
-    tokenProgram,
-  });
-  const transferInstruction = getTransferCheckedInstruction(
-    {
-      source: sourceTokenAccount.tokenAccount,
-      mint: mintAddress,
-      destination: destinationTokenAccount,
+  const { createDestinationAtaInstruction, transferInstruction } =
+    await tokenAccounts.buildSplTransferInstructions(rpc, {
       authority: signer,
-      amount: transferAmount,
-      decimals: sourceTokenAccount.decimals,
-    },
-    { programAddress: tokenProgram }
-  );
+      destination: destinationAddress,
+      mint: mintAddress,
+      amount,
+      ataRentPayer: feePayer,
+    });
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -869,625 +755,62 @@ async function executeSplTransfer(
   };
 }
 
-function createSignatureHistoryRpc(env: Env) {
-  // Prefer Helius when configured for richer signature history (getSignaturesForAddress).
-  // Falls back to the default RPC URL if Helius is not configured.
-  //
-  // TODO: Replace getSignaturesForAddress with a dedicated indexer (Helius webhooks,
-  // Triton stream, or similar) for production-scale history and comprehensive inbound
-  // transfer tracking. The current approach is limited to the most recent ~200 signatures.
-  const url = env.SOLANA_RPC_HELIUS_URL
-    ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
-    : getSolanaConfig(env).rpcUrl;
-  return solanaRpc.createRpc(env, { rpcUrl: url });
-}
-
-function resolveSignatureHistoryRpcUrl(env: Env): string {
-  return env.SOLANA_RPC_HELIUS_URL
-    ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
-    : getSolanaConfig(env).rpcUrl;
-}
-
-function resolveObservedTokenSymbol(mint: string, tokenSymbolsByMint: Map<string, string>): string {
-  const normalizedMint = mint.trim();
-  const known = tokenSymbolsByMint.get(normalizedMint)?.trim();
-  if (known) {
-    return known;
-  }
-
-  const wellKnownSymbol = WELL_KNOWN_TOKEN_BY_MINT.get(normalizedMint)?.symbol;
-  if (wellKnownSymbol) {
-    return wellKnownSymbol;
-  }
-
-  return normalizedMint;
-}
-
-function resolveParsedAccountKey(accountKey: string | ParsedAccountKey | undefined): string | null {
-  if (typeof accountKey === "string" && accountKey.trim()) {
-    return accountKey;
-  }
-
-  if (
-    accountKey &&
-    typeof accountKey === "object" &&
-    typeof accountKey.pubkey === "string" &&
-    accountKey.pubkey.trim()
-  ) {
-    return accountKey.pubkey;
-  }
-
-  return null;
-}
-
-function flattenParsedInstructions(payload: ParsedTransactionResponse): ParsedInstructionRecord[] {
-  const topLevel = payload.result?.transaction?.message?.instructions ?? [];
-  const inner = (payload.result?.meta?.innerInstructions ?? []).flatMap(
-    (group) => group.instructions ?? []
-  );
-  return [...topLevel, ...inner];
-}
-
-function resolveObservedTimestamp(blockTime: bigint | number | null | undefined): string {
-  if (typeof blockTime === "bigint") {
-    return new Date(Number(blockTime) * 1_000).toISOString();
-  }
-
-  if (typeof blockTime === "number" && Number.isFinite(blockTime) && blockTime > 0) {
-    return new Date(blockTime * 1_000).toISOString();
-  }
-
-  return new Date().toISOString();
-}
-
-function readInstructionInfoString(
-  info: Record<string, unknown> | undefined,
-  key: string
-): string | null {
-  const value = info?.[key];
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function readInstructionInfoInteger(
-  info: Record<string, unknown> | undefined,
-  key: string
-): bigint | null {
-  const value = info?.[key];
-
-  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
-    return BigInt(value.trim());
-  }
-
-  if (
-    typeof value === "number" &&
-    Number.isFinite(value) &&
-    Number.isInteger(value) &&
-    value >= 0
-  ) {
-    return BigInt(value);
-  }
-
-  return null;
-}
-
-function readTokenAmountInfo(
-  info: Record<string, unknown> | undefined
-): { amount: bigint; decimals: number; uiAmount: string | null } | null {
-  const rawTokenAmount = info?.tokenAmount;
-  if (!rawTokenAmount || typeof rawTokenAmount !== "object" || Array.isArray(rawTokenAmount)) {
-    const rawAmount = readInstructionInfoInteger(info, "amount");
-    const decimalsValue = info?.decimals;
-    if (
-      rawAmount === null ||
-      typeof decimalsValue !== "number" ||
-      !Number.isFinite(decimalsValue) ||
-      !Number.isInteger(decimalsValue)
-    ) {
-      return null;
-    }
-
-    return {
-      amount: rawAmount,
-      decimals: decimalsValue,
-      uiAmount: formatDecimalAmount(rawAmount, decimalsValue),
-    };
-  }
-
-  const tokenAmountRecord = rawTokenAmount as RpcTokenBalanceAmount;
-
-  const amountValue =
-    typeof tokenAmountRecord.amount === "string" && /^\d+$/.test(tokenAmountRecord.amount)
-      ? BigInt(tokenAmountRecord.amount)
-      : null;
-  const decimalsValue =
-    typeof tokenAmountRecord.decimals === "number" &&
-    Number.isFinite(tokenAmountRecord.decimals) &&
-    Number.isInteger(tokenAmountRecord.decimals)
-      ? tokenAmountRecord.decimals
-      : null;
-
-  if (amountValue === null || decimalsValue === null) {
-    return null;
-  }
-
-  return {
-    amount: amountValue,
-    decimals: decimalsValue,
-    uiAmount:
-      typeof tokenAmountRecord.uiAmountString === "string" &&
-      tokenAmountRecord.uiAmountString.trim()
-        ? tokenAmountRecord.uiAmountString
-        : formatDecimalAmount(amountValue, decimalsValue),
-  };
-}
-
-function compareSignatureHistoryDesc(
-  left: SignatureHistoryEntry,
-  right: SignatureHistoryEntry
-): number {
-  const leftBlockTime = left.blockTime ?? 0n;
-  const rightBlockTime = right.blockTime ?? 0n;
-
-  if (leftBlockTime !== rightBlockTime) {
-    return leftBlockTime > rightBlockTime ? -1 : 1;
-  }
-
-  if (left.slot !== right.slot) {
-    return left.slot > right.slot ? -1 : 1;
-  }
-
-  return String(left.signature).localeCompare(String(right.signature));
-}
-
-function dedupeSignatureHistory(
-  signatures: SignatureHistoryEntry[],
-  limit: number
-): SignatureHistoryEntry[] {
-  const bySignature = new Map<string, SignatureHistoryEntry>();
-
-  for (const signatureInfo of signatures) {
-    bySignature.set(String(signatureInfo.signature), signatureInfo);
-  }
-
-  return Array.from(bySignature.values()).sort(compareSignatureHistoryDesc).slice(0, limit);
-}
-
-async function mapSettledWithConcurrency<T, U>(
-  items: T[],
-  concurrency: number,
-  mapper: (item: T) => Promise<U>
-): Promise<Array<PromiseSettledResult<U>>> {
-  const results = new Array<PromiseSettledResult<U>>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(concurrency, items.length);
-
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (nextIndex < items.length) {
-        const currentIndex = nextIndex;
-        nextIndex += 1;
-
-        try {
-          results[currentIndex] = {
-            status: "fulfilled",
-            value: await mapper(items[currentIndex] as T),
-          };
-        } catch (reason) {
-          results[currentIndex] = {
-            status: "rejected",
-            reason,
-          };
-        }
-      }
-    })
-  );
-
-  return results;
-}
-
-async function resolveWalletTokenAccountAddresses(
-  c: AppContext,
-  rpc: ReturnType<typeof solanaRpc.createRpc>,
-  owner: Address,
-  walletId: string
-): Promise<Address[]> {
-  try {
-    return await tokenAccounts.getSplTokenAccountAddresses(rpc, owner);
-  } catch (error) {
-    console.error("listTransfers: failed to fetch token accounts for wallet history", {
-      requestId: c.get("requestId"),
-      walletId,
-      owner,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
-}
-
-async function resolveObservedTokenSymbols(env: Env): Promise<Map<string, string>> {
-  const symbolsByMint = new Map<string, string>();
-
-  try {
-    const result = await getDb(env)
-      .prepare(
-        `SELECT mint_address, symbol
-         FROM issued_tokens
-        WHERE mint_address IS NOT NULL
-          AND deployed_at IS NOT NULL`
-      )
-      .all<{
-        mint_address?: string | null;
-        symbol?: string | null;
-      }>();
-
-    for (const row of result.results ?? []) {
-      const mint = row.mint_address?.trim();
-      if (!mint) {
-        continue;
-      }
-
-      symbolsByMint.set(mint, row.symbol?.trim() || mint);
-    }
-  } catch {
-    // Ignore symbol resolution failures and fall back to mint addresses.
-  }
-
-  return symbolsByMint;
-}
-
-async function fetchParsedTransaction(
-  env: Env,
-  signature: string
-): Promise<ParsedTransactionResponse["result"]> {
-  const rpcResponse = await fetch(resolveSignatureHistoryRpcUrl(env), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: crypto.randomUUID(),
-      method: "getTransaction",
-      params: [
-        signature,
-        { encoding: "jsonParsed", commitment: "confirmed", maxSupportedTransactionVersion: 0 },
-      ],
-    }),
-  });
-
-  if (!rpcResponse.ok) {
-    throw new Error(`RPC request failed with status ${rpcResponse.status}`);
-  }
-
-  const payload = (await rpcResponse.json()) as ParsedTransactionResponse;
-  if (payload.error) {
-    throw new Error(payload.error.message ?? "RPC returned an error");
-  }
-
-  return payload.result ?? null;
-}
-
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Parsed transaction synthesis intentionally handles both SOL and SPL transfers in one pass.
-function buildObservedTransferRows(
-  parsedTransaction: ParsedTransactionResponse["result"],
-  signature: string,
-  fallbackBlockTime: bigint | number | null,
-  context: ObservedTransferContext
-): TransferRow[] {
-  if (!parsedTransaction) {
-    return [];
-  }
-
-  const accountKeys = (parsedTransaction.transaction?.message?.accountKeys ?? [])
-    .map((accountKey) => resolveParsedAccountKey(accountKey))
-    .filter((accountKey): accountKey is string => Boolean(accountKey));
-  const tokenAccountMetadata = new Map<
-    string,
-    { decimals: number | null; mint: string | null; owner: string | null }
-  >();
-  const observedRows = new Map<string, TransferRow>();
-  const preTokenBalances = parsedTransaction.meta?.preTokenBalances ?? [];
-  const postTokenBalances = parsedTransaction.meta?.postTokenBalances ?? [];
-
-  for (const balance of [...preTokenBalances, ...postTokenBalances]) {
-    if (typeof balance.accountIndex !== "number") {
-      continue;
-    }
-
-    const accountAddress = accountKeys[balance.accountIndex];
-    if (!accountAddress) {
-      continue;
-    }
-
-    const current = tokenAccountMetadata.get(accountAddress) ?? {
-      owner: null,
-      mint: null,
-      decimals: null,
-    };
-
-    tokenAccountMetadata.set(accountAddress, {
-      owner:
-        typeof balance.owner === "string" && balance.owner.trim() ? balance.owner : current.owner,
-      mint: typeof balance.mint === "string" && balance.mint.trim() ? balance.mint : current.mint,
-      decimals:
-        typeof balance.uiTokenAmount?.decimals === "number" &&
-        Number.isFinite(balance.uiTokenAmount.decimals) &&
-        Number.isInteger(balance.uiTokenAmount.decimals)
-          ? balance.uiTokenAmount.decimals
-          : current.decimals,
-    });
-  }
-
-  const timestamp = resolveObservedTimestamp(parsedTransaction.blockTime ?? fallbackBlockTime);
-  const status: TransferStatus = parsedTransaction.meta?.err ? "failed" : "confirmed";
-
-  for (const instruction of flattenParsedInstructions({ result: parsedTransaction })) {
-    const parsedType = instruction.parsed?.type;
-    const info = instruction.parsed?.info;
-
-    if (!parsedType || !info) {
-      continue;
-    }
-
-    if ((instruction.program ?? "").startsWith("system") && parsedType === "transfer") {
-      const sourceAddress = readInstructionInfoString(info, "source");
-      const destinationAddress = readInstructionInfoString(info, "destination");
-      const lamports = readInstructionInfoInteger(info, "lamports");
-
-      if (!sourceAddress || !destinationAddress || lamports === null) {
-        continue;
-      }
-
-      const sourceWalletId = context.walletIdsByAddress.get(sourceAddress) ?? null;
-      const destinationWalletId = context.walletIdsByAddress.get(destinationAddress) ?? null;
-      const walletId = sourceWalletId ?? destinationWalletId;
-
-      if (!walletId) {
-        continue;
-      }
-
-      const direction: TransferDirection =
-        destinationWalletId && !sourceWalletId ? "inbound" : "outbound";
-      const dedupeKey = `${walletId}:${signature}:SOL:${direction}`;
-
-      if (observedRows.has(dedupeKey)) {
-        continue;
-      }
-
-      observedRows.set(dedupeKey, {
-        id: `xfr_observed_${walletId}_${signature}`,
-        organization_id: context.organizationId,
-        project_id: context.projectId,
-        wallet_id: walletId,
-        counterparty_id: null,
-        source_address: sourceAddress,
-        destination_address: destinationAddress,
-        token: "SOL",
-        amount: formatDecimalAmount(lamports, 9),
-        memo: null,
-        type: "transfer",
-        direction,
-        status,
-        provider: null,
-        provider_reference: null,
-        delivery_mode: null,
-        fiat_currency: null,
-        fiat_amount: null,
-        provider_data: {},
-        signature,
-        serialized_tx: null,
-        slot: parsedTransaction.slot ?? null,
-        block_time: timestamp,
-        fee: parsedTransaction.meta?.fee ?? null,
-        error: null,
-        initiated_by_key_id: null,
-        idempotency_key: null,
-        idempotency_fingerprint: null,
-        created_at: timestamp,
-        updated_at: timestamp,
-      });
-      continue;
-    }
-
-    const normalizedProgram = (instruction.program ?? "").toLowerCase();
-    if (!normalizedProgram.includes("token")) {
-      continue;
-    }
-
-    if (parsedType === "mintTo" || parsedType === "mintToChecked") {
-      const destinationTokenAccount = readInstructionInfoString(info, "account");
-      if (!destinationTokenAccount) {
-        continue;
-      }
-
-      const destinationTokenMetadata = tokenAccountMetadata.get(destinationTokenAccount);
-      const destinationOwner = destinationTokenMetadata?.owner ?? null;
-      const destinationWalletId = resolveWalletIdForTokenAccount(
-        context,
-        destinationTokenAccount,
-        destinationOwner
-      );
-
-      if (!destinationWalletId) {
-        continue;
-      }
-
-      const tokenAmount = readTokenAmountInfo(info);
-      const decimals = tokenAmount?.decimals ?? destinationTokenMetadata?.decimals;
-      const rawAmount = tokenAmount?.amount ?? readInstructionInfoInteger(info, "amount");
-      const mint = readInstructionInfoString(info, "mint") ?? destinationTokenMetadata?.mint;
-      const resolvedDecimals =
-        typeof decimals === "number" && Number.isFinite(decimals) && Number.isInteger(decimals)
-          ? decimals
-          : null;
-
-      if (resolvedDecimals === null || rawAmount === null || !mint) {
-        continue;
-      }
-
-      const resolvedUiAmount =
-        tokenAmount?.uiAmount ?? formatDecimalAmount(rawAmount, resolvedDecimals);
-      const dedupeKey = `${destinationWalletId}:${signature}:${mint}:mint:${rawAmount.toString()}`;
-
-      if (observedRows.has(dedupeKey)) {
-        continue;
-      }
-
-      observedRows.set(dedupeKey, {
-        id: `xfr_observed_${destinationWalletId}_${signature}_${mint}_mint`,
-        organization_id: context.organizationId,
-        project_id: context.projectId,
-        wallet_id: destinationWalletId,
-        counterparty_id: null,
-        source_address: readInstructionInfoString(info, "mintAuthority") ?? mint,
-        destination_address: destinationOwner ?? destinationTokenAccount,
-        token: resolveObservedTokenSymbol(mint, context.tokenSymbolsByMint),
-        amount: resolvedUiAmount,
-        memo: null,
-        type: "transfer",
-        direction: "inbound",
-        status,
-        provider: null,
-        provider_reference: null,
-        delivery_mode: null,
-        fiat_currency: null,
-        fiat_amount: null,
-        provider_data: {},
-        signature,
-        serialized_tx: null,
-        slot: parsedTransaction.slot ?? null,
-        block_time: timestamp,
-        fee: parsedTransaction.meta?.fee ?? null,
-        error: null,
-        initiated_by_key_id: null,
-        idempotency_key: null,
-        idempotency_fingerprint: null,
-        created_at: timestamp,
-        updated_at: timestamp,
-      });
-      continue;
-    }
-
-    if (parsedType !== "transfer" && parsedType !== "transferChecked") {
-      continue;
-    }
-
-    const sourceTokenAccount = readInstructionInfoString(info, "source");
-    const destinationTokenAccount = readInstructionInfoString(info, "destination");
-    if (!sourceTokenAccount || !destinationTokenAccount) {
-      continue;
-    }
-
-    const sourceTokenMetadata = tokenAccountMetadata.get(sourceTokenAccount);
-    const destinationTokenMetadata = tokenAccountMetadata.get(destinationTokenAccount);
-    const sourceOwner = sourceTokenMetadata?.owner ?? null;
-    const destinationOwner = destinationTokenMetadata?.owner ?? null;
-    const sourceWalletId = resolveWalletIdForTokenAccount(context, sourceTokenAccount, sourceOwner);
-    const destinationWalletId = resolveWalletIdForTokenAccount(
-      context,
-      destinationTokenAccount,
-      destinationOwner
-    );
-    const walletId = sourceWalletId ?? destinationWalletId;
-
-    if (!walletId) {
-      continue;
-    }
-
-    const tokenAmount = readTokenAmountInfo(info);
-    const decimals =
-      tokenAmount?.decimals ?? sourceTokenMetadata?.decimals ?? destinationTokenMetadata?.decimals;
-    const rawAmount = tokenAmount?.amount ?? readInstructionInfoInteger(info, "amount");
-    const mint =
-      readInstructionInfoString(info, "mint") ??
-      sourceTokenMetadata?.mint ??
-      destinationTokenMetadata?.mint;
-    const resolvedDecimals =
-      typeof decimals === "number" && Number.isFinite(decimals) && Number.isInteger(decimals)
-        ? decimals
-        : null;
-
-    if (resolvedDecimals === null || rawAmount === null || !mint) {
-      continue;
-    }
-
-    const direction: TransferDirection =
-      destinationWalletId && !sourceWalletId ? "inbound" : "outbound";
-    const resolvedUiAmount =
-      tokenAmount?.uiAmount ?? formatDecimalAmount(rawAmount, resolvedDecimals);
-    const dedupeKey = `${walletId}:${signature}:${mint}:${direction}:${rawAmount.toString()}`;
-
-    if (observedRows.has(dedupeKey)) {
-      continue;
-    }
-
-    observedRows.set(dedupeKey, {
-      id: `xfr_observed_${walletId}_${signature}_${mint}`,
-      organization_id: context.organizationId,
-      project_id: context.projectId,
-      wallet_id: walletId,
-      counterparty_id: null,
-      source_address: sourceOwner ?? sourceTokenAccount,
-      destination_address: destinationOwner ?? destinationTokenAccount,
-      token: resolveObservedTokenSymbol(mint, context.tokenSymbolsByMint),
-      amount: resolvedUiAmount,
-      memo: null,
-      type: "transfer",
-      direction,
-      status,
-      provider: null,
-      provider_reference: null,
-      delivery_mode: null,
-      fiat_currency: null,
-      fiat_amount: null,
-      provider_data: {},
-      signature,
-      serialized_tx: null,
-      slot: parsedTransaction.slot ?? null,
-      block_time: timestamp,
-      fee: parsedTransaction.meta?.fee ?? null,
-      error: null,
-      initiated_by_key_id: null,
-      idempotency_key: null,
-      idempotency_fingerprint: null,
-      created_at: timestamp,
-      updated_at: timestamp,
-    });
-  }
-
-  return [...observedRows.values()];
-}
-
-async function buildObservedTransfersForSignatures(
-  env: Env,
-  signatures: Array<Awaited<ReturnType<typeof solanaRpc.getSignaturesForAddress>>[number]>,
-  context: ObservedTransferContext
-): Promise<TransferRow[]> {
-  if (signatures.length === 0 || context.walletIdsByAddress.size === 0) {
-    return [];
-  }
-
-  const settled = await Promise.allSettled(
-    signatures.map(async (signatureInfo) => {
-      const parsedTransaction = await fetchParsedTransaction(env, String(signatureInfo.signature));
-      return buildObservedTransferRows(
-        parsedTransaction,
-        String(signatureInfo.signature),
-        signatureInfo.blockTime,
-        context
-      );
-    })
-  );
-
-  return settled.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
-}
-
 function buildTransferReplayPayload(replay: TransferRow) {
   const storedPrivateTransfer = (replay.provider_data as Record<string, unknown> | null | undefined)
     ?.privateTransfer;
   return storedPrivateTransfer
     ? { transfer: mapTransferRow(replay), privateTransfer: storedPrivateTransfer }
     : { transfer: mapTransferRow(replay) };
+}
+
+function transferMatchesSearch(row: TransferRow, search: string): boolean {
+  const normalizedSearch = search.toLowerCase();
+  return [
+    row.id,
+    row.signature,
+    row.provider_reference,
+    row.source_address,
+    row.destination_address,
+    row.memo,
+    row.counterparty_id,
+    row.counterparty_display_name,
+  ].some((value) => value?.toLowerCase().includes(normalizedSearch));
+}
+
+function compareTransferRows(
+  left: TransferRow,
+  right: TransferRow,
+  sortBy: "amount" | "createdAt" | "status" | "updatedAt",
+  sortDirection: "asc" | "desc"
+): number {
+  let primaryComparison: number;
+
+  if (sortBy === "amount") {
+    const leftAmount = left.amount?.trim() || null;
+    const rightAmount = right.amount?.trim() || null;
+    if (leftAmount === null || rightAmount === null) {
+      if (leftAmount === rightAmount) {
+        primaryComparison = 0;
+      } else {
+        return leftAmount === null ? 1 : -1;
+      }
+    } else {
+      primaryComparison = compareDecimalAmounts(leftAmount, rightAmount);
+    }
+  } else if (sortBy === "status") {
+    primaryComparison = left.status.localeCompare(right.status);
+  } else if (sortBy === "updatedAt") {
+    primaryComparison = left.updated_at.localeCompare(right.updated_at);
+  } else {
+    primaryComparison = left.created_at.localeCompare(right.created_at);
+  }
+
+  if (primaryComparison !== 0) {
+    return sortDirection === "asc" ? primaryComparison : -primaryComparison;
+  }
+
+  const createdAtComparison = right.created_at.localeCompare(left.created_at);
+  return createdAtComparison || right.id.localeCompare(left.id);
 }
 
 export async function createTransfer(c: AppContext) {
@@ -1706,43 +1029,58 @@ export async function listTransfers(c: AppContext) {
   const auth = getAuth(c);
   const query = listTransfersQuerySchema.safeParse(c.req.query());
   if (!query.success) throw badRequestQuery();
-  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:read"]);
 
   const {
     page,
     pageSize,
     wallet: walletId,
     walletAddress,
+    search,
     token,
     direction,
     status: statuses,
     category,
+    type: requestedTypes,
     counterpartyId,
     provider,
     providerReference,
     from,
     to,
+    includeObserved,
+    sortBy,
+    sortDirection,
   } = query.data;
   const repo = getPaymentsRepository(c);
   const offset = (page - 1) * pageSize;
-  const transferTypes =
+  const categoryTypes =
     category === "wallet"
       ? WALLET_TRANSFER_TYPES
       : category === "ramp"
         ? RAMP_TRANSFER_TYPES
         : undefined;
+  const transferTypes = requestedTypes ?? categoryTypes;
+  if (
+    requestedTypes &&
+    categoryTypes &&
+    requestedTypes.some((type) => !categoryTypes.includes(type as never))
+  ) {
+    throw new AppError("BAD_REQUEST", "type must match the requested transfer category");
+  }
   const transferTypeSet = transferTypes ? new Set<TransferType>(transferTypes) : undefined;
   const hasProvider = provider !== undefined;
   const hasProviderReference = providerReference !== undefined;
+  const hasExactProviderReference = hasProvider && hasProviderReference;
 
-  if (hasProvider !== hasProviderReference) {
-    throw new AppError(
-      "BAD_REQUEST",
-      "provider and providerReference are both required for provider reference lookup"
-    );
+  if (walletId && allowedWalletIds && !allowedWalletIds.includes(walletId)) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
   }
 
-  if (hasProvider && hasProviderReference) {
+  if (hasProviderReference && !hasProvider) {
+    throw new AppError("BAD_REQUEST", "provider is required for provider reference lookup");
+  }
+
+  if (hasExactProviderReference) {
     const row = await repo.getTransferByProviderReference({
       provider,
       providerReference,
@@ -1750,26 +1088,15 @@ export async function listTransfers(c: AppContext) {
       projectId: auth.projectId,
     });
 
-    if (!row) {
-      return paginated(c, [], { total: 0, page, pageSize });
-    }
-    if (allowedWalletIds && !allowedWalletIds.includes(row.wallet_id)) {
+    if (row && allowedWalletIds && !allowedWalletIds.includes(row.wallet_id)) {
       throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
     }
-    if (category === "wallet" && isRampTransferType(row.type)) {
-      return paginated(c, [], { total: 0, page, pageSize });
-    }
-    if (category === "ramp" && !isRampTransferType(row.type)) {
-      return paginated(c, [], { total: 0, page, pageSize });
-    }
-
-    return paginated(c, [mapTransferRow(row)], { total: 1, page, pageSize });
   }
 
   let transferRows: TransferRow[];
   let total: number;
 
-  if (walletId || walletAddress) {
+  if ((walletId || walletAddress) && includeObserved && !hasExactProviderReference) {
     // Helius-backed path: fetch on-chain signatures for the wallet address, then
     // cross-reference with our DB. Append pending/processing/failed from DB (not on-chain yet).
     //
@@ -1781,10 +1108,6 @@ export async function listTransfers(c: AppContext) {
     const scope = await resolveScope(c);
 
     if (walletId) {
-      if (allowedWalletIds && !allowedWalletIds.includes(walletId)) {
-        throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-      }
-
       const wallet = resolveWallet(scope.wallets, walletId);
       assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:read"]);
       sourceAddress = wallet.publicKey;
@@ -1894,14 +1217,18 @@ export async function listTransfers(c: AppContext) {
         projectId: auth.projectId,
         walletId: resolvedWalletId,
         walletIds: resolvedWalletId ? undefined : (allowedWalletIds ?? undefined),
-        sourceAddress: resolvedWalletId ? undefined : walletAddress,
+        walletAddress: resolvedWalletId ? undefined : walletAddress,
         counterpartyId,
+        search,
         statuses: nonChainStatuses,
         types: transferTypes,
+        provider,
         token,
         direction,
         createdAtFrom: from,
         createdAtTo: to,
+        sortBy,
+        sortDirection,
         limit: 100,
         offset: 0,
       });
@@ -1939,32 +1266,75 @@ export async function listTransfers(c: AppContext) {
     // 5. Apply remaining filters and sort
     const filtered = merged
       .filter((row) => {
+        if (search && !transferMatchesSearch(row, search)) return false;
         if (counterpartyId && row.counterparty_id !== counterpartyId) return false;
+        if (provider && row.provider !== provider) return false;
         if (statuses && !statuses.includes(row.status)) return false;
         if (token && row.token !== token) return false;
         if (direction && row.direction !== direction) return false;
         if (transferTypeSet && !transferTypeSet.has(row.type)) return false;
+        if (from && row.created_at < from) return false;
+        if (to && row.created_at > to) return false;
         return true;
       })
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+      .sort((left, right) => compareTransferRows(left, right, sortBy, sortDirection));
 
     total = filtered.length;
     transferRows = filtered.slice(offset, offset + pageSize);
   } else {
     // DB-only path for org-scoped queries without a specific wallet
+    let resolvedDatabaseWalletId = walletId;
+    let unresolvedDatabaseWalletAddress: string | undefined;
+
+    if (!resolvedDatabaseWalletId && walletAddress) {
+      const scope = await resolveScope(c);
+      const matchedWallet = scope.wallets.find((wallet) => wallet.publicKey === walletAddress);
+
+      if (matchedWallet) {
+        if (allowedWalletIds && !allowedWalletIds.includes(matchedWallet.walletId)) {
+          throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+        }
+        resolvedDatabaseWalletId = matchedWallet.walletId;
+      } else {
+        if (allowedWalletIds) {
+          throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+        }
+        unresolvedDatabaseWalletAddress = walletAddress;
+      }
+    }
+
+    if (
+      !resolvedDatabaseWalletId &&
+      !unresolvedDatabaseWalletAddress &&
+      allowedWalletIds?.length === 0
+    ) {
+      return paginated(c, [], { total: 0, page, pageSize });
+    }
+
+    const queryStartedAt = performance.now();
     const result = await repo.listTransfers({
       organizationId: auth.organizationId,
       projectId: auth.projectId,
-      walletIds: allowedWalletIds ?? undefined,
+      walletId: resolvedDatabaseWalletId,
+      walletIds: resolvedDatabaseWalletId ? undefined : (allowedWalletIds ?? undefined),
+      walletAddress: walletId ? walletAddress : unresolvedDatabaseWalletAddress,
       counterpartyId,
+      search,
       token,
       direction,
       statuses,
       types: transferTypes,
+      provider,
+      providerReference,
       createdAtFrom: from,
       createdAtTo: to,
+      sortBy,
+      sortDirection,
       limit: pageSize,
       offset,
+    });
+    c.header("Server-Timing", `db;dur=${(performance.now() - queryStartedAt).toFixed(1)}`, {
+      append: true,
     });
     total = result.total;
     transferRows = result.rows;
@@ -1976,7 +1346,7 @@ export async function listTransfers(c: AppContext) {
 
 export async function getTransfer(c: AppContext) {
   const auth = getAuth(c);
-  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:read"]);
   const params = transferIdParamsSchema.safeParse(c.req.param());
   const repo = getPaymentsRepository(c);
 
