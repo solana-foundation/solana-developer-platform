@@ -15,6 +15,9 @@ describe("shouldRedirectToOrganizationOnboarding", () => {
     expect(shouldRedirectToOrganizationOnboarding("not_started", "/dashboard/onboarding")).toBe(
       false
     );
+    expect(
+      shouldRedirectToOrganizationOnboarding("in_progress", "/dashboard/onboarding/custody")
+    ).toBe(false);
     expect(shouldRedirectToOrganizationOnboarding("complete", "/dashboard/wallets")).toBe(false);
     expect(shouldRedirectToOrganizationOnboarding(null, "/dashboard/wallets")).toBe(false);
   });

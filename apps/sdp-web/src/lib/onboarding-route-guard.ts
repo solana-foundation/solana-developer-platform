@@ -4,5 +4,7 @@ export function shouldRedirectToOrganizationOnboarding(
   status: OrganizationOnboardingStatus | null,
   pathname: string
 ): boolean {
-  return status !== null && status !== "complete" && pathname !== "/dashboard/onboarding";
+  const isOnboardingRoute =
+    pathname === "/dashboard/onboarding" || pathname.startsWith("/dashboard/onboarding/");
+  return status !== null && status !== "complete" && !isOnboardingRoute;
 }
