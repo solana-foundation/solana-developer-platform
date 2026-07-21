@@ -92,6 +92,17 @@ test("NEXT_PUBLIC_SOLANA_NETWORK is derived from SOLANA_NETWORK", () => {
   assert.match(env, /^NEXT_PUBLIC_SOLANA_NETWORK=mainnet-beta$/m);
 });
 
+test("Asset Profiles remains an explicit production opt-in", () => {
+  const disabled = generateEnv(defaultValues());
+  assert.match(disabled, /^ASSET_PROFILES_ENABLED=false$/m);
+
+  const enabled = generateEnv({
+    ...defaultValues(),
+    ASSET_PROFILES_ENABLED: "true",
+  });
+  assert.match(enabled, /^ASSET_PROFILES_ENABLED=true$/m);
+});
+
 test("generated .env covers every base key in infra/self-hosted/.env.example", () => {
   const env = generateEnv(defaultValues());
   const emitted = new Set(

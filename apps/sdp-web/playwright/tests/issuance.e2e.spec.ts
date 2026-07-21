@@ -257,6 +257,9 @@ async function createDraftViaWizard(page: Page, options: CreateDraftOptions): Pr
   await page
     .getByPlaceholder("Describe what this asset represents.")
     .fill("Created by Playwright issuance e2e.");
+  await page.getByRole("tab", { name: "Operational", exact: true }).click();
+  await page.getByRole("combobox").click();
+  await page.getByRole("option").filter({ hasText: options.treasuryWalletId }).click();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
 
   // Public information — defaults are fine.
@@ -268,7 +271,18 @@ async function createDraftViaWizard(page: Page, options: CreateDraftOptions): Pr
   const dialog = page.getByRole("dialog", { name: "Create asset draft" });
   await expect(dialog).toBeVisible();
   await page.waitForTimeout(400);
-  await dialog.getByRole("button", { name: "Create draft", exact: true }).click();
+  // Confirmation starts an async server action, then routes to the new token.
+  // Wait for that navigation so the caller cannot abort the create request by
+  // immediately navigating back to the overview.
+  await Promise.all([
+    page.waitForURL(
+      (url) =>
+        url.pathname.startsWith("/dashboard/issuance") &&
+        url.pathname !== "/dashboard/issuance/create",
+      { timeout: 120_000 }
+    ),
+    dialog.getByRole("button", { name: "Create draft", exact: true }).click(),
+  ]);
 }
 
 // The legacy create-token modal: template → identity → features → create.

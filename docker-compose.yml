@@ -50,6 +50,7 @@ services:
     environment:
       # Core
       ENVIRONMENT: ${ENVIRONMENT:-development}
+      ASSET_PROFILES_ENABLED: ${ASSET_PROFILES_ENABLED:-true}
       API_VERSION: ${API_VERSION:-local-compose}
       SDP_DEPLOYMENT_MODE: ${SDP_DEPLOYMENT_MODE:-self_hosted}
       DATABASE_URL: postgresql://sdp:sdp@postgres:5432/sdp
@@ -91,7 +92,8 @@ services:
         NEXT_PUBLIC_SDP_API_BASE_URL: ${NEXT_PUBLIC_SDP_API_BASE_URL:-http://localhost:8787}
         NEXT_PUBLIC_SDP_DOCS_URL: ${NEXT_PUBLIC_SDP_DOCS_URL:-http://localhost:3001}
         NEXT_PUBLIC_SOLANA_NETWORK: ${NEXT_PUBLIC_SOLANA_NETWORK:-devnet}
-        NEXT_PUBLIC_ASSET_PROFILES_ENABLED: ${NEXT_PUBLIC_ASSET_PROFILES_ENABLED:-true}
+        NEXT_PUBLIC_SDP_ENVIRONMENT: ${ENVIRONMENT:-development}
+        NEXT_PUBLIC_ASSET_PROFILES_ENABLED: ${ASSET_PROFILES_ENABLED:-true}
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
     restart: unless-stopped
     ports:

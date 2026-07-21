@@ -5,15 +5,25 @@
 // controls whether the UI is shown. Recognized non-production contexts are
 // always enabled; production keeps the explicit flag for a controlled rollout.
 export function isAssetProfilesUiEnabled(): boolean {
+  const sdpEnvironment = process.env.NEXT_PUBLIC_SDP_ENVIRONMENT?.trim().toLowerCase();
+  if (sdpEnvironment === "development") {
+    return true;
+  }
+
   const vercelEnvironment = process.env.NEXT_PUBLIC_VERCEL_ENV?.trim().toLowerCase();
   if (vercelEnvironment === "preview" || vercelEnvironment === "development") {
     return true;
   }
 
   const nodeEnvironment = process.env.NODE_ENV?.trim().toLowerCase();
-  if (!vercelEnvironment && (nodeEnvironment === "development" || nodeEnvironment === "test")) {
+  if (
+    !sdpEnvironment &&
+    !vercelEnvironment &&
+    (nodeEnvironment === "development" || nodeEnvironment === "test")
+  ) {
     return true;
   }
 
-  return process.env.NEXT_PUBLIC_ASSET_PROFILES_ENABLED === "true";
+  const explicitFlag = process.env.NEXT_PUBLIC_ASSET_PROFILES_ENABLED?.trim().toLowerCase();
+  return explicitFlag === "true";
 }

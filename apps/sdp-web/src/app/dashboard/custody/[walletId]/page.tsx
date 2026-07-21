@@ -336,7 +336,7 @@ export default async function WalletDetailPage({
   );
 }
 
-async function WalletBalanceSummary({
+export async function WalletBalanceSummary({
   balancesPromise,
   providerLabel,
   publicKey,
@@ -389,7 +389,7 @@ async function WalletBalanceSummary({
   );
 }
 
-async function WalletBalancesSection({
+export async function WalletBalancesSection({
   balancesPromise,
   ownedTokensByMintPromise,
   t,
