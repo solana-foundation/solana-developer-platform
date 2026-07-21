@@ -303,7 +303,7 @@ export async function sendAndConfirmTransaction(
     maxRetries: options?.maxRetries,
   });
 
-  return pollForConfirmation(rpc, signature, options);
+  return confirmTransaction(rpc, signature, options);
 }
 
 export type ConfirmTransactionOptions = {
@@ -312,18 +312,18 @@ export type ConfirmTransactionOptions = {
   pollIntervalMs?: number;
 };
 
-async function pollForConfirmation(
+/**
+ * Confirm an already-sent transaction
+ */
+export async function confirmTransaction(
   rpc: SolanaRpc,
   signature: Signature,
-  options: ConfirmTransactionOptions | undefined,
-  resend?: () => Promise<unknown>
+  options?: ConfirmTransactionOptions
 ): Promise<TransactionConfirmation> {
   const commitment = options?.commitment ?? "confirmed";
   const timeoutMs = options?.timeoutMs ?? 60000;
   const pollIntervalMs = options?.pollIntervalMs ?? 1000;
-  const resendIntervalMs = 5000;
   const startTime = Date.now();
-  let lastSendTime = startTime;
 
   while (Date.now() - startTime < timeoutMs) {
     const result = await getSignatureStatusOrNull(rpc, signature);
@@ -344,44 +344,10 @@ async function pollForConfirmation(
       }
     }
 
-    if (!result && resend && Date.now() - lastSendTime >= resendIntervalMs) {
-      lastSendTime = Date.now();
-      await resend().catch(() => undefined);
-    }
-
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
 
   throw solanaRpcError(`Transaction ${signature} confirmation timed out after ${timeoutMs}ms`);
-}
-
-/**
- * Confirm an already-sent transaction
- */
-export async function confirmTransaction(
-  rpc: SolanaRpc,
-  signature: Signature,
-  options?: ConfirmTransactionOptions
-): Promise<TransactionConfirmation> {
-  return pollForConfirmation(rpc, signature, options);
-}
-
-/**
- * Confirm an already-sent transaction, resubmitting it every few seconds
- * while the signature has no status yet. Validators occasionally drop an
- * accepted transaction, and redundantly sending the identical bytes is the
- * standard recovery — same message, same signature, so resends are
- * idempotent. Resend failures are ignored because duplicate submissions of
- * an already-landed transaction can be rejected while the original still
- * confirms; the poll loop alone decides the outcome.
- */
-export async function confirmTransactionWithResend(
-  rpc: SolanaRpc,
-  signature: Signature,
-  resend: () => Promise<unknown>,
-  options?: ConfirmTransactionOptions
-): Promise<TransactionConfirmation> {
-  return pollForConfirmation(rpc, signature, options, resend);
 }
 
 /**

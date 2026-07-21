@@ -16,7 +16,7 @@ import type { FeePaymentPort } from "@sdp/payments/fee-payment/port";
 import type { RpcEnv } from "@sdp/rpc";
 import {
   type ConfirmTransactionOptions,
-  confirmTransactionWithResend,
+  confirmTransaction,
   createRpcForSdk,
 } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -1197,7 +1197,7 @@ export class MosaicService {
       const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
 
       const signature = await feePayment.signAndSend(txBytes);
-      return this.confirmSubmitted(signature, () => feePayment.signAndSend(txBytes));
+      return this.confirmSubmitted(signature);
     }
 
     // No fee sponsor configured: sign and submit directly
@@ -1211,27 +1211,17 @@ export class MosaicService {
       })
       .send();
 
-    return this.confirmSubmitted(signature, () =>
-      this.rpc.sendTransaction(encoded, { skipPreflight: true, encoding: "base64" }).send()
-    );
+    return this.confirmSubmitted(signature);
   }
 
   /**
-   * Wait for a submitted transaction to confirm, resubmitting it while the
-   * signature has no status — the validator can drop an accepted transaction
-   * (the dominant Surfpool CI flake). Resubmitting identical bytes is
-   * idempotent: same message, same signature. Resends after the first landing
-   * use skipPreflight on the direct path since preflight simulation of an
-   * already-executed transaction fails spuriously.
+   * Wait for a submitted transaction to confirm and map the result into a
+   * MosaicTransactionResult, throwing the app-mapped error on on-chain failure.
    */
-  private async confirmSubmitted(
-    signature: Signature,
-    resend: () => Promise<unknown>
-  ): Promise<MosaicTransactionResult> {
-    const confirmation = await confirmTransactionWithResend(
+  private async confirmSubmitted(signature: Signature): Promise<MosaicTransactionResult> {
+    const confirmation = await confirmTransaction(
       this.rpc,
       signature,
-      resend,
       this.getTransactionConfirmationOptions()
     );
 
