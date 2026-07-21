@@ -12,7 +12,7 @@ import {
   type ParsedTransaction,
   simulateTransaction,
 } from "@sdp/rpc/solana";
-import type { TokenResponse } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS, type TokenResponse } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -592,6 +592,7 @@ export const prepareDeploy = async (c: AppContext) => {
 // carries one targeting that mint. jsonParsed decodes both legacy `spl-token`
 // and `spl-token-2022` programs under the same instruction `type`.
 const MINT_INIT_INSTRUCTION_TYPES = new Set(["initializeMint", "initializeMint2"]);
+const TOKEN_PROGRAM_IDS = new Set<string>(Object.values(SPL_TOKEN_PROGRAMS));
 
 /**
  * Whether `tx` contains an instruction that initializes `mint` — i.e. the
@@ -602,9 +603,26 @@ const MINT_INIT_INSTRUCTION_TYPES = new Set(["initializeMint", "initializeMint2"
 const transactionInitializesMint = (tx: ParsedTransaction, mint: Address): boolean =>
   tx.instructions.some(
     (ix) =>
+      TOKEN_PROGRAM_IDS.has(ix.programId) &&
       ix.parsedType !== null &&
       MINT_INIT_INSTRUCTION_TYPES.has(ix.parsedType) &&
       ix.info?.mint === mint
+  );
+
+const transactionInitializesMintWithAuthorities = (
+  tx: ParsedTransaction,
+  mint: Address,
+  mintAuthority: Address,
+  freezeAuthority: Address | null
+): boolean =>
+  tx.instructions.some(
+    (ix) =>
+      TOKEN_PROGRAM_IDS.has(ix.programId) &&
+      ix.parsedType !== null &&
+      MINT_INIT_INSTRUCTION_TYPES.has(ix.parsedType) &&
+      ix.info?.mint === mint &&
+      ix.info?.mintAuthority === mintAuthority &&
+      ix.info?.freezeAuthority === freezeAuthority
   );
 
 /**
@@ -721,6 +739,12 @@ export const confirmDeploy = async (c: AppContext) => {
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const custodyAddress = signer.address;
   const freezeAuthority = token.isFreezable ? custodyAddress : null;
+
+  if (
+    !transactionInitializesMintWithAuthorities(confirmedTx, mint, custodyAddress, freezeAuthority)
+  ) {
+    throw badRequest("Deploy transaction did not use the expected mint authorities");
+  }
 
   // Re-derive the ABL list address server-side instead of trusting the request
   // body's `listAddress`: for allowlist/blocklist tokens a wrong value would

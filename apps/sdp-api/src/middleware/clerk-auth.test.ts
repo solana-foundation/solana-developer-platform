@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import { AppError } from "@/lib/errors";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { rateLimitMiddleware } from "@/middleware/rate-limit";
@@ -110,6 +111,12 @@ describe("Clerk auth request cache", () => {
         organizationId: c.get("clerk")?.organizationId ?? null,
       });
     });
+    app.onError((error, c) => {
+      if (error instanceof AppError) {
+        return c.json(error.toResponse(), error.statusCode as 401 | 403);
+      }
+      throw error;
+    });
 
     return { app, token };
   }
@@ -150,6 +157,38 @@ describe("Clerk auth request cache", () => {
       "default-production",
       "default-sandbox",
     ]);
+  });
+
+  it("rejects a stale Clerk JWT after the local organization membership is removed", async () => {
+    await getDb(env)
+      .prepare(
+        "UPDATE organization_members SET status = 'removed' WHERE organization_id = ? AND user_id = ?"
+      )
+      .bind(TEST_ORG.id, "usr_clerk_cached")
+      .run();
+
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_cached",
+      org_id: "clerk_org_cached",
+      org_role: "org:admin",
+      org_slug: TEST_ORG.slug,
+      email: "clerk-cache@example.com",
+      iss: "https://clerk.example.test",
+    };
+    const { app, token } = createProtectedApp(payload);
+
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(401);
+    const membership = await getDb(env)
+      .prepare("SELECT status FROM organization_members WHERE organization_id = ? AND user_id = ?")
+      .bind(TEST_ORG.id, "usr_clerk_cached")
+      .first<{ status: string }>();
+    expect(membership?.status).toBe("removed");
   });
 
   it("provisions default projects when the membership webhook has not arrived", async () => {

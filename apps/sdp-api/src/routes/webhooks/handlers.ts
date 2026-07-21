@@ -106,33 +106,26 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
   ]);
 }
 
-function primaryEmailFromClerkUser(user: ClerkUser): string | null {
+function verifiedPrimaryEmailFromClerkUser(user: ClerkUser): string | null {
   const emails = user.email_addresses || [];
   const primary = emails.find((item) => item.id === user.primary_email_address_id) || emails[0];
+  if (primary?.verification?.status !== "verified") {
+    return null;
+  }
   return primary?.email_address?.toLowerCase() ?? null;
 }
 
-async function resolveUserEmail(env: Env, userId: string, fallbackEmail?: string | null) {
-  if (fallbackEmail?.includes("@")) {
-    return fallbackEmail.toLowerCase();
-  }
-
+async function resolveVerifiedUserEmail(env: Env, userId: string): Promise<string | null> {
   const user = await new ClerkUsersService(env).getUser(userId);
-  const email = primaryEmailFromClerkUser(user);
-
-  if (!email) {
-    throw badRequest("Clerk user missing email");
-  }
-
-  return email;
+  return verifiedPrimaryEmailFromClerkUser(user);
 }
 
 async function ensureUserMapping(
   c: AppContext,
-  user: { id: string; email?: string | null; name?: string | null }
+  user: { id: string; email: string; name?: string | null }
 ): Promise<string> {
   const db = getDb(c.env);
-  const email = await resolveUserEmail(c.env, user.id, user.email);
+  const email = user.email.toLowerCase();
   const existing = await db
     .prepare(
       `SELECT aui.user_id, u.email
@@ -209,10 +202,14 @@ async function ensureUserMapping(
 }
 
 async function syncUser(c: AppContext, data: UserJSON) {
+  const email = verifiedPrimaryEmailFromClerkUser(data);
+  if (!email) {
+    return;
+  }
   const fullName = [data.first_name, data.last_name].filter(Boolean).join(" ").trim();
   await ensureUserMapping(c, {
     id: data.id,
-    email: primaryEmailFromClerkUser(data),
+    email,
     name: fullName || data.username,
   });
 }
@@ -245,9 +242,13 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
 
 async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON) {
   const organizationId = await ensureOrganizationMapping(c, data.organization);
+  const email = await resolveVerifiedUserEmail(c.env, data.public_user_data.user_id);
+  if (!email) {
+    return;
+  }
   const userId = await ensureUserMapping(c, {
     id: data.public_user_data.user_id,
-    email: data.public_user_data.identifier,
+    email,
   });
   const role = mapClerkRoleToOrgRole(data.role);
   const memberId = `mem_${crypto.randomUUID()}`;

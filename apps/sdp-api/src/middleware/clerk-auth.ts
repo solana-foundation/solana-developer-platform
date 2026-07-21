@@ -111,15 +111,15 @@ async function resolveExistingClerkContext(
     }>();
 }
 
-async function resolveOrgRole(db: DatabaseClient, userId: string, organizationId: string) {
+async function resolveOrgMembership(db: DatabaseClient, userId: string, organizationId: string) {
   return db
     .prepare(
-      `SELECT role
+      `SELECT role, status
        FROM organization_members
-       WHERE user_id = ? AND organization_id = ? AND status = 'active'`
+       WHERE user_id = ? AND organization_id = ?`
     )
     .bind(userId, organizationId)
-    .first<{ role: string }>();
+    .first<{ role: string; status: string }>();
 }
 
 async function ensureClerkUser(
@@ -180,8 +180,11 @@ async function ensureMembership(
     clerkRole?: string | null;
   }
 ): Promise<OrganizationRole> {
-  const existing = await resolveOrgRole(db, params.userId, params.organizationId);
-  if (existing?.role) {
+  const existing = await resolveOrgMembership(db, params.userId, params.organizationId);
+  if (existing && existing.status !== "active") {
+    throw unauthorized("Organization membership is inactive");
+  }
+  if (existing) {
     const normalizedRole = normalizeOrganizationRole(existing.role);
     if (normalizedRole !== existing.role) {
       await db
@@ -239,11 +242,19 @@ async function ensureMembership(
       )
       .bind(memberId, params.organizationId, params.userId, role)
       .run();
-  } catch {
-    const existingAfterInsert = await resolveOrgRole(db, params.userId, params.organizationId);
-    if (existingAfterInsert?.role) {
+  } catch (error) {
+    const existingAfterInsert = await resolveOrgMembership(
+      db,
+      params.userId,
+      params.organizationId
+    );
+    if (existingAfterInsert?.status === "active") {
       return normalizeOrganizationRole(existingAfterInsert.role);
     }
+    if (existingAfterInsert) {
+      throw unauthorized("Organization membership is inactive");
+    }
+    throw error;
   }
 
   if (pendingInvite && role === normalizeOrganizationRole(pendingInvite.role)) {

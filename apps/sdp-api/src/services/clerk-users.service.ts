@@ -4,6 +4,9 @@ import type { Env } from "@/types/env";
 export interface ClerkEmailAddress {
   id: string;
   email_address: string;
+  verification?: {
+    status?: string | null;
+  } | null;
 }
 
 export interface ClerkUser {
@@ -19,7 +22,7 @@ export class ClerkUsersService {
   private apiBase: string;
   private secretKey: string;
 
-  constructor(private env: Env) {
+  constructor(env: Env) {
     if (!env.CLERK_SECRET_KEY) {
       throw new AppError("INTERNAL_ERROR", "CLERK_SECRET_KEY is required");
     }
