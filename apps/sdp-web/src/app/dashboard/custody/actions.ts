@@ -1,6 +1,7 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
+import type { CustodyConfigsResponse } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
@@ -125,10 +126,7 @@ export async function initializeCustody(formData: FormData) {
   redirect("/dashboard/wallets");
 }
 
-async function initializeCustodyWallet(
-  formData: FormData,
-  options: { createWalletOnConflict?: boolean } = {}
-) {
+async function initializeCustodyWallet(formData: FormData) {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
@@ -180,9 +178,20 @@ async function initializeCustodyWallet(
       apiError?.status === 409 &&
       apiError.message.includes("Signing already initialized for org")
     ) {
-      if (options.createWalletOnConflict === false) {
+      const configurations = await client.fetch<CustodyConfigsResponse>("/v1/wallets/configs");
+      const readyConfiguration = configurations.configs.some(
+        (configuration) =>
+          configuration.provider === provider &&
+          configuration.isDefault &&
+          configuration.defaultWalletId !== null
+      );
+
+      if (readyConfiguration) {
         return;
       }
+
+      // Repair a provider connection whose first wallet did not finish
+      // persisting instead of leaving the organization trapped in onboarding.
       await client.fetch("/v1/wallets", {
         method: "POST",
         body: JSON.stringify({
@@ -261,7 +270,7 @@ export async function initializeOnboardingCustodyAction(
 ): Promise<WalletSetupActionResult> {
   const t = await getTranslations();
   try {
-    await initializeCustodyWallet(formData, { createWalletOnConflict: false });
+    await initializeCustodyWallet(formData);
     revalidateWalletPaths();
     return { status: "success" };
   } catch (error) {

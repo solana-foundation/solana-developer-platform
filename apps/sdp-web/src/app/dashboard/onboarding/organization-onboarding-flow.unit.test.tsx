@@ -38,6 +38,8 @@ describe("OrganizationOnboardingFlow", () => {
     expect(markup).toContain("QuickNode");
     expect(markup.match(/aria-pressed="false"/g)).toHaveLength(3);
     expect(markup).toContain('data-organization-onboarding-actions="true"');
+    expect(markup).toContain("bg-surface-raised/95");
+    expect(markup).not.toContain("bg-white/95");
   });
 
   it("resumes at custody and only renders generally available providers", () => {

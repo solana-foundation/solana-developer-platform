@@ -199,7 +199,7 @@ export function OrganizationOnboardingFlow({
       </div>
 
       <footer
-        className="shrink-0 border-t border-border-default bg-white/95 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-8"
+        className="shrink-0 border-t border-border-default bg-surface-raised/95 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-8"
         data-organization-onboarding-actions="true"
       >
         <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-3">
