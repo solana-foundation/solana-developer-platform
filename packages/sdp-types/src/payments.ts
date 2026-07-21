@@ -923,6 +923,7 @@ export type MoneygramRampEvent =
       sessionId: string;
       transactionId: string;
       status: string;
+      amount: number;
       referenceNumber?: string;
     }
   | {

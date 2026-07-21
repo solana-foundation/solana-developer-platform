@@ -712,6 +712,7 @@ export const moneygramRampEventSchema = z.discriminatedUnion("kind", [
     sessionId: z.string().min(1),
     transactionId: z.string().min(1),
     status: z.string().min(1),
+    amount: z.number().positive(),
     referenceNumber: z.string().min(1).optional(),
   }),
   z.object({

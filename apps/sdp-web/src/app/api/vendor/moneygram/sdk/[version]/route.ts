@@ -5,24 +5,26 @@ const MONEYGRAM_SDK_UPSTREAM_URL = "https://playground.xramps.moneygram.com/sdk/
 
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, s-maxage=31536000, immutable";
 
-let verifiedSdk: ArrayBuffer | null = null;
+let verifiedSdkPromise: Promise<ArrayBuffer> | null = null;
 
-/** Fetches the upstream SDK once per server instance; the URL is keyed by content hash, so a verified buffer never goes stale. */
-async function fetchVerifiedSdk(): Promise<ArrayBuffer> {
-  if (verifiedSdk) {
-    return verifiedSdk;
-  }
-  const upstream = await fetch(MONEYGRAM_SDK_UPSTREAM_URL, { cache: "no-store" });
-  if (!upstream.ok) {
-    throw new Error("MoneyGram SDK is unavailable.");
-  }
-  const sdk = await upstream.arrayBuffer();
-  const digest = createHash("sha256").update(new Uint8Array(sdk)).digest("hex");
-  if (digest !== MONEYGRAM_SDK_VERSION) {
-    throw new Error("MoneyGram SDK integrity check failed.");
-  }
-  verifiedSdk = sdk;
-  return sdk;
+/** Fetches the upstream SDK once per server instance; concurrent cold-start requests coalesce onto the in-flight fetch, and the URL is keyed by content hash so a verified buffer never goes stale. */
+function fetchVerifiedSdk(): Promise<ArrayBuffer> {
+  verifiedSdkPromise ??= (async () => {
+    const upstream = await fetch(MONEYGRAM_SDK_UPSTREAM_URL, { cache: "no-store" });
+    if (!upstream.ok) {
+      throw new Error("MoneyGram SDK is unavailable.");
+    }
+    const sdk = await upstream.arrayBuffer();
+    const digest = createHash("sha256").update(new Uint8Array(sdk)).digest("hex");
+    if (digest !== MONEYGRAM_SDK_VERSION) {
+      throw new Error("MoneyGram SDK integrity check failed.");
+    }
+    return sdk;
+  })();
+  verifiedSdkPromise.catch(() => {
+    verifiedSdkPromise = null;
+  });
+  return verifiedSdkPromise;
 }
 
 export async function GET(

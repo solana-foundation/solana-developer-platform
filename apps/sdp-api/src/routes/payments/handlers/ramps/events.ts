@@ -197,6 +197,7 @@ async function recordMoneygramRampEvent(c: AppContext, body: unknown) {
           moneygram: {
             ...moneygramData,
             transactionId: event.transactionId,
+            payoutAmount: event.amount,
             payoutStatus: event.status,
             ...(event.referenceNumber ? { referenceNumber: event.referenceNumber } : {}),
           },

@@ -230,6 +230,12 @@ export class MoneygramRampClient implements RampProvider {
         provider: this.id,
       });
     }
+    if (option.quote.receiveAmount.currency !== asset) {
+      throw providerUnavailable(
+        "MoneyGram returned an on-ramp receive amount outside the crypto asset.",
+        { provider: this.id }
+      );
+    }
     return {
       provider: this.id,
       direction: "onramp",

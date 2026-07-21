@@ -380,6 +380,7 @@ export function MoneygramRampWidget({
                 sessionId,
                 transactionId: transaction.id,
                 status: transaction.status,
+                amount: transaction.amount,
                 ...(transaction.referenceNumber
                   ? { referenceNumber: transaction.referenceNumber }
                   : {}),
