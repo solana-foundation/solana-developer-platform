@@ -1,4 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
+import { getPlaywrightAdminSession } from "../support/auth-session";
+import { bootstrapLocalWalletFixtures } from "../support/local-dashboard-bootstrap";
 
 const THEME_STORAGE_KEY = "sdp-theme";
 const THEME_TEST_INITIALIZED_KEY = "sdp-theme-test-initialized";
@@ -15,11 +17,26 @@ async function clearThemePreferenceBeforeNavigation(page: Page) {
 }
 
 test.describe("dashboard theme e2e", () => {
-  test("persists one accessible theme control without hydration errors", async ({ page }) => {
-    const hydrationErrors: string[] = [];
+  test.beforeAll(async ({ browser }) => {
+    const session = await getPlaywrightAdminSession(browser);
+    await bootstrapLocalWalletFixtures({
+      identity: session.identity,
+      bearerToken: session.getBearerToken,
+      provider: "privy",
+      walletCount: 1,
+      walletLabel: `Theme Toast ${Date.now().toString(36).toUpperCase()}`,
+      tier: "enterprise",
+    });
+  });
+
+  test("persists one accessible theme control without React render errors", async ({ page }) => {
+    const reactRenderErrors: string[] = [];
     page.on("console", (message) => {
-      if (message.type() === "error" && /hydration|did not match/i.test(message.text())) {
-        hydrationErrors.push(message.text());
+      if (
+        message.type() === "error" &&
+        /hydration|did not match|script tag while rendering/i.test(message.text())
+      ) {
+        reactRenderErrors.push(message.text());
       }
     });
 
@@ -43,7 +60,7 @@ test.describe("dashboard theme e2e", () => {
       "aria-checked",
       "true"
     );
-    expect(hydrationErrors).toEqual([]);
+    expect(reactRenderErrors).toEqual([]);
   });
 
   test("themes rendered toasts in both modes", async ({ page }) => {

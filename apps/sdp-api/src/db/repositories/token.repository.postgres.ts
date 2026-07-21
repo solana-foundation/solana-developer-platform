@@ -89,6 +89,19 @@ export function createPostgresTokenRepository(db: AppDb): TokenRepository {
       return mapTokenRow(row, extensions);
     },
 
+    async getStatusByMint(projectId: string, mintAddress: string) {
+      const row = await db
+        .prepare("SELECT status FROM issued_tokens WHERE project_id = ? AND mint_address = ?")
+        .bind(projectId, mintAddress)
+        .first<{ status: TokenStatus }>();
+
+      if (!row) {
+        return null;
+      }
+
+      return row.status;
+    },
+
     async listByProject(projectId: string, options: ListTokensOptions) {
       const clauses = ["project_id = ?"];
       const values: unknown[] = [projectId];

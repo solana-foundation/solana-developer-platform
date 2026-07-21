@@ -64,7 +64,7 @@ function resolveAccountAddress(account: CounterpartyAccount | null): string {
   return typeof address === "string" ? address : "";
 }
 
-function recurringPaymentAssetOptions(
+export function recurringPaymentAssetOptions(
   wallet: PaymentsDashboardWallet | null,
   issuedTokenSymbolsByMint: Record<string, string>,
   t: ReturnType<typeof useTranslations>
