@@ -5140,7 +5140,6 @@ describe("Issuance Routes", () => {
               info: {
                 mint: TEST_SOLANA_ADDRESSES.mint,
                 mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
-                freezeAuthority: null,
               },
             },
           ],

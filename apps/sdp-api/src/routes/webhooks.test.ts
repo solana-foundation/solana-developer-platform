@@ -51,24 +51,38 @@ async function simulateClerkWebhook(event: { type: string; data: Record<string, 
 function mockClerkUserLookup(
   userId: string,
   email: string,
-  verificationStatus: "verified" | "unverified" = "verified"
+  verificationStatus: "verified" | "unverified" = "verified",
+  memberships: Array<{ role: string; organization: Record<string, unknown> }> = []
 ) {
   env.CLERK_SECRET_KEY = "sk_test_clerk_webhook_user_lookup";
   env.CLERK_API_URL = "https://clerk.example.test/v1";
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    expect(url).toBe(`${env.CLERK_API_URL}/users/${userId}`);
+
+    if (url === `${env.CLERK_API_URL}/users/${userId}`) {
+      return new Response(
+        JSON.stringify({
+          id: userId,
+          primary_email_address_id: "email_primary",
+          email_addresses: [
+            {
+              id: "email_primary",
+              email_address: email,
+              verification: { status: verificationStatus },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    expect(url).toBe(
+      `${env.CLERK_API_URL}/users/${userId}/organization_memberships?limit=500&offset=0`
+    );
     return new Response(
       JSON.stringify({
-        id: userId,
-        primary_email_address_id: "email_primary",
-        email_addresses: [
-          {
-            id: "email_primary",
-            email_address: email,
-            verification: { status: verificationStatus },
-          },
-        ],
+        data: memberships,
+        total_count: memberships.length,
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
@@ -239,6 +253,7 @@ describe("Clerk webhooks", () => {
         )
         .bind("aui_existing", "user_clerk_existing", "usr_clerk_existing", "old@example.com"),
     ]);
+    mockClerkUserLookup("user_clerk_existing", "taken@example.com");
 
     const updated = await simulateClerkWebhook({
       type: "user.updated",
@@ -305,7 +320,16 @@ describe("Clerk webhooks", () => {
       .first<{ user_id: string }>();
     expect(identity).toBeNull();
 
-    mockClerkUserLookup("user_unverified_collision", "victim@example.com", "unverified");
+    mockClerkUserLookup("user_unverified_collision", "victim@example.com", "unverified", [
+      {
+        role: "org:admin",
+        organization: {
+          id: "org_unverified_collision",
+          name: "Unverified Collision Org",
+          slug: "unverified-collision-org",
+        },
+      },
+    ]);
     const membershipCreated = await simulateClerkWebhook({
       type: "organizationMembership.created",
       data: {
@@ -359,6 +383,17 @@ describe("Clerk webhooks", () => {
       .bind("user_unverified_collision")
       .first<{ user_id: string }>();
     expect(verifiedIdentity?.user_id).toBe("usr_verified_email_owner");
+
+    const reconciledMembership = await getDb(env)
+      .prepare(
+        `SELECT om.role, om.status
+         FROM organization_members om
+         JOIN auth_user_identities aui ON aui.user_id = om.user_id
+         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
+      )
+      .bind("user_unverified_collision")
+      .first<{ role: string; status: string }>();
+    expect(reconciledMembership).toEqual({ role: "admin", status: "active" });
   });
 
   it("syncs organization memberships without creating records on delete-only events", async () => {

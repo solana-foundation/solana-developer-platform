@@ -207,11 +207,21 @@ async function syncUser(c: AppContext, data: UserJSON) {
     return;
   }
   const fullName = [data.first_name, data.last_name].filter(Boolean).join(" ").trim();
-  await ensureUserMapping(c, {
+  const userId = await ensureUserMapping(c, {
     id: data.id,
     email,
     name: fullName || data.username,
   });
+  const memberships = await new ClerkUsersService(c.env).getOrganizationMemberships(data.id);
+  await Promise.all(
+    memberships.map((membership) =>
+      upsertVerifiedMembership(c, {
+        organization: membership.organization,
+        userId,
+        role: membership.role,
+      })
+    )
+  );
 }
 
 async function deleteUser(c: AppContext, data: UserDeletedJSON) {
@@ -240,16 +250,11 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
   ]);
 }
 
-async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON) {
+async function upsertVerifiedMembership(
+  c: AppContext,
+  data: { organization: OrganizationJSON; userId: string; role: string }
+) {
   const organizationId = await ensureOrganizationMapping(c, data.organization);
-  const email = await resolveVerifiedUserEmail(c.env, data.public_user_data.user_id);
-  if (!email) {
-    return;
-  }
-  const userId = await ensureUserMapping(c, {
-    id: data.public_user_data.user_id,
-    email,
-  });
   const role = mapClerkRoleToOrgRole(data.role);
   const memberId = `mem_${crypto.randomUUID()}`;
 
@@ -262,14 +267,30 @@ async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON)
          role = excluded.role,
          status = 'active'`
     )
-    .bind(memberId, organizationId, userId, role)
+    .bind(memberId, organizationId, data.userId, role)
     .run();
 
   const projectService = new ProjectService(getDb(c.env));
   await Promise.all([
-    projectService.findOrCreateDefault(organizationId, "sandbox", userId),
-    projectService.findOrCreateDefault(organizationId, "production", userId),
+    projectService.findOrCreateDefault(organizationId, "sandbox", data.userId),
+    projectService.findOrCreateDefault(organizationId, "production", data.userId),
   ]);
+}
+
+async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON) {
+  const email = await resolveVerifiedUserEmail(c.env, data.public_user_data.user_id);
+  if (!email) {
+    return;
+  }
+  const userId = await ensureUserMapping(c, {
+    id: data.public_user_data.user_id,
+    email,
+  });
+  await upsertVerifiedMembership(c, {
+    organization: data.organization,
+    userId,
+    role: data.role,
+  });
 }
 
 async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON) {
