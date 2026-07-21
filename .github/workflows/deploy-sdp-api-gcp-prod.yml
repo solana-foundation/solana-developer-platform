@@ -22,12 +22,13 @@ jobs:
   deploy:
     name: Deploy production image
     if: >-
+      always() &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'workflow_dispatch' ||
        startsWith(github.event.head_commit.message, 'chore(main): release '))
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     environment: production
     env:
       PROJECT_ID: solana-developer-platform
@@ -67,6 +68,7 @@ jobs:
 
       - name: Build and push image
         if: ${{ github.event_name == 'push' }}
+        timeout-minutes: 20
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
@@ -102,6 +104,7 @@ jobs:
 
       - name: Run database migrations
         if: ${{ github.event_name == 'push' }}
+        timeout-minutes: 15
         run: |
           gcloud run jobs update "${MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
@@ -119,14 +122,16 @@ jobs:
             jq -er '
               [.status.traffic[]
                 | select((.percent // 0) > 0)
-                | "\(.revisionName)=\(.percent)"]
+                | if (.revisionName // "") != "" then
+                    "\(.revisionName)=\(.percent)"
+                  else error("active traffic target has no resolved revisionName") end]
               | if length > 0 then join(",") else error("service has no active traffic targets") end
             ' <<<"${service_json}"
           )"
           previous_cron_image="$(
             gcloud run jobs describe "${JOB}" \
               --region "${REGION}" --project "${PROJECT_ID}" \
-              --format='value(spec.template.template.containers[0].image)'
+              --format='value(spec.template.spec.template.spec.containers[0].image)'
           )"
           if [[ -z "${previous_cron_image}" ]]; then
             echo "Could not resolve the current cron job image." >&2
@@ -136,10 +141,12 @@ jobs:
           echo "PREVIOUS_CRON_IMAGE=${previous_cron_image}" >> "${GITHUB_ENV}"
 
       - name: Deploy candidate without production traffic
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           candidate_tag="candidate-${DEPLOY_IMAGE_SHA:0:12}"
           echo "CANDIDATE_TAG=${candidate_tag}" >> "${GITHUB_ENV}"
+          echo "ROLLOUT_STARTED=true" >> "${GITHUB_ENV}"
           gcloud run services update "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}" \
             --no-traffic --tag "${candidate_tag}"
@@ -175,6 +182,7 @@ jobs:
           echo "Candidate revision: ${candidate_revision}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Verify candidate readiness
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           for attempt in {1..12}; do
@@ -198,27 +206,9 @@ jobs:
           done
 
       - name: Promote service and cron with rollback
+        timeout-minutes: 10
         run: |
-          set -eEuo pipefail
-          rollback() {
-            failure_status=$?
-            trap - ERR
-            set +e
-            echo "Promotion failed; restoring service traffic and cron image." >&2
-            gcloud run services update-traffic "${SERVICE}" \
-              --region "${REGION}" --project "${PROJECT_ID}" \
-              --to-revisions "${PREVIOUS_TRAFFIC}"
-            service_rollback_status=$?
-            gcloud run jobs update "${JOB}" \
-              --region "${REGION}" --project "${PROJECT_ID}" \
-              --image "${PREVIOUS_CRON_IMAGE}"
-            cron_rollback_status=$?
-            if [[ "${service_rollback_status}" -ne 0 || "${cron_rollback_status}" -ne 0 ]]; then
-              echo "Automatic rollback was incomplete; escalate immediately." >&2
-            fi
-            exit "${failure_status}"
-          }
-          trap rollback ERR
+          set -euo pipefail
 
           gcloud run services update-traffic "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
@@ -245,10 +235,33 @@ jobs:
 
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
-          trap - ERR
+          echo "ROLLOUT_COMPLETE=true" >> "${GITHUB_ENV}"
+
+      - name: Roll back incomplete rollout
+        if: ${{ always() }}
+        timeout-minutes: 5
+        run: |
+          set -uo pipefail
+          if [[ "${ROLLOUT_STARTED:-}" != "true" || "${ROLLOUT_COMPLETE:-}" == "true" ]]; then
+            exit 0
+          fi
+
+          echo "Rollout did not complete; restoring service traffic and cron image." >&2
+          rollback_failed=0
+          gcloud run services update-traffic "${SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --to-revisions "${PREVIOUS_TRAFFIC}" || rollback_failed=1
+          gcloud run jobs update "${JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --image "${PREVIOUS_CRON_IMAGE}" || rollback_failed=1
+          if [[ "${rollback_failed}" -ne 0 ]]; then
+            echo "Automatic rollback was incomplete; escalate immediately." >&2
+            exit 1
+          fi
 
       - name: Remove candidate traffic tag
         if: ${{ always() }}
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           if [[ -z "${CANDIDATE_TAG:-}" ]]; then

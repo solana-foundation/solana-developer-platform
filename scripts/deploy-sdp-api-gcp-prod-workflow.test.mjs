@@ -57,20 +57,48 @@ test("candidate traffic tag is always removed", () => {
   assert.ok(promotion !== -1 && promotion < cleanup);
 });
 
-test("promotion restores service traffic and cron together on failure", () => {
+test("cancellation-safe rollback restores resolved traffic and cron together", () => {
+  assert.match(workflow, /if: >-\n\s+always\(\) &&/);
   assert.match(workflow, /PREVIOUS_TRAFFIC=/);
   assert.match(workflow, /PREVIOUS_CRON_IMAGE=/);
-  assert.match(workflow, /trap rollback ERR/);
+  assert.match(
+    workflow,
+    /--format='value\(spec\.template\.spec\.template\.spec\.containers\[0\]\.image\)'/
+  );
+  assert.match(workflow, /ROLLOUT_STARTED=true/);
+  assert.match(workflow, /ROLLOUT_COMPLETE=true/);
+  assert.match(
+    workflow,
+    /- name: Roll back incomplete rollout\n\s+if: \$\{\{ always\(\) \}\}\n\s+timeout-minutes: 5/
+  );
   assert.match(workflow, /--to-revisions "\$\{CANDIDATE_REVISION\}=100"/);
   assert.match(workflow, /--to-revisions "\$\{PREVIOUS_TRAFFIC\}"/);
   assert.match(workflow, /--image "\$\{PREVIOUS_CRON_IMAGE\}"/);
 
+  const candidateStep = workflow.indexOf("- name: Deploy candidate without production traffic");
+  const rolloutStarted = workflow.indexOf("ROLLOUT_STARTED=true", candidateStep);
+  const candidateDeploy = workflow.indexOf("gcloud run services update", candidateStep);
   const promotionStep = workflow.indexOf("- name: Promote service and cron with rollback");
   const promotion = workflow.indexOf("--to-revisions", promotionStep);
   const canonicalReadiness = workflow.indexOf('"https://api.solana.com/health/ready"', promotion);
   const cronUpdate = workflow.indexOf("gcloud run jobs update", canonicalReadiness);
+  const rolloutComplete = workflow.indexOf("ROLLOUT_COMPLETE=true", cronUpdate);
+  const rollback = workflow.indexOf("- name: Roll back incomplete rollout", rolloutComplete);
+  assert.ok(candidateStep !== -1 && candidateStep < rolloutStarted);
+  assert.ok(rolloutStarted < candidateDeploy);
   assert.ok(promotion !== -1 && promotion < canonicalReadiness);
   assert.ok(canonicalReadiness < cronUpdate);
+  assert.ok(cronUpdate < rolloutComplete && rolloutComplete < rollback);
+});
+
+test("rollback targets resolved pre-candidate revisions instead of LATEST", () => {
+  const capture = workflow.indexOf("- name: Capture rollback state");
+  const candidate = workflow.indexOf("- name: Deploy candidate without production traffic");
+  const captureStep = workflow.slice(capture, candidate);
+
+  assert.match(captureStep, /\.status\.traffic\[\]/);
+  assert.match(captureStep, /\.revisionName/);
+  assert.doesNotMatch(captureStep, /LATEST=/);
 });
 
 test("service and cron use the resolved digest", () => {
@@ -82,5 +110,6 @@ test("service and cron use the resolved digest", () => {
     workflow,
     /gcloud run jobs update "\$\{JOB\}" \\\n+\s+--region "\$\{REGION\}" --project "\$\{PROJECT_ID\}" --image "\$\{IMAGE\}"/
   );
-  assert.match(workflow, /timeout-minutes: 30/);
+  assert.match(workflow, /timeout-minutes: 90/);
+  assert.match(workflow, /- name: Promote service and cron with rollback\n\s+timeout-minutes: 10/);
 });
