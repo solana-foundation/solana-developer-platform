@@ -62,6 +62,7 @@ import {
   WalletsOverviewSkeleton,
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
+import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
@@ -1206,13 +1207,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   }, [dashboardAccess.capabilities.canReadApprovals, selectedProjectId]);
 
   if (!isLoaded) {
-    return (
-      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
-        <div className="mx-auto max-w-5xl border border-border-subtle bg-surface-raised/70 p-6">
-          <p className="text-sm text-tertiary">{t("Shared.dashboardShell.loadingDashboard")}</p>
-        </div>
-      </main>
-    );
+    return <FullscreenLoadingIndicator />;
   }
 
   if (!isSignedIn) {

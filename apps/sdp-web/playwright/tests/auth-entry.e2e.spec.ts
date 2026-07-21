@@ -9,6 +9,24 @@ test.describe("public auth entry e2e", () => {
     await expect(page.getByRole("link", { name: "Docs" })).toBeVisible();
   });
 
+  test("language picker does not shift the header when it opens or closes", async ({ page }) => {
+    await page.goto("/");
+
+    const languagePicker = page.getByRole("button", { name: "Language" });
+    const dashboardLink = page.getByRole("link", { name: "Dashboard" });
+    const dashboardLinkX = (await dashboardLink.boundingBox())?.x;
+
+    expect(dashboardLinkX).toBeDefined();
+
+    await languagePicker.click();
+    await expect(page.getByText("Choose language", { exact: true })).toBeVisible();
+    expect((await dashboardLink.boundingBox())?.x).toBe(dashboardLinkX);
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByText("Choose language", { exact: true })).toBeHidden();
+    expect((await dashboardLink.boundingBox())?.x).toBe(dashboardLinkX);
+  });
+
   test("system dark mode keeps landing artwork and Clerk sign-in legible", async ({ page }) => {
     const themeScriptErrors: string[] = [];
     page.on("console", (message) => {
