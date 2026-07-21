@@ -47,7 +47,6 @@ services:
     env_file:
       - .env
     environment:
-      SDP_RUNTIME: node
       SDP_DEPLOYMENT_MODE: ${SDP_DEPLOYMENT_MODE:-self_hosted}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       API_VERSION: ${SDP_VERSION:-latest}

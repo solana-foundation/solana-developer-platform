@@ -13,7 +13,6 @@ const observability: Observability = {
 const appEnv = {
   ENVIRONMENT: "development",
   API_VERSION: "v1",
-  SDP_RUNTIME: "node",
 } as Env;
 
 describe("OpenAPI response delivery", () => {

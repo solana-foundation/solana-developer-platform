@@ -18,7 +18,7 @@ const MODULE_METADATA = [
   {
     name: "@sdp/api",
     directory: "apps/sdp-api",
-    purpose: "Cloudflare Workers API and application composition root.",
+    purpose: "Node.js API and application composition root.",
     allowedDependencies: [
       "@sdp/custody",
       "@sdp/env-config",

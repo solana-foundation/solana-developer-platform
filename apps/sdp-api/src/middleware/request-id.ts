@@ -44,9 +44,7 @@ export function requestIdMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     // Use provided request ID or generate a new one
     const requestId =
-      normalizeRequestId(c.req.header(REQUEST_ID_HEADER)) ||
-      normalizeRequestId(c.req.header("cf-ray")) ||
-      `req_${crypto.randomUUID()}`;
+      normalizeRequestId(c.req.header(REQUEST_ID_HEADER)) || `req_${crypto.randomUUID()}`;
 
     c.set("requestId", requestId);
     c.header(REQUEST_ID_HEADER, requestId);

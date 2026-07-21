@@ -1,12 +1,10 @@
 /**
- * SDP API — runtime-neutral Hono app factory.
+ * SDP API — Hono application factory.
  *
  * `createApp(deps)` builds the Hono instance with all middleware, routes, and
- * error handling wired up, but takes runtime-specific concerns (observability)
- * as injected dependencies. Runtime-specific bindings and SDKs are owned by
- * the entrypoints (`index.ts` on Workers, `server.ts` on Node — HOO-511); this
- * file must not import them, so the same Hono instance can be reused across
- * both runtimes.
+ * error handling wired up, while transport and process lifecycle concerns stay
+ * in `server.ts`. Observability remains injected so tests can use a lightweight
+ * implementation without initializing the production SDK.
  */
 
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";

@@ -353,7 +353,10 @@ export const deployToken = async (c: AppContext) => {
         // points each environment at itself.
         uri:
           token.uri?.trim() ||
-          canonicalMetadataUrl(resolveMetadataOrigin(c.env, c.req.url), token.id),
+          canonicalMetadataUrl(
+            resolveMetadataOrigin(c.env, c.req.url, c.req.header("x-forwarded-proto")),
+            token.id
+          ),
       },
       decimals: token.decimals,
       mintAuthority: signer,
@@ -513,7 +516,11 @@ export const prepareDeploy = async (c: AppContext) => {
 
   // See deployToken above: SDP-hosted metadata fallback (HOO-466).
   const resolvedUri =
-    token.uri?.trim() || canonicalMetadataUrl(resolveMetadataOrigin(c.env, c.req.url), token.id);
+    token.uri?.trim() ||
+    canonicalMetadataUrl(
+      resolveMetadataOrigin(c.env, c.req.url, c.req.header("x-forwarded-proto")),
+      token.id
+    );
 
   const buildMetadata = (uri: string) => ({ name: token.name, symbol: token.symbol, uri });
   const prepareOptions = {
@@ -811,7 +818,11 @@ export const prepareDeployMetadata = async (c: AppContext) => {
   // Resolve the same uri prepareDeploy used so the on-chain pointer ends up at
   // the SDP-hosted (or issuer-supplied) URL.
   const resolvedUri =
-    token.uri?.trim() || canonicalMetadataUrl(resolveMetadataOrigin(c.env, c.req.url), token.id);
+    token.uri?.trim() ||
+    canonicalMetadataUrl(
+      resolveMetadataOrigin(c.env, c.req.url, c.req.header("x-forwarded-proto")),
+      token.id
+    );
 
   const prepared = await mosaic.prepareUpdateMetadata({
     mint: token.mintAddress as Address,

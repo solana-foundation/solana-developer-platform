@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_custody_self_hosted",
@@ -144,7 +144,7 @@ describe("Custody routes — self-hosted deployment mode", () => {
     env.CUSTODY_PRIVATE_KEY = originalCustodyPrivateKey;
     writeManagedProviderEnv(originalManagedProviderEnv);
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
   });
 
   it("GET /v1/wallets/switch-options returns only the configured local provider", async () => {
@@ -208,7 +208,7 @@ describe("Custody routes — managed-mode regression", () => {
     env.CUSTODY_PRIVATE_KEY = originalCustodyPrivateKey;
     writeManagedProviderEnv(originalManagedProviderEnv);
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
   });
 
   it("requires manual activation for local custody in managed mode", async () => {

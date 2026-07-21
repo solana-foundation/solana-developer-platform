@@ -4,6 +4,7 @@
 
 import { Hono } from "hono";
 import { getDb } from "@/db";
+import { pingRedis } from "@/runtime/kv-redis";
 import type { Env } from "@/types/env";
 
 const health = new Hono<{ Bindings: Env }>();
@@ -23,29 +24,25 @@ health.get("/", async (c) => {
 });
 
 health.get("/ready", async (c) => {
-  // Readiness check - verify Postgres connection
-  try {
-    await getDb(c.env).prepare("SELECT 1").first();
+  const [database, redis] = await Promise.allSettled([
+    getDb(c.env).prepare("SELECT 1").first(),
+    pingRedis(c.env),
+  ]);
+  const checks = {
+    database: database.status === "fulfilled" ? ("ok" as const) : ("error" as const),
+    redis: redis.status === "fulfilled" ? ("ok" as const) : ("error" as const),
+  };
+  const body = {
+    status:
+      checks.database === "ok" && checks.redis === "ok"
+        ? ("ready" as const)
+        : ("not_ready" as const),
+    timestamp: new Date().toISOString(),
+    revision: c.env.K_REVISION ?? "local",
+    checks,
+  };
 
-    return c.json({
-      status: "ready",
-      timestamp: new Date().toISOString(),
-      checks: {
-        database: "ok",
-      },
-    });
-  } catch {
-    return c.json(
-      {
-        status: "not_ready",
-        timestamp: new Date().toISOString(),
-        checks: {
-          database: "error",
-        },
-      },
-      503
-    );
-  }
+  return body.status === "ready" ? c.json(body) : c.json(body, 503);
 });
 
 export default health;

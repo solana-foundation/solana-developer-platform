@@ -6,7 +6,7 @@ import app from "@/index";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_compliance_test",
@@ -156,7 +156,7 @@ describe("Compliance routes", () => {
 
     vi.restoreAllMocks();
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
   });
 
   it("returns forbidden when the organization has no enabled compliance providers", async () => {

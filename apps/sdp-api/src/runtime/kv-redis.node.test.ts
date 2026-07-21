@@ -1,6 +1,6 @@
 /**
  * Integration tests for RedisKVStore against a real Redis. Runs in plain
- * Node via vitest.node.config.ts so ioredis can open real TCP sockets.
+ * Node via vitest.config.ts so ioredis can open real TCP sockets.
  * Requires REDIS_URL (defaults to localhost:6379); each test FLUSHALLs
  * first so runs are isolated.
  */
@@ -70,7 +70,7 @@ describe("RedisKVStore (HOO-510)", () => {
       expect(pttl).toBeLessThanOrEqual(30_000);
     });
 
-    it("no TTL persists indefinitely (PTTL = -1) — parity with CF KV", async () => {
+    it("no TTL persists indefinitely (PTTL = -1)", async () => {
       const store = new RedisKVStore(raw, "test");
       await store.put("k", "v"); // no options
       const pttl = await raw.pttl("test:k");
@@ -137,11 +137,13 @@ describe("RedisKVStore (HOO-510)", () => {
     });
 
     it("throws a clear error when REDIS_URL is missing", () => {
-      expect(() => createRedisKVStoreSet({} as Env)).toThrow(/REDIS_URL missing/);
+      expect(() => createRedisKVStoreSet({} as Env)).toThrow(/REDIS_URL is required/);
     });
 
     it("throws when REDIS_URL is whitespace-only", () => {
-      expect(() => createRedisKVStoreSet({ REDIS_URL: "   " } as Env)).toThrow(/REDIS_URL missing/);
+      expect(() => createRedisKVStoreSet({ REDIS_URL: "   " } as Env)).toThrow(
+        /REDIS_URL is required/
+      );
     });
   });
 });

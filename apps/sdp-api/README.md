@@ -1,6 +1,6 @@
 # SDP API
 
-The core Solana Developer Platform API, built with Cloudflare Workers, Postgres/Hyperdrive, and KV bindings.
+The core Solana Developer Platform API, built as a Node.js service with Postgres and Redis and deployed to Cloud Run.
 
 ## What is SDP API?
 
@@ -43,8 +43,8 @@ The API exposes these public REST endpoints (all require API key or session toke
 
 - **Node.js 22+**
 - **pnpm 10.16+**
-- **Doppler CLI** — Required to run dev and test commands. Install: `brew install dopplerhq/cli/doppler`
-- **Local Postgres 16** (deployed environments use managed Postgres via Hyperdrive)
+- **Docker or another Compose-compatible runtime** — Runs local Postgres 16 and Redis 7
+- **Doppler CLI** — Recommended for team configuration. Install: `brew install dopplerhq/cli/doppler`; external contributors can use `.env.local` instead.
 
 ### Setup
 
@@ -58,47 +58,68 @@ The API exposes these public REST endpoints (all require API key or session toke
    **Option A: Using Doppler (team members)**
    ```bash
    doppler login
+   ```
+
+   **Option B: Using local `.env.local` (external contributors)**
+   ```bash
+   cp apps/sdp-api/.env.local.example apps/sdp-api/.env.local
+   # Edit .env.local with your values (see below)
+   ```
+
+3. **Start the development environment:**
+
+   To run the workspace, use:
+
+   ```bash
    pnpm dev
    ```
 
-   **Option B: Using local `.dev.vars` (external contributors)**
-   ```bash
-   cp apps/sdp-api/.dev.vars.example apps/sdp-api/.dev.vars
-   # Edit .dev.vars with your values (see below)
-   pnpm -C apps/sdp-api dev:local
-   ```
+   That command starts local Postgres and Redis along with the development
+   processes. To run only the API, start its dependencies and process
+   separately:
 
-3. **Start local infrastructure:**
    ```bash
-   # Terminal 1: Postgres
+   # Postgres and Redis (runs in the background)
    pnpm db:postgres:up
-   pnpm --filter @sdp/api db:postgres:bootstrap
 
-   # Terminal 2: Kora (fee-payer service)
+   # Optional: local Kora, only when FEE_PAYMENT_PROVIDER=kora
    pnpm kora:up
 
-   # Terminal 3: API
-   pnpm dev
+   # API with team/Doppler configuration (keep this process running)
+   pnpm dev:api:local
    ```
+
+   External contributors using only `.env.local` can replace the final command
+   with `pnpm -C apps/sdp-api dev:local` so no Doppler session is required.
+
+   The API development process waits for Postgres and Redis and applies local
+   migrations before starting the server.
 
 ### Required Environment Variables
 
-Create `apps/sdp-api/.dev.vars` with at least:
+Create `apps/sdp-api/.env.local` with at least:
 
 ```bash
-# Solana RPC (required)
-SOLANA_RPC_URL=https://api.devnet.solana.com
+# Local development without hosted custody or fee-payment dependencies
+SDP_DEPLOYMENT_MODE=self_hosted
 
-# Fee-payer service (required for wallet/payment operations)
-KORA_RPC_URL=http://127.0.0.1:8080  # or use local Kora
+# Use an RPC endpoint that supports the methods exercised by the API
+SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
 
-# Signer (choose one)
-SIGNING_PROVIDER=kora                 # Use local Kora with a devnet keypair
-# OR
-SIGNING_PROVIDER=coinbase_cdp         # Requires COINBASE_CDP_* vars
-# OR
-SIGNING_PROVIDER=privy                # Requires PRIVY_* vars
+# Wallet signer (generate both values with `pnpm --filter @sdp/api keygen:local`)
+SIGNING_PROVIDER=local
+CUSTODY_PRIVATE_KEY=<base58-encoded keypair>
+CUSTODY_ENCRYPTION_KEY=<base64-encoded 256-bit key>
+
+# Native fee payment can reuse the local custody key in development
+FEE_PAYMENT_PROVIDER=native
+FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
 ```
+
+Kora is a fee-payment provider, not a signing provider. To use local Kora,
+set `FEE_PAYMENT_PROVIDER=kora` and `KORA_RPC_URL=http://127.0.0.1:8080`
+instead. For managed custody, choose a supported `SIGNING_PROVIDER` and add
+that provider's credentials as shown below and in `.env.local.example`.
 
 ### Optional: Custody Integrations
 
@@ -118,13 +139,13 @@ PRIVY_APP_ID=your_app_id
 PRIVY_APP_SECRET=your_app_secret
 ```
 
-See `.dev.vars.example` for all available options.
+See `.env.local.example` for all available options.
 
 ### Self-Hosted Mode (no third-party providers)
 
 Run SDP with only the local signer + native fee-payment + a single RPC
 endpoint — no DFNS / Privy / Fireblocks / Coinbase / Para / etc. accounts
-required. In `apps/sdp-api/.dev.vars`:
+required. In `apps/sdp-api/.env.local`:
 
 ```bash
 SDP_DEPLOYMENT_MODE=self_hosted
@@ -153,7 +174,7 @@ pnpm --filter @sdp/api keygen:local
 ```
 
 The script prints `PUBLIC_KEY=…`, `CUSTODY_PRIVATE_KEY=…`, and
-`CUSTODY_ENCRYPTION_KEY=…` lines you can paste straight into `.dev.vars`,
+`CUSTODY_ENCRYPTION_KEY=…` lines you can paste straight into `.env.local`,
 plus a commented `# FEE_PAYER_PRIVATE_KEY=…` hint. Uncomment the hint to
 reuse the custody keypair as the fee payer in local dev (the same keypair
 can serve both roles); use distinct keys for any non-dev deployment. Add
@@ -191,10 +212,9 @@ MOONPAY_SECRET_KEY=sk_...
 pnpm --filter @sdp/api test
 ```
 
-No external dependencies required. The suite runs against an isolated test
-database (`<dbname>_test`, e.g. `sdp_test`) so it never touches your dev data.
-Override the connection with `TEST_DATABASE_URL` if you need to point at a
-different host. See `db:migrate:test` under [Database Migrations](#database-migrations).
+The suite provisions isolated Postgres and Redis containers, so it requires a
+working Docker-compatible runtime but no hosted provider dependencies. The test
+database never touches your dev data, and migrations are applied automatically.
 
 ### Integration Tests
 
@@ -219,28 +239,32 @@ pnpm --filter @sdp/api db:migrate:local
 
 ### Test database (Postgres)
 
-The unit-test suite uses a separate Postgres database so tests never share
-state with your dev data. By default it is the dev DB name with a `_test`
-suffix (e.g. `DATABASE_URL=…/sdp` → tests use `sdp_test`). Override with
-`TEST_DATABASE_URL` if you need a different host.
+The standard unit-test suite creates disposable Postgres and Redis containers
+and applies migrations automatically. It does not use the local development
+database.
+
+For a manually managed local test database, `db:migrate:test` derives a `_test`
+database name from `DATABASE_URL` (for example, `…/sdp` becomes `…/sdp_test`).
+Set `TEST_DATABASE_URL` to target an explicit test database instead.
 
 ```bash
 pnpm --filter @sdp/api db:migrate:test
 ```
 
-This creates the test database if it does not exist and applies all pending
-migrations. Re-run it after pulling new migrations or running
-`pnpm db:postgres:reset`. CI runs this automatically before unit tests.
+This creates the explicit test database if it does not exist and applies all
+pending migrations. The normal `pnpm --filter @sdp/api test` path does not need
+this command because its disposable container is migrated during test setup.
 
 ### Deployed migrations (Postgres)
 
-```bash
-# Dev environment
-doppler run --config dev -- pnpm --filter @sdp/api db:migrate:dev
+Hosted schema changes run through each environment's Cloud Run migration job
+as part of the automated deployment. The job is updated to the intended image
+and must succeed before the service rollout proceeds. A manual production image
+redeploy intentionally does not update or execute the migration job.
 
-# Production environment
-doppler run --config prd -- pnpm --filter @sdp/api db:migrate:production
-```
+Do not run a deployed migration directly from a laptop with Doppler credentials.
+For an exceptional manual operation, use the named Cloud Run migration job and
+the environment's GCP deployment identity under the release operations runbook.
 
 ## API Documentation
 
@@ -260,30 +284,28 @@ Full getting-started guides and tutorials: https://platform.solana.com/docs (or 
 
 ## Deployment
 
-### Dev Environment
+The hosted API is built as a container and deployed to Cloud Run through GitHub Actions:
 
-```bash
-doppler run --config dev -- pnpm --filter @sdp/api exec wrangler deploy --env dev
-```
+- Relevant pushes to `main` deploy to the dev service.
+- A merged `chore(main): release X.Y.Z` release commit deploys to production.
+- Manual production workflow dispatch can redeploy an existing Git SHA image without rebuilding it.
 
-### Production Environment
-
-Automated on tag push: `v*.*.*` or `solana-developer-platform-v*.*.*`
-
-Manual deploy:
-```bash
-doppler run --config prd -- pnpm --filter @sdp/api exec wrangler deploy --env production
-```
+Automated dev deployments and push-triggered production releases update and
+execute the migration job before deploying the API. Production then verifies a
+no-traffic candidate revision before promoting the service and reconciliation
+cron job to the same immutable image. Manual production redeploys leave the
+migration job unchanged. Runtime environment variables and secret references
+are managed on the GCP resources rather than written by the image deployment.
 
 See [`docs/ops/release-operations.md`](../../docs/ops/release-operations.md) for details.
 
 ## Architecture
 
-- **Cloudflare Workers** — Serverless compute
-- **Hyperdrive** — PostgreSQL connection pooling
-- **KV** — Key-value store for API keys, rate limits, cache
-- **Postgres 16** — Application database
-- **Kora** — Local fee-payer service (devnet signing)
+- **Cloud Run** — Hosted Node.js API service and one-shot jobs
+- **Postgres 16** — Application database, hosted with managed connectivity in deployed environments
+- **Redis** — API-key, rate-limit, cache, and session storage
+- **Cloud Run jobs and scheduler** — Database migrations and transfer reconciliation
+- **Kora** — Optional local fee-payer service
 
 ## Contributing
 
