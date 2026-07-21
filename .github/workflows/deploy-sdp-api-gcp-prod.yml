@@ -18,6 +18,7 @@ jobs:
     name: Build and deploy
     if: >-
       github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.ref == 'refs/heads/main' &&
       (github.event_name == 'workflow_dispatch' ||
        startsWith(github.event.head_commit.message, 'chore(main): release '))
     runs-on: ubuntu-latest
