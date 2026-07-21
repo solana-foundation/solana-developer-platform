@@ -132,11 +132,15 @@ test.describe
 
       await page.getByRole("link", { name: "Back to recurring payments" }).click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
-      await expect(page.getByText(recurringCounterpartyName).first()).toBeVisible();
-      await expect(page.getByText(recurringWalletLabel)).toBeVisible();
-      await expect(page.getByText(`7.50 ${recurringTokenSymbol}`)).toBeVisible();
+      const recurringRow = page
+        .getByRole("button")
+        .filter({ hasText: recurringCounterpartyName })
+        .first();
+      await expect(recurringRow).toBeVisible();
+      await expect(recurringRow).toContainText(recurringWalletLabel);
+      await expect(recurringRow).toContainText(`7.50 ${recurringTokenSymbol}`);
 
-      await page.locator("tbody tr").filter({ hasText: recurringCounterpartyName }).first().click();
+      await recurringRow.click();
       await expect(page).toHaveURL(
         new RegExp(`/dashboard/payments/recurring/${recurringPaymentId}$`)
       );
@@ -265,7 +269,7 @@ test.describe
       await expect(page).toHaveURL(/\/dashboard\/payments(?:\?.*)?$/);
 
       const shortenedDestination = `${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-4)}`;
-      const transferRow = app.locator("tbody tr").filter({ hasText: shortenedDestination }).first();
+      const transferRow = app.getByRole("link").filter({ hasText: shortenedDestination }).first();
       await expect(transferRow).toBeVisible({ timeout: 120_000 });
       await expect(transferRow).toContainText("0.01");
     });
