@@ -66,6 +66,7 @@ async function migrateCustodyConfigs(env: Env): Promise<number> {
 
 async function main(): Promise<void> {
   const env = withProcessEnvFallback({} as Env);
+  env.SDP_RUNTIME = "node";
 
   if (!env.CUSTODY_ENCRYPTION_KEY) {
     throw new Error("CUSTODY_ENCRYPTION_KEY must be set (legacy key for decryption)");
