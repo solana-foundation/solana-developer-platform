@@ -24,6 +24,7 @@ import type {
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
+  RampOnrampQuoteInput,
   RampProvider,
   RampRawDumpReader,
   RampRuntimeContext,
@@ -35,7 +36,7 @@ const MONEYGRAM_SANDBOX_BASE_URL = "https://playground.xramps.moneygram.com";
 export const MONEYGRAM_DECLARED_RAIL_SUPPORT = {
   onramp: {
     countrySupport: UNREPORTED_COUNTRY_SUPPORT,
-    entityTypes: [],
+    entityTypes: ["individual"],
   },
   offramp: {
     countrySupport: UNREPORTED_COUNTRY_SUPPORT,
@@ -49,6 +50,11 @@ const MONEYGRAM_OFFRAMP_DESTINATION: Partial<Record<RampFiatCurrency, string>> =
 };
 
 const MONEYGRAM_ORIGINATING_COUNTRY = "USA";
+
+const MONEYGRAM_ONRAMP_DESTINATION = {
+  country: "USA",
+  subdivision: "US-TX",
+} as const;
 
 const moneygramCurrencyEntrySchema = z.object({
   code: z.string(),
@@ -69,6 +75,24 @@ const withdrawEstimateSchema = z.object({
     fxRate: z.number(),
     totalAmount: amountDetailSchema,
   }),
+});
+
+const cashInQuoteSchema = z.object({
+  serviceOptions: z.array(
+    z.object({
+      serviceOptionCode: z.string(),
+      quote: z.object({
+        sendAmount: z.object({ value: z.string(), currency: z.string() }),
+        receiveAmount: z.object({ value: z.string(), currency: z.string() }),
+        fees: z.object({
+          mgi: z.object({ value: z.string(), currency: z.string() }),
+          partner: z.object({ value: z.string(), currency: z.string() }),
+          total: z.object({ value: z.string(), currency: z.string() }),
+        }),
+        exchangeRate: z.number(),
+      }),
+    })
+  ),
 });
 
 const sessionSchema = z.object({
@@ -108,8 +132,8 @@ export function distillMoneygramRailSupport(raw: unknown): ProviderRailSupportDi
   return {
     snapshot: {
       onramp: {
-        currencies: {},
-        cryptos: [],
+        currencies: { USD: unreportedCurrencyLimit() },
+        cryptos: ["usdc.solana"],
       },
       offramp: {
         currencies: offrampCurrencies,
@@ -158,10 +182,75 @@ export class MoneygramRampClient implements RampProvider {
   }
 
   async estimateOnramp(
-    _ctx: RampRuntimeContext,
-    _input: RampEstimateOnrampInput
+    { env, mode }: RampRuntimeContext,
+    input: RampEstimateOnrampInput
   ): Promise<PaymentRampEstimate> {
-    throw estimateNotAvailable("MoneyGram does not support on-ramp.", { provider: this.id });
+    if (input.fiatCurrency !== "USD") {
+      throw estimateNotAvailable("MoneyGram on-ramp is limited to USD during the pilot.", {
+        provider: this.id,
+      });
+    }
+    const secretKey = requireMoneygramSecretKey(env, mode);
+    const asset = getCryptoRailAssetLabel(input.assetRail);
+    const response = await providerFetchJson<unknown, Record<string, unknown>>(
+      this.id,
+      `${MONEYGRAM_SANDBOX_BASE_URL}/api/v1/quotes`,
+      {
+        method: "POST",
+        headers: { "x-api-key": secretKey, "User-Agent": "sdp-api/ramps" },
+        body: {
+          destinationCountry: MONEYGRAM_ONRAMP_DESTINATION.country,
+          destinationSubdivision: MONEYGRAM_ONRAMP_DESTINATION.subdivision,
+          sendAmount: Number(input.fiatAmount),
+          asset,
+          chain: "solana",
+          transactionType: "cash-in",
+          serviceOptionCode: "DIRECT_TO_ACCT",
+          receiveCurrencyCode: input.fiatCurrency,
+        },
+      }
+    );
+    const parsed = cashInQuoteSchema.safeParse(response);
+    if (!parsed.success) {
+      throw providerUnavailable("MoneyGram on-ramp estimate response is malformed.", {
+        provider: this.id,
+        issues: z.flattenError(parsed.error).fieldErrors,
+      });
+    }
+    const option = parsed.data.serviceOptions.find(
+      ({ serviceOptionCode }) => serviceOptionCode === "DIRECT_TO_ACCT"
+    );
+    if (!option) {
+      throw estimateNotAvailable("MoneyGram did not return a cash-in service option.", {
+        provider: this.id,
+      });
+    }
+    if (option.quote.fees.total.currency !== input.fiatCurrency) {
+      throw providerUnavailable("MoneyGram returned on-ramp fees outside the fiat send currency.", {
+        provider: this.id,
+      });
+    }
+    return {
+      provider: this.id,
+      direction: "onramp",
+      fiatCurrency: input.fiatCurrency,
+      assetRail: input.assetRail,
+      fiatAmount: option.quote.sendAmount.value,
+      cryptoAmount: option.quote.receiveAmount.value,
+      exchangeRate: String(option.quote.exchangeRate),
+      fees: {
+        currency: input.fiatCurrency,
+        total: option.quote.fees.total.value,
+        provider: option.quote.fees.mgi.value,
+      },
+    };
+  }
+
+  async createOnrampQuote(
+    ctx: RampRuntimeContext,
+    _input: RampOnrampQuoteInput
+  ): Promise<PaymentRampQuote> {
+    return this.createSessionQuote(ctx, "on-ramp");
   }
 
   async estimateOfframp(
@@ -221,8 +310,19 @@ export class MoneygramRampClient implements RampProvider {
   }
 
   async createOfframpQuote(
-    { env, mode }: RampRuntimeContext,
+    ctx: RampRuntimeContext,
     _input: RampOfframpQuoteInput
+  ): Promise<PaymentRampQuote> {
+    return this.createSessionQuote(ctx, "off-ramp");
+  }
+
+  /**
+   * The sessions API always returns a widgetUrl pinned to mode=off-ramp; the widget
+   * reads its direction solely from that query param, so rewrite it per direction.
+   */
+  private async createSessionQuote(
+    { env, mode }: RampRuntimeContext,
+    widgetMode: "on-ramp" | "off-ramp"
   ): Promise<PaymentRampQuote> {
     const secretKey = requireMoneygramSecretKey(env, mode);
     const session = await providerFetchJson<unknown, Record<never, never>>(
@@ -243,6 +343,9 @@ export class MoneygramRampClient implements RampProvider {
       });
     }
 
+    const widgetUrl = new URL(parsed.data.widgetUrl);
+    widgetUrl.searchParams.set("mode", widgetMode);
+
     return {
       provider: this.id,
       id: parsed.data.sessionId,
@@ -250,8 +353,7 @@ export class MoneygramRampClient implements RampProvider {
       deliveryMode: "session_widget",
       sessionToken: parsed.data.sessionToken,
       sessionId: parsed.data.sessionId,
-      widgetUrl: parsed.data.widgetUrl,
-      sdkUrl: `${MONEYGRAM_SANDBOX_BASE_URL}/sdk/index.global.js`,
+      widgetUrl: widgetUrl.toString(),
     };
   }
 }

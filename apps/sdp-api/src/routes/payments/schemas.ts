@@ -708,6 +708,13 @@ export const createOfframpQuoteSchema = z.object({
 
 export const moneygramRampEventSchema = z.discriminatedUnion("kind", [
   z.object({
+    kind: z.literal("onramp_completed"),
+    sessionId: z.string().min(1),
+    transactionId: z.string().min(1),
+    status: z.string().min(1),
+    referenceNumber: z.string().min(1).optional(),
+  }),
+  z.object({
     kind: z.literal("signed"),
     sessionId: z.string().min(1),
     cryptoTransferId: z.string().min(1),

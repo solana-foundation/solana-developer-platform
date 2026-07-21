@@ -11,6 +11,7 @@ import {
   postMoneygramRampEvent,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
+import { MONEYGRAM_SDK_URL } from "@/lib/moneygram-sdk";
 
 const SESSION_REFRESH_MS = 50 * 60 * 1000;
 
@@ -225,7 +226,19 @@ function buildOfframpTransactionPrefill(
   };
 }
 
+function buildOnrampTransactionPrefill(
+  fiatAmount: string,
+  cryptoAsset: CryptoAssetSymbol
+): MoneygramRampsConfig["transaction"] {
+  return {
+    type: "on-ramp",
+    amount: toNumberAmount(fiatAmount),
+    asset: cryptoAsset,
+  };
+}
+
 export interface MoneygramRampWidgetProps {
+  direction: "onramp" | "offramp";
   quote: Extract<PaymentRampQuote, { provider: "moneygram" }>;
   counterparty: Counterparty | null;
   sourceWalletId: string;
@@ -239,6 +252,7 @@ export interface MoneygramRampWidgetProps {
 }
 
 export function MoneygramRampWidget({
+  direction,
   quote,
   counterparty,
   sourceWalletId,
@@ -273,7 +287,7 @@ export function MoneygramRampWidget({
     if (!container) {
       return;
     }
-    const { sessionId, sessionToken, widgetUrl, sdkUrl } = quote;
+    const { sessionId, sessionToken, widgetUrl } = quote;
     const mountPoint = document.createElement("div");
     mountPoint.className = "h-full w-full";
     container.appendChild(mountPoint);
@@ -292,7 +306,7 @@ export function MoneygramRampWidget({
       });
     };
 
-    loadRampsSdk(sdkUrl)
+    loadRampsSdk(MONEYGRAM_SDK_URL)
       .then((sdk) => {
         if (cancelled) {
           return;
@@ -310,12 +324,15 @@ export function MoneygramRampWidget({
             displayName: sourceWalletName,
           },
           customer: buildCustomerPrefill(counterparty),
-          transaction: buildOfframpTransactionPrefill(
-            fiatCurrency,
-            cryptoAsset,
-            cryptoAmount,
-            counterparty
-          ),
+          transaction:
+            direction === "onramp"
+              ? buildOnrampTransactionPrefill(cryptoAmount, cryptoAsset)
+              : buildOfframpTransactionPrefill(
+                  fiatCurrency,
+                  cryptoAsset,
+                  cryptoAmount,
+                  counterparty
+                ),
           onSignTransaction: async (tx) => {
             if (tx.chain !== "solana" || tx.asset !== cryptoAsset) {
               throw new Error(
@@ -357,6 +374,18 @@ export function MoneygramRampWidget({
             return transfer.signature;
           },
           onComplete: (transaction) => {
+            if (direction === "onramp") {
+              post({
+                kind: "onramp_completed",
+                sessionId,
+                transactionId: transaction.id,
+                status: transaction.status,
+                ...(transaction.referenceNumber
+                  ? { referenceNumber: transaction.referenceNumber }
+                  : {}),
+              });
+              return;
+            }
             const cryptoTransferId = signedTransferIdRef.current;
             if (!cryptoTransferId) {
               toast.error(t("DashboardPayments.ramps.moneygramCompletionBeforeTransfer"), {
@@ -410,6 +439,7 @@ export function MoneygramRampWidget({
   }, [
     quote,
     counterparty,
+    direction,
     fiatCurrency,
     cryptoAsset,
     sourceWalletId,

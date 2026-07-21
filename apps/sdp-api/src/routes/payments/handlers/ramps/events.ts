@@ -1,4 +1,5 @@
 import { isRampEventProvider } from "@sdp/payments/ramps/shared";
+import type { MoneygramRampEvent } from "@sdp/types";
 import { z } from "zod";
 import type { PaymentTransferRow, PaymentTransferStatus } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -142,6 +143,14 @@ async function recordCoinbaseRampEvent(c: AppContext, body: unknown) {
   }
 }
 
+const MONEYGRAM_EVENT_DIRECTION = {
+  onramp_completed: "onramp",
+  signed: "offramp",
+  completed: "offramp",
+  errored: null,
+  closed: null,
+} as const satisfies Record<MoneygramRampEvent["kind"], "onramp" | "offramp" | null>;
+
 async function recordMoneygramRampEvent(c: AppContext, body: unknown) {
   const parsed = moneygramRampEventSchema.safeParse(body);
   if (!parsed.success) {
@@ -164,17 +173,38 @@ async function recordMoneygramRampEvent(c: AppContext, body: unknown) {
   if (!transfer) {
     throw notFound("Ramp transfer");
   }
-  if (transfer.type !== "offramp") {
-    throw badRequest("MoneyGram events only apply to off-ramp transfers.");
-  }
   if (isTerminalRampStatus(transfer.status)) {
     return success(c, { transfer: mapTransferRow(transfer) });
+  }
+
+  const expectedDirection = MONEYGRAM_EVENT_DIRECTION[event.kind];
+  if (expectedDirection !== null && transfer.type !== expectedDirection) {
+    throw badRequest(
+      `MoneyGram ${event.kind} events only apply to ${expectedDirection} transfers.`
+    );
   }
 
   const moneygramData = readMoneygramData(transfer);
   const now = new Date().toISOString();
 
   switch (event.kind) {
+    case "onramp_completed": {
+      const updated = await repo.updateTransfer({
+        transferId: transfer.id,
+        status: "completed",
+        providerData: {
+          ...transfer.provider_data,
+          moneygram: {
+            ...moneygramData,
+            transactionId: event.transactionId,
+            payoutStatus: event.status,
+            ...(event.referenceNumber ? { referenceNumber: event.referenceNumber } : {}),
+          },
+        },
+        updatedAt: now,
+      });
+      return transferResponse(c, updated);
+    }
     case "signed": {
       if (transfer.status === "settling") {
         if (moneygramData.cryptoTransferId === event.cryptoTransferId) {
@@ -237,52 +267,8 @@ async function recordMoneygramRampEvent(c: AppContext, body: unknown) {
       });
       return transferResponse(c, updated);
     }
-    case "errored": {
-      const moneygram = {
-        ...moneygramData,
-        ...(event.transactionId ? { transactionId: event.transactionId } : {}),
-      };
-      if (transfer.status === "settling") {
-        const updated = await repo.updateTransfer({
-          transferId: transfer.id,
-          providerData: {
-            ...transfer.provider_data,
-            moneygram: { ...moneygram, lastWidgetError: event.reason },
-          },
-          updatedAt: now,
-        });
-        return transferResponse(c, updated);
-      }
-      if (event.cryptoTransferId) {
-        const leg = await requireVerifiedCryptoLeg(c, transfer, event.cryptoTransferId, {
-          requireConfirmed: false,
-        });
-        const updated = await repo.updateTransfer({
-          transferId: transfer.id,
-          status: "settling",
-          amount: leg.amount,
-          providerData: {
-            ...transfer.provider_data,
-            moneygram: {
-              ...moneygram,
-              cryptoTransferId: leg.id,
-              solanaTxSignature: leg.signature,
-              lastWidgetError: event.reason,
-            },
-          },
-          updatedAt: now,
-        });
-        return transferResponse(c, updated);
-      }
-      const updated = await repo.updateTransfer({
-        transferId: transfer.id,
-        status: "failed",
-        error: event.reason,
-        providerData: { ...transfer.provider_data, moneygram },
-        updatedAt: now,
-      });
-      return transferResponse(c, updated);
-    }
+    case "errored":
+      return recordMoneygramErroredEvent(c, transfer, moneygramData, event, now);
     case "closed": {
       if (transfer.status !== "pending") {
         return success(c, { transfer: mapTransferRow(transfer) });
@@ -299,4 +285,58 @@ async function recordMoneygramRampEvent(c: AppContext, body: unknown) {
       throw internalError(`Unhandled MoneyGram ramp event: ${JSON.stringify(exhaustive)}`);
     }
   }
+}
+
+async function recordMoneygramErroredEvent(
+  c: AppContext,
+  transfer: PaymentTransferRow,
+  moneygramData: Record<string, unknown>,
+  event: Extract<MoneygramRampEvent, { kind: "errored" }>,
+  now: string
+) {
+  const repo = getPaymentsRepository(c);
+  const moneygram = {
+    ...moneygramData,
+    ...(event.transactionId ? { transactionId: event.transactionId } : {}),
+  };
+  if (transfer.type === "offramp" && transfer.status === "settling") {
+    const updated = await repo.updateTransfer({
+      transferId: transfer.id,
+      providerData: {
+        ...transfer.provider_data,
+        moneygram: { ...moneygram, lastWidgetError: event.reason },
+      },
+      updatedAt: now,
+    });
+    return transferResponse(c, updated);
+  }
+  if (transfer.type === "offramp" && event.cryptoTransferId) {
+    const leg = await requireVerifiedCryptoLeg(c, transfer, event.cryptoTransferId, {
+      requireConfirmed: false,
+    });
+    const updated = await repo.updateTransfer({
+      transferId: transfer.id,
+      status: "settling",
+      amount: leg.amount,
+      providerData: {
+        ...transfer.provider_data,
+        moneygram: {
+          ...moneygram,
+          cryptoTransferId: leg.id,
+          solanaTxSignature: leg.signature,
+          lastWidgetError: event.reason,
+        },
+      },
+      updatedAt: now,
+    });
+    return transferResponse(c, updated);
+  }
+  const updated = await repo.updateTransfer({
+    transferId: transfer.id,
+    status: "failed",
+    error: event.reason,
+    providerData: { ...transfer.provider_data, moneygram },
+    updatedAt: now,
+  });
+  return transferResponse(c, updated);
 }
