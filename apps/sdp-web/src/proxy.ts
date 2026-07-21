@@ -6,10 +6,12 @@ import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
 import { retryProjectBootstrap } from "@/lib/project-bootstrap-retry";
 import { PROJECT_COOKIE_NAME, PROJECT_COOKIE_OPTIONS } from "@/lib/project-cookie";
 import { acquireClerkToken, createTokenSdpApiClient } from "@/lib/sdp-api";
+import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 
 export const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
+  WORKSPACE_LOADING_PATH,
   "/pay/:token",
   "/",
   "/docs(.*)",
@@ -71,6 +73,10 @@ export const proxy = clerkMiddleware(async (auth, req) => {
       bootstrappedProjectId = await resolveDefaultProjectId(getToken);
       if (bootstrappedProjectId) {
         req.cookies.set(PROJECT_COOKIE_NAME, bootstrappedProjectId);
+      } else {
+        const loadingUrl = new URL(WORKSPACE_LOADING_PATH, req.url);
+        loadingUrl.searchParams.set("return_to", `${req.nextUrl.pathname}${req.nextUrl.search}`);
+        return NextResponse.redirect(loadingUrl);
       }
     }
   }
