@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
@@ -159,7 +160,7 @@ function WorkSection({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-border-default bg-white p-5">
+    <section className="rounded-lg border border-border-default bg-surface-raised p-5">
       <div>
         <h3 className="text-base font-medium text-primary">{title}</h3>
         {description ? <p className="mt-1 text-sm text-secondary">{description}</p> : null}
@@ -457,36 +458,6 @@ function WalletBaseline({ wallets }: { wallets: ApiKeyAuthoringWallet[] }) {
   );
 }
 
-function RestrictionToggle({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  const t = useTranslations();
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={t("DashboardCustody.apiKeyAddRestrictions")}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "relative h-6 w-11 shrink-0 rounded-full transition-colors",
-        checked ? "bg-primary" : "bg-fill-strong"
-      )}
-    >
-      <span
-        className={cn(
-          "absolute top-0.5 size-5 rounded-full bg-white shadow-sm transition-transform",
-          checked ? "translate-x-5" : "translate-x-0.5"
-        )}
-      />
-    </button>
-  );
-}
-
 function RestrictionGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="border-t border-border-default pt-4 first:border-t-0 first:pt-0">
@@ -553,7 +524,7 @@ function RestrictionEditor({
                 className={cn(
                   "min-h-9 rounded-md px-2 text-xs font-medium",
                   draft.defaultAction === action
-                    ? "border border-border-default bg-white text-primary shadow-sm"
+                    ? "border border-border-default bg-surface-raised text-primary shadow-sm"
                     : "text-secondary"
                 )}
               >
@@ -628,7 +599,7 @@ function RestrictionEditor({
           </Label>
           <textarea
             id="api-key-destinations"
-            className="min-h-24 w-full rounded-lg border border-border-default bg-white px-3 py-2 text-sm text-primary outline-none focus:border-primary"
+            className="min-h-24 w-full rounded-lg border border-border-default bg-surface-raised px-3 py-2 text-sm text-primary outline-none focus:border-primary"
             value={draft.destinations}
             onChange={(event) =>
               update({ destinations: event.currentTarget.value, restrictionsEdited: true })
@@ -809,8 +780,9 @@ function WalletPolicyStep({
                 </p>
               ) : null}
             </div>
-            <RestrictionToggle
+            <ToggleSwitch
               checked={draft.restrictionsEnabled}
+              aria-label={t("DashboardCustody.apiKeyAddRestrictions")}
               onChange={(restrictionsEnabled) =>
                 update({
                   restrictionsEnabled,
@@ -999,7 +971,7 @@ function KeySummary({
 
   return (
     <aside className="lg:sticky lg:top-4">
-      <div className="rounded-lg border border-border-default bg-white p-5">
+      <div className="rounded-lg border border-border-default bg-surface-raised p-5">
         <h2 className="text-base font-medium text-primary">
           {t("DashboardCustody.apiKeySummaryTitle")}
         </h2>
@@ -1278,7 +1250,7 @@ export function ApiKeyAuthoringWorkspace({
           />
         </div>
       </div>
-      <div className="shrink-0 border-t border-border-default bg-white/90 px-4 py-4 md:px-6">
+      <div className="shrink-0 border-t border-border-default bg-surface-raised/90 px-4 py-4 md:px-6">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3">
           <Button type="button" variant="secondary" onClick={handleBack} disabled={isPending}>
             {currentStepIndex === 0 ? t("DashboardCustody.cancel") : t("DashboardCustody.back")}

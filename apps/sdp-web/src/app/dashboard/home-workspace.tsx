@@ -131,7 +131,10 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
             />
           ) : null}
           {dashboardAccess.capabilities.canManageCustody ? (
-            <Button asChild className="!text-white hover:!text-white visited:!text-white">
+            <Button
+              asChild
+              className="!text-on-primary hover:!text-on-primary visited:!text-on-primary"
+            >
               <Link href="/dashboard/wallets">{t("Shared.homeWorkspace.createWallet")}</Link>
             </Button>
           ) : null}

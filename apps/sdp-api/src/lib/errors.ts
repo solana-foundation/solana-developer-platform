@@ -278,3 +278,26 @@ export function counterpartyNotProvisioned(
     { ...details, provider, direction }
   );
 }
+
+/**
+ * Resolves a promise whose expected miss is signalled by throwing a specific
+ * error class.
+ *
+ * @param promise - The in-flight operation.
+ * @param expected - The error class that represents an expected miss.
+ * @returns The result, or null when the operation threw an instance of
+ *   `expected`; any other error rethrows.
+ */
+export async function nullOnExpected<T>(
+  promise: Promise<T>,
+  expected: new (message?: string) => Error
+): Promise<T | null> {
+  try {
+    return await promise;
+  } catch (err) {
+    if (err instanceof expected) {
+      return null;
+    }
+    throw err;
+  }
+}

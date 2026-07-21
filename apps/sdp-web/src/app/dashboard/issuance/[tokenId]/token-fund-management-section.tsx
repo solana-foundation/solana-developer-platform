@@ -24,7 +24,7 @@ export function TokenFundManagementSection({
   onOpenAction,
 }: TokenFundManagementSectionProps) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-border-default bg-white">
+    <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
       {rows.map((row) => (
         <div
           key={row.id}

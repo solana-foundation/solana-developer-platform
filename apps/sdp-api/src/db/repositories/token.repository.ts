@@ -1,4 +1,4 @@
-import type { Token } from "@sdp/types";
+import type { Token, TokenStatus } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
 
 export interface ListTokensOptions {
@@ -13,6 +13,7 @@ export interface TokenRepositoryContext {
 
 export interface TokenRepository {
   getById(tokenId: string): Promise<Token | null>;
+  getStatusByMint(projectId: string, mintAddress: string): Promise<TokenStatus | null>;
   listByProject(
     projectId: string,
     options: ListTokensOptions

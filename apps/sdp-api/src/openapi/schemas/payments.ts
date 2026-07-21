@@ -1078,7 +1078,7 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
     ),
     token: withOpenApi(createRecurringPaymentSchemaBase.shape.token, {
       description:
-        "SPL token mint address. Native SOL is not supported for program-backed recurring payments.",
+        "Token mint address or well-known symbol. Must be a USD stablecoin (e.g. USDC) or a token issued in this project; native SOL is not supported.",
       example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(createRecurringPaymentSchemaBase.shape.amount, {
@@ -1124,7 +1124,7 @@ export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaB
     ),
     token: withOpenApi(updateRecurringPaymentSchemaBase.shape.token, {
       description:
-        "Optional replacement SPL token mint address. Native SOL is not supported for recurring payments.",
+        "Optional replacement token. Must be a USD stablecoin (e.g. USDC) or a token issued in this project; native SOL is not supported.",
       example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(updateRecurringPaymentSchemaBase.shape.amount, {

@@ -323,7 +323,7 @@ test.describe
       const actionTrigger = page.locator(
         '[data-slot="dropdown-menu-trigger"][aria-label^="Wallet actions for"]'
       );
-      const walletHeading = page.locator("h2").filter({ hasText: walletLabel });
+      const walletHeading = page.getByRole("heading", { name: walletLabel });
       const pageGeometry = async () => {
         const [root, trigger, heading] = await Promise.all([
           page.evaluate(() => ({

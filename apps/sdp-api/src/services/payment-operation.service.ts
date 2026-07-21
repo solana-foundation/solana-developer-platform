@@ -2,7 +2,7 @@ import { getSolanaConfig, type RpcEnv } from "@sdp/rpc";
 import { assertValidAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
 import { isWellKnownTokenSymbol, type Permission, SOL_MINT, wellKnownMint } from "@sdp/types";
-import type { Address } from "@solana/kit";
+import { type Address, getI64Encoder, getU64Encoder } from "@solana/kit";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, walletNotFound } from "@/lib/errors";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
@@ -54,6 +54,34 @@ export function assertPositivePaymentAmount(amount: string): string {
   }
 
   throw badRequest("Transfer amount must be greater than zero");
+}
+
+/**
+ * Parses a numeric string into a bigint, rejecting values outside the unsigned
+ * 64-bit range via the canonical u64 codec.
+ */
+export function parseU64String(value: string, fieldName: string): bigint {
+  try {
+    const parsed = BigInt(value);
+    getU64Encoder().encode(parsed);
+    return parsed;
+  } catch {
+    throw badRequest(`${fieldName} must fit in an unsigned 64-bit integer`);
+  }
+}
+
+/**
+ * Parses a numeric string into a bigint, rejecting values outside the signed
+ * 64-bit range via the canonical i64 codec.
+ */
+export function parseI64String(value: string, fieldName: string): bigint {
+  try {
+    const parsed = BigInt(value);
+    getI64Encoder().encode(parsed);
+    return parsed;
+  } catch {
+    throw badRequest(`${fieldName} must fit in a signed 64-bit integer`);
+  }
 }
 
 export function isNativePaymentToken(token: string): boolean {

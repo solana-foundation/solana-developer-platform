@@ -51,7 +51,11 @@ import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
-import { normalizePaymentToken } from "@/services/payment-operation.service";
+import {
+  normalizePaymentToken,
+  parseI64String,
+  parseU64String,
+} from "@/services/payment-operation.service";
 import {
   type AppContext,
   getPaymentSubscriptionsRepository,
@@ -75,10 +79,6 @@ import {
 } from "../schemas";
 import { resolveMintDecimals, resolveMintTokenProgram, SOL_MINT } from "../token-accounts";
 import { resolveScope, resolveWallet } from "../wallets";
-
-const U64_MAX = 18_446_744_073_709_551_615n;
-const I64_MIN = -9_223_372_036_854_775_808n;
-const I64_MAX = 9_223_372_036_854_775_807n;
 
 function mapPlan(row: PaymentSubscriptionPlanRow): PaymentSubscriptionPlan {
   return {
@@ -178,30 +178,6 @@ function generateProgramPlanId(): string {
   }
 
   return value.toString();
-}
-
-function parseU64String(value: string, fieldName: string): bigint {
-  try {
-    const parsed = BigInt(value);
-    if (parsed < 0n || parsed > U64_MAX) {
-      throw new Error("out of range");
-    }
-    return parsed;
-  } catch {
-    throw badRequest(`${fieldName} must fit in an unsigned 64-bit integer`);
-  }
-}
-
-function parseI64String(value: string, fieldName: string): bigint {
-  try {
-    const parsed = BigInt(value);
-    if (parsed < I64_MIN || parsed > I64_MAX) {
-      throw new Error("out of range");
-    }
-    return parsed;
-  } catch {
-    throw badRequest(`${fieldName} must fit in a signed 64-bit integer`);
-  }
 }
 
 function assertSubscriptionTokenMint(token: string): Address {

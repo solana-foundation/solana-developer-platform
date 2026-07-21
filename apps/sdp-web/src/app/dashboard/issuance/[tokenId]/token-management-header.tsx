@@ -59,7 +59,7 @@ export function TokenManagementHeader({
               className="h-14 w-14 shrink-0 rounded-full border border-border-default object-cover"
             />
           ) : (
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-border-default bg-white text-[20px] font-semibold text-primary">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-border-default bg-surface-raised text-[20px] font-semibold text-primary">
               {tokenSymbol.slice(0, 1) || "T"}
             </div>
           )}
@@ -74,13 +74,13 @@ export function TokenManagementHeader({
                 <button
                   type="button"
                   onClick={onCopyAddress}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-border-default bg-white text-secondary transition-colors hover:text-primary"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-border-default bg-surface-raised text-secondary transition-colors hover:text-primary"
                   aria-label={t("DashboardIssuance.header.copyTokenAddress")}
                 >
                   <Copy className="h-4 w-4" />
                 </button>
               ) : null}
-              <span className="rounded-full border border-border-default bg-white px-3 py-1 text-[13px] font-medium text-secondary">
+              <span className="rounded-full border border-border-default bg-surface-raised px-3 py-1 text-[13px] font-medium text-secondary">
                 {tokenSymbol}
               </span>
             </div>
@@ -100,7 +100,7 @@ export function TokenManagementHeader({
               <button
                 type="button"
                 onClick={onCopyTokenId}
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] border border-border-default bg-white text-secondary transition-colors hover:text-primary"
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] border border-border-default bg-surface-raised text-secondary transition-colors hover:text-primary"
                 aria-label={t("DashboardIssuance.header.copyTokenId")}
               >
                 <Copy className="h-3.5 w-3.5" />
