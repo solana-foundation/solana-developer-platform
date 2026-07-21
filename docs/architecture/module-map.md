@@ -24,7 +24,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/solana` | Solana transaction and token-program services. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/types` | Shared runtime types, constants, and product contracts. | None |
 | `sdp-docs` | Public documentation site and generated API reference. | `@sdp/env-config`, `@sdp/types` |
-| `sdp-web` | Dashboard application. | `@sdp/solana`, `@sdp/types` |
+| `sdp-web` | Dashboard application. | `@sdp/issuance`, `@sdp/solana`, `@sdp/types` |
 
 ## Declared Workspace Graph
 
@@ -38,4 +38,4 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/solana` -> `@sdp/rpc`, `@sdp/types`
 - `@sdp/types` -> None
 - `sdp-docs` -> `@sdp/env-config`, `@sdp/types`
-- `sdp-web` -> `@sdp/solana`, `@sdp/types`
+- `sdp-web` -> `@sdp/issuance`, `@sdp/solana`, `@sdp/types`

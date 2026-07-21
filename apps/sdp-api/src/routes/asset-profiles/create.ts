@@ -1,3 +1,4 @@
+import { resolveSettingsToExtensions } from "@sdp/issuance/capabilities";
 import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
 import { getAssetTypeRegistryEntry, type TokenWithAssetProfileResponse } from "@sdp/types";
 import { z } from "zod";
@@ -6,6 +7,12 @@ import { createPostgresAssetProfilesRepository } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, internalError } from "@/lib/errors";
+import {
+  getSelectedSettings,
+  selectedAuthorityValuedSettings,
+  stampAdvancedSettingsVersion,
+  validateAdvancedSettings,
+} from "@/lib/issuance/advanced-settings";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { created } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
@@ -16,14 +23,7 @@ import { createTokenWithAssetProfileSchema } from "../issuance/schemas";
 import type { AppContext } from "./context";
 import { mapToAssetProfile } from "./handlers";
 
-/**
- * POST /v1/issuance/asset-profiles — create an issued token and its asset
- * profile in a single request.
- *
- * The token row and the profile row are written inside one DB transaction: if
- * either insert fails, both roll back, so we never persist a token without a
- * profile.
- */
+// POST /v1/issuance/asset-profiles: create token and profile in one transaction.
 export const createTokenWithAssetProfile = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -40,38 +40,72 @@ export const createTokenWithAssetProfile = async (c: AppContext) => {
 
   const { assetCategory, assetType, issuanceMetadata, ...tokenInput } = parsed.data;
 
-  const normalizedTemplate = normalizeTemplateId(tokenInput.template);
-  const resolved = resolveTemplateConfig(
-    normalizedTemplate,
-    tokenInput.overrides,
-    tokenInput.requiresAllowlist,
-    tokenInput.decimals
-  );
-
-  if (resolved.errors.length > 0) {
-    throw badRequest("Invalid template overrides", {
-      errors: resolved.errors,
-    });
-  }
-
-  // Validate the asset type here (before opening a transaction) so a bad
-  // category/type never gets as far as inserting a token.
+  // Validate type early (before transaction) to avoid token insert on bad type.
   const registryEntry = getAssetTypeRegistryEntry(assetCategory, assetType);
   if (!registryEntry) {
     throw internalError("Missing registry entry for a validated asset type");
+  }
+
+  // Validate settings before touching custody or resolving extensions.
+  const settingErrors = validateAdvancedSettings(assetCategory, assetType, issuanceMetadata ?? {});
+  if (settingErrors.length > 0) {
+    throw badRequest("Invalid advanced settings", { errors: settingErrors });
   }
 
   const signingWalletId = resolveApiKeySigningWalletId(auth, tokenInput.signingWalletId, [
     "tokens:write",
   ]);
 
-  // Custody signer provisioning is idempotent setup, kept outside the DB
-  // transaction (it may reach an external custody provider that cannot roll back).
-  if (signingWalletId) {
-    await createOrgSigner(c.env, orgId, projectId, signingWalletId);
+  // Custody signer outside transaction (external provider can't roll back).
+  // Signer address is the controlled wallet for authority-valued extensions.
+  const signer = signingWalletId
+    ? await createOrgSigner(c.env, orgId, projectId, signingWalletId)
+    : null;
+
+  // Authority-valued settings need real wallet; reject if missing to avoid bricking.
+  const authoritySettings = signer ? [] : selectedAuthorityValuedSettings(issuanceMetadata ?? {});
+  if (authoritySettings.length > 0) {
+    throw badRequest("A signing wallet is required for the selected advanced settings", {
+      errors: authoritySettings.map((settingKey) => ({
+        settingKey,
+        reason: "signing_wallet_required",
+      })),
+    });
   }
 
-  const metadata = issuanceMetadata ?? {};
+  // Two mutually-exclusive extension sources: advanced settings (capability-derived
+  // template, source of truth) or the legacy template + overrides. When settings are
+  // present they win — `template` is a base-template hint the capability supersedes, so
+  // it's tolerated (the wizard always sends it alongside settings). `overrides`, though,
+  // carries explicit per-extension config that would be dropped silently; reject rather
+  // than deploy something the caller never asked for (extensions are immutable post-deploy).
+  const selectedSettings = getSelectedSettings(issuanceMetadata ?? {});
+  const usingSettings = Object.keys(selectedSettings).length > 0;
+
+  if (usingSettings && tokenInput.overrides !== undefined) {
+    throw badRequest("Advanced settings and template overrides cannot be combined", {
+      errors: [{ field: "overrides", reason: "conflicts_with_advanced_settings" }],
+    });
+  }
+
+  const resolved = usingSettings
+    ? resolveSettingsToExtensions(assetCategory, assetType, selectedSettings, {
+        authorities: signer ? { permanentDelegate: signer.address } : undefined,
+        decimals: tokenInput.decimals,
+        requiresAllowlist: tokenInput.requiresAllowlist,
+      })
+    : resolveTemplateConfig(
+        normalizeTemplateId(tokenInput.template),
+        tokenInput.overrides,
+        tokenInput.requiresAllowlist,
+        tokenInput.decimals
+      );
+
+  if (resolved.errors.length > 0) {
+    throw badRequest("Invalid token extension configuration", { errors: resolved.errors });
+  }
+
+  const metadata = stampAdvancedSettingsVersion(issuanceMetadata ?? {});
   const publicMetadata = projectPublicMetadata(assetCategory, assetType, metadata);
   const createdBy = await resolveCreatorUserId(c);
 
@@ -114,7 +148,7 @@ export const createTokenWithAssetProfile = async (c: AppContext) => {
     });
 
     if (!profileRow) {
-      // Throw to roll back the token insert we just made in this transaction.
+      // Throw to roll back token insert.
       throw internalError("Failed to create asset profile");
     }
 
@@ -123,8 +157,7 @@ export const createTokenWithAssetProfile = async (c: AppContext) => {
 
   const assetProfile = mapToAssetProfile(profileRow);
 
-  // Audit outside the transaction: a failed audit write must not roll back a
-  // committed token + profile.
+  // Audit outside transaction; audit failure must not roll back committed token + profile.
   const auditService = new AuditService(db);
   await auditService.log(c, {
     action: "create",
