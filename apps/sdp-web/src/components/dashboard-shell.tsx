@@ -19,7 +19,7 @@ import {
   ShieldCheckIcon,
   WalletIcon,
 } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ApiKeyAuthoringSkeleton,
@@ -82,6 +82,10 @@ import {
   type DashboardNavigationStartDetail,
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
+import {
+  type OrganizationOnboardingStatus,
+  shouldRedirectToOrganizationOnboarding,
+} from "@/lib/onboarding-route-guard";
 import { cn } from "@/lib/utils";
 
 type SubNavItem = {
@@ -1034,10 +1038,17 @@ function DashboardSidebarContent({
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
-export function DashboardShell({ children }: { children: ReactNode }) {
+export function DashboardShell({
+  children,
+  onboardingStatus,
+}: {
+  children: ReactNode;
+  onboardingStatus: OrganizationOnboardingStatus | null;
+}) {
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
+  const router = useRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -1124,6 +1135,16 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
+  const shouldRedirectToOnboarding = shouldRedirectToOrganizationOnboarding(
+    onboardingStatus,
+    pathname
+  );
+
+  useEffect(() => {
+    if (shouldRedirectToOnboarding) {
+      router.replace("/dashboard/onboarding");
+    }
+  }, [router, shouldRedirectToOnboarding]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem("sdp.dashboard.payments-subnav-open");
@@ -1208,7 +1229,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     };
   }, [dashboardAccess.capabilities.canReadApprovals, selectedProjectId]);
 
-  if (!isLoaded) {
+  if (!isLoaded || shouldRedirectToOnboarding) {
     return <FullscreenLoadingIndicator />;
   }
 

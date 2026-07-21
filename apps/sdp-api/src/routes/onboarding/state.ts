@@ -3,7 +3,7 @@ import type { CustodyProvider, OrganizationRpcProvider } from "@sdp/types";
 export const ONBOARDING_VERSION = 1;
 
 export type OrganizationOnboardingSetup = {
-  status: "incomplete" | "complete";
+  status: "not_started" | "in_progress" | "complete";
   currentStep: "rpc" | "custody" | "complete";
   rpcProvider: OrganizationRpcProvider | null;
   custodyProvider: CustodyProvider | null;
@@ -32,7 +32,7 @@ export function resolveOnboardingSetup(input: {
   }
 
   return {
-    status: "incomplete",
+    status: input.rpcProvider ? "in_progress" : "not_started",
     currentStep: input.rpcProvider ? "custody" : "rpc",
     rpcProvider: input.rpcProvider,
     custodyProvider: input.custodyProvider,

@@ -338,6 +338,8 @@
     "onboardingDescription": "Choisissez l'infrastructure utilisée par votre organisation. Vous pourrez modifier les deux fournisseurs plus tard dans les paramètres.",
     "onboardingChooseRpc": "Choisissez votre fournisseur RPC",
     "onboardingChooseCustody": "Choisissez votre fournisseur de conservation",
+    "onboardingNoRpcProviders": "Aucun fournisseur RPC n'est configuré pour cet environnement. Contactez votre administrateur SDP avant de continuer.",
+    "onboardingNoCustodyProviders": "Aucun fournisseur de conservation généralement disponible n'est configuré pour cet environnement. Contactez votre administrateur SDP avant de continuer.",
     "onboardingFinish": "Terminer la configuration",
     "onboardingFinishError": "Impossible de terminer la configuration de l'organisation.",
     "onboardingSaving": "Enregistrement...",

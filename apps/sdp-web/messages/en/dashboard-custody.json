@@ -456,6 +456,8 @@
     "onboardingDescription": "Choose the infrastructure your organization will use. You can change both providers later in settings.",
     "onboardingChooseRpc": "Choose your RPC provider",
     "onboardingChooseCustody": "Choose your custody provider",
+    "onboardingNoRpcProviders": "No RPC providers are configured for this environment. Contact your SDP administrator before continuing.",
+    "onboardingNoCustodyProviders": "No generally available custody providers are configured for this environment. Contact your SDP administrator before continuing.",
     "onboardingFinish": "Finish setup",
     "onboardingFinishError": "Unable to finish organization setup.",
     "onboardingSaving": "Saving...",

@@ -1,7 +1,8 @@
 "use server";
 
 import type { OrganizationRpcProvider } from "@sdp/types";
-import { initializeCustodySetupAction } from "@/app/dashboard/custody/actions";
+import { revalidatePath } from "next/cache";
+import { initializeOnboardingCustodyAction } from "@/app/dashboard/custody/actions";
 import { updateOrganizationRpcSettingsAction } from "@/app/dashboard/settings/actions";
 import { getTranslations } from "@/i18n/server";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
@@ -30,14 +31,18 @@ export async function completeOrganizationOnboardingAction(
   const formData = new FormData();
   formData.set("provider", provider);
   formData.set("walletLabel", "Default wallet");
-  const walletResult = await initializeCustodySetupAction(formData);
+  const walletResult = await initializeOnboardingCustodyAction(formData);
   if (walletResult.status === "error") {
     return walletResult;
   }
 
   try {
     const client = await createOrgSdpApiClient();
-    await client.fetch("/v1/onboarding/complete", { method: "POST", body: "{}" });
+    await client.fetch("/v1/onboarding/complete", {
+      method: "POST",
+      body: JSON.stringify({ custodyProvider: provider }),
+    });
+    revalidatePath("/dashboard", "layout");
     return { status: "success" };
   } catch (error) {
     return {

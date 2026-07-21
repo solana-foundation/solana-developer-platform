@@ -139,6 +139,14 @@ export function OrganizationOnboardingFlow({
 
           {currentStep === "rpc" ? (
             <form id={formId} onSubmit={submitRpc} className="grid gap-4 md:grid-cols-2">
+              {rpcProviders.length === 0 ? (
+                <div
+                  role="alert"
+                  className="md:col-span-2 rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary"
+                >
+                  {t("DashboardCustody.onboardingNoRpcProviders")}
+                </div>
+              ) : null}
               {rpcProviders.map((provider) => (
                 <ProviderSelectionCard
                   key={provider}
@@ -155,6 +163,14 @@ export function OrganizationOnboardingFlow({
             </form>
           ) : (
             <form id={formId} onSubmit={submitCustody} className="grid gap-4 md:grid-cols-2">
+              {custodyEntries.length === 0 ? (
+                <div
+                  role="alert"
+                  className="md:col-span-2 rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary"
+                >
+                  {t("DashboardCustody.onboardingNoCustodyProviders")}
+                </div>
+              ) : null}
               {custodyEntries.map((provider: CustodyProviderCatalogEntry) => (
                 <ProviderSelectionCard
                   key={provider.id}

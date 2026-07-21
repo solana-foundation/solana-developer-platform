@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveOnboardingSetup } from "./state";
 
 describe("resolveOnboardingSetup", () => {
-  it("starts incomplete organizations at RPC selection", () => {
+  it("starts new organizations at RPC selection", () => {
     expect(
       resolveOnboardingSetup({
         completedAt: null,
@@ -12,7 +12,7 @@ describe("resolveOnboardingSetup", () => {
         version: 1,
       })
     ).toEqual({
-      status: "incomplete",
+      status: "not_started",
       currentStep: "rpc",
       rpcProvider: null,
       custodyProvider: null,
@@ -30,8 +30,8 @@ describe("resolveOnboardingSetup", () => {
         custodyProvider: null,
         canManage: true,
         version: 1,
-      }).currentStep
-    ).toBe("custody");
+      })
+    ).toMatchObject({ status: "in_progress", currentStep: "custody" });
   });
 
   it("does not trust prerequisites alone to mark onboarding complete", () => {
@@ -43,7 +43,7 @@ describe("resolveOnboardingSetup", () => {
         canManage: true,
         version: 1,
       })
-    ).toMatchObject({ status: "incomplete", currentStep: "custody" });
+    ).toMatchObject({ status: "in_progress", currentStep: "custody" });
   });
 
   it("keeps backfilled organizations complete even without provider selections", () => {

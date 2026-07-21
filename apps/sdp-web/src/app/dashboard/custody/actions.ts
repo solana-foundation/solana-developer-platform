@@ -125,7 +125,10 @@ export async function initializeCustody(formData: FormData) {
   redirect("/dashboard/wallets");
 }
 
-async function initializeCustodyWallet(formData: FormData) {
+async function initializeCustodyWallet(
+  formData: FormData,
+  options: { createWalletOnConflict?: boolean } = {}
+) {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
@@ -177,6 +180,9 @@ async function initializeCustodyWallet(formData: FormData) {
       apiError?.status === 409 &&
       apiError.message.includes("Signing already initialized for org")
     ) {
+      if (options.createWalletOnConflict === false) {
+        return;
+      }
       await client.fetch("/v1/wallets", {
         method: "POST",
         body: JSON.stringify({
@@ -240,6 +246,22 @@ export async function initializeCustodySetupAction(
   const t = await getTranslations();
   try {
     await initializeCustodyWallet(formData);
+    revalidateWalletPaths();
+    return { status: "success" };
+  } catch (error) {
+    return {
+      status: "error",
+      message: toApiActionErrorMessage(error, t),
+    };
+  }
+}
+
+export async function initializeOnboardingCustodyAction(
+  formData: FormData
+): Promise<WalletSetupActionResult> {
+  const t = await getTranslations();
+  try {
+    await initializeCustodyWallet(formData, { createWalletOnConflict: false });
     revalidateWalletPaths();
     return { status: "success" };
   } catch (error) {

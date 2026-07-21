@@ -1,6 +1,6 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
-import { errorResponseSchema } from "../schemas";
+import { errorResponseSchema, onboardingCompleteRequestSchema } from "../schemas";
 import { errorResponses, jsonContent } from "./helpers";
 import { onboardingCompleteResponse, onboardingStatusResponse } from "./responses";
 
@@ -29,8 +29,14 @@ export function registerOnboardingPaths(registry: OpenAPIRegistry) {
     summary: "Complete organization onboarding",
     operationId: "completeOrganizationOnboarding",
     description:
-      "Marks organization onboarding complete after verifying an RPC selection and active custody wallet.",
+      "Marks organization onboarding complete after verifying an RPC selection and the selected default custody wallet for the default sandbox project.",
     security: [{ apiKeyAuth: [] }],
+    request: {
+      body: {
+        required: true,
+        content: jsonContent(onboardingCompleteRequestSchema),
+      },
+    },
     responses: {
       200: {
         description: "Completed onboarding state",

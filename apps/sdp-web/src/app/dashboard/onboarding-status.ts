@@ -4,7 +4,7 @@ export type OnboardingStatusResponse = {
     id: string;
   } | null;
   setup?: {
-    status: "incomplete" | "complete";
+    status: import("@/lib/onboarding-route-guard").OrganizationOnboardingStatus;
     currentStep: "rpc" | "custody" | "complete";
     rpcProvider: import("@sdp/types").OrganizationRpcProvider | null;
     custodyProvider: import("@sdp/types").CustodyProvider | null;

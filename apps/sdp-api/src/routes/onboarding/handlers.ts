@@ -67,20 +67,31 @@ function resolveRpcProvider(settings: unknown): OrganizationRpcProvider | null {
 
 async function fetchCustodyProvider(
   db: DatabaseClient,
-  organizationId: string
+  organizationId: string,
+  expectedProvider: CustodyProvider | null = null
 ): Promise<CustodyProvider | null> {
   const row = await db
     .prepare(
       `SELECT cc.provider
-       FROM custody_configs cc
-       INNER JOIN custody_wallets cw ON cw.custody_config_id = cc.id
-       WHERE cc.organization_id = ?
+       FROM projects p
+       INNER JOIN custody_scope_defaults csd
+         ON csd.organization_id = p.organization_id AND csd.project_id = p.id
+       INNER JOIN custody_configs cc
+         ON cc.id = csd.default_custody_config_id
+        AND cc.organization_id = p.organization_id
+        AND cc.project_id = p.id
+       INNER JOIN custody_wallets cw
+         ON cw.custody_config_id = cc.id AND cw.wallet_id = cc.default_wallet_id
+       WHERE p.organization_id = ?
+         AND p.slug = 'default-sandbox'
+         AND p.environment = 'sandbox'
+         AND p.status = 'active'
          AND cc.status = 'active'
          AND cw.status = 'active'
-       ORDER BY cw.created_at ASC
+         ${expectedProvider ? "AND cc.provider = ?" : ""}
        LIMIT 1`
     )
-    .bind(organizationId)
+    .bind(...(expectedProvider ? [organizationId, expectedProvider] : [organizationId]))
     .first<{ provider: string }>();
 
   return row && CUSTODY_PROVIDERS.includes(row.provider as CustodyProvider)
@@ -160,13 +171,27 @@ export const completeOnboarding = async (c: AppContext) => {
   }
 
   const organization = await fetchOrganization(db, mapping.organization_id);
+  const requestBody = await c.req.json().catch(() => ({}));
+  const requestedProvider =
+    requestBody && typeof requestBody === "object" && "custodyProvider" in requestBody
+      ? (requestBody as { custodyProvider?: unknown }).custodyProvider
+      : null;
+  if (!CUSTODY_PROVIDERS.includes(requestedProvider as CustodyProvider)) {
+    throw badRequest("Choose a supported custody provider before finishing setup");
+  }
   const rpcProvider = resolveRpcProvider(organization.settings);
-  const custodyProvider = await fetchCustodyProvider(db, organization.id);
+  const custodyProvider = await fetchCustodyProvider(
+    db,
+    organization.id,
+    requestedProvider as CustodyProvider
+  );
   if (!rpcProvider) {
     throw badRequest("Select an RPC provider before finishing setup");
   }
   if (!custodyProvider) {
-    throw badRequest("Create a custody wallet before finishing setup");
+    throw badRequest(
+      "Create and select a default custody wallet for the sandbox project before finishing setup"
+    );
   }
 
   await db
