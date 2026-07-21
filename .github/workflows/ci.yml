@@ -581,6 +581,9 @@ jobs:
           - name: Dashboard E2E (Surfpool Local)
             test_script: test:e2e:dashboard
             artifact_suffix: dashboard-surfpool
+          - name: Dashboard E2E (Transactions / Surfpool Local)
+            test_script: test:e2e:dashboard-transactions
+            artifact_suffix: dashboard-transactions-surfpool
           - name: Issuance E2E (Surfpool Shards)
             test_script: kora:surfpool:e2e:issuance
             artifact_suffix: issuance

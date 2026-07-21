@@ -90,7 +90,19 @@ export default defineConfig({
     {
       name: "dashboard",
       testMatch: /.*\.e2e\.spec\.ts/,
-      testIgnore: /.*(issuance|auth-entry|gcp-read-only).*.e2e\.spec\.ts/,
+      testIgnore: [
+        /.*(issuance|auth-entry|gcp-read-only).*.e2e\.spec\.ts/,
+        /(^|\/)(payments|wallets)\.e2e\.spec\.ts$/,
+      ],
+      dependencies: ["auth-setup"],
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: authStatePath,
+      },
+    },
+    {
+      name: "dashboard-transactions",
+      testMatch: /(^|\/)(payments|wallets)\.e2e\.spec\.ts$/,
       dependencies: ["auth-setup"],
       use: {
         ...devices["Desktop Chrome"],
