@@ -3,12 +3,15 @@ import type { ListProjectsResponse } from "@sdp/types";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
+import { retryProjectBootstrap } from "@/lib/project-bootstrap-retry";
 import { PROJECT_COOKIE_NAME, PROJECT_COOKIE_OPTIONS } from "@/lib/project-cookie";
 import { acquireClerkToken, createTokenSdpApiClient } from "@/lib/sdp-api";
+import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 
 export const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
+  WORKSPACE_LOADING_PATH,
   "/pay/:token",
   "/",
   "/docs(.*)",
@@ -43,15 +46,17 @@ function getUnauthenticatedUrl(req: NextRequest): string {
 async function resolveDefaultProjectId(
   getToken: (options?: { template?: string }) => Promise<string | null>
 ): Promise<string | null> {
-  try {
-    const client = createTokenSdpApiClient(await acquireClerkToken(getToken));
-    const { projects } = await client.fetch<ListProjectsResponse>("/v1/projects");
-    return (
-      (projects.find((project) => project.slug === "default-sandbox") ?? projects[0])?.id ?? null
-    );
-  } catch {
-    return null;
-  }
+  const projects = await retryProjectBootstrap({
+    load: async () => {
+      const client = createTokenSdpApiClient(await acquireClerkToken(getToken));
+      return (await client.fetch<ListProjectsResponse>("/v1/projects")).projects;
+    },
+    isReady: (value) => value.length > 0,
+  });
+
+  return (
+    (projects?.find((project) => project.slug === "default-sandbox") ?? projects?.[0])?.id ?? null
+  );
 }
 
 export const proxy = clerkMiddleware(async (auth, req) => {
@@ -68,6 +73,10 @@ export const proxy = clerkMiddleware(async (auth, req) => {
       bootstrappedProjectId = await resolveDefaultProjectId(getToken);
       if (bootstrappedProjectId) {
         req.cookies.set(PROJECT_COOKIE_NAME, bootstrappedProjectId);
+      } else {
+        const loadingUrl = new URL(WORKSPACE_LOADING_PATH, req.url);
+        loadingUrl.searchParams.set("return_to", `${req.nextUrl.pathname}${req.nextUrl.search}`);
+        return NextResponse.redirect(loadingUrl);
       }
     }
   }
