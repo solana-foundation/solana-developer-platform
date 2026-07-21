@@ -69,8 +69,8 @@ test.describe
     test("creates and displays a recurring payment", async ({ page }) => {
       await page.goto("/dashboard/payments");
 
-      await expect(page.getByRole("link", { name: "Recurring" })).toBeVisible();
-      await page.getByRole("link", { name: "Recurring" }).click();
+      await expect(page.getByRole("link", { name: "Recurring", exact: true })).toBeVisible();
+      await page.getByRole("link", { name: "Recurring", exact: true }).click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
       await expect(
         page.locator("main").getByRole("heading", { name: "Recurring payments" }).first()
