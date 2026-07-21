@@ -9,7 +9,8 @@
     "dashboard": "Dashboard",
     "title": "Construisez tout produit financier, sans gérer l’infrastructure",
     "description": "Émission de stablecoin, paiements transfrontaliers ou tokenisation d’actifs réels : SDP fournit les APIs et l’infra les plus fiables pour y parvenir.",
-    "joinWaitlist": "Rejoindre la liste d’attente"
+    "trySdp": "Essayer SDP",
+    "contactUs": "Nous contacter"
   },
   "NotFound": {
     "solanaLogo": "Solana",

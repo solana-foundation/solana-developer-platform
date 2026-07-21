@@ -7,7 +7,7 @@ import { getTranslations } from "@/i18n/server";
 const docsHref =
   process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
   (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
-const waitlistHref = "https://solanafoundation.typeform.com/to/PLfMTDQs";
+const contactHref = "https://solanafoundation.typeform.com/to/PLfMTDQs";
 
 export default async function Home() {
   const t = await getTranslations();
@@ -52,14 +52,20 @@ export default async function Home() {
             {t("Home.description")}
           </p>
 
-          <div className="mt-[34px]">
+          <div className="mt-[34px] flex flex-wrap items-center gap-3">
             <Link
-              href={waitlistHref}
-              target="_blank"
-              rel="noreferrer"
+              href="/sign-up"
               className="inline-flex h-10 items-center justify-center rounded-[10px] bg-primary px-[18px] text-[15px] font-semibold leading-[15px] text-on-primary transition hover:opacity-90"
             >
-              {t("Home.joinWaitlist")}
+              {t("Home.trySdp")}
+            </Link>
+            <Link
+              href={contactHref}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-10 items-center justify-center rounded-[10px] border border-border-default bg-surface-raised px-[18px] text-[15px] font-semibold leading-[15px] text-primary transition-colors hover:bg-fill-subtle"
+            >
+              {t("Home.contactUs")}
             </Link>
           </div>
         </div>

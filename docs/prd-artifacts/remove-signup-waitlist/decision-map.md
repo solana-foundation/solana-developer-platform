@@ -43,7 +43,8 @@ make it inert for provider access and remove tier language from product UI and p
 
 Launch-critical changes:
 
-- change the landing-page waitlist CTA to `/sign-up`
+- replace the landing-page waitlist CTA with `Try SDP` linking to `/sign-up`, alongside a secondary
+  `Contact us` action that preserves the existing Typeform funnel
 - disable Clerk's signup restriction in the production Clerk instance
 - stop deriving provider access from organization tier
 - keep self-hosted behavior: configured providers are usable unless explicitly disabled
@@ -155,7 +156,7 @@ hidden context reliably, create a small SDP request-access endpoint first and tr
 form as the follow-up channel.
 
 Do not show `Upgrade`, `Enterprise only`, customer-tier comparisons, a global contact banner, or a
-waitlist message. The landing-page CTA remains `Get started`.
+waitlist message. The landing-page actions are `Try SDP` and `Contact us`.
 
 ## #5: How are existing organizations migrated?
 
