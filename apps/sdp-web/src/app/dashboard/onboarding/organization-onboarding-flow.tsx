@@ -61,7 +61,7 @@ export function OrganizationOnboardingFlow({
   const [isPending, startTransition] = useTransition();
   const [currentStep, setCurrentStep] = useState(initialStep);
   const [rpcProvider, setRpcProvider] = useState<OrganizationRpcProvider | null>(
-    initialRpcProvider
+    initialRpcProvider === "default" ? null : initialRpcProvider
   );
   const [custodyProvider, setCustodyProvider] = useState<CustodyProvider | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -69,6 +69,10 @@ export function OrganizationOnboardingFlow({
     const providers = new Set(custodyProviders);
     return CUSTODY_PROVIDER_CATALOG.filter((entry) => providers.has(entry.id));
   }, [custodyProviders]);
+  const visibleRpcProviders = useMemo(
+    () => rpcProviders.filter((provider) => provider !== "default"),
+    [rpcProviders]
+  );
 
   const submitRpc = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -139,7 +143,7 @@ export function OrganizationOnboardingFlow({
 
           {currentStep === "rpc" ? (
             <form id={formId} onSubmit={submitRpc} className="grid gap-4 md:grid-cols-2">
-              {rpcProviders.length === 0 ? (
+              {visibleRpcProviders.length === 0 ? (
                 <div
                   role="alert"
                   className="md:col-span-2 rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary"
@@ -147,7 +151,7 @@ export function OrganizationOnboardingFlow({
                   {t("DashboardCustody.onboardingNoRpcProviders")}
                 </div>
               ) : null}
-              {rpcProviders.map((provider) => (
+              {visibleRpcProviders.map((provider) => (
                 <ProviderSelectionCard
                   key={provider}
                   isSelected={rpcProvider === provider}

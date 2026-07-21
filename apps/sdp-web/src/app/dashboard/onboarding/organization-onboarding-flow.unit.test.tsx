@@ -20,7 +20,7 @@ function renderFlow(currentStep: "rpc" | "custody" = "rpc") {
         organizationId="org_test"
         currentStep={currentStep}
         initialRpcProvider={currentStep === "custody" ? "helius" : null}
-        rpcProviders={["default", "helius", "quicknode"]}
+        rpcProviders={["default", "alchemy", "helius", "quicknode", "triton", "validationcloud"]}
         custodyProviders={["privy", "coinbase_cdp", "para", "turnkey"]}
       />
     </I18nProvider>
@@ -28,15 +28,18 @@ function renderFlow(currentStep: "rpc" | "custody" = "rpc") {
 }
 
 describe("OrganizationOnboardingFlow", () => {
-  it("starts with configured RPC provider cards in the shared wizard shell", () => {
+  it("starts with every vendor RPC card and omits the SDP default", () => {
     const markup = renderFlow();
 
     expect(markup).toContain("Set up your workspace");
     expect(markup).toContain("Step 1 of 2");
-    expect(markup).toContain("SDP RPC");
+    expect(markup).toContain("Alchemy");
     expect(markup).toContain("Helius");
     expect(markup).toContain("QuickNode");
-    expect(markup.match(/aria-pressed="false"/g)).toHaveLength(3);
+    expect(markup).toContain("Triton");
+    expect(markup).toContain("Validation Cloud");
+    expect(markup).not.toContain("SDP RPC");
+    expect(markup.match(/aria-pressed="false"/g)).toHaveLength(5);
     expect(markup).toContain('data-organization-onboarding-actions="true"');
     expect(markup).toContain("bg-surface-raised/95");
     expect(markup).not.toContain("bg-white/95");

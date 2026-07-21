@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import {
   type CustodyProvider,
   GENERAL_PROVIDER_DEFAULTS,
+  ORGANIZATION_RPC_PROVIDERS,
   type OrganizationRpcProvider,
 } from "@sdp/types";
 import { redirect } from "next/navigation";
@@ -16,6 +17,10 @@ import { OrganizationPreparingLoader } from "./organization-preparing-loader";
 const GENERAL_CUSTODY_PROVIDERS = Object.entries(GENERAL_PROVIDER_DEFAULTS.custody)
   .filter(([, enabled]) => enabled)
   .map(([provider]) => provider as CustodyProvider);
+
+const GENERAL_RPC_PROVIDERS = ORGANIZATION_RPC_PROVIDERS.filter(
+  (provider) => provider !== "default" && GENERAL_PROVIDER_DEFAULTS.rpc[provider]
+);
 
 export default async function OrganizationOnboardingPage() {
   const t = await getTranslations();
@@ -50,9 +55,6 @@ export default async function OrganizationOnboardingPage() {
     organizationClient.request,
     status.organization.id
   );
-  const rpcProviders = Object.entries(availability.providers.rpc)
-    .filter(([, entry]) => entry.configured)
-    .map(([provider]) => provider as OrganizationRpcProvider);
   const custodyProviders = GENERAL_CUSTODY_PROVIDERS.filter(
     (provider) => availability.providers.custody[provider]?.configured
   );
@@ -62,7 +64,7 @@ export default async function OrganizationOnboardingPage() {
       organizationId={status.organization.id}
       currentStep={status.setup.currentStep === "custody" ? "custody" : "rpc"}
       initialRpcProvider={status.setup.rpcProvider}
-      rpcProviders={rpcProviders}
+      rpcProviders={[...GENERAL_RPC_PROVIDERS] as OrganizationRpcProvider[]}
       custodyProviders={[...custodyProviders]}
     />
   );
