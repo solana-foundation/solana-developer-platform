@@ -24,7 +24,6 @@ export function ClerkClientProvider({ children }: { children: ReactNode }) {
       }}
       signInUrl="/sign-in"
       signUpUrl="/sign-up"
-      taskUrls={{ "choose-organization": "/sign-up/tasks/choose-organization" }}
       signInFallbackRedirectUrl="/dashboard"
       signUpFallbackRedirectUrl="/dashboard"
       allowedRedirectOrigins={ALLOWED_SATELLITE_REDIRECT_ORIGINS}
