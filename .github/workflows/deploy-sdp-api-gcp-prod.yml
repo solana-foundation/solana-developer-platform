@@ -1,0 +1,74 @@
+name: Deploy sdp-api to Cloud Run (prod)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sdp-api-gcp-deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      (github.event_name == 'workflow_dispatch' ||
+       startsWith(github.event.head_commit.message, 'chore(main): release '))
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      PROJECT_ID: solana-developer-platform
+      REGION: us-central1
+      REPO: sdp-prod
+      SERVICE: sdp-prod-api-public
+      JOB: sdp-prod-api-public-cron
+      MIGRATE_JOB: sdp-prod-api-public-migrate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push image
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${VERSION}"
+          docker build -f apps/sdp-api/Dockerfile --build-arg GIT_SHA="${GITHUB_SHA}" \
+            -t "${IMAGE}" -t "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${GITHUB_SHA}" .
+          docker push "${IMAGE}"
+          docker push "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${GITHUB_SHA}"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Run database migrations
+        run: |
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+          gcloud run jobs execute "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --wait
+
+      - name: Deploy service
+        run: |
+          gcloud run services update "${SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+
+      - name: Update cron job image
+        run: |
+          gcloud run jobs update "${JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
