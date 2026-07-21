@@ -58,7 +58,7 @@ import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
-import { walletBalanceAssetOptions } from "../ramps/wallet-options";
+import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
 import {
   type RecurringPaymentAction,
   runRecurringPaymentAction,
@@ -960,7 +960,7 @@ export function RecurringPaymentDetailWorkspace({
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
   const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceWalletId);
-  const assetOptions = walletBalanceAssetOptions(wallet, {}, t);
+  const assetOptions = recurringPaymentAssetOptions(wallet, {}, t);
   const receivingAccount =
     counterpartyAccounts.find((account) => account.id === recurringPayment.counterpartyAccountId) ??
     null;
