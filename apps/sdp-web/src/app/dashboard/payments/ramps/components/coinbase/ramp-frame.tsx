@@ -1,6 +1,5 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { handleCoinbaseFrameEvent } from "./frame-events";
@@ -51,11 +50,7 @@ export function CoinbaseRampFrame({ orderId, src }: { orderId: string; src: stri
   }, [src, orderId, t]);
 
   if (phase === "processing") {
-    return (
-      <div className="flex h-12 items-center justify-center">
-        <Loader2 className="size-5 animate-spin text-secondary" />
-      </div>
-    );
+    return null;
   }
 
   return (
