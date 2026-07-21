@@ -184,7 +184,7 @@ export interface Env {
   PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE?: string;
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
 
-  // Asset Profiles backend feature flag
+  // Asset Profiles production opt-in; development is always enabled.
   ASSET_PROFILES_ENABLED?: string;
 
   // Compliance providers

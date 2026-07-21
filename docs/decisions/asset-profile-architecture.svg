@@ -119,5 +119,5 @@
 
   <!-- Footnote -->
   <text x="520" y="822" text-anchor="middle" font-size="12" fill="#64748b">The canonical token metadata.json folds in only the cached public_metadata — compliance &amp; custom fields never cross into it.</text>
-  <text x="520" y="838" text-anchor="middle" font-size="11" fill="#94a3b8">Whole feature gated by ASSET_PROFILES_ENABLED (off by default).</text>
+  <text x="520" y="838" text-anchor="middle" font-size="11" fill="#94a3b8">Enabled outside production; production uses ASSET_PROFILES_ENABLED.</text>
 </svg>

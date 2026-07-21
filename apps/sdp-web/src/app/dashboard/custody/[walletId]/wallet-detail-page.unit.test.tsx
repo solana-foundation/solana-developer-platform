@@ -1,7 +1,9 @@
 import type { CustodyWalletTokenBalance } from "@sdp/types";
 import { Children, type ComponentProps, isValidElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
+import { getTranslations } from "@/i18n/server";
 
 const { mockAuth, mockLoadWalletActivity, mockRequest } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -39,7 +41,7 @@ vi.mock("@/app/dashboard/custody/wallet-activity.data", async (importOriginal) =
   };
 });
 
-import WalletDetailPage from "./page";
+import WalletDetailPage, { WalletBalanceSummary, WalletBalancesSection } from "./page";
 
 const solBalance: CustodyWalletTokenBalance = {
   token: "SOL",
@@ -134,6 +136,36 @@ beforeEach(() => {
 });
 
 describe("WalletDetailPage critical path", () => {
+  it("keeps wallet detail data cards on theme-aware surfaces", async () => {
+    const t = await getTranslations();
+    const balanceResult = { balances: [solBalance], error: null };
+    const [summary, populatedBalances, emptyBalances] = await Promise.all([
+      WalletBalanceSummary({
+        balancesPromise: Promise.resolve(balanceResult),
+        providerLabel: "Privy",
+        publicKey: "11111111111111111111111111111111",
+        purposeLabel: null,
+        t,
+      }),
+      WalletBalancesSection({
+        balancesPromise: Promise.resolve(balanceResult),
+        ownedTokensByMintPromise: Promise.resolve(new Map()),
+        t,
+      }),
+      WalletBalancesSection({
+        balancesPromise: Promise.resolve({ balances: [], error: null }),
+        ownedTokensByMintPromise: Promise.resolve(new Map()),
+        t,
+      }),
+    ]);
+    const markup = [summary, populatedBalances, emptyBalances]
+      .map((surface) => renderToStaticMarkup(surface))
+      .join("\n");
+
+    expect(markup.match(/bg-surface-raised/g)).toHaveLength(3);
+    expect(markup).not.toMatch(/\bbg-white(?:\/\d+)?\b/);
+  });
+
   it.each([
     ["org:admin", true],
     ["org:member", false],
