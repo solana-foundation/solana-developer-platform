@@ -1,16 +1,14 @@
 import { getDb } from "@/db";
-import { getProcessEnv } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 
-const processEnv = getProcessEnv();
-
+// CI runs under Doppler. Only pass through the test data-service endpoints so
+// ambient provider credentials cannot silently change unit-test behavior.
 const providedEnv: Env = {
-  ...processEnv,
   ENVIRONMENT: "development",
-  API_VERSION: processEnv.API_VERSION ?? "v1",
-  DATABASE_URL: process.env.TEST_DATABASE_URL ?? processEnv.DATABASE_URL,
-  REDIS_URL: processEnv.REDIS_URL,
-  API_KEY_PEPPER: processEnv.API_KEY_PEPPER ?? "test-pepper-for-unit-tests",
+  API_VERSION: "v1",
+  DATABASE_URL: process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL,
+  REDIS_URL: process.env.REDIS_URL,
+  API_KEY_PEPPER: "test-pepper-for-unit-tests",
   SOLANA_MOCK: "true",
   RUN_INTEGRATION_TESTS: "false",
   SOLANA_NETWORK: "devnet",
