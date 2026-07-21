@@ -2,7 +2,10 @@ import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 import type { ClerkOrganization } from "./clerk-organizations.service";
-import { syncProviderAccessFromClerk } from "./provider-availability.service";
+import {
+  parseClerkOrganizationTierMetadata,
+  syncProviderAccessFromClerk,
+} from "./provider-availability.service";
 
 export interface ClerkOrganizationMapping {
   organizationId: string;
@@ -79,15 +82,23 @@ export async function ensureClerkOrganizationMapping(params: {
     params.organization.name?.trim() || params.organization.slug?.trim() || "Organization";
   const slug = await ensureUniqueSlug(params.db, params.organization.slug || name);
   const organizationId = `org_${crypto.randomUUID()}`;
+  const providerState = isSelfHostedDeployment(params.env)
+    ? { tier: "enterprise" as const, providerOverrides: undefined }
+    : parseClerkOrganizationTierMetadata(params.organization);
+  const settings = providerState.providerOverrides
+    ? JSON.stringify({ providerOverrides: providerState.providerOverrides })
+    : null;
 
+  // Persist Clerk-derived access state with the mapping so provisioning cannot
+  // commit an organization that depends on a later repair update succeeding.
   try {
     await params.db.batch([
       params.db
         .prepare(
-          `INSERT INTO organizations (id, name, slug, tier, status)
-           VALUES (?, ?, ?, 'enterprise', 'active')`
+          `INSERT INTO organizations (id, name, slug, tier, settings, status)
+           VALUES (?, ?, ?, ?, ?, 'active')`
         )
-        .bind(organizationId, name, slug),
+        .bind(organizationId, name, slug, providerState.tier, settings),
       params.db
         .prepare(
           `INSERT INTO auth_organization_identities
@@ -102,13 +113,6 @@ export async function ensureClerkOrganizationMapping(params: {
       if (concurrent) return concurrent;
     }
     throw error;
-  }
-
-  if (!isSelfHostedDeployment(params.env)) {
-    await syncProviderAccessFromClerk(params.db, {
-      organizationId,
-      clerkOrganization: params.organization,
-    });
   }
 
   return { organizationId, slug };

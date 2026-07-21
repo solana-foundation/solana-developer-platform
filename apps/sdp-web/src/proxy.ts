@@ -3,7 +3,10 @@ import type { ListProjectsResponse } from "@sdp/types";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
-import { retryProjectBootstrap } from "@/lib/project-bootstrap-retry";
+import {
+  PROXY_PROJECT_BOOTSTRAP_RETRY_DELAYS_MS,
+  retryProjectBootstrap,
+} from "@/lib/project-bootstrap-retry";
 import { PROJECT_COOKIE_NAME, PROJECT_COOKIE_OPTIONS } from "@/lib/project-cookie";
 import { acquireClerkToken, createTokenSdpApiClient } from "@/lib/sdp-api";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
@@ -52,6 +55,9 @@ async function resolveDefaultProjectId(
       return (await client.fetch<ListProjectsResponse>("/v1/projects")).projects;
     },
     isReady: (value) => value.length > 0,
+    // Next 16 Proxy runs on Node.js, but keeping deliberate waits below five
+    // seconds also leaves room for upstream calls on the smallest deployments.
+    delaysMs: PROXY_PROJECT_BOOTSTRAP_RETRY_DELAYS_MS,
   });
 
   return (
