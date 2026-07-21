@@ -18,6 +18,12 @@ describe("resolveClientIp", () => {
     expect(resolveClientIp(headers, { K_SERVICE: "sdp-api" })).toBe("203.0.113.10");
   });
 
+  it("rejects an unverified single-hop value on Cloud Run", () => {
+    const headers = new Headers({ "x-forwarded-for": "198.51.100.99" });
+
+    expect(resolveClientIp(headers, { K_SERVICE: "sdp-api" })).toBeNull();
+  });
+
   it("keeps first-hop proxy behavior outside Cloud Run", () => {
     const headers = new Headers({
       "x-forwarded-for": "203.0.113.10, 192.0.2.20",

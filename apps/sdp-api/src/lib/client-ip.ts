@@ -32,8 +32,11 @@ export function resolveClientIp(
     return null;
   }
 
-  if (env.K_SERVICE && forwarded.length >= 2) {
-    return forwarded.at(-2) ?? null;
+  if (env.K_SERVICE) {
+    // The Google load balancer appends [verified client, load balancer]. A
+    // shorter chain has no verified client address, so fail closed instead of
+    // accepting a caller-controlled single entry.
+    return forwarded.length >= 2 ? (forwarded.at(-2) ?? null) : null;
   }
 
   return forwarded[0] ?? null;
