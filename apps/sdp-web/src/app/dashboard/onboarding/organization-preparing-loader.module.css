@@ -1,0 +1,110 @@
+.game {
+  position: relative;
+  width: 11rem;
+  height: 11rem;
+  border: 1px solid var(--border-l);
+  border-radius: 2.25rem;
+  background:
+    linear-gradient(var(--border-xl) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-xl) 1px, transparent 1px), var(--surface-sunken);
+  background-size: 2.75rem 2.75rem;
+  overflow: hidden;
+}
+
+.game::before,
+.game::after {
+  position: absolute;
+  content: "";
+  inset: 50% auto auto 50%;
+  width: 5.25rem;
+  height: 5.25rem;
+  border: 1px solid var(--border-l);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  animation: breathe 2.8s ease-in-out infinite;
+}
+
+.game::after {
+  width: 2.5rem;
+  height: 2.5rem;
+  background: var(--t4);
+  animation-delay: -1.4s;
+}
+
+.spark {
+  position: absolute;
+  z-index: 1;
+  top: 1rem;
+  left: 1rem;
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border: 1px solid var(--border-m);
+  border-radius: 999px;
+  background: var(--emph-xh);
+  color: var(--on-primary);
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+  animation: spark-tour 5.6s cubic-bezier(0.55, 0.1, 0.45, 0.9) infinite;
+  transition: scale 160ms ease-out;
+}
+
+.spark:is(:hover, :focus-visible) {
+  animation-play-state: paused;
+  scale: 1.1;
+}
+
+.spark:active {
+  scale: 0.9;
+}
+
+.spark:focus-visible {
+  outline: 2px solid var(--emph-xh);
+  outline-offset: 3px;
+}
+
+.sparkIcon {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+@keyframes spark-tour {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  24% {
+    transform: translate3d(6.25rem, 0.65rem, 0) rotate(80deg);
+  }
+  48% {
+    transform: translate3d(6rem, 6.25rem, 0) rotate(170deg);
+  }
+  72% {
+    transform: translate3d(0.4rem, 6rem, 0) rotate(260deg);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game::before,
+  .game::after,
+  .spark {
+    animation: none;
+  }
+
+  .spark {
+    transform: translate3d(3.1rem, 3.1rem, 0);
+  }
+}

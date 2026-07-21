@@ -11,6 +11,7 @@ import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../onboarding-status";
 import { OrganizationOnboardingFlow } from "./organization-onboarding-flow";
+import { OrganizationPreparingLoader } from "./organization-preparing-loader";
 
 const GENERAL_CUSTODY_PROVIDERS = Object.entries(GENERAL_PROVIDER_DEFAULTS.custody)
   .filter(([, enabled]) => enabled)
@@ -26,18 +27,7 @@ export default async function OrganizationOnboardingPage() {
   const status = await organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
 
   if (!status.linked || !status.organization || !status.setup) {
-    return (
-      <div className="flex h-full items-center justify-center p-6">
-        <div className="max-w-lg rounded-2xl border border-border-default bg-surface-raised p-6 text-center">
-          <h1 className="text-xl font-medium text-primary">
-            {t("DashboardCustody.onboardingPreparingTitle")}
-          </h1>
-          <p className="mt-2 text-sm leading-6 text-tertiary">
-            {t("DashboardCustody.onboardingPreparingDescription")}
-          </p>
-        </div>
-      </div>
-    );
+    return <OrganizationPreparingLoader />;
   }
   if (status.setup.status === "complete") redirect("/dashboard");
 
