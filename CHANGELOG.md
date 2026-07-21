@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.44.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.43.1...v0.44.0) (2026-07-21)
+
+### Features
+
+* add additional form fields per asset type ([#828](https://github.com/solana-foundation/solana-developer-platform/pull/828)) ([9051b31](https://github.com/solana-foundation/solana-developer-platform/commit/9051b31d12391eeef90ae0f91995b9bc4885451c))
+
+### Refactors
+
+* **api:** retire Cloudflare infrastructure ([#842](https://github.com/solana-foundation/solana-developer-platform/pull/842)) ([9f6a2c4](https://github.com/solana-foundation/solana-developer-platform/commit/9f6a2c4ff0d0c98d211932cfda4ff1591ababa70))
+
+### Maintenance
+
+* **deps:** bump @hono/node-server from 2.0.4 to 2.0.5 ([#840](https://github.com/solana-foundation/solana-developer-platform/pull/840)) ([53c5a86](https://github.com/solana-foundation/solana-developer-platform/commit/53c5a86a8dbf99191749c816203f4dd2d77f2b56))
+
 ## [0.43.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.43.0...v0.43.1) (2026-07-21)
 
 ### Other Changes
