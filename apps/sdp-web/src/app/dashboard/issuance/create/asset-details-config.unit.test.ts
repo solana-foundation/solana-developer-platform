@@ -23,7 +23,7 @@ describe("getDetailSections", () => {
     // Crypto-backing adds a collateral & oracle section absent from fiat.
     expect(crypto).toContain("collateralizationRatio");
     expect(crypto).toContain("oracleProvider");
-    expect(crypto).toContain("liquidationThreshold");
+    expect(crypto).toContain("minCollateralRatio");
     expect(fiat).not.toContain("collateralizationRatio");
   });
 

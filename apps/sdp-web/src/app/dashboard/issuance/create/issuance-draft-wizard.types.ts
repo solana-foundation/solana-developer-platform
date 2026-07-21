@@ -77,7 +77,7 @@ export interface DraftState {
   // on-chain backing rather than off-chain fiat reserves)
   collateralizationRatio: string;
   oracleProvider: string;
-  liquidationThreshold: string;
+  minCollateralRatio: string;
   // Step 2 — tokenized-security details
   issuerName: string;
   jurisdiction: string;
@@ -145,7 +145,7 @@ export function createInitialDraft(): DraftState {
     redemptionEnabled: false,
     collateralizationRatio: "",
     oracleProvider: "",
-    liquidationThreshold: "",
+    minCollateralRatio: "",
     issuerName: "",
     jurisdiction: "",
     offeringType: "",

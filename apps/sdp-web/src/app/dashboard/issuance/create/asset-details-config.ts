@@ -26,7 +26,7 @@ export type DetailFieldKey =
   | "redemptionEnabled"
   | "collateralizationRatio"
   | "oracleProvider"
-  | "liquidationThreshold"
+  | "minCollateralRatio"
   | "issuerName"
   | "jurisdiction"
   | "offeringType"
@@ -218,11 +218,11 @@ const CRYPTO_COLLATERAL_SECTION: DetailSection = {
       placeholderKey: "DashboardIssuance.config.oracleProviderPlaceholder",
     },
     {
-      key: "liquidationThreshold",
-      labelKey: "DashboardIssuance.config.liquidationThreshold",
+      key: "minCollateralRatio",
+      labelKey: "DashboardIssuance.config.minCollateralRatio",
       control: "number",
-      placeholderKey: "DashboardIssuance.config.liquidationThresholdPlaceholder",
-      helpKey: "DashboardIssuance.config.liquidationThresholdHelp",
+      placeholderKey: "DashboardIssuance.config.minCollateralRatioPlaceholder",
+      helpKey: "DashboardIssuance.config.minCollateralRatioHelp",
     },
   ],
 };

@@ -127,7 +127,7 @@ const FIELD_ICONS: Record<string, LucideIcon> = {
   reservecustodian: Wallet,
   collateralizationratio: Gauge,
   oracleprovider: Radio,
-  liquidationthreshold: Scale,
+  mincollateralratio: Scale,
   custodian: Wallet,
   website: Globe,
   jurisdiction: MapPin,
