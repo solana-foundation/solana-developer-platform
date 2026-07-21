@@ -77,6 +77,7 @@ const productionEnv = {
   PAYMENTS_RECURRING_COLLECTION_ENABLED: "true",
   PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE: "25",
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES: "30",
+  EARN_ENABLED: "false",
 };
 
 test("production render keeps deployment config as Wrangler vars", () => {

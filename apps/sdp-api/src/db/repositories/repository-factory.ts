@@ -6,6 +6,8 @@ import type { CounterpartiesRepository } from "./counterparty.repository";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import type { CounterpartyAccountsRepository } from "./counterparty-account.repository";
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
+import type { EarnRepository } from "./earn.repository";
+import { createPostgresEarnRepository } from "./earn.repository.postgres";
 import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 import type { PaymentRequestsRepository } from "./payment-requests.repository";
@@ -61,4 +63,8 @@ export function createPolicyRepository(env: Env): PolicyRepository {
 
 export function createAssetProfilesRepository(env: Env): AssetProfilesRepository {
   return createPostgresAssetProfilesRepository(getDb(env));
+}
+
+export function createEarnRepository(env: Env): EarnRepository {
+  return createPostgresEarnRepository(getDb(env));
 }

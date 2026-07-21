@@ -1,6 +1,7 @@
 import type { AppLocale } from "@/i18n/config";
 import dashboardApprovals from "../../messages/en/dashboard-approvals.json";
 import dashboardCustody from "../../messages/en/dashboard-custody.json";
+import dashboardEarn from "../../messages/en/dashboard-earn.json";
 import dashboardIssuance from "../../messages/en/dashboard-issuance.json";
 import dashboardPayments from "../../messages/en/dashboard-payments.json";
 import dashboardPolicies from "../../messages/en/dashboard-policies.json";
@@ -8,6 +9,7 @@ import shared from "../../messages/en/shared.json";
 import en from "../../messages/en.json";
 import frDashboardApprovals from "../../messages/fr/dashboard-approvals.json";
 import frDashboardCustody from "../../messages/fr/dashboard-custody.json";
+import frDashboardEarn from "../../messages/fr/dashboard-earn.json";
 import frDashboardIssuance from "../../messages/fr/dashboard-issuance.json";
 import frDashboardPayments from "../../messages/fr/dashboard-payments.json";
 import frDashboardPolicies from "../../messages/fr/dashboard-policies.json";
@@ -18,6 +20,7 @@ const enMessages = {
   ...en,
   ...dashboardApprovals,
   ...dashboardCustody,
+  ...dashboardEarn,
   ...dashboardIssuance,
   ...dashboardPayments,
   ...dashboardPolicies,
@@ -30,6 +33,7 @@ const frMessages = {
   ...fr,
   ...frDashboardApprovals,
   ...frDashboardCustody,
+  ...frDashboardEarn,
   ...frDashboardIssuance,
   ...frDashboardPayments,
   ...frDashboardPolicies,

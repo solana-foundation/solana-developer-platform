@@ -14,3 +14,7 @@ export function isRecurringPaymentCollectionEnabled(
 export function isAssetProfilesEnabled(env: Pick<Env, "ASSET_PROFILES_ENABLED">): boolean {
   return isTruthyFlag(env.ASSET_PROFILES_ENABLED);
 }
+
+export function isEarnEnabled(env: Pick<Env, "EARN_ENABLED">): boolean {
+  return isTruthyFlag(env.EARN_ENABLED);
+}

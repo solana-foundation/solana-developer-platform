@@ -1,0 +1,72 @@
+{
+  "name": "@sdp/earn",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts",
+      "default": "./src/errors.ts"
+    },
+    "./fetch": {
+      "types": "./src/fetch.ts",
+      "import": "./src/fetch.ts",
+      "default": "./src/fetch.ts"
+    },
+    "./nav": {
+      "types": "./src/nav.ts",
+      "import": "./src/nav.ts",
+      "default": "./src/nav.ts"
+    },
+    "./shared": {
+      "types": "./src/shared.ts",
+      "import": "./src/shared.ts",
+      "default": "./src/shared.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "import": "./src/types.ts",
+      "default": "./src/types.ts"
+    },
+    "./providers/veda/client": {
+      "types": "./src/providers/veda/client.ts",
+      "import": "./src/providers/veda/client.ts",
+      "default": "./src/providers/veda/client.ts"
+    },
+    "./providers/upshift/client": {
+      "types": "./src/providers/upshift/client.ts",
+      "import": "./src/providers/upshift/client.ts",
+      "default": "./src/providers/upshift/client.ts"
+    },
+    "./providers/perena/client": {
+      "types": "./src/providers/perena/client.ts",
+      "import": "./src/providers/perena/client.ts",
+      "default": "./src/providers/perena/client.ts"
+    },
+    "./providers/ground/client": {
+      "types": "./src/providers/ground/client.ts",
+      "import": "./src/providers/ground/client.ts",
+      "default": "./src/providers/ground/client.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "@sdp/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260609.1",
+    "@types/node": "^25.9.2",
+    "tsx": "4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

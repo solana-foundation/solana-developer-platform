@@ -14,9 +14,10 @@ This map is generated from the module-boundary check. It records the permitted w
 
 | Module | Purpose | Allowed workspace dependencies |
 | --- | --- | --- |
-| `@sdp/api` | Cloudflare Workers API and application composition root. | `@sdp/custody`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
+| `@sdp/api` | Cloudflare Workers API and application composition root. | `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/api-integration` | Maintainer integration harness for API endpoint and provider coverage. | `@sdp/api`, `@sdp/rpc`, `@sdp/types` |
 | `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/types` |
+| `@sdp/earn` | Earn domain services, yield strategies, and vault-infra providers. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None |
 | `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/payments` | Payment domain services, fee payment, and ramp providers. | `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
@@ -28,9 +29,10 @@ This map is generated from the module-boundary check. It records the permitted w
 
 ## Declared Workspace Graph
 
-- `@sdp/api` -> `@sdp/custody`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
+- `@sdp/api` -> `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/api-integration` -> `@sdp/api`, `@sdp/rpc`, `@sdp/types`
 - `@sdp/custody` -> `@sdp/types`
+- `@sdp/earn` -> `@sdp/types`
 - `@sdp/env-config` -> None
 - `@sdp/issuance` -> `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/payments` -> `@sdp/rpc`, `@sdp/solana`, `@sdp/types`

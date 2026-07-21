@@ -29,6 +29,11 @@
       "import": "./src/api-keys.ts",
       "default": "./src/api-keys.ts"
     },
+    "./earn": {
+      "types": "./src/earn.ts",
+      "import": "./src/earn.ts",
+      "default": "./src/earn.ts"
+    },
     "./payments": {
       "types": "./src/payments.ts",
       "import": "./src/payments.ts",
