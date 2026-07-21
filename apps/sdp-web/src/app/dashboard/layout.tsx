@@ -28,8 +28,8 @@ async function loadOnboardingStatus(): Promise<OrganizationOnboardingStatus | nu
     const response = await client.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
     return response.setup?.status ?? "not_started";
   } catch (error) {
-    console.error("Failed to load onboarding status; gating dashboard until it recovers", error);
-    return "not_started";
+    console.error("Failed to load onboarding status; leaving dashboard routing unchanged", error);
+    return null;
   }
 }
 
