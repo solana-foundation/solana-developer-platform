@@ -3,8 +3,9 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createOrgSdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { HomeWorkspace } from "./home-workspace";
+import type { OnboardingStatusResponse } from "./onboarding-status";
 import { resolveTotalBalance } from "./payments/payments-overview.utils";
 import { fetchPaymentsAggregate, fetchPaymentsWallets } from "./payments/payments-page.data";
 
@@ -20,6 +21,16 @@ export default async function DashboardPage() {
 
   const trace = createTimedTrace("dashboard.home.page");
   try {
+    const organizationClient = await trace.step("create_org_sdp_api_client", () =>
+      createOrgSdpApiClient(trace.childContext("dashboard.home.org.api"))
+    );
+    const onboarding = await trace.step("fetch_onboarding_status", () =>
+      organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status")
+    );
+    if (onboarding.setup?.status === "incomplete") {
+      redirect("/dashboard/onboarding");
+    }
+
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.home.api"))
     );

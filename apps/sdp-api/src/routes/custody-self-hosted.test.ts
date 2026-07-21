@@ -211,10 +211,7 @@ describe("Custody routes — managed-mode regression", () => {
     await clearKVNamespaces(env);
   });
 
-  it("rejects local custody on individual tier even when CUSTODY_PRIVATE_KEY is set", async () => {
-    // local is absent from INDIVIDUAL_PROVIDER_DEFAULTS.custody — must stay disabled
-    // in managed mode regardless of env config. Pin this behavior so a future
-    // refactor that flips the SDP_DEPLOYMENT_MODE default is caught immediately.
+  it("requires manual activation for local custody in managed mode", async () => {
     await seedAuth("individual");
 
     const res = await app.request(
@@ -232,6 +229,6 @@ describe("Custody routes — managed-mode regression", () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("enterprise tier");
+    expect(body.error.message).toContain("manual activation");
   });
 });

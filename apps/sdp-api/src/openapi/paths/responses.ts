@@ -46,6 +46,7 @@ import {
   listSessionsResponseSchema,
   listTemplatesResponseSchema,
   offrampCurrenciesResponseSchema,
+  onboardingCompleteResponseSchema,
   onboardingStatusResponseSchema,
   onrampCurrenciesResponseSchema,
   onrampQuoteResponseSchema,
@@ -220,6 +221,7 @@ export const tokenTemplateResponse = successResponseSchema(tokenTemplateResponse
 export const listTemplatesResponse = successResponseSchema(listTemplatesResponseSchema);
 
 export const onboardingStatusResponse = successResponseSchema(onboardingStatusResponseSchema);
+export const onboardingCompleteResponse = successResponseSchema(onboardingCompleteResponseSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
 export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSchema);
 export const policyControlInventoryResponse = successResponseSchema(
