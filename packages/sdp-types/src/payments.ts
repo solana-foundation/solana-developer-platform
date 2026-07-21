@@ -149,7 +149,31 @@ export interface LightsparkRampSettlement {
   failureReason?: string;
 }
 
-export type RampTransferSettlement = MoonpayRampSettlement | LightsparkRampSettlement;
+export interface CoinbaseRampFee {
+  feeAmount: string;
+  feeCurrency: string;
+  feeType: string;
+}
+
+/** Coinbase onramp order economics, captured verbatim from a terminal webhook. */
+export interface CoinbaseRampSettlement {
+  provider: "coinbase";
+  status: "completed" | "failed";
+  paymentCurrency: string;
+  paymentSubtotal: string;
+  paymentTotal: string;
+  purchaseCurrency: string;
+  purchaseAmount: string;
+  exchangeRate: string;
+  fees: CoinbaseRampFee[];
+  txHash?: string;
+  failureReason?: string;
+}
+
+export type RampTransferSettlement =
+  | MoonpayRampSettlement
+  | LightsparkRampSettlement
+  | CoinbaseRampSettlement;
 
 export interface MoneygramTransferDetails {
   transactionId?: string;
@@ -880,9 +904,22 @@ export type PaymentRampQuote =
       paymentInstructions: MuralPaymentRampInstruction[];
     })
   | (BasePaymentRampQuote & {
-      provider: "moonpay" | "bvnk" | "coinbase";
+      provider: "moonpay" | "bvnk";
       deliveryMode: "hosted";
       hostedUrl: string;
+    })
+  | (BasePaymentRampQuote & {
+      provider: "coinbase";
+      deliveryMode: "hosted";
+      hostedUrl: string;
+      /** Order economics captured verbatim from the Coinbase create-order response. */
+      paymentCurrency: string;
+      paymentSubtotal: string;
+      paymentTotal: string;
+      purchaseCurrency: string;
+      purchaseAmount: string;
+      exchangeRate: string;
+      fees: CoinbaseRampFee[];
     })
   | (BasePaymentRampQuote & {
       provider: "moneygram";
