@@ -7,6 +7,7 @@ import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import { toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
+import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
@@ -153,7 +154,10 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     return (
       <div className="space-y-6">
         {quote.provider === "coinbase" ? (
-          <CoinbaseRampFrame orderId={quote.id} src={quote.hostedUrl} />
+          <>
+            <CoinbaseQuoteSummary quote={quote} />
+            <CoinbaseRampFrame orderId={quote.id} src={quote.hostedUrl} />
+          </>
         ) : (
           <MoonpayRampFrame
             title={t("DashboardPayments.ramps.providerDeposit", { provider: quote.provider })}

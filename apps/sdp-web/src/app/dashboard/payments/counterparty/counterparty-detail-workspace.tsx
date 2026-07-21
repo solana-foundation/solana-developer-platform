@@ -485,6 +485,31 @@ function RampSettlementRows({ settlement }: { settlement: RampTransferSettlement
     );
   }
 
+  if (settlement.provider === "coinbase") {
+    const providerFee = settlement.fees.find((fee) => fee.feeType === "FEE_TYPE_EXCHANGE");
+    const networkFee = settlement.fees.find((fee) => fee.feeType === "FEE_TYPE_NETWORK");
+    return (
+      <>
+        {providerFee ? (
+          <DetailRow
+            label={t("DashboardPayments.transferDetails.providerFee")}
+            value={formatDisplayAmount(providerFee.feeAmount, providerFee.feeCurrency)}
+          />
+        ) : null}
+        {networkFee && Number(networkFee.feeAmount) > 0 ? (
+          <DetailRow
+            label={t("DashboardPayments.transferDetails.networkFee")}
+            value={formatDisplayAmount(networkFee.feeAmount, networkFee.feeCurrency)}
+          />
+        ) : null}
+        <DetailRow
+          label={t("DashboardPayments.transferDetails.exchangeRate")}
+          value={`1 ${settlement.purchaseCurrency} = ${formatDisplayAmount(settlement.exchangeRate, settlement.paymentCurrency)}`}
+        />
+      </>
+    );
+  }
+
   const sentDecimal = settlement.sentAmount.amount / 10 ** settlement.sentAmount.decimals;
   const receivedDecimal =
     settlement.receivedAmount.amount / 10 ** settlement.receivedAmount.decimals;

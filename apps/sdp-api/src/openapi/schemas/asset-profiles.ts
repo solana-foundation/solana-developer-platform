@@ -36,13 +36,21 @@ const issuanceMetadataExample = {
   chain: { decimals: 6 },
   custom: { customer: { internalDeskId: "FX-22" }, integration: {} },
   visibility: { public: ["asset.name", "asset.issuerName", "asset.pegCurrency", "chain.decimals"] },
+  settings: {
+    version: 1,
+    selected: {
+      freezeTransfers: {},
+      transferFee: { params: { basisPoints: 50, maxFee: "100" } },
+    },
+  },
 };
 
 export const issuanceMetadataSchema = withOpenApi(issuanceMetadataSchemaBase, {
   description:
     "Canonical, private master metadata for the asset. SDP-owned namespaces (asset, compliance, chain) plus a namespaced custom bucket (customer, integration). " +
     "The optional `visibility.public` array holds the issuance_metadata dot-paths the issuer chose to expose publicly; when omitted, the asset type's registry default is used. " +
-    "Only asset.* and chain.decimals paths can ever be projected publicly — compliance and custom fields are private by default and can never be exposed, even if listed in visibility.public.",
+    "Only asset.* and chain.decimals paths can ever be projected publicly — compliance and custom fields are private by default and can never be exposed, even if listed in visibility.public. " +
+    "The optional `settings` namespace holds the selected advanced (Token-2022) settings; `version` is server-stamped and each selected key is validated against the asset type's capability.",
   example: issuanceMetadataExample,
 });
 
