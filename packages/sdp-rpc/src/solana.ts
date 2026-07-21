@@ -298,55 +298,19 @@ export async function sendAndConfirmTransaction(
     pollIntervalMs?: number;
   }
 ): Promise<TransactionConfirmation> {
-  const commitment = options?.commitment ?? "confirmed";
-  const timeoutMs = options?.timeoutMs ?? 60000;
-  const pollIntervalMs = options?.pollIntervalMs ?? 1000;
-
-  // Send the transaction
   const signature = await sendTransaction(rpc, signedTransaction, {
     skipPreflight: options?.skipPreflight,
     maxRetries: options?.maxRetries,
   });
 
-  // Poll for confirmation
-  const startTime = Date.now();
-
-  while (Date.now() - startTime < timeoutMs) {
-    const result = await getSignatureStatusOrNull(rpc, signature);
-
-    if (result) {
-      // Check if confirmed to required level
-      const isConfirmed =
-        result.confirmationStatus === commitment ||
-        (commitment === "confirmed" && result.confirmationStatus === "finalized") ||
-        result.confirmationStatus === "finalized";
-
-      if (isConfirmed) {
-        return {
-          signature,
-          slot: result.slot,
-          confirmationStatus: result.confirmationStatus ?? commitment,
-          err: result.err,
-        };
-      }
-
-      // Check for error
-      if (result.err) {
-        return {
-          signature,
-          slot: result.slot,
-          confirmationStatus: result.confirmationStatus ?? "processed",
-          err: result.err,
-        };
-      }
-    }
-
-    // Wait before polling again
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-  }
-
-  throw solanaRpcError(`Transaction ${signature} confirmation timed out after ${timeoutMs}ms`);
+  return confirmTransaction(rpc, signature, options);
 }
+
+export type ConfirmTransactionOptions = {
+  commitment?: Commitment;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+};
 
 /**
  * Confirm an already-sent transaction
@@ -354,11 +318,7 @@ export async function sendAndConfirmTransaction(
 export async function confirmTransaction(
   rpc: SolanaRpc,
   signature: Signature,
-  options?: {
-    commitment?: Commitment;
-    timeoutMs?: number;
-    pollIntervalMs?: number;
-  }
+  options?: ConfirmTransactionOptions
 ): Promise<TransactionConfirmation> {
   const commitment = options?.commitment ?? "confirmed";
   const timeoutMs = options?.timeoutMs ?? 60000;

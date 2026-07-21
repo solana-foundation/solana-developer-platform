@@ -69,8 +69,8 @@ test.describe
     test("creates and displays a recurring payment", async ({ page }) => {
       await page.goto("/dashboard/payments");
 
-      await expect(page.getByRole("link", { name: "Recurring" })).toBeVisible();
-      await page.getByRole("link", { name: "Recurring" }).click();
+      await expect(page.getByRole("link", { name: "Recurring", exact: true })).toBeVisible();
+      await page.getByRole("link", { name: "Recurring", exact: true }).click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
       await expect(
         page.locator("main").getByRole("heading", { name: "Recurring payments" }).first()
@@ -125,18 +125,22 @@ test.describe
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring\/prp_/);
       recurringPaymentId = page.url().split("/").pop() ?? "";
       expect(recurringPaymentId).toMatch(/^prp_/);
-      await expect(page.getByText(recurringCounterpartyName)).toBeVisible();
+      await expect(page.getByText(recurringCounterpartyName).first()).toBeVisible();
       await expect(page.getByText(`7.50 ${recurringTokenSymbol}`, { exact: true })).toBeVisible();
       await expect(page.getByText("Pending activation", { exact: true })).toBeVisible();
       await expect(page.getByText("Every day", { exact: true })).toBeVisible();
 
       await page.getByRole("link", { name: "Back to recurring payments" }).click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
-      await expect(page.getByText(recurringCounterpartyName)).toBeVisible();
-      await expect(page.getByText(recurringWalletLabel)).toBeVisible();
-      await expect(page.getByText(`7.50 ${recurringTokenSymbol}`)).toBeVisible();
+      const recurringRow = page
+        .getByRole("button")
+        .filter({ hasText: recurringCounterpartyName })
+        .first();
+      await expect(recurringRow).toBeVisible();
+      await expect(recurringRow).toContainText(recurringWalletLabel);
+      await expect(recurringRow).toContainText(`7.50 ${recurringTokenSymbol}`);
 
-      await page.locator("tbody tr").filter({ hasText: recurringCounterpartyName }).first().click();
+      await recurringRow.click();
       await expect(page).toHaveURL(
         new RegExp(`/dashboard/payments/recurring/${recurringPaymentId}$`)
       );
@@ -264,7 +268,8 @@ test.describe
       await doneButton.press("Enter");
       await expect(page).toHaveURL(/\/dashboard\/payments(?:\?.*)?$/);
 
-      const transferRow = app.locator("tbody tr").filter({ hasText: destinationAddress }).first();
+      const shortenedDestination = `${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-4)}`;
+      const transferRow = app.getByRole("link").filter({ hasText: shortenedDestination }).first();
       await expect(transferRow).toBeVisible({ timeout: 120_000 });
       await expect(transferRow).toContainText("0.01");
     });

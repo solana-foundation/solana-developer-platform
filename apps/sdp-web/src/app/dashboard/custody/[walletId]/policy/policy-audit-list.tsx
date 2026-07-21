@@ -371,7 +371,7 @@ export function PolicyAuditList({
 }
 
 const filterControlClassName =
-  "h-10 w-full rounded-md border border-border-default bg-white px-3 text-sm text-primary outline-none transition-colors focus:border-primary";
+  "h-10 w-full rounded-md border border-border-default bg-surface-raised px-3 text-sm text-primary outline-none transition-colors focus:border-primary";
 
 function MobileAuditRow({
   evaluation,

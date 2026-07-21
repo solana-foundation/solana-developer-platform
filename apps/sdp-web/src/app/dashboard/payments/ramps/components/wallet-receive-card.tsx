@@ -47,7 +47,7 @@ export function WalletReceiveCard({ address }: { address: string }) {
   return (
     <section className="rounded-2xl border border-border-default bg-fill-subtle p-6">
       <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start">
-        <div className="flex size-[180px] items-center justify-center rounded-2xl bg-white p-4 ring-1 ring-border-subtle">
+        <div className="flex size-[180px] items-center justify-center rounded-2xl bg-[white] p-4 ring-1 ring-border-subtle">
           {qrCodeUrl ? (
             <Image
               src={qrCodeUrl}
@@ -65,7 +65,7 @@ export function WalletReceiveCard({ address }: { address: string }) {
           <p className="text-sm text-tertiary">
             {t("DashboardPayments.ramps.walletReceiveDescription")}
           </p>
-          <div className="rounded-2xl border border-border-subtle bg-white px-4 py-3">
+          <div className="rounded-2xl border border-border-subtle bg-surface-raised px-4 py-3">
             <p className="break-all font-mono text-xs text-secondary">{address}</p>
           </div>
           <div className="flex justify-end">

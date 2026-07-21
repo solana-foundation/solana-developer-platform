@@ -17,7 +17,7 @@ interface AdvancedCapacitiesProps {
 export function AdvancedCapacities({ value, onChange, disabled }: AdvancedCapacitiesProps) {
   const t = useTranslations();
   return (
-    <details className="group rounded-2xl border border-border-default bg-white p-4" open>
+    <details className="group rounded-2xl border border-border-default bg-surface-raised p-4" open>
       <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
         <span className="text-sm font-semibold text-primary">
           {t("DashboardIssuance.config.advanced")}
@@ -38,7 +38,7 @@ export function AdvancedCapacities({ value, onChange, disabled }: AdvancedCapaci
                 "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors",
                 checked
                   ? "border-primary bg-fill-subtle"
-                  : "border-border-default bg-white hover:bg-fill-subtle"
+                  : "border-border-default bg-surface-raised hover:bg-fill-subtle"
               )}
             >
               <input

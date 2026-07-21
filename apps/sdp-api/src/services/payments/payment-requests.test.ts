@@ -18,7 +18,7 @@ import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { reconcilePaymentRequest, reconcilePaymentRequestBestEffort } from "./payment-requests";
+import { reconcilePaymentRequest } from "./payment-requests";
 
 const TEST_PROJECT_ID = "prj_preq_handler_test";
 const TEST_WALLET_ID = "wal_preq_handler_test";
@@ -109,7 +109,9 @@ describe("reconcilePaymentRequest", () => {
   it("settles an awaiting request and links a recorded inbound transfer", async () => {
     mockSettlementSucceeds();
 
-    const settled = await reconcilePaymentRequest(env, await createRequest());
+    const settled = await reconcilePaymentRequest(env, await createRequest(), {
+      bestEffort: false,
+    });
 
     expect(settled.status).toBe("paid");
     expect(settled.fulfilled_by_transfer_id).not.toBeNull();
@@ -127,7 +129,8 @@ describe("reconcilePaymentRequest", () => {
 
     const settled = await reconcilePaymentRequest(
       env,
-      await createRequest({ token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" })
+      await createRequest({ token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" }),
+      { bestEffort: false }
     );
 
     expect(settled.status).toBe("paid");
@@ -140,8 +143,8 @@ describe("reconcilePaymentRequest", () => {
     const request = await createRequest();
 
     const [a, b] = await Promise.all([
-      reconcilePaymentRequest(env, request),
-      reconcilePaymentRequest(env, request),
+      reconcilePaymentRequest(env, request, { bestEffort: false }),
+      reconcilePaymentRequest(env, request, { bestEffort: false }),
     ]);
 
     expect(a.status).toBe("paid");
@@ -152,7 +155,7 @@ describe("reconcilePaymentRequest", () => {
   it("leaves the request awaiting when no transfer references it", async () => {
     findReferenceSpy.mockRejectedValue(new FindReferenceError("not found"));
 
-    const result = await reconcilePaymentRequest(env, await createRequest());
+    const result = await reconcilePaymentRequest(env, await createRequest(), { bestEffort: false });
 
     expect(result.status).toBe("awaiting_payment");
     expect(result.fulfilled_by_transfer_id).toBeNull();
@@ -164,7 +167,7 @@ describe("reconcilePaymentRequest", () => {
     findReferenceSpy.mockResolvedValue(foundSignature());
     validateTransferSpy.mockRejectedValue(new ValidateTransferError("wrong amount"));
 
-    const result = await reconcilePaymentRequest(env, await createRequest());
+    const result = await reconcilePaymentRequest(env, await createRequest(), { bestEffort: false });
 
     expect(result.status).toBe("awaiting_payment");
     expect(result.fulfilled_by_transfer_id).toBeNull();
@@ -174,9 +177,9 @@ describe("reconcilePaymentRequest", () => {
   it("rethrows unexpected errors instead of swallowing them", async () => {
     findReferenceSpy.mockRejectedValue(new Error("rpc exploded"));
 
-    await expect(reconcilePaymentRequest(env, await createRequest())).rejects.toThrow(
-      "rpc exploded"
-    );
+    await expect(
+      reconcilePaymentRequest(env, await createRequest(), { bestEffort: false })
+    ).rejects.toThrow("rpc exploded");
   });
 
   it("best-effort returns the stored row and logs when reconcile errors unexpectedly", async () => {
@@ -184,17 +187,25 @@ describe("reconcilePaymentRequest", () => {
     findReferenceSpy.mockRejectedValue(new Error("rpc exploded"));
     const request = await createRequest();
 
-    const result = await reconcilePaymentRequestBestEffort(env, request);
+    const result = await reconcilePaymentRequest(env, request, { bestEffort: true });
 
     expect(result).toBe(request);
     expect(errorSpy).toHaveBeenCalled();
     expect(await listInboundTransfers()).toHaveLength(0);
   });
 
+  it("best-effort still rethrows invariant violations", async () => {
+    const request: PaymentRequestRow = { ...(await createRequest()), project_id: null };
+
+    await expect(reconcilePaymentRequest(env, request, { bestEffort: true })).rejects.toThrow(
+      "missing project_id"
+    );
+  });
+
   it("short-circuits non-awaiting requests without touching the chain", async () => {
     const canceled: PaymentRequestRow = { ...(await createRequest()), status: "canceled" };
 
-    const result = await reconcilePaymentRequest(env, canceled);
+    const result = await reconcilePaymentRequest(env, canceled, { bestEffort: false });
 
     expect(result).toBe(canceled);
     expect(findReferenceSpy).not.toHaveBeenCalled();
@@ -203,7 +214,7 @@ describe("reconcilePaymentRequest", () => {
   it("short-circuits expired requests without touching the chain", async () => {
     const expired = await createRequest({ expiresAt: "2000-01-01T00:00:00.000Z" });
 
-    const result = await reconcilePaymentRequest(env, expired);
+    const result = await reconcilePaymentRequest(env, expired, { bestEffort: false });
 
     expect(result.status).toBe("awaiting_payment");
     expect(findReferenceSpy).not.toHaveBeenCalled();

@@ -41,7 +41,7 @@ import {
 } from "./approval-requests.data";
 
 const filterControlClassName =
-  "h-10 w-full rounded-md border border-border-default bg-white px-3 text-sm text-primary outline-none transition-[border-color,box-shadow] duration-150 focus:border-primary focus:ring-2 focus:ring-primary/10";
+  "h-10 w-full rounded-md border border-border-default bg-surface-raised px-3 text-sm text-primary outline-none transition-[border-color,box-shadow] duration-150 focus:border-primary focus:ring-2 focus:ring-primary/10";
 
 function approvalRequestHref(approvalRequestId: string): string {
   return `/dashboard/approvals/${encodeURIComponent(approvalRequestId)}`;
