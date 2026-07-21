@@ -1,5 +1,6 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { handleCoinbaseFrameEvent } from "./frame-events";
@@ -23,9 +24,11 @@ import { handleCoinbaseFrameEvent } from "./frame-events";
  *
  * @see https://docs.cdp.coinbase.com/onramp/headless-onramp/overview#web-app-testing
  */
+type CoinbaseFramePhase = "button" | "sheet" | "processing";
+
 export function CoinbaseRampFrame({ orderId, src }: { orderId: string; src: string }) {
   const t = useTranslations();
-  const [expanded, setExpanded] = useState(false);
+  const [phase, setPhase] = useState<CoinbaseFramePhase>("button");
   useEffect(() => {
     const expectedOrigin = new URL(src).origin;
     const handleMessage = (event: MessageEvent) => {
@@ -34,24 +37,35 @@ export function CoinbaseRampFrame({ orderId, src }: { orderId: string; src: stri
       }
       const frameEvent = handleCoinbaseFrameEvent(orderId, event.data, t);
       if (frameEvent?.eventName === "onramp_api.apple_pay_button_pressed") {
-        setExpanded(true);
+        setPhase("sheet");
       }
       if (frameEvent?.eventName === "onramp_api.cancel") {
-        setExpanded(false);
+        setPhase("button");
+      }
+      if (frameEvent?.eventName === "onramp_api.commit_success") {
+        setPhase("processing");
       }
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
   }, [src, orderId, t]);
 
+  if (phase === "processing") {
+    return (
+      <div className="flex h-12 items-center justify-center">
+        <Loader2 className="size-5 animate-spin text-secondary" />
+      </div>
+    );
+  }
+
   return (
     <div
-      className={`mx-auto overflow-hidden rounded-lg transition-all duration-300 ${expanded ? "max-w-lg" : "max-w-xs"}`}
+      className={`mx-auto overflow-hidden rounded-lg transition-all duration-300 ${phase === "sheet" ? "max-w-lg" : "max-w-xs"}`}
     >
       <iframe
         title={t("DashboardPayments.ramps.coinbaseOnramp")}
         src={src}
-        className={`w-full border-0 transition-all duration-300 ${expanded ? "h-96" : "h-12"}`}
+        className={`w-full border-0 transition-all duration-300 ${phase === "sheet" ? "h-96" : "h-12"}`}
         allow="payment"
         sandbox="allow-scripts allow-same-origin"
         referrerPolicy="no-referrer"
