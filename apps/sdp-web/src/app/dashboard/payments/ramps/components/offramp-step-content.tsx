@@ -220,6 +220,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     return (
       <div className="space-y-6">
         <MoneygramRampWidget
+          direction="offramp"
           quote={quote}
           counterparty={selectedCounterparty}
           sourceWalletId={fields.walletId}
