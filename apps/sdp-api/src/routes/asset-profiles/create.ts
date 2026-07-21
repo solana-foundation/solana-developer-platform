@@ -73,21 +73,33 @@ export const createTokenWithAssetProfile = async (c: AppContext) => {
     });
   }
 
-  // Extensions from profile settings (source of truth) or request template overrides.
+  // Two mutually-exclusive extension sources: advanced settings (capability-derived
+  // template, source of truth) or the legacy template + overrides. When settings are
+  // present they win — `template` is a base-template hint the capability supersedes, so
+  // it's tolerated (the wizard always sends it alongside settings). `overrides`, though,
+  // carries explicit per-extension config that would be dropped silently; reject rather
+  // than deploy something the caller never asked for (extensions are immutable post-deploy).
   const selectedSettings = getSelectedSettings(issuanceMetadata ?? {});
-  const resolved =
-    Object.keys(selectedSettings).length > 0
-      ? resolveSettingsToExtensions(assetCategory, assetType, selectedSettings, {
-          authorities: signer ? { permanentDelegate: signer.address } : undefined,
-          decimals: tokenInput.decimals,
-          requiresAllowlist: tokenInput.requiresAllowlist,
-        })
-      : resolveTemplateConfig(
-          normalizeTemplateId(tokenInput.template),
-          tokenInput.overrides,
-          tokenInput.requiresAllowlist,
-          tokenInput.decimals
-        );
+  const usingSettings = Object.keys(selectedSettings).length > 0;
+
+  if (usingSettings && tokenInput.overrides !== undefined) {
+    throw badRequest("Advanced settings and template overrides cannot be combined", {
+      errors: [{ field: "overrides", reason: "conflicts_with_advanced_settings" }],
+    });
+  }
+
+  const resolved = usingSettings
+    ? resolveSettingsToExtensions(assetCategory, assetType, selectedSettings, {
+        authorities: signer ? { permanentDelegate: signer.address } : undefined,
+        decimals: tokenInput.decimals,
+        requiresAllowlist: tokenInput.requiresAllowlist,
+      })
+    : resolveTemplateConfig(
+        normalizeTemplateId(tokenInput.template),
+        tokenInput.overrides,
+        tokenInput.requiresAllowlist,
+        tokenInput.decimals
+      );
 
   if (resolved.errors.length > 0) {
     throw badRequest("Invalid token extension configuration", { errors: resolved.errors });
