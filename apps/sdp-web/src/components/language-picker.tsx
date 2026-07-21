@@ -48,7 +48,7 @@ export function LanguagePicker({ variant = "topbar" }: { variant?: "topbar" | "l
   };
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
