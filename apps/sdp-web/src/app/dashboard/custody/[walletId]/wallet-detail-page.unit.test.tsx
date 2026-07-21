@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { CustodyWalletTokenBalance } from "@sdp/types";
 import { Children, type ComponentProps, isValidElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -134,6 +135,13 @@ beforeEach(() => {
 });
 
 describe("WalletDetailPage critical path", () => {
+  it("keeps wallet detail data cards on theme-aware surfaces", () => {
+    const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain("bg-surface-raised");
+    expect(source).not.toMatch(/\bbg-white(?:\/\d+)?\b/);
+  });
+
   it.each([
     ["org:admin", true],
     ["org:member", false],
