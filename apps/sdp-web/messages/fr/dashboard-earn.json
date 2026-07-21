@@ -46,7 +46,8 @@
     },
     "liquidity": {
       "instant": "Instantané",
-      "delayed": "T+{days}"
+      "delayed": "T+{days}",
+      "mixed": "{pct}% intrajournalier · reste T+{days}"
     },
     "withdraw": {
       "title": "Retirer",
@@ -56,6 +57,7 @@
       "useMax": "Max",
       "previewInstantTitle": "Rachat instantané",
       "previewInstant": "Les fonds sont réglés immédiatement sur {wallet}.",
+      "previewInstantDefiCaveat": "Sous réserve de la liquidité du protocole — une utilisation complète peut retarder le règlement (voir les conditions de la stratégie).",
       "previewDelayedTitle": "Rachat T+{days}",
       "previewDelayed": "Les fonds seront disponibles le {date}. Ce montant cesse de générer du rendement dès maintenant et sera réglé à la fin de la fenêtre de rachat.",
       "errorAmountRequired": "Saisissez un montant supérieur à zéro.",

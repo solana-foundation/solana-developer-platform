@@ -3,7 +3,8 @@ import type { EarnStrategy } from "@sdp/types";
 /**
  * Mock catalogue for the Earn design scaffold. This file is the ONLY data
  * seam in the flow: swap these fixtures for the /api/dashboard/earn BFF
- * fetchers (already stubbed) once the first vault-infra provider sync lands,
+ * fetchers (the strategies proxy is stubbed; positions/movements proxies land
+ * with the execution path) once the first vault-infra provider sync lands,
  * and the workspace + wizard keep working unchanged.
  */
 
@@ -15,6 +16,11 @@ export type MockEarnStrategy = EarnStrategy & {
   tvlUsd: number;
   riskTier: EarnRiskTier;
   curator: string;
+  /**
+   * Mixed-liquidity shape from the BG/BAGEY partner discussion: the fraction
+   * redeemable intraday, with the remainder settling after redemptionDelayDays.
+   */
+  intradayFraction?: number;
 };
 
 const MOCK_TIMESTAMP = "2026-07-18T09:00:00.000Z";
@@ -31,15 +37,19 @@ function strategy(
   };
 }
 
-// Mainnet mints for USDC / USDG / USDT (matches WELL_KNOWN_TOKENS in @sdp/types).
+// Mainnet mints for USDC / USDG / USDT / PYUSD (matches WELL_KNOWN_TOKENS in
+// @sdp/types). PYUSD enters via the Galaxy sweep strategy (newly discussed:
+// intraday liquidity with PYUSD), not the day-one deposit-token registry.
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDG = "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH";
 const USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+const PYUSD = "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo";
 
 export const MOCK_TOKEN_SYMBOLS: Readonly<Record<string, string>> = {
   [USDC]: "USDC",
   [USDG]: "USDG",
   [USDT]: "USDT",
+  [PYUSD]: "PYUSD",
 };
 
 export const MOCK_EARN_STRATEGIES: readonly MockEarnStrategy[] = [
@@ -118,6 +128,53 @@ export const MOCK_EARN_STRATEGIES: readonly MockEarnStrategy[] = [
     riskTier: "balanced",
     curator: "steakhouse",
     tvlUsd: 143_100_000,
+  }),
+  strategy({
+    id: "earn_strategy_mock_sweep",
+    provider: "perena",
+    providerReference: "perena-galaxy-sweep",
+    name: "Galaxy Sweep Intraday",
+    sourceKind: "rwa",
+    underlyingSource: "sweep",
+    depositMints: [PYUSD],
+    apyType: "variable",
+    currentApy: "0.042",
+    liquidityTerm: "instant",
+    riskTier: "conservative",
+    curator: "steakhouse",
+    tvlUsd: 78_300_000,
+  }),
+  strategy({
+    id: "earn_strategy_mock_figure_prime",
+    provider: "ground",
+    providerReference: "ground-figure-prime",
+    name: "Figure PRIME",
+    sourceKind: "rwa",
+    underlyingSource: "figure-prime",
+    depositMints: [USDC],
+    apyType: "variable",
+    currentApy: "0.075",
+    liquidityTerm: "instant",
+    riskTier: "enhanced",
+    curator: "sentora",
+    tvlUsd: 121_600_000,
+  }),
+  strategy({
+    id: "earn_strategy_mock_bagey",
+    provider: "veda",
+    providerReference: "veda-bagey-credit",
+    name: "BAGEY Credit",
+    sourceKind: "rwa",
+    underlyingSource: "bagey",
+    depositMints: [USDC],
+    apyType: "variable",
+    currentApy: "0.061",
+    liquidityTerm: "delayed",
+    redemptionDelayDays: 2,
+    intradayFraction: 0.1,
+    riskTier: "balanced",
+    curator: "gauntlet",
+    tvlUsd: 54_200_000,
   }),
   strategy({
     id: "earn_strategy_mock_syrup",

@@ -112,6 +112,13 @@ export function EarnWithdrawModal({ position, strategy, onClose }: EarnWithdrawM
                   wallet: wallet?.name ?? position.walletId,
                 })}
           </p>
+          {!delayed && strategy.sourceKind === "defi" ? (
+            // Full-utilization edge case the doc calls out for instant DeFi
+            // redemptions: instant is the norm, not a guarantee.
+            <p className="mt-1 text-xs text-tertiary">
+              {t("DashboardEarn.withdraw.previewInstantDefiCaveat")}
+            </p>
+          ) : null}
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-3">

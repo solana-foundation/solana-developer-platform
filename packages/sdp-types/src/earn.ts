@@ -63,6 +63,10 @@ export const EARN_KNOWN_UNDERLYING_SOURCES = [
   "usdy",
   "sweep",
   "syrup-usdc",
+  "figure-prime",
+  "bagey",
+  "usde",
+  "aaa-clo",
 ] as const;
 export type EarnKnownUnderlyingSource = (typeof EARN_KNOWN_UNDERLYING_SOURCES)[number];
 

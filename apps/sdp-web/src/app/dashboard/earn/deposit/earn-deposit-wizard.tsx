@@ -81,10 +81,20 @@ const stepVariants = {
 
 function useLiquidityLabel() {
   const t = useTranslations();
-  return (strategy: MockEarnStrategy): string =>
-    strategy.liquidityTerm === "instant"
-      ? t("DashboardEarn.liquidity.instant")
-      : t("DashboardEarn.liquidity.delayed", { days: strategy.redemptionDelayDays ?? 1 });
+  return (strategy: MockEarnStrategy): string => {
+    if (strategy.liquidityTerm === "instant") {
+      return t("DashboardEarn.liquidity.instant");
+    }
+    const days = strategy.redemptionDelayDays ?? 1;
+    // Mixed shape (BG/BAGEY): a slice redeems intraday, the rest T+n.
+    if (strategy.intradayFraction) {
+      return t("DashboardEarn.liquidity.mixed", {
+        pct: Math.round(strategy.intradayFraction * 100),
+        days,
+      });
+    }
+    return t("DashboardEarn.liquidity.delayed", { days });
+  };
 }
 
 function RadioDot({ selected }: { selected: boolean }) {

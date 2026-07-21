@@ -46,7 +46,8 @@
     },
     "liquidity": {
       "instant": "Instant",
-      "delayed": "T+{days}"
+      "delayed": "T+{days}",
+      "mixed": "{pct}% intraday · rest T+{days}"
     },
     "withdraw": {
       "title": "Withdraw",
@@ -56,6 +57,7 @@
       "useMax": "Max",
       "previewInstantTitle": "Instant redemption",
       "previewInstant": "Funds settle to {wallet} immediately.",
+      "previewInstantDefiCaveat": "Subject to protocol liquidity — full utilization can delay settlement (see strategy terms).",
       "previewDelayedTitle": "T+{days} redemption",
       "previewDelayed": "Funds become available {date}. This amount stops earning now and settles when the redemption window passes.",
       "errorAmountRequired": "Enter an amount greater than zero.",
