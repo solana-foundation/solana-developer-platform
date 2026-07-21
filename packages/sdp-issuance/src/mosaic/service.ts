@@ -14,7 +14,11 @@
 
 import type { FeePaymentPort } from "@sdp/payments/fee-payment/port";
 import type { RpcEnv } from "@sdp/rpc";
-import { confirmTransaction, createRpcForSdk } from "@sdp/rpc/solana";
+import {
+  type ConfirmTransactionOptions,
+  confirmTransaction,
+  createRpcForSdk,
+} from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   type Address,
@@ -29,6 +33,7 @@ import {
   getTransactionEncoder,
   pipe,
   type Rpc,
+  type Signature,
   type SolanaRpcApi,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
@@ -93,7 +98,6 @@ import { safeStringify } from "./utils";
 // ═══════════════════════════════════════════════════════════════════════════
 
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
-type ConfirmationOptions = Parameters<typeof confirmTransaction>[2];
 
 /**
  * Environment bindings required by the Mosaic issuance service.
@@ -204,7 +208,7 @@ export class MosaicService {
     throw lastError instanceof Error ? lastError : new Error("RPC operation failed");
   }
 
-  private getTransactionConfirmationOptions(): ConfirmationOptions {
+  private getTransactionConfirmationOptions(): ConfirmTransactionOptions | undefined {
     if (this.env.KORA_SURFPOOL_SHIM === "true") {
       return {
         commitment: "processed" satisfies Commitment,
@@ -1185,27 +1189,15 @@ export class MosaicService {
   }
 
   private async signAndSubmit(fullTx: FullTransaction): Promise<MosaicTransactionResult> {
-    if (this.feePayment) {
+    const feePayment = this.feePayment;
+    if (feePayment) {
       // Two-signer flow: custody signs locally, Kora adds fee payer + submits
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();
       const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
 
-      const signature = await this.feePayment.signAndSend(txBytes);
-      const confirmation = await confirmTransaction(
-        this.rpc,
-        signature,
-        this.getTransactionConfirmationOptions()
-      );
-
-      if (confirmation.err) {
-        throw this.transactionFailedError(`Transaction failed: ${safeStringify(confirmation.err)}`);
-      }
-
-      return {
-        signature,
-        slot: confirmation.slot,
-      };
+      const signature = await feePayment.signAndSend(txBytes);
+      return this.confirmSubmitted(signature);
     }
 
     // No fee sponsor configured: sign and submit directly
@@ -1219,6 +1211,14 @@ export class MosaicService {
       })
       .send();
 
+    return this.confirmSubmitted(signature);
+  }
+
+  /**
+   * Wait for a submitted transaction to confirm and map the result into a
+   * MosaicTransactionResult, throwing the app-mapped error on on-chain failure.
+   */
+  private async confirmSubmitted(signature: Signature): Promise<MosaicTransactionResult> {
     const confirmation = await confirmTransaction(
       this.rpc,
       signature,
