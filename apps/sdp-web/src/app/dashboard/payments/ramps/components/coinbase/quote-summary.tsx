@@ -14,7 +14,9 @@ type CoinbaseQuote = Extract<PaymentRampQuote, { provider: "coinbase" }>;
  */
 export function CoinbaseQuoteSummary({ quote }: { quote: CoinbaseQuote }) {
   const t = useTranslations();
-  const feesIncluded = quote.fees.reduce((total, fee) => total + Number(fee.feeAmount), 0);
+  const feesIncluded = quote.fees
+    .filter((fee) => fee.feeCurrency === quote.paymentCurrency)
+    .reduce((total, fee) => total + Number(fee.feeAmount), 0);
   return (
     <div className="grid gap-3 lg:grid-cols-2">
       <QuoteSummaryField
