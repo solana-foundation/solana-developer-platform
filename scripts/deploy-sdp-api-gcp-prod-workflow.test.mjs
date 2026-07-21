@@ -34,6 +34,7 @@ test("manual production redeploy always skips builds and migrations", () => {
 test("candidate is revision-specific and proven ready before promotion", () => {
   assert.match(workflow, /echo "IMAGE=\$\{resolved_image\}" >> "\$\{GITHUB_ENV\}"/);
   assert.match(workflow, /--no-traffic --tag "\$\{candidate_tag\}"/);
+  assert.match(workflow, /CANDIDATE_TAG=\$\{candidate_tag\}/);
   assert.match(workflow, /status\.imageDigest/);
   assert.match(workflow, /"\$\{CANDIDATE_URL\}\/health\/ready"/);
   assert.match(workflow, /\.revision == \$revision/);
@@ -45,6 +46,15 @@ test("candidate is revision-specific and proven ready before promotion", () => {
   const promotion = workflow.indexOf("- name: Promote service and cron with rollback");
   assert.ok(candidateDeploy !== -1 && candidateDeploy < candidateReadiness);
   assert.ok(candidateReadiness < promotion);
+});
+
+test("candidate traffic tag is always removed", () => {
+  assert.match(workflow, /- name: Remove candidate traffic tag\n\s+if: \$\{\{ always\(\) \}\}/);
+  assert.match(workflow, /--remove-tags "\$\{CANDIDATE_TAG\}"/);
+
+  const promotion = workflow.indexOf("- name: Promote service and cron with rollback");
+  const cleanup = workflow.indexOf("- name: Remove candidate traffic tag");
+  assert.ok(promotion !== -1 && promotion < cleanup);
 });
 
 test("promotion restores service traffic and cron together on failure", () => {

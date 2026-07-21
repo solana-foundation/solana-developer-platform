@@ -52,6 +52,7 @@
     "secrets:print:docker": "node scripts/project-secrets.mjs docker",
     "check": "biome check --write . && turbo run typecheck",
     "db:postgres:up": "docker compose -f infra/postgres/docker-compose.yml up -d",
+    "db:redis:up": "docker compose -f infra/postgres/docker-compose.yml up -d redis",
     "db:postgres:down": "docker compose -f infra/postgres/docker-compose.yml down",
     "db:postgres:reset": "docker compose -f infra/postgres/docker-compose.yml down -v && docker compose -f infra/postgres/docker-compose.yml up -d",
     "db:postgres:logs": "docker compose -f infra/postgres/docker-compose.yml logs -f postgres",

@@ -139,6 +139,7 @@ jobs:
         run: |
           set -euo pipefail
           candidate_tag="candidate-${DEPLOY_IMAGE_SHA:0:12}"
+          echo "CANDIDATE_TAG=${candidate_tag}" >> "${GITHUB_ENV}"
           gcloud run services update "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}" \
             --no-traffic --tag "${candidate_tag}"
@@ -245,3 +246,14 @@ jobs:
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
           trap - ERR
+
+      - name: Remove candidate traffic tag
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CANDIDATE_TAG:-}" ]]; then
+            exit 0
+          fi
+          gcloud run services update-traffic "${SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --remove-tags "${CANDIDATE_TAG}"
