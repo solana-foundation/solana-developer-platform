@@ -23,8 +23,6 @@ import { getTemplateCatalogEntry, type IssuanceTemplateId } from "./template-cat
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export type FieldDepth = "type-aware" | "core";
-export type ManageVariant = "link" | "kebab" | "button";
 export type TokenView = "grid" | "list";
 
 export interface IssuanceAssetProfileView {
@@ -268,7 +266,6 @@ function pushMintAndCreated(
 
 export function buildExpandedFields(
   view: IssuanceTokenView,
-  depth: FieldDepth,
   t: Translate,
   locale: string
 ): ExpandedField[] {
@@ -281,7 +278,8 @@ export function buildExpandedFields(
     fields.push({ label, value: normalized, href: href ?? null });
   };
 
-  if (depth === "type-aware" && view.assetProfile) {
+  // Type-aware fields when the token has an asset profile.
+  if (view.assetProfile) {
     push(t("DashboardIssuance.list.decimals"), String(view.decimals));
     push(t("DashboardIssuance.list.supply"), formatSupply(view.totalSupply, locale));
     pushTypeAwareFields(view, t, push);
@@ -289,7 +287,7 @@ export function buildExpandedFields(
     return fields;
   }
 
-  // Core fields — available for every token regardless of asset profile.
+  // Core fallback — tokens without an asset profile (legacy / flag off).
   push(t("DashboardIssuance.list.type"), getTokenTypeLabel(view.template, t));
   push(t("DashboardIssuance.list.decimals"), String(view.decimals));
   push(t("DashboardIssuance.list.supply"), formatSupply(view.totalSupply, locale));

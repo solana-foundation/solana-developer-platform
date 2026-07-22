@@ -1,12 +1,12 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { getMessages, type MessageKey, translate, type TranslationValues } from "@/i18n/messages";
+import { getMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import {
   buildExpandedFields,
-  type IssuanceTokenView,
   getTokenChips,
+  type IssuanceTokenView,
 } from "./issuance-token-fields";
 import { IssuanceTokenList } from "./issuance-token-list";
 
@@ -65,12 +65,7 @@ const stablecoinProfile: IssuanceTokenView["assetProfile"] = {
 
 describe("buildExpandedFields", () => {
   it("surfaces stablecoin type-specific fields when a profile is present", () => {
-    const fields = buildExpandedFields(
-      baseToken({ assetProfile: stablecoinProfile }),
-      "type-aware",
-      t,
-      "en"
-    );
+    const fields = buildExpandedFields(baseToken({ assetProfile: stablecoinProfile }), t, "en");
     const byLabel = new Map(fields.map((field) => [field.label, field.value]));
 
     expect(byLabel.get(t("DashboardIssuance.list.decimals"))).toBe("6");
@@ -91,7 +86,7 @@ describe("buildExpandedFields", () => {
   });
 
   it("falls back to core fields when there is no asset profile", () => {
-    const fields = buildExpandedFields(baseToken(), "type-aware", t, "en");
+    const fields = buildExpandedFields(baseToken(), t, "en");
     const labels = fields.map((field) => field.label);
 
     expect(labels).toContain(t("DashboardIssuance.list.type"));
@@ -102,20 +97,6 @@ describe("buildExpandedFields", () => {
     expect(maxSupply?.value).toBe(t("DashboardIssuance.list.unlimited"));
     const transfers = fields.find((f) => f.label === t("DashboardIssuance.list.transfers"));
     expect(transfers?.value).toBe(t("DashboardIssuance.list.unrestricted"));
-  });
-
-  it("core depth ignores the profile and shows core fields", () => {
-    const fields = buildExpandedFields(
-      baseToken({ assetProfile: stablecoinProfile, requiresAllowlist: true }),
-      "core",
-      t,
-      "en"
-    );
-    const labels = fields.map((field) => field.label);
-    expect(labels).toContain(t("DashboardIssuance.list.type"));
-    expect(labels).not.toContain(t("DashboardIssuance.config.pegTarget"));
-    const transfers = fields.find((f) => f.label === t("DashboardIssuance.list.transfers"));
-    expect(transfers?.value).toBe(t("DashboardIssuance.list.restricted"));
   });
 });
 
@@ -139,8 +120,6 @@ describe("IssuanceTokenList", () => {
     const markup = renderWithI18n(
       <IssuanceTokenList
         tokens={[baseToken({ assetProfile: stablecoinProfile })]}
-        manageVariant="button"
-        fieldDepth="type-aware"
         onCreate={() => undefined}
       />
     );

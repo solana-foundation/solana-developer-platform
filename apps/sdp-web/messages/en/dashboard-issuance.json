@@ -56,7 +56,8 @@
       "assetNameRequired": "Asset name is required.",
       "settingValuesRequired": "Enter the required values for your selected settings.",
       "settingValueRequired": "Required",
-      "settingConflict": "Some selected settings can't be combined. Remove one to continue."
+      "settingConflict": "Some selected settings can't be combined. Remove one to continue.",
+      "signerRequiredForSettings": "Select a signing wallet — it's required for the advanced settings you chose."
     },
     "controlLists": {
       "title": "Control Lists",
@@ -239,19 +240,12 @@
       "viewToggleLabel": "Switch between grid and list view",
       "viewGrid": "Grid",
       "viewList": "List",
-      "addNewToken": "Add new token",
+      "manageAsset": "Manage {name}",
       "active": "Active",
       "draft": "Draft"
     },
     "list": {
-      "devPreview": "Preview",
-      "devManageStyle": "Manage style",
-      "devFieldDepth": "Field depth",
-      "manageLink": "Inline link",
-      "manageKebab": "Menu",
-      "manageButton": "Button",
-      "depthTypeAware": "Type-aware",
-      "depthCore": "Core",
+      "toggleDetails": "Toggle details for {name}",
       "manageThisAsset": "Manage this asset",
       "viewOnExplorer": "View on explorer",
       "copyMintAddress": "Copy mint address",

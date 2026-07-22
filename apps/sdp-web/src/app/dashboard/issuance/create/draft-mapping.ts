@@ -1,5 +1,6 @@
 import {
   ADVANCED_SETTINGS,
+  AUTHORITY_VALUED_SETTINGS,
   findIncompatibleExtensionPair,
   getRecommendedSettings,
   isSettingAllowed,
@@ -623,6 +624,16 @@ export function getAssetDetailsErrors(
   });
   if (findIncompatibleExtensionPair(selectedExtensions)) {
     errors.advancedSettings = t("DashboardIssuance.errors.settingConflict");
+  }
+
+  // Authority-valued settings (e.g. permanent delegate) bind an on-chain authority
+  // to the signing wallet at deploy, so the server rejects the create without one.
+  // Require it here so the user gets inline guidance instead of a late 400.
+  const needsSigner = Object.keys(draft.advancedSettings).some((key) =>
+    (AUTHORITY_VALUED_SETTINGS as readonly string[]).includes(key)
+  );
+  if (needsSigner && !draft.signingWalletId.trim()) {
+    errors.signingWalletId = t("DashboardIssuance.errors.signerRequiredForSettings");
   }
 
   return errors;

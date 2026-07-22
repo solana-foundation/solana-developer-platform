@@ -1,10 +1,19 @@
 "use client";
 
-import { ArrowRight, ChevronDown, MoreHorizontal, Plus } from "lucide-react";
+import {
+  ArrowRight,
+  ChevronDown,
+  Copy,
+  ExternalLink,
+  FlaskConical,
+  type LucideIcon,
+  MoreHorizontal,
+  Plus,
+  SlidersHorizontal,
+} from "lucide-react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,14 +27,12 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
   buildExpandedFields,
-  type FieldDepth,
   FieldRow,
   formatDate,
   formatSupply,
   getDeploymentStatus,
   getTokenChips,
   type IssuanceTokenView,
-  type ManageVariant,
   tokenExplorerHref,
 } from "./issuance-token-fields";
 
@@ -74,32 +81,54 @@ function StatusBadge({ token }: { token: IssuanceTokenView }) {
   );
 }
 
-// Kebab (⋯) menu — Manage plus quick actions. Copy uses the clipboard API.
-function ManageKebab({ token }: { token: IssuanceTokenView }) {
+// Actions menu — Manage, playground deep-link, and quick actions. Copy uses the
+// clipboard API. Reused by the list row (default ghost ⋯ trigger) and the grid
+// tile, which passes a manage glyph via `icon` and `triggerVariant="outline"` so
+// the corner action reads as a defined button rather than a floating icon.
+export function ManageKebab({
+  token,
+  icon: Icon = MoreHorizontal,
+  triggerVariant = "ghost",
+}: {
+  token: IssuanceTokenView;
+  icon?: LucideIcon;
+  triggerVariant?: "ghost" | "outline";
+}) {
   const t = useTranslations();
   const explorer = tokenExplorerHref(token.mintAddress);
+  const playgroundHref = `/dashboard/issuance?tab=playground&tokenId=${encodeURIComponent(token.id)}`;
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
-          variant="ghost"
+          variant={triggerVariant}
           size="icon"
           className="h-8 w-8 shrink-0"
           aria-label={t("DashboardIssuance.workspace.manage")}
         >
-          <MoreHorizontal className="h-4 w-4" />
+          <Icon className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent>
         <DropdownMenuItem asChild>
-          <Link href={detailHref(token)}>{t("DashboardIssuance.workspace.manage")}</Link>
+          <Link href={detailHref(token)}>
+            <SlidersHorizontal className="h-4 w-4 shrink-0 text-tertiary" aria-hidden="true" />
+            {t("DashboardIssuance.workspace.manage")}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href={playgroundHref}>
+            <FlaskConical className="h-4 w-4 shrink-0 text-tertiary" aria-hidden="true" />
+            {t("DashboardIssuance.playground.openInPlayground")}
+          </Link>
         </DropdownMenuItem>
         {(explorer || token.mintAddress) && <DropdownMenuSeparator />}
         {explorer ? (
           <DropdownMenuItem asChild>
             <a href={explorer} target="_blank" rel="noreferrer">
+              <ExternalLink className="h-4 w-4 shrink-0 text-tertiary" aria-hidden="true" />
               {t("DashboardIssuance.list.viewOnExplorer")}
             </a>
           </DropdownMenuItem>
@@ -112,6 +141,7 @@ function ManageKebab({ token }: { token: IssuanceTokenView }) {
               }
             }}
           >
+            <Copy className="h-4 w-4 shrink-0 text-tertiary" aria-hidden="true" />
             {t("DashboardIssuance.list.copyMintAddress")}
           </DropdownMenuItem>
         ) : null}
@@ -120,130 +150,103 @@ function ManageKebab({ token }: { token: IssuanceTokenView }) {
   );
 }
 
-// The Manage action, rendered per selected variant. `context` tunes placement:
-// "row"/"tile" sit alongside the collapsed content; "tile" also handles the grid
-// card footer. The "link" variant is intentionally quiet — in a row it defers to
-// the expanded panel's inline link (returns null here).
-export function ManageAffordance({
-  token,
-  variant,
-  context,
+function CollapsedStat({
+  label,
+  value,
+  className,
 }: {
-  token: IssuanceTokenView;
-  variant: ManageVariant;
-  context: "row" | "tile";
+  label: string;
+  value: string;
+  className?: string;
 }) {
-  const t = useTranslations();
-
-  if (variant === "kebab") {
-    return <ManageKebab token={token} />;
-  }
-
-  if (variant === "button") {
-    return (
-      <Button type="button" asChild variant="outline" size="sm" className="h-8 shrink-0 rounded-lg">
-        <Link href={detailHref(token)}>
-          {t("DashboardIssuance.workspace.manage")}
-          <ArrowRight className="h-3.5 w-3.5" />
-        </Link>
-      </Button>
-    );
-  }
-
-  // variant === "link"
-  if (context === "tile") {
-    return (
-      <Link
-        href={detailHref(token)}
-        className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-      >
-        {t("DashboardIssuance.workspace.manage")}
-        <ArrowRight className="h-3.5 w-3.5" />
-      </Link>
-    );
-  }
-  return null;
-}
-
-function CollapsedStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="text-right">
-      <p className="text-xs text-tertiary">{label}</p>
-      <p className="text-sm font-medium text-primary">{value}</p>
+    <div className={cn("hidden min-w-0 text-center lg:block", className)}>
+      <p className="truncate text-xs text-tertiary">{label}</p>
+      <p className="truncate text-sm font-medium text-primary">{value}</p>
     </div>
   );
 }
 
-function IssuanceTokenListRow({
-  token,
-  manageVariant,
-  fieldDepth,
-}: {
-  token: IssuanceTokenView;
-  manageVariant: ManageVariant;
-  fieldDepth: FieldDepth;
-}) {
+function IssuanceTokenListRow({ token }: { token: IssuanceTokenView }) {
   const t = useTranslations();
   const locale = useLocale();
   const reduceMotion = useReducedMotion();
   const [expanded, setExpanded] = useState(false);
   const chips = getTokenChips(token, t);
-  const fields = expanded ? buildExpandedFields(token, fieldDepth, t, locale) : [];
+  const fields = expanded ? buildExpandedFields(token, t, locale) : [];
+
+  const toggle = () => setExpanded((value) => !value);
 
   return (
     <div
       data-testid={`token-row-${token.id}`}
       className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised"
     >
-      <div className="flex items-center gap-3 p-4">
+      {/* The whole header row toggles the panel via a full-bleed overlay button
+          (a real <button> covering the row). The kebab cell sits above it (z-10)
+          so its menu is clickable without also toggling the row. */}
+      <div
+        className={cn(
+          "relative grid items-center gap-x-3 p-4 text-left",
+          "grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]",
+          "md:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto_auto]",
+          "lg:grid-cols-[auto_auto_11rem_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_5rem_auto]"
+        )}
+      >
         <button
           type="button"
-          onClick={() => setExpanded((value) => !value)}
+          onClick={toggle}
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left"
-        >
-          <ChevronDown
-            className={cn(
-              "h-4 w-4 shrink-0 text-tertiary transition-transform duration-200",
-              expanded && "rotate-180"
-            )}
-            aria-hidden="true"
-          />
-          <TokenAvatar token={token} />
-          <div className="min-w-0">
-            <p className="text-xs font-medium tracking-wide text-tertiary">{token.symbol}</p>
-            <p className="truncate text-sm font-medium text-primary">{token.name}</p>
-          </div>
-          <div className="ml-1 hidden flex-wrap items-center gap-1.5 md:flex">
-            {chips.map((chip) => {
-              const Icon = chip.icon;
-              return (
-                <Badge key={chip.label} variant="default" className="gap-1">
-                  {Icon ? <Icon className="h-3 w-3" aria-hidden="true" /> : null}
-                  {chip.label}
-                </Badge>
-              );
-            })}
-          </div>
-          <div className="ml-auto hidden items-center gap-8 lg:flex">
-            <CollapsedStat
-              label={t("DashboardIssuance.workspace.supply")}
-              value={formatSupply(token.totalSupply, locale)}
-            />
-            <CollapsedStat
-              label={t("DashboardIssuance.list.decimals")}
-              value={String(token.decimals)}
-            />
-            <CollapsedStat
-              label={t("DashboardIssuance.workspace.created")}
-              value={formatDate(token.createdAt, locale)}
-            />
-          </div>
-          <div className="ml-auto lg:ml-4">
-            <StatusBadge token={token} />
-          </div>
-        </button>
-        <ManageAffordance token={token} variant={manageVariant} context="row" />
+          aria-label={t("DashboardIssuance.list.toggleDetails", { name: token.name })}
+          className="absolute inset-0 z-0 cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)] focus-visible:ring-inset"
+        />
+        <ChevronDown
+          className={cn(
+            "h-4 w-4 shrink-0 text-tertiary transition-transform duration-200",
+            expanded && "rotate-180"
+          )}
+          aria-hidden="true"
+        />
+        <TokenAvatar token={token} />
+        <div className="min-w-0">
+          <p className="text-xs font-medium tracking-wide text-tertiary">{token.symbol}</p>
+          <p className="truncate text-sm font-medium text-primary">{token.name}</p>
+        </div>
+        {/* Chips are stacked one-per-row so every row is the same height. */}
+        <div className="hidden min-w-0 flex-col items-start gap-1 md:flex">
+          {chips.map((chip) => {
+            const Icon = chip.icon;
+            return (
+              <span
+                key={chip.label}
+                className="inline-flex max-w-full items-center gap-1 rounded-full border border-border-subtle bg-fill-subtle px-2 py-0.5 text-xs text-secondary"
+              >
+                {Icon ? (
+                  <Icon className="h-3.5 w-3.5 shrink-0 text-tertiary" aria-hidden="true" />
+                ) : null}
+                <span className="truncate">{chip.label}</span>
+              </span>
+            );
+          })}
+        </div>
+        <CollapsedStat
+          label={t("DashboardIssuance.workspace.supply")}
+          value={formatSupply(token.totalSupply, locale)}
+        />
+        <CollapsedStat
+          label={t("DashboardIssuance.list.decimals")}
+          value={String(token.decimals)}
+        />
+        <CollapsedStat
+          label={t("DashboardIssuance.workspace.created")}
+          value={formatDate(token.createdAt, locale)}
+        />
+        <div className="flex justify-end">
+          <StatusBadge token={token} />
+        </div>
+        <div className="relative z-10 flex justify-end">
+          <ManageKebab token={token} />
+        </div>
       </div>
 
       <AnimatePresence initial={false}>
@@ -255,17 +258,15 @@ function IssuanceTokenListRow({
                   <FieldRow key={field.label} {...field} />
                 ))}
               </div>
-              {manageVariant === "link" ? (
-                <div className="mt-5 flex justify-end border-t border-border-subtle pt-4">
-                  <Link
-                    href={detailHref(token)}
-                    className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-                  >
-                    {t("DashboardIssuance.list.manageThisAsset")}
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </Link>
-                </div>
-              ) : null}
+              <div className="mt-5 flex justify-end border-t border-border-subtle pt-4">
+                <Link
+                  href={detailHref(token)}
+                  className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+                >
+                  {t("DashboardIssuance.list.manageThisAsset")}
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </div>
             </div>
           </HeightReveal>
         ) : null}
@@ -276,13 +277,9 @@ function IssuanceTokenListRow({
 
 export function IssuanceTokenList({
   tokens,
-  manageVariant,
-  fieldDepth,
   onCreate,
 }: {
   tokens: IssuanceTokenView[];
-  manageVariant: ManageVariant;
-  fieldDepth: FieldDepth;
   onCreate: () => void;
 }) {
   const t = useTranslations();
@@ -290,12 +287,7 @@ export function IssuanceTokenList({
   return (
     <div className="flex flex-col gap-2.5">
       {tokens.map((token) => (
-        <IssuanceTokenListRow
-          key={token.id}
-          token={token}
-          manageVariant={manageVariant}
-          fieldDepth={fieldDepth}
-        />
+        <IssuanceTokenListRow key={token.id} token={token} />
       ))}
       <button
         type="button"

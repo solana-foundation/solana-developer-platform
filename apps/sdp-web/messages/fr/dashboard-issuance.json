@@ -56,7 +56,8 @@
       "assetNameRequired": "Le nom de l'Asset est requis.",
       "settingValuesRequired": "Saisissez les valeurs requises pour les paramètres sélectionnés.",
       "settingValueRequired": "Requis",
-      "settingConflict": "Certains paramètres sélectionnés ne peuvent pas être combinés. Supprimez-en un pour continuer."
+      "settingConflict": "Certains paramètres sélectionnés ne peuvent pas être combinés. Supprimez-en un pour continuer.",
+      "signerRequiredForSettings": "Sélectionnez un wallet de signature — il est requis pour les paramètres avancés choisis."
     },
     "controlLists": {
       "title": "Listes de contrôle",
@@ -239,19 +240,12 @@
       "viewToggleLabel": "Basculer entre la vue grille et la vue liste",
       "viewGrid": "Grille",
       "viewList": "Liste",
-      "addNewToken": "Ajouter un Token",
+      "manageAsset": "Gérer {name}",
       "active": "Actif",
       "draft": "Draft"
     },
     "list": {
-      "devPreview": "Aperçu",
-      "devManageStyle": "Style de gestion",
-      "devFieldDepth": "Niveau de détail",
-      "manageLink": "Lien intégré",
-      "manageKebab": "Menu",
-      "manageButton": "Bouton",
-      "depthTypeAware": "Selon le type",
-      "depthCore": "Essentiel",
+      "toggleDetails": "Afficher les détails de {name}",
       "manageThisAsset": "Gérer cet actif",
       "viewOnExplorer": "Voir sur l'explorateur",
       "copyMintAddress": "Copier l'adresse du mint",
