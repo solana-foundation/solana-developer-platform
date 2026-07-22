@@ -173,57 +173,30 @@ function WorkSection({
 function WizardProgress({ currentStep }: { currentStep: ApiKeyAuthoringStep }) {
   const t = useTranslations();
   const currentIndex = API_KEY_AUTHORING_STEPS.indexOf(currentStep);
-  const labels = [
-    t("DashboardCustody.apiKeyStepDetails"),
-    t("DashboardCustody.apiKeyStepPermissions"),
-    t("DashboardCustody.apiKeyStepWalletAccess"),
-    t("DashboardCustody.apiKeyStepReview"),
-  ];
 
   return (
-    <div>
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1.5" aria-hidden="true">
-          {API_KEY_AUTHORING_STEPS.map((step, index) => (
-            <span
-              key={step}
-              className={cn(
-                "h-1.5 rounded-full transition-all",
-                index === currentIndex
-                  ? "w-4 bg-primary"
-                  : index < currentIndex
-                    ? "w-1.5 bg-primary"
-                    : "w-1.5 bg-fill-strong"
-              )}
-            />
-          ))}
-        </div>
-        <span className="text-xs text-muted">
-          {t("DashboardCustody.stepOf", {
-            current: currentIndex + 1,
-            total: API_KEY_AUTHORING_STEPS.length,
-          })}
-        </span>
-      </div>
-      <ol
-        className="mt-5 grid grid-cols-4 border-b border-border-default"
-        aria-label={t("DashboardCustody.apiKeyAuthoringProgress")}
-      >
-        {labels.map((label, index) => (
-          <li
-            key={label}
-            aria-current={index === currentIndex ? "step" : undefined}
+    <div className="flex items-center gap-3">
+      <div className="flex items-center gap-1.5" aria-hidden="true">
+        {API_KEY_AUTHORING_STEPS.map((step, index) => (
+          <span
+            key={step}
             className={cn(
-              "min-w-0 border-b-2 px-2 pb-2 text-center text-xs sm:text-sm",
+              "h-1.5 rounded-full transition-all",
               index === currentIndex
-                ? "border-primary font-medium text-primary"
-                : "border-transparent text-tertiary"
+                ? "w-4 bg-primary"
+                : index < currentIndex
+                  ? "w-1.5 bg-primary"
+                  : "w-1.5 bg-fill-strong"
             )}
-          >
-            {label}
-          </li>
+          />
         ))}
-      </ol>
+      </div>
+      <span className="text-xs text-muted">
+        {t("DashboardCustody.stepOf", {
+          current: currentIndex + 1,
+          total: API_KEY_AUTHORING_STEPS.length,
+        })}
+      </span>
     </div>
   );
 }
