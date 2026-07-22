@@ -422,7 +422,16 @@ describe("Clerk webhooks", () => {
 
     expect(missingOrg).toBeNull();
 
-    mockClerkUserLookup("user_clerk_member", "admin@example.com");
+    mockClerkUserLookup("user_clerk_member", "admin@example.com", "verified", [
+      {
+        role: "org:admin",
+        organization: {
+          id: "org_clerk_membership",
+          name: "Membership Org",
+          slug: "membership-org",
+        },
+      },
+    ]);
     const created = await simulateClerkWebhook({
       type: "organizationMembership.created",
       data: {
@@ -483,6 +492,61 @@ describe("Clerk webhooks", () => {
       .first<{ status: string }>();
 
     expect(removed?.status).toBe("removed");
+
+    const delayedUserUpdate = await simulateClerkWebhook({
+      type: "user.updated",
+      data: {
+        id: "user_clerk_member",
+        primary_email_address_id: "email_primary",
+        email_addresses: [
+          {
+            id: "email_primary",
+            email_address: "admin@example.com",
+            verification: { status: "verified" },
+          },
+        ],
+      },
+    });
+
+    expect(delayedUserUpdate.status).toBe(200);
+    const stillRemoved = await getDb(env)
+      .prepare(
+        `SELECT om.status
+         FROM organization_members om
+         JOIN auth_user_identities aui ON aui.user_id = om.user_id
+         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
+      )
+      .bind("user_clerk_member")
+      .first<{ status: string }>();
+    expect(stillRemoved?.status).toBe("removed");
+
+    const readded = await simulateClerkWebhook({
+      type: "organizationMembership.created",
+      data: {
+        organization: {
+          id: "org_clerk_membership",
+          name: "Membership Org",
+          slug: "membership-org",
+        },
+        role: "org:admin",
+        public_user_data: {
+          user_id: "user_clerk_member",
+          identifier: "admin@example.com",
+        },
+      },
+    });
+
+    expect(readded.status).toBe(200);
+    const activeAgain = await getDb(env)
+      .prepare(
+        `SELECT om.status
+         FROM organization_members om
+         JOIN auth_user_identities aui ON aui.user_id = om.user_id
+         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
+      )
+      .bind("user_clerk_member")
+      .first<{ status: string }>();
+    expect(activeAgain?.status).toBe("active");
   });
 
   it("syncs user lifecycle and Clerk organization deletion", async () => {

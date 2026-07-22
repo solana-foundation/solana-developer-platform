@@ -219,6 +219,7 @@ async function syncUser(c: AppContext, data: UserJSON) {
         organization: membership.organization,
         userId,
         role: membership.role,
+        reactivateRemoved: false,
       })
     )
   );
@@ -252,7 +253,12 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
 
 async function upsertVerifiedMembership(
   c: AppContext,
-  data: { organization: OrganizationJSON; userId: string; role: string }
+  data: {
+    organization: OrganizationJSON;
+    userId: string;
+    role: string;
+    reactivateRemoved: boolean;
+  }
 ) {
   const organizationId = await ensureOrganizationMapping(c, data.organization);
   const role = mapClerkRoleToOrgRole(data.role);
@@ -265,9 +271,13 @@ async function upsertVerifiedMembership(
        ON CONFLICT(organization_id, user_id)
        DO UPDATE SET
          role = excluded.role,
-         status = 'active'`
+         status = CASE
+           WHEN organization_members.status = 'removed' AND ? = 0
+             THEN organization_members.status
+           ELSE 'active'
+         END`
     )
-    .bind(memberId, organizationId, data.userId, role)
+    .bind(memberId, organizationId, data.userId, role, data.reactivateRemoved ? 1 : 0)
     .run();
 
   const projectService = new ProjectService(getDb(c.env));
@@ -290,6 +300,7 @@ async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON)
     organization: data.organization,
     userId,
     role: data.role,
+    reactivateRemoved: true,
   });
 }
 
