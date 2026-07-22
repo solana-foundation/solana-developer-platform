@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_api_key_wallet_scope",
@@ -258,7 +258,7 @@ describe("API key wallet scope routes", () => {
 
   afterEach(async () => {
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
   });
 
   it("rejects create requests without walletScope", async () => {

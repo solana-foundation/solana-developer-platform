@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
 import { canonicalMetadataUrl, resolveMetadataOrigin } from "./metadata";
 
-const envWith = (publicApiOrigin?: string): Env =>
-  ({ PUBLIC_API_ORIGIN: publicApiOrigin }) as unknown as Env;
+const envWith = (publicApiOrigin?: string, kService?: string): Env =>
+  ({ PUBLIC_API_ORIGIN: publicApiOrigin, K_SERVICE: kService }) as unknown as Env;
 
 describe("resolveMetadataOrigin", () => {
   const requestUrl = "https://api.sdp.example/v1/issuance/tokens/tok_1/metadata.json";
@@ -32,6 +32,36 @@ describe("resolveMetadataOrigin", () => {
 
   it("falls back to the request origin when PUBLIC_API_ORIGIN is malformed", () => {
     expect(resolveMetadataOrigin(envWith("not a url"), requestUrl)).toBe("https://api.sdp.example");
+  });
+
+  it("uses the trusted forwarded scheme for a Cloud Run service", () => {
+    expect(
+      resolveMetadataOrigin(
+        envWith(undefined, "sdp-api"),
+        "http://api.sdp.example/v1/issuance/tokens/tok_1/metadata.json",
+        "https"
+      )
+    ).toBe("https://api.sdp.example");
+  });
+
+  it("uses the proxy-appended forwarded scheme instead of an untrusted prefix", () => {
+    expect(
+      resolveMetadataOrigin(
+        envWith(undefined, "sdp-api"),
+        "http://api.sdp.example/v1/issuance/tokens/tok_1/metadata.json",
+        "http, https"
+      )
+    ).toBe("https://api.sdp.example");
+  });
+
+  it("ignores a forwarded scheme outside Cloud Run", () => {
+    expect(
+      resolveMetadataOrigin(
+        envWith(undefined),
+        "http://localhost:8787/v1/issuance/tokens/tok_1/metadata.json",
+        "https"
+      )
+    ).toBe("http://localhost:8787");
   });
 });
 

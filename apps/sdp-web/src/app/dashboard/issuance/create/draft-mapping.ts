@@ -260,7 +260,10 @@ export function buildIssuanceMetadata(draft: DraftState): IssuanceMetadata {
         if (!selection.enabled) {
           return [key, undefined];
         }
-        return [key, selection.config ? { enabled: true, config: selection.config } : { enabled: true }];
+        return [
+          key,
+          selection.config ? { enabled: true, config: selection.config } : { enabled: true },
+        ];
       })
     )
   );

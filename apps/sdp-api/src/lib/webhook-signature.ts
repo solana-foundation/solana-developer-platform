@@ -42,7 +42,12 @@ async function verifyHmacSha256(
     false,
     ["verify"]
   );
-  return crypto.subtle.verify("HMAC", key, signatureBytes, encoder.encode(signedPayload));
+  return crypto.subtle.verify(
+    "HMAC",
+    key,
+    new Uint8Array(signatureBytes),
+    encoder.encode(signedPayload)
+  );
 }
 
 /**

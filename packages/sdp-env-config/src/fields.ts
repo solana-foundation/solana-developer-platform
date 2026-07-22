@@ -617,6 +617,18 @@ export const FIELDS: EnvField[] = [
     derive: (v) => v.SOLANA_NETWORK ?? "devnet",
   },
   {
+    key: "ASSET_PROFILES_ENABLED",
+    section: "advanced",
+    kind: "select",
+    label: "Asset Profiles production opt-in",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Disabled" },
+      { value: "true", label: "Enabled" },
+    ],
+    help: "Development is always enabled. This setting controls production only.",
+  },
+  {
     key: "PAYMENTS_RECURRING_COLLECTION_ENABLED",
     section: "advanced",
     kind: "text",

@@ -64,9 +64,32 @@ export interface TransferApprovalsConfig {
   approvers?: string[];
 }
 
+// Redemptions redeem against reserves, so the rule keys off amount (not a
+// counterparty). Mirrors transfer approvals otherwise.
+export type RedemptionApprovalRule = "all" | "above_amount";
+export interface RedemptionApprovalsConfig {
+  rule: RedemptionApprovalRule;
+  amount?: string;
+  approvers?: string[];
+}
+
+export type ReportingCadence = "monthly" | "quarterly" | "annual";
+export type ReportingFormat = "pdf" | "csv" | "xlsx";
+export interface InvestorReportingConfig {
+  cadence: ReportingCadence;
+  format?: ReportingFormat;
+  // Report recipients (emails/names) — a roster that may stay empty until the
+  // investor set exists.
+  recipients?: string[];
+}
+
 // The config payload for a capacity that supports one. Absent config = enabled
 // but unconfigured. Narrowed by capacity key at the modal edge.
-export type CapacityConfig = TradingHoursConfig | TransferApprovalsConfig;
+export type CapacityConfig =
+  | TradingHoursConfig
+  | TransferApprovalsConfig
+  | RedemptionApprovalsConfig
+  | InvestorReportingConfig;
 
 // A single off-chain capacity selection. Mirrors the on-chain SelectedSetting
 // ({ params? }) so the whole compliance selection persists in one payload
@@ -168,6 +191,33 @@ export function createInitialCapacities(): Record<CapacityKey, CapacitySelection
     investorReporting: { enabled: false },
     transferApprovals: { enabled: false },
   };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// Normalize a persisted capacities map to the current { enabled, config? } shape,
+// tolerating the legacy bare-boolean encoding ({ kyc: true }). The single coercion
+// point shared by every hydration path (wizard localStorage + asset-profile DB), so
+// an old payload never reaches the UI as a raw boolean (which would make the toggle
+// an uncontrolled input).
+export function coerceCapacities(value: unknown): Record<CapacityKey, CapacitySelection> {
+  const capacities = createInitialCapacities();
+  if (isPlainObject(value)) {
+    for (const key of CAPACITY_KEYS) {
+      const raw = value[key];
+      if (raw === true) {
+        capacities[key] = { enabled: true };
+      } else if (isPlainObject(raw) && raw.enabled === true) {
+        capacities[key] = {
+          enabled: true,
+          config: isPlainObject(raw.config) ? (raw.config as unknown as CapacityConfig) : undefined,
+        };
+      }
+    }
+  }
+  return capacities;
 }
 
 export function createInitialDraft(): DraftState {

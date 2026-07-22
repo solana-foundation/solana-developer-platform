@@ -142,7 +142,7 @@ export function getE2EEnv(): E2EEnv {
           fallback.NEXT_PUBLIC_SDP_API_BASE_URL ||
           fallback.NEXT_PUBLIC_API_BASE_URL,
       },
-      "https://sdp-api-dev.solana.workers.dev"
+      GCP_DEV_API_URL
     );
   const publicApiBaseUrl =
     process.env.NEXT_PUBLIC_SDP_API_BASE_URL ??

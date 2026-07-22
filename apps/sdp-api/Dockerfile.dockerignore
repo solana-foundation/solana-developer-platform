@@ -10,7 +10,6 @@ apps/sdp-api/src/**/*.spec.ts
 apps/sdp-api/src/test
 apps/sdp-api/src/**/__tests__
 apps/sdp-api/vitest.config.ts
-apps/sdp-api/vitest.node.config.ts
 
 # Workspace siblings the runner never copies. Re-include @sdp/api's
 # workspace dependencies.
@@ -33,9 +32,14 @@ skills
 .env.*
 !.env.example
 !.env.local.example
+apps/sdp-api/.env.local
+apps/sdp-api/.env.local.*
+!apps/sdp-api/.env.local.example
 apps/sdp-api/.dev.vars
 apps/sdp-api/.dev.vars.*
-!apps/sdp-api/.dev.vars.example
+apps/sdp-api/.cloudflare.*.env
+apps/sdp-api/.wrangler
+apps/sdp-api/.wrangler.*.generated.toml
 
 .git
 .gitignore

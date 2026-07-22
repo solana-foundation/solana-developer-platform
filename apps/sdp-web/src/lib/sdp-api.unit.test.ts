@@ -8,7 +8,7 @@ vi.mock("next/headers", () => ({
   cookies: mocks.cookies,
 }));
 
-import { createRequestScopedSdpApiClients } from "./sdp-api";
+import { createRequestScopedSdpApiClients, SdpApiResponseError } from "./sdp-api";
 
 describe("createRequestScopedSdpApiClients", () => {
   const originalApiBaseUrl = process.env.SDP_API_BASE_URL;
@@ -82,5 +82,21 @@ describe("createRequestScopedSdpApiClients", () => {
     expect(organizationClient).toBeDefined();
     expect(projectClient).toBeNull();
     expect(getToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves upstream status on API response errors", async () => {
+    mocks.cookies.mockResolvedValue({ get: () => undefined });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("temporarily unavailable", { status: 503 }))
+    );
+
+    const { organizationClient } = await createRequestScopedSdpApiClients({
+      getToken: vi.fn().mockResolvedValue("token_test"),
+    });
+
+    const request = organizationClient.fetch("/v1/projects");
+    await expect(request).rejects.toBeInstanceOf(SdpApiResponseError);
+    await expect(request).rejects.toMatchObject({ status: 503 });
   });
 });

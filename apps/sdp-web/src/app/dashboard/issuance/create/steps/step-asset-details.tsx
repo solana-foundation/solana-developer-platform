@@ -3,7 +3,7 @@
 import { DEFAULT_SDP_DOCS_URL, type PaymentsDashboardWallet } from "@sdp/types";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
@@ -81,10 +81,18 @@ export function StepAssetDetails({
   // required fields live on Overview, advanced-settings values on Compliance,
   // and the signing wallet on Operational. Prefer Overview, then Operational
   // (signer), then Compliance.
+  //
+  // Jump ONCE, guarded by a ref — `errors` is rebuilt every render, so keying
+  // the jump off it would re-fire on each keystroke and pin the user to the
+  // error tab, blocking any manual tab switch while an error is unresolved.
+  // The component remounts when the user leaves/returns to this step, so the
+  // guard resets and the next failed attempt jumps again.
+  const jumpedToErrorTab = useRef(false);
   useEffect(() => {
-    if (!showErrors || !hasErrors) {
+    if (!showErrors || !hasErrors || jumpedToErrorTab.current) {
       return;
     }
+    jumpedToErrorTab.current = true;
     const overviewHasError = Object.keys(errors).some(
       (key) => key !== "advancedSettings" && key !== "signingWalletId"
     );

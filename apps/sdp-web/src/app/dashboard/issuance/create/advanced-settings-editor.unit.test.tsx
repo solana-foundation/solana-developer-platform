@@ -50,6 +50,11 @@ describe("AdvancedSettingsEditor", () => {
     );
     expect(withAccess).toContain("Access control");
     expect(withAccess).toContain("Allow list");
+    // The single-select control is backed by native radio inputs, not tab-role
+    // buttons (there are no tabpanels behind it) — a screen-reader correctness guard.
+    expect(withAccess).toContain('type="radio"');
+    expect(withAccess).not.toContain('role="tablist"');
+    expect(withAccess).not.toContain('role="tab"');
 
     const withoutAccess = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
     expect(withoutAccess).not.toContain("Access control");
@@ -59,6 +64,14 @@ describe("AdvancedSettingsEditor", () => {
     const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
     expect(markup).toContain("Verified holders"); // the kyc capacity label
     expect(markup).not.toContain("Not enforced yet");
+  });
+
+  it("uses jargon-free capacity descriptions in the default (non-technical) view", () => {
+    const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
+    // Institutional wording is shown by default...
+    expect(markup).toContain("issue new units or retire existing ones");
+    // ...the token/mint/burn phrasing is reserved for the technical view.
+    expect(markup).not.toContain("mint new tokens or burn existing supply");
   });
 
   it("reveals a Configure affordance for a configurable capacity when config is allowed", () => {
@@ -71,12 +84,16 @@ describe("AdvancedSettingsEditor", () => {
     expect(markup).toContain("Not configured yet");
   });
 
-  it("keeps capacities declaration-only in the wizard: a hint, no Configure affordance", () => {
+  it("keeps capacities declaration-only in the wizard: no per-card config UI", () => {
     const capacities = createInitialCapacities();
     capacities.restrictTradingHours = { enabled: true };
-    const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} capacities={capacities} />);
-    expect(markup).toContain("Set up in the compliance tab");
+    const markup = renderWithI18n(
+      <AdvancedSettingsEditor {...baseProps} capacities={capacities} />
+    );
+    // No per-card Configure / summary in the wizard...
     expect(markup).not.toContain("Not configured yet");
+    // ...the section subtitle explains config happens later on the compliance tab.
+    expect(markup).toContain("configured later on the compliance tab");
   });
 
   it("offers quick-fill presets, hidden once the on-chain settings are read-only", () => {

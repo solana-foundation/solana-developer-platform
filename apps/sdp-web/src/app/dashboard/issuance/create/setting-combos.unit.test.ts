@@ -98,7 +98,13 @@ describe("applyCombo / isComboActive", () => {
     });
 
     // Removing it clears only enabled; config survives so re-selecting restores it.
-    const next = removeCombo(combo, applied.settings, applied.capacities, [], applied.accessControl);
+    const next = removeCombo(
+      combo,
+      applied.settings,
+      applied.capacities,
+      [],
+      applied.accessControl
+    );
     expect(next.capacities.restrictTradingHours).toEqual({
       enabled: false,
       config: { schedule: "market_hours" },

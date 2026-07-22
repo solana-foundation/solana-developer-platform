@@ -168,6 +168,18 @@ describe("profileToDraftState", () => {
     expect(draft.capacities.investorReporting.enabled).toBe(false);
   });
 
+  it("treats an object without an explicit enabled:true as disabled", () => {
+    // A stale/partial object shape ({ kyc: {} } — no enabled key) must default to
+    // disabled, not silently enabled. The coercion requires enabled === true.
+    const partial: IssuanceMetadata = {
+      ...FOREIGN_METADATA,
+      compliance: { capacities: { kyc: {}, transferApprovals: { config: { rule: "all" } } } },
+    };
+    const draft = profileToDraftState(makeProfile(partial), makeToken());
+    expect(draft.capacities.kyc.enabled).toBe(false);
+    expect(draft.capacities.transferApprovals.enabled).toBe(false);
+  });
+
   it("hydrates per-policy config from the object encoding", () => {
     const withConfig: IssuanceMetadata = {
       ...FOREIGN_METADATA,

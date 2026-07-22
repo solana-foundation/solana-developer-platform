@@ -21,7 +21,7 @@ if [ -n "${WEBHOOK_INGEST_DOMAIN:-}" ]; then
 else
   base_url="https://<assigned-by-ngrok>"
   echo "${yellow}No WEBHOOK_INGEST_DOMAIN set${reset} — ngrok will assign a random URL each run." >&2
-  echo "Reserve a free stable domain at https://dashboard.ngrok.com/domains and set ${cyan}WEBHOOK_INGEST_DOMAIN${reset} in apps/sdp-api/.dev.vars." >&2
+  echo "Reserve a free stable domain at https://dashboard.ngrok.com/domains and set ${cyan}WEBHOOK_INGEST_DOMAIN${reset} in apps/sdp-api/.env.local." >&2
 fi
 
 echo "${dim}Register provider webhooks against:${reset}" >&2

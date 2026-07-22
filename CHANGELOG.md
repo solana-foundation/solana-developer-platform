@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.44.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.43.1...v0.44.0) (2026-07-22)
+
+### Features
+
+* add additional form fields per asset type ([#828](https://github.com/solana-foundation/solana-developer-platform/pull/828)) ([9051b31](https://github.com/solana-foundation/solana-developer-platform/commit/9051b31d12391eeef90ae0f91995b9bc4885451c))
+
+### Bug Fixes
+
+* **tests:** standardize test runs on TEST_DATABASE_URL ([#852](https://github.com/solana-foundation/solana-developer-platform/pull/852)) ([a7cf826](https://github.com/solana-foundation/solana-developer-platform/commit/a7cf8265329e294e5ebc267d8b4eea6a863ca191))
+* **e2e:** assert the signer UI the wallet fixtures dictate ([#856](https://github.com/solana-foundation/solana-developer-platform/pull/856)) ([511345b](https://github.com/solana-foundation/solana-developer-platform/commit/511345ba5f059dc7283c099a87c332382e4cb5ac))
+* **api:** surface frozen token accounts as 400 ACCOUNT_FROZEN, not 502 ([#776](https://github.com/solana-foundation/solana-developer-platform/pull/776)) ([50b6f70](https://github.com/solana-foundation/solana-developer-platform/commit/50b6f70202520348e3d83a979a359a20d5dc4fab))
+* counterparty data fill in ([#829](https://github.com/solana-foundation/solana-developer-platform/pull/829)) ([99194ae](https://github.com/solana-foundation/solana-developer-platform/commit/99194aeca2d3e60733aa4d99be6e0bec4f3ab27b))
+* enable non-prod asset profiles and dark-mode wallet cards ([#847](https://github.com/solana-foundation/solana-developer-platform/pull/847)) ([6863901](https://github.com/solana-foundation/solana-developer-platform/commit/68639017c51d6bebee1d2fc001f98801d2d9ac9b))
+
+### Refactors
+
+* **api:** retire Cloudflare infrastructure ([#842](https://github.com/solana-foundation/solana-developer-platform/pull/842)) ([9f6a2c4](https://github.com/solana-foundation/solana-developer-platform/commit/9f6a2c4ff0d0c98d211932cfda4ff1591ababa70))
+
+### Maintenance
+
+* **deps:** bump @hono/node-server from 2.0.5 to 2.0.10 ([#846](https://github.com/solana-foundation/solana-developer-platform/pull/846)) ([4a3622f](https://github.com/solana-foundation/solana-developer-platform/commit/4a3622f3d40599323383aa2b10bde91873b10db4))
+* **deps:** bump @hono/node-server from 2.0.4 to 2.0.5 ([#840](https://github.com/solana-foundation/solana-developer-platform/pull/840)) ([53c5a86](https://github.com/solana-foundation/solana-developer-platform/commit/53c5a86a8dbf99191749c816203f4dd2d77f2b56))
+
+## [0.43.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.43.0...v0.43.1) (2026-07-21)
+
+### Other Changes
+
+* fix wallet setup footer dark mode ([#838](https://github.com/solana-foundation/solana-developer-platform/pull/838)) ([3f22ee9](https://github.com/solana-foundation/solana-developer-platform/commit/3f22ee9a4dedd8e51e7b060ad61874366056d516))
+* fix organization bootstrap failure recovery ([#836](https://github.com/solana-foundation/solana-developer-platform/pull/836)) ([f6f61ee](https://github.com/solana-foundation/solana-developer-platform/commit/f6f61ee940808810100b015ac75019aef141383b))
+
+## [0.43.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.42.0...v0.43.0) (2026-07-21)
+
+### Features
+
+* **payments:** reconcile Coinbase onramp webhooks and surface order economics ([#826](https://github.com/solana-foundation/solana-developer-platform/pull/826)) ([856a014](https://github.com/solana-foundation/solana-developer-platform/commit/856a014fd8234ac9384b2b6b75223311cd7f5746))
+* HOO-681, HOO-680, HOO-683, HOO-679, HOO-682 - Advanced settings editor ([#806](https://github.com/solana-foundation/solana-developer-platform/pull/806)) ([bed4ba2](https://github.com/solana-foundation/solana-developer-platform/commit/bed4ba216b194b205278226ef5c21227364a807c))
+* HOO-767 Add credential admin auth boundary ([#808](https://github.com/solana-foundation/solana-developer-platform/pull/808)) ([84106a5](https://github.com/solana-foundation/solana-developer-platform/commit/84106a5e2ff613dd508357b8c05a7939a377234e))
+* share provider catalog metadata ([#813](https://github.com/solana-foundation/solana-developer-platform/pull/813)) ([afa8871](https://github.com/solana-foundation/solana-developer-platform/commit/afa8871c421eb07d7010967e46223b1fe3bd5836))
+* **payments:** enable MoneyGram on-ramp with self-hosted pinned widget SDK ([#820](https://github.com/solana-foundation/solana-developer-platform/pull/820)) ([0807370](https://github.com/solana-foundation/solana-developer-platform/commit/0807370175b42a1913cf0751c972ab887ada057e))
+* **api:** restrict recurring payment tokens to stablecoins and issued tokens ([#811](https://github.com/solana-foundation/solana-developer-platform/pull/811)) ([b509dc5](https://github.com/solana-foundation/solana-developer-platform/commit/b509dc528313f341043ade24aca0b8e0e879c3db))
+* **web:** Add complete French UI translation catalogs ([#685](https://github.com/solana-foundation/solana-developer-platform/pull/685)) ([535c05b](https://github.com/solana-foundation/solana-developer-platform/commit/535c05b60e88fb0cd47ef05467aea134274afecf))
+
+### Bug Fixes
+
+* prevent organization provisioning races ([#833](https://github.com/solana-foundation/solana-developer-platform/pull/833)) ([94b960b](https://github.com/solana-foundation/solana-developer-platform/commit/94b960ba66f199fa9673e832c296e6a21ac66aae))
+* surfpool test reliability ([#817](https://github.com/solana-foundation/solana-developer-platform/pull/817)) ([faff202](https://github.com/solana-foundation/solana-developer-platform/commit/faff202ae3f40cf60f78af56cba5fd0e3b0cd9ff))
+
+### Maintenance
+
+* add prod Cloud Run deploy workflow for sdp-api ([#825](https://github.com/solana-foundation/solana-developer-platform/pull/825)) ([f2ba580](https://github.com/solana-foundation/solana-developer-platform/commit/f2ba5800e1af42f66e37b3aff81302faf0b06769))
+
+### Other Changes
+
+* fix language picker layout shift ([#832](https://github.com/solana-foundation/solana-developer-platform/pull/832)) ([446887b](https://github.com/solana-foundation/solana-developer-platform/commit/446887b2d767aafa5ffad5ae77cf2a9b40b7d2d9))
+
 ## [0.42.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.41.0...v0.42.0) (2026-07-20)
 
 ### Features

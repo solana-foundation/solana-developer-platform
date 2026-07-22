@@ -1,9 +1,7 @@
 /**
  * Node Observability — wraps @sentry/node.
  *
- * Used by the future Node entrypoint (src/server.ts, HOO-510). Node has no
- * per-request wrapper analogous to Cloudflare's `withSentry`; instead the
- * entrypoint calls `initNodeSentry(getSentryOptions(env))` once at startup
+ * The entrypoint calls `initNodeSentry(getSentryOptions(env))` once at startup
  * and then uses the shared `Observability` API.
  *
  * `nodeObservability.*` methods throw if invoked before `initNodeSentry()`
@@ -22,11 +20,8 @@ export function initNodeSentry(opts: SentryOptions): void {
   // Intentional: when DSN is unset we skip `Sentry.init` entirely rather
   // than calling it with `{ enabled: false }`. The latter would still
   // create a client and wire up scope/breadcrumb machinery, just suppress
-  // sending. CF behaves differently — `Sentry.withSentry` still wraps the
-  // handler and sets up scopes/error boundaries even without a DSN; only
-  // transport is skipped. We accept that asymmetry: Phase 1 has no caller
-  // that needs ambient scopes when Sentry is "off". Revisit if a future
-  // caller wants breadcrumb-only behaviour with the SDK initialised.
+  // sending. No caller needs ambient scopes when Sentry is off; revisit if a
+  // future caller needs breadcrumb-only behavior with the SDK initialized.
   initialized = true;
   if (!opts.enabled) {
     return;
