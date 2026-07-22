@@ -1,6 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import type { SigningConfigRecord } from "@/services/adapters";
-import { createEncryptionService } from "@/services/encryption.service";
+import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type { Env } from "@/types/env";
 
 export interface LocalProviderConfig {
@@ -96,7 +96,8 @@ export type ProviderConfigRecord =
 export async function parseConfigRecord(
   env: Env,
   orgId: string,
-  record: SigningConfigRecord
+  record: SigningConfigRecord,
+  cipher: CustodyCipher = createCustodyCipher(env)
 ): Promise<ProviderConfigRecord> {
   const parsedDirect = tryParseJson(record.config);
   if (parsedDirect !== null) {
@@ -104,8 +105,7 @@ export async function parseConfigRecord(
   }
 
   try {
-    const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
-    const decrypted = await encryption.decrypt(orgId, record.config);
+    const decrypted = await cipher.decrypt(orgId, record.config);
     const parsedDecrypted = tryParseJson(decrypted);
     if (parsedDecrypted === null) {
       throw new SigningError(
