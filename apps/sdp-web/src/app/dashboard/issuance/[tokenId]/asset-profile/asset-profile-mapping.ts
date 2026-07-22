@@ -3,7 +3,9 @@ import { getDefaultPublicFields } from "../../create/draft-mapping";
 import {
   type AdvancedSettingsDraft,
   CAPACITY_KEYS,
+  type CapacityConfig,
   type CapacityKey,
+  type CapacitySelection,
   type CustomFieldRow,
   createInitialCapacities,
   type DocumentRow,
@@ -24,10 +26,23 @@ export const ASSET_OWNED_KEYS = [
   "reserveAsset",
   "reserveCustodian",
   "redemptionEnabled",
+  "collateralizationRatio",
+  "oracleProvider",
+  "minCollateralRatio",
   "jurisdiction",
   "offeringType",
+  "shareClass",
+  "votingRights",
+  "couponRate",
+  "maturityDate",
+  "seniority",
+  "fundStrategy",
+  "managementFee",
+  "netAssetValue",
   "underlyingAsset",
   "custodian",
+  "propertyType",
+  "propertyLocation",
   "documents",
 ] as const;
 
@@ -89,11 +104,27 @@ function readAccessControl(value: unknown): DraftState["accessControl"] {
   return value === "allowlist" || value === "blocklist" || value === "disabled" ? value : "";
 }
 
-function readCapacities(value: unknown): Record<CapacityKey, boolean> {
+// Hydrate off-chain capacities, tolerating both encodings:
+//   legacy   compliance.capacities = { kyc: true }          (bare boolean)
+//   current  compliance.capacities = { kyc: {}, transferApprovals: { config } }
+// Presence with a non-false value = enabled. Absent/false = disabled. This is the
+// only place raw stored capacities are read, so back-compat lives here alone.
+function readCapacities(value: unknown): Record<CapacityKey, CapacitySelection> {
   const capacities = createInitialCapacities();
   if (isRecord(value)) {
     for (const key of CAPACITY_KEYS) {
-      capacities[key] = value[key] === true;
+      const raw = value[key];
+      if (raw === true) {
+        capacities[key] = { enabled: true };
+      } else if (isRecord(raw) && raw.enabled !== false) {
+        capacities[key] = {
+          enabled: true,
+          // Stored config is untyped JSON we wrote; the per-policy modal reads it
+          // defensively, so a structural cast (via unknown) is safe here.
+          config: isRecord(raw.config) ? (raw.config as unknown as CapacityConfig) : undefined,
+        };
+      }
+      // raw === false / undefined / anything else ⇒ keep initial { enabled: false }.
     }
   }
   return capacities;
@@ -172,11 +203,24 @@ export function profileToDraftState(profile: AssetProfile, token: Token): DraftS
     reserveAsset: readString(asset, "reserveAsset"),
     reserveCustodian: readString(asset, "reserveCustodian"),
     redemptionEnabled: asset.redemptionEnabled === true,
+    collateralizationRatio: readString(asset, "collateralizationRatio"),
+    oracleProvider: readString(asset, "oracleProvider"),
+    minCollateralRatio: readString(asset, "minCollateralRatio"),
     issuerName: readString(asset, "issuerName"),
     jurisdiction: readString(asset, "jurisdiction"),
     offeringType: readString(asset, "offeringType"),
+    shareClass: readString(asset, "shareClass"),
+    votingRights: asset.votingRights === true,
+    couponRate: readString(asset, "couponRate"),
+    maturityDate: readString(asset, "maturityDate"),
+    seniority: readString(asset, "seniority"),
+    fundStrategy: readString(asset, "fundStrategy"),
+    managementFee: readString(asset, "managementFee"),
+    netAssetValue: readString(asset, "netAssetValue"),
     underlyingAsset: readString(asset, "underlyingAsset"),
     custodian: readString(asset, "custodian"),
+    propertyType: readString(asset, "propertyType"),
+    propertyLocation: readString(asset, "propertyLocation"),
     documents: readDocuments(asset.documents),
     accessControl: readAccessControl(compliance.accessControl),
     capacities: readCapacities(compliance.capacities),
@@ -302,11 +346,24 @@ function canonicalDraft(draft: DraftState): Record<string, unknown> {
     reserveAsset: draft.reserveAsset.trim(),
     reserveCustodian: draft.reserveCustodian.trim(),
     redemptionEnabled: draft.redemptionEnabled,
+    collateralizationRatio: draft.collateralizationRatio.trim(),
+    oracleProvider: draft.oracleProvider.trim(),
+    minCollateralRatio: draft.minCollateralRatio.trim(),
     issuerName: draft.issuerName.trim(),
     jurisdiction: draft.jurisdiction,
     offeringType: draft.offeringType,
+    shareClass: draft.shareClass.trim(),
+    votingRights: draft.votingRights,
+    couponRate: draft.couponRate.trim(),
+    maturityDate: draft.maturityDate.trim(),
+    seniority: draft.seniority,
+    fundStrategy: draft.fundStrategy,
+    managementFee: draft.managementFee.trim(),
+    netAssetValue: draft.netAssetValue.trim(),
     underlyingAsset: draft.underlyingAsset.trim(),
     custodian: draft.custodian.trim(),
+    propertyType: draft.propertyType,
+    propertyLocation: draft.propertyLocation.trim(),
     // Mirror buildIssuanceMetadata's filter: a row with only a type (no name or
     // url) is never persisted or re-hydrated, so it must not read as a change —
     // otherwise a type-only row leaves the form permanently "dirty".
@@ -314,7 +371,13 @@ function canonicalDraft(draft: DraftState): Record<string, unknown> {
       .filter((doc) => doc.name.trim() || doc.url.trim())
       .map((doc) => ({ docType: doc.docType.trim(), name: doc.name.trim(), url: doc.url.trim() })),
     accessControl: draft.accessControl,
-    capacities: CAPACITY_KEYS.map((key) => draft.capacities[key]),
+    // Normalize to { enabled, config } per key so both the enable bit and the
+    // per-policy config participate in dirty detection (config ?? null keeps
+    // key order stable for the comparison).
+    capacities: CAPACITY_KEYS.map((key) => ({
+      enabled: draft.capacities[key].enabled,
+      config: draft.capacities[key].config ?? null,
+    })),
     // Mirror buildSelectedSettings: sorted keys, trimmed non-empty params only,
     // so presentation noise never reads as a change.
     advancedSettings: Object.keys(draft.advancedSettings)

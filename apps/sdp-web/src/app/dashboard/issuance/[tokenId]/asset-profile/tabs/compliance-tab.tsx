@@ -105,6 +105,9 @@ export function ComplianceTab({
         onSettingsChange={(advancedSettings) => updateDraft({ advancedSettings })}
         capacities={draft.capacities}
         onCapacitiesChange={(capacities) => updateDraft({ capacities })}
+        // The compliance tab is the config home: reveal the per-policy Configure
+        // modal here (the step wizard keeps capacities declaration-only).
+        allowCapacityConfig
         showErrors={showErrors}
         // On-chain extensions are immutable once deployed — lock them, but keep
         // the off-chain capacities editable. An undeployed draft stays fully

@@ -4,19 +4,24 @@ import type { Token } from "@sdp/types";
 import {
   Boxes,
   Braces,
+  Building2,
   DollarSign,
   FileText,
+  Landmark,
   Lock,
   type LucideIcon,
+  PieChart,
   ScrollText,
+  ShieldCheck,
   SlidersHorizontal,
   Tag,
+  TrendingUp,
 } from "lucide-react";
 import { useState } from "react";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { getCategorySections } from "../../../create/asset-details-config";
+import { getDetailSections } from "../../../create/asset-details-config";
 import { DocumentRows } from "../../../create/document-rows";
 import { buildIssuanceMetadata, getRequiredAssetDetailKeys } from "../../../create/draft-mapping";
 import {
@@ -39,8 +44,13 @@ import type { TokenOperations } from "../use-token-operations";
 // presentation concern of this tab.
 const SECTION_ICONS: Record<string, LucideIcon> = {
   "DashboardIssuance.config.financialDetails": DollarSign,
+  "DashboardIssuance.config.collateralOracleDetails": ShieldCheck,
   "DashboardIssuance.config.securityDetails": ScrollText,
+  "DashboardIssuance.config.equityDetails": TrendingUp,
+  "DashboardIssuance.config.debtDetails": Landmark,
+  "DashboardIssuance.config.fundDetails": PieChart,
   "DashboardIssuance.config.categoryAssetDetails": Boxes,
+  "DashboardIssuance.config.realEstateDetails": Building2,
 };
 
 export function DetailsTab({
@@ -55,7 +65,7 @@ export function DetailsTab({
   const t = useTranslations();
   const { draft, updateDraft, saving, errors, showErrors } = form;
   const [jsonOpen, setJsonOpen] = useState(false);
-  const sections = getCategorySections(draft.assetCategory);
+  const sections = getDetailSections(draft.assetCategory, draft.assetType);
   const requiredKeys = getRequiredAssetDetailKeys(draft);
 
   // Same reveal semantics as the creation wizard: live feedback once a field

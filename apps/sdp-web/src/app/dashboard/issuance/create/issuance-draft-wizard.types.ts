@@ -33,6 +33,49 @@ export const CAPACITY_KEYS = [
 ] as const;
 export type CapacityKey = (typeof CAPACITY_KEYS)[number];
 
+// --- Per-policy configuration -------------------------------------------------
+// Off-chain policies are policy objects, not scalars. Two layers: enabling a
+// policy (the checkbox — the *declaration* layer, what presets compose) is
+// separate from configuring how it works (the *config* layer, edited in the
+// per-policy modal on the asset-profile compliance tab). Config is heterogeneous
+// per capacity and always optional — a capacity may be enabled but not yet
+// configured (surfaced as a readiness item).
+
+export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+export type Weekday = (typeof WEEKDAYS)[number];
+export type TradingHoursSchedule = "24_7" | "market_hours" | "custom";
+
+export interface TradingHoursConfig {
+  schedule: TradingHoursSchedule;
+  // Only meaningful for the "custom" schedule: the open days and the daily
+  // window (local to `timezone`). "HH:MM" 24-hour strings.
+  days?: Weekday[];
+  open?: string;
+  close?: string;
+  timezone?: string; // IANA tz id, e.g. "America/New_York".
+}
+
+export type TransferApprovalRule = "all" | "above_amount" | "new_counterparty";
+export interface TransferApprovalsConfig {
+  rule: TransferApprovalRule;
+  // Only for "above_amount": threshold in whole tokens (string; may exceed 2^53).
+  amount?: string;
+  // Approver wallets/roles — a roster that may stay empty until wallets exist.
+  approvers?: string[];
+}
+
+// The config payload for a capacity that supports one. Absent config = enabled
+// but unconfigured. Narrowed by capacity key at the modal edge.
+export type CapacityConfig = TradingHoursConfig | TransferApprovalsConfig;
+
+// A single off-chain capacity selection. Mirrors the on-chain SelectedSetting
+// ({ params? }) so the whole compliance selection persists in one payload
+// (issuance_metadata.compliance.capacities).
+export interface CapacitySelection {
+  enabled: boolean;
+  config?: CapacityConfig;
+}
+
 // Selected advanced (Token-2022) settings, keyed by settingKey from the
 // @sdp/issuance/capabilities catalog. Presence = enabled; `params` holds expert
 // override values as strings (form inputs). Persisted under
@@ -73,18 +116,36 @@ export interface DraftState {
   reserveAsset: string;
   reserveCustodian: string;
   redemptionEnabled: boolean;
+  // Step 2 — crypto-backed stablecoin collateral & oracle (over-collateralized,
+  // on-chain backing rather than off-chain fiat reserves)
+  collateralizationRatio: string;
+  oracleProvider: string;
+  minCollateralRatio: string;
   // Step 2 — tokenized-security details
   issuerName: string;
   jurisdiction: string;
   offeringType: string;
+  // Step 2 — tokenized-security instrument terms (per sub-type: equity / debt /
+  // fund)
+  shareClass: string;
+  votingRights: boolean;
+  couponRate: string;
+  maturityDate: string;
+  seniority: string;
+  fundStrategy: string;
+  managementFee: string;
+  netAssetValue: string;
   // Step 2 — non-security digital asset details
   underlyingAsset: string;
   custodian: string;
+  // Step 2 — tokenized real-estate details
+  propertyType: string;
+  propertyLocation: string;
   // Step 2 — documents & references
   documents: DocumentRow[];
   // Step 2 — compliance & access
   accessControl: AccessControlMode | "";
-  capacities: Record<CapacityKey, boolean>;
+  capacities: Record<CapacityKey, CapacitySelection>;
   // Step 2 — advanced (on-chain) settings (issuance_metadata.settings)
   advancedSettings: AdvancedSettingsDraft;
   // Step 2 — operational
@@ -98,14 +159,14 @@ export interface DraftState {
   publicFields: string[];
 }
 
-export function createInitialCapacities(): Record<CapacityKey, boolean> {
+export function createInitialCapacities(): Record<CapacityKey, CapacitySelection> {
   return {
-    kyc: false,
-    restrictTradingHours: false,
-    issueRetireControls: false,
-    redemptionApprovals: false,
-    investorReporting: false,
-    transferApprovals: false,
+    kyc: { enabled: false },
+    restrictTradingHours: { enabled: false },
+    issueRetireControls: { enabled: false },
+    redemptionApprovals: { enabled: false },
+    investorReporting: { enabled: false },
+    transferApprovals: { enabled: false },
   };
 }
 
@@ -125,11 +186,24 @@ export function createInitialDraft(): DraftState {
     reserveAsset: "",
     reserveCustodian: "",
     redemptionEnabled: false,
+    collateralizationRatio: "",
+    oracleProvider: "",
+    minCollateralRatio: "",
     issuerName: "",
     jurisdiction: "",
     offeringType: "",
+    shareClass: "",
+    votingRights: false,
+    couponRate: "",
+    maturityDate: "",
+    seniority: "",
+    fundStrategy: "",
+    managementFee: "",
+    netAssetValue: "",
     underlyingAsset: "",
     custodian: "",
+    propertyType: "",
+    propertyLocation: "",
     documents: [],
     accessControl: "",
     capacities: createInitialCapacities(),

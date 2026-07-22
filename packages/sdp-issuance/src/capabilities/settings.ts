@@ -14,7 +14,6 @@ export const ADVANCED_SETTINGS = {
     descriptionKey: desc("freezeTransfers"),
     extensions: ["pausable"],
     actions: ["pause", "unpause", "freeze", "unfreeze"],
-    signing: "custodial-or-wallet",
   },
   permanentDelegate: {
     group: "controls",
@@ -22,7 +21,6 @@ export const ADVANCED_SETTINGS = {
     descriptionKey: desc("permanentDelegate"),
     extensions: ["permanentDelegate"],
     actions: ["seize", "force_burn"],
-    signing: "custodial-or-wallet",
   },
   transferFee: {
     group: "economics",
@@ -30,7 +28,6 @@ export const ADVANCED_SETTINGS = {
     descriptionKey: desc("transferFee"),
     extensions: ["transferFee"],
     actions: ["update_authority"],
-    signing: "custodial-or-wallet",
     params: [
       {
         key: "basisPoints",
@@ -56,7 +53,6 @@ export const ADVANCED_SETTINGS = {
     descriptionKey: desc("interestBearing"),
     extensions: ["interestBearing"],
     actions: ["update_authority"],
-    signing: "custodial-or-wallet",
     params: [
       {
         key: "rate",
@@ -77,7 +73,6 @@ export const ADVANCED_SETTINGS = {
     descriptionKey: desc("scaledUiAmount"),
     extensions: ["scaledUiAmount"],
     actions: ["update_authority"],
-    signing: "custodial-or-wallet",
     params: [
       {
         key: "multiplier",
@@ -92,21 +87,12 @@ export const ADVANCED_SETTINGS = {
       },
     ],
   },
-  nonTransferable: {
-    group: "controls",
-    labelKey: config("nonTransferable"),
-    descriptionKey: desc("nonTransferable"),
-    extensions: ["nonTransferable"],
-    actions: [],
-    signing: "custodial-only",
-  },
   transferHook: {
     group: "controls",
     labelKey: config("transferHook"),
     descriptionKey: desc("transferHook"),
     extensions: ["transferHook"],
     actions: ["update_authority"],
-    signing: "custodial-or-wallet",
     params: [
       {
         key: "programId",
@@ -116,6 +102,15 @@ export const ADVANCED_SETTINGS = {
         required: true,
       },
     ],
+  },
+  // nonTransferable is a terminal "opt out of transfers" choice — kept last so the
+  // list ends on it (it conflicts with the transfer-related settings above).
+  nonTransferable: {
+    group: "controls",
+    labelKey: config("nonTransferable"),
+    descriptionKey: desc("nonTransferable"),
+    extensions: ["nonTransferable"],
+    actions: [],
   },
 } as const satisfies Record<string, AdvancedSetting>;
 

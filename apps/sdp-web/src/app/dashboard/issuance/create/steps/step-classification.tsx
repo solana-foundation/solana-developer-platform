@@ -5,7 +5,7 @@ import { motion } from "motion/react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
-import { getDefaultAccessControl } from "../asset-details-config";
+import { getDefaultAccessControl, impliedBackingType } from "../asset-details-config";
 import { ASSET_TAXONOMY, getCategoryPresentation } from "../asset-taxonomy";
 import { getDefaultPublicFields, getRecommendedAdvancedSettings } from "../draft-mapping";
 import { createInitialCapacities } from "../issuance-draft-wizard.types";
@@ -80,6 +80,9 @@ export function StepClassification() {
                 updateDraft({
                   assetCategory: entry.category,
                   assetType: null,
+                  // Backing type is implied by the (soon to be re-picked) sub
+                  // type for typed stablecoins; clear the stale value here.
+                  backingType: "",
                   advancedSettings: {},
                   capacities: createInitialCapacities(),
                 });
@@ -121,14 +124,31 @@ export function StepClassification() {
                     category.category,
                     subType.type
                   );
+                  const baseAccessControl = getDefaultAccessControl(category.category);
+                  // The default combo may imply its own access-control mode (e.g. a
+                  // security preset → allowlist); otherwise fall back to the
+                  // category default.
                   const initial = defaultCombo
-                    ? applyCombo(defaultCombo, baseSettings, createInitialCapacities())
-                    : { settings: baseSettings, capacities: createInitialCapacities() };
+                    ? applyCombo(
+                        defaultCombo,
+                        baseSettings,
+                        createInitialCapacities(),
+                        baseAccessControl
+                      )
+                    : {
+                        settings: baseSettings,
+                        capacities: createInitialCapacities(),
+                        accessControl: baseAccessControl,
+                      };
                   updateDraft({
                     assetType: subType.type,
+                    // Keep asset.backingType consistent with the chosen type so a
+                    // crypto-backed stablecoin can't report "fiat" backing. Typed
+                    // stablecoins imply it; a generic stablecoin sets it manually.
+                    backingType: impliedBackingType(category.category, subType.type) ?? "",
                     capacities: initial.capacities,
                     advancedSettings: initial.settings,
-                    accessControl: getDefaultAccessControl(category.category),
+                    accessControl: initial.accessControl,
                     publicFields: getDefaultPublicFields(category.category, subType.type),
                   });
                 }}
