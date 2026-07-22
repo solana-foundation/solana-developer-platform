@@ -5031,7 +5031,11 @@ describe("Issuance Routes", () => {
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
               parsedType: "initializeMint2",
-              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+                freezeAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
             },
           ],
         });
@@ -5113,6 +5117,7 @@ describe("Issuance Routes", () => {
           mintAddress: null,
           status: "pending",
           uri: null,
+          isFreezable: false,
           requiresAllowlist: false,
         });
 
@@ -5132,7 +5137,10 @@ describe("Issuance Routes", () => {
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
               parsedType: "initializeMint2",
-              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
             },
           ],
         });
@@ -5249,6 +5257,75 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("returns 400 when the mint authority differs from the server-derived custody address", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_wrong_authority",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              parsedType: "initializeMint2",
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+                freezeAuthority: null,
+              },
+            },
+          ],
+        });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5wrongAuthorityConfirmedSig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+          const stillPending = await new TokenService(getDb(env)).getToken({
+            tokenId: token.id,
+            organizationId: TEST_PROJECT.organizationId,
+            projectId: TEST_PROJECT.id,
+          });
+          expect(stillPending?.mintAddress).toBeNull();
+          expect(stillPending?.status).toBe("pending");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
+
       it("returns a retryable error (not the wrong-tx 400) when the tx is not yet indexed", async () => {
         ensureRpcUrl();
 
@@ -5344,7 +5421,11 @@ describe("Issuance Routes", () => {
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
               parsedType: "initializeMint2",
-              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+                freezeAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
             },
           ],
         });
@@ -5437,7 +5518,11 @@ describe("Issuance Routes", () => {
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
               parsedType: "initializeMint2",
-              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+                freezeAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
             },
           ],
         });
