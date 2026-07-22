@@ -609,11 +609,15 @@ function WalletPolicyStep({
   draft,
   wallets,
   hadExistingRestrictions,
+  walletSelectionTouched,
+  onWalletSelectionTouched,
   update,
 }: {
   draft: ApiKeyAuthoringDraft;
   wallets: ApiKeyAuthoringWallet[];
   hadExistingRestrictions: boolean;
+  walletSelectionTouched: boolean;
+  onWalletSelectionTouched: () => void;
   update: (patch: Partial<ApiKeyAuthoringDraft>) => void;
 }) {
   const t = useTranslations();
@@ -630,6 +634,7 @@ function WalletPolicyStep({
       .includes(query);
   });
   const toggleWallet = (walletId: string) => {
+    onWalletSelectionTouched();
     const selectedWalletIds = draft.selectedWalletIds.includes(walletId)
       ? draft.selectedWalletIds.filter((item) => item !== walletId)
       : [...draft.selectedWalletIds, walletId];
@@ -725,7 +730,7 @@ function WalletPolicyStep({
                   </p>
                 )}
               </div>
-              {selectedWallets.length === 0 ? (
+              {walletSelectionTouched && selectedWallets.length === 0 ? (
                 <p className="mt-2 text-xs text-destructive">
                   {t("DashboardCustody.apiKeyWalletRequired")}
                 </p>
@@ -1106,6 +1111,7 @@ export function ApiKeyAuthoringWorkspace({
   const { sdpEnvironment } = useDashboardWorkspace();
   const [currentStep, setCurrentStep] = useState<ApiKeyAuthoringStep>("details");
   const [draft, setDraft] = useState(() => draftFromInitialKey(initialKey));
+  const [walletSelectionTouched, setWalletSelectionTouched] = useState(false);
   const [dialogConfirmation, setDialogConfirmation] = useState<BindingConfirmation | null>(null);
   const [isPending, startTransition] = useTransition();
   const initialState = initialKey
@@ -1208,6 +1214,8 @@ export function ApiKeyAuthoringWorkspace({
                 draft={draft}
                 wallets={wallets}
                 hadExistingRestrictions={hadExistingRestrictions}
+                walletSelectionTouched={walletSelectionTouched}
+                onWalletSelectionTouched={() => setWalletSelectionTouched(true)}
                 update={update}
               />
             ) : null}
