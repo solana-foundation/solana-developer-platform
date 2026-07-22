@@ -72,7 +72,6 @@ import {
 
 type SettingSelection = AdvancedSettingsDraft[string];
 
-// Icons for the quick-fill scenario chips.
 const COMBO_ICONS: Record<string, LucideIcon> = {
   regulatedStablecoin: ShieldCheck,
   permissionedStablecoin: Landmark,
@@ -97,7 +96,6 @@ const SETTING_ICONS: Record<string, LucideIcon> = {
   transferHook: Webhook,
 };
 
-// SDP action identifiers → an icon for the technical-mode action badges.
 const ACTION_ICONS: Record<string, LucideIcon> = {
   pause: Pause,
   unpause: Play,
@@ -117,17 +115,13 @@ const CAPACITY_ICONS: Record<CapacityKey, LucideIcon> = {
   transferApprovals: CheckCheck,
 };
 
-// Technical-mode labels for the off-chain policies, matching the old Expert view.
-// Only the capacities whose plain-language name differs from their technical name
-// override; the rest keep their manager-facing label.
+// Technical labels for capacities whose plain-language name differs from technical.
 const CAPACITY_EXPERT_LABELS: Partial<Record<CapacityKey, MessageKey>> = {
   kyc: "DashboardIssuance.config.kycExpert",
   issueRetireControls: "DashboardIssuance.config.issueRetireControlsExpert",
 };
 
-// Technical-mode descriptions: the token/wallet/mint/burn phrasing lives here so
-// the default (manager) view stays jargon-free. Only the policies whose plain and
-// technical wording differ override; the rest reuse their manager description.
+// Technical descriptions: token/wallet/mint/burn phrasing reserved for technical mode.
 const CAPACITY_EXPERT_DESCRIPTIONS: Partial<Record<CapacityKey, MessageKey>> = {
   kyc: "DashboardIssuance.config.kycDescriptionExpert",
   restrictTradingHours: "DashboardIssuance.config.restrictTradingHoursDescriptionExpert",
@@ -135,9 +129,7 @@ const CAPACITY_EXPERT_DESCRIPTIONS: Partial<Record<CapacityKey, MessageKey>> = {
   redemptionApprovals: "DashboardIssuance.config.redemptionApprovalsDescriptionExpert",
 };
 
-// The manager-facing effect line for each access-control mode. accessControl is a
-// standalone field (a 3-way mode, template-defaulted, immutable at deploy) — it's
-// surfaced here as a control alongside the settings, but its plumbing is unchanged.
+// Returns the effect description for each access-control mode.
 function accessDescriptionKey(mode: AccessControlMode | ""): MessageKey {
   switch (mode) {
     case "allowlist":
@@ -235,7 +227,6 @@ function IconTile({ icon: Icon, active }: { icon: LucideIcon; active: boolean })
   );
 }
 
-// Card shell with checkbox, icon, label, and footer for params/technical detail.
 function SettingShell({
   icon,
   checked,
@@ -262,17 +253,14 @@ function SettingShell({
   return (
     <div
       className={cn(
-        "rounded-xl border bg-surface-raised transition-colors",
+        "flex flex-col rounded-xl border bg-surface-raised transition-colors",
         checked ? "border-primary" : "border-border-default"
       )}
     >
       <label
         className={cn(
-          // Padding lives on the label (not the card) so the entire card surface —
-          // including its edges — is clickable and shows the pointer cursor. Center
-          // the icon/checkbox against the full content (title + description + any
-          // actions row) so every row reads as vertically balanced.
-          "flex items-center gap-3 p-3",
+          // Padding on label (not card) makes entire surface clickable and centered.
+          "flex flex-1 items-center gap-3 p-3",
           disabled ? "cursor-default" : "cursor-pointer",
           dimmed && "opacity-55"
         )}
@@ -296,17 +284,12 @@ function SettingShell({
           ) : null}
         </span>
       </label>
-      {/* Params / conflict note sit outside the label (so clicking an input never
-          toggles the checkbox) and carry their own padding since the card has none. */}
+      {/* Params/conflict outside label so input clicks don't toggle checkbox. */}
       {children ? <div className="px-3 pb-3">{children}</div> : null}
     </div>
   );
 }
 
-// One transparent controls view: a unified list of manager controls (access
-// control + on-chain settings + off-chain capacities), each showing an honest
-// "what this does" line. A "Show technical detail" toggle reveals the Token-2022
-// extensions and SDP actions behind each row; presets are a quick-fill affordance.
 export function AdvancedSettingsEditor({
   category,
   type,
@@ -327,7 +310,6 @@ export function AdvancedSettingsEditor({
   const t = useTranslations();
   const [showTechnical, setShowTechnical] = useState(false);
   const [showDeployConfig, setShowDeployConfig] = useState(false);
-  // The capacity whose config modal is open (null = closed).
   const [configuringCapacity, setConfiguringCapacity] = useState<CapacityKey | null>(null);
 
   if (!category || !type) {
@@ -336,8 +318,6 @@ export function AdvancedSettingsEditor({
 
   const permanent = listSettingsForType(category, type);
 
-  // Presets (quick-fill). Toggling one bulk-flips its settings + capacities and, for
-  // verified-holder scenarios, its access-control mode.
   const access = accessControl ?? "";
   const combos = getCombosForCategory(category);
   const activeCombos = combos.filter((combo) => isComboActive(combo, settings, capacities, access));
@@ -359,7 +339,6 @@ export function AdvancedSettingsEditor({
   const setEnabled = (entry: GroupedSetting, enabled: boolean) => {
     const next = { ...settings };
     if (enabled) {
-      // Populate default param values on enable.
       const params: Record<string, string> = {};
       for (const param of entry.setting.params ?? []) {
         if (param.defaultValue !== undefined) {
@@ -387,7 +366,6 @@ export function AdvancedSettingsEditor({
   const labelByKey = new Map<string, string>(
     permanent.map((entry) => [entry.key, t(entry.setting.labelKey as MessageKey)])
   );
-  // Return the label of any enabled setting that conflicts with this key, if any.
   const conflictBlocker = (key: SettingKey): string | undefined => {
     if (settings[key] !== undefined) {
       return undefined;
@@ -411,10 +389,7 @@ export function AdvancedSettingsEditor({
           type="button"
           aria-pressed={showTechnical}
           onClick={() => setShowTechnical((value) => !value)}
-          className={cn(
-            "inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-default px-3 py-1 text-xs font-medium transition-colors",
-            showTechnical ? "bg-fill-subtle text-primary" : "text-tertiary hover:text-primary"
-          )}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-default px-3 py-1 text-xs font-medium text-primary transition-colors hover:bg-fill-subtle"
         >
           {showTechnical ? (
             <Wrench className="h-3.5 w-3.5" />
@@ -425,8 +400,7 @@ export function AdvancedSettingsEditor({
         </button>
       </div>
 
-      {/* Quick-fill presets — pre-select controls from a scenario. Hidden once the
-          on-chain settings are locked (a deployed token). */}
+      {/* Quick-fill presets — hidden once on-chain settings are locked. */}
       {!settingsReadOnly && combos.length > 0 ? (
         <section className="mt-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
@@ -507,8 +481,7 @@ export function AdvancedSettingsEditor({
           ) : null}
         </div>
 
-        {/* Deploy payload preview · what these on-chain settings compile to.
-            Shown right under the toggle, technical mode only. */}
+        {/* Deploy payload preview in technical mode. */}
         {showTechnical && showDeployConfig && deployConfig ? (
           <div className="mt-3">
             <p className="mb-2 text-xs text-tertiary">
@@ -606,9 +579,7 @@ export function AdvancedSettingsEditor({
   );
 }
 
-// The access-control policy, surfaced as the first on-chain control. Unlike the
-// other rows it's a 3-way mode (allowlist / blocklist / disabled), so it renders a
-// segmented control rather than a checkbox.
+// 3-way mode (allowlist/blocklist/disabled) rendered as segmented control.
 function AccessControlRow({
   mode,
   onChange,
@@ -690,8 +661,6 @@ function AccessControlRow({
   );
 }
 
-// A single on-chain setting. Locked settings are checked and non-deselectable;
-// the technical toggle reveals the Token-2022 extension(s) and SDP actions.
 function PermanentRow({
   entry,
   selection,
@@ -748,9 +717,7 @@ function PermanentRow({
           : null
       }
     >
-      {/* Single node (or null) so the shell's footer wrapper isn't rendered — and
-          doesn't add phantom bottom padding — when there's neither a conflict nor
-          params. blocked (needs !checked) and params (needs checked) are exclusive. */}
+      {/* Render conflict or params, but not both (footer adds phantom padding otherwise). */}
       {blocked ? (
         <p className="flex flex-wrap items-center gap-1.5 border-t border-border-subtle pt-2 text-[11px] text-tertiary">
           {t("DashboardIssuance.config.settingConflictsWith")}
@@ -779,11 +746,6 @@ function PermanentRow({
   );
 }
 
-// A single off-chain compliance capacity. Enabling the checkbox is the declaration
-// layer. For capacities that carry a config (configurable), the compliance tab
-// (allowConfig) reveals a summary + Configure button that opens the config modal;
-// the wizard instead shows a hint that config happens on the compliance tab.
-// Technical mode swaps in the Expert-view label where one differs.
 function CapacityRow({
   capKey,
   checked,

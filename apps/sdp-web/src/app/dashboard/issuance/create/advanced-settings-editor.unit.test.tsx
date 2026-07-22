@@ -88,7 +88,7 @@ describe("AdvancedSettingsEditor", () => {
     // No per-card Configure / summary in the wizard...
     expect(markup).not.toContain("Not configured yet");
     // ...the section subtitle explains config happens later on the compliance tab.
-    expect(markup).toContain("A starting set for this asset");
+    expect(markup).toContain("configured later on the compliance tab");
   });
 
   it("offers quick-fill presets, hidden once the on-chain settings are read-only", () => {

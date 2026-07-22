@@ -821,7 +821,7 @@
       "settingsPermanentLockedSubtitle": "Déployé on-chain — ces extensions sont permanentes et ne peuvent plus être modifiées.",
       "settingsOngoingTitle": "Continu",
       "settingsOngoingSubtitle": "Chaque règle peut être ajustée ou configurée à tout moment.",
-      "settingsOngoingSubtitleDraft": "Un ensemble de départ pour cet actif. Chaque règle est configurée dans l'onglet conformité une fois le brouillon créé, et peut être modifiée à tout moment.",
+      "settingsOngoingSubtitleDraft": "Un ensemble de départ. Chaque règle est configurée ensuite dans l'onglet conformité, et modifiable à tout moment.",
       "settingsOnchainTitle": "On-chain",
       "settingsOffchainTitle": "Off-chain",
       "settingConfigureInExpert": "Passez à la vue Expert pour configurer ses options.",

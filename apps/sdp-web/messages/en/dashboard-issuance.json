@@ -875,7 +875,7 @@
       "settingsPermanentLockedSubtitle": "Deployed on-chain — these extensions are permanent and can no longer be changed.",
       "settingsOngoingTitle": "Ongoing",
       "settingsOngoingSubtitle": "Each policy can be adjusted or configured at any time.",
-      "settingsOngoingSubtitleDraft": "A starting set for this asset. Each policy is configured on the compliance tab once the draft is created, and can be changed at any time.",
+      "settingsOngoingSubtitleDraft": "A starting set. Each policy is configured later on the compliance tab, and can be changed anytime.",
       "settingsOnchainTitle": "On-chain",
       "settingsOffchainTitle": "Off-chain",
       "settingConfigureInExpert": "Switch to Expert view to configure its options.",
