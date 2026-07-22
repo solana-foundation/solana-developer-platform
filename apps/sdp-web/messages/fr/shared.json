@@ -153,8 +153,8 @@
     "pendingApprovals": "{count} approbations en attente",
     "colorTheme": "Thème de couleur",
     "darkMode": "Mode sombre",
-    "expandPaymentsMenu": "Développer le menu Paiements",
-    "collapsePaymentsMenu": "Réduire le menu Paiements",
+    "expandSectionMenu": "Développer le menu {section}",
+    "collapseSectionMenu": "Réduire le menu {section}",
     "backToWallet": "Retour au portefeuille",
     "walletControls": "Contrôles du portefeuille",
     "backToApprovals": "Retour aux approbations"

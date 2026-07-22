@@ -103,6 +103,8 @@ type NavItem = {
   badge?: number;
   external?: boolean;
   children?: SubNavItem[];
+  /** Set on items whose children render as a collapsible Payments-style sub-nav. */
+  subnavKey?: SubnavGroupKey;
 };
 
 type NavSection = {
@@ -110,10 +112,15 @@ type NavSection = {
   items: NavItem[];
 };
 
-const PAYMENTS_SUBNAV_IDS = {
-  desktop: "payments-subnav-desktop",
-  mobile: "payments-subnav-mobile",
+// Nav groups with a Payments-style collapsible sub-nav (chevron disclosure,
+// per-group persistence). Adding a group = one entry here + subnavKey on the item.
+const SUBNAV_IDS = {
+  payments: { desktop: "payments-subnav-desktop", mobile: "payments-subnav-mobile" },
+  markets: { desktop: "markets-subnav-desktop", mobile: "markets-subnav-mobile" },
 } as const;
+type SubnavGroupKey = keyof typeof SUBNAV_IDS;
+
+const subnavStorageKey = (key: SubnavGroupKey) => `sdp.dashboard.${key}-subnav-open`;
 
 function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[] {
   return [
@@ -174,6 +181,7 @@ function getNavSections(
           href: DASHBOARD_SIDE_NAV_HREFS.payments,
           icon: ArrowLeftRightIcon,
           children: getPaymentsActions(t),
+          subnavKey: "payments" as const,
         },
         ...(isEarnUiEnabled()
           ? [
@@ -187,6 +195,7 @@ function getNavSections(
                     href: DASHBOARD_SIDE_NAV_HREFS.markets,
                   },
                 ],
+                subnavKey: "markets" as const,
               },
             ]
           : []),
@@ -842,8 +851,8 @@ function SidebarGroup({
   onNavigate,
   isCollapsed,
   showTopSeparator,
-  paymentsSubnavOpen,
-  onPaymentsSubnavToggle,
+  openSubnavs,
+  onSubnavToggle,
   variant,
 }: {
   title: string;
@@ -852,8 +861,8 @@ function SidebarGroup({
   onNavigate?: () => void;
   isCollapsed: boolean;
   showTopSeparator: boolean;
-  paymentsSubnavOpen: boolean;
-  onPaymentsSubnavToggle: () => void;
+  openSubnavs: Record<SubnavGroupKey, boolean>;
+  onSubnavToggle: (key: SubnavGroupKey) => void;
   variant: "desktop" | "mobile";
 }) {
   const t = useTranslations();
@@ -874,14 +883,15 @@ function SidebarGroup({
         ) : null}
       </p>
       <div className="space-y-0.5">
-        {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: each branch preserves the shared navigation item and accessible payments disclosure in one rendering pass. */}
+        {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: each branch preserves the shared navigation item and accessible sub-nav disclosure in one rendering pass. */}
         {items.map((item) => {
           const Icon = item.icon;
           const active = isItemActive(pathname, item.href);
-          const isPaymentsGroup = item.href === DASHBOARD_SIDE_NAV_HREFS.payments;
+          const subnavKey = item.subnavKey;
+          const subnavOpen = subnavKey ? openSubnavs[subnavKey] : true;
           const showChildren = !isCollapsed && item.children && item.children.length > 0;
-          const childrenExpanded = isPaymentsGroup ? paymentsSubnavOpen : true;
-          const subnavId = isPaymentsGroup ? PAYMENTS_SUBNAV_IDS[variant] : undefined;
+          const childrenExpanded = subnavOpen;
+          const subnavId = subnavKey ? SUBNAV_IDS[subnavKey][variant] : undefined;
 
           return (
             <div key={item.label}>
@@ -901,7 +911,7 @@ function SidebarGroup({
                     navItemBase,
                     active ? navItemActive : navItemInactive,
                     isCollapsed && "justify-center",
-                    isPaymentsGroup && !isCollapsed && "pr-11"
+                    subnavKey && !isCollapsed && "pr-11"
                   )}
                 >
                   <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
@@ -922,23 +932,24 @@ function SidebarGroup({
                     />
                   ) : null}
                 </DashboardNavigationLink>
-                {isPaymentsGroup && !isCollapsed ? (
+                {subnavKey && !isCollapsed ? (
                   <button
                     type="button"
-                    aria-expanded={paymentsSubnavOpen}
+                    aria-expanded={subnavOpen}
                     aria-controls={subnavId}
                     aria-label={t(
-                      paymentsSubnavOpen
-                        ? "Shared.dashboardShell.collapsePaymentsMenu"
-                        : "Shared.dashboardShell.expandPaymentsMenu"
+                      subnavOpen
+                        ? "Shared.dashboardShell.collapseSectionMenu"
+                        : "Shared.dashboardShell.expandSectionMenu",
+                      { section: item.label }
                     )}
-                    onClick={onPaymentsSubnavToggle}
+                    onClick={() => onSubnavToggle(subnavKey)}
                     className="absolute right-1 inline-flex size-9 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong hover:text-primary"
                   >
                     <ChevronDownIcon
                       className={cn(
                         "size-4 transition-transform motion-reduce:transition-none",
-                        !paymentsSubnavOpen && "-rotate-90"
+                        !subnavOpen && "-rotate-90"
                       )}
                     />
                   </button>
@@ -999,8 +1010,8 @@ function DashboardSidebarContent({
   isCollapsed,
   variant,
   onOrganizationSwitchingChange,
-  paymentsSubnavOpen,
-  onPaymentsSubnavToggle,
+  openSubnavs,
+  onSubnavToggle,
 }: {
   bottomNavItems: NavItem[];
   navSections: NavSection[];
@@ -1010,8 +1021,8 @@ function DashboardSidebarContent({
   isCollapsed: boolean;
   variant: "desktop" | "mobile";
   onOrganizationSwitchingChange: (isSwitching: boolean) => void;
-  paymentsSubnavOpen: boolean;
-  onPaymentsSubnavToggle: () => void;
+  openSubnavs: Record<SubnavGroupKey, boolean>;
+  onSubnavToggle: (key: SubnavGroupKey) => void;
 }) {
   const t = useTranslations();
   const showMobileClose = variant === "mobile";
@@ -1050,8 +1061,8 @@ function DashboardSidebarContent({
             onNavigate={onNavigate}
             isCollapsed={isCollapsed}
             showTopSeparator={idx > 0}
-            paymentsSubnavOpen={paymentsSubnavOpen}
-            onPaymentsSubnavToggle={onPaymentsSubnavToggle}
+            openSubnavs={openSubnavs}
+            onSubnavToggle={onSubnavToggle}
             variant={variant}
           />
         ))}
@@ -1100,10 +1111,11 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     toSearch: string;
   } | null>(null);
   const [pendingApprovalCount, setPendingApprovalCount] = useState<number | null>(null);
-  const [paymentsSubnavOpen, setPaymentsSubnavOpen] = useState(() =>
-    pathname.startsWith("/dashboard/payments")
-  );
-  const paymentsSubnavHydratedRef = useRef(false);
+  const [openSubnavs, setOpenSubnavs] = useState<Record<SubnavGroupKey, boolean>>(() => ({
+    payments: pathname.startsWith("/dashboard/payments"),
+    markets: pathname.startsWith("/dashboard/markets"),
+  }));
+  const subnavHydratedRef = useRef(false);
   const previousPathnameRef = useRef(pathname);
   const pendingNavigationPathname =
     pendingNavigation?.fromPathname === pathname ? pendingNavigation.toPathname : null;
@@ -1177,20 +1189,26 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("sdp.dashboard.payments-subnav-open");
-    if (stored === "true" || stored === "false") {
-      setPaymentsSubnavOpen(stored === "true");
-    }
-    paymentsSubnavHydratedRef.current = true;
-  }, []);
-
-  const togglePaymentsSubnav = () => {
-    setPaymentsSubnavOpen((current) => {
-      const next = !current;
-      if (paymentsSubnavHydratedRef.current) {
-        window.localStorage.setItem("sdp.dashboard.payments-subnav-open", String(next));
+    setOpenSubnavs((current) => {
+      const next = { ...current };
+      for (const key of Object.keys(SUBNAV_IDS) as SubnavGroupKey[]) {
+        const stored = window.localStorage.getItem(subnavStorageKey(key));
+        if (stored === "true" || stored === "false") {
+          next[key] = stored === "true";
+        }
       }
       return next;
+    });
+    subnavHydratedRef.current = true;
+  }, []);
+
+  const toggleSubnav = (key: SubnavGroupKey) => {
+    setOpenSubnavs((current) => {
+      const next = !current[key];
+      if (subnavHydratedRef.current) {
+        window.localStorage.setItem(subnavStorageKey(key), String(next));
+      }
+      return { ...current, [key]: next };
     });
   };
 
@@ -1342,8 +1360,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             isCollapsed={!isSidebarOpen}
             variant="desktop"
             onOrganizationSwitchingChange={setOrganizationSwitching}
-            paymentsSubnavOpen={paymentsSubnavOpen}
-            onPaymentsSubnavToggle={togglePaymentsSubnav}
+            openSubnavs={openSubnavs}
+            onSubnavToggle={toggleSubnav}
           />
           <button
             type="button"
@@ -1377,8 +1395,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 isCollapsed={false}
                 variant="mobile"
                 onOrganizationSwitchingChange={setOrganizationSwitching}
-                paymentsSubnavOpen={paymentsSubnavOpen}
-                onPaymentsSubnavToggle={togglePaymentsSubnav}
+                openSubnavs={openSubnavs}
+                onSubnavToggle={toggleSubnav}
               />
             </div>
           </div>
