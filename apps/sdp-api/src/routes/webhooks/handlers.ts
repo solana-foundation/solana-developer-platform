@@ -18,7 +18,10 @@ import {
   findClerkOrganizationMapping,
   syncClerkOrganization,
 } from "@/services/clerk-organization-provisioning.service";
-import { type ClerkUser, ClerkUsersService } from "@/services/clerk-users.service";
+import {
+  ClerkUsersService,
+  verifiedPrimaryEmailFromClerkUser,
+} from "@/services/clerk-users.service";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 import { BvnkWebhookProcessor } from "./ramps/bvnk";
@@ -106,33 +109,17 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
   ]);
 }
 
-function primaryEmailFromClerkUser(user: ClerkUser): string | null {
-  const emails = user.email_addresses || [];
-  const primary = emails.find((item) => item.id === user.primary_email_address_id) || emails[0];
-  return primary?.email_address?.toLowerCase() ?? null;
-}
-
-async function resolveUserEmail(env: Env, userId: string, fallbackEmail?: string | null) {
-  if (fallbackEmail?.includes("@")) {
-    return fallbackEmail.toLowerCase();
-  }
-
+async function resolveVerifiedUserEmail(env: Env, userId: string): Promise<string | null> {
   const user = await new ClerkUsersService(env).getUser(userId);
-  const email = primaryEmailFromClerkUser(user);
-
-  if (!email) {
-    throw badRequest("Clerk user missing email");
-  }
-
-  return email;
+  return verifiedPrimaryEmailFromClerkUser(user);
 }
 
 async function ensureUserMapping(
   c: AppContext,
-  user: { id: string; email?: string | null; name?: string | null }
+  user: { id: string; email: string; name?: string | null }
 ): Promise<string> {
   const db = getDb(c.env);
-  const email = await resolveUserEmail(c.env, user.id, user.email);
+  const email = user.email.toLowerCase();
   const existing = await db
     .prepare(
       `SELECT aui.user_id, u.email
@@ -209,12 +196,27 @@ async function ensureUserMapping(
 }
 
 async function syncUser(c: AppContext, data: UserJSON) {
+  const email = verifiedPrimaryEmailFromClerkUser(data);
+  if (!email) {
+    return;
+  }
   const fullName = [data.first_name, data.last_name].filter(Boolean).join(" ").trim();
-  await ensureUserMapping(c, {
+  const userId = await ensureUserMapping(c, {
     id: data.id,
-    email: primaryEmailFromClerkUser(data),
+    email,
     name: fullName || data.username,
   });
+  const memberships = await new ClerkUsersService(c.env).getOrganizationMemberships(data.id);
+  await Promise.all(
+    memberships.map((membership) =>
+      upsertVerifiedMembership(c, {
+        organization: membership.organization,
+        userId,
+        role: membership.role,
+        reactivateRemoved: false,
+      })
+    )
+  );
 }
 
 async function deleteUser(c: AppContext, data: UserDeletedJSON) {
@@ -243,12 +245,16 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
   ]);
 }
 
-async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON) {
+async function upsertVerifiedMembership(
+  c: AppContext,
+  data: {
+    organization: OrganizationJSON;
+    userId: string;
+    role: string;
+    reactivateRemoved: boolean;
+  }
+) {
   const organizationId = await ensureOrganizationMapping(c, data.organization);
-  const userId = await ensureUserMapping(c, {
-    id: data.public_user_data.user_id,
-    email: data.public_user_data.identifier,
-  });
   const role = mapClerkRoleToOrgRole(data.role);
   const memberId = `mem_${crypto.randomUUID()}`;
 
@@ -259,16 +265,37 @@ async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON)
        ON CONFLICT(organization_id, user_id)
        DO UPDATE SET
          role = excluded.role,
-         status = 'active'`
+         status = CASE
+           WHEN organization_members.status = 'removed' AND ? = 0
+             THEN organization_members.status
+           ELSE 'active'
+         END`
     )
-    .bind(memberId, organizationId, userId, role)
+    .bind(memberId, organizationId, data.userId, role, data.reactivateRemoved ? 1 : 0)
     .run();
 
   const projectService = new ProjectService(getDb(c.env));
   await Promise.all([
-    projectService.findOrCreateDefault(organizationId, "sandbox", userId),
-    projectService.findOrCreateDefault(organizationId, "production", userId),
+    projectService.findOrCreateDefault(organizationId, "sandbox", data.userId),
+    projectService.findOrCreateDefault(organizationId, "production", data.userId),
   ]);
+}
+
+async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON) {
+  const email = await resolveVerifiedUserEmail(c.env, data.public_user_data.user_id);
+  if (!email) {
+    return;
+  }
+  const userId = await ensureUserMapping(c, {
+    id: data.public_user_data.user_id,
+    email,
+  });
+  await upsertVerifiedMembership(c, {
+    organization: data.organization,
+    userId,
+    role: data.role,
+    reactivateRemoved: true,
+  });
 }
 
 async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON) {
