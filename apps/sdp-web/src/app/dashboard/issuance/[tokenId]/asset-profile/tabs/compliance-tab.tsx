@@ -1,8 +1,10 @@
 "use client";
 
 import type { Token } from "@sdp/types";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Terminal } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
@@ -12,6 +14,7 @@ import { FormCard, ReadOnlyField } from "../../../create/form-primitives";
 import type { DraftState } from "../../../create/issuance-draft-wizard.types";
 import { TokenControlListsSection } from "../../token-control-lists-section";
 import type { AdminAction } from "../../token-management-workspace.types";
+import { playgroundHrefForAction } from "../playground-links";
 import type { AssetProfileForm } from "../use-asset-profile-form";
 import type { TokenOperations } from "../use-token-operations";
 import { ActionPills } from "./action-pills";
@@ -112,13 +115,23 @@ export function ComplianceTab({
 
       {availableActions.length > 0 ? (
         <div className="space-y-4 pt-2">
-          <div>
-            <p className="text-base font-medium text-primary">
-              {t("DashboardIssuance.compliance.controls")}
-            </p>
-            <p className="mt-0.5 text-sm text-tertiary">
-              {t("DashboardIssuance.compliance.controlsDescription")}
-            </p>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="text-base font-medium text-primary">
+                {t("DashboardIssuance.compliance.controls")}
+              </p>
+              <p className="mt-0.5 text-sm text-tertiary">
+                {t("DashboardIssuance.compliance.controlsDescription")}
+              </p>
+            </div>
+            {activeAction ? (
+              <Button variant="outline" size="sm" asChild>
+                <Link href={playgroundHrefForAction(token.id, activeAction)}>
+                  <Terminal className="h-4 w-4" />
+                  {t("DashboardIssuance.playground.openInPlayground")}
+                </Link>
+              </Button>
+            ) : null}
           </div>
           <ActionPills
             actions={availableActions}

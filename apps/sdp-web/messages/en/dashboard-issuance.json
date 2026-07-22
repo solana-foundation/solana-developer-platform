@@ -182,7 +182,40 @@
       "publicInformation": "Public information",
       "compliance": "Compliance",
       "operations": "Operations",
-      "permissions": "Permissions"
+      "permissions": "Permissions",
+      "activity": "Activity"
+    },
+    "activity": {
+      "title": "Audit history",
+      "description": "Every management action recorded for this asset.",
+      "filterLabel": "Action",
+      "filterAll": "All actions",
+      "columnAction": "Action",
+      "columnActor": "Actor",
+      "columnActorType": "Type",
+      "columnStatus": "Status",
+      "columnTime": "Time",
+      "actorWorkflow": "Workflow",
+      "actorApiKey": "API key",
+      "actorUser": "Team member",
+      "statusSuccess": "Success",
+      "statusFailure": "Failed",
+      "empty": "No activity recorded yet.",
+      "loading": "Loading activity…",
+      "error": "Couldn't load activity.",
+      "loadMore": "Load more",
+      "recentTitle": "Recent activity",
+      "viewAll": "View all"
+    },
+    "permissions": {
+      "managedBadge": "SDP-managed",
+      "externalBadge": "External",
+      "externalWarningTitle": "External authorities detected for",
+      "externalWarningBody": "SDP can't sign for authorities held outside custody, so related actions stay unavailable until they're transferred to an SDP custody wallet.",
+      "externalRemediationTarget": "Transfer these authorities to your SDP custody wallet:",
+      "externalRemediationNoWallet": "Create an SDP custody wallet, then transfer these authorities to it.",
+      "externalRemediationNote": "The current authority holder must sign the transfer from their own wallet — SDP can't perform it.",
+      "createWallet": "Create custody wallet"
     },
     "workspace": {
       "tokenLoadWarning": "Token load warning",
@@ -562,7 +595,10 @@
       "readyForDeployDescription": "This asset is ready to deploy — continue in the Operations tab.",
       "mintAddress": "Mint address",
       "notDeployedYet": "Not deployed yet",
-      "noDescription": "No description yet — add one in the Details tab."
+      "noDescription": "No description yet — add one in the Details tab.",
+      "authoritiesControlled": "Managed authorities",
+      "authoritiesIncompleteTooltip": "Not all authorities are SDP-managed, so some actions can't be signed from the dashboard.",
+      "authoritiesIncompleteLink": "Review in Permissions"
     },
     "operations": {
       "deployHelper": "Deploy this token on-chain before running other fund operations."
@@ -721,6 +757,8 @@
       "comboGatedAccessDescription": "Permissioned token: new accounts start frozen until you approve them, limited to verified holders and set trading hours."
     },
     "playground": {
+      "viewApiContext": "API Playground",
+      "openInPlayground": "Open in API Playground",
       "tokenNameExample": "Acme Dollar",
       "tokenSymbolExample": "ACME",
       "selectTemplate": "Select template",

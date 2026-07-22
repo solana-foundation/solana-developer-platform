@@ -9,40 +9,49 @@ import type { Context } from "hono";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import type { Env } from "@/types/env";
 
-export type AuditAction =
-  | "create"
-  | "read"
-  | "update"
-  | "delete"
-  | "revoke"
-  | "invite"
-  | "accept_invite"
-  | "login"
-  | "logout"
-  | "api_call"
-  | "deploy"
-  | "mint"
-  | "burn"
-  | "freeze"
-  | "unfreeze"
-  | "seize"
-  | "force_burn"
-  | "update_authority"
-  | "pause"
-  | "unpause"
+// Runtime list is the source of truth for the AuditAction type so callers can
+// validate arbitrary input (e.g. an ?action= query filter) at runtime.
+export const AUDIT_ACTIONS = [
+  "create",
+  "read",
+  "update",
+  "delete",
+  "revoke",
+  "invite",
+  "accept_invite",
+  "login",
+  "logout",
+  "api_call",
+  "deploy",
+  "mint",
+  "burn",
+  "freeze",
+  "unfreeze",
+  "seize",
+  "force_burn",
+  "update_authority",
+  "pause",
+  "unpause",
   // Transaction actions
-  | "submit"
-  | "submit_failed"
-  | "sign"
-  | "sign_requested"
+  "submit",
+  "submit_failed",
+  "sign",
+  "sign_requested",
   // BYO credential lifecycle actions
-  | "validate_failed"
-  | "check"
-  | "activate"
-  | "rotate"
-  | "rollback"
-  | "deactivate"
-  | "blocked_deactivation";
+  "validate_failed",
+  "check",
+  "activate",
+  "rotate",
+  "rollback",
+  "deactivate",
+  "blocked_deactivation",
+] as const;
+
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+export function isAuditAction(value: string): value is AuditAction {
+  return (AUDIT_ACTIONS as readonly string[]).includes(value);
+}
 
 export type ResourceType =
   | "organization"
@@ -87,8 +96,24 @@ export class AuditService {
    * Log an audit event
    */
   async log(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): Promise<void> {
+    // Resolve the actor from whichever auth context is present. Dashboard
+    // requests carry a Clerk/session context (a user), API requests carry an
+    // apiKey context; earlier this only read `apiKey`, so dashboard-driven
+    // events were written with a null organization_id/user_id and became
+    // invisible to org-scoped queries.
     const auth = c.get("apiKey");
+    const clerk = c.get("clerk");
+    const session = c.get("session");
     const requestId = c.get("requestId");
+
+    const organizationId =
+      entry.organizationId ||
+      auth?.organizationId ||
+      clerk?.organizationId ||
+      session?.organizationId ||
+      null;
+    const userId = entry.userId || clerk?.userId || session?.userId || null;
+    const apiKeyId = entry.apiKeyId || auth?.id || null;
 
     const id = `aud_${crypto.randomUUID()}`;
     const ipAddress = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for") || null;
@@ -105,9 +130,9 @@ export class AuditService {
         )
         .bind(
           id,
-          entry.organizationId || auth?.organizationId || null,
-          entry.userId || null,
-          entry.apiKeyId || auth?.id || null,
+          organizationId,
+          userId,
+          apiKeyId,
           entry.action,
           entry.resourceType,
           entry.resourceId || null,
@@ -224,4 +249,126 @@ export class AuditService {
 
     return result?.count || 0;
   }
+
+  /**
+   * Query audit events for a single asset (issued token). Aggregates every event
+   * tied to the token: rows logged directly against the token id, plus child
+   * events (transactions, allowlist entries, frozen accounts) which store the
+   * owning token id in `metadata.tokenId`. Resolves the actor to a display label.
+   */
+  async getForAsset(
+    organizationId: string,
+    tokenId: string,
+    options: { limit?: number; offset?: number; action?: AuditAction } = {}
+  ): Promise<AssetAuditRecord[]> {
+    const { limit = 50, offset = 0, action } = options;
+
+    // metadata is stored as JSON text; cast to jsonb to read `tokenId`. All
+    // org-scoped rows are SDP-written via JSON.stringify, so the cast is safe.
+    let query = `
+      SELECT a.id, a.user_id, a.api_key_id, a.action, a.resource_type, a.resource_id,
+             a.metadata, a.status, a.created_at,
+             ak.name AS api_key_name, u.name AS user_name, u.email AS user_email
+      FROM audit_logs a
+      LEFT JOIN api_keys ak ON ak.id = a.api_key_id
+      LEFT JOIN users u ON u.id = a.user_id
+      WHERE a.organization_id = ?
+        AND (
+          a.resource_id = ?
+          OR (a.metadata IS NOT NULL AND (a.metadata::jsonb) ->> 'tokenId' = ?)
+        )
+    `;
+    const params: (string | number)[] = [organizationId, tokenId, tokenId];
+
+    if (action) {
+      query += " AND a.action = ?";
+      params.push(action);
+    }
+
+    query += " ORDER BY a.created_at DESC LIMIT ? OFFSET ?";
+    params.push(limit, offset);
+
+    const results = await this.db
+      .prepare(query)
+      .bind(...params)
+      .all();
+
+    return results.results.map((row) => {
+      const userId = (row.user_id as string | null) ?? null;
+      const apiKeyId = (row.api_key_id as string | null) ?? null;
+      const actorType: "user" | "api_key" | "system" = userId
+        ? "user"
+        : apiKeyId
+          ? "api_key"
+          : "system";
+      const actorLabel = userId
+        ? (row.user_name as string | null) || (row.user_email as string | null) || "Team member"
+        : apiKeyId
+          ? (row.api_key_name as string | null) || "API key"
+          : "Automated";
+
+      return {
+        id: row.id as string,
+        action: row.action as AuditAction,
+        resourceType: row.resource_type as ResourceType,
+        resourceId: (row.resource_id as string | null) ?? null,
+        userId,
+        apiKeyId,
+        actorType,
+        actorLabel,
+        metadata: parseOptionalPostgresJson<Record<string, unknown>>(row.metadata),
+        status: row.status as "success" | "failure",
+        createdAt: row.created_at as string,
+      };
+    });
+  }
+
+  /**
+   * Count of audit events for a single asset (for pagination totals).
+   */
+  async countForAsset(
+    organizationId: string,
+    tokenId: string,
+    options: { action?: AuditAction } = {}
+  ): Promise<number> {
+    const { action } = options;
+
+    let query = `
+      SELECT COUNT(*) as count
+      FROM audit_logs a
+      WHERE a.organization_id = ?
+        AND (
+          a.resource_id = ?
+          OR (a.metadata IS NOT NULL AND (a.metadata::jsonb) ->> 'tokenId' = ?)
+        )
+    `;
+    const params: string[] = [organizationId, tokenId, tokenId];
+
+    if (action) {
+      query += " AND a.action = ?";
+      params.push(action);
+    }
+
+    const result = await this.db
+      .prepare(query)
+      .bind(...params)
+      .first<{ count: number }>();
+
+    return result?.count || 0;
+  }
+}
+
+/** An audit event scoped to one asset, with the actor resolved to a label. */
+export interface AssetAuditRecord {
+  id: string;
+  action: AuditAction;
+  resourceType: ResourceType;
+  resourceId: string | null;
+  userId: string | null;
+  apiKeyId: string | null;
+  actorType: "user" | "api_key" | "system";
+  actorLabel: string;
+  metadata: Record<string, unknown> | null;
+  status: "success" | "failure";
+  createdAt: string;
 }

@@ -182,7 +182,40 @@
       "publicInformation": "Informations publiques",
       "compliance": "Conformité",
       "operations": "Opérations",
-      "permissions": "Permissions"
+      "permissions": "Permissions",
+      "activity": "Activité"
+    },
+    "activity": {
+      "title": "Historique d'audit",
+      "description": "Chaque action de gestion enregistrée pour cet actif.",
+      "filterLabel": "Action",
+      "filterAll": "Toutes les actions",
+      "columnAction": "Action",
+      "columnActor": "Auteur",
+      "columnActorType": "Type",
+      "columnStatus": "Statut",
+      "columnTime": "Heure",
+      "actorWorkflow": "Workflow",
+      "actorApiKey": "Clé API",
+      "actorUser": "Membre de l'équipe",
+      "statusSuccess": "Succès",
+      "statusFailure": "Échec",
+      "empty": "Aucune activité enregistrée pour le moment.",
+      "loading": "Chargement de l'activité…",
+      "error": "Impossible de charger l'activité.",
+      "loadMore": "Afficher plus",
+      "recentTitle": "Activité récente",
+      "viewAll": "Tout afficher"
+    },
+    "permissions": {
+      "managedBadge": "Géré par SDP",
+      "externalBadge": "Externe",
+      "externalWarningTitle": "Autorités externes détectées pour",
+      "externalWarningBody": "SDP ne peut pas signer pour les autorités détenues hors dépôt ; les actions associées restent indisponibles jusqu'à leur transfert vers un portefeuille de dépôt SDP.",
+      "externalRemediationTarget": "Transférez ces autorités vers votre portefeuille de dépôt SDP :",
+      "externalRemediationNoWallet": "Créez un portefeuille de dépôt SDP, puis transférez-y ces autorités.",
+      "externalRemediationNote": "Le détenteur actuel de l'autorité doit signer le transfert depuis son propre portefeuille — SDP ne peut pas le faire.",
+      "createWallet": "Créer un portefeuille de dépôt"
     },
     "workspace": {
       "tokenLoadWarning": "Avertissement de chargement du Token",
@@ -562,7 +595,10 @@
       "readyForDeployDescription": "Cet Asset est prêt pour Deploy — continuez dans l'onglet Opérations.",
       "mintAddress": "Adresse Mint",
       "notDeployedYet": "Pas encore Deploy",
-      "noDescription": "Aucune description — ajoutez-en une dans l'onglet Détails."
+      "noDescription": "Aucune description — ajoutez-en une dans l'onglet Détails.",
+      "authoritiesControlled": "Autorités gérées",
+      "authoritiesIncompleteTooltip": "Toutes les autorités ne sont pas gérées par SDP ; certaines actions ne peuvent pas être signées depuis le tableau de bord.",
+      "authoritiesIncompleteLink": "Vérifier dans Permissions"
     },
     "operations": {
       "deployHelper": "Deploy ce Token Onchain avant les autres opérations de fonds."
@@ -721,6 +757,8 @@
       "comboGatedAccessDescription": "Token avec autorisations : les nouveaux comptes sont Freeze jusqu'à votre approbation, limité aux détenteurs vérifiés et à des heures de négociation définies."
     },
     "playground": {
+      "viewApiContext": "Bac à sable API",
+      "openInPlayground": "Ouvrir dans le bac à sable API",
       "tokenNameExample": "Acme Dollar",
       "tokenSymbolExample": "ACME",
       "selectTemplate": "Sélectionner un Template",

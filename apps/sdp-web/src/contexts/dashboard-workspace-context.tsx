@@ -196,16 +196,22 @@ export function DashboardWorkspaceProvider({
     const previousPathname = previousPathnameRef.current;
     if (previousPathname === pathname) return;
     previousPathnameRef.current = pathname;
+    // Read the tab straight from the URL, not the useSyncExternalStore snapshot:
+    // App Router <Link> navigation fires no popstate/custom event, so the snapshot
+    // can still hold the previous page's tab. Acting on that stale value would wipe
+    // an explicit deep-link destination (e.g. ?tab=playground) that just committed.
+    const tab =
+      typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("tab");
     if (
       shouldClearDashboardTabAfterPathnameChange({
         previousPathname,
         pathname,
-        tab: searchParams.get("tab"),
+        tab,
       })
     ) {
       replaceSearchParams({ tab: null });
     }
-  }, [pathname, searchParams, replaceSearchParams]);
+  }, [pathname, replaceSearchParams]);
 
   const issuanceTab: IssuanceWorkspaceTab = useMemo(() => {
     const tab = searchParams.get("tab");

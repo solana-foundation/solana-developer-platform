@@ -7,6 +7,7 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import { addAllowlistEntry, listAllowlist, removeAllowlistEntry } from "./handlers/allowlist";
+import { getAssetAuditHistory } from "./handlers/audit";
 import { executeUpdateAuthority, prepareUpdateAuthority } from "./handlers/authority";
 import { executeBurn, prepareBurn } from "./handlers/burn";
 import {
@@ -52,6 +53,7 @@ issuance.get(
   requirePermissions("tokens:read"),
   listTokenTransactions
 );
+issuance.get("/tokens/:tokenId/audit", requirePermissions("tokens:read"), getAssetAuditHistory);
 issuance.post(
   "/tokens/:tokenId/supply/refresh",
   requirePermissions("tokens:read"),
