@@ -18,7 +18,10 @@ import {
   findClerkOrganizationMapping,
   syncClerkOrganization,
 } from "@/services/clerk-organization-provisioning.service";
-import { type ClerkUser, ClerkUsersService } from "@/services/clerk-users.service";
+import {
+  ClerkUsersService,
+  verifiedPrimaryEmailFromClerkUser,
+} from "@/services/clerk-users.service";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 import { BvnkWebhookProcessor } from "./ramps/bvnk";
@@ -104,15 +107,6 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
       )
       .bind(mapping.organization_id),
   ]);
-}
-
-function verifiedPrimaryEmailFromClerkUser(user: ClerkUser): string | null {
-  const emails = user.email_addresses || [];
-  const primary = emails.find((item) => item.id === user.primary_email_address_id) || emails[0];
-  if (primary?.verification?.status !== "verified") {
-    return null;
-  }
-  return primary?.email_address?.toLowerCase() ?? null;
 }
 
 async function resolveVerifiedUserEmail(env: Env, userId: string): Promise<string | null> {

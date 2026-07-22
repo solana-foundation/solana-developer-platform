@@ -19,6 +19,15 @@ export interface ClerkUser {
   email_addresses?: ClerkEmailAddress[];
 }
 
+export function verifiedPrimaryEmailFromClerkUser(user: ClerkUser): string | null {
+  const emails = user.email_addresses || [];
+  const primary = emails.find((item) => item.id === user.primary_email_address_id);
+  if (primary?.verification?.status !== "verified") {
+    return null;
+  }
+  return primary.email_address.toLowerCase();
+}
+
 export interface ClerkOrganizationMembership {
   role: string;
   organization: OrganizationJSON;

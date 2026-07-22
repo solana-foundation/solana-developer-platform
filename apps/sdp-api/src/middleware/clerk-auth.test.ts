@@ -191,6 +191,85 @@ describe("Clerk auth request cache", () => {
     expect(membership?.status).toBe("removed");
   });
 
+  it("does not link a first-time Clerk identity until its primary email is verified", async () => {
+    await getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+      .bind("usr_email_collision_target", "collision-target@example.com")
+      .run();
+
+    env.CLERK_SECRET_KEY = "sk_test_clerk_auth_user_lookup";
+    env.CLERK_API_URL = "https://clerk.example.test/v1";
+    let verificationStatus = "unverified";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      expect(url).toBe(`${env.CLERK_API_URL}/users/clerk_user_first_login`);
+      return new Response(
+        JSON.stringify({
+          id: "clerk_user_first_login",
+          primary_email_address_id: "email_primary",
+          email_addresses: [
+            {
+              id: "email_primary",
+              email_address: "collision-target@example.com",
+              verification: { status: verificationStatus },
+            },
+            {
+              id: "email_secondary",
+              email_address: "verified-secondary@example.com",
+              verification: { status: "verified" },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_first_login",
+      org_id: "clerk_org_cached",
+      org_role: "org:member",
+      org_slug: TEST_ORG.slug,
+      email: "collision-target@example.com",
+      iss: "https://clerk.example.test",
+    };
+    const { app, token } = createProtectedApp(payload);
+
+    const unverified = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+    expect(unverified.status).toBe(401);
+
+    const missingIdentity = await getDb(env)
+      .prepare(
+        `SELECT user_id
+         FROM auth_user_identities
+         WHERE provider = 'clerk' AND provider_user_id = ?`
+      )
+      .bind("clerk_user_first_login")
+      .first<{ user_id: string }>();
+    expect(missingIdentity).toBeNull();
+
+    verificationStatus = "verified";
+    const verified = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+    expect(verified.status).toBe(200);
+
+    const linkedIdentity = await getDb(env)
+      .prepare(
+        `SELECT user_id
+         FROM auth_user_identities
+         WHERE provider = 'clerk' AND provider_user_id = ?`
+      )
+      .bind("clerk_user_first_login")
+      .first<{ user_id: string }>();
+    expect(linkedIdentity?.user_id).toBe("usr_email_collision_target");
+  });
+
   it("provisions default projects when the membership webhook has not arrived", async () => {
     await getDb(env)
       .prepare("DELETE FROM organization_members WHERE organization_id = ?")
