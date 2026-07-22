@@ -4,8 +4,7 @@
   height: 10rem;
   border: 1px solid var(--border-l);
   border-radius: 2rem;
-  background:
-    radial-gradient(circle at 50% 50%, var(--t3), transparent 58%), var(--surface-sunken);
+  background: radial-gradient(circle at 50% 50%, var(--t3), transparent 58%), var(--surface-sunken);
   overflow: hidden;
 }
 
