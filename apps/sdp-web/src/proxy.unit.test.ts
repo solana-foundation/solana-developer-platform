@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import { isPublicRoute } from "./proxy";
 
 describe("public web routes", () => {
+  it("keeps the workspace loading transition available during bootstrap", () => {
+    expect(isPublicRoute(new NextRequest("https://dashboard.example.com/workspace-loading"))).toBe(
+      true
+    );
+  });
+
   it("keeps shareable payment checkout links unauthenticated", () => {
     expect(isPublicRoute(new NextRequest("https://dashboard.example.com/pay/public-token"))).toBe(
       true

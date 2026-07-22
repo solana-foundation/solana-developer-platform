@@ -1,15 +1,15 @@
 /**
  * Background Job: Track Pending Transfers
  *
- * Runs on a Cloudflare Workers cron schedule to reconcile transfer statuses:
+ * Runs on the API cron schedule to reconcile transfer statuses:
  *
  * 1. Recover stuck "processing" transfers with no signature — created by
- *    executeTransfer but the worker may have crashed before receiving a signature.
+ *    executeTransfer but the process may have crashed before receiving a signature.
  *    Mark them failed after 5 minutes.
  *
  * 2. Sync on-chain status for "processing" transfers that do have a signature —
  *    these are submitted transactions whose final confirmation may not have been
- *    recorded due to a timeout or worker crash. We batch-check their statuses via
+ *    recorded due to a timeout or process crash. We batch-check their statuses via
  *    getSignatureStatuses and update DB accordingly.
  */
 
@@ -39,7 +39,7 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
 
 /**
  * Fail processing transfers that have no signature and have been stuck for
- * longer than the recovery threshold, indicating the worker crashed before
+ * longer than the recovery threshold, indicating the process crashed before
  * obtaining a signature.
  */
 async function recoverStuckProcessingTransfers(

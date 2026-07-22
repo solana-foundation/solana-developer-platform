@@ -1,6 +1,7 @@
 import type { AssetProfile, IssuanceMetadata, Token } from "@sdp/types";
 import { getDefaultPublicFields } from "../../create/draft-mapping";
 import {
+  type AdvancedSettingsDraft,
   CAPACITY_KEYS,
   type CapacityKey,
   type CustomFieldRow,
@@ -23,10 +24,23 @@ export const ASSET_OWNED_KEYS = [
   "reserveAsset",
   "reserveCustodian",
   "redemptionEnabled",
+  "collateralizationRatio",
+  "oracleProvider",
+  "minCollateralRatio",
   "jurisdiction",
   "offeringType",
+  "shareClass",
+  "votingRights",
+  "couponRate",
+  "maturityDate",
+  "seniority",
+  "fundStrategy",
+  "managementFee",
+  "netAssetValue",
   "underlyingAsset",
   "custodian",
+  "propertyType",
+  "propertyLocation",
   "documents",
 ] as const;
 
@@ -98,6 +112,28 @@ function readCapacities(value: unknown): Record<CapacityKey, boolean> {
   return capacities;
 }
 
+// The persisted advanced-settings selection, hydrated back into draft shape
+// (params as strings). Absent (legacy profiles) ⇒ empty selection.
+function readAdvancedSettings(value: unknown): AdvancedSettingsDraft {
+  const result: AdvancedSettingsDraft = {};
+  if (isRecord(value) && isRecord(value.selected)) {
+    for (const [key, selection] of Object.entries(value.selected)) {
+      const params: Record<string, string> = {};
+      if (isRecord(selection) && isRecord(selection.params)) {
+        for (const [paramKey, paramValue] of Object.entries(selection.params)) {
+          if (typeof paramValue === "string") {
+            params[paramKey] = paramValue;
+          } else if (typeof paramValue === "number") {
+            params[paramKey] = String(paramValue);
+          }
+        }
+      }
+      result[key] = Object.keys(params).length > 0 ? { params } : {};
+    }
+  }
+  return result;
+}
+
 // The persisted public-field selection, if any. Absent (legacy profiles) ⇒ null
 // so the caller can fall back to the type's registry default.
 function readPublicFields(value: unknown): string[] | null {
@@ -149,14 +185,28 @@ export function profileToDraftState(profile: AssetProfile, token: Token): DraftS
     reserveAsset: readString(asset, "reserveAsset"),
     reserveCustodian: readString(asset, "reserveCustodian"),
     redemptionEnabled: asset.redemptionEnabled === true,
+    collateralizationRatio: readString(asset, "collateralizationRatio"),
+    oracleProvider: readString(asset, "oracleProvider"),
+    minCollateralRatio: readString(asset, "minCollateralRatio"),
     issuerName: readString(asset, "issuerName"),
     jurisdiction: readString(asset, "jurisdiction"),
     offeringType: readString(asset, "offeringType"),
+    shareClass: readString(asset, "shareClass"),
+    votingRights: asset.votingRights === true,
+    couponRate: readString(asset, "couponRate"),
+    maturityDate: readString(asset, "maturityDate"),
+    seniority: readString(asset, "seniority"),
+    fundStrategy: readString(asset, "fundStrategy"),
+    managementFee: readString(asset, "managementFee"),
+    netAssetValue: readString(asset, "netAssetValue"),
     underlyingAsset: readString(asset, "underlyingAsset"),
     custodian: readString(asset, "custodian"),
+    propertyType: readString(asset, "propertyType"),
+    propertyLocation: readString(asset, "propertyLocation"),
     documents: readDocuments(asset.documents),
     accessControl: readAccessControl(compliance.accessControl),
     capacities: readCapacities(compliance.capacities),
+    advancedSettings: readAdvancedSettings(metadata.settings),
     signingWalletId: token.signingWalletId ?? "",
     metadataUri: token.uri ?? "",
     customFields: readCustomFields(customer),
@@ -251,6 +301,14 @@ export function mergeIssuanceMetadataForUpdate(
     delete merged.visibility;
   }
 
+  // Settings is a wholly form-owned namespace (no integration writes there), so
+  // the rebuilt selection replaces it outright — or clears it when empty.
+  if (isRecord(rebuilt.settings)) {
+    merged.settings = rebuilt.settings;
+  } else {
+    delete merged.settings;
+  }
+
   return merged as IssuanceMetadata;
 }
 
@@ -270,11 +328,24 @@ function canonicalDraft(draft: DraftState): Record<string, unknown> {
     reserveAsset: draft.reserveAsset.trim(),
     reserveCustodian: draft.reserveCustodian.trim(),
     redemptionEnabled: draft.redemptionEnabled,
+    collateralizationRatio: draft.collateralizationRatio.trim(),
+    oracleProvider: draft.oracleProvider.trim(),
+    minCollateralRatio: draft.minCollateralRatio.trim(),
     issuerName: draft.issuerName.trim(),
     jurisdiction: draft.jurisdiction,
     offeringType: draft.offeringType,
+    shareClass: draft.shareClass.trim(),
+    votingRights: draft.votingRights,
+    couponRate: draft.couponRate.trim(),
+    maturityDate: draft.maturityDate.trim(),
+    seniority: draft.seniority,
+    fundStrategy: draft.fundStrategy,
+    managementFee: draft.managementFee.trim(),
+    netAssetValue: draft.netAssetValue.trim(),
     underlyingAsset: draft.underlyingAsset.trim(),
     custodian: draft.custodian.trim(),
+    propertyType: draft.propertyType,
+    propertyLocation: draft.propertyLocation.trim(),
     // Mirror buildIssuanceMetadata's filter: a row with only a type (no name or
     // url) is never persisted or re-hydrated, so it must not read as a change —
     // otherwise a type-only row leaves the form permanently "dirty".
@@ -283,6 +354,17 @@ function canonicalDraft(draft: DraftState): Record<string, unknown> {
       .map((doc) => ({ docType: doc.docType.trim(), name: doc.name.trim(), url: doc.url.trim() })),
     accessControl: draft.accessControl,
     capacities: CAPACITY_KEYS.map((key) => draft.capacities[key]),
+    // Mirror buildSelectedSettings: sorted keys, trimmed non-empty params only,
+    // so presentation noise never reads as a change.
+    advancedSettings: Object.keys(draft.advancedSettings)
+      .sort()
+      .map((key) => ({
+        key,
+        params: Object.entries(draft.advancedSettings[key].params ?? {})
+          .filter(([, paramValue]) => paramValue.trim() !== "")
+          .map(([paramKey, paramValue]) => [paramKey, paramValue.trim()])
+          .sort(([a], [b]) => a.localeCompare(b)),
+      })),
     signingWalletId: draft.signingWalletId.trim(),
     metadataUri: draft.metadataUri.trim(),
     customFields: draft.customFields

@@ -63,7 +63,9 @@ export class EncryptionService {
     }
 
     // Import as HKDF source key for deriving org-specific keys
-    this.masterKey = await crypto.subtle.importKey("raw", keyData, "HKDF", false, ["deriveKey"]);
+    this.masterKey = await crypto.subtle.importKey("raw", new Uint8Array(keyData), "HKDF", false, [
+      "deriveKey",
+    ]);
 
     return this.masterKey;
   }

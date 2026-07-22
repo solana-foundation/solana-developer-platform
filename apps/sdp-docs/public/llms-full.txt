@@ -3501,14 +3501,14 @@ The browser faucet is more reliable than the RPC `requestAirdrop` method, which 
 
 ### 5. API base URL
 
-The canonical SDP API URL is `https://api.solana.com`. The custom domain is in rollout; until it completes, requests route through the underlying worker at `https://sdp-api-production.solana.workers.dev`. The code samples in this tutorial use the workers.dev URL. Switch to `api.solana.com` once the rollout completes; the request and response semantics are identical on both hosts.
+The canonical SDP API URL is `https://api.solana.com`. Use this hostname for every production request.
 
 ### 6. Wire up your client and verify
 
 Wire two HTTP clients (one per project-scoped key) using a thin wrapper around `fetch`:
 
 ```javascript
-const BASE = "https://sdp-api-production.solana.workers.dev";
+const BASE = "https://api.solana.com";
 
 class SdpClient {
   constructor(apiKey, baseUrl = BASE) {
@@ -4120,7 +4120,7 @@ Your sandbox setup is built around six artifacts that all swap for production eq
 - **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys minted from your production project. Use the Section 2 bootstrap pattern with a fresh Admin key, selecting the `default-production` project from `GET /v1/projects` instead of `default-sandbox`, and fresh project-scoped keys minted under it.
 - **Custody provider**. Production reads `provider` as your federally chartered custodian (Anchorage Digital Bank for most US institutional issuers), bound to your organization through the Anchorage onboarding flow. The Privy sandbox wallets do not carry over.
 - **Solana network**. Mainnet-beta replaces devnet. The custody address gets funded by your custody bank as part of standard operational support, not by a faucet.
-- **API base URL**. `https://api.solana.com` is the canonical production base. While the custom domain is in rollout, requests route through `https://sdp-api-production.solana.workers.dev`. Code paths are identical; only the hostname changes.
+- **API base URL**. `https://api.solana.com` is the canonical production base.
 - **Screening providers**. Confirm the production provider mix matches your compliance team's policy. Run a `POST /v1/compliance/address-screenings` against a known address to verify each provider returns `status: "ok"` before live traffic.
 - **Idempotency-Key strategy**. In production, generate idempotency keys deterministically per operation (for example, `mint-${reserveDepositReference}`) rather than purely random per attempt. This lets your runbook resend safely without minting twice.
 
@@ -4381,7 +4381,7 @@ In your Clerk development app:
 - Create a JWT template named `sdp-api`.
 - Expose your local API with the webhook tunnel: reserve a free stable domain
   at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains), set it
-  as `WEBHOOK_INGEST_DOMAIN` in `apps/sdp-api/.dev.vars`, and run
+  as `WEBHOOK_INGEST_DOMAIN` in `apps/sdp-api/.env.local`, and run
   `pnpm dev:webhooks`.
 - Create a webhook endpoint that points at
   `https://<your-domain>/webhooks/clerk/link-orgs` — Clerk delivers over the
@@ -4882,7 +4882,7 @@ Resources for integrating with SDP: API endpoints, supported token templates, pr
 ### Issuance Token Types
 Source: https://platform.solana.com/docs/reference/issuance-token-types
 
-> Supported issuance templates and default controls.
+> How to choose a token template, and the default controls each one applies.
 
 The public issuance surface currently exposes three token templates:
 
@@ -4893,6 +4893,59 @@ The public issuance surface currently exposes three token templates:
 | `custom` | 9 decimals default (up to 18 max), extension set is fully configurable | Use when your requirements do not match preset templates. |
 
 These defaults are sourced from the API implementation in `apps/sdp-api/src/services/issuance/templates/definitions.ts`.
+
+## Selecting a template
+
+Each template is a vetted, fixed composition of Token-2022 extensions for a specific class of
+asset, rather than an à-la-carte menu. The appropriate template is determined by the nature of
+the instrument being issued. The `custom` template applies to assets that do not fit the
+stablecoin or tokenized-security models.
+
+### Stablecoin
+
+Intended for tokens pegged to a fiat currency and redeemable at par (1:1). The template applies
+the compliance controls typical of regulated fiat tokens: a **pausable** extension (transfers
+can be frozen in an emergency) and a **permanent delegate** (tokens can be seized or clawed back
+in response to a compliance event). A blocklist applies by default.
+
+Stablecoins cannot pay interest or yield to holders. This reflects payment-stablecoin frameworks
+such as the U.S. GENIUS Act and the EU's MiCA, which prohibit issuers from paying interest on the
+token itself. Interest- or yield-bearing products are issued as tokenized securities (typically
+funds) rather than stablecoins.
+
+### Tokenized security
+
+Intended for regulated instruments — equity, debt, or fund shares. The template applies the
+stablecoin controls together with stronger defaults: an **allowlist is required**, new accounts
+are **frozen by default** (holders must be approved before transacting), and the **scaled UI
+amount** extension is added for corporate actions such as splits or share-class rebasing.
+Interest- and yield-bearing instruments (for example debt or fund tokens) also fall under this
+template.
+
+### Custom
+
+Corresponds to the **Non-Security Digital Asset** classification in the issuance interface —
+assets that are neither fiat stablecoins nor regulated securities, such as commodities, real
+estate, or collectibles. The template exposes the full Token-2022 extension set (transfer fees,
+transfer hooks, non-transferable behaviour, interest, and others) and applies where the preset
+templates do not match the instrument.
+
+### Summary
+
+| Instrument | Template |
+| --- | --- |
+| Pegged to a fiat currency, redeemable 1:1, with no yield | `stablecoin` |
+| Regulated security (equity, debt, or fund), or an instrument that pays a return | `tokenized-security` |
+| Any other asset, or one requiring extensions the presets do not offer | `custom` (Non-Security Digital Asset) |
+
+<Callout type="warn">
+Token-2022 extensions are set when the mint is created and cannot be changed afterward. The
+template selection is therefore permanent for a given token; changing it requires issuing a new
+token.
+</Callout>
+
+This page provides general guidance and is not legal advice; regulatory treatment depends on the
+jurisdiction and on how the instrument is structured.
 
 ## Amount format
 

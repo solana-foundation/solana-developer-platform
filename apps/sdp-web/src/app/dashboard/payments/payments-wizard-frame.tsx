@@ -27,7 +27,7 @@ export function PaymentsWizardFrame({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col" data-payments-wizard-frame>
-      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6" data-payments-wizard-stepper>
+      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6" data-payments-wizard-stepper>
         <div className={cn("mx-auto w-full", maxWidthClassName)}>
           <WizardStepProgress
             currentStep={currentStep}
