@@ -98,6 +98,7 @@
     "closeNavigation": "Close navigation",
     "sandbox": "Sandbox",
     "loadingDashboard": "Loading dashboard...",
+    "reloadDashboard": "Reload dashboard",
     "signInToContinue": "Sign in to continue",
     "signInDescription": "Access your organization workspace and wallet controls.",
     "signIn": "Sign in",

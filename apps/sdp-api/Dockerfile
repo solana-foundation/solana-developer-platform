@@ -80,7 +80,7 @@ LABEL org.opencontainers.image.title="sdp-api" \
 USER sdp
 EXPOSE 8787
 
-# Liveness only — status<500 means the HTTP layer is up. /ready (DB+Redis)
+# Liveness only — status<500 means the HTTP layer is up. /health/ready (DB+Redis)
 # belongs on a k8s readinessProbe, not on the container HEALTHCHECK.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8787)+'/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"

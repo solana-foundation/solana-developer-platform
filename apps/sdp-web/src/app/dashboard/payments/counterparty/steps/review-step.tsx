@@ -10,25 +10,21 @@ export function ReviewStep() {
   const t = useTranslations();
   const { basics, identity, address, steps, submitError } = useCounterpartyCreate();
 
+  const hasIdentityStep = steps.includes("identity");
   const basicsParsed = basicsSchema.safeParse(basics.values);
-  const identityParsed = identitySchema.safeParse(identity.values);
+  const identityParsed = hasIdentityStep ? identitySchema.safeParse(identity.values) : null;
   const addressParsed = addressSchema.safeParse(address.values);
 
-  if (!basicsParsed.success || !identityParsed.success || !addressParsed.success) {
+  if (
+    !basicsParsed.success ||
+    !addressParsed.success ||
+    (identityParsed !== null && !identityParsed.success)
+  ) {
     return null;
   }
 
   const basicsValues = basicsParsed.data;
-  const identityValues = identityParsed.data;
   const addressValues = addressParsed.data;
-
-  const hasIdentityStep = steps.includes("identity");
-  const hasAnyIdentity = !!(
-    identityValues.firstName ||
-    identityValues.lastName ||
-    identityValues.dateOfBirth ||
-    identityValues.phone
-  );
 
   return (
     <div className="space-y-6">
@@ -51,34 +47,26 @@ export function ReviewStep() {
         ) : null}
       </div>
 
-      {hasIdentityStep && hasAnyIdentity ? (
+      {identityParsed?.success ? (
         <>
           <SectionDivider label={t("DashboardPayments.counterparty.personalInfo")} />
           <div className="space-y-1">
-            {identityValues.firstName ? (
-              <ReviewRow
-                label={t("DashboardPayments.counterparty.firstName")}
-                value={identityValues.firstName}
-              />
-            ) : null}
-            {identityValues.lastName ? (
-              <ReviewRow
-                label={t("DashboardPayments.counterparty.lastName")}
-                value={identityValues.lastName}
-              />
-            ) : null}
-            {identityValues.dateOfBirth ? (
-              <ReviewRow
-                label={t("DashboardPayments.counterparty.dateOfBirth")}
-                value={identityValues.dateOfBirth}
-              />
-            ) : null}
-            {identityValues.phone ? (
-              <ReviewRow
-                label={t("DashboardPayments.counterparty.phone")}
-                value={identityValues.phone}
-              />
-            ) : null}
+            <ReviewRow
+              label={t("DashboardPayments.counterparty.firstName")}
+              value={identityParsed.data.firstName}
+            />
+            <ReviewRow
+              label={t("DashboardPayments.counterparty.lastName")}
+              value={identityParsed.data.lastName}
+            />
+            <ReviewRow
+              label={t("DashboardPayments.counterparty.dateOfBirth")}
+              value={identityParsed.data.dateOfBirth}
+            />
+            <ReviewRow
+              label={t("DashboardPayments.counterparty.phone")}
+              value={identityParsed.data.phone}
+            />
           </div>
         </>
       ) : null}

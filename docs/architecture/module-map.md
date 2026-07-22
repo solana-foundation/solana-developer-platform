@@ -14,7 +14,7 @@ This map is generated from the module-boundary check. It records the permitted w
 
 | Module | Purpose | Allowed workspace dependencies |
 | --- | --- | --- |
-| `@sdp/api` | Cloudflare Workers API and application composition root. | `@sdp/custody`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
+| `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/api-integration` | Maintainer integration harness for API endpoint and provider coverage. | `@sdp/api`, `@sdp/rpc`, `@sdp/types` |
 | `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/types` |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None |

@@ -199,9 +199,7 @@ describe("authority-resolution", () => {
 
     const result = await resolveAuthoritySigner({
       env: {
-        HYPERDRIVE: {
-          connectionString: "postgresql://sdp:sdp@127.0.0.1:5432/sdp",
-        },
+        DATABASE_URL: "postgresql://sdp:sdp@127.0.0.1:5432/sdp",
         CUSTODY_ENCRYPTION_KEY: "test",
       } as never,
       auth,

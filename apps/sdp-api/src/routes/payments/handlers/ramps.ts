@@ -43,6 +43,7 @@ import type {
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
+import { getClientIp } from "@/lib/client-ip";
 import {
   AppError,
   badRequest,
@@ -630,7 +631,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
-        customerIpAddress: c.req.header("cf-connecting-ip"),
+        customerIpAddress: getClientIp(c) ?? undefined,
       });
       break;
     }

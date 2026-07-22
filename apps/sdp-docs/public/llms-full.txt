@@ -3501,14 +3501,14 @@ The browser faucet is more reliable than the RPC `requestAirdrop` method, which 
 
 ### 5. API base URL
 
-The canonical SDP API URL is `https://api.solana.com`. The custom domain is in rollout; until it completes, requests route through the underlying worker at `https://sdp-api-production.solana.workers.dev`. The code samples in this tutorial use the workers.dev URL. Switch to `api.solana.com` once the rollout completes; the request and response semantics are identical on both hosts.
+The canonical SDP API URL is `https://api.solana.com`. Use this hostname for every production request.
 
 ### 6. Wire up your client and verify
 
 Wire two HTTP clients (one per project-scoped key) using a thin wrapper around `fetch`:
 
 ```javascript
-const BASE = "https://sdp-api-production.solana.workers.dev";
+const BASE = "https://api.solana.com";
 
 class SdpClient {
   constructor(apiKey, baseUrl = BASE) {
@@ -4120,7 +4120,7 @@ Your sandbox setup is built around six artifacts that all swap for production eq
 - **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys minted from your production project. Use the Section 2 bootstrap pattern with a fresh Admin key, selecting the `default-production` project from `GET /v1/projects` instead of `default-sandbox`, and fresh project-scoped keys minted under it.
 - **Custody provider**. Production reads `provider` as your federally chartered custodian (Anchorage Digital Bank for most US institutional issuers), bound to your organization through the Anchorage onboarding flow. The Privy sandbox wallets do not carry over.
 - **Solana network**. Mainnet-beta replaces devnet. The custody address gets funded by your custody bank as part of standard operational support, not by a faucet.
-- **API base URL**. `https://api.solana.com` is the canonical production base. While the custom domain is in rollout, requests route through `https://sdp-api-production.solana.workers.dev`. Code paths are identical; only the hostname changes.
+- **API base URL**. `https://api.solana.com` is the canonical production base.
 - **Screening providers**. Confirm the production provider mix matches your compliance team's policy. Run a `POST /v1/compliance/address-screenings` against a known address to verify each provider returns `status: "ok"` before live traffic.
 - **Idempotency-Key strategy**. In production, generate idempotency keys deterministically per operation (for example, `mint-${reserveDepositReference}`) rather than purely random per attempt. This lets your runbook resend safely without minting twice.
 
@@ -4381,7 +4381,7 @@ In your Clerk development app:
 - Create a JWT template named `sdp-api`.
 - Expose your local API with the webhook tunnel: reserve a free stable domain
   at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains), set it
-  as `WEBHOOK_INGEST_DOMAIN` in `apps/sdp-api/.dev.vars`, and run
+  as `WEBHOOK_INGEST_DOMAIN` in `apps/sdp-api/.env.local`, and run
   `pnpm dev:webhooks`.
 - Create a webhook endpoint that points at
   `https://<your-domain>/webhooks/clerk/link-orgs` — Clerk delivers over the

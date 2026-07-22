@@ -264,7 +264,7 @@ describe("utila wallet provisioning", () => {
         now: () => now,
         randomUUID: () => "test-uuid",
         getRandomValues: (values) => values,
-        sha256: (data) => crypto.subtle.digest("SHA-256", data),
+        sha256: (data) => crypto.subtle.digest("SHA-256", new Uint8Array(data)),
       },
       {
         serviceAccountEmail: "service-account@example.com",
