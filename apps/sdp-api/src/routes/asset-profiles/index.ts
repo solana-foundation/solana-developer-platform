@@ -16,7 +16,8 @@ import {
 
 const assetProfiles = new Hono<{ Bindings: Env }>();
 
-// Gate routes behind feature flag; off by default.
+// Non-production environments always expose Asset Profiles. Production keeps
+// the explicit feature flag so rollout remains independently controlled.
 async function requireAssetProfilesFeature(c: Context<{ Bindings: Env }>, next: Next) {
   if (!isAssetProfilesEnabled(c.env)) {
     throw new AppError("FORBIDDEN", "Asset Profiles are not enabled for this environment");

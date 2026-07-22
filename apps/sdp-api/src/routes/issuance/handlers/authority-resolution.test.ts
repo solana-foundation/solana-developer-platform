@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiKeyContext } from "@/lib/auth";
 import * as solanaServices from "@/services/solana";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
+import { env as testEnv } from "@/test/helpers/env";
 import {
   getInitialPermanentDelegateAuthority,
   resolveAuthoritySigner,
@@ -199,7 +200,7 @@ describe("authority-resolution", () => {
 
     const result = await resolveAuthoritySigner({
       env: {
-        DATABASE_URL: "postgresql://sdp:sdp@127.0.0.1:5432/sdp",
+        DATABASE_URL: testEnv.DATABASE_URL,
         CUSTODY_ENCRYPTION_KEY: "test",
       } as never,
       auth,

@@ -44,17 +44,16 @@ function loadLocalEnvFile(filePath) {
 }
 
 const localEnv = loadLocalEnvFile(localApiEnvPath);
-const localDatabaseUrl = new URL("postgresql://127.0.0.1:5432/sdp");
-localDatabaseUrl.username = "sdp";
-localDatabaseUrl.password = "sdp";
-const databaseUrl =
-  process.env.DATABASE_URL ?? localEnv.DATABASE_URL ?? localDatabaseUrl.toString();
+// biome-ignore lint/security/noSecrets: Local Docker Postgres fallback for isolated tests.
+const localTestDatabaseUrl = "postgresql://sdp:sdp@127.0.0.1:5432/sdp_test";
+const testDatabaseUrl =
+  process.env.TEST_DATABASE_URL ?? localEnv.TEST_DATABASE_URL ?? localTestDatabaseUrl;
 const redisUrl = process.env.REDIS_URL ?? localEnv.REDIS_URL ?? "redis://127.0.0.1:6379";
 
 const resolvedEnv = {
   ...localEnv,
   ...process.env,
-  DATABASE_URL: databaseUrl,
+  TEST_DATABASE_URL: testDatabaseUrl,
   REDIS_URL: redisUrl,
 };
 
@@ -89,9 +88,7 @@ try {
     await configureIntegrationSolanaRpc(resolvedEnv);
   }
 
-  await run("pnpm", ["--filter", "@sdp/api", "db:postgres:bootstrap"]);
-
-  if (mode === "unit") {
+  if (mode === "integration") {
     await run("pnpm", ["--filter", "@sdp/api", "db:migrate:test"]);
   }
 

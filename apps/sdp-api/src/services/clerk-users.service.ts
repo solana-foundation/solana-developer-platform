@@ -1,9 +1,13 @@
+import type { OrganizationJSON } from "@clerk/backend";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
 export interface ClerkEmailAddress {
   id: string;
   email_address: string;
+  verification?: {
+    status?: string | null;
+  } | null;
 }
 
 export interface ClerkUser {
@@ -15,11 +19,30 @@ export interface ClerkUser {
   email_addresses?: ClerkEmailAddress[];
 }
 
+export function verifiedPrimaryEmailFromClerkUser(user: ClerkUser): string | null {
+  const emails = user.email_addresses || [];
+  const primary = emails.find((item) => item.id === user.primary_email_address_id);
+  if (primary?.verification?.status !== "verified") {
+    return null;
+  }
+  return primary.email_address.toLowerCase();
+}
+
+export interface ClerkOrganizationMembership {
+  role: string;
+  organization: OrganizationJSON;
+}
+
+interface ClerkOrganizationMembershipPage {
+  data: ClerkOrganizationMembership[];
+  total_count: number;
+}
+
 export class ClerkUsersService {
   private apiBase: string;
   private secretKey: string;
 
-  constructor(private env: Env) {
+  constructor(env: Env) {
     if (!env.CLERK_SECRET_KEY) {
       throw new AppError("INTERNAL_ERROR", "CLERK_SECRET_KEY is required");
     }
@@ -54,5 +77,21 @@ export class ClerkUsersService {
 
   async getUser(userId: string): Promise<ClerkUser> {
     return this.request<ClerkUser>(`/users/${userId}`);
+  }
+
+  async getOrganizationMemberships(userId: string): Promise<ClerkOrganizationMembership[]> {
+    const memberships: ClerkOrganizationMembership[] = [];
+    const limit = 500;
+
+    while (true) {
+      const page = await this.request<ClerkOrganizationMembershipPage>(
+        `/users/${userId}/organization_memberships?limit=${limit}&offset=${memberships.length}`
+      );
+      memberships.push(...page.data);
+
+      if (page.data.length === 0 || memberships.length >= page.total_count) {
+        return memberships;
+      }
+    }
   }
 }

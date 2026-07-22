@@ -6,7 +6,7 @@ import type { Env } from "@/types/env";
 const providedEnv: Env = {
   ENVIRONMENT: "development",
   API_VERSION: "v1",
-  DATABASE_URL: process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL,
+  DATABASE_URL: process.env.TEST_DATABASE_URL,
   REDIS_URL: process.env.REDIS_URL,
   API_KEY_PEPPER: "test-pepper-for-unit-tests",
   SOLANA_MOCK: "true",
@@ -18,7 +18,7 @@ const providedEnv: Env = {
 };
 
 if (!providedEnv.DATABASE_URL) {
-  throw new Error("Test environment requires TEST_DATABASE_URL or DATABASE_URL.");
+  throw new Error("Test environment requires TEST_DATABASE_URL.");
 }
 if (!providedEnv.REDIS_URL) {
   throw new Error("Test environment requires REDIS_URL.");
