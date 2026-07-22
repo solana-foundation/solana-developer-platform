@@ -32,8 +32,6 @@ for (const [key, value] of Object.entries(loadEnvFile(LOCAL_ENV_PATH))) {
 
 process.env.ENVIRONMENT ??= "development";
 process.env.API_VERSION ??= "v1";
-// biome-ignore lint/security/noSecrets: Local Docker Postgres fallback for integration tests.
-process.env.DATABASE_URL ??= "postgresql://sdp:sdp@127.0.0.1:5432/sdp";
 process.env.REDIS_URL ??= "redis://127.0.0.1:6379";
 process.env.RUN_INTEGRATION_TESTS = "true";
 process.env.SOLANA_MOCK = "false";
