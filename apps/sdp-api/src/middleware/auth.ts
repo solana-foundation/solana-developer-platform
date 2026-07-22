@@ -27,6 +27,7 @@ import type { Env } from "@/types/env";
 import { enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
 
 const KV_TTL_SECONDS = 3600; // 1 hour cache
+const INVALID_KEY_CACHE_TTL_SECONDS = 30;
 const NODE_LAST_USED_WRITE_INTERVAL_MS = 5 * 60_000;
 
 interface LastUsedWriteState {
@@ -76,6 +77,17 @@ function looksLikeJwt(token: string): boolean {
 async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | null> {
   const cached = await kv.get<CachedApiKey>(`key:${keyHash}`, "json");
   return cached;
+}
+
+async function isKnownInvalidKey(kv: KVStore, keyHash: string): Promise<boolean> {
+  const marker = await kv.get<{ invalid: true }>(`invalid:${keyHash}`, "json");
+  return marker?.invalid === true;
+}
+
+async function cacheInvalidKey(kv: KVStore, keyHash: string): Promise<void> {
+  await kv.put(`invalid:${keyHash}`, JSON.stringify({ invalid: true }), {
+    expirationTtl: INVALID_KEY_CACHE_TTL_SECONDS,
+  });
 }
 
 /**
@@ -326,7 +338,13 @@ export function authMiddleware() {
     const apiKeysKV = c.var.kv.apiKeys;
     let cachedKey = await getFromKV(apiKeysKV, keyHash);
     if (!cachedKey) {
+      if (await isKnownInvalidKey(apiKeysKV, keyHash)) {
+        throw new AppError("INVALID_API_KEY", "Invalid API key");
+      }
       cachedKey = await getFromDatabaseAndCache(getDb(c.env), apiKeysKV, keyHash);
+      if (!cachedKey) {
+        await cacheInvalidKey(apiKeysKV, keyHash);
+      }
     }
 
     if (!cachedKey) {
