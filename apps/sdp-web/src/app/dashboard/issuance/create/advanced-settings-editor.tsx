@@ -559,9 +559,7 @@ export function AdvancedSettingsEditor({
                 showTechnical={showTechnical}
                 configurable={configurable}
                 allowConfig={allowCapacityConfig}
-                summary={
-                  configurable ? summarizeCapacityConfig(key, selection.config, t) : null
-                }
+                summary={configurable ? summarizeCapacityConfig(key, selection.config, t) : null}
                 onToggle={(checked) =>
                   onCapacitiesChange({
                     ...capacities,

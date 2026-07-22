@@ -778,6 +778,38 @@
           "summaryAboveUnset": "Above a threshold",
           "summaryNewCounterparty": "New counterparties"
         },
+        "redemptionApprovals": {
+          "ruleLabel": "Require approval for",
+          "ruleAll": "All redemptions",
+          "ruleAbove": "Redemptions above an amount",
+          "amountLabel": "Threshold",
+          "amountSuffix": "tokens",
+          "amountPlaceholder": "e.g. 10000",
+          "approversLabel": "Approvers",
+          "approversHint": "Wallet addresses or role names — you can add these after launch.",
+          "addApprover": "Add approver",
+          "approverPlaceholder": "Wallet address or role",
+          "removeApprover": "Remove approver",
+          "summaryAll": "All redemptions",
+          "summaryAbove": "Above {amount} tokens",
+          "summaryAboveUnset": "Above a threshold"
+        },
+        "investorReporting": {
+          "cadenceLabel": "Reporting cadence",
+          "cadenceMonthly": "Monthly",
+          "cadenceQuarterly": "Quarterly",
+          "cadenceAnnual": "Annual",
+          "formatLabel": "Report format",
+          "formatPdf": "PDF",
+          "formatCsv": "CSV",
+          "formatXlsx": "Excel",
+          "recipientsLabel": "Recipients",
+          "recipientsHint": "Email addresses or investor groups — you can add these after launch.",
+          "addRecipient": "Add recipient",
+          "recipientPlaceholder": "Email or investor group",
+          "removeRecipient": "Remove recipient",
+          "summaryWithFormat": "{cadence} · {format}"
+        },
         "weekdays": {
           "mon": "Mon",
           "tue": "Tue",

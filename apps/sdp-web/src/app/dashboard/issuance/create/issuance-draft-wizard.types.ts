@@ -64,9 +64,32 @@ export interface TransferApprovalsConfig {
   approvers?: string[];
 }
 
+// Redemptions redeem against reserves, so the rule keys off amount (not a
+// counterparty). Mirrors transfer approvals otherwise.
+export type RedemptionApprovalRule = "all" | "above_amount";
+export interface RedemptionApprovalsConfig {
+  rule: RedemptionApprovalRule;
+  amount?: string;
+  approvers?: string[];
+}
+
+export type ReportingCadence = "monthly" | "quarterly" | "annual";
+export type ReportingFormat = "pdf" | "csv" | "xlsx";
+export interface InvestorReportingConfig {
+  cadence: ReportingCadence;
+  format?: ReportingFormat;
+  // Report recipients (emails/names) — a roster that may stay empty until the
+  // investor set exists.
+  recipients?: string[];
+}
+
 // The config payload for a capacity that supports one. Absent config = enabled
 // but unconfigured. Narrowed by capacity key at the modal edge.
-export type CapacityConfig = TradingHoursConfig | TransferApprovalsConfig;
+export type CapacityConfig =
+  | TradingHoursConfig
+  | TransferApprovalsConfig
+  | RedemptionApprovalsConfig
+  | InvestorReportingConfig;
 
 // A single off-chain capacity selection. Mirrors the on-chain SelectedSetting
 // ({ params? }) so the whole compliance selection persists in one payload

@@ -722,6 +722,38 @@
           "summaryAboveUnset": "Au-dessus d'un seuil",
           "summaryNewCounterparty": "Nouvelles contreparties"
         },
+        "redemptionApprovals": {
+          "ruleLabel": "Exiger une approbation pour",
+          "ruleAll": "Tous les rachats",
+          "ruleAbove": "Les rachats au-dessus d'un montant",
+          "amountLabel": "Seuil",
+          "amountSuffix": "jetons",
+          "amountPlaceholder": "p. ex. 10000",
+          "approversLabel": "Approbateurs",
+          "approversHint": "Adresses de portefeuille ou noms de rôle — vous pourrez les ajouter après le lancement.",
+          "addApprover": "Ajouter un approbateur",
+          "approverPlaceholder": "Adresse de portefeuille ou rôle",
+          "removeApprover": "Supprimer l'approbateur",
+          "summaryAll": "Tous les rachats",
+          "summaryAbove": "Au-dessus de {amount} jetons",
+          "summaryAboveUnset": "Au-dessus d'un seuil"
+        },
+        "investorReporting": {
+          "cadenceLabel": "Fréquence des rapports",
+          "cadenceMonthly": "Mensuelle",
+          "cadenceQuarterly": "Trimestrielle",
+          "cadenceAnnual": "Annuelle",
+          "formatLabel": "Format du rapport",
+          "formatPdf": "PDF",
+          "formatCsv": "CSV",
+          "formatXlsx": "Excel",
+          "recipientsLabel": "Destinataires",
+          "recipientsHint": "Adresses e-mail ou groupes d'investisseurs — vous pourrez les ajouter après le lancement.",
+          "addRecipient": "Ajouter un destinataire",
+          "recipientPlaceholder": "E-mail ou groupe d'investisseurs",
+          "removeRecipient": "Supprimer le destinataire",
+          "summaryWithFormat": "{cadence} · {format}"
+        },
         "weekdays": {
           "mon": "lun",
           "tue": "mar",

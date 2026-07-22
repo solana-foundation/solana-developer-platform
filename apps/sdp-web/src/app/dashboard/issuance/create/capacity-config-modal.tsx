@@ -1,7 +1,7 @@
 "use client";
 
 import { Plus, X } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
@@ -9,6 +9,9 @@ import { cn } from "@/lib/utils";
 import {
   CAPACITY_META,
   defaultCapacityConfig,
+  REDEMPTION_APPROVAL_RULE_OPTIONS,
+  REPORTING_CADENCE_OPTIONS,
+  REPORTING_FORMAT_OPTIONS,
   TIMEZONE_OPTIONS,
   TRADING_HOURS_SCHEDULE_OPTIONS,
   TRANSFER_APPROVAL_RULE_OPTIONS,
@@ -17,6 +20,11 @@ import {
 import {
   type CapacityConfig,
   type CapacityKey,
+  type InvestorReportingConfig,
+  type RedemptionApprovalRule,
+  type RedemptionApprovalsConfig,
+  type ReportingCadence,
+  type ReportingFormat,
   type TradingHoursConfig,
   type TradingHoursSchedule,
   type TransferApprovalRule,
@@ -123,6 +131,20 @@ function ConfigForm({
             disabled={disabled}
           />
         ) : null}
+        {capKey === "redemptionApprovals" ? (
+          <RedemptionApprovalsFields
+            value={config as RedemptionApprovalsConfig | undefined}
+            onChange={setConfig}
+            disabled={disabled}
+          />
+        ) : null}
+        {capKey === "investorReporting" ? (
+          <InvestorReportingFields
+            value={config as InvestorReportingConfig | undefined}
+            onChange={setConfig}
+            disabled={disabled}
+          />
+        ) : null}
 
         <div className="flex items-center justify-end gap-2 pt-1">
           <Button type="button" variant="outline" onClick={onCancel} disabled={disabled}>
@@ -137,13 +159,82 @@ function ConfigForm({
   );
 }
 
-// A labelled field wrapper.
+// A labelled field group. A plain <div> (not <label>) because most fields here
+// are button groups / chip rows rather than a single labelable input.
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="grid gap-1.5">
+    <div className="grid gap-1.5">
       <span className="text-xs font-medium text-secondary">{label}</span>
       {children}
-    </label>
+    </div>
+  );
+}
+
+// An editable, optional roster of free-text entries (approver wallets/roles,
+// report recipients). Owns stable row ids locally so list keys aren't array
+// indices, and projects back to a plain string[] on every change.
+function RosterList({
+  values,
+  placeholder,
+  addLabel,
+  removeLabel,
+  hint,
+  disabled,
+  onChange,
+}: {
+  values: string[];
+  placeholder: string;
+  addLabel: string;
+  removeLabel: string;
+  hint: string;
+  disabled?: boolean;
+  onChange: (values: string[]) => void;
+}) {
+  const nextId = useRef(0);
+  const [rows, setRows] = useState<{ id: number; value: string }[]>(() =>
+    values.map((value) => ({ id: nextId.current++, value }))
+  );
+  const commit = (next: { id: number; value: string }[]) => {
+    setRows(next);
+    onChange(next.map((row) => row.value));
+  };
+
+  return (
+    <div className="space-y-2">
+      {rows.map((row) => (
+        <div key={row.id} className="flex items-center gap-2">
+          <input
+            type="text"
+            className={cn(INPUT_CLASS, "flex-1")}
+            value={row.value}
+            placeholder={placeholder}
+            disabled={disabled}
+            onChange={(event) =>
+              commit(rows.map((r) => (r.id === row.id ? { ...r, value: event.target.value } : r)))
+            }
+          />
+          <button
+            type="button"
+            disabled={disabled}
+            aria-label={removeLabel}
+            onClick={() => commit(rows.filter((r) => r.id !== row.id))}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border-default text-tertiary transition-colors hover:text-primary"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => commit([...rows, { id: nextId.current++, value: "" }])}
+        className="inline-flex items-center gap-1 text-sm font-medium text-tertiary transition-colors hover:text-primary"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        {addLabel}
+      </button>
+      <p className="text-xs text-tertiary">{hint}</p>
+    </div>
   );
 }
 
@@ -177,7 +268,9 @@ function Segmented({
           onClick={() => onChange(option.value)}
           className={cn(
             "inline-flex flex-1 items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-            value === option.value ? "bg-surface-raised text-primary" : "text-tertiary hover:text-primary",
+            value === option.value
+              ? "bg-surface-raised text-primary"
+              : "text-tertiary hover:text-primary",
             disabled && "cursor-not-allowed"
           )}
         >
@@ -338,9 +431,13 @@ function TransferApprovalsFields({
               inputMode="numeric"
               className={cn(INPUT_CLASS, "flex-1")}
               value={value?.amount ?? ""}
-              placeholder={t("DashboardIssuance.config.capacityConfig.transferApprovals.amountPlaceholder")}
+              placeholder={t(
+                "DashboardIssuance.config.capacityConfig.transferApprovals.amountPlaceholder"
+              )}
               disabled={disabled}
-              onChange={(event) => patch({ amount: event.currentTarget.value.replace(/[^\d]/g, "") })}
+              onChange={(event) =>
+                patch({ amount: event.currentTarget.value.replace(/[^\d]/g, "") })
+              }
             />
             <span className="text-sm text-tertiary">
               {t("DashboardIssuance.config.capacityConfig.transferApprovals.amountSuffix")}
@@ -350,53 +447,204 @@ function TransferApprovalsFields({
       ) : null}
 
       <Field label={t("DashboardIssuance.config.capacityConfig.transferApprovals.approversLabel")}>
-        <div className="space-y-2">
-          {approvers.map((approver, index) => (
-            // Index key: the list is edited in place and never reordered.
-            <div key={index} className="flex items-center gap-2">
-              <input
-                type="text"
-                className={cn(INPUT_CLASS, "flex-1")}
-                value={approver}
-                placeholder={t(
-                  "DashboardIssuance.config.capacityConfig.transferApprovals.approverPlaceholder"
-                )}
-                disabled={disabled}
-                onChange={(event) => {
-                  const next = [...approvers];
-                  next[index] = event.currentTarget.value;
-                  patch({ approvers: next });
-                }}
-              />
-              <button
-                type="button"
-                disabled={disabled}
-                aria-label={t(
-                  "DashboardIssuance.config.capacityConfig.transferApprovals.removeApprover"
-                )}
-                onClick={() => patch({ approvers: approvers.filter((_, i) => i !== index) })}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border-default text-tertiary transition-colors hover:text-primary"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => patch({ approvers: [...approvers, ""] })}
-            className="inline-flex items-center gap-1 text-sm font-medium text-tertiary transition-colors hover:text-primary"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {t("DashboardIssuance.config.capacityConfig.transferApprovals.addApprover")}
-          </button>
-          <p className="text-xs text-tertiary">
-            {t("DashboardIssuance.config.capacityConfig.transferApprovals.approversHint")}
-          </p>
-        </div>
+        <RosterList
+          values={approvers}
+          disabled={disabled}
+          placeholder={t(
+            "DashboardIssuance.config.capacityConfig.transferApprovals.approverPlaceholder"
+          )}
+          addLabel={t("DashboardIssuance.config.capacityConfig.transferApprovals.addApprover")}
+          removeLabel={t(
+            "DashboardIssuance.config.capacityConfig.transferApprovals.removeApprover"
+          )}
+          hint={t("DashboardIssuance.config.capacityConfig.transferApprovals.approversHint")}
+          onChange={(next) => patch({ approvers: next })}
+        />
       </Field>
     </div>
   );
+}
+
+function RedemptionApprovalsFields({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: RedemptionApprovalsConfig | undefined;
+  onChange: (config: RedemptionApprovalsConfig) => void;
+  disabled?: boolean;
+}) {
+  const t = useTranslations();
+  const rule: RedemptionApprovalRule = value?.rule ?? "all";
+  const approvers = value?.approvers ?? [];
+  const patch = (next: Partial<RedemptionApprovalsConfig>) => onChange({ ...value, rule, ...next });
+
+  return (
+    <div className="space-y-4">
+      <Field label={t("DashboardIssuance.config.capacityConfig.redemptionApprovals.ruleLabel")}>
+        <Segmented
+          ariaLabel={t("DashboardIssuance.config.capacityConfig.redemptionApprovals.ruleLabel")}
+          value={rule}
+          disabled={disabled}
+          onChange={(next) => onChange({ ...value, rule: next as RedemptionApprovalRule })}
+          options={REDEMPTION_APPROVAL_RULE_OPTIONS.map((option) => ({
+            value: option.value,
+            label: t(option.labelKey),
+          }))}
+        />
+      </Field>
+
+      {rule === "above_amount" ? (
+        <Field label={t("DashboardIssuance.config.capacityConfig.redemptionApprovals.amountLabel")}>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              inputMode="numeric"
+              className={cn(INPUT_CLASS, "flex-1")}
+              value={value?.amount ?? ""}
+              placeholder={t(
+                "DashboardIssuance.config.capacityConfig.redemptionApprovals.amountPlaceholder"
+              )}
+              disabled={disabled}
+              onChange={(event) => patch({ amount: event.target.value.replace(/[^\d]/g, "") })}
+            />
+            <span className="text-sm text-tertiary">
+              {t("DashboardIssuance.config.capacityConfig.redemptionApprovals.amountSuffix")}
+            </span>
+          </div>
+        </Field>
+      ) : null}
+
+      <Field
+        label={t("DashboardIssuance.config.capacityConfig.redemptionApprovals.approversLabel")}
+      >
+        <RosterList
+          values={approvers}
+          disabled={disabled}
+          placeholder={t(
+            "DashboardIssuance.config.capacityConfig.redemptionApprovals.approverPlaceholder"
+          )}
+          addLabel={t("DashboardIssuance.config.capacityConfig.redemptionApprovals.addApprover")}
+          removeLabel={t(
+            "DashboardIssuance.config.capacityConfig.redemptionApprovals.removeApprover"
+          )}
+          hint={t("DashboardIssuance.config.capacityConfig.redemptionApprovals.approversHint")}
+          onChange={(next) => patch({ approvers: next })}
+        />
+      </Field>
+    </div>
+  );
+}
+
+function InvestorReportingFields({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: InvestorReportingConfig | undefined;
+  onChange: (config: InvestorReportingConfig) => void;
+  disabled?: boolean;
+}) {
+  const t = useTranslations();
+  const cadence: ReportingCadence = value?.cadence ?? "quarterly";
+  const recipients = value?.recipients ?? [];
+  const patch = (next: Partial<InvestorReportingConfig>) =>
+    onChange({ ...value, cadence, ...next });
+
+  return (
+    <div className="space-y-4">
+      <Field label={t("DashboardIssuance.config.capacityConfig.investorReporting.cadenceLabel")}>
+        <Segmented
+          ariaLabel={t("DashboardIssuance.config.capacityConfig.investorReporting.cadenceLabel")}
+          value={cadence}
+          disabled={disabled}
+          onChange={(next) => onChange({ ...value, cadence: next as ReportingCadence })}
+          options={REPORTING_CADENCE_OPTIONS.map((option) => ({
+            value: option.value,
+            label: t(option.labelKey),
+          }))}
+        />
+      </Field>
+
+      <Field label={t("DashboardIssuance.config.capacityConfig.investorReporting.formatLabel")}>
+        <select
+          className={INPUT_CLASS}
+          value={value?.format ?? ""}
+          disabled={disabled}
+          onChange={(event) =>
+            patch({ format: (event.target.value || undefined) as ReportingFormat | undefined })
+          }
+        >
+          <option value="">—</option>
+          {REPORTING_FORMAT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {t(option.labelKey)}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <Field label={t("DashboardIssuance.config.capacityConfig.investorReporting.recipientsLabel")}>
+        <RosterList
+          values={recipients}
+          disabled={disabled}
+          placeholder={t(
+            "DashboardIssuance.config.capacityConfig.investorReporting.recipientPlaceholder"
+          )}
+          addLabel={t("DashboardIssuance.config.capacityConfig.investorReporting.addRecipient")}
+          removeLabel={t(
+            "DashboardIssuance.config.capacityConfig.investorReporting.removeRecipient"
+          )}
+          hint={t("DashboardIssuance.config.capacityConfig.investorReporting.recipientsHint")}
+          onChange={(next) => patch({ recipients: next })}
+        />
+      </Field>
+    </div>
+  );
+}
+
+// Trim entries and drop empties from an optional roster.
+function cleanRoster(values: string[] | undefined): string[] {
+  return (values ?? []).map((value) => value.trim()).filter(Boolean);
+}
+
+function cleanTradingHours(c: TradingHoursConfig): TradingHoursConfig {
+  if (c.schedule === "24_7") {
+    return { schedule: "24_7" };
+  }
+  if (c.schedule === "market_hours") {
+    return { schedule: "market_hours", ...(c.timezone ? { timezone: c.timezone } : {}) };
+  }
+  return {
+    schedule: "custom",
+    ...(c.days?.length ? { days: c.days } : {}),
+    ...(c.open ? { open: c.open } : {}),
+    ...(c.close ? { close: c.close } : {}),
+    ...(c.timezone ? { timezone: c.timezone } : {}),
+  };
+}
+
+// Transfer + redemption approvals share the rule/amount/approvers shape.
+function cleanApprovals<Rule extends string>(c: {
+  rule: Rule;
+  amount?: string;
+  approvers?: string[];
+}): { rule: Rule; amount?: string; approvers?: string[] } {
+  const approvers = cleanRoster(c.approvers);
+  return {
+    rule: c.rule,
+    ...(c.rule === "above_amount" && c.amount ? { amount: c.amount } : {}),
+    ...(approvers.length ? { approvers } : {}),
+  };
+}
+
+function cleanInvestorReporting(c: InvestorReportingConfig): InvestorReportingConfig {
+  const recipients = cleanRoster(c.recipients);
+  return {
+    cadence: c.cadence,
+    ...(c.format ? { format: c.format } : {}),
+    ...(recipients.length ? { recipients } : {}),
+  };
 }
 
 // Drop fields that don't apply to the chosen mode and trim roster entries, so the
@@ -408,30 +656,16 @@ function cleanConfig(
   if (!config) {
     return undefined;
   }
-  if (capKey === "restrictTradingHours") {
-    const c = config as TradingHoursConfig;
-    if (c.schedule === "24_7") {
-      return { schedule: "24_7" };
-    }
-    if (c.schedule === "market_hours") {
-      return { schedule: "market_hours", ...(c.timezone ? { timezone: c.timezone } : {}) };
-    }
-    return {
-      schedule: "custom",
-      ...(c.days && c.days.length ? { days: c.days } : {}),
-      ...(c.open ? { open: c.open } : {}),
-      ...(c.close ? { close: c.close } : {}),
-      ...(c.timezone ? { timezone: c.timezone } : {}),
-    };
+  switch (capKey) {
+    case "restrictTradingHours":
+      return cleanTradingHours(config as TradingHoursConfig);
+    case "transferApprovals":
+      return cleanApprovals(config as TransferApprovalsConfig) as TransferApprovalsConfig;
+    case "redemptionApprovals":
+      return cleanApprovals(config as RedemptionApprovalsConfig) as RedemptionApprovalsConfig;
+    case "investorReporting":
+      return cleanInvestorReporting(config as InvestorReportingConfig);
+    default:
+      return config;
   }
-  if (capKey === "transferApprovals") {
-    const c = config as TransferApprovalsConfig;
-    const approvers = (c.approvers ?? []).map((a) => a.trim()).filter(Boolean);
-    return {
-      rule: c.rule,
-      ...(c.rule === "above_amount" && c.amount ? { amount: c.amount } : {}),
-      ...(approvers.length ? { approvers } : {}),
-    };
-  }
-  return config;
 }

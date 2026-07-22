@@ -7,6 +7,11 @@ import {
   type CapacitySelection,
   createInitialCapacities,
   type DraftState,
+  type InvestorReportingConfig,
+  type RedemptionApprovalRule,
+  type RedemptionApprovalsConfig,
+  type ReportingCadence,
+  type ReportingFormat,
   type TradingHoursConfig,
   type TradingHoursSchedule,
   type TransferApprovalRule,
@@ -570,6 +575,8 @@ export function getRecommendedCapacities(
 export const CONFIGURABLE_CAPACITIES: readonly CapacityKey[] = [
   "restrictTradingHours",
   "transferApprovals",
+  "redemptionApprovals",
+  "investorReporting",
 ];
 
 export function capacityHasConfig(key: CapacityKey): boolean {
@@ -583,6 +590,10 @@ export function defaultCapacityConfig(key: CapacityKey): CapacityConfig | undefi
       return { schedule: "market_hours" };
     case "transferApprovals":
       return { rule: "all" };
+    case "redemptionApprovals":
+      return { rule: "all" };
+    case "investorReporting":
+      return { cadence: "quarterly" };
     default:
       return undefined;
   }
@@ -603,6 +614,23 @@ export const TRANSFER_APPROVAL_RULE_OPTIONS = [
   { value: "new_counterparty", labelKey: cc("transferApprovals.ruleNewCounterparty") },
 ] as const satisfies readonly { value: TransferApprovalRule; labelKey: MessageKey }[];
 
+export const REDEMPTION_APPROVAL_RULE_OPTIONS = [
+  { value: "all", labelKey: cc("redemptionApprovals.ruleAll") },
+  { value: "above_amount", labelKey: cc("redemptionApprovals.ruleAbove") },
+] as const satisfies readonly { value: RedemptionApprovalRule; labelKey: MessageKey }[];
+
+export const REPORTING_CADENCE_OPTIONS = [
+  { value: "monthly", labelKey: cc("investorReporting.cadenceMonthly") },
+  { value: "quarterly", labelKey: cc("investorReporting.cadenceQuarterly") },
+  { value: "annual", labelKey: cc("investorReporting.cadenceAnnual") },
+] as const satisfies readonly { value: ReportingCadence; labelKey: MessageKey }[];
+
+export const REPORTING_FORMAT_OPTIONS = [
+  { value: "pdf", labelKey: cc("investorReporting.formatPdf") },
+  { value: "csv", labelKey: cc("investorReporting.formatCsv") },
+  { value: "xlsx", labelKey: cc("investorReporting.formatXlsx") },
+] as const satisfies readonly { value: ReportingFormat; labelKey: MessageKey }[];
+
 export const TIMEZONE_OPTIONS = [
   { value: "UTC", labelKey: cc("timezones.utc") },
   { value: "America/New_York", labelKey: cc("timezones.newYork") },
@@ -618,6 +646,51 @@ export const WEEKDAY_OPTIONS = WEEKDAYS.map((day) => ({
   labelKey: cc(`weekdays.${day}`),
 }));
 
+function summarizeTradingHours(c: TradingHoursConfig, t: Translate): string {
+  if (c.schedule === "24_7") {
+    return t(cc("tradingHours.summaryAlways"));
+  }
+  if (c.schedule === "market_hours") {
+    return t(cc("tradingHours.summaryMarket"));
+  }
+  const days = (c.days ?? []).map((day) => t(cc(`weekdays.${day}`))).join(" ");
+  if (!days) {
+    return t(cc("tradingHours.summaryUnset"));
+  }
+  return c.open && c.close
+    ? t(cc("tradingHours.summaryCustom"), { days, open: c.open, close: c.close })
+    : t(cc("tradingHours.summaryCustomDaysOnly"), { days });
+}
+
+// Shared by transfer + redemption approvals (same all/above-amount shape).
+function summarizeApprovalRule(
+  rule: string,
+  amount: string | undefined,
+  prefix: "transferApprovals" | "redemptionApprovals",
+  t: Translate
+): string {
+  if (rule === "all") {
+    return t(cc(`${prefix}.summaryAll`));
+  }
+  if (rule === "new_counterparty") {
+    return t(cc(`${prefix}.summaryNewCounterparty`));
+  }
+  return amount
+    ? t(cc(`${prefix}.summaryAbove`), { amount })
+    : t(cc(`${prefix}.summaryAboveUnset`));
+}
+
+function summarizeInvestorReporting(c: InvestorReportingConfig, t: Translate): string {
+  const cadenceOption = REPORTING_CADENCE_OPTIONS.find((option) => option.value === c.cadence);
+  const cadence = cadenceOption ? t(cadenceOption.labelKey) : c.cadence;
+  if (!c.format) {
+    return cadence;
+  }
+  const formatOption = REPORTING_FORMAT_OPTIONS.find((option) => option.value === c.format);
+  const format = formatOption ? t(formatOption.labelKey) : c.format;
+  return t(cc("investorReporting.summaryWithFormat"), { cadence, format });
+}
+
 // One-line summary of a capacity's current config for the card + review surfaces.
 // Returns null when there's nothing to summarize (unconfigured or no config form).
 export function summarizeCapacityConfig(
@@ -625,42 +698,25 @@ export function summarizeCapacityConfig(
   config: CapacityConfig | undefined,
   t: Translate
 ): string | null {
-  if (key === "restrictTradingHours") {
-    const c = config as TradingHoursConfig | undefined;
-    if (!c) {
-      return null;
-    }
-    if (c.schedule === "24_7") {
-      return t(cc("tradingHours.summaryAlways"));
-    }
-    if (c.schedule === "market_hours") {
-      return t(cc("tradingHours.summaryMarket"));
-    }
-    const days = (c.days ?? []).map((day) => t(cc(`weekdays.${day}`))).join(" ");
-    if (!days) {
-      return t(cc("tradingHours.summaryUnset"));
-    }
-    if (c.open && c.close) {
-      return t(cc("tradingHours.summaryCustom"), { days, open: c.open, close: c.close });
-    }
-    return t(cc("tradingHours.summaryCustomDaysOnly"), { days });
+  if (!config) {
+    return null;
   }
-  if (key === "transferApprovals") {
-    const c = config as TransferApprovalsConfig | undefined;
-    if (!c) {
+  switch (key) {
+    case "restrictTradingHours":
+      return summarizeTradingHours(config as TradingHoursConfig, t);
+    case "transferApprovals": {
+      const c = config as TransferApprovalsConfig;
+      return summarizeApprovalRule(c.rule, c.amount, "transferApprovals", t);
+    }
+    case "redemptionApprovals": {
+      const c = config as RedemptionApprovalsConfig;
+      return summarizeApprovalRule(c.rule, c.amount, "redemptionApprovals", t);
+    }
+    case "investorReporting":
+      return summarizeInvestorReporting(config as InvestorReportingConfig, t);
+    default:
       return null;
-    }
-    if (c.rule === "all") {
-      return t(cc("transferApprovals.summaryAll"));
-    }
-    if (c.rule === "new_counterparty") {
-      return t(cc("transferApprovals.summaryNewCounterparty"));
-    }
-    return c.amount
-      ? t(cc("transferApprovals.summaryAbove"), { amount: c.amount })
-      : t(cc("transferApprovals.summaryAboveUnset"));
   }
-  return null;
 }
 
 // Human label for an access-control mode (used in summary/review).
