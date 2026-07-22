@@ -8,6 +8,12 @@ import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
+/**
+ * From TEST-NET-3 (203.0.113.0/24, RFC 5737) — reserved for documentation and
+ * tests, never publicly routable. Must be a syntactically valid IP because
+ * getClientIp drops x-forwarded-for entries that fail isIP(), which would
+ * silently move these tests to the "unknown" bucket.
+ */
 const CLIENT_IP = "203.0.113.7";
 
 async function keyedRequest(): Promise<Response> {
