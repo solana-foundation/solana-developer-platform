@@ -27,6 +27,7 @@ export interface IssuanceFixtures {
   wallets: {
     treasury: IssuanceFixtureWallet;
     delegated: IssuanceFixtureWallet;
+    custodySignerWalletCount: number;
   };
   tokens: {
     pending: IssuanceFixtureToken;

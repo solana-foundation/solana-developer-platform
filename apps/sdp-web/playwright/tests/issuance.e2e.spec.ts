@@ -217,6 +217,7 @@ interface CreateDraftOptions {
   symbol: string;
   decimals: string;
   treasuryWalletId: string;
+  custodySignerWalletCount: number;
 }
 
 // Creating a draft goes through one of two UIs depending on the
@@ -258,8 +259,15 @@ async function createDraftViaWizard(page: Page, options: CreateDraftOptions): Pr
     .getByPlaceholder("Describe what this asset represents.")
     .fill("Created by Playwright issuance e2e.");
   await page.getByRole("tab", { name: "Operational", exact: true }).click();
-  await page.getByRole("combobox").click();
-  await page.getByRole("option").filter({ hasText: options.treasuryWalletId }).click();
+  // The signing-wallet field locks to the only wallet when the project has
+  // exactly one custody signer wallet (an identity card, no combobox) and
+  // renders a select otherwise. Assert the branch the fixtures dictate.
+  if (options.custodySignerWalletCount === 1) {
+    await expect(page.getByTestId("wallet-identity-card")).toContainText(options.treasuryWalletId);
+  } else {
+    await page.getByRole("combobox").click();
+    await page.getByRole("option").filter({ hasText: options.treasuryWalletId }).click();
+  }
   await page.getByRole("button", { name: "Continue", exact: true }).click();
 
   // Public information — defaults are fine.
@@ -350,6 +358,7 @@ test.describe
         symbol: draftSymbol,
         decimals: "7",
         treasuryWalletId: fixtures.wallets.treasury.walletId,
+        custodySignerWalletCount: fixtures.wallets.custodySignerWalletCount,
       });
 
       // Verify via the overview list, which is identical under either create UI
