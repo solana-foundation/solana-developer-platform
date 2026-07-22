@@ -178,7 +178,10 @@ export async function enforceRateLimit(
   identifier: string,
   maxRequests: number
 ): Promise<void> {
-  const kv = c.var.kv.rateLimits;
+  const kv = c.var.kv?.rateLimits;
+  if (!kv) {
+    return;
+  }
 
   const now = Date.now();
   const windowStart = Math.floor(now / RATE_LIMIT_WINDOW_MS) * RATE_LIMIT_WINDOW_MS;
