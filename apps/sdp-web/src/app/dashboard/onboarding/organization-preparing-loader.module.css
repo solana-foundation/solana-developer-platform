@@ -1,110 +1,115 @@
-.game {
+.stage {
   position: relative;
-  width: 11rem;
-  height: 11rem;
+  width: 13rem;
+  height: 10rem;
   border: 1px solid var(--border-l);
-  border-radius: 2.25rem;
+  border-radius: 2rem;
   background:
-    linear-gradient(var(--border-xl) 1px, transparent 1px),
-    linear-gradient(90deg, var(--border-xl) 1px, transparent 1px), var(--surface-sunken);
-  background-size: 2.75rem 2.75rem;
+    radial-gradient(circle at 50% 50%, var(--t3), transparent 58%), var(--surface-sunken);
   overflow: hidden;
 }
 
-.game::before,
-.game::after {
+.stage::before,
+.stage::after {
   position: absolute;
   content: "";
-  inset: 50% auto auto 50%;
-  width: 5.25rem;
-  height: 5.25rem;
+  top: 50%;
+  left: 50%;
+  width: 10.25rem;
+  height: 5.5rem;
   border: 1px solid var(--border-l);
   border-radius: 50%;
+  opacity: 0.7;
+  transform: translate(-50%, -50%) rotate(-12deg);
+}
+
+.stage::after {
+  width: 8rem;
+  height: 4rem;
+  border-color: var(--border-xl);
+  opacity: 0.55;
+  transform: translate(-50%, -50%) rotate(18deg);
+}
+
+.orbit {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 50%;
+  background: var(--emph-m);
+  box-shadow:
+    -4.6rem -1.6rem 0 -1px var(--emph-l),
+    4.4rem 1.5rem 0 -1px var(--emph-l);
+  opacity: 0.45;
   transform: translate(-50%, -50%);
-  animation: breathe 2.8s ease-in-out infinite;
 }
 
-.game::after {
-  width: 2.5rem;
-  height: 2.5rem;
-  background: var(--t4);
-  animation-delay: -1.4s;
-}
-
-.spark {
+.traveler {
   position: absolute;
   z-index: 1;
-  top: 1rem;
-  left: 1rem;
+  top: calc(50% - 1.7rem);
+  left: calc(50% - 1.9rem);
+  width: 3.8rem;
+  height: 3.4rem;
+  animation: logo-drift 8s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  will-change: transform;
+}
+
+.logoPlate {
   display: grid;
-  width: 2.75rem;
-  height: 2.75rem;
+  width: 100%;
+  height: 100%;
   place-items: center;
   border: 1px solid var(--border-m);
-  border-radius: 999px;
-  background: var(--emph-xh);
-  color: var(--on-primary);
-  cursor: pointer;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
-  animation: spark-tour 5.6s cubic-bezier(0.55, 0.1, 0.45, 0.9) infinite;
-  transition: scale 160ms ease-out;
+  border-radius: 1rem;
+  background: var(--surface-raised);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  animation: logo-float 2.6s ease-in-out infinite;
 }
 
-.spark:is(:hover, :focus-visible) {
-  animation-play-state: paused;
-  scale: 1.1;
+.logo {
+  width: 2.6rem;
+  height: auto;
 }
 
-.spark:active {
-  scale: 0.9;
-}
-
-.spark:focus-visible {
-  outline: 2px solid var(--emph-xh);
-  outline-offset: 3px;
-}
-
-.sparkIcon {
-  width: 1.15rem;
-  height: 1.15rem;
-}
-
-@keyframes spark-tour {
+@keyframes logo-drift {
   0%,
   100% {
-    transform: translate3d(0, 0, 0) rotate(0deg);
+    transform: translate3d(-4.1rem, -0.8rem, 0) rotate(-5deg);
   }
-  24% {
-    transform: translate3d(6.25rem, 0.65rem, 0) rotate(80deg);
+  22% {
+    transform: translate3d(-1.5rem, -2.5rem, 0) rotate(4deg);
   }
-  48% {
-    transform: translate3d(6rem, 6.25rem, 0) rotate(170deg);
+  46% {
+    transform: translate3d(4rem, -1rem, 0) rotate(-2deg);
   }
-  72% {
-    transform: translate3d(0.4rem, 6rem, 0) rotate(260deg);
+  70% {
+    transform: translate3d(2.25rem, 2.35rem, 0) rotate(5deg);
+  }
+  88% {
+    transform: translate3d(-2.8rem, 1.95rem, 0) rotate(-4deg);
   }
 }
 
-@keyframes breathe {
+@keyframes logo-float {
   0%,
   100% {
-    opacity: 0.45;
-    transform: translate(-50%, -50%) scale(0.9);
+    transform: translateY(-0.12rem);
   }
   50% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1.08);
+    transform: translateY(0.12rem);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .game::before,
-  .game::after,
-  .spark {
+  .traveler,
+  .logoPlate {
     animation: none;
   }
 
-  .spark {
-    transform: translate3d(3.1rem, 3.1rem, 0);
+  .traveler {
+    transform: translate3d(0, 0, 0);
   }
 }

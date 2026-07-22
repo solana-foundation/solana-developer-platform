@@ -38,6 +38,11 @@ describe("OrganizationOnboardingFlow", () => {
     expect(markup).toContain("QuickNode");
     expect(markup).toContain("Triton");
     expect(markup).toContain("Validation Cloud");
+    expect(markup).toContain("/provider-logos/alchemy.svg");
+    expect(markup).toContain("/provider-logos/helius.svg");
+    expect(markup).toContain("/provider-logos/quicknode.svg");
+    expect(markup).toContain("/provider-logos/triton.svg");
+    expect(markup).toContain("/provider-logos/validation-cloud.svg");
     expect(markup).not.toContain("SDP RPC");
     expect(markup.match(/aria-pressed="false"/g)).toHaveLength(5);
     expect(markup).toContain('data-organization-onboarding-actions="true"');

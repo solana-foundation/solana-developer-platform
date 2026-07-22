@@ -9,7 +9,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("OrganizationPreparingLoader", () => {
-  it("keeps provisioning details private and offers a playful wait state", () => {
+  it("keeps provisioning details private and shows an ambient Solana loader", () => {
     const markup = renderToStaticMarkup(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <OrganizationPreparingLoader />
@@ -17,9 +17,10 @@ describe("OrganizationPreparingLoader", () => {
     );
 
     expect(markup).toContain("Your workspace is tying its shoelaces");
-    expect(markup).toContain("Catch the moving spark");
-    expect(markup).toContain("Sparks caught: 0");
-    expect(markup).not.toContain("sync");
+    expect(markup).toContain("/landing/solana-logo.svg");
+    expect(markup).not.toContain("<button");
+    expect(markup).not.toContain("Sparks caught");
+    expect(markup).not.toContain("initial organization sync");
     expect(markup).not.toContain("Refresh this page");
   });
 });

@@ -1,8 +1,8 @@
 "use client";
 
-import { Sparkles } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useTranslations } from "@/i18n/provider";
 import styles from "./organization-preparing-loader.module.css";
 
@@ -11,7 +11,6 @@ const ORGANIZATION_STATUS_REFRESH_MS = 2_000;
 export function OrganizationPreparingLoader() {
   const t = useTranslations();
   const router = useRouter();
-  const [score, setScore] = useState(0);
 
   useEffect(() => {
     const refreshTimer = window.setInterval(() => {
@@ -24,24 +23,23 @@ export function OrganizationPreparingLoader() {
   return (
     <div className="flex h-full items-center justify-center px-6 py-10">
       <section className="flex w-full max-w-xl flex-col items-center text-center">
-        <div className={styles.game}>
-          <button
-            type="button"
-            className={styles.spark}
-            aria-label={t("DashboardCustody.onboardingPreparingCatch")}
-            onClick={() => setScore((current) => current + 1)}
-          >
-            <Sparkles className={styles.sparkIcon} aria-hidden="true" />
-          </button>
+        <div className={styles.stage} aria-hidden="true">
+          <div className={styles.orbit} />
+          <div className={styles.traveler}>
+            <div className={styles.logoPlate}>
+              <Image
+                src="/landing/solana-logo.svg"
+                alt=""
+                width={42}
+                height={38}
+                className={`${styles.logo} dark:invert`}
+                priority
+              />
+            </div>
+          </div>
         </div>
 
-        <p
-          className="mt-5 text-xs font-medium tracking-[0.12em] text-muted uppercase"
-          aria-live="polite"
-        >
-          {t("DashboardCustody.onboardingPreparingScore", { count: score })}
-        </p>
-        <h1 className="mt-6 text-balance text-[30px] leading-tight font-medium tracking-tight text-primary md:text-[36px]">
+        <h1 className="mt-7 text-balance text-[30px] leading-tight font-medium tracking-tight text-primary md:text-[36px]">
           {t("DashboardCustody.onboardingPreparingTitle")}
         </h1>
         <p className="mt-3 max-w-md text-sm leading-6 text-tertiary md:text-base">

@@ -1,7 +1,7 @@
 "use client";
 
 import type { CustodyProvider, OrganizationRpcProvider } from "@sdp/types";
-import { ArrowLeft, ArrowRight, Server } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { type FormEvent, useMemo, useState, useTransition } from "react";
 import {
   CUSTODY_PROVIDER_CATALOG,
@@ -14,6 +14,7 @@ import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { completeOrganizationOnboardingAction, saveOnboardingRpcAction } from "./actions";
+import { RpcProviderMark } from "./rpc-provider-mark";
 
 const RPC_LABELS: Record<OrganizationRpcProvider, string> = {
   alchemy: "Alchemy",
@@ -159,7 +160,7 @@ export function OrganizationOnboardingFlow({
                     setRpcProvider(provider);
                     setErrorMessage(null);
                   }}
-                  icon={<Server className="size-5" strokeWidth={1.8} />}
+                  icon={<RpcProviderMark provider={provider} />}
                   title={RPC_LABELS[provider]}
                   description={t(RPC_DESCRIPTION_KEYS[provider])}
                 />
