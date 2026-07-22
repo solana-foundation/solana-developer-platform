@@ -1,14 +1,9 @@
-/**
- * Rate Limiting Middleware
- *
- * Uses an approximate sliding window counter stored in KV.
- * Different tiers have different limits.
- */
-
+import type { RateLimitTier } from "@sdp/types";
 import type { Context, Next } from "hono";
+import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { getClientIp } from "@/lib/client-ip";
-import { AppError } from "@/lib/errors";
+import { rateLimited } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import { matchesFreePath } from "./path-match";
 
@@ -17,9 +12,9 @@ interface RateLimitConfig {
   maxRequests: number;
 }
 
-const RATE_LIMIT_TIERS: Record<string, RateLimitConfig> = {
+const RATE_LIMIT_TIERS = {
   standard: {
-    windowMs: 60_000, // 1 minute
+    windowMs: 60_000,
     maxRequests: 100,
   },
   elevated: {
@@ -30,12 +25,23 @@ const RATE_LIMIT_TIERS: Record<string, RateLimitConfig> = {
     windowMs: 60_000,
     maxRequests: 10_000,
   },
-};
+} as const satisfies Record<RateLimitTier, RateLimitConfig>;
 
-// Fallback for unauthenticated requests
 const ANONYMOUS_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
   maxRequests: 20,
+};
+
+/**
+ * Per-IP ceiling for requests that present an sk_-shaped credential. Keyed
+ * traffic gets its real limit per key id after auth (enforceApiKeyRateLimit),
+ * so the anonymous limit must not apply — it would cap every tier at 20/min
+ * per IP. The key is unverified at this point, so a high IP ceiling still
+ * bounds invalid-key spray against the KV/DB lookup in auth.
+ */
+const KEYED_IP_BACKSTOP: RateLimitConfig = {
+  windowMs: 60_000,
+  maxRequests: 10_000,
 };
 
 interface RateLimitState {
@@ -43,9 +49,6 @@ interface RateLimitState {
   windowStart: number;
 }
 
-/**
- * Get the window key
- */
 function getWindowKey(identifier: string, windowStart: number): string {
   return `ratelimit:${identifier}:${windowStart}`;
 }
@@ -113,26 +116,93 @@ async function isVerifiedClerkJwt(c: Context<{ Bindings: Env }>, token: string):
 }
 
 /**
- * Rate limiting middleware
+ * Enforces an approximate sliding-window rate limit for the identifier: reads
+ * the current + previous window counters from KV, weights the previous window
+ * by elapsed time, sets X-RateLimit-* headers, throws RATE_LIMITED when the
+ * estimate reaches the cap, and increments the current window (TTL 2x window).
+ * A failed counter write logs and fails open.
+ */
+async function enforceRateLimit(
+  c: Context<{ Bindings: Env }>,
+  identifier: string,
+  config: RateLimitConfig
+): Promise<void> {
+  const kv = c.var.kv.rateLimits;
+
+  const now = Date.now();
+  const windowStart = getWindowStart(now, config.windowMs);
+  const previousWindowStart = windowStart - config.windowMs;
+
+  const windowKey = getWindowKey(identifier, windowStart);
+  const previousWindowKey = getWindowKey(identifier, previousWindowStart);
+
+  const [current, previous] = await Promise.all([
+    kv.get<RateLimitState>(windowKey, "json"),
+    kv.get<RateLimitState>(previousWindowKey, "json"),
+  ]);
+
+  const currentCount = current?.count || 0;
+  const previousCount = previous?.count || 0;
+  const elapsed = now - windowStart;
+  const previousWeight = Math.max(0, 1 - elapsed / config.windowMs);
+  const estimatedCount = currentCount + previousCount * previousWeight;
+
+  c.header("X-RateLimit-Limit", config.maxRequests.toString());
+  c.header(
+    "X-RateLimit-Remaining",
+    Math.max(0, Math.floor(config.maxRequests - (estimatedCount + 1))).toString()
+  );
+  const resetAtSeconds = Math.ceil((windowStart + config.windowMs) / 1000);
+  c.header("X-RateLimit-Reset", resetAtSeconds.toString());
+
+  if (estimatedCount >= config.maxRequests) {
+    const retryAfter = Math.max(1, Math.ceil((windowStart + config.windowMs - now) / 1000));
+    c.header("Retry-After", retryAfter.toString());
+    throw rateLimited(`Rate limit exceeded. Retry after ${retryAfter} seconds.`);
+  }
+
+  const newState: RateLimitState = {
+    count: currentCount + 1,
+    windowStart,
+  };
+
+  try {
+    await kv.put(windowKey, JSON.stringify(newState), {
+      expirationTtl: Math.ceil((config.windowMs * 2) / 1000),
+    });
+  } catch (err) {
+    console.error("Failed to update rate limit:", err);
+  }
+}
+
+/**
+ * Enforces the API key's tier limit, keyed by key id. Called by the auth
+ * middleware once the key is resolved (KV cache or DB), because the global
+ * rateLimitMiddleware runs before route-level auth and never sees the key.
+ */
+export async function enforceApiKeyRateLimit(
+  c: Context<{ Bindings: Env }>,
+  apiKeyId: string,
+  tier: RateLimitTier
+): Promise<void> {
+  await enforceRateLimit(c, apiKeyId, RATE_LIMIT_TIERS[tier]);
+}
+
+/**
+ * Pre-auth rate limiting middleware: verified Clerk dashboard JWTs are
+ * exempt, sk_-shaped requests get the high per-IP backstop (their real limit
+ * is enforced per key after auth via enforceApiKeyRateLimit), everything else
+ * gets the anonymous per-IP limit.
  *
  * Requires c.var.kv to be populated (by kvStoreMiddleware). Any path that
  * kv-store skips must also be skipped here via skipRateLimitPaths — the
- * `c.var.kv.rateLimits` deref below has no guard.
+ * `c.var.kv.rateLimits` deref has no guard.
  */
 export function rateLimitMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const kv = c.var.kv.rateLimits;
-    const auth = c.get("apiKey");
     const bearerToken = extractBearerToken(c);
 
-    // Clerk-authenticated dashboard traffic is not rate-limited.
-    // Only bypass when the bearer token verifies as a Clerk JWT.
-    if (
-      !auth &&
-      bearerToken &&
-      looksLikeJwt(bearerToken) &&
-      looksLikeClerkJwt(bearerToken, c.env)
-    ) {
+    if (bearerToken && looksLikeJwt(bearerToken) && looksLikeClerkJwt(bearerToken, c.env)) {
       const isClerkToken = await isVerifiedClerkJwt(c, bearerToken);
       if (isClerkToken) {
         await next();
@@ -140,70 +210,14 @@ export function rateLimitMiddleware() {
       }
     }
 
-    // Determine rate limit tier
-    let identifier: string;
-    let config: RateLimitConfig;
+    const apiKey = extractApiKey(c);
+    const presentsApiKey = apiKey !== null && looksLikeApiKey(apiKey);
 
-    if (auth) {
-      identifier = auth.id;
-      const tier = auth.role === "api_admin" ? "unlimited" : "standard";
-      config = RATE_LIMIT_TIERS[tier] || RATE_LIMIT_TIERS.standard;
-    } else {
-      // Use IP for anonymous requests
-      identifier = getClientIp(c) ?? "unknown";
-      config = ANONYMOUS_LIMIT;
-    }
-
-    const now = Date.now();
-    const windowStart = getWindowStart(now, config.windowMs);
-    const previousWindowStart = windowStart - config.windowMs;
-
-    const windowKey = getWindowKey(identifier, windowStart);
-    const previousWindowKey = getWindowKey(identifier, previousWindowStart);
-
-    // Get current + previous window counts for sliding window approximation
-    const [current, previous] = await Promise.all([
-      kv.get<RateLimitState>(windowKey, "json"),
-      kv.get<RateLimitState>(previousWindowKey, "json"),
-    ]);
-
-    const currentCount = current?.count || 0;
-    const previousCount = previous?.count || 0;
-    const elapsed = now - windowStart;
-    const previousWeight = Math.max(0, 1 - elapsed / config.windowMs);
-    const estimatedCount = currentCount + previousCount * previousWeight;
-
-    // Set rate limit headers
-    c.header("X-RateLimit-Limit", config.maxRequests.toString());
-    c.header(
-      "X-RateLimit-Remaining",
-      Math.max(0, Math.floor(config.maxRequests - (estimatedCount + 1))).toString()
+    await enforceRateLimit(
+      c,
+      getClientIp(c) ?? "unknown",
+      presentsApiKey ? KEYED_IP_BACKSTOP : ANONYMOUS_LIMIT
     );
-    const resetAtSeconds = Math.ceil((windowStart + config.windowMs) / 1000);
-    c.header("X-RateLimit-Reset", resetAtSeconds.toString());
-
-    // Check limit
-    if (estimatedCount >= config.maxRequests) {
-      const retryAfter = Math.max(1, Math.ceil((windowStart + config.windowMs - now) / 1000));
-      c.header("Retry-After", retryAfter.toString());
-      throw new AppError("RATE_LIMITED", `Rate limit exceeded. Retry after ${retryAfter} seconds.`);
-    }
-
-    // Increment counter for the current window
-    const newState: RateLimitState = {
-      count: currentCount + 1,
-      windowStart,
-    };
-
-    // TTL is 2x window to ensure cleanup
-    try {
-      await kv.put(windowKey, JSON.stringify(newState), {
-        expirationTtl: Math.ceil((config.windowMs * 2) / 1000),
-      });
-    } catch (err) {
-      console.error("Failed to update rate limit:", err);
-    }
-
     await next();
   };
 }

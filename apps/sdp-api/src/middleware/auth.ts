@@ -20,9 +20,11 @@ import {
   parsePostgresJson,
   parsePostgresJsonOr,
 } from "@/db/postgres-utils";
+import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { AppError } from "@/lib/errors";
 import type { KVStore } from "@/runtime/kv";
 import type { Env } from "@/types/env";
+import { enforceApiKeyRateLimit } from "./rate-limit";
 
 const KV_TTL_SECONDS = 3600; // 1 hour cache
 const NODE_LAST_USED_WRITE_INTERVAL_MS = 5 * 60_000;
@@ -51,27 +53,6 @@ interface ApiKeyContext {
   walletBindings: ApiKeyWalletBinding[];
 }
 
-/**
- * Extract API key from Authorization header
- */
-function extractApiKey(c: Context<{ Bindings: Env }>): string | null {
-  const authHeader = c.req.header("Authorization");
-  if (!authHeader) {
-    return null;
-  }
-
-  // Support both "Bearer sk_xxx" and just "sk_xxx"
-  if (authHeader.startsWith("Bearer ")) {
-    return authHeader.slice(7);
-  }
-
-  if (authHeader.startsWith("sk_")) {
-    return authHeader;
-  }
-
-  return null;
-}
-
 function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
   const authHeader = c.req.header("Authorization");
   if (!authHeader) {
@@ -83,10 +64,6 @@ function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
   }
 
   return authHeader.slice(7);
-}
-
-function looksLikeApiKey(token: string): boolean {
-  return token.startsWith("sk_");
 }
 
 function looksLikeJwt(token: string): boolean {
@@ -370,6 +347,8 @@ export function authMiddleware() {
       throw new AppError("EXPIRED_API_KEY");
     }
 
+    await enforceApiKeyRateLimit(c, cachedKey.id, cachedKey.rateLimitTier);
+
     // Set auth context
     const normalizedWalletBindings = normalizeWalletBindings(cachedKey);
 
@@ -436,12 +415,15 @@ export function optionalAuth() {
     const apiKey = extractApiKey(c);
 
     if (apiKey && looksLikeApiKey(apiKey)) {
-      // Reuse the main auth logic but catch errors
+      // Reuse the main auth logic; swallow auth failures (the key is optional)
+      // but never rate limiting — a limited key must not proceed as anonymous.
       try {
         const authMw = authMiddleware();
         await authMw(c, async () => {});
-      } catch {
-        // Ignore auth errors for optional auth
+      } catch (error) {
+        if (error instanceof AppError && error.code === "RATE_LIMITED") {
+          throw error;
+        }
       }
     }
 
