@@ -31,7 +31,7 @@ const coinbaseFrameEventSchema = z.discriminatedUnion("eventName", [
   }),
 ]);
 
-type CoinbaseFrameEvent = z.infer<typeof coinbaseFrameEventSchema>;
+export type CoinbaseFrameEvent = z.infer<typeof coinbaseFrameEventSchema>;
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 /**
@@ -85,12 +85,19 @@ function reportRampEvent(event: CoinbaseRampEvent, t: Translate): void {
  * ERROR_CODE_GUEST_APPLE_PAY_NOT_SUPPORTED is followed by a successful QR-code fallback
  * render on web.
  *
+ * Returns the parsed event (null for foreign messages) so the frame can react to
+ * UI-phase transitions like `apple_pay_button_pressed` and `cancel`.
+ *
  * @see https://docs.cdp.coinbase.com/onramp/headless-onramp/overview#post-message-events
  */
-export function handleCoinbaseFrameEvent(orderId: string, raw: unknown, t: Translate): void {
+export function handleCoinbaseFrameEvent(
+  orderId: string,
+  raw: unknown,
+  t: Translate
+): CoinbaseFrameEvent | null {
   const event = parseCoinbaseFrameEvent(raw);
   if (!event) {
-    return;
+    return null;
   }
   switch (event.eventName) {
     case "onramp_api.commit_success":
@@ -115,4 +122,5 @@ export function handleCoinbaseFrameEvent(orderId: string, raw: unknown, t: Trans
       throw new Error(`Unhandled Coinbase frame event: ${JSON.stringify(exhaustive)}`);
     }
   }
+  return event;
 }

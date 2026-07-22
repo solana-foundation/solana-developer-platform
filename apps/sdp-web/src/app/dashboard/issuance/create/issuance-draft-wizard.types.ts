@@ -19,18 +19,25 @@ export const WIZARD_STEP_META: readonly WizardStepMeta[] = [
 
 export type AccessControlMode = "allowlist" | "blocklist" | "disabled";
 
-// Optional lifecycle capacities (the "Advanced (Recommended)" collapse). Stored
-// under compliance.capacities.* in the issuance metadata.
+// Off-chain compliance capacities (the "Advanced (Recommended)" collapse). Stored
+// under compliance.capacities.* in the issuance metadata. On-chain, extension-
+// backed controls (e.g. freeze via the pausable extension) live in the advanced
+// settings editor instead (issuance_metadata.settings), not here.
 export const CAPACITY_KEYS = [
   "kyc",
   "restrictTradingHours",
-  "freezeTransfers",
   "issueRetireControls",
   "redemptionApprovals",
   "investorReporting",
   "transferApprovals",
 ] as const;
 export type CapacityKey = (typeof CAPACITY_KEYS)[number];
+
+// Selected advanced (Token-2022) settings, keyed by settingKey from the
+// @sdp/issuance/capabilities catalog. Presence = enabled; `params` holds expert
+// override values as strings (form inputs). Persisted under
+// issuance_metadata.settings.selected.
+export type AdvancedSettingsDraft = Record<string, { params?: Record<string, string> }>;
 
 export interface DocumentRow {
   id: string;
@@ -66,18 +73,38 @@ export interface DraftState {
   reserveAsset: string;
   reserveCustodian: string;
   redemptionEnabled: boolean;
+  // Step 2 — crypto-backed stablecoin collateral & oracle (over-collateralized,
+  // on-chain backing rather than off-chain fiat reserves)
+  collateralizationRatio: string;
+  oracleProvider: string;
+  minCollateralRatio: string;
   // Step 2 — tokenized-security details
   issuerName: string;
   jurisdiction: string;
   offeringType: string;
+  // Step 2 — tokenized-security instrument terms (per sub-type: equity / debt /
+  // fund)
+  shareClass: string;
+  votingRights: boolean;
+  couponRate: string;
+  maturityDate: string;
+  seniority: string;
+  fundStrategy: string;
+  managementFee: string;
+  netAssetValue: string;
   // Step 2 — non-security digital asset details
   underlyingAsset: string;
   custodian: string;
+  // Step 2 — tokenized real-estate details
+  propertyType: string;
+  propertyLocation: string;
   // Step 2 — documents & references
   documents: DocumentRow[];
   // Step 2 — compliance & access
   accessControl: AccessControlMode | "";
   capacities: Record<CapacityKey, boolean>;
+  // Step 2 — advanced (on-chain) settings (issuance_metadata.settings)
+  advancedSettings: AdvancedSettingsDraft;
   // Step 2 — operational
   signingWalletId: string;
   metadataUri: string;
@@ -93,7 +120,6 @@ export function createInitialCapacities(): Record<CapacityKey, boolean> {
   return {
     kyc: false,
     restrictTradingHours: false,
-    freezeTransfers: false,
     issueRetireControls: false,
     redemptionApprovals: false,
     investorReporting: false,
@@ -117,14 +143,28 @@ export function createInitialDraft(): DraftState {
     reserveAsset: "",
     reserveCustodian: "",
     redemptionEnabled: false,
+    collateralizationRatio: "",
+    oracleProvider: "",
+    minCollateralRatio: "",
     issuerName: "",
     jurisdiction: "",
     offeringType: "",
+    shareClass: "",
+    votingRights: false,
+    couponRate: "",
+    maturityDate: "",
+    seniority: "",
+    fundStrategy: "",
+    managementFee: "",
+    netAssetValue: "",
     underlyingAsset: "",
     custodian: "",
+    propertyType: "",
+    propertyLocation: "",
     documents: [],
     accessControl: "",
     capacities: createInitialCapacities(),
+    advancedSettings: {},
     signingWalletId: "",
     metadataUri: "",
     customFields: [],

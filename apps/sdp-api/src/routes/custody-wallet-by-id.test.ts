@@ -8,7 +8,7 @@ import * as heliusDasService from "@/services/helius-das.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
@@ -193,7 +193,7 @@ describe("Custody wallet by ID route", () => {
 
   afterEach(async () => {
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
   });
 
   it("returns wallet metadata and SOL balance for a wallet across active providers", async () => {

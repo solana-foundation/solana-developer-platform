@@ -1,13 +1,13 @@
 /**
- * Master list of every env key the SDP API reads. The routing lists below are
- * all derived from it, so adding a key here is what makes it flow to local
- * wrangler dev (dev-local.mjs), the Cloudflare secret sync, and the
- * self-hosted docker env file. A key absent from this list reaches nothing.
+ * Master list of every env key the SDP API reads. The local development and
+ * self-hosted Docker projections derive from it, so a key absent from this
+ * list reaches neither surface.
  */
 export const API_LOCAL_ENV_KEYS = [
   "DATABASE_URL",
   "REDIS_URL",
-  "SDP_RUNTIME",
+  "PUBLIC_API_ORIGIN",
+  "DISABLE_CRON",
   "SENTRY_DSN",
   "SENTRY_TRACES_SAMPLE_RATE",
   "SDP_DEPLOYMENT_MODE",
@@ -157,11 +157,10 @@ export const API_LOCAL_ENV_KEYS = [
 ];
 
 /**
- * Keys that must never reach a deployed Worker: deployed workers connect to
- * Postgres through the Hyperdrive binding (not a raw DATABASE_URL), and the
- * rest are local test/mock switches.
+ * Keys supplied directly by Docker Compose or reserved for local tests, so
+ * they must not be copied into the generated self-hosted Docker env file.
  */
-export const LOCAL_ONLY_API_ENV_KEYS = new Set([
+const DOCKER_EXCLUDED_API_ENV_KEYS = new Set([
   "DATABASE_URL",
   "REDIS_URL",
   "SOLANA_MOCK",
@@ -169,44 +168,10 @@ export const LOCAL_ONLY_API_ENV_KEYS = new Set([
 ]);
 
 /**
- * Keys deployed as plain Wrangler vars (committed defaults for dev and
- * rendered from Doppler for production), so they are excluded from the
- * Cloudflare secret sync. Everything else Doppler defines reaches deployed
- * Workers as a secret.
- */
-export const COMMITTED_WORKER_VAR_KEYS = new Set([
-  "SDP_RUNTIME",
-  "SDP_DEPLOYMENT_MODE",
-  "EMAIL_FROM",
-  "SOLANA_NETWORK",
-  "SOLANA_RPC_URL",
-  "SOLANA_RPC_DEFAULT_PROVIDER",
-  "SOLANA_RPC_TRITON_URL",
-  "SOLANA_RPC_HELIUS_URL",
-  "SOLANA_RPC_ALCHEMY_URL",
-  "SOLANA_RPC_QUICKNODE_URL",
-  "SOLANA_RPC_VALIDATIONCLOUD_URL",
-  "FEE_PAYMENT_PROVIDER",
-  "KORA_RPC_URL",
-  "PAYMENTS_RECURRING_COLLECTION_ENABLED",
-  "PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE",
-  "PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES",
-]);
-
-/**
- * Keys the deploy workflow syncs to deployed Workers as secrets via
- * `wrangler secret bulk` (project-secrets.mjs `cloudflare`/`cloudflare-batches`).
- * Only keys with a value in the Doppler config actually sync.
- */
-export const CLOUDFLARE_SECRET_KEYS = API_LOCAL_ENV_KEYS.filter(
-  (key) => !LOCAL_ONLY_API_ENV_KEYS.has(key) && !COMMITTED_WORKER_VAR_KEYS.has(key)
-);
-
-/**
  * Keys the self-hosted docker env file ships (project-secrets.mjs `docker`).
- * Docker has no wrangler.toml, so COMMITTED_WORKER_VAR_KEYS must ship inside
- * the env file alongside true secrets.
+ * Connection URLs are composed by the stack itself, while test-only switches
+ * remain local.
  */
 export const DOCKER_ENV_KEYS = API_LOCAL_ENV_KEYS.filter(
-  (key) => !LOCAL_ONLY_API_ENV_KEYS.has(key)
+  (key) => !DOCKER_EXCLUDED_API_ENV_KEYS.has(key)
 );

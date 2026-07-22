@@ -12,7 +12,7 @@ import {
   type ParsedTransaction,
   simulateTransaction,
 } from "@sdp/rpc/solana";
-import type { TokenResponse } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS, type TokenResponse } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -353,7 +353,10 @@ export const deployToken = async (c: AppContext) => {
         // points each environment at itself.
         uri:
           token.uri?.trim() ||
-          canonicalMetadataUrl(resolveMetadataOrigin(c.env, c.req.url), token.id),
+          canonicalMetadataUrl(
+            resolveMetadataOrigin(c.env, c.req.url, c.req.header("x-forwarded-proto")),
+            token.id
+          ),
       },
       decimals: token.decimals,
       mintAuthority: signer,
@@ -513,7 +516,11 @@ export const prepareDeploy = async (c: AppContext) => {
 
   // See deployToken above: SDP-hosted metadata fallback (HOO-466).
   const resolvedUri =
-    token.uri?.trim() || canonicalMetadataUrl(resolveMetadataOrigin(c.env, c.req.url), token.id);
+    token.uri?.trim() ||
+    canonicalMetadataUrl(
+      resolveMetadataOrigin(c.env, c.req.url, c.req.header("x-forwarded-proto")),
+      token.id
+    );
 
   const buildMetadata = (uri: string) => ({ name: token.name, symbol: token.symbol, uri });
   const prepareOptions = {
@@ -585,16 +592,15 @@ export const prepareDeploy = async (c: AppContext) => {
 // carries one targeting that mint. jsonParsed decodes both legacy `spl-token`
 // and `spl-token-2022` programs under the same instruction `type`.
 const MINT_INIT_INSTRUCTION_TYPES = new Set(["initializeMint", "initializeMint2"]);
+const TOKEN_PROGRAM_IDS = new Set<string>(Object.values(SPL_TOKEN_PROGRAMS));
 
-/**
- * Whether `tx` contains an instruction that initializes `mint` — i.e. the
- * transaction actually created this mint, rather than merely referencing or
- * coexisting with it. Used by `confirmDeploy` to bind a confirmed signature to
- * the mint a caller claims it produced.
- */
-const transactionInitializesMint = (tx: ParsedTransaction, mint: Address): boolean =>
-  tx.instructions.some(
+const findMintInitialization = (
+  tx: ParsedTransaction,
+  mint: Address
+): ParsedTransaction["instructions"][number] | undefined =>
+  tx.instructions.find(
     (ix) =>
+      TOKEN_PROGRAM_IDS.has(ix.programId) &&
       ix.parsedType !== null &&
       MINT_INIT_INSTRUCTION_TYPES.has(ix.parsedType) &&
       ix.info?.mint === mint
@@ -695,7 +701,8 @@ export const confirmDeploy = async (c: AppContext) => {
     );
   }
 
-  if (!transactionInitializesMint(confirmedTx, mint)) {
+  const mintInitialization = findMintInitialization(confirmedTx, mint);
+  if (!mintInitialization) {
     throw badRequest("Deploy transaction did not create this mint");
   }
 
@@ -714,6 +721,13 @@ export const confirmDeploy = async (c: AppContext) => {
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const custodyAddress = signer.address;
   const freezeAuthority = token.isFreezable ? custodyAddress : null;
+
+  if (
+    mintInitialization.info?.mintAuthority !== custodyAddress ||
+    (mintInitialization.info?.freezeAuthority ?? null) !== freezeAuthority
+  ) {
+    throw badRequest("Deploy transaction did not use the expected mint authorities");
+  }
 
   // Re-derive the ABL list address server-side instead of trusting the request
   // body's `listAddress`: for allowlist/blocklist tokens a wrong value would
@@ -811,7 +825,11 @@ export const prepareDeployMetadata = async (c: AppContext) => {
   // Resolve the same uri prepareDeploy used so the on-chain pointer ends up at
   // the SDP-hosted (or issuer-supplied) URL.
   const resolvedUri =
-    token.uri?.trim() || canonicalMetadataUrl(resolveMetadataOrigin(c.env, c.req.url), token.id);
+    token.uri?.trim() ||
+    canonicalMetadataUrl(
+      resolveMetadataOrigin(c.env, c.req.url, c.req.header("x-forwarded-proto")),
+      token.id
+    );
 
   const prepared = await mosaic.prepareUpdateMetadata({
     mint: token.mintAddress as Address,

@@ -1,13 +1,14 @@
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import { AppError } from "@/lib/errors";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { rateLimitMiddleware } from "@/middleware/rate-limit";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVNamespaces } from "@/test/mocks/kv";
+import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 const TEST_ORG = {
@@ -85,11 +86,40 @@ describe("Clerk auth request cache", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
     env.CLERK_ISSUER = undefined;
     env.CLERK_JWKS_URL = undefined;
+    env.CLERK_SECRET_KEY = undefined;
+    env.CLERK_API_URL = undefined;
   });
+
+  function createProtectedApp(payload: ClerkJwtPayload) {
+    const token = createJwt(payload);
+    const app = new Hono<{ Bindings: Env }>();
+
+    app.use("*", kvStoreMiddleware());
+    app.use("*", async (c, next) => {
+      c.set("verifiedClerkJwt", { token, payload });
+      await next();
+    });
+    app.use("*", rateLimitMiddleware());
+    app.use("*", unifiedAuthMiddleware({ allowClerk: true }));
+    app.get("/protected", requirePermissions("org:read"), (c) => {
+      return c.json({
+        organizationId: c.get("clerk")?.organizationId ?? null,
+      });
+    });
+    app.onError((error, c) => {
+      if (error instanceof AppError) {
+        return c.json(error.toResponse(), error.statusCode as 401 | 403);
+      }
+      throw error;
+    });
+
+    return { app, token };
+  }
 
   it("reuses a cached Clerk JWT across rate limiting and auth in one request", async () => {
     const payload: ClerkJwtPayload = {
@@ -100,26 +130,9 @@ describe("Clerk auth request cache", () => {
       email: "clerk-cache@example.com",
       iss: "https://clerk.example.test",
     };
-    const token = createJwt(payload);
-
     env.CLERK_ISSUER = payload.iss;
     env.CLERK_JWKS_URL = undefined;
-
-    const app = new Hono<{ Bindings: Env }>();
-
-    app.use("*", kvStoreMiddleware());
-    app.use("*", async (c, next) => {
-      c.set("verifiedClerkJwt", { token, payload });
-      await next();
-    });
-    app.use("*", rateLimitMiddleware());
-    app.use("*", unifiedAuthMiddleware({ allowClerk: true }));
-
-    app.get("/protected", requirePermissions("org:read"), (c) => {
-      return c.json({
-        organizationId: c.get("clerk")?.organizationId ?? null,
-      });
-    });
+    const { app, token } = createProtectedApp(payload);
 
     const res = await app.request(
       "/protected",
@@ -135,5 +148,233 @@ describe("Clerk auth request cache", () => {
     expect(await res.json()).toEqual({
       organizationId: TEST_ORG.id,
     });
+
+    const projects = await getDb(env)
+      .prepare("SELECT slug FROM projects WHERE organization_id = ? ORDER BY slug")
+      .bind(TEST_ORG.id)
+      .all<{ slug: string }>();
+    expect(projects.results.map((project) => project.slug)).toEqual([
+      "default-production",
+      "default-sandbox",
+    ]);
+  });
+
+  it("rejects a stale Clerk JWT after the local organization membership is removed", async () => {
+    await getDb(env)
+      .prepare(
+        "UPDATE organization_members SET status = 'removed' WHERE organization_id = ? AND user_id = ?"
+      )
+      .bind(TEST_ORG.id, "usr_clerk_cached")
+      .run();
+
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_cached",
+      org_id: "clerk_org_cached",
+      org_role: "org:admin",
+      org_slug: TEST_ORG.slug,
+      email: "clerk-cache@example.com",
+      iss: "https://clerk.example.test",
+    };
+    const { app, token } = createProtectedApp(payload);
+
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(401);
+    const membership = await getDb(env)
+      .prepare("SELECT status FROM organization_members WHERE organization_id = ? AND user_id = ?")
+      .bind(TEST_ORG.id, "usr_clerk_cached")
+      .first<{ status: string }>();
+    expect(membership?.status).toBe("removed");
+  });
+
+  it("does not link a first-time Clerk identity until its primary email is verified", async () => {
+    await getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+      .bind("usr_email_collision_target", "collision-target@example.com")
+      .run();
+
+    env.CLERK_SECRET_KEY = "sk_test_clerk_auth_user_lookup";
+    env.CLERK_API_URL = "https://clerk.example.test/v1";
+    let verificationStatus = "unverified";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      expect(url).toBe(`${env.CLERK_API_URL}/users/clerk_user_first_login`);
+      return new Response(
+        JSON.stringify({
+          id: "clerk_user_first_login",
+          primary_email_address_id: "email_primary",
+          email_addresses: [
+            {
+              id: "email_primary",
+              email_address: "collision-target@example.com",
+              verification: { status: verificationStatus },
+            },
+            {
+              id: "email_secondary",
+              email_address: "verified-secondary@example.com",
+              verification: { status: "verified" },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_first_login",
+      org_id: "clerk_org_cached",
+      org_role: "org:member",
+      org_slug: TEST_ORG.slug,
+      email: "collision-target@example.com",
+      iss: "https://clerk.example.test",
+    };
+    const { app, token } = createProtectedApp(payload);
+
+    const unverified = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+    expect(unverified.status).toBe(401);
+
+    const missingIdentity = await getDb(env)
+      .prepare(
+        `SELECT user_id
+         FROM auth_user_identities
+         WHERE provider = 'clerk' AND provider_user_id = ?`
+      )
+      .bind("clerk_user_first_login")
+      .first<{ user_id: string }>();
+    expect(missingIdentity).toBeNull();
+
+    verificationStatus = "verified";
+    const verified = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+    expect(verified.status).toBe(200);
+
+    const linkedIdentity = await getDb(env)
+      .prepare(
+        `SELECT user_id
+         FROM auth_user_identities
+         WHERE provider = 'clerk' AND provider_user_id = ?`
+      )
+      .bind("clerk_user_first_login")
+      .first<{ user_id: string }>();
+    expect(linkedIdentity?.user_id).toBe("usr_email_collision_target");
+  });
+
+  it("provisions default projects when the membership webhook has not arrived", async () => {
+    await getDb(env)
+      .prepare("DELETE FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_cached",
+      org_id: "clerk_org_cached",
+      org_role: "org:admin",
+      org_slug: TEST_ORG.slug,
+      email: "clerk-cache@example.com",
+      iss: "https://clerk.example.test",
+    };
+    const { app, token } = createProtectedApp(payload);
+
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+
+    const projects = await getDb(env)
+      .prepare("SELECT slug FROM projects WHERE organization_id = ? ORDER BY slug")
+      .bind(TEST_ORG.id)
+      .all<{ slug: string }>();
+    expect(projects.results.map((project) => project.slug)).toEqual([
+      "default-production",
+      "default-sandbox",
+    ]);
+  });
+
+  it("bootstraps an unlinked Clerk organization on the first authenticated request", async () => {
+    const originalFetch = globalThis.fetch;
+    env.CLERK_SECRET_KEY = "sk_test_clerk_auth_bootstrap";
+    env.CLERK_API_URL = "https://clerk.example.test/v1";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url === `${env.CLERK_API_URL}/organizations/clerk_org_new`) {
+        return new Response(
+          JSON.stringify({
+            id: "clerk_org_new",
+            name: "New Clerk Organization",
+            slug: "new-clerk-organization",
+            private_metadata: {
+              sdp: {
+                tier: "enterprise",
+                providerOverrides: { ramps: { coinbase: false } },
+              },
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return originalFetch(input, init);
+    });
+
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_cached",
+      org_id: "clerk_org_new",
+      org_role: "org:admin",
+      org_slug: "new-clerk-organization",
+      email: "clerk-cache@example.com",
+      iss: "https://clerk.example.test",
+    };
+    const { app, token } = createProtectedApp(payload);
+
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { organizationId: string };
+    expect(body.organizationId).toMatch(/^org_/);
+
+    const mapping = await getDb(env)
+      .prepare(
+        `SELECT organization_id
+         FROM auth_organization_identities
+         WHERE provider = 'clerk' AND provider_org_id = ?`
+      )
+      .bind("clerk_org_new")
+      .first<{ organization_id: string }>();
+    expect(mapping?.organization_id).toBe(body.organizationId);
+
+    const organization = await getDb(env)
+      .prepare("SELECT tier, settings FROM organizations WHERE id = ?")
+      .bind(body.organizationId)
+      .first<{ tier: string; settings: string | null }>();
+    expect(organization?.tier).toBe("enterprise");
+    expect(JSON.parse(organization?.settings ?? "{}")).toEqual({
+      providerOverrides: { ramps: { coinbase: false } },
+    });
+
+    const projects = await getDb(env)
+      .prepare("SELECT slug FROM projects WHERE organization_id = ? ORDER BY slug")
+      .bind(body.organizationId)
+      .all<{ slug: string }>();
+    expect(projects.results.map((project) => project.slug)).toEqual([
+      "default-production",
+      "default-sandbox",
+    ]);
   });
 });

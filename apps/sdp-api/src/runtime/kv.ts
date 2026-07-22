@@ -1,9 +1,8 @@
 /**
- * Runtime-neutral KV store abstraction.
+ * Key-value store abstraction.
  *
- * Call-sites depend on KVStore, not on Cloudflare's KVNamespace, so a
- * Redis-backed implementation (HOO-510) can drop in behind the same factory
- * without touching any consumer.
+ * Call-sites depend on KVStore while Redis ownership and namespacing stay in
+ * the runtime adapter.
  *
  * Surface kept minimal: get / put / delete / list — only what current
  * consumers use. getWithMetadata is intentionally omitted (unused).

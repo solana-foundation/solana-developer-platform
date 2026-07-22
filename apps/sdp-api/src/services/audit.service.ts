@@ -7,6 +7,7 @@
 import { redactCredentialSecrets } from "@sdp/custody";
 import type { Context } from "hono";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
+import { getClientIp } from "@/lib/client-ip";
 import type { Env } from "@/types/env";
 
 export type AuditAction =
@@ -91,7 +92,7 @@ export class AuditService {
     const requestId = c.get("requestId");
 
     const id = `aud_${crypto.randomUUID()}`;
-    const ipAddress = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for") || null;
+    const ipAddress = getClientIp(c);
     const userAgent = c.req.header("user-agent") || null;
     const metadata = entry.metadata ? redactCredentialSecrets(entry.metadata) : null;
 

@@ -10,8 +10,8 @@ import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { TokenSignerSelect } from "../../[tokenId]/token-signer-select";
-import { AdvancedCapacities } from "../advanced-capacities";
-import { ACCESS_CONTROL_OPTIONS, getCategorySections } from "../asset-details-config";
+import { AdvancedSettingsEditor } from "../advanced-settings-editor";
+import { ACCESS_CONTROL_OPTIONS, getDetailSections } from "../asset-details-config";
 import { DocumentRows } from "../document-rows";
 import {
   buildIssuanceMetadata,
@@ -64,7 +64,7 @@ export function StepAssetDetails({
   const { draft, updateDraft } = useIssuanceDraft();
   const [tab, setTab] = useState<string>("overview");
   const [jsonOpen, setJsonOpen] = useState(false);
-  const sections = getCategorySections(draft.assetCategory);
+  const sections = getDetailSections(draft.assetCategory, draft.assetType);
   const metadata = buildIssuanceMetadata(draft);
   const errors = getAssetDetailsErrors(draft, t);
   const requiredKeys = getRequiredAssetDetailKeys(draft);
@@ -83,13 +83,16 @@ export function StepAssetDetails({
   };
   const descriptionError = fieldError("description");
 
-  // A failed continue attempt highlights fields that all live on the Overview
-  // tab — jump there so the user can see what needs fixing.
+  // A failed continue attempt jumps to the tab holding the problem: most
+  // required fields live on Overview, but advanced-settings values live on
+  // Compliance. Prefer Overview when it has an error, else Compliance.
   useEffect(() => {
-    if (showErrors && hasErrors) {
-      setTab("overview");
+    if (!showErrors || !hasErrors) {
+      return;
     }
-  }, [showErrors, hasErrors]);
+    const overviewHasError = Object.keys(errors).some((key) => key !== "advancedSettings");
+    setTab(overviewHasError ? "overview" : "compliance");
+  }, [showErrors, hasErrors, errors]);
 
   return (
     <motion.div
@@ -258,11 +261,14 @@ export function StepAssetDetails({
               </DocsLink>
             </div>
           </FormCard>
-          <AdvancedCapacities
-            value={draft.capacities}
-            onChange={(key, checked) =>
-              updateDraft({ capacities: { ...draft.capacities, [key]: checked } })
-            }
+          <AdvancedSettingsEditor
+            category={draft.assetCategory}
+            type={draft.assetType}
+            settings={draft.advancedSettings}
+            onSettingsChange={(advancedSettings) => updateDraft({ advancedSettings })}
+            capacities={draft.capacities}
+            onCapacitiesChange={(capacities) => updateDraft({ capacities })}
+            showErrors={showErrors}
           />
         </div>
       ) : null}

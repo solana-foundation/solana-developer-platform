@@ -7,6 +7,7 @@
 
 import type { Context, Next } from "hono";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
+import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import { matchesFreePath } from "./path-match";
@@ -51,20 +52,6 @@ function getWindowKey(identifier: string, windowStart: number): string {
 
 function getWindowStart(now: number, windowMs: number): number {
   return Math.floor(now / windowMs) * windowMs;
-}
-
-function getClientIdentifier(c: Context<{ Bindings: Env }>): string {
-  const cfIp = c.req.header("cf-connecting-ip");
-  if (cfIp) {
-    return cfIp;
-  }
-
-  const forwarded = c.req.header("x-forwarded-for");
-  if (forwarded) {
-    return forwarded.split(",")[0]?.trim() || "unknown";
-  }
-
-  return "unknown";
 }
 
 function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
@@ -163,7 +150,7 @@ export function rateLimitMiddleware() {
       config = RATE_LIMIT_TIERS[tier] || RATE_LIMIT_TIERS.standard;
     } else {
       // Use IP for anonymous requests
-      identifier = getClientIdentifier(c);
+      identifier = getClientIp(c) ?? "unknown";
       config = ANONYMOUS_LIMIT;
     }
 

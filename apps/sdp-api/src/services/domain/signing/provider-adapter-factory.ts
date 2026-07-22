@@ -294,8 +294,8 @@ export async function createAdapterFromEncryptedConfig(
   const parsed = await parseConfigRecord(env, orgId, record);
   const factory = providerAdapterFactories[parsed.provider] as AdapterFactory;
   // `return await`, not bare `return`: factories are async and can reject before
-  // their first await. workerd (unlike Node) reports the adopted, briefly
+  // their first await. Some runtimes report the adopted, briefly
   // handler-less promise as an unhandled rejection — dropping the await fails
-  // the workers-pool test runs and would log rejection noise in production.
+  // shared-module test runs and would log rejection noise in production.
   return await factory({ env, orgId, record, parsed });
 }

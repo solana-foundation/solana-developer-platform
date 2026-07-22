@@ -14,7 +14,7 @@ if (mode !== "unit" && mode !== "integration") {
 }
 
 const rootDir = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
-const localApiEnvPath = path.resolve(rootDir, "apps/sdp-api/.dev.vars");
+const localApiEnvPath = path.resolve(rootDir, "apps/sdp-api/.env.local");
 
 function loadLocalEnvFile(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -44,18 +44,17 @@ function loadLocalEnvFile(filePath) {
 }
 
 const localEnv = loadLocalEnvFile(localApiEnvPath);
-const localDatabaseUrl = new URL("postgresql://127.0.0.1:5432/sdp");
-localDatabaseUrl.username = "sdp";
-localDatabaseUrl.password = "sdp";
-const databaseUrl =
-  process.env.DATABASE_URL ?? localEnv.DATABASE_URL ?? localDatabaseUrl.toString();
+// biome-ignore lint/security/noSecrets: Local Docker Postgres fallback for isolated tests.
+const localTestDatabaseUrl = "postgresql://sdp:sdp@127.0.0.1:5432/sdp_test";
+const testDatabaseUrl =
+  process.env.TEST_DATABASE_URL ?? localEnv.TEST_DATABASE_URL ?? localTestDatabaseUrl;
+const redisUrl = process.env.REDIS_URL ?? localEnv.REDIS_URL ?? "redis://127.0.0.1:6379";
 
 const resolvedEnv = {
   ...localEnv,
   ...process.env,
-  DATABASE_URL: databaseUrl,
-  CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: databaseUrl,
-  CLOUDFLARE_INCLUDE_PROCESS_ENV: "true",
+  TEST_DATABASE_URL: testDatabaseUrl,
+  REDIS_URL: redisUrl,
 };
 
 function run(command, args, options = {}) {
@@ -89,9 +88,7 @@ try {
     await configureIntegrationSolanaRpc(resolvedEnv);
   }
 
-  await run("pnpm", ["--filter", "@sdp/api", "db:postgres:bootstrap"]);
-
-  if (mode === "unit") {
+  if (mode === "integration") {
     await run("pnpm", ["--filter", "@sdp/api", "db:migrate:test"]);
   }
 
