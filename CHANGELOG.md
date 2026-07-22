@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.44.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.44.0...v0.44.1) (2026-07-22)
+
+### Bug Fixes
+
+* resolve boolean query param parsing and allow cancelling pending_activation recurring payments ([#789](https://github.com/solana-foundation/solana-developer-platform/pull/789)) ([87dac13](https://github.com/solana-foundation/solana-developer-platform/commit/87dac130b34658a1e2bee8621ca74c9b3d6e36df))
+* **api:** close DeepSec high-severity findings ([#848](https://github.com/solana-foundation/solana-developer-platform/pull/848)) ([68fe35d](https://github.com/solana-foundation/solana-developer-platform/commit/68fe35d3e4fd2036e8f7b649b74e53f5ddbf1188))
+
+### Maintenance
+
+* **deps:** bump the actions group across 1 directory with 10 updates ([#728](https://github.com/solana-foundation/solana-developer-platform/pull/728)) ([55e8acd](https://github.com/solana-foundation/solana-developer-platform/commit/55e8acd9df9cbd0802e66715b17a3d1a3b9d21d7))
+
 ## [0.44.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.43.1...v0.44.0) (2026-07-22)
 
 ### Features
