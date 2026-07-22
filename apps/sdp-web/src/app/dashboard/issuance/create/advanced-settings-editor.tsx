@@ -147,36 +147,23 @@ function accessDescriptionKey(mode: AccessControlMode | ""): MessageKey {
 interface AdvancedSettingsEditorProps {
   category: AssetCategory | null;
   type: string | null;
-  // On-chain, extension-backed settings (permanent once deployed).
   settings: AdvancedSettingsDraft;
   onSettingsChange: (next: AdvancedSettingsDraft) => void;
-  // Off-chain compliance capacities (changeable after launch). Bulk setter so a
-  // preset can flip several at once in a single draft update.
+  // Bulk setter so a preset can flip several at once.
   capacities: Record<CapacityKey, CapacitySelection>;
   onCapacitiesChange: (next: Record<CapacityKey, CapacitySelection>) => void;
-  // Enable the per-policy Configure affordance (opens the config modal). The step
-  // wizard leaves this off — capacities are declaration-only there; the compliance
-  // tab opts in so operators can configure how each enabled policy works.
+  // Reveal Configure button for policies; only the compliance tab opts in.
   allowCapacityConfig?: boolean;
-  // Reveal required-but-empty param errors (after a failed Continue attempt).
   showErrors?: boolean;
-  // Lock the on-chain settings (a deployed token: extensions are immutable) while
-  // leaving the off-chain capacities editable. Also hides the quick-fill presets,
-  // whose scenarios bundle on-chain settings that can no longer change.
+  // Locks on-chain settings (deployed token) while keeping off-chain capacities editable.
   settingsReadOnly?: boolean;
   disabled?: boolean;
-  // Access-control (allowlist/blocklist/disabled) surfaced as the first on-chain
-  // control. OPTIONAL: only the create wizard opts in (passing onAccessControlChange
-  // moves the standalone accessControl card into this editor). The post-deploy
-  // compliance tab omits these and keeps its own accessControl card unchanged —
-  // it could opt in later via onAccessControlChange + accessControlReadOnly.
+  // OPTIONAL: create wizard opts in; compliance tab keeps its own card.
   accessControl?: AccessControlMode | "";
   onAccessControlChange?: (mode: AccessControlMode | "") => void;
   accessControlReadOnly?: boolean;
   accessControlDocsHref?: string;
-  // Resolved deploy-config preview (what the settings compile to on-chain). OPTIONAL:
-  // when provided, technical mode reveals it as a JSON section at the bottom. Built by
-  // the parent (buildDeployConfigPreview) so the editor stays free of resolver wiring.
+  // Deploy-config preview (technical mode only). Built by parent, not wired here.
   deployConfig?: DeployConfigPreview | null;
 }
 
@@ -196,16 +183,13 @@ function Tag({ children }: { children: ReactNode }) {
   );
 }
 
-// Raw SDP action identifiers (e.g. "force_burn") read as underscore_case; soften
-// them to capitalized spaced words for the badges ("force_burn" → "Force burn").
+// Convert underscore_case action IDs to spaced words for badges.
 function humanizeAction(action: string): string {
   const text = action.replace(/_/g, " ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-// Token-2022 extension names are camelCase (e.g. "permanentDelegate"); in
-// technical mode the row title shows the real extension name in human-friendly
-// spaced words rather than the manager-facing label.
+// Convert camelCase extension names to human-friendly spaced words.
 function humanizeExtension(name: string): string {
   return name.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
 }
