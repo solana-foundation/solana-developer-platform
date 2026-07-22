@@ -139,7 +139,7 @@ export type CreateWalletRequest = z.infer<typeof createWalletSchema>;
 
 export const updateWalletSchema = z.object({
   label: z.string().max(100).nullable().optional(),
-  feePaymentToken: feePaymentTokenSchema.optional(),
+  feePaymentToken: feePaymentTokenSchema.nullable().optional(),
 });
 
 export type UpdateWalletRequest = z.infer<typeof updateWalletSchema>;

@@ -107,7 +107,7 @@ export const updateCustodyWalletRequestSchema = updateWalletSchemaBase
       example: "Treasury signer",
     }),
     feePaymentToken: withOpenApi(updateWalletSchemaBase.shape.feePaymentToken, {
-      description: "Token symbol used to pay Kora sponsorship fees.",
+      description: "Token symbol used to pay Kora sponsorship fees. Set to null to clear it.",
       example: "USDC",
     }),
   })

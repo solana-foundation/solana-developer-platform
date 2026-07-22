@@ -80,6 +80,24 @@ function assertFeePaymentTokenAvailable(env: RpcEnv, token: WellKnownTokenSymbol
   }
 }
 
+/**
+ * Apply a feePaymentToken update to the wallet's stored settings: undefined
+ * leaves the settings untouched, null clears the token, a symbol sets it.
+ */
+function nextWalletSettings(
+  current: CustodyWalletSettings,
+  feePaymentToken: WellKnownTokenSymbol | null | undefined
+): CustodyWalletSettings {
+  if (feePaymentToken === undefined) {
+    return current;
+  }
+  if (feePaymentToken === null) {
+    const { feePaymentToken: _cleared, ...rest } = current;
+    return rest;
+  }
+  return { ...current, feePaymentToken };
+}
+
 const walletSummaryCache = new Map<string, CacheEntry<CustodyWalletSummary[]>>();
 const walletAggregateCache = new Map<string, CacheEntry<CustodyWalletAggregate>>();
 const walletBalanceCache = new Map<string, CacheEntry<CustodyWalletTokenBalance[]>>();
@@ -692,12 +710,11 @@ export const updateWallet = async (c: AppContext) => {
 
   const nextLabel = parsed.data.label?.trim() ? parsed.data.label.trim() : null;
   const feePaymentToken = parsed.data.feePaymentToken;
-  if (feePaymentToken !== undefined) {
+  if (feePaymentToken !== undefined && feePaymentToken !== null) {
     assertFeePaymentTokenAvailable(c.env, feePaymentToken);
   }
 
-  const nextSettings: CustodyWalletSettings =
-    feePaymentToken === undefined ? wallet.settings : { ...wallet.settings, feePaymentToken };
+  const nextSettings = nextWalletSettings(wallet.settings, feePaymentToken);
 
   await getDb(c.env)
     .prepare(

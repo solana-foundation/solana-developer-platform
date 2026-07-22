@@ -16,7 +16,7 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
-import { getTransferCheckedInstruction } from "@solana-program/token-2022";
+import { findAssociatedTokenPda, getTransferCheckedInstruction } from "@solana-program/token-2022";
 import { feePaymentTokenNotConfigured, internalError } from "@/lib/errors";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 
@@ -125,9 +125,12 @@ export async function signMessageWithWalletFeePayment(input: {
 }
 
 /**
- * Worst-case stand-in for the provider's payment instruction, used to reserve
+ * Stand-in for the provider's payment instruction, used to reserve
  * transaction-size headroom when packing batch chunks. Returns null under free
- * pricing, where no payment instruction will be appended.
+ * pricing, where no payment instruction will be appended. Uses the real source
+ * ATA and the fee payer's ATA so the compiled probe carries the same three
+ * distinct account-list entries as the eventual payment instruction — distinct
+ * placeholder reuse would let the compiler deduplicate them and under-reserve.
  */
 export async function buildFeePaymentSizeProbeInstruction(input: {
   env: RpcEnv;
@@ -141,11 +144,22 @@ export async function buildFeePaymentSizeProbeInstruction(input: {
   }
 
   const feeToken = resolveWalletFeePaymentToken(input.env, input.wallet);
+  const feePayer = await input.feePayment.getFeePayer();
+  const [sourceTokenAccount] = await findAssociatedTokenPda({
+    owner: address(input.wallet.publicKey),
+    mint: feeToken.mint,
+    tokenProgram: feeToken.tokenProgram,
+  });
+  const [destinationTokenAccount] = await findAssociatedTokenPda({
+    owner: feePayer,
+    mint: feeToken.mint,
+    tokenProgram: feeToken.tokenProgram,
+  });
   return getTransferCheckedInstruction(
     {
-      source: feeToken.mint,
+      source: sourceTokenAccount,
       mint: feeToken.mint,
-      destination: feeToken.mint,
+      destination: destinationTokenAccount,
       authority: input.sourceSigner,
       amount: 0n,
       decimals: feeToken.decimals,
