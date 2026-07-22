@@ -50,6 +50,11 @@ describe("AdvancedSettingsEditor", () => {
     );
     expect(withAccess).toContain("Access control");
     expect(withAccess).toContain("Allow list");
+    // The single-select control is backed by native radio inputs, not tab-role
+    // buttons (there are no tabpanels behind it) — a screen-reader correctness guard.
+    expect(withAccess).toContain('type="radio"');
+    expect(withAccess).not.toContain('role="tablist"');
+    expect(withAccess).not.toContain('role="tab"');
 
     const withoutAccess = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
     expect(withoutAccess).not.toContain("Access control");

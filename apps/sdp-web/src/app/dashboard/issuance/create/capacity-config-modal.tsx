@@ -32,6 +32,7 @@ import {
   WEEKDAYS,
   type Weekday,
 } from "./issuance-draft-wizard.types";
+import { SegmentedControl as Segmented } from "./segmented-control";
 
 // Shared control styling, mirroring the editor's ParamField so the modal reads as
 // the same family as the on-chain param inputs.
@@ -239,48 +240,6 @@ function RosterList({
 }
 
 // A small segmented (single-choice) control, matching the access-control row.
-function Segmented({
-  options,
-  value,
-  onChange,
-  disabled,
-  ariaLabel,
-}: {
-  options: readonly { value: string; label: string }[];
-  value: string;
-  onChange: (value: string) => void;
-  disabled?: boolean;
-  ariaLabel: string;
-}) {
-  return (
-    <div
-      className="flex rounded-lg border border-border-default bg-fill-subtle p-0.5"
-      role="tablist"
-      aria-label={ariaLabel}
-    >
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          role="tab"
-          aria-selected={value === option.value}
-          disabled={disabled}
-          onClick={() => onChange(option.value)}
-          className={cn(
-            "inline-flex flex-1 items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-            value === option.value
-              ? "bg-surface-raised text-primary"
-              : "text-tertiary hover:text-primary",
-            disabled && "cursor-not-allowed"
-          )}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function TradingHoursFields({
   value,
   onChange,

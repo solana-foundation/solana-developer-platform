@@ -61,6 +61,7 @@ import {
   type CapacitySelection,
 } from "./issuance-draft-wizard.types";
 import { JsonCodeBlock } from "./metadata-json";
+import { SegmentedControl } from "./segmented-control";
 import {
   applyCombo,
   getComboConflict,
@@ -614,31 +615,19 @@ function AccessControlRow({
           </span>
         </div>
       </div>
-      <div
-        className="mt-3 flex rounded-lg border border-border-default bg-fill-subtle p-0.5"
-        role="tablist"
-        aria-label={t("DashboardIssuance.compliance.accessControl")}
-      >
-        {ACCESS_CONTROL_OPTIONS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            role="tab"
-            aria-selected={mode === option.value}
-            disabled={disabled}
-            onClick={() => onChange(option.value)}
-            className={cn(
-              "inline-flex flex-1 items-center justify-center rounded-md px-3 py-1 text-xs font-medium transition-colors",
-              mode === option.value
-                ? "bg-primary text-on-primary"
-                : "text-tertiary hover:text-primary",
-              disabled && "cursor-not-allowed"
-            )}
-          >
-            {t(option.labelKey)}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        className="mt-3"
+        ariaLabel={t("DashboardIssuance.compliance.accessControl")}
+        value={mode}
+        onChange={(value) => onChange(value as AccessControlMode | "")}
+        disabled={disabled}
+        optionClassName="py-1"
+        selectedClassName="bg-primary text-on-primary"
+        options={ACCESS_CONTROL_OPTIONS.map((option) => ({
+          value: option.value,
+          label: t(option.labelKey),
+        }))}
+      />
       {docsHref ? (
         <div className="mt-2.5">
           <a
