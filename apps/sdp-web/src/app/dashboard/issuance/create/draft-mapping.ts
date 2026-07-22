@@ -4,6 +4,7 @@ import {
   getRecommendedSettings,
   isSettingAllowed,
   pruneIncompatibleSettings,
+  resolveSettingsToExtensions,
   type SettingKey,
 } from "@sdp/issuance/capabilities";
 import {
@@ -11,6 +12,8 @@ import {
   type AssetCategory,
   getAssetTypeRegistryEntry,
   type IssuanceMetadata,
+  type TokenExtensionsConfig,
+  type TokenTemplate,
 } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { detailFieldOptionLabel } from "./asset-details-config";
@@ -143,6 +146,40 @@ export function buildTokenInput(draft: DraftState): TokenInput {
     uri: draft.metadataUri.trim() || undefined,
     imageUrl: draft.imageUrl.trim() || undefined,
     signingWalletId: draft.signingWalletId.trim() || undefined,
+  };
+}
+
+// A best-effort preview of what the draft's advanced settings compile to at deploy
+// time — the resolver output (base template, decimals, allowlist, and the resolved
+// Token-2022 extension config). Authorities are deliberately omitted: mint/freeze/
+// delegate are assigned server-side from the signing wallet's custody at deploy, so
+// the client can't show the real on-chain values (the resolver omits an authority
+// rather than emit a bricking placeholder). Returns null before a category/type is
+// chosen — nothing to resolve yet.
+export interface DeployConfigPreview {
+  template: TokenTemplate;
+  decimals: number;
+  requiresAllowlist: boolean;
+  extensions: TokenExtensionsConfig | null;
+}
+
+export function buildDeployConfigPreview(draft: DraftState): DeployConfigPreview | null {
+  if (!draft.assetCategory || !draft.assetType) {
+    return null;
+  }
+  const selected = buildSelectedSettings(
+    sanitizeAdvancedSettings(draft.assetCategory, draft.assetType, draft.advancedSettings)
+  );
+  const decimals = Number(draft.decimals);
+  const resolution = resolveSettingsToExtensions(draft.assetCategory, draft.assetType, selected, {
+    decimals: Number.isFinite(decimals) ? decimals : 0,
+    requiresAllowlist: draft.accessControl === "allowlist",
+  });
+  return {
+    template: resolution.template,
+    decimals: resolution.decimals,
+    requiresAllowlist: resolution.requiresAllowlist,
+    extensions: resolution.extensions,
   };
 }
 
