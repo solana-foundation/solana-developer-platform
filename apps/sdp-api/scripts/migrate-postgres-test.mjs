@@ -5,23 +5,10 @@ import { ensureDatabaseExists, runPostgresMigrations } from "./lib/run-postgres-
 // biome-ignore lint/security/noSecrets: Local Docker Postgres fallback for isolated tests.
 const TEST_DATABASE_URL_FALLBACK = "postgresql://sdp:sdp@127.0.0.1:5432/sdp_test";
 
-// Keep the `_test` derivation stable for callers that run this migration
-// helper outside the Testcontainers-backed Vitest suite.
-function deriveTestDatabaseUrl(baseUrl) {
-  const url = new URL(baseUrl);
-  const dbName = decodeURIComponent(url.pathname.replace(/^\//, "")) || "sdp";
-  url.pathname = `/${encodeURIComponent(`${dbName}_test`)}`;
-  return url.toString();
-}
-
 const appDir = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const migrationsDir = path.join(appDir, "src/db/migrations/postgres");
 
-const explicitTestDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
-const baseDatabaseUrl = process.env.DATABASE_URL?.trim();
-const databaseUrl =
-  explicitTestDatabaseUrl ||
-  (baseDatabaseUrl ? deriveTestDatabaseUrl(baseDatabaseUrl) : TEST_DATABASE_URL_FALLBACK);
+const databaseUrl = process.env.TEST_DATABASE_URL?.trim() || TEST_DATABASE_URL_FALLBACK;
 
 try {
   await ensureDatabaseExists({ databaseUrl });
