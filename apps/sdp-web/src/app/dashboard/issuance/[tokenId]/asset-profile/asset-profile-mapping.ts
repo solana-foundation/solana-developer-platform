@@ -3,9 +3,8 @@ import { getDefaultPublicFields } from "../../create/draft-mapping";
 import {
   type AdvancedSettingsDraft,
   CAPACITY_KEYS,
-  type CapacityKey,
   type CustomFieldRow,
-  createInitialCapacities,
+  coerceCapacities,
   type DocumentRow,
   type DraftState,
 } from "../../create/issuance-draft-wizard.types";
@@ -102,16 +101,6 @@ function readAccessControl(value: unknown): DraftState["accessControl"] {
   return value === "allowlist" || value === "blocklist" || value === "disabled" ? value : "";
 }
 
-function readCapacities(value: unknown): Record<CapacityKey, boolean> {
-  const capacities = createInitialCapacities();
-  if (isRecord(value)) {
-    for (const key of CAPACITY_KEYS) {
-      capacities[key] = value[key] === true;
-    }
-  }
-  return capacities;
-}
-
 // The persisted advanced-settings selection, hydrated back into draft shape
 // (params as strings). Absent (legacy profiles) ⇒ empty selection.
 function readAdvancedSettings(value: unknown): AdvancedSettingsDraft {
@@ -205,7 +194,7 @@ export function profileToDraftState(profile: AssetProfile, token: Token): DraftS
     propertyLocation: readString(asset, "propertyLocation"),
     documents: readDocuments(asset.documents),
     accessControl: readAccessControl(compliance.accessControl),
-    capacities: readCapacities(compliance.capacities),
+    capacities: coerceCapacities(compliance.capacities),
     advancedSettings: readAdvancedSettings(metadata.settings),
     signingWalletId: token.signingWalletId ?? "",
     metadataUri: token.uri ?? "",
@@ -353,7 +342,13 @@ function canonicalDraft(draft: DraftState): Record<string, unknown> {
       .filter((doc) => doc.name.trim() || doc.url.trim())
       .map((doc) => ({ docType: doc.docType.trim(), name: doc.name.trim(), url: doc.url.trim() })),
     accessControl: draft.accessControl,
-    capacities: CAPACITY_KEYS.map((key) => draft.capacities[key]),
+    // Normalize to { enabled, config } per key so both the enable bit and the
+    // per-policy config participate in dirty detection (config ?? null keeps
+    // key order stable for the comparison).
+    capacities: CAPACITY_KEYS.map((key) => ({
+      enabled: draft.capacities[key].enabled,
+      config: draft.capacities[key].config ?? null,
+    })),
     // Mirror buildSelectedSettings: sorted keys, trimmed non-empty params only,
     // so presentation noise never reads as a change.
     advancedSettings: Object.keys(draft.advancedSettings)

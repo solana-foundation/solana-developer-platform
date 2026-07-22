@@ -13,6 +13,7 @@ import {
 } from "react";
 import { sanitizeAdvancedSettings } from "./draft-mapping";
 import {
+  coerceCapacities,
   createInitialDraft,
   type DraftState,
   furthestReachableStep,
@@ -156,6 +157,9 @@ function readStoredState(): WizardState | null {
       draft.assetType,
       draft.advancedSettings
     );
+    // Normalize capacities: a pre-config-layer draft stored them as bare booleans,
+    // which would reach the toggle as `undefined` .enabled (uncontrolled input).
+    draft.capacities = coerceCapacities(parsed.draft.capacities);
     const ceiling = furthestReachableStep(draft);
     const storedCurrent = isWizardStep(parsed.currentStep) ? parsed.currentStep : "classification";
     const storedMax = isWizardStep(parsed.maxStepReached) ? parsed.maxStepReached : storedCurrent;
