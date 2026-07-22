@@ -325,7 +325,7 @@
             "description": "Provisions a new wallet for the resolved default signing provider configuration, or for an explicitly targeted provider.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\",\n  \"setDefault\": true\n}",
+              "raw": "{\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\",\n  \"setDefault\": true,\n  \"feePaymentToken\": \"USDC\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -520,7 +520,7 @@
             "description": "Updates editable wallet metadata such as the display label.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"label\": \"Treasury signer\"\n}",
+              "raw": "{\n  \"label\": \"Treasury signer\",\n  \"feePaymentToken\": \"USDC\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
