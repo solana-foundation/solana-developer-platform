@@ -9,6 +9,7 @@ import type {
   AccessControlMode,
   AdvancedSettingsDraft,
   CapacityKey,
+  CapacitySelection,
 } from "./issuance-draft-wizard.types";
 
 // Basic-mode preset: curated bundle of optional settings + capacities.
@@ -166,12 +167,12 @@ export function comboItemLabelKeys(combo: SettingCombo): string[] {
 export function isComboActive(
   combo: SettingCombo,
   settings: AdvancedSettingsDraft,
-  capacities: Record<CapacityKey, boolean>,
+  capacities: Record<CapacityKey, CapacitySelection>,
   accessControl: AccessControlMode | "" = ""
 ): boolean {
   return (
     combo.settings.every((key) => settings[key] !== undefined) &&
-    combo.capacities.every((key) => capacities[key] === true) &&
+    combo.capacities.every((key) => capacities[key].enabled) &&
     (combo.accessControl === undefined || combo.accessControl === accessControl)
   );
 }
@@ -260,11 +261,11 @@ function defaultParamsFor(key: SettingKey): Record<string, string> {
 export function applyCombo(
   combo: SettingCombo,
   settings: AdvancedSettingsDraft,
-  capacities: Record<CapacityKey, boolean>,
+  capacities: Record<CapacityKey, CapacitySelection>,
   accessControl: AccessControlMode | "" = ""
 ): {
   settings: AdvancedSettingsDraft;
-  capacities: Record<CapacityKey, boolean>;
+  capacities: Record<CapacityKey, CapacitySelection>;
   accessControl: AccessControlMode | "";
 } {
   const nextSettings: AdvancedSettingsDraft = { ...settings };
@@ -276,7 +277,8 @@ export function applyCombo(
   }
   const nextCapacities = { ...capacities };
   for (const key of combo.capacities) {
-    nextCapacities[key] = true;
+    // Preset only flips the enable bit; any existing per-policy config is kept.
+    nextCapacities[key] = { ...nextCapacities[key], enabled: true };
   }
   return {
     settings: nextSettings,
@@ -305,12 +307,12 @@ function isSupersetOf(sup: SettingCombo, sub: SettingCombo): boolean {
 export function removeCombo(
   combo: SettingCombo,
   settings: AdvancedSettingsDraft,
-  capacities: Record<CapacityKey, boolean>,
+  capacities: Record<CapacityKey, CapacitySelection>,
   otherActiveCombos: readonly SettingCombo[],
   accessControl: AccessControlMode | "" = ""
 ): {
   settings: AdvancedSettingsDraft;
-  capacities: Record<CapacityKey, boolean>;
+  capacities: Record<CapacityKey, CapacitySelection>;
   accessControl: AccessControlMode | "";
 } {
   // Cascade: deactivating `combo` also deactivates any other active preset built on
@@ -342,7 +344,9 @@ export function removeCombo(
     }
     for (const key of target.capacities) {
       if (!keepCapacities.has(key)) {
-        nextCapacities[key] = false;
+        // Only clear the enable bit; keep any config the user entered so
+        // re-selecting the preset restores their settings.
+        nextCapacities[key] = { ...nextCapacities[key], enabled: false };
       }
     }
   }

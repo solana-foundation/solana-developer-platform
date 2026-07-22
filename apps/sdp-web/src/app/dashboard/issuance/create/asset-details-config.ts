@@ -2,9 +2,16 @@ import type { AssetCategory } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {
   type AccessControlMode,
+  type CapacityConfig,
   type CapacityKey,
+  type CapacitySelection,
   createInitialCapacities,
   type DraftState,
+  type TradingHoursConfig,
+  type TradingHoursSchedule,
+  type TransferApprovalRule,
+  type TransferApprovalsConfig,
+  WEEKDAYS,
 } from "./issuance-draft-wizard.types";
 
 // Presentation config for the Step-2 "Asset details" form. Sections are chosen
@@ -541,18 +548,119 @@ export const CAPACITY_META: Record<
 export function getRecommendedCapacities(
   category: AssetCategory,
   type: string
-): Record<CapacityKey, boolean> {
+): Record<CapacityKey, CapacitySelection> {
   const caps = createInitialCapacities();
-  caps.kyc = true;
-  caps.issueRetireControls = true;
+  caps.kyc.enabled = true;
+  caps.issueRetireControls.enabled = true;
   if (category === "stablecoin") {
-    caps.restrictTradingHours = type === "fiat_backed";
+    caps.restrictTradingHours.enabled = type === "fiat_backed";
   }
   if (category === "tokenized_security") {
-    caps.investorReporting = true;
-    caps.transferApprovals = true;
+    caps.investorReporting.enabled = true;
+    caps.transferApprovals.enabled = true;
   }
   return caps;
+}
+
+// --- Off-chain policy configuration -------------------------------------------
+// Enabling a capacity (the checkbox) is the declaration layer; these helpers back
+// the *configuration* layer edited in the per-policy modal on the compliance tab.
+// Only capacities listed here expose a Configure affordance — the rest stay plain
+// declaration toggles. Keep CONFIGURABLE_CAPACITIES in sync with the modal switch.
+export const CONFIGURABLE_CAPACITIES: readonly CapacityKey[] = [
+  "restrictTradingHours",
+  "transferApprovals",
+];
+
+export function capacityHasConfig(key: CapacityKey): boolean {
+  return CONFIGURABLE_CAPACITIES.includes(key);
+}
+
+// The config a freshly-opened modal starts from when the policy has none yet.
+export function defaultCapacityConfig(key: CapacityKey): CapacityConfig | undefined {
+  switch (key) {
+    case "restrictTradingHours":
+      return { schedule: "market_hours" };
+    case "transferApprovals":
+      return { rule: "all" };
+    default:
+      return undefined;
+  }
+}
+
+const cc = (leaf: string): MessageKey =>
+  `DashboardIssuance.config.capacityConfig.${leaf}` as MessageKey;
+
+export const TRADING_HOURS_SCHEDULE_OPTIONS = [
+  { value: "24_7", labelKey: cc("tradingHours.scheduleAlways") },
+  { value: "market_hours", labelKey: cc("tradingHours.scheduleMarket") },
+  { value: "custom", labelKey: cc("tradingHours.scheduleCustom") },
+] as const satisfies readonly { value: TradingHoursSchedule; labelKey: MessageKey }[];
+
+export const TRANSFER_APPROVAL_RULE_OPTIONS = [
+  { value: "all", labelKey: cc("transferApprovals.ruleAll") },
+  { value: "above_amount", labelKey: cc("transferApprovals.ruleAbove") },
+  { value: "new_counterparty", labelKey: cc("transferApprovals.ruleNewCounterparty") },
+] as const satisfies readonly { value: TransferApprovalRule; labelKey: MessageKey }[];
+
+export const TIMEZONE_OPTIONS = [
+  { value: "UTC", labelKey: cc("timezones.utc") },
+  { value: "America/New_York", labelKey: cc("timezones.newYork") },
+  { value: "America/Los_Angeles", labelKey: cc("timezones.losAngeles") },
+  { value: "Europe/London", labelKey: cc("timezones.london") },
+  { value: "Europe/Zurich", labelKey: cc("timezones.zurich") },
+  { value: "Asia/Singapore", labelKey: cc("timezones.singapore") },
+  { value: "Asia/Tokyo", labelKey: cc("timezones.tokyo") },
+] as const satisfies readonly { value: string; labelKey: MessageKey }[];
+
+export const WEEKDAY_OPTIONS = WEEKDAYS.map((day) => ({
+  value: day,
+  labelKey: cc(`weekdays.${day}`),
+}));
+
+// One-line summary of a capacity's current config for the card + review surfaces.
+// Returns null when there's nothing to summarize (unconfigured or no config form).
+export function summarizeCapacityConfig(
+  key: CapacityKey,
+  config: CapacityConfig | undefined,
+  t: Translate
+): string | null {
+  if (key === "restrictTradingHours") {
+    const c = config as TradingHoursConfig | undefined;
+    if (!c) {
+      return null;
+    }
+    if (c.schedule === "24_7") {
+      return t(cc("tradingHours.summaryAlways"));
+    }
+    if (c.schedule === "market_hours") {
+      return t(cc("tradingHours.summaryMarket"));
+    }
+    const days = (c.days ?? []).map((day) => t(cc(`weekdays.${day}`))).join(" ");
+    if (!days) {
+      return t(cc("tradingHours.summaryUnset"));
+    }
+    if (c.open && c.close) {
+      return t(cc("tradingHours.summaryCustom"), { days, open: c.open, close: c.close });
+    }
+    return t(cc("tradingHours.summaryCustomDaysOnly"), { days });
+  }
+  if (key === "transferApprovals") {
+    const c = config as TransferApprovalsConfig | undefined;
+    if (!c) {
+      return null;
+    }
+    if (c.rule === "all") {
+      return t(cc("transferApprovals.summaryAll"));
+    }
+    if (c.rule === "new_counterparty") {
+      return t(cc("transferApprovals.summaryNewCounterparty"));
+    }
+    return c.amount
+      ? t(cc("transferApprovals.summaryAbove"), { amount: c.amount })
+      : t(cc("transferApprovals.summaryAboveUnset"));
+  }
+  return null;
 }
 
 // Human label for an access-control mode (used in summary/review).

@@ -248,8 +248,20 @@ export function buildIssuanceMetadata(draft: DraftState): IssuanceMetadata {
       .map((doc) => ({ type: doc.docType.trim(), name: doc.name.trim(), url: doc.url.trim() })),
   });
 
+  // Off-chain capacities: presence = enabled. Store `{ enabled: true, config? }`
+  // (not a bare `{}`) so pruneEmpty keeps an enabled-but-unconfigured policy —
+  // it drops empty objects. Disabled ⇒ undefined ⇒ pruned. readCapacities also
+  // accepts the legacy `{ key: true }` boolean encoding.
   const capacities = pruneEmpty(
-    Object.fromEntries(CAPACITY_KEYS.map((key) => [key, draft.capacities[key] ? true : undefined]))
+    Object.fromEntries(
+      CAPACITY_KEYS.map((key) => {
+        const selection = draft.capacities[key];
+        if (!selection.enabled) {
+          return [key, undefined];
+        }
+        return [key, selection.config ? { enabled: true, config: selection.config } : { enabled: true }];
+      })
+    )
   );
   const compliance = pruneEmpty({
     accessControl: draft.accessControl || undefined,

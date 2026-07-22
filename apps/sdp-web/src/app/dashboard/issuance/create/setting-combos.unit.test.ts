@@ -52,7 +52,7 @@ describe("applyCombo / isComboActive", () => {
     );
     expect(settings.freezeTransfers).toBeDefined();
     expect(settings.permanentDelegate).toBeDefined();
-    expect(capacities.kyc).toBe(true);
+    expect(capacities.kyc.enabled).toBe(true);
     expect(accessControl).toBe("allowlist");
     expect(isComboActive(combo, settings, capacities, accessControl)).toBe(true);
   });
@@ -74,10 +74,35 @@ describe("applyCombo / isComboActive", () => {
     expect(isComboActive(combo, settings, capacities, accessControl)).toBe(true);
     // Drop one bundled capacity → the combo no longer reads as active.
     expect(
-      isComboActive(combo, settings, { ...capacities, restrictTradingHours: false }, accessControl)
+      isComboActive(
+        combo,
+        settings,
+        { ...capacities, restrictTradingHours: { enabled: false } },
+        accessControl
+      )
     ).toBe(false);
     // Drop the access mode → also no longer active.
     expect(isComboActive(combo, settings, capacities, "")).toBe(false);
+  });
+
+  it("preset toggling only flips the enable bit — per-policy config is preserved", () => {
+    const combo = comboByKey("gatedAccess"); // bundles restrictTradingHours
+    const seeded = createInitialCapacities();
+    seeded.restrictTradingHours = { enabled: false, config: { schedule: "market_hours" } };
+
+    // Applying the preset enables the policy but keeps the config the user set.
+    const applied = applyCombo(combo, {}, seeded);
+    expect(applied.capacities.restrictTradingHours).toEqual({
+      enabled: true,
+      config: { schedule: "market_hours" },
+    });
+
+    // Removing it clears only enabled; config survives so re-selecting restores it.
+    const next = removeCombo(combo, applied.settings, applied.capacities, [], applied.accessControl);
+    expect(next.capacities.restrictTradingHours).toEqual({
+      enabled: false,
+      config: { schedule: "market_hours" },
+    });
   });
 });
 
@@ -104,9 +129,9 @@ describe("removeCombo", () => {
       state.accessControl
     );
     expect(next.settings.freezeTransfers).toBeDefined(); // kept — controlled needs it
-    expect(next.capacities.kyc).toBe(true); // kept — controlled needs it
+    expect(next.capacities.kyc.enabled).toBe(true); // kept — controlled needs it
     expect(next.accessControl).toBe("allowlist"); // kept — controlled needs it
-    expect(next.capacities.restrictTradingHours).toBe(false); // gated-only — dropped
+    expect(next.capacities.restrictTradingHours.enabled).toBe(false); // gated-only — dropped
     expect(next.settings.permanentDelegate).toBeDefined(); // controlled untouched
     expect(isComboActive(controlled, next.settings, next.capacities, next.accessControl)).toBe(
       true
@@ -234,8 +259,8 @@ describe("tokenized-security presets combine instead of contradicting", () => {
     // Neither deactivates the other; the union is the full fund stack.
     expect(isComboActive(base, state.settings, state.capacities, state.accessControl)).toBe(true);
     expect(isComboActive(fund, state.settings, state.capacities, state.accessControl)).toBe(true);
-    expect(state.capacities.restrictTradingHours).toBe(true); // base
-    expect(state.capacities.redemptionApprovals).toBe(true); // fund layer
+    expect(state.capacities.restrictTradingHours.enabled).toBe(true); // base
+    expect(state.capacities.redemptionApprovals.enabled).toBe(true); // fund layer
     expect(state.accessControl).toBe("allowlist"); // shared, no contradiction
   });
 
@@ -250,8 +275,8 @@ describe("tokenized-security presets combine instead of contradicting", () => {
     const next = removeCombo(fund, state.settings, state.capacities, [base], state.accessControl);
     expect(isComboActive(base, next.settings, next.capacities, next.accessControl)).toBe(true);
     expect(isComboActive(fund, next.settings, next.capacities, next.accessControl)).toBe(false);
-    expect(next.capacities.redemptionApprovals).toBe(false); // fund-only, dropped
-    expect(next.capacities.transferApprovals).toBe(true); // base, kept
+    expect(next.capacities.redemptionApprovals.enabled).toBe(false); // fund-only, dropped
+    expect(next.capacities.transferApprovals.enabled).toBe(true); // base, kept
     expect(next.accessControl).toBe("allowlist"); // base still needs it
   });
 });

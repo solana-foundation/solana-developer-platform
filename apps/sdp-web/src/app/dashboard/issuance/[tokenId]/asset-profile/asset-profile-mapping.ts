@@ -3,7 +3,9 @@ import { getDefaultPublicFields } from "../../create/draft-mapping";
 import {
   type AdvancedSettingsDraft,
   CAPACITY_KEYS,
+  type CapacityConfig,
   type CapacityKey,
+  type CapacitySelection,
   type CustomFieldRow,
   createInitialCapacities,
   type DocumentRow,
@@ -102,11 +104,27 @@ function readAccessControl(value: unknown): DraftState["accessControl"] {
   return value === "allowlist" || value === "blocklist" || value === "disabled" ? value : "";
 }
 
-function readCapacities(value: unknown): Record<CapacityKey, boolean> {
+// Hydrate off-chain capacities, tolerating both encodings:
+//   legacy   compliance.capacities = { kyc: true }          (bare boolean)
+//   current  compliance.capacities = { kyc: {}, transferApprovals: { config } }
+// Presence with a non-false value = enabled. Absent/false = disabled. This is the
+// only place raw stored capacities are read, so back-compat lives here alone.
+function readCapacities(value: unknown): Record<CapacityKey, CapacitySelection> {
   const capacities = createInitialCapacities();
   if (isRecord(value)) {
     for (const key of CAPACITY_KEYS) {
-      capacities[key] = value[key] === true;
+      const raw = value[key];
+      if (raw === true) {
+        capacities[key] = { enabled: true };
+      } else if (isRecord(raw) && raw.enabled !== false) {
+        capacities[key] = {
+          enabled: true,
+          // Stored config is untyped JSON we wrote; the per-policy modal reads it
+          // defensively, so a structural cast (via unknown) is safe here.
+          config: isRecord(raw.config) ? (raw.config as unknown as CapacityConfig) : undefined,
+        };
+      }
+      // raw === false / undefined / anything else ⇒ keep initial { enabled: false }.
     }
   }
   return capacities;
@@ -353,7 +371,13 @@ function canonicalDraft(draft: DraftState): Record<string, unknown> {
       .filter((doc) => doc.name.trim() || doc.url.trim())
       .map((doc) => ({ docType: doc.docType.trim(), name: doc.name.trim(), url: doc.url.trim() })),
     accessControl: draft.accessControl,
-    capacities: CAPACITY_KEYS.map((key) => draft.capacities[key]),
+    // Normalize to { enabled, config } per key so both the enable bit and the
+    // per-policy config participate in dirty detection (config ?? null keeps
+    // key order stable for the comparison).
+    capacities: CAPACITY_KEYS.map((key) => ({
+      enabled: draft.capacities[key].enabled,
+      config: draft.capacities[key].config ?? null,
+    })),
     // Mirror buildSelectedSettings: sorted keys, trimmed non-empty params only,
     // so presentation noise never reads as a change.
     advancedSettings: Object.keys(draft.advancedSettings)

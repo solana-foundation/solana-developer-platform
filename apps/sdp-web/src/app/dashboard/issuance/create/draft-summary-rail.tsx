@@ -98,7 +98,7 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
   const transferRestrictionsEnabled =
     draft.accessControl === "allowlist" ||
     draft.accessControl === "blocklist" ||
-    draft.capacities.transferApprovals;
+    draft.capacities.transferApprovals.enabled;
   const website = draft.website.trim();
   const pegSummary = getPegSummary(draft);
 
@@ -157,7 +157,9 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
             icon={ClipboardList}
             label={t("DashboardIssuance.summary.investorReporting")}
             value={
-              draft.capacities.investorReporting ? t("DashboardIssuance.summary.enabled") : null
+              draft.capacities.investorReporting.enabled
+                ? t("DashboardIssuance.summary.enabled")
+                : null
             }
           />
           <SummaryRow

@@ -13,6 +13,7 @@ import {
   Boxes,
   Briefcase,
   CheckCheck,
+  ChevronRight,
   ClipboardCheck,
   Clock,
   Code2,
@@ -44,13 +45,20 @@ import { type ReactNode, useState } from "react";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { ACCESS_CONTROL_OPTIONS, CAPACITY_META } from "./asset-details-config";
+import {
+  ACCESS_CONTROL_OPTIONS,
+  CAPACITY_META,
+  capacityHasConfig,
+  summarizeCapacityConfig,
+} from "./asset-details-config";
+import { CapacityConfigModal } from "./capacity-config-modal";
 import type { DeployConfigPreview } from "./draft-mapping";
 import {
   type AccessControlMode,
   type AdvancedSettingsDraft,
   CAPACITY_KEYS,
   type CapacityKey,
+  type CapacitySelection,
 } from "./issuance-draft-wizard.types";
 import { JsonCodeBlock } from "./metadata-json";
 import {
@@ -141,8 +149,12 @@ interface AdvancedSettingsEditorProps {
   onSettingsChange: (next: AdvancedSettingsDraft) => void;
   // Off-chain compliance capacities (changeable after launch). Bulk setter so a
   // preset can flip several at once in a single draft update.
-  capacities: Record<CapacityKey, boolean>;
-  onCapacitiesChange: (next: Record<CapacityKey, boolean>) => void;
+  capacities: Record<CapacityKey, CapacitySelection>;
+  onCapacitiesChange: (next: Record<CapacityKey, CapacitySelection>) => void;
+  // Enable the per-policy Configure affordance (opens the config modal). The step
+  // wizard leaves this off — capacities are declaration-only there; the compliance
+  // tab opts in so operators can configure how each enabled policy works.
+  allowCapacityConfig?: boolean;
   // Reveal required-but-empty param errors (after a failed Continue attempt).
   showErrors?: boolean;
   // Lock the on-chain settings (a deployed token: extensions are immutable) while
@@ -292,6 +304,7 @@ export function AdvancedSettingsEditor({
   onSettingsChange,
   capacities,
   onCapacitiesChange,
+  allowCapacityConfig,
   showErrors,
   settingsReadOnly,
   disabled,
@@ -304,6 +317,8 @@ export function AdvancedSettingsEditor({
   const t = useTranslations();
   const [showTechnical, setShowTechnical] = useState(false);
   const [showDeployConfig, setShowDeployConfig] = useState(false);
+  // The capacity whose config modal is open (null = closed).
+  const [configuringCapacity, setConfiguringCapacity] = useState<CapacityKey | null>(null);
 
   if (!category || !type) {
     return null;
@@ -532,18 +547,49 @@ export function AdvancedSettingsEditor({
           {t("DashboardIssuance.config.settingsOngoingSubtitle")}
         </p>
         <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
-          {CAPACITY_KEYS.map((key) => (
-            <CapacityRow
-              key={key}
-              capKey={key}
-              checked={capacities[key]}
-              disabled={disabled}
-              showTechnical={showTechnical}
-              onToggle={(checked) => onCapacitiesChange({ ...capacities, [key]: checked })}
-            />
-          ))}
+          {CAPACITY_KEYS.map((key) => {
+            const selection = capacities[key];
+            const configurable = capacityHasConfig(key);
+            return (
+              <CapacityRow
+                key={key}
+                capKey={key}
+                checked={selection.enabled}
+                disabled={disabled}
+                showTechnical={showTechnical}
+                configurable={configurable}
+                allowConfig={allowCapacityConfig}
+                summary={
+                  configurable ? summarizeCapacityConfig(key, selection.config, t) : null
+                }
+                onToggle={(checked) =>
+                  onCapacitiesChange({
+                    ...capacities,
+                    [key]: { ...selection, enabled: checked },
+                  })
+                }
+                onConfigure={() => setConfiguringCapacity(key)}
+              />
+            );
+          })}
         </div>
       </section>
+
+      <CapacityConfigModal
+        capKey={configuringCapacity}
+        config={configuringCapacity ? capacities[configuringCapacity].config : undefined}
+        disabled={disabled}
+        onClose={() => setConfiguringCapacity(null)}
+        onSave={(config) => {
+          if (!configuringCapacity) {
+            return;
+          }
+          onCapacitiesChange({
+            ...capacities,
+            [configuringCapacity]: { ...capacities[configuringCapacity], config },
+          });
+        }}
+      />
     </div>
   );
 }
@@ -721,20 +767,31 @@ function PermanentRow({
   );
 }
 
-// A single off-chain compliance capacity (a plain on/off policy). Technical mode
-// swaps in the Expert-view label for the capacities that have a distinct one.
+// A single off-chain compliance capacity. Enabling the checkbox is the declaration
+// layer. For capacities that carry a config (configurable), the compliance tab
+// (allowConfig) reveals a summary + Configure button that opens the config modal;
+// the wizard instead shows a hint that config happens on the compliance tab.
+// Technical mode swaps in the Expert-view label where one differs.
 function CapacityRow({
   capKey,
   checked,
   disabled,
   showTechnical,
+  configurable,
+  allowConfig,
+  summary,
   onToggle,
+  onConfigure,
 }: {
   capKey: CapacityKey;
   checked: boolean;
   disabled?: boolean;
   showTechnical?: boolean;
+  configurable?: boolean;
+  allowConfig?: boolean;
+  summary?: string | null;
   onToggle: (checked: boolean) => void;
+  onConfigure?: () => void;
 }) {
   const t = useTranslations();
   const meta = CAPACITY_META[capKey];
@@ -747,7 +804,28 @@ function CapacityRow({
       onToggle={onToggle}
       label={showTechnical && expertLabel ? t(expertLabel) : t(meta.labelKey)}
       description={t(meta.descriptionKey)}
-    />
+    >
+      {checked && configurable && allowConfig ? (
+        <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-border-subtle pt-2.5">
+          <span className="min-w-0 flex-1 truncate text-xs text-tertiary">
+            {summary ?? t("DashboardIssuance.config.capacityConfig.notConfigured")}
+          </span>
+          <button
+            type="button"
+            onClick={onConfigure}
+            disabled={disabled}
+            className="inline-flex shrink-0 items-center gap-0.5 text-xs font-medium text-primary transition-colors hover:underline"
+          >
+            {t("DashboardIssuance.config.capacityConfig.configure")}
+            <ChevronRight className="h-3 w-3" />
+          </button>
+        </div>
+      ) : checked && configurable ? (
+        <p className="mt-2 border-t border-border-subtle pt-2 text-[11px] leading-relaxed text-tertiary">
+          {t("DashboardIssuance.config.capacityConfig.setupInComplianceTab")}
+        </p>
+      ) : null}
+    </SettingShell>
   );
 }
 

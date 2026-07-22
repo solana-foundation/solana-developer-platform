@@ -77,7 +77,7 @@ const FOREIGN_METADATA: IssuanceMetadata = {
   },
   compliance: {
     accessControl: "blocklist",
-    capacities: { kyc: true },
+    capacities: { kyc: { enabled: true } },
     reviewerNotes: "integration-written",
   },
   chain: {
@@ -112,8 +112,8 @@ describe("profileToDraftState", () => {
     expect(draft.issuerName).toBe("Verde Inc");
     expect(draft.pegCurrency).toBe("USD");
     expect(draft.accessControl).toBe("blocklist");
-    expect(draft.capacities.kyc).toBe(true);
-    expect(draft.capacities.transferApprovals).toBe(false);
+    expect(draft.capacities.kyc.enabled).toBe(true);
+    expect(draft.capacities.transferApprovals.enabled).toBe(false);
 
     expect(draft.documents).toHaveLength(1);
     expect(draft.documents[0]).toMatchObject({
@@ -154,6 +154,35 @@ describe("profileToDraftState", () => {
     );
     expect(draft.publicFields).toEqual(["asset.name", "asset.website"]);
   });
+
+  it("back-compat: hydrates a legacy bare-boolean capacity map", () => {
+    // Pre-config-layer drafts stored capacities as { key: true }. They must still
+    // read as enabled (no crash), with no config attached.
+    const legacy: IssuanceMetadata = {
+      ...FOREIGN_METADATA,
+      compliance: { capacities: { kyc: true, transferApprovals: true } },
+    };
+    const draft = profileToDraftState(makeProfile(legacy), makeToken());
+    expect(draft.capacities.kyc).toEqual({ enabled: true });
+    expect(draft.capacities.transferApprovals).toEqual({ enabled: true });
+    expect(draft.capacities.investorReporting.enabled).toBe(false);
+  });
+
+  it("hydrates per-policy config from the object encoding", () => {
+    const withConfig: IssuanceMetadata = {
+      ...FOREIGN_METADATA,
+      compliance: {
+        capacities: {
+          transferApprovals: { enabled: true, config: { rule: "above_amount", amount: "10000" } },
+        },
+      },
+    };
+    const draft = profileToDraftState(makeProfile(withConfig), makeToken());
+    expect(draft.capacities.transferApprovals).toEqual({
+      enabled: true,
+      config: { rule: "above_amount", amount: "10000" },
+    });
+  });
 });
 
 describe("mergeIssuanceMetadataForUpdate", () => {
@@ -167,6 +196,31 @@ describe("mergeIssuanceMetadataForUpdate", () => {
     );
 
     expect(merged).toEqual(FOREIGN_METADATA);
+  });
+
+  it("upgrades a legacy bare-boolean capacity map to the object encoding on save", () => {
+    const token = makeToken();
+    const legacy: IssuanceMetadata = {
+      ...FOREIGN_METADATA,
+      compliance: {
+        accessControl: "blocklist",
+        capacities: { kyc: true },
+        reviewerNotes: "integration-written",
+      },
+    };
+    const profile = makeProfile(legacy);
+    const draft = profileToDraftState(profile, token);
+    const merged = mergeIssuanceMetadataForUpdate(
+      profile.issuanceMetadata,
+      buildIssuanceMetadata(draft)
+    );
+
+    // The owned capacities key is re-emitted in the new encoding...
+    expect((merged.compliance as Record<string, unknown>).capacities).toEqual({
+      kyc: { enabled: true },
+    });
+    // ...while foreign compliance data is carried through untouched.
+    expect(merged.compliance).toMatchObject({ reviewerNotes: "integration-written" });
   });
 
   it("preserves foreign data when owned fields change", () => {

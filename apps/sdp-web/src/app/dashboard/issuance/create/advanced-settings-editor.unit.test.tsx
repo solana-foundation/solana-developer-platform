@@ -61,6 +61,24 @@ describe("AdvancedSettingsEditor", () => {
     expect(markup).not.toContain("Not enforced yet");
   });
 
+  it("reveals a Configure affordance for a configurable capacity when config is allowed", () => {
+    const capacities = createInitialCapacities();
+    capacities.restrictTradingHours = { enabled: true };
+    const markup = renderWithI18n(
+      <AdvancedSettingsEditor {...baseProps} capacities={capacities} allowCapacityConfig />
+    );
+    expect(markup).toContain("Configure");
+    expect(markup).toContain("Not configured yet");
+  });
+
+  it("keeps capacities declaration-only in the wizard: a hint, no Configure affordance", () => {
+    const capacities = createInitialCapacities();
+    capacities.restrictTradingHours = { enabled: true };
+    const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} capacities={capacities} />);
+    expect(markup).toContain("Set up in the compliance tab");
+    expect(markup).not.toContain("Not configured yet");
+  });
+
   it("offers quick-fill presets, hidden once the on-chain settings are read-only", () => {
     const editable = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
     expect(editable).toContain("Start from a scenario");
