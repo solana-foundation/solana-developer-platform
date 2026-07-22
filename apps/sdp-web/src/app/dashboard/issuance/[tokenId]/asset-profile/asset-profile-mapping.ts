@@ -3,11 +3,8 @@ import { getDefaultPublicFields } from "../../create/draft-mapping";
 import {
   type AdvancedSettingsDraft,
   CAPACITY_KEYS,
-  type CapacityConfig,
-  type CapacityKey,
-  type CapacitySelection,
   type CustomFieldRow,
-  createInitialCapacities,
+  coerceCapacities,
   type DocumentRow,
   type DraftState,
 } from "../../create/issuance-draft-wizard.types";
@@ -104,32 +101,6 @@ function readAccessControl(value: unknown): DraftState["accessControl"] {
   return value === "allowlist" || value === "blocklist" || value === "disabled" ? value : "";
 }
 
-// Hydrate off-chain capacities, tolerating both encodings:
-//   legacy   compliance.capacities = { kyc: true }          (bare boolean)
-//   current  compliance.capacities = { kyc: {}, transferApprovals: { config } }
-// Presence with a non-false value = enabled. Absent/false = disabled. This is the
-// only place raw stored capacities are read, so back-compat lives here alone.
-function readCapacities(value: unknown): Record<CapacityKey, CapacitySelection> {
-  const capacities = createInitialCapacities();
-  if (isRecord(value)) {
-    for (const key of CAPACITY_KEYS) {
-      const raw = value[key];
-      if (raw === true) {
-        capacities[key] = { enabled: true };
-      } else if (isRecord(raw) && raw.enabled !== false) {
-        capacities[key] = {
-          enabled: true,
-          // Stored config is untyped JSON we wrote; the per-policy modal reads it
-          // defensively, so a structural cast (via unknown) is safe here.
-          config: isRecord(raw.config) ? (raw.config as unknown as CapacityConfig) : undefined,
-        };
-      }
-      // raw === false / undefined / anything else ⇒ keep initial { enabled: false }.
-    }
-  }
-  return capacities;
-}
-
 // The persisted advanced-settings selection, hydrated back into draft shape
 // (params as strings). Absent (legacy profiles) ⇒ empty selection.
 function readAdvancedSettings(value: unknown): AdvancedSettingsDraft {
@@ -223,7 +194,7 @@ export function profileToDraftState(profile: AssetProfile, token: Token): DraftS
     propertyLocation: readString(asset, "propertyLocation"),
     documents: readDocuments(asset.documents),
     accessControl: readAccessControl(compliance.accessControl),
-    capacities: readCapacities(compliance.capacities),
+    capacities: coerceCapacities(compliance.capacities),
     advancedSettings: readAdvancedSettings(metadata.settings),
     signingWalletId: token.signingWalletId ?? "",
     metadataUri: token.uri ?? "",

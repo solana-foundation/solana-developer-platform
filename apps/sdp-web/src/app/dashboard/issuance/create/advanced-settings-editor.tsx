@@ -544,7 +544,11 @@ export function AdvancedSettingsEditor({
           )}
         </p>
         <p className="mt-0.5 text-xs text-tertiary">
-          {t("DashboardIssuance.config.settingsOngoingSubtitle")}
+          {t(
+            allowCapacityConfig
+              ? "DashboardIssuance.config.settingsOngoingSubtitle"
+              : "DashboardIssuance.config.settingsOngoingSubtitleDraft"
+          )}
         </p>
         <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
           {CAPACITY_KEYS.map((key) => {
@@ -818,10 +822,6 @@ function CapacityRow({
             <ChevronRight className="h-3 w-3" />
           </button>
         </div>
-      ) : checked && configurable ? (
-        <p className="mt-2 border-t border-border-subtle pt-2 text-[11px] leading-relaxed text-tertiary">
-          {t("DashboardIssuance.config.capacityConfig.setupInComplianceTab")}
-        </p>
       ) : null}
     </SettingShell>
   );

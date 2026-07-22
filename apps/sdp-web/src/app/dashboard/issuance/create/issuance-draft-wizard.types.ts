@@ -193,6 +193,33 @@ export function createInitialCapacities(): Record<CapacityKey, CapacitySelection
   };
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// Normalize a persisted capacities map to the current { enabled, config? } shape,
+// tolerating the legacy bare-boolean encoding ({ kyc: true }). The single coercion
+// point shared by every hydration path (wizard localStorage + asset-profile DB), so
+// an old payload never reaches the UI as a raw boolean (which would make the toggle
+// an uncontrolled input).
+export function coerceCapacities(value: unknown): Record<CapacityKey, CapacitySelection> {
+  const capacities = createInitialCapacities();
+  if (isPlainObject(value)) {
+    for (const key of CAPACITY_KEYS) {
+      const raw = value[key];
+      if (raw === true) {
+        capacities[key] = { enabled: true };
+      } else if (isPlainObject(raw) && raw.enabled !== false) {
+        capacities[key] = {
+          enabled: true,
+          config: isPlainObject(raw.config) ? (raw.config as unknown as CapacityConfig) : undefined,
+        };
+      }
+    }
+  }
+  return capacities;
+}
+
 export function createInitialDraft(): DraftState {
   return {
     assetCategory: null,

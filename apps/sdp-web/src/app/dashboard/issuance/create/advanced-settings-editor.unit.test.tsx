@@ -71,12 +71,16 @@ describe("AdvancedSettingsEditor", () => {
     expect(markup).toContain("Not configured yet");
   });
 
-  it("keeps capacities declaration-only in the wizard: a hint, no Configure affordance", () => {
+  it("keeps capacities declaration-only in the wizard: no per-card config UI", () => {
     const capacities = createInitialCapacities();
     capacities.restrictTradingHours = { enabled: true };
-    const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} capacities={capacities} />);
-    expect(markup).toContain("Set up in the compliance tab");
+    const markup = renderWithI18n(
+      <AdvancedSettingsEditor {...baseProps} capacities={capacities} />
+    );
+    // No per-card Configure / summary in the wizard...
     expect(markup).not.toContain("Not configured yet");
+    // ...the section subtitle explains config happens later on the compliance tab.
+    expect(markup).toContain("A starting set for this asset");
   });
 
   it("offers quick-fill presets, hidden once the on-chain settings are read-only", () => {
