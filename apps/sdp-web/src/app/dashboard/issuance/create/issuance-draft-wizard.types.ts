@@ -209,7 +209,7 @@ export function coerceCapacities(value: unknown): Record<CapacityKey, CapacitySe
       const raw = value[key];
       if (raw === true) {
         capacities[key] = { enabled: true };
-      } else if (isPlainObject(raw) && raw.enabled !== false) {
+      } else if (isPlainObject(raw) && raw.enabled === true) {
         capacities[key] = {
           enabled: true,
           config: isPlainObject(raw.config) ? (raw.config as unknown as CapacityConfig) : undefined,
