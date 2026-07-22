@@ -208,6 +208,13 @@ export function walletNotFound(): AppError {
   );
 }
 
+export function feePaymentTokenNotConfigured(walletId: string): AppError {
+  return new AppError(
+    "BAD_REQUEST",
+    `Wallet ${walletId} has no feePaymentToken configured. Set it via PATCH /v1/wallets/${walletId} before sending fee-charged transfers.`
+  );
+}
+
 export function conflict(message?: string): AppError {
   return new AppError("CONFLICT", message);
 }

@@ -7,12 +7,13 @@
 
 import {
   type Address,
+  address,
   getSignatureFromTransaction,
   getTransactionDecoder,
   type Signature,
 } from "@solana/kit";
-import { KoraClient, type KoraClientOptions } from "@solana/kora";
-import type { FeePaymentPort } from "./port";
+import { KoraClient, type KoraClientOptions, type PriceModel } from "@solana/kora";
+import type { FeePaymentInstruction, FeePaymentInstructionInput, FeePaymentPort } from "./port";
 import { FeePaymentError } from "./port";
 
 export type KoraAdapterConfig = KoraClientOptions & {
@@ -40,6 +41,7 @@ export class KoraAdapter implements FeePaymentPort {
   private readonly userId?: string;
   private cachedFeePayer: Address | null = null;
   private cachedFeeToken: string | null = null;
+  private cachedPricingModel: PriceModel | null = null;
 
   constructor(config: KoraAdapterConfig) {
     const { rpcUrl, apiKey, hmacSecret, userId } = config;
@@ -83,6 +85,40 @@ export class KoraAdapter implements FeePaymentPort {
 
     // Unreachable: loop always returns or throws.
     throw new FeePaymentError("Failed to get fee payer address", "NETWORK_ERROR");
+  }
+
+  async getPricingModel(): Promise<PriceModel> {
+    if (this.cachedPricingModel !== null) {
+      return this.cachedPricingModel;
+    }
+
+    try {
+      const config = await this.client.getConfig();
+      this.cachedPricingModel = config.validation_config.price;
+      return this.cachedPricingModel;
+    } catch (error) {
+      throw this.wrapError(error, "Failed to get pricing model");
+    }
+  }
+
+  async getPaymentInstruction(input: FeePaymentInstructionInput): Promise<FeePaymentInstruction> {
+    try {
+      const response = await this.client.getPaymentInstruction({
+        transaction: encodeBase64(input.transaction),
+        fee_token: input.feeToken,
+        source_wallet: input.sourceWallet,
+        token_program_id: input.tokenProgram,
+      });
+
+      return {
+        instruction: response.payment_instruction,
+        amountRaw: BigInt(response.payment_amount),
+        paymentToken: address(response.payment_token),
+        paymentAddress: address(response.payment_address),
+      };
+    } catch (error) {
+      throw this.wrapError(error, "Failed to get payment instruction");
+    }
   }
 
   /**

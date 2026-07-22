@@ -16,9 +16,13 @@ import type {
   SignerCheckResponse,
   SwitchProviderOptionsResponse,
 } from "@sdp/types";
+import { isWellKnownTokenSymbol } from "@sdp/types";
 import { z } from "zod";
 
 const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);
+const feePaymentTokenSchema = z.string().refine(isWellKnownTokenSymbol, {
+  message: "Unknown fee payment token",
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Initialize Signing
@@ -128,12 +132,14 @@ export const createWalletSchema = z.object({
     .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
     .optional(),
   setDefault: z.boolean().optional(),
+  feePaymentToken: feePaymentTokenSchema.optional(),
 });
 
 export type CreateWalletRequest = z.infer<typeof createWalletSchema>;
 
 export const updateWalletSchema = z.object({
   label: z.string().max(100).nullable().optional(),
+  feePaymentToken: feePaymentTokenSchema.optional(),
 });
 
 export type UpdateWalletRequest = z.infer<typeof updateWalletSchema>;

@@ -6,6 +6,8 @@
  */
 
 import { SigningError, type SignStatus } from "@sdp/custody/signing";
+import type { CustodyWalletSettings, WellKnownTokenSymbol } from "@sdp/types";
+import { parsePostgresJson } from "@/db/postgres-utils";
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
 import type {
   CreateSigningRequestParams,
@@ -29,6 +31,7 @@ export interface CustodyWallet {
   purpose: WalletPurpose | null;
   status: "active" | "inactive";
   createdAt: string;
+  settings: CustodyWalletSettings;
 }
 
 export interface CustodyWalletLookup extends CustodyWallet {
@@ -48,6 +51,7 @@ export interface CreateWalletParams {
   publicKey: string;
   label?: string;
   purpose?: WalletPurpose;
+  feePaymentToken?: WellKnownTokenSymbol;
 }
 
 export type DeactivateWalletResult = "deactivated" | "wallet_not_found" | "last_wallet";
@@ -76,6 +80,7 @@ interface CustodyWalletRow {
   status: string;
   created_at: string;
   updated_at: string | null;
+  settings: unknown;
 }
 
 interface CustodyWalletLookupRow extends CustodyWalletRow {
@@ -406,10 +411,11 @@ export class CustodyConfigStore implements SigningConfigStore {
            public_key,
            label,
            purpose,
+           settings,
            status,
            updated_at
          )
-         VALUES (?, ?, ?, ?, ?, ?, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
+         VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
       )
       .bind(
         id,
@@ -417,7 +423,10 @@ export class CustodyConfigStore implements SigningConfigStore {
         params.walletId,
         params.publicKey,
         params.label ?? null,
-        params.purpose ?? null
+        params.purpose ?? null,
+        JSON.stringify(
+          params.feePaymentToken === undefined ? {} : { feePaymentToken: params.feePaymentToken }
+        )
       )
       .run();
 
@@ -496,6 +505,7 @@ export class CustodyConfigStore implements SigningConfigStore {
                w.status,
                w.created_at,
                w.updated_at,
+               w.settings,
                c.provider,
                c.project_id
              FROM custody_wallets w
@@ -522,6 +532,7 @@ export class CustodyConfigStore implements SigningConfigStore {
                w.status,
                w.created_at,
                w.updated_at,
+               w.settings,
                c.provider,
                c.project_id
              FROM custody_wallets w
@@ -562,6 +573,7 @@ export class CustodyConfigStore implements SigningConfigStore {
                w.status,
                w.created_at,
                w.updated_at,
+               w.settings,
                c.provider,
                c.project_id
              FROM custody_wallets w
@@ -588,6 +600,7 @@ export class CustodyConfigStore implements SigningConfigStore {
                w.status,
                w.created_at,
                w.updated_at,
+               w.settings,
                c.provider,
                c.project_id
              FROM custody_wallets w
@@ -782,6 +795,7 @@ export class CustodyConfigStore implements SigningConfigStore {
       purpose: row.purpose as WalletPurpose | null,
       status: row.status as "active" | "inactive",
       createdAt: row.created_at,
+      settings: parsePostgresJson<CustodyWalletSettings>(row.settings),
     };
   }
 

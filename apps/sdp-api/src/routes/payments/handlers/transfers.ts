@@ -18,7 +18,6 @@ import {
 } from "@solana/kit";
 import {
   assertIsTransactionPartialSigner,
-  partiallySignTransactionMessageWithSigners,
   partiallySignTransactionWithSigners,
 } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
@@ -34,6 +33,7 @@ import {
 } from "@/db/repositories/payments.repository";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
+import { signMessageWithWalletFeePayment } from "@/lib/fee-payment";
 import { buildPaymentTransferFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import {
@@ -330,9 +330,13 @@ async function executeSolTransfer(
     (m) => addSignersToTransactionMessage([signer], m)
   );
 
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
-  const txEncoder = getTransactionEncoder();
-  const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+  const { txBytes } = await signMessageWithWalletFeePayment({
+    env: c.env,
+    feePayment,
+    wallet: sourceWallet,
+    sourceAddress: signer.address,
+    message,
+  });
   const signature = await feePayment.signAndSend(txBytes);
 
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
@@ -735,9 +739,13 @@ async function executeSplTransfer(
     (m) => addSignersToTransactionMessage([signer], m)
   );
 
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
-  const txEncoder = getTransactionEncoder();
-  const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+  const { txBytes } = await signMessageWithWalletFeePayment({
+    env: c.env,
+    feePayment,
+    wallet: sourceWallet,
+    sourceAddress: signer.address,
+    message,
+  });
   const signature = await feePayment.signAndSend(txBytes);
 
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {

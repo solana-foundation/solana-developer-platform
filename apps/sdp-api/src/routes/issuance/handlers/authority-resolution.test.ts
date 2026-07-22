@@ -194,6 +194,7 @@ describe("authority-resolution", () => {
       purpose: "root",
       status: "active",
       createdAt: new Date().toISOString(),
+      settings: {},
       provider: "privy",
       projectId: "proj_test",
     });

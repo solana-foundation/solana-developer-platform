@@ -65,6 +65,10 @@ export const createCustodyWalletRequestSchema = createWalletSchemaBase
       description: "Set this wallet as the default signer for the active wallet signing config.",
       example: true,
     }),
+    feePaymentToken: withOpenApi(createWalletSchemaBase.shape.feePaymentToken, {
+      description: "Token symbol used to pay Kora sponsorship fees.",
+      example: "USDC",
+    }),
   })
   .openapi({ description: "Create wallet request body." });
 
@@ -101,6 +105,10 @@ export const updateCustodyWalletRequestSchema = updateWalletSchemaBase
     label: withOpenApi(updateWalletSchemaBase.shape.label, {
       description: "Optional wallet label. Set to null to clear the label.",
       example: "Treasury signer",
+    }),
+    feePaymentToken: withOpenApi(updateWalletSchemaBase.shape.feePaymentToken, {
+      description: "Token symbol used to pay Kora sponsorship fees.",
+      example: "USDC",
     }),
   })
   .openapi({ description: "Update wallet request body." });
@@ -150,6 +158,11 @@ const custodyWalletBaseSchema = z.object({
     example: "active",
   }),
   createdAt: isoDateTimeSchema,
+  feePaymentToken: z.string().optional().openapi({
+    description:
+      "Token symbol used to pay Kora sponsorship fees. Unset until configured; required before sending fee-charged transfers.",
+    example: "USDC",
+  }),
 });
 
 const custodyWalletTokenBalanceSchema = z

@@ -15,7 +15,6 @@ import {
   createNoopSigner,
   createTransactionMessage,
   getBase64EncodedWireTransaction,
-  getTransactionEncoder,
   getTransactionSize,
   getTransactionSizeLimit,
   isTransactionWithinSizeLimit,
@@ -23,7 +22,6 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
 import {
   findAssociatedTokenPda,
@@ -53,6 +51,10 @@ import {
   notFound,
   transactionFailed,
 } from "@/lib/errors";
+import {
+  buildFeePaymentSizeProbeInstruction,
+  signMessageWithWalletFeePayment,
+} from "@/lib/fee-payment";
 import { buildTransferBatchFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import {
@@ -467,8 +469,23 @@ function buildCandidateChunk(
   };
 }
 
-function assertTransactionFits(chunk: TransactionChunk): void {
-  const transaction = compileTransaction(chunk.message);
+function transactionForSizeProbe(
+  chunk: TransactionChunk,
+  sizeProbeInstruction: Instruction | null
+) {
+  const message =
+    sizeProbeInstruction === null
+      ? chunk.message
+      : appendTransactionMessageInstructions([sizeProbeInstruction], chunk.message);
+  return compileTransaction(message);
+}
+
+function assertTransactionFits(
+  chunk: TransactionChunk,
+  sizeProbeInstruction: Instruction | null,
+  recipientCount: number
+): void {
+  const transaction = transactionForSizeProbe(chunk, sizeProbeInstruction);
   if (isTransactionWithinSizeLimit(transaction)) {
     return;
   }
@@ -476,7 +493,7 @@ function assertTransactionFits(chunk: TransactionChunk): void {
   throw badRequest("A batch transaction exceeds Solana transaction size limits", {
     transactionSize: getTransactionSize(transaction),
     transactionSizeLimit: getTransactionSizeLimit(transaction),
-    recipientCount: chunk.recipientIndexes.length,
+    recipientCount,
   });
 }
 
@@ -486,6 +503,7 @@ function chunkInstructionGroups(params: {
   feePayer: Address;
   lifetime: RecentBlockhash;
   maxRecipientsPerTransaction: number;
+  sizeProbeInstruction: Instruction | null;
 }): TransactionChunk[] {
   const chunks: TransactionChunk[] = [];
   let pending: RecipientInstructionGroup[] = [];
@@ -495,7 +513,7 @@ function chunkInstructionGroups(params: {
       return;
     }
     const chunk = buildCandidateChunk(pending, params);
-    assertTransactionFits(chunk);
+    assertTransactionFits(chunk, params.sizeProbeInstruction, chunk.recipientIndexes.length);
     chunks.push(chunk);
     pending = [];
   };
@@ -507,14 +525,16 @@ function chunkInstructionGroups(params: {
 
     const candidateGroups = [...pending, group];
     const candidate = buildCandidateChunk(candidateGroups, params);
-    if (isTransactionWithinSizeLimit(compileTransaction(candidate.message))) {
+    if (
+      isTransactionWithinSizeLimit(transactionForSizeProbe(candidate, params.sizeProbeInstruction))
+    ) {
       pending = candidateGroups;
       continue;
     }
 
     flush();
     pending = [group];
-    assertTransactionFits(buildCandidateChunk(pending, params));
+    assertTransactionFits(buildCandidateChunk(pending, params), params.sizeProbeInstruction, 1);
   }
 
   flush();
@@ -716,9 +736,14 @@ async function executeChunk(params: {
     { blockhash: lifetime.blockhash, lastValidBlockHeight: lifetime.lastValidBlockHeight },
     chunk.message
   );
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
+  const { partiallySigned, txBytes, walletFeePayment } = await signMessageWithWalletFeePayment({
+    env: c.env,
+    feePayment: params.feePayment,
+    wallet: resolved.sourceWallet,
+    sourceAddress: resolved.sourceAddress,
+    message,
+  });
   const serializedTx = getBase64EncodedWireTransaction(partiallySigned);
-  const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
   const recipientRows = chunk.recipientIndexes.map((index) => params.recipientsByIndex.get(index));
   if (recipientRows.some((row) => !row)) {
     throw internalError("Transfer batch recipient row is missing");
@@ -746,6 +771,15 @@ async function executeChunk(params: {
     providerData: {
       batchRecipientCount: recipientRows.length,
       recipientIds: recipientRows.map((row) => row?.id).filter(Boolean),
+      ...(walletFeePayment === null
+        ? {}
+        : {
+            feePayment: {
+              amountRaw: walletFeePayment.instruction.amountRaw.toString(),
+              token: walletFeePayment.feeToken.symbol,
+              paymentAddress: walletFeePayment.instruction.paymentAddress,
+            },
+          }),
     },
     serializedTx,
     signature: null,
@@ -875,9 +909,15 @@ export async function estimateTransferBatch(c: AppContext) {
   const resolved = await resolveBatchRequest(c, parsed.data, ["payments:read"]);
   const feePayment = getFeePayment(c);
   const sourceSigner = createNoopSigner(resolved.sourceAddress);
-  const [feePayer, lifetime] = await Promise.all([
+  const [feePayer, lifetime, sizeProbeInstruction] = await Promise.all([
     feePayment.getFeePayer(),
     solanaRpc.getRecentBlockhash(resolved.rpc, "confirmed"),
+    buildFeePaymentSizeProbeInstruction({
+      env: c.env,
+      feePayment,
+      wallet: resolved.sourceWallet,
+      sourceSigner,
+    }),
   ]);
   const groups = await buildInstructionGroups({
     rpc: resolved.rpc,
@@ -893,6 +933,7 @@ export async function estimateTransferBatch(c: AppContext) {
     lifetime,
     maxRecipientsPerTransaction:
       parsed.data.options?.maxRecipientsPerTransaction ?? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
+    sizeProbeInstruction,
   });
   const [networkFeeLamports, tokenAccountRentLamports] = await Promise.all([
     estimateNetworkFeeLamports(resolved.rpc, chunks),
@@ -907,7 +948,7 @@ export async function estimateTransferBatch(c: AppContext) {
         networkFeeLamports: networkFeeLamports.toString(),
         priorityFeeLamports: "0",
         tokenAccountRentLamports: tokenAccountRentLamports.toString(),
-        sponsored: true,
+        sponsored: sizeProbeInstruction === null,
       },
     },
   });
@@ -975,13 +1016,21 @@ export async function createTransferBatch(c: AppContext) {
   if (signer.address !== resolved.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");
   }
-  const groups = await buildInstructionGroups({
-    rpc: resolved.rpc,
-    tokenContext: resolved.tokenContext,
-    recipients: resolved.recipients,
-    sourceSigner: signer,
-    feePayer,
-  });
+  const [sizeProbeInstruction, groups] = await Promise.all([
+    buildFeePaymentSizeProbeInstruction({
+      env: c.env,
+      feePayment,
+      wallet: resolved.sourceWallet,
+      sourceSigner: signer,
+    }),
+    buildInstructionGroups({
+      rpc: resolved.rpc,
+      tokenContext: resolved.tokenContext,
+      recipients: resolved.recipients,
+      sourceSigner: signer,
+      feePayer,
+    }),
+  ]);
   const chunks = chunkInstructionGroups({
     groups,
     sourceSigner: signer,
@@ -989,6 +1038,7 @@ export async function createTransferBatch(c: AppContext) {
     lifetime,
     maxRecipientsPerTransaction:
       parsed.data.options?.maxRecipientsPerTransaction ?? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
+    sizeProbeInstruction,
   });
 
   const batchRepository = getPaymentTransferBatchesRepository(c);
