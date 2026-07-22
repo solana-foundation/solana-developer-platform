@@ -74,7 +74,11 @@ export const TEMPLATE_DEFINITIONS: Record<CanonicalTemplate, TokenTemplateDefini
     requiresAllowlist: true,
     allowlistOverridable: true,
     extensions: {
-      required: ["permanentDelegate", "pausable", "scaledUiAmount"],
+      // The guarded builder always applies permanentDelegate + pausable, but
+      // scaledUiAmount is conditional on the config (see mosaic/service.ts) — so
+      // it is available/opt-in, not required. `required` names only what the
+      // builder forces unconditionally.
+      required: ["permanentDelegate", "pausable"],
       defaultEnabled: ["defaultAccountState"],
       available: TOKENIZED_SECURITY_OVERRIDE_EXTENSIONS,
       incompatible: [],

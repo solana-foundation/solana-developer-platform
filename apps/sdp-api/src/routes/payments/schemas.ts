@@ -12,6 +12,7 @@ import {
   RAMP_PROVIDERS,
 } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
+import { getI64Encoder, getU64Encoder } from "@solana/kit";
 import { z } from "zod";
 import { SOL_MINT } from "@/services/payment-operation.service";
 
@@ -209,7 +210,8 @@ const u64StringSchema = z
   .regex(/^\d+$/, { message: "Value must be an unsigned integer string" })
   .refine((value) => {
     try {
-      return BigInt(value) <= 18_446_744_073_709_551_615n;
+      getU64Encoder().encode(BigInt(value));
+      return true;
     } catch {
       return false;
     }
@@ -219,8 +221,8 @@ const i64StringSchema = z
   .regex(/^-?\d+$/, { message: "Value must be a signed integer string" })
   .refine((value) => {
     try {
-      const parsed = BigInt(value);
-      return parsed >= -9_223_372_036_854_775_808n && parsed <= 9_223_372_036_854_775_807n;
+      getI64Encoder().encode(BigInt(value));
+      return true;
     } catch {
       return false;
     }
@@ -705,6 +707,14 @@ export const createOfframpQuoteSchema = z.object({
 });
 
 export const moneygramRampEventSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("onramp_completed"),
+    sessionId: z.string().min(1),
+    transactionId: z.string().min(1),
+    status: z.string().min(1),
+    amount: z.number().positive(),
+    referenceNumber: z.string().min(1).optional(),
+  }),
   z.object({
     kind: z.literal("signed"),
     sessionId: z.string().min(1),

@@ -6,6 +6,7 @@ import {
   type CachedApiKey,
   type PolicyDefaultAction,
   type PolicyRule,
+  type TokenStatus,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
@@ -461,6 +462,30 @@ async function seedCryptoWalletCounterpartyAccount(params: {
   return id;
 }
 
+async function seedIssuedTokenMint(params: {
+  projectId: string;
+  mintAddress: string;
+  status: TokenStatus;
+}): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, name, symbol, decimals, status, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      `tok_${crypto.randomUUID()}`,
+      params.projectId,
+      TEST_ORG.id,
+      params.mintAddress,
+      "Issued Test Token",
+      "ITT",
+      6,
+      params.status,
+      TEST_USER.id
+    )
+    .run();
+}
+
 function mockTokenSupplyDecimalsOnce(decimals = 6): void {
   createRpcMock.mockReturnValueOnce({
     getTokenSupply: () => ({
@@ -822,6 +847,101 @@ describe("Payments routes", () => {
     };
     expect(getBody.data.recurringPayment.id).toBe(createBody.data.recurringPayment.id);
     expect(getBody.data.recurringPayment.status).toBe("pending_activation");
+  });
+
+  it("restricts recurring payment tokens to USD stablecoins and project-issued tokens", async () => {
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const counterpartyId = await seedCounterparty({ externalId: "recurring_token_gate" });
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const createRecurring = (token: string) =>
+      app.request(
+        "/v1/payments/recurring-payments",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            sourceWalletId: TEST_WALLET_ID,
+            counterpartyId,
+            counterpartyAccountId,
+            token,
+            amount: "25.00",
+            periodHours: 24,
+          }),
+        },
+        env
+      );
+
+    const expectTokenRejected = async (token: string) => {
+      const res = await createRecurring(token);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toBe(
+        "Recurring payments support USD stablecoins and tokens issued in this project; native SOL is not supported"
+      );
+    };
+
+    await expectTokenRejected("SOL");
+    await expectTokenRejected(TEST_SOLANA_ADDRESSES.wallet1);
+
+    const otherProject = { id: "prj_other_token_gate", slug: "other-token-gate-project" };
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        otherProject.id,
+        TEST_ORG.id,
+        "Other Token Gate Project",
+        otherProject.slug,
+        "sandbox",
+        "active",
+        TEST_USER.id
+      )
+      .run();
+
+    const issuedMint = (await generateKeyPairSigner()).address;
+    const pausedMint = (await generateKeyPairSigner()).address;
+    const otherProjectMint = (await generateKeyPairSigner()).address;
+    await seedIssuedTokenMint({
+      projectId: TEST_PROJECT.id,
+      mintAddress: issuedMint,
+      status: "active",
+    });
+    await seedIssuedTokenMint({
+      projectId: TEST_PROJECT.id,
+      mintAddress: pausedMint,
+      status: "paused",
+    });
+    await seedIssuedTokenMint({
+      projectId: otherProject.id,
+      mintAddress: otherProjectMint,
+      status: "active",
+    });
+
+    await expectTokenRejected(pausedMint);
+    await expectTokenRejected(otherProjectMint);
+
+    const issuedRes = await createRecurring(issuedMint);
+    expect(issuedRes.status).toBe(201);
+    const issuedBody = (await issuedRes.json()) as {
+      data: { recurringPayment: { token: string } };
+    };
+    expect(issuedBody.data.recurringPayment.token).toBe(issuedMint);
+
+    const stableRes = await createRecurring("USDC");
+    expect(stableRes.status).toBe(201);
+    const stableBody = (await stableRes.json()) as {
+      data: { recurringPayment: { token: string } };
+    };
+    expect(stableBody.data.recurringPayment.token).toBe(DEVNET_USDC_MINT);
   });
 
   it("activates recurring payments through SDP API routes", async () => {

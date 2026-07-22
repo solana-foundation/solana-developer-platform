@@ -19,6 +19,11 @@ import {
   internalError,
   notFound,
 } from "@/lib/errors";
+import {
+  resolveAdvancedSettings,
+  stampAdvancedSettingsVersion,
+  validateAdvancedSettings,
+} from "@/lib/issuance/advanced-settings";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
@@ -180,9 +185,28 @@ export const updateAssetProfile = async (c: AppContext) => {
 
   const typeChanged = nextCategory !== current.asset_category || nextType !== current.asset_type;
   const metadataChanged = parsed.data.issuanceMetadata !== undefined;
-  const nextMetadata = parsed.data.issuanceMetadata ?? current.issuance_metadata;
 
-  // Recompute the cached public projection whenever its inputs change.
+  // Validate settings when metadata or type changed; catches unsupported by type change too.
+  if (metadataChanged || typeChanged) {
+    const effectiveMetadata = parsed.data.issuanceMetadata ?? current.issuance_metadata;
+    const settingErrors = validateAdvancedSettings(nextCategory, nextType, effectiveMetadata);
+    if (settingErrors.length > 0) {
+      throw badRequest("Invalid advanced settings", { errors: settingErrors });
+    }
+    const buildErrors = resolveAdvancedSettings(nextCategory, nextType, effectiveMetadata);
+    if (buildErrors.length > 0) {
+      throw badRequest("Invalid advanced settings combination", { errors: buildErrors });
+    }
+  }
+
+  // Stamp version only on metadata we persist.
+  const persistedMetadata =
+    parsed.data.issuanceMetadata !== undefined
+      ? stampAdvancedSettingsVersion(parsed.data.issuanceMetadata)
+      : undefined;
+  const nextMetadata = persistedMetadata ?? current.issuance_metadata;
+
+  // Recompute public projection when inputs change.
   const publicMetadata =
     typeChanged || metadataChanged
       ? projectPublicMetadata(nextCategory, nextType, nextMetadata)
@@ -195,7 +219,7 @@ export const updateAssetProfile = async (c: AppContext) => {
     assetCategory: parsed.data.assetCategory,
     assetType: parsed.data.assetType,
     assetTypeVersion: typeChanged ? registryEntry.version : undefined,
-    issuanceMetadata: parsed.data.issuanceMetadata,
+    issuanceMetadata: persistedMetadata,
     publicMetadata,
   });
 

@@ -6,7 +6,7 @@ import { useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
-import { AdvancedCapacities } from "../../../create/advanced-capacities";
+import { AdvancedSettingsEditor } from "../../../create/advanced-settings-editor";
 import { ACCESS_CONTROL_OPTIONS, accessControlLabel } from "../../../create/asset-details-config";
 import { FormCard, ReadOnlyField } from "../../../create/form-primitives";
 import type { DraftState } from "../../../create/issuance-draft-wizard.types";
@@ -29,7 +29,7 @@ export function ComplianceTab({
   canManageTokenAdmin: boolean;
 }) {
   const t = useTranslations();
-  const { draft, updateDraft, saving } = form;
+  const { draft, updateDraft, saving, showErrors } = form;
   const isDeployed = Boolean(token.mintAddress);
 
   const availableActions: Array<{ id: AdminAction; label: string }> = [
@@ -95,12 +95,19 @@ export function ComplianceTab({
         </div>
       </FormCard>
 
-      <AdvancedCapacities
+      <AdvancedSettingsEditor
+        category={draft.assetCategory}
+        type={draft.assetType}
+        settings={draft.advancedSettings}
+        onSettingsChange={(advancedSettings) => updateDraft({ advancedSettings })}
+        capacities={draft.capacities}
+        onCapacitiesChange={(capacities) => updateDraft({ capacities })}
+        showErrors={showErrors}
+        // On-chain extensions are immutable once deployed — lock them, but keep
+        // the off-chain capacities editable. An undeployed draft stays fully
+        // editable (the editor itself flags what becomes permanent at deploy).
+        settingsReadOnly={isDeployed}
         disabled={saving}
-        value={draft.capacities}
-        onChange={(key, checked) =>
-          updateDraft({ capacities: { ...draft.capacities, [key]: checked } })
-        }
       />
 
       {availableActions.length > 0 ? (

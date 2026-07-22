@@ -1,15 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { queryBooleanSchema } from "./common-schemas";
-import { listCounterpartiesQuerySchema } from "./counterparties/schemas";
-import { listCounterpartyAccountsQuerySchema } from "./counterparty-accounts/schemas";
-import { listAssetProfilesQuerySchema } from "./asset-profiles/schemas";
+import { listAssetProfilesQuerySchema } from "@/routes/asset-profiles/schemas";
+import { listCounterpartiesQuerySchema } from "@/routes/counterparties/schemas";
+import { listCounterpartyAccountsQuerySchema } from "@/routes/counterparty-accounts/schemas";
+import { queryBooleanSchema } from "./base";
 
 describe("queryBooleanSchema", () => {
   it.each([
-    { input: "false", expected: false },
-    { input: "0", expected: false },
     { input: "true", expected: true },
-    { input: "1", expected: true },
+    { input: "false", expected: false },
   ])("parses '$input' as $expected", ({ input, expected }) => {
     const result = queryBooleanSchema.safeParse(input);
     expect(result.success).toBe(true);
@@ -18,16 +16,12 @@ describe("queryBooleanSchema", () => {
     }
   });
 
-  it.each(["invalid", "2", "yes", "no"])(
-    "rejects invalid boolean string value '%s'",
-    (input) => {
-      const result = queryBooleanSchema.safeParse(input);
-      expect(result.success).toBe(false);
-    }
-  );
+  it.each(["1", "0", "TRUE", "False", "yes", "no", "2", "invalid", ""])("rejects '%s'", (input) => {
+    expect(queryBooleanSchema.safeParse(input).success).toBe(false);
+  });
 });
 
-describe("includeArchived query params integration across route schemas", () => {
+describe("includeArchived query param across route schemas", () => {
   const schemas = [
     { name: "listCounterpartiesQuerySchema", schema: listCounterpartiesQuerySchema },
     { name: "listCounterpartyAccountsQuerySchema", schema: listCounterpartyAccountsQuerySchema },
@@ -36,16 +30,8 @@ describe("includeArchived query params integration across route schemas", () => 
 
   for (const { name, schema } of schemas) {
     describe(name, () => {
-      it("parses 'false' as boolean false without truthy string coercion bug", () => {
+      it("parses 'false' as boolean false", () => {
         const result = schema.safeParse({ includeArchived: "false" });
-        expect(result.success).toBe(true);
-        if (result.success) {
-          expect(result.data.includeArchived).toBe(false);
-        }
-      });
-
-      it("parses '0' as boolean false", () => {
-        const result = schema.safeParse({ includeArchived: "0" });
         expect(result.success).toBe(true);
         if (result.success) {
           expect(result.data.includeArchived).toBe(false);
@@ -60,17 +46,16 @@ describe("includeArchived query params integration across route schemas", () => 
         }
       });
 
-      it("parses '1' as boolean true", () => {
-        const result = schema.safeParse({ includeArchived: "1" });
+      it("defaults to false when omitted", () => {
+        const result = schema.safeParse({});
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.data.includeArchived).toBe(true);
+          expect(result.data.includeArchived).toBe(false);
         }
       });
 
       it("rejects invalid boolean query param", () => {
-        const result = schema.safeParse({ includeArchived: "invalid" });
-        expect(result.success).toBe(false);
+        expect(schema.safeParse({ includeArchived: "1" }).success).toBe(false);
       });
     });
   }

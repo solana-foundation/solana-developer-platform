@@ -1,7 +1,7 @@
 import { isAddress } from "@sdp/solana/address";
 import { COUNTERPARTY_ACCOUNT_KINDS } from "@sdp/types";
 import { z } from "zod";
-import { queryBooleanSchema } from "@/routes/common-schemas";
+import { queryBooleanSchema } from "@/openapi/schemas/base";
 
 export const counterpartyAccountKindSchema = z.enum(COUNTERPARTY_ACCOUNT_KINDS);
 
