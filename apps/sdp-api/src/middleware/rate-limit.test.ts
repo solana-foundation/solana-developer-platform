@@ -6,6 +6,7 @@ import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { optionalAuth } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { KEYED_IP_BACKSTOP_MAX_REQUESTS } from "@/middleware/rate-limit";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -164,7 +165,7 @@ describe("Rate limiting", () => {
 
     it("still caps keyed requests at the per-IP backstop", async () => {
       await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
-      await seedRateLimit(env, CLIENT_IP, 10_000);
+      await seedRateLimit(env, CLIENT_IP, KEYED_IP_BACKSTOP_MAX_REQUESTS);
 
       const res = await keyedRequest();
 

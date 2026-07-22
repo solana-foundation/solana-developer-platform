@@ -26,7 +26,7 @@ const ANONYMOUS_MAX_REQUESTS = 20;
  * every tier at 20/min per IP. The key is unverified at this point, so a high
  * IP ceiling still bounds invalid-key spray against the KV/DB lookup in auth.
  */
-const KEYED_IP_BACKSTOP_MAX_REQUESTS = 10_000;
+export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIMIT_TIERS)) * 5;
 
 /**
  * Builds the KV key for one identifier's counter in one window bucket.
