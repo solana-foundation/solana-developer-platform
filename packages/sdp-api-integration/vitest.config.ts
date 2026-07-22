@@ -32,9 +32,10 @@ for (const [key, value] of Object.entries(loadEnvFile(LOCAL_ENV_PATH))) {
 
 process.env.ENVIRONMENT ??= "development";
 process.env.API_VERSION ??= "v1";
-// biome-ignore lint/security/noSecrets: Local Docker Postgres fallback for isolated integration tests.
-const TEST_DATABASE_URL_FALLBACK = "postgresql://sdp:sdp@127.0.0.1:5432/sdp_test";
-process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? TEST_DATABASE_URL_FALLBACK;
+if (!process.env.TEST_DATABASE_URL) {
+  throw new Error("Integration tests require TEST_DATABASE_URL to be set.");
+}
+process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 process.env.REDIS_URL ??= "redis://127.0.0.1:6379";
 process.env.RUN_INTEGRATION_TESTS = "true";
 process.env.SOLANA_MOCK = "false";
