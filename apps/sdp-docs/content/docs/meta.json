@@ -1,8 +1,8 @@
 {
   "title": "Solana Developer Platform Docs",
   "pages": [
-    "home",
     "introduction",
+    "developing-with-sdp",
     "guides",
     "tokens",
     "wallet-operations",

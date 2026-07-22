@@ -11,13 +11,13 @@ The minimal inbound-only request:
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl "https://api.solana.com/v1/payments/transfers?direction=inbound&pageSize=50" \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="list-inbound-transfers.ts"
 const url = new URL("https://api.solana.com/v1/payments/transfers");
 url.searchParams.set("direction", "inbound");
 url.searchParams.set("pageSize", "50");
@@ -61,7 +61,7 @@ Customer-initiated inbound transfers do **not** populate `Transfer.memo` (memo-p
 The typical inbound match cycle:
 
 1. **Read** the recent inbound transfers for the relevant token, using the **org-scoped path** (no `wallet`/`walletAddress` filter) so `from`/`to` are honored:
-   ```
+   ```text title="Request"
    GET /v1/payments/transfers
      ?direction=inbound
      &token=<mint or SOL>
@@ -85,7 +85,7 @@ A reconciliation worker that wakes on a tick and asks "what is new since last ti
 
 <Tabs items={["TypeScript"]}>
 <Tab value="TypeScript">
-```typescript
+```typescript title="reconcile-tick.ts"
 const OVERLAP_MS = 5_000; // re-query the last 5s on each tick to catch boundary arrivals
 
 async function reconcileTick(state: WorkerState) {

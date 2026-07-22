@@ -59,7 +59,7 @@ Each provider supports a different set of operations shown as capability chips:
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/wallets/initialize \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -70,7 +70,7 @@ curl -X POST https://api.solana.com/v1/wallets/initialize \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="initialize-wallet-provider.ts"
 const response = await fetch("https://api.solana.com/v1/wallets/initialize", {
   method: "POST",
   headers: {
@@ -87,7 +87,7 @@ const { data } = await response.json();
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="InitializeWalletProvider.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/wallets/initialize"))
     .header("Authorization", "Bearer sk_test_...")
@@ -106,7 +106,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/wallets \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -118,7 +118,7 @@ curl -X POST https://api.solana.com/v1/wallets \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="create-wallet.ts"
 const response = await fetch("https://api.solana.com/v1/wallets", {
   method: "POST",
   headers: {
@@ -134,7 +134,7 @@ const response = await fetch("https://api.solana.com/v1/wallets", {
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="CreateWallet.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/wallets"))
     .header("Authorization", "Bearer sk_test_...")
@@ -156,13 +156,13 @@ The `purpose` field is optional metadata in the API. The current dashboard creat
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl "https://api.solana.com/v1/wallets?view=summary" \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="list-wallets.ts"
 const response = await fetch("https://api.solana.com/v1/wallets?view=summary", {
   headers: { "Authorization": "Bearer sk_test_..." },
 });
@@ -171,7 +171,7 @@ const { data } = await response.json();
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="ListWallets.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/wallets?view=summary"))
     .header("Authorization", "Bearer sk_test_...")
@@ -187,7 +187,7 @@ Use the returned `walletId` when setting a default wallet or binding wallet-scop
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/wallets/default-wallet \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -195,7 +195,7 @@ curl -X POST https://api.solana.com/v1/wallets/default-wallet \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="set-default-wallet.ts"
 await fetch("https://api.solana.com/v1/wallets/default-wallet", {
   method: "POST",
   headers: {
@@ -207,7 +207,7 @@ await fetch("https://api.solana.com/v1/wallets/default-wallet", {
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="SetDefaultWallet.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/wallets/default-wallet"))
     .header("Authorization", "Bearer sk_test_...")

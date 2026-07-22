@@ -3,7 +3,7 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import type { ComponentType } from "react";
-import { HOME_TOC } from "@/components/docs-shell/home";
+import { HOME_TOC, ProviderCallout } from "@/components/docs-shell/home";
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "@/components/docs-shell/page";
 import { getDocsPagePath } from "@/lib/site";
 import { source } from "@/lib/source";
@@ -36,7 +36,8 @@ type ResolvedPage = {
 
 function resolvePage(slug?: string[]): ResolvedPage | null {
   if (!slug || slug.length === 0) {
-    return null;
+    const rootPage = source.getPage([]);
+    return rootPage ? { page: rootPage, pageSlug: [] } : null;
   }
 
   const directPage = source.getPage(slug);
@@ -56,8 +57,8 @@ function resolvePage(slug?: string[]): ResolvedPage | null {
 export default async function Page({ params }: DocsPageProps) {
   const { slug } = await params;
 
-  if (!slug || slug.length === 0) {
-    redirect("/docs/home");
+  if (slug?.join("/") === "home") {
+    redirect("/docs");
   }
 
   const resolvedPage = resolvePage(slug);
@@ -81,7 +82,7 @@ export default async function Page({ params }: DocsPageProps) {
     ? { name: String(neighbours.next.name), url: neighbours.next.url }
     : undefined;
 
-  const isHome = resolvedPage.pageSlug.join("/") === "home";
+  const isHome = resolvedPage.pageSlug.length === 0;
   const baseToc = isHome ? HOME_TOC : (data.toc ?? []);
   const steps = data.steps ?? [];
   let toc = baseToc;
@@ -99,7 +100,7 @@ export default async function Page({ params }: DocsPageProps) {
   }
 
   return (
-    <DocsPage toc={toc} full={data.full}>
+    <DocsPage toc={toc} full={data.full} tocFooter={isHome ? <ProviderCallout /> : undefined}>
       {!data.hideTitle && <DocsTitle>{data.title}</DocsTitle>}
       {!data.hideTitle && <DocsDescription>{data.description}</DocsDescription>}
       <DocsBody prev={prev} next={next} bare={data.hideTitle}>
@@ -125,7 +126,8 @@ export async function generateMetadata({ params }: DocsPageProps): Promise<Metad
 
   const pagePath = getDocsPagePath(Array.isArray(slug) ? slug.join("/") : "");
   return {
-    title: data.title,
+    title:
+      resolvedPage.pageSlug.length === 0 ? "Solana Developer Platform Documentation" : data.title,
     description: data.description,
     alternates: {
       canonical: pagePath,

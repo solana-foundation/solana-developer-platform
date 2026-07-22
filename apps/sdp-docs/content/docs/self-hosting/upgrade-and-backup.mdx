@@ -15,7 +15,7 @@ A release ships new container images plus an updated `compose.yml`. To upgrade:
    checksums) and leaves any existing `.env` and `.env.example` in place, printing
    a link to the new release's `.env.example` so you can check for new variables.
 
-   ```bash
+   ```bash title="Terminal"
    curl -fsSL https://github.com/solana-foundation/solana-developer-platform/releases/latest/download/install.sh | bash
    ```
 
@@ -25,7 +25,7 @@ A release ships new container images plus an updated `compose.yml`. To upgrade:
 
 3. **Pull and restart.**
 
-   ```bash
+   ```bash title="Terminal"
    cd ~/sdp
    docker compose pull
    docker compose up -d
@@ -64,7 +64,7 @@ Take a logical dump with `pg_dump` from the running container. Running it throug
 `sh -c` lets `pg_dump` read `POSTGRES_USER` and `POSTGRES_DB` from inside the
 container, so custom values are honored:
 
-```bash
+```bash title="Terminal"
 cd ~/sdp
 docker compose exec -T postgres \
   sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > sdp-backup.sql
@@ -79,7 +79,7 @@ into an **empty** database and let the stack start on top of it. Do not restore
 over an already-migrated database, or the dump's schema collides with the one
 `sdp-migrate` created on the previous `up`.
 
-```bash
+```bash title="Terminal"
 cd ~/sdp
 docker compose down                       # stop every service
 docker volume rm sdp_sdp-postgres-data    # discard the current database (destructive)

@@ -9,7 +9,7 @@ type TocItem = {
   depth?: number;
 };
 
-export function TableOfContents({ items }: { items: TocItem[] }) {
+export function TableOfContents({ items, children }: { items: TocItem[]; children?: ReactNode }) {
   const [activeId, setActiveId] = useState("");
 
   useEffect(() => {
@@ -60,6 +60,7 @@ export function TableOfContents({ items }: { items: TocItem[] }) {
           </a>
         ))}
       </nav>
+      {children}
     </aside>
   );
 }

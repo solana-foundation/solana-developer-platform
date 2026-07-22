@@ -14,7 +14,7 @@ Call a mutation endpoint without the `/prepare` suffix and SDP handles everythin
 3. Submits it to Solana
 4. Returns the confirmed result with a transaction signature
 
-```typescript
+```typescript title="mint-execute.ts"
 const res = await fetch(
   "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
   {
@@ -45,7 +45,7 @@ Issuance `amount` fields use **UI units** (decimal strings such as `"1000"` for 
 
 Add `/prepare` to a mutation endpoint and SDP builds the transaction but returns it unsigned:
 
-```typescript
+```typescript title="mint-prepare.ts"
 const res = await fetch(
   "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare",
   {
