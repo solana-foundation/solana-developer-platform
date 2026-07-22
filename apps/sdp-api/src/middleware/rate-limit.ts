@@ -28,10 +28,6 @@ const ANONYMOUS_MAX_REQUESTS = 20;
  */
 const KEYED_IP_BACKSTOP_MAX_REQUESTS = 10_000;
 
-interface RateLimitState {
-  count: number;
-}
-
 /**
  * Builds the KV key for one identifier's counter in one window bucket.
  *
@@ -190,41 +186,38 @@ export async function enforceRateLimit(
   const windowKey = getWindowKey(identifier, windowStart);
   const previousWindowKey = getWindowKey(identifier, previousWindowStart);
 
-  const [current, previous] = await Promise.all([
-    kv.get<RateLimitState>(windowKey, "json"),
-    kv.get<RateLimitState>(previousWindowKey, "json"),
-  ]);
-
-  const currentCount = current?.count || 0;
-  const previousCount = previous?.count || 0;
   const elapsed = now - windowStart;
   const previousWeight = Math.max(0, 1 - elapsed / RATE_LIMIT_WINDOW_MS);
-  const estimatedCount = currentCount + previousCount * previousWeight;
+
+  const admission = await kv
+    .admitSlidingWindow(windowKey, previousWindowKey, {
+      maxRequests,
+      previousWeight,
+      expirationTtl: Math.ceil((RATE_LIMIT_WINDOW_MS * 2) / 1000),
+    })
+    .catch((err) => {
+      console.error("Failed to update rate limit:", err);
+      return null;
+    });
+
+  if (!admission) {
+    return;
+  }
+
+  const estimatedCount = admission.current + admission.previous * previousWeight;
 
   c.header("X-RateLimit-Limit", maxRequests.toString());
   c.header(
     "X-RateLimit-Remaining",
-    Math.max(0, Math.floor(maxRequests - (estimatedCount + 1))).toString()
+    Math.max(0, Math.floor(maxRequests - estimatedCount)).toString()
   );
   const windowEndMs = windowStart + RATE_LIMIT_WINDOW_MS;
   c.header("X-RateLimit-Reset", Math.ceil(windowEndMs / 1000).toString());
 
-  if (estimatedCount >= maxRequests) {
+  if (!admission.admitted) {
     const retryAfter = Math.max(1, Math.ceil((windowEndMs - now) / 1000));
     c.header("Retry-After", retryAfter.toString());
     throw rateLimited(`Rate limit exceeded. Retry after ${retryAfter} seconds.`);
-  }
-
-  const newState: RateLimitState = {
-    count: currentCount + 1,
-  };
-
-  try {
-    await kv.put(windowKey, JSON.stringify(newState), {
-      expirationTtl: Math.ceil((RATE_LIMIT_WINDOW_MS * 2) / 1000),
-    });
-  } catch (err) {
-    console.error("Failed to update rate limit:", err);
   }
 }
 

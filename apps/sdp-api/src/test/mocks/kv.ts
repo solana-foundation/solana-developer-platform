@@ -60,7 +60,7 @@ export async function seedRateLimit(
   const key = `ratelimit:${identifier}:${windowStart}`;
 
   const kv = createKVStoreSet(env);
-  await kv.rateLimits.put(key, JSON.stringify({ count }), {
+  await kv.rateLimits.put(key, String(count), {
     expirationTtl: 120,
   });
 }
@@ -75,9 +75,6 @@ export async function seedRateLimit(
 export async function readRateLimitCount(env: Env, identifier: string): Promise<number> {
   const windowStart = Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS) * RATE_LIMIT_WINDOW_MS;
   const kv = createKVStoreSet(env);
-  const state = await kv.rateLimits.get<{ count: number }>(
-    `ratelimit:${identifier}:${windowStart}`,
-    "json"
-  );
-  return state === null ? 0 : state.count;
+  const raw = await kv.rateLimits.get(`ratelimit:${identifier}:${windowStart}`);
+  return raw === null ? 0 : Number(raw);
 }

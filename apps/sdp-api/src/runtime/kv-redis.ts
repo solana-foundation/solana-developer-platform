@@ -11,9 +11,30 @@
 
 import type { Redis } from "ioredis";
 import type { Env } from "@/types/env";
-import type { KVListResult, KVPutOptions, KVStore, KVStoreSet } from "./kv";
+import type {
+  KVListResult,
+  KVPutOptions,
+  KVStore,
+  KVStoreSet,
+  SlidingWindowAdmission,
+  SlidingWindowOptions,
+} from "./kv";
 
 const SCAN_COUNT = 100;
+
+const ADMIT_SLIDING_WINDOW_LUA = `
+local max = tonumber(ARGV[1])
+local weight = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local previous = tonumber(redis.call('GET', KEYS[2]) or '0')
+if current + previous * weight >= max then
+  return {0, current, previous}
+end
+current = redis.call('INCR', KEYS[1])
+redis.call('PEXPIRE', KEYS[1], ttl)
+return {1, current, previous}
+`;
 
 // One Promise<Redis> per URL, shared by every RedisKVStore at that backend.
 // Storing the Promise (not the resolved client) means concurrent first-
@@ -92,6 +113,24 @@ export class RedisKVStore implements KVStore {
   async delete(key: string): Promise<void> {
     const client = await this.clientPromise;
     await client.del(this.namespaced(key));
+  }
+
+  async admitSlidingWindow(
+    currentKey: string,
+    previousKey: string,
+    options: SlidingWindowOptions
+  ): Promise<SlidingWindowAdmission> {
+    const client = await this.clientPromise;
+    const [admitted, current, previous] = (await client.eval(
+      ADMIT_SLIDING_WINDOW_LUA,
+      2,
+      this.namespaced(currentKey),
+      this.namespaced(previousKey),
+      options.maxRequests,
+      options.previousWeight,
+      Math.ceil(options.expirationTtl * 1000)
+    )) as [number, number, number];
+    return { admitted: admitted === 1, current, previous };
   }
 
   async list(): Promise<KVListResult> {
