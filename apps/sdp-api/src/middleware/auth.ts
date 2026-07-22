@@ -24,7 +24,7 @@ import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { AppError } from "@/lib/errors";
 import type { KVStore } from "@/runtime/kv";
 import type { Env } from "@/types/env";
-import { enforceApiKeyRateLimit } from "./rate-limit";
+import { enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
 
 const KV_TTL_SECONDS = 3600; // 1 hour cache
 const NODE_LAST_USED_WRITE_INTERVAL_MS = 5 * 60_000;
@@ -347,7 +347,7 @@ export function authMiddleware() {
       throw new AppError("EXPIRED_API_KEY");
     }
 
-    await enforceApiKeyRateLimit(c, cachedKey.id, cachedKey.rateLimitTier);
+    await enforceRateLimit(c, cachedKey.id, RATE_LIMIT_TIERS[cachedKey.rateLimitTier]);
 
     // Set auth context
     const normalizedWalletBindings = normalizeWalletBindings(cachedKey);

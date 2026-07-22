@@ -4,7 +4,7 @@ import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
-import { rateLimitMiddleware } from "@/middleware/rate-limit";
+import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -103,7 +103,7 @@ describe("Clerk auth request cache", () => {
       c.set("verifiedClerkJwt", { token, payload });
       await next();
     });
-    app.use("*", rateLimitMiddleware());
+    app.use("*", skipRateLimitPaths());
     app.use("*", unifiedAuthMiddleware({ allowClerk: true }));
     app.get("/protected", requirePermissions("org:read"), (c) => {
       return c.json({
