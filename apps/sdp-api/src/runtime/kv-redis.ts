@@ -9,6 +9,7 @@
  * actually used.
  */
 
+import { createHash } from "node:crypto";
 import type { Redis } from "ioredis";
 import type { Env } from "@/types/env";
 import type {
@@ -35,6 +36,8 @@ current = redis.call('INCR', KEYS[1])
 redis.call('PEXPIRE', KEYS[1], ttl)
 return {1, current, previous}
 `;
+
+const ADMIT_SLIDING_WINDOW_SHA = createHash("sha1").update(ADMIT_SLIDING_WINDOW_LUA).digest("hex");
 
 // One Promise<Redis> per URL, shared by every RedisKVStore at that backend.
 // Storing the Promise (not the resolved client) means concurrent first-
@@ -121,15 +124,24 @@ export class RedisKVStore implements KVStore {
     options: SlidingWindowOptions
   ): Promise<SlidingWindowAdmission> {
     const client = await this.clientPromise;
-    const [admitted, current, previous] = (await client.eval(
-      ADMIT_SLIDING_WINDOW_LUA,
-      2,
+    const args: (string | number)[] = [
       this.namespaced(currentKey),
       this.namespaced(previousKey),
       options.maxRequests,
       options.previousWeight,
-      Math.ceil(options.expirationTtl * 1000)
-    )) as [number, number, number];
+      Math.ceil(options.expirationTtl * 1000),
+    ];
+    let raw: unknown;
+    try {
+      raw = await client.evalsha(ADMIT_SLIDING_WINDOW_SHA, 2, ...args);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("NOSCRIPT")) {
+        raw = await client.eval(ADMIT_SLIDING_WINDOW_LUA, 2, ...args);
+      } else {
+        throw err;
+      }
+    }
+    const [admitted, current, previous] = raw as [number, number, number];
     return { admitted: admitted === 1, current, previous };
   }
 
