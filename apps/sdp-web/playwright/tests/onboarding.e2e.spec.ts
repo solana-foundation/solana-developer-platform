@@ -35,7 +35,7 @@ test.describe
       );
       expect(projectCookie?.value).toMatch(/^prj_/);
 
-      await page.getByRole("button", { name: /SDP RPC/ }).click();
+      await page.getByRole("button", { name: /^QuickNode\b/ }).click();
       await page.getByRole("button", { name: "Next", exact: true }).click();
       await expect(
         page.getByRole("heading", { level: 2, name: "Choose your custody provider" })
