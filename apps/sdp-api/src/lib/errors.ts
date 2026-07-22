@@ -235,6 +235,10 @@ export function solanaRpcError(message?: string, details?: Record<string, unknow
   return new AppError("SOLANA_RPC_ERROR", message, details);
 }
 
+export function accountFrozen(message?: string, details?: Record<string, unknown>): AppError {
+  return new AppError("ACCOUNT_FROZEN", message, details);
+}
+
 export function providerNotConfigured(message?: string): AppError {
   return new AppError("PROVIDER_NOT_CONFIGURED", message);
 }
