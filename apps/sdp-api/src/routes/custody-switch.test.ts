@@ -7,7 +7,7 @@ import app from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const provisionParaWalletMock = vi.spyOn(custodyProvisioning, "provisionParaWallet");
 
@@ -130,7 +130,7 @@ describe("Custody switch rollback", () => {
   afterEach(async () => {
     env.PARA_API_KEY = originalParaApiKey;
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
   });
 
   it("restores the previous active config when provider initialization fails", async () => {

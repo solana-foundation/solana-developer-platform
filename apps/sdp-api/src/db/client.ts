@@ -1,13 +1,8 @@
-import { Client, Pool, type QueryResult, types } from "pg";
+import { Pool, type QueryResult, types } from "pg";
 
 types.setTypeParser(20, (value) => Number.parseInt(value, 10));
 
-export interface HyperdriveBinding {
-  connectionString: string;
-}
-
 export interface DatabaseBindings {
-  HYPERDRIVE?: HyperdriveBinding | null;
   DATABASE_URL?: string | null;
 }
 
@@ -48,7 +43,6 @@ type Queryable = {
 };
 
 const pooledClients = new Map<string, PooledPostgresClient>();
-const hyperdriveClients = new Map<string, HyperdrivePostgresClient>();
 
 const NODE_POOL_OPTIONS = {
   max: 10,
@@ -58,43 +52,6 @@ const NODE_POOL_OPTIONS = {
   keepAlive: true,
   keepAliveInitialDelayMillis: 10_000,
 } as const;
-
-class ConnectionCoordinator implements Queryable {
-  private pending: Promise<void> = Promise.resolve();
-
-  constructor(private readonly connectionString: string) {}
-
-  async query(args: QueryArgs): Promise<QueryResult> {
-    return this.runExclusive(async () => {
-      const client = new Client({
-        connectionString: this.connectionString,
-      });
-
-      try {
-        await client.connect();
-        return await client.query(args.text, args.values);
-      } finally {
-        await client.end().catch(() => {});
-      }
-    });
-  }
-
-  async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
-    const previous = this.pending;
-    let release: (() => void) | undefined;
-    this.pending = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-
-    await previous;
-
-    try {
-      return await operation();
-    } finally {
-      release?.();
-    }
-  }
-}
 
 function replacePositionalPlaceholders(query: string): string {
   let result = "";
@@ -289,38 +246,6 @@ abstract class BasePostgresClient extends PostgresExecutor implements DatabaseCl
   abstract transaction<T>(callback: (tx: DatabaseExecutor) => Promise<T>): Promise<T>;
 }
 
-class HyperdrivePostgresClient extends BasePostgresClient {
-  private readonly coordinator: ConnectionCoordinator;
-
-  constructor(private readonly connectionString: string) {
-    const coordinator = new ConnectionCoordinator(connectionString);
-    super(coordinator);
-    this.coordinator = coordinator;
-  }
-
-  async transaction<T>(callback: (tx: DatabaseExecutor) => Promise<T>): Promise<T> {
-    return this.coordinator.runExclusive(async () => {
-      const client = new Client({
-        connectionString: this.connectionString,
-      });
-
-      try {
-        await client.connect();
-        await client.query("BEGIN");
-        const executor = new PostgresExecutor(client);
-        const result = await callback(executor);
-        await client.query("COMMIT");
-        return result;
-      } catch (error) {
-        await client.query("ROLLBACK").catch(() => {});
-        throw error;
-      } finally {
-        await client.end().catch(() => {});
-      }
-    });
-  }
-}
-
 class PooledPostgresClient extends BasePostgresClient {
   private readonly pool: Pool;
 
@@ -404,11 +329,6 @@ export function asTransactionalClient(tx: DatabaseExecutor): DatabaseClient {
 }
 
 export function getConnectionString(bindings: DatabaseBindings): string {
-  const hyperdriveUrl = bindings.HYPERDRIVE?.connectionString?.trim();
-  if (hyperdriveUrl) {
-    return hyperdriveUrl;
-  }
-
   const databaseUrl = bindings.DATABASE_URL?.trim() ?? process.env.DATABASE_URL?.trim();
   if (databaseUrl) {
     return databaseUrl;
@@ -429,25 +349,12 @@ export function createDatabaseClient(connectionString: string): DatabaseClient {
 }
 
 export function getDb(bindings: DatabaseBindings): DatabaseClient {
-  const hyperdriveUrl = bindings.HYPERDRIVE?.connectionString?.trim();
-  if (hyperdriveUrl) {
-    const existing = hyperdriveClients.get(hyperdriveUrl);
-    if (existing) {
-      return existing;
-    }
-
-    const client = new HyperdrivePostgresClient(hyperdriveUrl);
-    hyperdriveClients.set(hyperdriveUrl, client);
-    return client;
-  }
-
   return createDatabaseClient(getConnectionString(bindings));
 }
 
 export async function closeDatabasePools(): Promise<void> {
   const pools = [...pooledClients.values()];
   pooledClients.clear();
-  hyperdriveClients.clear();
 
   const results = await Promise.allSettled(pools.map((client) => client.close()));
   const errors = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));

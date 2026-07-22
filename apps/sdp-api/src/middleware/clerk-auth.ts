@@ -20,6 +20,9 @@ import {
   verifyClerkJwtForRequest,
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
+import { ensureClerkOrganizationMapping } from "@/services/clerk-organization-provisioning.service";
+import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
+import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 
 async function resolveClerkUser(db: DatabaseClient, clerkUserId: string) {
@@ -60,7 +63,25 @@ async function resolveExistingClerkContext(
          COALESCE(aui.email, u.email, ?) AS email,
          aoi.organization_id,
          COALESCE(aoi.slug, ?) AS org_slug,
-         om.role
+         om.role,
+         EXISTS (
+           SELECT 1
+           FROM projects p
+           JOIN project_members pm
+             ON pm.project_id = p.id AND pm.user_id = aui.user_id
+           WHERE p.organization_id = aoi.organization_id
+             AND p.slug = 'default-sandbox'
+             AND p.status = 'active'
+         ) AS has_default_sandbox,
+         EXISTS (
+           SELECT 1
+           FROM projects p
+           JOIN project_members pm
+             ON pm.project_id = p.id AND pm.user_id = aui.user_id
+           WHERE p.organization_id = aoi.organization_id
+             AND p.slug = 'default-production'
+             AND p.status = 'active'
+         ) AS has_default_production
        FROM auth_organization_identities aoi
        LEFT JOIN auth_user_identities aui
          ON aui.provider = 'clerk' AND aui.provider_user_id = ?
@@ -85,6 +106,8 @@ async function resolveExistingClerkContext(
       organization_id: string;
       org_slug: string | null;
       role: string | null;
+      has_default_sandbox: boolean | number;
+      has_default_production: boolean | number;
     }>();
 }
 
@@ -235,6 +258,18 @@ async function ensureMembership(
   return role;
 }
 
+async function ensureDefaultProjects(
+  db: DatabaseClient,
+  organizationId: string,
+  userId: string
+): Promise<void> {
+  const projectService = new ProjectService(db);
+  await Promise.all([
+    projectService.findOrCreateDefault(organizationId, "sandbox", userId),
+    projectService.findOrCreateDefault(organizationId, "production", userId),
+  ]);
+}
+
 async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJwtPayload) {
   const email = resolveClerkEmail(payload);
   if (!email) {
@@ -262,6 +297,14 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
         .run();
     }
 
+    if (!existingContext.has_default_sandbox || !existingContext.has_default_production) {
+      await ensureDefaultProjects(
+        getDb(c.env),
+        existingContext.organization_id,
+        existingContext.user_id
+      );
+    }
+
     return {
       userId: existingContext.user_id,
       organizationId: existingContext.organization_id,
@@ -280,28 +323,45 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     resolveClerkOrganization(getDb(c.env), payload.org_id as string),
   ]);
 
-  if (!orgIdentity) {
-    throw new AppError("UNAUTHORIZED", "Clerk organization is not linked");
+  let resolvedOrgIdentity = orgIdentity;
+  if (!resolvedOrgIdentity) {
+    const organization = await new ClerkOrganizationsService(c.env).getOrganization(
+      payload.org_id as string
+    );
+    const mapping = await ensureClerkOrganizationMapping({
+      env: c.env,
+      db: getDb(c.env),
+      organization,
+    });
+    resolvedOrgIdentity = {
+      organization_id: mapping.organizationId,
+      slug: mapping.slug,
+    };
   }
 
   const role = await ensureMembership(getDb(c.env), {
-    organizationId: orgIdentity.organization_id,
+    organizationId: resolvedOrgIdentity.organization_id,
     userId: userIdentity.userId,
     email,
     clerkRole: payload.org_role,
   });
+  await ensureDefaultProjects(
+    getDb(c.env),
+    resolvedOrgIdentity.organization_id,
+    userIdentity.userId
+  );
 
   const permissions = getPermissionsForOrgRole(role);
 
   return {
     userId: userIdentity.userId,
-    organizationId: orgIdentity.organization_id,
+    organizationId: resolvedOrgIdentity.organization_id,
     permissions,
     role,
     clerkUserId: payload.sub as string,
     clerkOrgId: payload.org_id as string,
     email: email || userIdentity.email,
-    orgSlug: payload.org_slug ?? orgIdentity.slug,
+    orgSlug: payload.org_slug ?? resolvedOrgIdentity.slug,
     orgRole: payload.org_role ?? null,
   };
 }

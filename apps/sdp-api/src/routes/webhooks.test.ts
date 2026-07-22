@@ -6,6 +6,7 @@ import {
   buildBvnkOnrampPaymentRuleKey,
   buildBvnkOnrampWalletName,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -55,7 +56,7 @@ describe("Clerk webhooks", () => {
     env.CLERK_WEBHOOK_SECRET = WEBHOOK_SECRET;
     // Webhook tier sync is gated by deployment mode — these tests verify the
     // managed-mode behavior (sync runs), so explicitly clear any leaked
-    // self-hosted setting from .dev.vars / process env.
+    // self-hosted setting from .env.local / process env.
     originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
     env.SDP_DEPLOYMENT_MODE = undefined;
   });

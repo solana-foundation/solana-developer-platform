@@ -1,51 +1,32 @@
-/**
- * Cloudflare Worker Environment Bindings
- *
- * These types define the bindings available in the Worker runtime,
- * configured via wrangler.toml.
- */
+/** Environment variables consumed by the Node API runtime. */
 
-import type { HyperdriveBinding } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { ApiKeyEnvironment, CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
 
 export interface Env {
-  // Hyperdrive database binding (Cloudflare runtime only)
-  HYPERDRIVE?: HyperdriveBinding;
-
-  // KV Namespaces (Cloudflare runtime only)
-  SDP_API_KEYS?: KVNamespace;
-  SDP_RATE_LIMITS?: KVNamespace;
-  SDP_CACHE?: KVNamespace;
-  SDP_SESSIONS?: KVNamespace;
-
-  // Node runtime equivalents (Postgres + Redis via connection strings)
+  // Runtime data services
   DATABASE_URL?: string;
   REDIS_URL?: string;
 
-  // Selects which runtime-specific code path to take.
-  // "cloudflare" uses HYPERDRIVE + KVNamespace bindings above;
-  // "node" uses DATABASE_URL + REDIS_URL.
-  SDP_RUNTIME?: "cloudflare" | "node";
-
-  // When the Node entrypoint runs with multiple replicas, scheduling the
-  // reconciliation cron on every replica would fire the job N times per
-  // tick. Setting this to "true" or "1" makes startCron a no-op so only
-  // one designated replica drives the job. Ignored on Cloudflare (CF uses
-  // a single scheduled handler per deployment).
+  // Cloud Run services disable embedded cron by default so the dedicated job
+  // is the sole scheduler. Set to "false" or "0" to opt in explicitly; other
+  // Node runtimes remain enabled by default and may opt out with "true"/"1".
   DISABLE_CRON?: string;
 
   // Environment variables
   ENVIRONMENT: "development" | "production";
   API_VERSION: string;
+  // Injected automatically by Cloud Run services. Local processes and jobs omit them.
+  K_SERVICE?: string;
+  K_REVISION?: string;
 
   // Public-facing origin of this API (e.g. "https://api.example.com"). When set,
   // it overrides the request-derived origin used to build the SDP-hosted token
   // metadata URL that gets burned into the on-chain MetadataPointer. Set this in
   // any environment fronted by a proxy that rewrites Host/scheme, so the URI
   // can't capture an internal, unreachable address. Falls back to the request
-  // origin (correct on Cloudflare Workers) when unset.
+  // origin when unset.
   PUBLIC_API_ORIGIN?: string;
 
   // Deployment mode. "managed" (default) uses tier-based provider entitlements
@@ -64,7 +45,7 @@ export interface Env {
   GCP_SECRET_MANAGER_SECRET_PREFIX?: string;
   GCP_SECRET_MANAGER_API_BASE_URL?: string;
 
-  // Secrets (set via wrangler secret)
+  // Application secrets
   API_KEY_PEPPER?: string;
   CUSTODY_ENCRYPTION_KEY?: string; // For encrypting org private keys in DB
   SENTRY_DSN?: string;
@@ -203,7 +184,7 @@ export interface Env {
   PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE?: string;
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
 
-  // Asset Profiles backend feature flag
+  // Asset Profiles production opt-in; development is always enabled.
   ASSET_PROFILES_ENABLED?: string;
 
   // Compliance providers

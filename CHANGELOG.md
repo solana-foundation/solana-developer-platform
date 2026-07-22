@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.43.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.43.0...v0.43.1) (2026-07-21)
+
+### Other Changes
+
+* fix wallet setup footer dark mode ([#838](https://github.com/solana-foundation/solana-developer-platform/pull/838)) ([3f22ee9](https://github.com/solana-foundation/solana-developer-platform/commit/3f22ee9a4dedd8e51e7b060ad61874366056d516))
+* fix organization bootstrap failure recovery ([#836](https://github.com/solana-foundation/solana-developer-platform/pull/836)) ([f6f61ee](https://github.com/solana-foundation/solana-developer-platform/commit/f6f61ee940808810100b015ac75019aef141383b))
+
+## [0.43.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.42.0...v0.43.0) (2026-07-21)
+
+### Features
+
+* **payments:** reconcile Coinbase onramp webhooks and surface order economics ([#826](https://github.com/solana-foundation/solana-developer-platform/pull/826)) ([856a014](https://github.com/solana-foundation/solana-developer-platform/commit/856a014fd8234ac9384b2b6b75223311cd7f5746))
+* HOO-681, HOO-680, HOO-683, HOO-679, HOO-682 - Advanced settings editor ([#806](https://github.com/solana-foundation/solana-developer-platform/pull/806)) ([bed4ba2](https://github.com/solana-foundation/solana-developer-platform/commit/bed4ba216b194b205278226ef5c21227364a807c))
+* HOO-767 Add credential admin auth boundary ([#808](https://github.com/solana-foundation/solana-developer-platform/pull/808)) ([84106a5](https://github.com/solana-foundation/solana-developer-platform/commit/84106a5e2ff613dd508357b8c05a7939a377234e))
+* share provider catalog metadata ([#813](https://github.com/solana-foundation/solana-developer-platform/pull/813)) ([afa8871](https://github.com/solana-foundation/solana-developer-platform/commit/afa8871c421eb07d7010967e46223b1fe3bd5836))
+* **payments:** enable MoneyGram on-ramp with self-hosted pinned widget SDK ([#820](https://github.com/solana-foundation/solana-developer-platform/pull/820)) ([0807370](https://github.com/solana-foundation/solana-developer-platform/commit/0807370175b42a1913cf0751c972ab887ada057e))
+* **api:** restrict recurring payment tokens to stablecoins and issued tokens ([#811](https://github.com/solana-foundation/solana-developer-platform/pull/811)) ([b509dc5](https://github.com/solana-foundation/solana-developer-platform/commit/b509dc528313f341043ade24aca0b8e0e879c3db))
+* **web:** Add complete French UI translation catalogs ([#685](https://github.com/solana-foundation/solana-developer-platform/pull/685)) ([535c05b](https://github.com/solana-foundation/solana-developer-platform/commit/535c05b60e88fb0cd47ef05467aea134274afecf))
+
+### Bug Fixes
+
+* prevent organization provisioning races ([#833](https://github.com/solana-foundation/solana-developer-platform/pull/833)) ([94b960b](https://github.com/solana-foundation/solana-developer-platform/commit/94b960ba66f199fa9673e832c296e6a21ac66aae))
+* surfpool test reliability ([#817](https://github.com/solana-foundation/solana-developer-platform/pull/817)) ([faff202](https://github.com/solana-foundation/solana-developer-platform/commit/faff202ae3f40cf60f78af56cba5fd0e3b0cd9ff))
+
+### Maintenance
+
+* add prod Cloud Run deploy workflow for sdp-api ([#825](https://github.com/solana-foundation/solana-developer-platform/pull/825)) ([f2ba580](https://github.com/solana-foundation/solana-developer-platform/commit/f2ba5800e1af42f66e37b3aff81302faf0b06769))
+
+### Other Changes
+
+* fix language picker layout shift ([#832](https://github.com/solana-foundation/solana-developer-platform/pull/832)) ([446887b](https://github.com/solana-foundation/solana-developer-platform/commit/446887b2d767aafa5ffad5ae77cf2a9b40b7d2d9))
+
 ## [0.42.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.41.0...v0.42.0) (2026-07-20)
 
 ### Features

@@ -412,7 +412,7 @@ export function WalletSetupFlow({
       </div>
 
       <footer
-        className="shrink-0 border-t border-border-default bg-white/95 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
+        className="shrink-0 border-t border-border-default bg-surface-raised/95 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
         data-wallet-setup-actions="true"
       >
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">

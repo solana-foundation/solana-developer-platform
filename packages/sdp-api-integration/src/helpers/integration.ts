@@ -23,6 +23,7 @@ import { getIntegrationCustodyProvider } from "./custody-provider";
 const {
   app,
   clearTestDatabase,
+  createKVStoreSet,
   createFeePaymentAdapter,
   createMosaicService,
   createSigningService,
@@ -100,11 +101,7 @@ export async function resetIntegrationState(
   apiKeyHash: string
 ): Promise<{ custodyAddress: string }> {
   const db = getDb(env);
-  const apiKeysKV = env.SDP_API_KEYS;
-  const rateLimitKV = env.SDP_RATE_LIMITS;
-  if (!apiKeysKV || !rateLimitKV) {
-    throw new Error("Integration test bindings SDP_API_KEYS and SDP_RATE_LIMITS are required.");
-  }
+  const { apiKeys: apiKeysKV, rateLimits: rateLimitKV } = createKVStoreSet(env);
 
   const rateLimitKeys = await rateLimitKV.list();
   for (const key of rateLimitKeys.keys) {

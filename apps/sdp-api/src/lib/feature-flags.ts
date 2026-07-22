@@ -11,6 +11,8 @@ export function isRecurringPaymentCollectionEnabled(
   return isTruthyFlag(env.PAYMENTS_RECURRING_COLLECTION_ENABLED);
 }
 
-export function isAssetProfilesEnabled(env: Pick<Env, "ASSET_PROFILES_ENABLED">): boolean {
-  return isTruthyFlag(env.ASSET_PROFILES_ENABLED);
+export function isAssetProfilesEnabled(
+  env: Pick<Env, "ASSET_PROFILES_ENABLED" | "ENVIRONMENT">
+): boolean {
+  return env.ENVIRONMENT === "development" || isTruthyFlag(env.ASSET_PROFILES_ENABLED);
 }

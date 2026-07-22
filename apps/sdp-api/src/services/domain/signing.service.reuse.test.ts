@@ -231,9 +231,7 @@ function createService(params: {
   };
 
   const env: Env = {
-    HYPERDRIVE: {
-      connectionString: "postgresql://sdp:sdp@127.0.0.1:5432/sdp",
-    },
+    DATABASE_URL: "postgresql://sdp:sdp@127.0.0.1:5432/sdp",
     CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
     ENVIRONMENT: "development",
     API_VERSION: "v1",
