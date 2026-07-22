@@ -16,10 +16,10 @@ import { DashboardNavigationLink as Link } from "@/components/dashboard-navigati
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ProviderSelectionCard } from "@/components/ui/provider-selection-card";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
-import { cn } from "@/lib/utils";
 
 type SetupStep = "provider" | "details";
 
@@ -116,38 +116,22 @@ function ProviderStep({
         const isConnected = connectedProviderSet.has(provider.id);
 
         return (
-          <button
+          <ProviderSelectionCard
             key={provider.id}
-            type="button"
-            onClick={() => onSelect(provider.id)}
-            data-wallet-enter-advance={isSelected ? "true" : undefined}
-            className={cn(
-              "group w-full cursor-pointer rounded-2xl border px-5 py-5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default focus-visible:ring-offset-2",
-              isSelected
-                ? "border-primary bg-fill-subtle"
-                : "border-border-default bg-surface-raised hover:bg-fill-subtle"
-            )}
-            aria-pressed={isSelected}
-          >
-            <div className="flex items-start gap-4">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-fill-strong text-primary">
-                <WalletProviderMark provider={provider.id} size="sm" />
-              </span>
-              <span className="min-w-0 flex-1 space-y-1">
-                <span className="flex flex-wrap items-center gap-2">
-                  <span className="relative inline-block text-[22px] leading-none font-medium text-primary after:absolute after:left-0 after:-bottom-1 after:h-px after:w-full after:origin-left after:scale-x-0 after:bg-current after:transition-transform after:duration-200 group-hover:after:scale-x-100 group-focus-visible:after:scale-x-100 motion-reduce:after:transition-none">
-                    {provider.label}
-                  </span>
-                  {isConnected ? (
-                    <span className="rounded-full bg-surface-raised px-3 py-1 text-xs font-medium text-secondary ring-1 ring-border-subtle">
-                      {t("DashboardCustody.active")}
-                    </span>
-                  ) : null}
+            onSelect={() => onSelect(provider.id)}
+            isSelected={isSelected}
+            advanceOnEnter={isSelected}
+            icon={<WalletProviderMark provider={provider.id} size="sm" />}
+            title={provider.label}
+            description={t(provider.descriptionKey)}
+            badge={
+              isConnected ? (
+                <span className="rounded-full bg-surface-raised px-3 py-1 text-xs font-medium text-secondary ring-1 ring-border-subtle">
+                  {t("DashboardCustody.active")}
                 </span>
-                <span className="block text-sm text-tertiary">{t(provider.descriptionKey)}</span>
-              </span>
-            </div>
-          </button>
+              ) : undefined
+            }
+          />
         );
       })}
     </div>
