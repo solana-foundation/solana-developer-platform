@@ -125,6 +125,16 @@ const CAPACITY_EXPERT_LABELS: Partial<Record<CapacityKey, MessageKey>> = {
   issueRetireControls: "DashboardIssuance.config.issueRetireControlsExpert",
 };
 
+// Technical-mode descriptions: the token/wallet/mint/burn phrasing lives here so
+// the default (manager) view stays jargon-free. Only the policies whose plain and
+// technical wording differ override; the rest reuse their manager description.
+const CAPACITY_EXPERT_DESCRIPTIONS: Partial<Record<CapacityKey, MessageKey>> = {
+  kyc: "DashboardIssuance.config.kycDescriptionExpert",
+  restrictTradingHours: "DashboardIssuance.config.restrictTradingHoursDescriptionExpert",
+  issueRetireControls: "DashboardIssuance.config.issueRetireControlsDescriptionExpert",
+  redemptionApprovals: "DashboardIssuance.config.redemptionApprovalsDescriptionExpert",
+};
+
 // The manager-facing effect line for each access-control mode. accessControl is a
 // standalone field (a 3-way mode, template-defaulted, immutable at deploy) — it's
 // surfaced here as a control alongside the settings, but its plumbing is unchanged.
@@ -798,6 +808,7 @@ function CapacityRow({
   const t = useTranslations();
   const meta = CAPACITY_META[capKey];
   const expertLabel = CAPACITY_EXPERT_LABELS[capKey];
+  const expertDescription = CAPACITY_EXPERT_DESCRIPTIONS[capKey];
   return (
     <SettingShell
       icon={CAPACITY_ICONS[capKey]}
@@ -805,7 +816,9 @@ function CapacityRow({
       disabled={disabled}
       onToggle={onToggle}
       label={showTechnical && expertLabel ? t(expertLabel) : t(meta.labelKey)}
-      description={t(meta.descriptionKey)}
+      description={
+        showTechnical && expertDescription ? t(expertDescription) : t(meta.descriptionKey)
+      }
     >
       {checked && configurable && allowConfig ? (
         <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-border-subtle pt-2.5">

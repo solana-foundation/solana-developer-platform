@@ -61,6 +61,14 @@ describe("AdvancedSettingsEditor", () => {
     expect(markup).not.toContain("Not enforced yet");
   });
 
+  it("uses jargon-free capacity descriptions in the default (non-technical) view", () => {
+    const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
+    // Institutional wording is shown by default...
+    expect(markup).toContain("issue new units or retire existing ones");
+    // ...the token/mint/burn phrasing is reserved for the technical view.
+    expect(markup).not.toContain("mint new tokens or burn existing supply");
+  });
+
   it("reveals a Configure affordance for a configurable capacity when config is allowed", () => {
     const capacities = createInitialCapacities();
     capacities.restrictTradingHours = { enabled: true };
