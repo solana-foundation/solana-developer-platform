@@ -31,16 +31,16 @@ import {
   ApprovalInboxSkeleton,
 } from "@/app/dashboard/approvals/approval-page-skeletons";
 import {
-  EarnDepositSkeleton,
-  EarnOverviewSkeleton,
-  EarnStrategyDetailSkeleton,
-} from "@/app/dashboard/earn/earn-route-skeletons";
-import {
   IssuanceCreateSkeleton,
   IssuanceDetailSkeleton,
   IssuancePageSkeleton,
 } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
+import {
+  EarnDepositSkeleton,
+  EarnOverviewSkeleton,
+  EarnStrategyDetailSkeleton,
+} from "@/app/dashboard/markets/earn/earn-route-skeletons";
 import {
   CompactOperationsCardSkeleton,
   SettingsPageSkeleton,
@@ -178,9 +178,15 @@ function getNavSections(
         ...(isEarnUiEnabled()
           ? [
               {
-                label: t("Shared.dashboardShell.earn"),
-                href: DASHBOARD_SIDE_NAV_HREFS.earn,
+                label: t("Shared.dashboardShell.markets"),
+                href: DASHBOARD_SIDE_NAV_HREFS.markets,
                 icon: TrendingUpIcon,
+                children: [
+                  {
+                    label: t("Shared.dashboardShell.earn"),
+                    href: DASHBOARD_SIDE_NAV_HREFS.markets,
+                  },
+                ],
               },
             ]
           : []),
@@ -463,15 +469,15 @@ function getEarnRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
-  if (pathname === "/dashboard/earn/deposit") {
+  if (pathname === "/dashboard/markets/earn/deposit") {
     return actionPageConfig({
       centeredTitle: t("Shared.dashboardShell.earnNewDeposit"),
-      backHref: "/dashboard/earn",
+      backHref: "/dashboard/markets/earn",
       backLabel: t("Shared.dashboardShell.backToEarn"),
       contentWidthClass: "max-w-none",
     });
   }
-  if (pathname === "/dashboard/earn" || pathname.startsWith("/dashboard/earn/")) {
+  if (pathname === "/dashboard/markets/earn" || pathname.startsWith("/dashboard/markets/earn/")) {
     return {
       title: t("Shared.dashboardShell.earn"),
       contentWidthClass: "max-w-none",
@@ -1161,7 +1167,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     shellPathname === "/dashboard/api-keys/new" ||
     (shellPathname.startsWith("/dashboard/api-keys/") && shellPathname.endsWith("/edit")) ||
     shellPathname.startsWith("/dashboard/payments") ||
-    shellPathname === "/dashboard/earn/deposit" ||
+    shellPathname === "/dashboard/markets/earn/deposit" ||
     shellPathname === "/dashboard/wallets" ||
     shellPathname === "/dashboard/custody" ||
     isWalletSetupRoute ||

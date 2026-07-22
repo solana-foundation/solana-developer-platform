@@ -3,7 +3,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   wallets: "/dashboard/wallets",
   issuance: "/dashboard/issuance",
   payments: "/dashboard/payments",
-  earn: "/dashboard/earn",
+  markets: "/dashboard/markets/earn",
   apiKeys: "/dashboard/api-keys",
   policies: "/dashboard/policies",
   approvals: "/dashboard/approvals",
@@ -93,9 +93,11 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (pathname === "/dashboard/issuance/create") return "issuance-create";
   if (/^\/dashboard\/issuance\/[^/]+$/.test(pathname)) return "issuance-detail";
 
-  if (pathname === "/dashboard/earn") return "earn-overview";
-  if (pathname === "/dashboard/earn/deposit") return "earn-deposit";
-  if (/^\/dashboard\/earn\/strategies\/[^/]+$/.test(pathname)) return "earn-strategy-detail";
+  if (pathname === "/dashboard/markets/earn") return "earn-overview";
+  if (pathname === "/dashboard/markets/earn/deposit") return "earn-deposit";
+  if (/^\/dashboard\/markets\/earn\/strategies\/[^/]+$/.test(pathname)) {
+    return "earn-strategy-detail";
+  }
 
   if (pathname === "/dashboard/payments") return "payments-overview";
   if (pathname === "/dashboard/payments/transactions") return "payments-transactions";

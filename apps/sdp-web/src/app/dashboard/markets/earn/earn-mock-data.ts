@@ -2,7 +2,7 @@ import type { EarnStrategy } from "@sdp/types";
 
 /**
  * Mock catalogue for the Earn design scaffold. This file is the ONLY data
- * seam in the flow: swap these fixtures for the /api/dashboard/earn BFF
+ * seam in the flow: swap these fixtures for the /api/dashboard/markets/earn BFF
  * fetchers (the strategies proxy is stubbed; positions/movements proxies land
  * with the execution path) once the first vault-infra provider sync lands,
  * and the workspace + wizard keep working unchanged.
@@ -51,6 +51,18 @@ export const MOCK_TOKEN_SYMBOLS: Readonly<Record<string, string>> = {
   [USDT]: "USDT",
   [PYUSD]: "PYUSD",
 };
+
+/** Sensible default deposit token (accepted by every day-one strategy). */
+export const DEFAULT_DEPOSIT_MINT = USDC;
+
+/** Deposit mints common to all given strategies (intersection). */
+export function commonDepositMints(strategies: readonly MockEarnStrategy[]): string[] {
+  if (strategies.length === 0) return [];
+  return strategies.reduce<string[]>(
+    (acc, strategy) => acc.filter((mint) => strategy.depositMints.includes(mint)),
+    [...strategies[0].depositMints]
+  );
+}
 
 export const MOCK_EARN_STRATEGIES: readonly MockEarnStrategy[] = [
   strategy({

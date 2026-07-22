@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 /**
  * Earn overview — SDP Markets module (V1: Solana Earn). Currently backed by
  * mock fixtures (see earn-mock-data.ts, the single data seam); the
- * /api/dashboard/earn BFF routes are already stubbed for the swap to live
+ * /api/dashboard/markets/earn BFF routes are already stubbed for the swap to live
  * /v1/earn data once the first vault-infra provider sync lands.
  */
 export default async function EarnPage() {

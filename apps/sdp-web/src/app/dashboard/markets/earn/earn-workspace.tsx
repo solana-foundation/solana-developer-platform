@@ -120,7 +120,7 @@ function PositionsSection() {
         <Button
           size="sm"
           iconLeft={<PlusIcon />}
-          onClick={() => router.push("/dashboard/earn/deposit")}
+          onClick={() => router.push("/dashboard/markets/earn/deposit")}
         >
           {t("DashboardEarn.overview.newDeposit")}
         </Button>
@@ -335,7 +335,7 @@ function StrategiesSection() {
                     variant="secondary"
                     onClick={() =>
                       router.push(
-                        `/dashboard/earn/deposit?strategy=${encodeURIComponent(strategy.id)}`
+                        `/dashboard/markets/earn/deposit?strategy=${encodeURIComponent(strategy.id)}`
                       )
                     }
                   >

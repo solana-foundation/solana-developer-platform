@@ -14,7 +14,7 @@ import type { WellKnownTokenSymbol } from "./well-known-tokens";
  * new kind is a code change, never a migration.
  */
 
-/** Day-one deposit stablecoins for Earn V1 (USDT still pending confirmation). */
+/** Day-one deposit stablecoins for Earn V1 (confirmed: USDC, USDG, USDT). */
 export const EARN_DEPOSIT_TOKEN_SYMBOLS = [
   "USDC",
   "USDG",

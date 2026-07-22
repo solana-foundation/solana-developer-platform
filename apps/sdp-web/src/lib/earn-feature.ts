@@ -1,5 +1,5 @@
 // Frontend gate for the Earn (SDP Markets) UI: the sidebar nav item, the
-// /dashboard/earn overview, and the /dashboard/earn/deposit wizard.
+// /dashboard/markets/earn overview, and the /dashboard/markets/earn/deposit wizard.
 // Independent of the backend EARN_ENABLED flag on sdp-api — this only controls
 // whether the UI is shown, while the API enforces its own flag on every
 // request. Toggle per environment/branch via NEXT_PUBLIC_EARN_ENABLED (e.g. in
