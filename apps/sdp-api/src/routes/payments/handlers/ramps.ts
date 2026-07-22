@@ -43,6 +43,7 @@ import type {
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
+import { getClientIp } from "@/lib/client-ip";
 import {
   AppError,
   badRequest,
@@ -600,8 +601,16 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       quote = muralOnrampQuote({ account, fiatCurrency: input.fiatCurrency });
       break;
     }
-    case "moneygram":
-      throw badRequest("MoneyGram on-ramp is not available.");
+    case "moneygram": {
+      quote = await RAMP_PROVIDER_CLIENTS.moneygram.createOnrampQuote(rampRuntime(c), {
+        cryptoToken: input.cryptoToken,
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        destinationWalletAddress,
+        externalCustomerId: counterparty.external_id ?? counterparty.id,
+      });
+      break;
+    }
     case "coinbase": {
       quote = await RAMP_PROVIDER_CLIENTS.coinbase.createOnrampQuote(rampRuntime(c), {
         cryptoToken: input.cryptoToken,
@@ -622,7 +631,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
-        customerIpAddress: c.req.header("cf-connecting-ip"),
+        customerIpAddress: getClientIp(c) ?? undefined,
       });
       break;
     }

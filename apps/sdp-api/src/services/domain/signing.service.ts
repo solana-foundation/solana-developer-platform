@@ -2017,7 +2017,7 @@ function decodeBase64(base64: string): Uint8Array {
  * This factory wires up the Postgres-backed stores and creates a fully
  * functional SigningService ready for use in request handlers.
  *
- * @param env - Cloudflare Worker environment bindings
+ * @param env - API process environment
  * @returns Configured SigningService instance
  */
 export function createSigningService(env: Env): SigningService {

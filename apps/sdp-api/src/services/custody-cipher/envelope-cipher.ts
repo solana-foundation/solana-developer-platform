@@ -59,7 +59,11 @@ export class KmsEnvelopeCipher {
       throw new EnvelopeCipherError("malformed v2 envelope");
     }
     const dek = await this.kms.decrypt(wrappedPart, `org:${orgId}`);
-    const key = await crypto.subtle.importKey("raw", dek, "AES-GCM", false, ["decrypt"]);
+    // KMS adapters may return a view backed by any ArrayBufferLike. Copy it so
+    // WebCrypto always receives an ArrayBuffer-backed BufferSource.
+    const key = await crypto.subtle.importKey("raw", Uint8Array.from(dek), "AES-GCM", false, [
+      "decrypt",
+    ]);
     const blob = unb64url(blobPart);
     const iv = blob.slice(0, IV_LENGTH);
     const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, blob.slice(IV_LENGTH));

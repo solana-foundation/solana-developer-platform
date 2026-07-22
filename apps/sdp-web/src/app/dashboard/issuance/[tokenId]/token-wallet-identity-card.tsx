@@ -22,7 +22,10 @@ export function TokenWalletIdentityCard({
     const label = wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled");
 
     return (
-      <div className="rounded-[12px] border border-border-default bg-fill-subtle px-4 py-3">
+      <div
+        data-testid="wallet-identity-card"
+        className="rounded-[12px] border border-border-default bg-fill-subtle px-4 py-3"
+      >
         <p className="text-sm font-medium text-primary">{label}</p>
         <div className="mt-3 space-y-2">
           <IdentityRow label={t("DashboardIssuance.wallet.walletId")} value={wallet.walletId} />

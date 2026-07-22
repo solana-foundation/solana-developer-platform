@@ -1,5 +1,5 @@
 import { closeDatabasePools, getDb } from "../src/db";
-import { withProcessEnvFallback } from "../src/lib/runtime-env";
+import { getProcessEnv } from "../src/lib/runtime-env";
 import { createCustodyCipher } from "../src/services/custody-cipher/cipher-router";
 import type { Env } from "../src/types/env";
 
@@ -65,8 +65,7 @@ async function migrateCustodyConfigs(env: Env): Promise<number> {
 }
 
 async function main(): Promise<void> {
-  const env = withProcessEnvFallback({} as Env);
-  env.SDP_RUNTIME = "node";
+  const env = getProcessEnv();
 
   if (!env.CUSTODY_ENCRYPTION_KEY) {
     throw new Error("CUSTODY_ENCRYPTION_KEY must be set (legacy key for decryption)");

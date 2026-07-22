@@ -8,7 +8,6 @@ export {
   type DatabaseExecutor,
   getConnectionString,
   getDb,
-  type HyperdriveBinding,
   type PreparedStatement,
   type QueryManyResult,
 } from "./client";

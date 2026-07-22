@@ -1,36 +1,151 @@
+import { readRecord, readString } from "@sdp/payments/json";
 import type { RampSettlementEvent, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
-import type { SdpEnvironment } from "@sdp/types";
+import type { CoinbaseRampSettlement, SdpEnvironment } from "@sdp/types";
+import { z } from "zod";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import type { AppContext, WebhookProcessor } from "./processor";
 import { applyRampSettlementEvent } from "./settlements";
 
-interface CoinbaseAmount {
-  value: string;
-}
-
 const COINBASE_ORDER_STATUS = {
+  ONRAMP_ORDER_STATUS_PENDING_PAYMENT: "awaiting_payment",
   ONRAMP_ORDER_STATUS_PENDING_AUTH: "settling",
-  ONRAMP_ORDER_STATUS_PENDING_PAYMENT: "settling",
   ONRAMP_ORDER_STATUS_PROCESSING: "settling",
   ONRAMP_ORDER_STATUS_COMPLETED: "settled",
   ONRAMP_ORDER_STATUS_FAILED: "failed",
 } as const satisfies Record<string, RampSettlementEvent["kind"]>;
+type CoinbaseOrderStatus = keyof typeof COINBASE_ORDER_STATUS;
 
+const coinbaseOnrampOrderSnapshot = z.object({
+  orderId: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  destinationAddress: z.string(),
+  destinationNetwork: z.string(),
+  partnerUserRef: z.string(),
+  paymentMethod: z.string(),
+  paymentCurrency: z.string(),
+  paymentSubtotal: z.string(),
+  paymentTotal: z.string(),
+  purchaseCurrency: z.string(),
+  purchaseAmount: z.string(),
+  exchangeRate: z.string(),
+  fees: z.array(z.object({ feeAmount: z.string(), feeCurrency: z.string(), feeType: z.string() })),
+  failureReason: z.string().optional(),
+});
+
+const coinbaseOnrampWebhookSchema = z.discriminatedUnion("eventType", [
+  coinbaseOnrampOrderSnapshot.extend({ eventType: z.literal("onramp.transaction.created") }),
+  coinbaseOnrampOrderSnapshot.extend({ eventType: z.literal("onramp.transaction.updated") }),
+  coinbaseOnrampOrderSnapshot.extend({
+    eventType: z.literal("onramp.transaction.success"),
+    txHash: z.string().optional(),
+  }),
+  coinbaseOnrampOrderSnapshot.extend({ eventType: z.literal("onramp.transaction.failed") }),
+]);
+type CoinbaseOnrampOrderEvent = z.infer<typeof coinbaseOnrampWebhookSchema>;
+type CoinbaseOnrampEventType = CoinbaseOnrampOrderEvent["eventType"];
+
+const COINBASE_ONRAMP_EVENT_TYPES = coinbaseOnrampWebhookSchema.options.map(
+  (option) => option.shape.eventType.value
+);
+
+function isCoinbaseOnrampEventType(value: string): value is CoinbaseOnrampEventType {
+  return (COINBASE_ONRAMP_EVENT_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * Resolves the settlement kind: terminal event types are authoritative,
+ * lifecycle events defer to the order status.
+ */
 function coinbaseSettlementKind(
-  eventType: string,
-  status: string | undefined
-): "settling" | "settled" | "failed" | undefined {
-  switch (eventType) {
+  event: CoinbaseOnrampOrderEvent
+): (typeof COINBASE_ORDER_STATUS)[CoinbaseOrderStatus] | undefined {
+  switch (event.eventType) {
     case "onramp.transaction.success":
       return "settled";
     case "onramp.transaction.failed":
       return "failed";
-    default:
-      return status
-        ? COINBASE_ORDER_STATUS[status as keyof typeof COINBASE_ORDER_STATUS]
-        : undefined;
+    case "onramp.transaction.created":
+    case "onramp.transaction.updated":
+      return COINBASE_ORDER_STATUS[event.status as CoinbaseOrderStatus];
+    default: {
+      const exhaustive: never = event;
+      return exhaustive;
+    }
   }
+}
+
+/**
+ * Captures the order economics verbatim from a terminal event.
+ */
+function buildCoinbaseSettlement(
+  event: CoinbaseOnrampOrderEvent,
+  status: CoinbaseRampSettlement["status"]
+): CoinbaseRampSettlement {
+  return {
+    provider: "coinbase",
+    status,
+    paymentCurrency: event.paymentCurrency,
+    paymentSubtotal: event.paymentSubtotal,
+    paymentTotal: event.paymentTotal,
+    purchaseCurrency: event.purchaseCurrency,
+    purchaseAmount: event.purchaseAmount,
+    exchangeRate: event.exchangeRate,
+    fees: event.fees,
+    ...(event.eventType === "onramp.transaction.success" && event.txHash
+      ? { txHash: event.txHash }
+      : {}),
+    ...(event.failureReason ? { failureReason: event.failureReason } : {}),
+  };
+}
+
+/**
+ * Maps a Coinbase onramp webhook payload to a provider-agnostic settlement event.
+ */
+function parseCoinbaseWebhookEvent(payload: unknown): RampSettlementEvent {
+  const eventType = readString(readRecord(payload)?.eventType);
+  if (eventType !== undefined && !isCoinbaseOnrampEventType(eventType)) {
+    return { provider: "coinbase", kind: "ignore", reason: `unsupported_event:${eventType}` };
+  }
+
+  const parsed = coinbaseOnrampWebhookSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw badRequest("Coinbase webhook payload violates the onramp event envelope", {
+      provider: "coinbase",
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+  const event = parsed.data;
+
+  const kind = coinbaseSettlementKind(event);
+  if (!kind) {
+    return {
+      provider: "coinbase",
+      kind: "ignore",
+      reason: `unhandled:${event.eventType}:${event.status}`,
+    };
+  }
+  if (kind === "failed") {
+    return {
+      provider: "coinbase",
+      kind,
+      reference: event.orderId,
+      ...(event.failureReason ? { error: event.failureReason } : {}),
+      settlement: buildCoinbaseSettlement(event, "failed"),
+    };
+  }
+  if (kind === "settled") {
+    return {
+      provider: "coinbase",
+      kind,
+      reference: event.orderId,
+      receivedAmount: event.purchaseAmount,
+      settlement: buildCoinbaseSettlement(event, "completed"),
+    };
+  }
+  return { provider: "coinbase", kind, reference: event.orderId };
 }
 
 interface CoinbaseWebhookSignatureFields {
@@ -39,7 +154,7 @@ interface CoinbaseWebhookSignatureFields {
 }
 
 /**
- * Parses the comma-separated `t=<timestamp>,v0=<signature>` X-Hook0-Signature header.
+ * Parses the comma-separated `t=<timestamp>,v0=<signature>,...` X-Hook0-Signature header.
  */
 function parseCoinbaseSignatureHeader(header: string): CoinbaseWebhookSignatureFields | undefined {
   const fields = new Map(
@@ -54,57 +169,6 @@ function parseCoinbaseSignatureHeader(header: string): CoinbaseWebhookSignatureF
     return undefined;
   }
   return { timestamp, signature };
-}
-
-// TODO(coinbase): type against real onramp.transaction.* samples before production.
-interface CoinbaseOnrampWebhookEvent {
-  eventType: string;
-  data: {
-    orderId: string;
-    status?: string;
-    purchaseAmount?: CoinbaseAmount;
-    failureReason?: string;
-  };
-}
-
-/**
- * Maps a Coinbase onramp webhook payload to a provider-agnostic settlement event.
- */
-function parseCoinbaseWebhookEvent(payload: unknown): RampSettlementEvent {
-  const { eventType, data } = payload as CoinbaseOnrampWebhookEvent;
-  if (!eventType?.startsWith("onramp.transaction.")) {
-    return { provider: "coinbase", kind: "ignore", reason: `unsupported_event:${eventType}` };
-  }
-  if (!data?.orderId) {
-    return { provider: "coinbase", kind: "ignore", reason: "missing_order_id" };
-  }
-
-  const kind = coinbaseSettlementKind(eventType, data.status);
-  if (!kind) {
-    return {
-      provider: "coinbase",
-      kind: "ignore",
-      reason: `unhandled:${eventType}:${data.status}`,
-    };
-  }
-  const reference = data.orderId;
-  if (kind === "failed") {
-    return {
-      provider: "coinbase",
-      kind,
-      reference,
-      ...(data.failureReason ? { error: data.failureReason } : {}),
-    };
-  }
-  if (kind === "settled") {
-    return {
-      provider: "coinbase",
-      kind,
-      reference,
-      ...(data.purchaseAmount ? { receivedAmount: data.purchaseAmount.value } : {}),
-    };
-  }
-  return { provider: "coinbase", kind, reference };
 }
 
 export class CoinbaseWebhookProcessor implements WebhookProcessor<unknown, RampSettlementEvent> {

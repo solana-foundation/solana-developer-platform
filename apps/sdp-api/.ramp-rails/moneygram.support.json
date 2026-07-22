@@ -1,7 +1,12 @@
 {
   "onramp": {
-    "currencies": {},
-    "cryptos": []
+    "currencies": {
+      "USD": {
+        "min": null,
+        "max": null
+      }
+    },
+    "cryptos": ["usdc.solana"]
   },
   "offramp": {
     "currencies": {

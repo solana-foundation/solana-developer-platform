@@ -14,7 +14,7 @@ This map is generated from the module-boundary check. It records the permitted w
 
 | Module | Purpose | Allowed workspace dependencies |
 | --- | --- | --- |
-| `@sdp/api` | Cloudflare Workers API and application composition root. | `@sdp/custody`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
+| `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/env-config`, `@sdp/issuance`, `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/api-integration` | Maintainer integration harness for API endpoint and provider coverage. | `@sdp/api`, `@sdp/rpc`, `@sdp/types` |
 | `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/types` |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None |
@@ -24,7 +24,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/solana` | Solana transaction and token-program services. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/types` | Shared runtime types, constants, and product contracts. | None |
 | `sdp-docs` | Public documentation site and generated API reference. | `@sdp/env-config`, `@sdp/types` |
-| `sdp-web` | Dashboard application. | `@sdp/solana`, `@sdp/types` |
+| `sdp-web` | Dashboard application. | `@sdp/issuance`, `@sdp/solana`, `@sdp/types` |
 
 ## Declared Workspace Graph
 
@@ -38,4 +38,4 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/solana` -> `@sdp/rpc`, `@sdp/types`
 - `@sdp/types` -> None
 - `sdp-docs` -> `@sdp/env-config`, `@sdp/types`
-- `sdp-web` -> `@sdp/solana`, `@sdp/types`
+- `sdp-web` -> `@sdp/issuance`, `@sdp/solana`, `@sdp/types`

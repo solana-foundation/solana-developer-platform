@@ -96,9 +96,20 @@ export const ASSET_TYPE_REGISTRY: readonly AssetTypeRegistryEntry[] = [
   {
     category: "stablecoin",
     type: "crypto_backed",
-    version: 2,
+    // v3: crypto-backing has no off-chain issuer/reserve model — its trust comes
+    // from transparent on-chain collateral, so the default projection exposes the
+    // backing type, collateral assets, and target collateralization ratio.
+    version: 3,
     label: "Crypto-backed stablecoin",
-    publicProjection: ["asset.name", "asset.pegCurrency", "chain.decimals", "asset.website"],
+    publicProjection: [
+      "asset.name",
+      "asset.pegCurrency",
+      "asset.backingType",
+      "asset.reserveAsset",
+      "asset.collateralizationRatio",
+      "chain.decimals",
+      "asset.website",
+    ],
     requiredForDeploy: [],
   },
   {

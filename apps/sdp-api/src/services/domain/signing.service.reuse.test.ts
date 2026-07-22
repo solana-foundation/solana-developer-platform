@@ -7,6 +7,7 @@ import {
 } from "@/services/custody/provisioning";
 import { type SigningRequestStore, SigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
+import { env as testEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 
 vi.mock("@/services/custody/provisioning", () => ({
@@ -231,9 +232,7 @@ function createService(params: {
   };
 
   const env: Env = {
-    HYPERDRIVE: {
-      connectionString: "postgresql://sdp:sdp@127.0.0.1:5432/sdp",
-    },
+    DATABASE_URL: testEnv.DATABASE_URL,
     CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
     ENVIRONMENT: "development",
     API_VERSION: "v1",
