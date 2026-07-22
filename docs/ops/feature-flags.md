@@ -6,7 +6,7 @@ Feature flags are the release surface. They are how we ship incomplete work safe
 
 **Source of truth:** `origin/main` as of 2026-07-22. A local checkout can lag `origin/main`; always read flags from `origin/main`, not a working tree. See [Maintenance](#maintenance) for how to regenerate.
 
-**Access note:** the live per-environment values (dev / staging / prod) live in Doppler (backend) and Vercel (frontend). Until that access lands, the per-environment columns below read `TBD`. Everything else here is read directly from code and is authoritative.
+**Access note:** the live per-environment values live in Doppler (backend) and Vercel (frontend). The `dev` and `stg` columns below are filled from Doppler (observed 2026-07-22); production is not yet accessible and is marked as such. Everything else here is read directly from code and is authoritative.
 
 ## How flags work in SDP
 
@@ -60,12 +60,12 @@ Feature flags are the release surface. They are how we ship incomplete work safe
 
 These are env-controlled toggles surfaced by a full sweep. They are not product feature flags (they gate diagnostics and observability, not user-facing features), but they are listed so the inventory is exhaustive.
 
-- **`NEXT_PUBLIC_ENABLE_NETWORK_DEBUG`** (frontend): turns on network debugging in the dashboard. Read at `apps/sdp-web/src/lib/network-debug.ts:32` (on when `="true"`). Developer diagnostic; off by default.
-- **`NEXT_PUBLIC_DISABLE_SENTRY`** (frontend): disables Sentry error reporting on the frontend when `="1"`. Read in `apps/sdp-web/next.config.ts`, `sentry.*.config.ts`, and `instrumentation-client.ts`. The frontend counterpart of the backend Sentry gate; observability config, not a feature.
+- **`NEXT_PUBLIC_ENABLE_NETWORK_DEBUG`** (frontend): turns on network debugging in the dashboard, gated by `isNetworkDebugAvailable()` at `apps/sdp-web/src/lib/network-debug.ts:29`. **Auto-on when `NODE_ENV === "development"`** (line 31) regardless of the flag; otherwise on when `NEXT_PUBLIC_ENABLE_NETWORK_DEBUG="true"` (line 32). Off by default only in non-development environments.
+- **`NEXT_PUBLIC_DISABLE_SENTRY`** (frontend): disables Sentry error reporting when `="1"`, and Sentry is **also disabled automatically when `NODE_ENV === "development"`** regardless of the flag. Read in `apps/sdp-web/next.config.ts`, `sentry.*.config.ts`, and `instrumentation-client.ts`. The frontend counterpart of the backend Sentry gate; observability config, not a feature.
 
 ## Per-environment state
 
-To be completed once Doppler (backend) and Vercel (frontend) access lands. The code-level default is filled from source; the hosted values are the actual Doppler/Vercel settings.
+The `dev` and `stg` values are read from Doppler (2026-07-22); production is not yet accessible (see the note below). The code-level default is from source; the hosted values are the actual Doppler/Vercel settings.
 
 | Flag | Code default | dev | staging | prod |
 |---|---|---|---|---|
@@ -99,7 +99,7 @@ To regenerate the flag list from `origin/main`:
 ```sh
 # EVERY toggle token across the repo, do NOT search only *_ENABLED, that misses
 # ENABLE_/DISABLE_/_FLAG-style toggles (this is how NETWORK_DEBUG/DISABLE_SENTRY were first missed)
-git grep -hoE "[A-Z][A-Z0-9_]*(_ENABLED|_FLAG)" origin/main -- apps packages infra | sort | uniq -c | sort -rn
+git grep -hoE "[A-Z][A-Z0-9_]*(ENABLE|DISABLE|_FLAG)[A-Z0-9_]*" origin/main -- apps packages infra | sort | uniq -c | sort -rn
 git grep -hoE "NEXT_PUBLIC_[A-Z0-9_]+" origin/main -- apps/sdp-web | sort -u   # scan for ENABLE_/DISABLE_ toggles too
 
 # backend helpers and env schema
@@ -112,7 +112,9 @@ git grep -liE "launchdarkly|unleash|flagsmith|growthbook|@vercel/flags" origin/m
 git grep -nE "_ENABLED" origin/main -- '*.env.example' '*.env.local.example'
 ```
 
-Cross-check each flag's declaration against its consumers, and confirm any environment auto-enabling in the helper (the `ENVIRONMENT === "development"` style short-circuits). Automating this refresh is tracked separately.
+Cross-check each flag's declaration against its consumers, and confirm any environment auto-enabling in the helper (the `NODE_ENV`/`ENVIRONMENT === "development"` short-circuits are easy to miss because they fire before the flag is read). Automating this refresh is tracked separately.
+
+The inline `:line` citations are a convenience, not a contract. The stable anchor for each is the named symbol (the helper function, the `Env` interface field, or the flag name itself); line numbers drift on refactor and are not CI-checked, so re-verify them on each refresh. The regenerate commands above surface the current locations.
 
 ## See also
 
