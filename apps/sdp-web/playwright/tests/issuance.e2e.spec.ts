@@ -263,7 +263,7 @@ async function createDraftViaWizard(page: Page, options: CreateDraftOptions): Pr
   // exactly one custody signer wallet (an identity card, no combobox) and
   // renders a select otherwise. Assert the branch the fixtures dictate.
   if (options.custodySignerWalletCount === 1) {
-    await expect(page.getByText(options.treasuryWalletId, { exact: true }).first()).toBeVisible();
+    await expect(page.getByTestId("wallet-identity-card")).toContainText(options.treasuryWalletId);
   } else {
     await page.getByRole("combobox").click();
     await page.getByRole("option").filter({ hasText: options.treasuryWalletId }).click();
