@@ -26,7 +26,7 @@ export async function seedCachedApiKey(
 /**
  * Clears all KV data
  */
-export async function clearKVNamespaces(env: Env): Promise<void> {
+export async function clearKVStores(env: Env): Promise<void> {
   const kv = createKVStoreSet(env);
   const stores = [kv.apiKeys, kv.rateLimits, kv.cache];
 

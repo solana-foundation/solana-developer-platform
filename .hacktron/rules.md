@@ -2,7 +2,7 @@
 
 ## System boundaries
 
-- `apps/sdp-api` is a Cloudflare Workers API. Treat route handlers, middleware, repositories, Postgres, KV, and provider adapters as server-side code.
+- `apps/sdp-api` is a Node.js API deployed to Cloud Run. Treat route handlers, middleware, repositories, Postgres, Redis, and provider adapters as server-side code.
 - `apps/sdp-web` is a browser-facing Next.js dashboard. Treat browser input, URL parameters, client state, and rendered user-controlled content as untrusted.
 - `apps/sdp-docs` is a public documentation site. Documentation and generated API reference content are public and must not contain secrets or private operational details.
 - `packages/*` contains shared runtime types and constants used by more than one application. Changes here can affect both API and dashboard trust boundaries.
@@ -25,7 +25,7 @@
 
 - External custody, compliance, payments, RPC, and fiat-rail providers are not trusted merely because they are configured. Validate their responses, signatures, status transitions, and identifiers at the provider adapter boundary.
 - Solana RPC responses and transaction metadata are external data. Do not treat a successful submission, signature, account address, or token amount as proof that the intended business operation is authorized or settled.
-- Local development and devnet defaults are not production security controls. Do not infer production safety from local `.dev.vars`, test fixtures, mocks, or devnet behavior.
+- Local development and devnet defaults are not production security controls. Do not infer production safety from local `.env.local`, test fixtures, mocks, or devnet behavior.
 
 ## Review guidance
 

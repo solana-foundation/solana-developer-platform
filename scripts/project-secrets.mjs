@@ -1,7 +1,6 @@
 import fs from "node:fs";
-import path from "node:path";
 import { parseArgs } from "node:util";
-import { CLOUDFLARE_SECRET_KEYS, DOCKER_ENV_KEYS } from "./secret-keys.mjs";
+import { DOCKER_ENV_KEYS } from "./secret-keys.mjs";
 
 function collectEntries(keys) {
   return keys
@@ -17,42 +16,6 @@ function emit(contents, outPath) {
     return;
   }
   process.stdout.write(contents);
-}
-
-function writeCloudflareSecretPayload(outPath) {
-  const payload = Object.fromEntries(collectEntries(CLOUDFLARE_SECRET_KEYS));
-  emit(`${JSON.stringify(payload, null, 2)}\n`, outPath);
-}
-
-function parsePositiveInteger(value, optionName) {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${optionName} must be a positive integer.`);
-  }
-  return parsed;
-}
-
-function writeCloudflareSecretBatches(outDir, batchSize) {
-  if (!outDir) {
-    throw new Error("cloudflare-batches requires --out-dir.");
-  }
-
-  fs.mkdirSync(outDir, { recursive: true });
-
-  const entries = collectEntries(CLOUDFLARE_SECRET_KEYS);
-  if (entries.length === 0) {
-    process.stdout.write("wrote 0 Cloudflare secret batches\n");
-    return;
-  }
-
-  const totalBatches = Math.ceil(entries.length / batchSize);
-  for (let i = 0; i < totalBatches; i += 1) {
-    const batch = entries.slice(i * batchSize, (i + 1) * batchSize);
-    const payload = Object.fromEntries(batch);
-    const batchNumber = String(i + 1).padStart(3, "0");
-    const outPath = path.join(outDir, `cloudflare-secrets-${batchNumber}.json`);
-    emit(`${JSON.stringify(payload, null, 2)}\n`, outPath);
-  }
 }
 
 function ensureDockerSafe(key, value) {
@@ -81,22 +44,14 @@ function writeDockerEnvFile(outPath) {
 
 function printUsage() {
   process.stderr.write(
-    [
-      "Usage:",
-      "  node scripts/project-secrets.mjs cloudflare [--out /tmp/cloudflare-secrets.json]",
-      "  node scripts/project-secrets.mjs cloudflare-batches --out-dir /tmp/cloudflare-secrets [--batch-size 25]",
-      "  node scripts/project-secrets.mjs docker [--out /tmp/.env.docker]",
-      "",
-    ].join("\n")
+    ["Usage:", "  node scripts/project-secrets.mjs docker [--out /tmp/.env.docker]", ""].join("\n")
   );
 }
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
-    "batch-size": { type: "string", default: "25" },
     out: { type: "string" },
-    "out-dir": { type: "string" },
   },
 });
 
@@ -104,15 +59,6 @@ const command = positionals[0];
 
 try {
   switch (command) {
-    case "cloudflare":
-      writeCloudflareSecretPayload(values.out);
-      break;
-    case "cloudflare-batches":
-      writeCloudflareSecretBatches(
-        values["out-dir"],
-        parsePositiveInteger(values["batch-size"], "--batch-size")
-      );
-      break;
     case "docker":
       writeDockerEnvFile(values.out);
       break;

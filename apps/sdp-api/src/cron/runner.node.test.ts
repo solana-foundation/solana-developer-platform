@@ -82,6 +82,21 @@ describe("startCron", () => {
     expect(scheduleMock.mock.calls[0][0]).toBe(PENDING_TRANSFERS_CRON);
   });
 
+  it("does not schedule by default in a Cloud Run service", () => {
+    const result = startCron({ env: { K_SERVICE: "sdp-api" } as Env, bg: makeBg() });
+    expect(result).toBeNull();
+    expect(scheduleMock).not.toHaveBeenCalled();
+  });
+
+  it("allows a Cloud Run service to opt in explicitly", () => {
+    startCron({
+      env: { K_SERVICE: "sdp-api", DISABLE_CRON: "false" } as Env,
+      bg: makeBg(),
+    });
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
+    expect(scheduleMock.mock.calls[0][0]).toBe(PENDING_TRANSFERS_CRON);
+  });
+
   it("does not schedule recurring collection unless collection is enabled", () => {
     startCron({ env: {} as Env, bg: makeBg() });
 

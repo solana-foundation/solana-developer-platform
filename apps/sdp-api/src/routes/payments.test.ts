@@ -36,7 +36,7 @@ import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
@@ -769,7 +769,7 @@ describe("Payments routes", () => {
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = originalMagicBlockAuthToken;
 
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
   });
 
   it("creates, lists, and gets recurring payment records through SDP API routes", async () => {
@@ -6972,6 +6972,54 @@ describe("Payments routes", () => {
       expect(res.status).toBe(502);
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("SOLANA_RPC_ERROR");
+
+      const transfers = await getDb(env)
+        .prepare("SELECT status, error FROM payment_transfers")
+        .all<{
+          status: string;
+          error: string | null;
+        }>();
+      expect(transfers.results).toHaveLength(1);
+      expect(transfers.results[0]?.status).toBe("failed");
+      expect(transfers.results[0]?.error).toBeTruthy();
+    });
+
+    it("returns 400 ACCOUNT_FROZEN when the source SPL token account is frozen", async () => {
+      mockRecurringActivationRpc();
+      createFeePaymentAdapterMock.mockReturnValueOnce({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signAsFeePayer: vi.fn(),
+        signAndSend: vi
+          .fn()
+          .mockRejectedValue(
+            new Error(
+              "Failed to sign and send transaction: RPC Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x11"
+            )
+          ),
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const res = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: DEVNET_USDC_MINT,
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("ACCOUNT_FROZEN");
 
       const transfers = await getDb(env)
         .prepare("SELECT status, error FROM payment_transfers")

@@ -21,10 +21,18 @@ export const healthReadyResponseSchema = z
       description: "Readiness check timestamp.",
       example: "2025-01-01T00:00:00.000Z",
     }),
+    revision: z.string().openapi({
+      description: "Cloud Run revision serving the request, or `local` outside Cloud Run.",
+      example: "sdp-prod-api-public-00042-abc",
+    }),
     checks: z
       .object({
         database: z.enum(["ok", "error"]).openapi({
           description: "Database connectivity status.",
+          example: "ok",
+        }),
+        redis: z.enum(["ok", "error"]).openapi({
+          description: "Redis connectivity status.",
           example: "ok",
         }),
       })

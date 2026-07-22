@@ -132,8 +132,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
-      DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
-      DOPPLER_PRESERVE_ENV: DATABASE_URL
+      TEST_DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp_test
+      REDIS_URL: redis://127.0.0.1:6379
+      DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL
     services:
       postgres:
         image: postgres:16-alpine
@@ -145,6 +146,15 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U sdp -d sdp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -221,7 +231,7 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Build API (Wrangler dry-run)
+      - name: Build API (Node bundle)
         run: pnpm --filter ./apps/sdp-api build
 
   docker_build_api:
@@ -445,8 +455,9 @@ jobs:
             custody_provider: local
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
-      DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
-      DOPPLER_PRESERVE_ENV: DATABASE_URL,SOLANA_NETWORK
+      TEST_DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp_test
+      REDIS_URL: redis://127.0.0.1:6379
+      DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL,SOLANA_NETWORK
       SOLANA_NETWORK: devnet
       INTEGRATION_SHARD_NAME: ${{ matrix.name }}
       INTEGRATION_TEST_FILES: ${{ matrix.test_files }}
@@ -463,6 +474,15 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U sdp -d sdp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -599,11 +619,11 @@ jobs:
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
-      DOPPLER_PRESERVE_ENV: DATABASE_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_API_PERSIST_PATH,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START
+      REDIS_URL: redis://127.0.0.1:6379
+      DOPPLER_PRESERVE_ENV: DATABASE_URL,REDIS_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START
       SOLANA_NETWORK: devnet
       PLAYWRIGHT_API_URL: http://127.0.0.1:8787
       PLAYWRIGHT_API_PORT: "8787"
-      PLAYWRIGHT_API_PERSIST_PATH: .wrangler/state-playwright
       PLAYWRIGHT_USE_NEXT_START: "1"
       PLAYWRIGHT_NEXT_DIST_DIR: .next-playwright
       NEXT_PUBLIC_DISABLE_SENTRY: "1"
@@ -620,6 +640,15 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U sdp -d sdp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20

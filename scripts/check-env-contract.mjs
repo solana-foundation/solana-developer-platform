@@ -34,13 +34,8 @@ const API_ENV_IGNORE = new Set([
   "ENVIRONMENT",
   "HELIUS_API_KEY",
   "QUICKNODE_API_KEY",
-  "SDP_API_KEYS",
-  "SDP_API_LOCAL_PERSIST_PATH",
   "SDP_API_PORT",
   "SDP_API_RESET_LOCAL_STATE",
-  "SDP_CACHE",
-  "SDP_RATE_LIMITS",
-  "SDP_SESSIONS",
   // Configurator-only input key (UI-only in @sdp/env-config); not an sdp-api runtime binding.
   "SIGNING_PROVIDERS",
   "TRITON_API_KEY",
