@@ -28,7 +28,7 @@ import {
   provisionTurnkeyPrivateKey,
   provisionUtilaWallet,
 } from "@/services/custody/provisioning";
-import { createEncryptionService } from "@/services/encryption.service";
+import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type { Env } from "@/types/env";
 import type { ProviderConfigRecord } from "./provider-config";
 
@@ -45,6 +45,7 @@ type WalletCreateContext<TParsed extends ProviderConfigRecord = ProviderConfigRe
     label?: string;
   };
   parsed: TParsed;
+  cipher?: CustodyCipher;
 };
 
 type WalletDeleteContext<TParsed extends ProviderConfigRecord = ProviderConfigRecord> = {
@@ -61,7 +62,7 @@ type WalletLifecycleHandler<TParsed extends ProviderConfigRecord = ProviderConfi
 const providerWalletLifecycleRegistry = {
   local: {},
   fireblocks: {
-    create: async ({ env, orgId, parsed }) => {
+    create: async ({ env, orgId, parsed, cipher }) => {
       if (!parsed.apiKey || !parsed.apiSecretEncrypted) {
         throw new SigningError(
           "Fireblocks configuration is missing API credentials",
@@ -69,8 +70,10 @@ const providerWalletLifecycleRegistry = {
         );
       }
 
-      const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
-      const apiSecretPem = await encryption.decryptPrivateKey(orgId, parsed.apiSecretEncrypted);
+      const apiSecretPem = await (cipher ?? createCustodyCipher(env)).decrypt(
+        orgId,
+        parsed.apiSecretEncrypted
+      );
       const provisioned = await withProvisioningError("Fireblocks", () =>
         provisionFireblocksVaultAccount(env, {
           orgId,

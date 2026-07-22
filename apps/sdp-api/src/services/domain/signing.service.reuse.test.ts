@@ -257,6 +257,7 @@ function createConfigRecord(params: {
     projectId: null,
     provider: params.provider,
     config: "encrypted-placeholder",
+    encryptionVersion: "sdp-custody-encryption-v1",
     defaultWalletId: params.defaultWalletId,
     status: "inactive",
     createdAt: "2026-01-01T00:00:00.000Z",
