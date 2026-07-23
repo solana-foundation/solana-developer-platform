@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.46.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.45.0...v0.46.0) (2026-07-23)
+
+### Features
+
+* updates on issuance workspace and asset management UI ([#874](https://github.com/solana-foundation/solana-developer-platform/pull/874)) ([4163068](https://github.com/solana-foundation/solana-developer-platform/commit/4163068e03241f58f33320b505a022508300ae5b))
+* add the debug panel to local dev ([#875](https://github.com/solana-foundation/solana-developer-platform/pull/875)) ([6bcb1d1](https://github.com/solana-foundation/solana-developer-platform/commit/6bcb1d1b8085c73b564e4f2d40da483e01a75b39))
+
+### Performance Improvements
+
+* async confirmation + parallel chunks for transfer batches ([#878](https://github.com/solana-foundation/solana-developer-platform/pull/878)) ([0442373](https://github.com/solana-foundation/solana-developer-platform/commit/0442373fd23538c8f7f5752c9141a3ce871a34d6))
+
+### Refactors
+
+* **kv:** inline the single-runtime KV factory into kv-redis ([#880](https://github.com/solana-foundation/solana-developer-platform/pull/880)) ([4ed7455](https://github.com/solana-foundation/solana-developer-platform/commit/4ed74553b1048149363a40edf2a3487923ec9c51))
+
 ## [0.45.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.44.0...v0.45.0) (2026-07-23)
 
 ### Features
