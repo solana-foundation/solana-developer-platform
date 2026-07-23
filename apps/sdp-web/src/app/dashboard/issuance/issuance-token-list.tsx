@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import {
@@ -98,6 +99,16 @@ export function ManageKebab({
   const explorer = tokenExplorerHref(token.mintAddress);
   const playgroundHref = `/dashboard/issuance?tab=playground&tokenId=${encodeURIComponent(token.id)}`;
 
+  const handleCopyMintAddress = async () => {
+    if (!token.mintAddress) return;
+    try {
+      await navigator.clipboard.writeText(token.mintAddress);
+      toast.success(t("DashboardIssuance.list.copied"));
+    } catch {
+      toast.error(t("DashboardIssuance.list.unableToCopy"));
+    }
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -134,13 +145,7 @@ export function ManageKebab({
           </DropdownMenuItem>
         ) : null}
         {token.mintAddress ? (
-          <DropdownMenuItem
-            onSelect={() => {
-              if (token.mintAddress) {
-                void navigator.clipboard?.writeText(token.mintAddress);
-              }
-            }}
-          >
+          <DropdownMenuItem onSelect={() => void handleCopyMintAddress()}>
             <Copy className="h-4 w-4 shrink-0 text-tertiary" aria-hidden="true" />
             {t("DashboardIssuance.list.copyMintAddress")}
           </DropdownMenuItem>

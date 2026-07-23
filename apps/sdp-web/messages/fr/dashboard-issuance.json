@@ -273,6 +273,8 @@
       "manageThisAsset": "Gérer cet actif",
       "viewOnExplorer": "Voir sur l'explorateur",
       "copyMintAddress": "Copier l'adresse du mint",
+      "copied": "Copié",
+      "unableToCopy": "Impossible de copier l'adresse",
       "type": "Type",
       "decimals": "Decimals",
       "supply": "Supply",

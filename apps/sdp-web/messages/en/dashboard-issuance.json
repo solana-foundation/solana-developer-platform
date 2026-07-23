@@ -273,6 +273,8 @@
       "manageThisAsset": "Manage this asset",
       "viewOnExplorer": "View on explorer",
       "copyMintAddress": "Copy mint address",
+      "copied": "Copied",
+      "unableToCopy": "Unable to copy address",
       "type": "Type",
       "decimals": "Decimals",
       "supply": "Supply",
