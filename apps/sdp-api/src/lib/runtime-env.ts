@@ -1,5 +1,4 @@
 import type { Env } from "@/types/env";
-
 export type SdpDeploymentMode = "managed" | "self_hosted";
 
 const VALID_DEPLOYMENT_MODES: ReadonlySet<string> = new Set<SdpDeploymentMode>([

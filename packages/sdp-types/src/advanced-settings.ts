@@ -8,9 +8,6 @@ import type { TokenExtensionName, TokenTemplate, TokenTransactionType } from "./
 // "locked" = enforced by base template (checked-disabled UI); others = opt-in/default/forbidden.
 export type SettingAvailability = "locked" | "recommended" | "available" | "unsupported";
 
-// "custodial-or-wallet" = platform signs by default, manager can self-sign if no custody authority; "custodial-only" = platform only.
-export type SettingSigning = "custodial-only" | "custodial-or-wallet";
-
 // UI grouping — sourced from catalog, never hardcoded in editor.
 export type SettingGroup = "economics" | "compliance" | "controls";
 
@@ -33,7 +30,7 @@ export interface ParamFieldSpec {
   hintKey?: string;
 }
 
-// Manager-facing setting: copy, Token-2022 extensions (internal), SDP actions, signing rules, optional expert params.
+// Manager-facing setting: copy, Token-2022 extensions (internal), SDP actions, optional expert params.
 export interface AdvancedSetting {
   group: SettingGroup;
   // Copy describes effects, never mechanics (e.g., "Freeze tokens" not "enable pausable extension").
@@ -41,7 +38,6 @@ export interface AdvancedSetting {
   descriptionKey: string;
   extensions: readonly TokenExtensionName[];
   actions: readonly TokenTransactionType[];
-  signing: SettingSigning;
   // Absent = plain toggle; present = exposes expert fields.
   params?: readonly ParamFieldSpec[];
 }
