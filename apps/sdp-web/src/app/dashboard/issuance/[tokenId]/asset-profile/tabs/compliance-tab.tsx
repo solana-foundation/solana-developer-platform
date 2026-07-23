@@ -54,13 +54,18 @@ export function ComplianceTab({
   );
 
   const hasControls = availableActions.length > 0;
+  // The advanced-settings / policy editor is admin-only. Non-admins reach this
+  // tab only for control-list tokens, where they get the allowlist controls but
+  // not the policy editor (also enforced server-side on the profile PATCH).
+  const showPolicyEditor = canManageTokenAdmin;
+  const twoColumn = showPolicyEditor && hasControls;
 
   return (
-    // Editor beside controls on widescreens; single column with no grid when
-    // there are no controls so the editor isn't stranded at half width.
+    // Editor beside controls on widescreens; single column when only one side is
+    // present (admin with no controls, or a non-admin allowlist-only view).
     <div
       className={
-        hasControls
+        twoColumn
           ? // Custom 1440px breakpoint (xl/1280 cramps the left column). Controls
             // hold a fixed width so their tab row never scrolls; the editor takes
             // minmax(0,1fr) and reflows to absorb the rest.
@@ -68,33 +73,35 @@ export function ComplianceTab({
           : undefined
       }
     >
-      <AdvancedSettingsEditor
-        // Collapse the inner grids on the editor's own width, not the viewport —
-        // it lives in a narrow half-column here.
-        containerResponsive
-        category={draft.assetCategory}
-        type={draft.assetType}
-        settings={draft.advancedSettings}
-        onSettingsChange={(advancedSettings) => updateDraft({ advancedSettings })}
-        capacities={draft.capacities}
-        onCapacitiesChange={(capacities) => updateDraft({ capacities })}
-        // Access control lives in the permanent (on-chain) section.
-        accessControl={draft.accessControl}
-        onAccessControlChange={(accessControl) => updateDraft({ accessControl })}
-        accessControlReadOnly={isDeployed}
-        accessControlDocsHref={ACCESS_CONTROL_DOCS_HREF}
-        // Deploy-payload preview is pre-deploy only; null hides the button.
-        deployConfig={isDeployed ? null : buildDeployConfigPreview(draft)}
-        // Scenario presets are creation-only.
-        showScenarios={false}
-        // The compliance tab is the config home; the wizard keeps capacities
-        // declaration-only.
-        allowCapacityConfig
-        showErrors={showErrors}
-        // Once deployed, on-chain extensions lock but off-chain capacities stay editable.
-        settingsReadOnly={isDeployed}
-        disabled={saving}
-      />
+      {showPolicyEditor ? (
+        <AdvancedSettingsEditor
+          // Collapse the inner grids on the editor's own width, not the viewport —
+          // it lives in a narrow half-column here.
+          containerResponsive
+          category={draft.assetCategory}
+          type={draft.assetType}
+          settings={draft.advancedSettings}
+          onSettingsChange={(advancedSettings) => updateDraft({ advancedSettings })}
+          capacities={draft.capacities}
+          onCapacitiesChange={(capacities) => updateDraft({ capacities })}
+          // Access control lives in the permanent (on-chain) section.
+          accessControl={draft.accessControl}
+          onAccessControlChange={(accessControl) => updateDraft({ accessControl })}
+          accessControlReadOnly={isDeployed}
+          accessControlDocsHref={ACCESS_CONTROL_DOCS_HREF}
+          // Deploy-payload preview is pre-deploy only; null hides the button.
+          deployConfig={isDeployed ? null : buildDeployConfigPreview(draft)}
+          // Scenario presets are creation-only.
+          showScenarios={false}
+          // The compliance tab is the config home; the wizard keeps capacities
+          // declaration-only.
+          allowCapacityConfig
+          showErrors={showErrors}
+          // Once deployed, on-chain extensions lock but off-chain capacities stay editable.
+          settingsReadOnly={isDeployed}
+          disabled={saving}
+        />
+      ) : null}
 
       {hasControls ? (
         // One card for the whole controls column; the form renders "bare" so it
