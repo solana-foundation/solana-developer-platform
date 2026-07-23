@@ -190,7 +190,12 @@ function createSubmissionContext(
 async function computeSubmissionFingerprint(context: SubmissionContext): Promise<string> {
   let pepper: string;
   try {
-    pepper = requireEnv({ API_KEY_PEPPER: context.c.env.API_KEY_PEPPER }, "API_KEY_PEPPER");
+    pepper = requireEnv(
+      {
+        CREDENTIAL_FINGERPRINT_PEPPER: context.c.env.CREDENTIAL_FINGERPRINT_PEPPER,
+      },
+      "CREDENTIAL_FINGERPRINT_PEPPER"
+    );
   } catch {
     await auditFailure(context.c, context.audit, context.auditBase, {
       reason: "missing_fingerprint_pepper",

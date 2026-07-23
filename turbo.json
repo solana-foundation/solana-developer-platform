@@ -4,6 +4,7 @@
   "globalDependencies": [".env", ".env.*"],
   "globalEnv": [
     "API_KEY_PEPPER",
+    "CREDENTIAL_FINGERPRINT_PEPPER",
     "CLERK_AUDIENCE",
     "CLERK_API_URL",
     "CLERK_ISSUER",

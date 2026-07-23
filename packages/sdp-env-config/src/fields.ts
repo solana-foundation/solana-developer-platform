@@ -537,6 +537,14 @@ export const FIELDS: EnvField[] = [
     required: true,
   },
   {
+    key: "CREDENTIAL_FINGERPRINT_PEPPER",
+    section: "secrets",
+    kind: "secret",
+    label: "Credential fingerprint pepper",
+    required: true,
+    help: "HMAC key for stored-credential request fingerprints. Keep it stable so committed requests remain replayable.",
+  },
+  {
     key: "CUSTODY_ENCRYPTION_KEY",
     section: "secrets",
     kind: "secret",

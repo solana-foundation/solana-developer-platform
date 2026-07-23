@@ -240,6 +240,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     backend: env.CREDENTIAL_SECRET_STORE_BACKEND,
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
     provisioningFlag: env.PRIVY_BYOK_PROVISIONING_ENABLED,
+    fingerprintPepper: env.CREDENTIAL_FINGERPRINT_PEPPER,
   };
 
   beforeEach(async () => {
@@ -250,6 +251,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     env.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
     env.CUSTODY_ENCRYPTION_KEY = testEncryptionKey();
     env.PRIVY_BYOK_PROVISIONING_ENABLED = "true";
+    env.CREDENTIAL_FINGERPRINT_PEPPER = "test-credential-fingerprint-pepper-for-unit-tests";
   });
 
   afterEach(async () => {
@@ -258,6 +260,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     env.CREDENTIAL_SECRET_STORE_BACKEND = original.backend;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
     env.PRIVY_BYOK_PROVISIONING_ENABLED = original.provisioningFlag;
+    env.CREDENTIAL_FINGERPRINT_PEPPER = original.fingerprintPepper;
     await clearTestDatabase(env);
     await clearKVStores(env);
   });
@@ -1127,29 +1130,24 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   it.each([
     ["missing", undefined],
     ["blank", "   "],
-  ] as const)("fails closed before secret storage when API_KEY_PEPPER is %s", async (_case, value) => {
-    const pepper = env.API_KEY_PEPPER;
-    env.API_KEY_PEPPER = value;
+  ] as const)("fails closed before secret storage when CREDENTIAL_FINGERPRINT_PEPPER is %s", async (_case, value) => {
+    env.CREDENTIAL_FINGERPRINT_PEPPER = value;
     const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
     const { app, token } = buildApp();
 
-    try {
-      const response = await submit(app, token, {
-        key: "missing-pepper",
-      });
-      expect(response.status).toBe(500);
-      expect(await response.json()).toMatchObject({
-        error: { code: "INTERNAL_ERROR" },
-      });
-      expect(factory).not.toHaveBeenCalled();
-      expect(await getDomainCounts()).toEqual({
-        credentials: 0,
-        connections: 0,
-        wallets: 0,
-      });
-    } finally {
-      env.API_KEY_PEPPER = pepper;
-    }
+    const response = await submit(app, token, {
+      key: "missing-pepper",
+    });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      error: { code: "INTERNAL_ERROR" },
+    });
+    expect(factory).not.toHaveBeenCalled();
+    expect(await getDomainCounts()).toEqual({
+      credentials: 0,
+      connections: 0,
+      wallets: 0,
+    });
   });
 
   it("maps an upstream secret-store failure to a safe 503 and orphan alert", async () => {

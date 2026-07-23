@@ -48,6 +48,7 @@ export interface Env {
 
   // Application secrets
   API_KEY_PEPPER?: string;
+  CREDENTIAL_FINGERPRINT_PEPPER?: string;
   CUSTODY_ENCRYPTION_KEY?: string; // For encrypting org private keys in DB
   SENTRY_DSN?: string;
   SENTRY_TRACES_SAMPLE_RATE?: string;
