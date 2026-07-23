@@ -393,6 +393,42 @@ describe("LightsparkRampClient", () => {
     expect(account).toEqual({ id: "ExternalAccount:acc_existing_123", status: "ACTIVE" });
   });
 
+  it("submits a customer for verification and returns the outcome", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: "Verification:ver_123",
+          customerId: "Customer:cus_123",
+          verificationStatus: "RESOLVE_ERRORS",
+          errors: [
+            {
+              type: "MISSING_FIELD",
+              field: "businessInfo.address",
+              reason: "Business address is required",
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    const client = new LightsparkRampClient();
+    const verification = await client.submitVerification(LIGHTSPARK_CONTEXT, {
+      customerId: "Customer:cus_123",
+    });
+
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(
+      `${LIGHTSPARK_GRID_API_BASE_URL}/verifications`
+    );
+    expect(JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body))).toEqual({
+      customerId: "Customer:cus_123",
+    });
+    expect(verification.verificationStatus).toBe("RESOLVE_ERRORS");
+    expect(verification.errors.map((error) => error.reason)).toEqual([
+      "Business address is required",
+    ]);
+  });
+
   it("derives content-addressed payout account keys", async () => {
     const key = await lightsparkPayoutAccountKey("USD", {
       paymentRails: "ACH",

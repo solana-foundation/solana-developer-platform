@@ -57,7 +57,7 @@ const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10
 export const LIGHTSPARK_DECLARED_RAIL_SUPPORT = {
   onramp: {
     countrySupport: UNREPORTED_COUNTRY_SUPPORT,
-    entityTypes: ["individual"],
+    entityTypes: ["individual", "business"],
   },
   offramp: {
     countrySupport: UNREPORTED_COUNTRY_SUPPORT,
@@ -252,6 +252,11 @@ interface GridCreateCustomerBody {
 
 interface GridCustomerResponse {
   id: string;
+}
+
+export interface LightsparkVerification {
+  verificationStatus: string;
+  errors: { reason: string }[];
 }
 
 interface GridCustomerListResponse {
@@ -598,6 +603,23 @@ export class LightsparkRampClient implements RampProvider {
     );
 
     return { id: response.id };
+  }
+
+  /**
+   * Submits a customer for Grid KYC/KYB verification. Business customers are
+   * created UNVERIFIED and cannot quote in either direction until approved;
+   * sandbox approves synchronously, production returns the outstanding
+   * requirements in `errors`.
+   */
+  async submitVerification(
+    { env, mode }: RampRuntimeContext,
+    input: { customerId: string }
+  ): Promise<LightsparkVerification> {
+    const config = readLightsparkConfig(env, mode);
+    return this.request<LightsparkVerification, { customerId: string }>(config, "verifications", {
+      method: "POST",
+      body: { customerId: input.customerId },
+    });
   }
 
   /** Looks up an existing Grid customer by the platform-side id we assigned. */
