@@ -36,7 +36,9 @@ describe("createProviderWallet", () => {
   });
 
   it("creates additional DFNS wallets without reusing the configured signing key", async () => {
-    const env = {} as Env;
+    const env = {
+      DFNS_API_BASE_URL: "https://trusted.dfns.test",
+    } as Env;
 
     const wallet = await createProviderWallet({
       env,
@@ -47,16 +49,14 @@ describe("createProviderWallet", () => {
       },
       parsed: {
         provider: "dfns",
-        apiBaseUrl: "https://api.dfns.test",
+        apiBaseUrl: "https://untrusted.example",
         network: "SolanaDevnet",
         walletId: "wa-12345-abcde-rootwallet",
         signingKeyId: "key-12345-abcde-rootwallet",
       },
     });
 
-    expect(createDfnsApiClientMock).toHaveBeenCalledWith(env, {
-      apiBaseUrl: "https://api.dfns.test",
-    });
+    expect(createDfnsApiClientMock).toHaveBeenCalledWith(env);
     expect(createWalletMock).toHaveBeenCalledWith({
       body: {
         network: "SolanaDevnet",
@@ -70,7 +70,9 @@ describe("createProviderWallet", () => {
   });
 
   it("creates additional IBM Digital Asset Haven wallets with the ibmhaven_ prefix", async () => {
-    const env = {} as Env;
+    const env = {
+      IBM_HAVEN_API_BASE_URL: "https://trusted.haven.test",
+    } as Env;
 
     const wallet = await createProviderWallet({
       env,
@@ -81,16 +83,14 @@ describe("createProviderWallet", () => {
       },
       parsed: {
         provider: "ibm_haven",
-        apiBaseUrl: "https://api.digitalassets.ibm.test",
+        apiBaseUrl: "https://untrusted.example",
         network: "SolanaDevnet",
         walletId: "wa-12345-abcde-rootwallet",
         signingKeyId: "key-12345-abcde-rootwallet",
       },
     });
 
-    expect(createIbmHavenApiClientMock).toHaveBeenCalledWith(env, {
-      apiBaseUrl: "https://api.digitalassets.ibm.test",
-    });
+    expect(createIbmHavenApiClientMock).toHaveBeenCalledWith(env);
     expect(createWalletMock).toHaveBeenCalledWith({
       body: {
         network: "SolanaDevnet",
