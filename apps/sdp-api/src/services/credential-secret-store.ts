@@ -322,7 +322,7 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
   }
 
   private async addSecretVersion(secretRef: string, payload: string): Promise<string> {
-    const response = await this.request<{ name?: string }>(`${secretRef}:addVersion`, {
+    const response = await this.request<unknown>(`${secretRef}:addVersion`, {
       method: "POST",
       body: JSON.stringify({
         payload: {
@@ -331,20 +331,34 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
       }),
     });
 
-    if (!response.name) {
+    const name =
+      typeof response === "object" && response !== null && "name" in response
+        ? response.name
+        : undefined;
+    if (typeof name !== "string") {
       throw new CredentialSecretStoreError(
         "GCP Secret Manager addVersion response did not include version name",
         "UPSTREAM_ERROR"
       );
     }
 
-    assertManagedSecretRef(response.name, {
-      projectId: this.options.projectId,
-      secretPrefix: this.options.secretPrefix,
-      requireVersion: true,
-    });
+    try {
+      assertManagedSecretRef(name, {
+        projectId: this.options.projectId,
+        secretPrefix: this.options.secretPrefix,
+        requireVersion: true,
+      });
+      if (!name.startsWith(`${secretRef}/versions/`)) {
+        throw new Error("Version name does not belong to the requested secret");
+      }
+    } catch {
+      throw new CredentialSecretStoreError(
+        "GCP Secret Manager addVersion response included an invalid version name",
+        "UPSTREAM_ERROR"
+      );
+    }
 
-    return response.name;
+    return name;
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {

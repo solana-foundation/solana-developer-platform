@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { type DatabaseClient, getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
@@ -196,6 +196,44 @@ async function getDomainCounts(): Promise<{
   return counts ?? { credentials: 0, connections: 0, wallets: 0 };
 }
 
+type InitialSetupIds = {
+  credentialId: string;
+  connectionId: string;
+};
+
+type RejectedReplacementCase = {
+  label: string;
+  key: string;
+  arrange: (db: DatabaseClient, ids: InitialSetupIds) => Promise<void>;
+};
+
+async function markInitialValidationFailed(
+  db: DatabaseClient,
+  { credentialId, connectionId }: InitialSetupIds
+): Promise<void> {
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE provider_credentials
+         SET status = 'failed_validation',
+             last_failed_at = sdp_iso_now(),
+             last_failure_code = 'invalid_credentials'
+         WHERE id = ?`
+      )
+      .bind(credentialId),
+    db
+      .prepare(
+        `UPDATE custody_connections
+         SET status = 'failed',
+             last_check_status = 'failed',
+             last_check_at = sdp_iso_now(),
+             last_check_failure_code = 'invalid_credentials'
+         WHERE id = ?`
+      )
+      .bind(connectionId),
+  ]);
+}
+
 describe("POST /internal/dashboard/custody/provider-credentials", () => {
   const original = {
     deploymentMode: env.SDP_DEPLOYMENT_MODE,
@@ -234,27 +272,41 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(response.headers.get("Idempotency-Key")).toBe("submit-privy-credentials-1");
     const body = (await response.json()) as {
       data: {
-        providerCredential: Record<string, unknown>;
-        custodyConnection: Record<string, unknown>;
+        providerCredential: { id: string };
+        custodyConnection: { id: string };
       };
       meta: { requestId: string; timestamp: string };
     };
-    expect(body.data.providerCredential).toMatchObject({
-      provider: "privy",
-      label: "Treasury Privy",
-      scope: "project",
-      projectId: PROJECT_ID,
-      status: "pending",
-      displayMetadata: { appIdSuffix: "1234" },
+    expect(body).toEqual({
+      data: {
+        providerCredential: {
+          id: expect.stringMatching(/^pcred_/),
+          provider: "privy",
+          label: "Treasury Privy",
+          scope: "project",
+          projectId: PROJECT_ID,
+          status: "pending",
+          createdAt: expect.any(String),
+          displayMetadata: { appIdSuffix: "1234" },
+        },
+        custodyConnection: {
+          id: expect.stringMatching(/^cconn_/),
+          projectId: PROJECT_ID,
+          provider: "privy",
+          providerCredentialId: body.data.providerCredential.id,
+          status: "pending",
+          defaultCustodyWalletId: null,
+          lastCheckStatus: null,
+          lastCheckAt: null,
+          lastCheckFailureCode: null,
+          createdAt: expect.any(String),
+        },
+      },
+      meta: {
+        requestId: "req_provider_credential_submit",
+        timestamp: expect.any(String),
+      },
     });
-    expect(body.data.custodyConnection).toMatchObject({
-      projectId: PROJECT_ID,
-      provider: "privy",
-      providerCredentialId: body.data.providerCredential.id,
-      status: "pending",
-    });
-    expect(body.meta.requestId).toBe("req_provider_credential_submit");
-    expect(body.meta.timestamp).toEqual(expect.any(String));
     expect(JSON.stringify(body)).not.toContain("privy-app-1234");
     expect(JSON.stringify(body)).not.toContain("exact secret");
 
@@ -263,6 +315,10 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       connections: 1,
       wallets: 0,
     });
+    const defaults = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM custody_scope_defaults")
+      .first<{ count: number }>();
+    expect(defaults?.count).toBe(0);
   });
 
   it("requires an idempotency key after auth, project, and body validation", async () => {
@@ -587,27 +643,10 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     };
     const firstCredentialId = firstBody.data.providerCredential.id;
     const connectionId = firstBody.data.custodyConnection.id;
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `UPDATE provider_credentials
-           SET status = 'failed_validation',
-               last_failed_at = sdp_iso_now(),
-               last_failure_code = 'invalid_credentials'
-           WHERE id = ?`
-        )
-        .bind(firstCredentialId),
-      getDb(env)
-        .prepare(
-          `UPDATE custody_connections
-           SET status = 'failed',
-               last_check_status = 'failed',
-               last_check_at = sdp_iso_now(),
-               last_check_failure_code = 'invalid_credentials'
-           WHERE id = ?`
-        )
-        .bind(connectionId),
-    ]);
+    await markInitialValidationFailed(getDb(env), {
+      credentialId: firstCredentialId,
+      connectionId,
+    });
 
     const replacement = await submit(app, token, {
       key: "replacement-v2",
@@ -702,6 +741,234 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         },
       },
     });
+  });
+
+  it.each([
+    {
+      label: "a pending connection",
+      key: "pending",
+      arrange: () => Promise.resolve(),
+    },
+    {
+      label: "a checking connection",
+      key: "checking",
+      arrange: async (db, { connectionId }) => {
+        await db
+          .prepare(
+            `UPDATE custody_connections
+             SET status = 'checking',
+                 last_check_status = 'running',
+                 last_check_at = sdp_iso_now()
+             WHERE id = ?`
+          )
+          .bind(connectionId)
+          .run();
+      },
+    },
+    {
+      label: "an active connection",
+      key: "active",
+      arrange: async (db, { credentialId, connectionId }) => {
+        await db.batch([
+          db
+            .prepare(
+              `UPDATE provider_credentials
+               SET status = 'active',
+                   last_validated_at = sdp_iso_now()
+               WHERE id = ?`
+            )
+            .bind(credentialId),
+          db
+            .prepare(
+              `UPDATE custody_connections
+               SET status = 'active',
+                   last_check_status = 'success',
+                   last_check_at = sdp_iso_now(),
+                   activated_at = sdp_iso_now()
+               WHERE id = ?`
+            )
+            .bind(connectionId),
+        ]);
+      },
+    },
+    {
+      label: "a failed connection whose credential is still pending",
+      key: "failed-credential-pending",
+      arrange: async (db, { connectionId }) => {
+        await db
+          .prepare(
+            `UPDATE custody_connections
+             SET status = 'failed',
+                 last_check_status = 'failed',
+                 last_check_at = sdp_iso_now(),
+                 last_check_failure_code = 'invalid_credentials'
+             WHERE id = ?`
+          )
+          .bind(connectionId)
+          .run();
+      },
+    },
+    {
+      label: "a failed connection with a default wallet",
+      key: "failed-default-wallet",
+      arrange: async (db, ids) => {
+        const custodyConfigId = "cust_rejected_replacement";
+        const walletId = "cwal_rejected_replacement";
+        await markInitialValidationFailed(db, ids);
+        await db.batch([
+          db
+            .prepare(
+              `INSERT INTO custody_configs (
+                 id, organization_id, project_id, provider, config_encrypted,
+                 encryption_version, status
+               ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', 'inactive')`
+            )
+            .bind(custodyConfigId, ORGANIZATION_ID, PROJECT_ID),
+          db
+            .prepare(
+              `INSERT INTO custody_wallets (
+                 id, custody_config_id, wallet_id, public_key, label, status
+               ) VALUES (?, ?, 'privy-wallet-1', 'wallet-public-key-1', 'Default', 'active')`
+            )
+            .bind(walletId, custodyConfigId),
+          db
+            .prepare(
+              `UPDATE custody_connections
+               SET default_custody_wallet_id = ?
+               WHERE id = ?`
+            )
+            .bind(walletId, ids.connectionId),
+        ]);
+      },
+    },
+    {
+      label: "a failed connection with pinned setup metadata",
+      key: "failed-pinned-account",
+      arrange: async (db, ids) => {
+        await markInitialValidationFailed(db, ids);
+        await db
+          .prepare(
+            `UPDATE custody_connections
+             SET setup_metadata =
+               '{"providerAccountFingerprint":"privy:api.privy.io:sha256:test-only"}'::jsonb
+             WHERE id = ?`
+          )
+          .bind(ids.connectionId)
+          .run();
+      },
+    },
+    {
+      label: "multiple non-deactivated connections",
+      key: "multiple-connections",
+      arrange: async (db) => {
+        await db.batch([
+          db
+            .prepare(
+              `INSERT INTO provider_credentials (
+                 id, organization_id, project_id, provider, label, scope, source,
+                 storage_backend, encrypted_secret_payload, status, created_by
+               ) VALUES (
+                 ?, ?, ?, 'privy', 'Second credential', 'project', 'stored',
+                 'encrypted_db', 'ciphertext:second', 'pending', ?
+               )`
+            )
+            .bind("pcred_second_connection", ORGANIZATION_ID, PROJECT_ID, USER_ID),
+          db
+            .prepare(
+              `INSERT INTO custody_connections (
+                 id, organization_id, project_id, provider, scope,
+                 provider_credential_id, provider_credential_scope_key,
+                 status, created_by
+               ) VALUES (
+                 ?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?
+               )`
+            )
+            .bind(
+              "cconn_second_connection",
+              ORGANIZATION_ID,
+              PROJECT_ID,
+              "pcred_second_connection",
+              PROJECT_ID,
+              USER_ID
+            ),
+        ]);
+      },
+    },
+  ] satisfies RejectedReplacementCase[])("rejects a new credential when the project already has $label", async ({
+    key,
+    arrange,
+  }) => {
+    const { app, token } = buildApp();
+    const initial = await submit(app, token, {
+      key: `blocked-${key}-initial`,
+    });
+    expect(initial.status).toBe(201);
+    const initialBody = (await initial.json()) as {
+      data: {
+        providerCredential: { id: string };
+        custodyConnection: { id: string };
+      };
+    };
+    const db = getDb(env);
+    await arrange(db, {
+      credentialId: initialBody.data.providerCredential.id,
+      connectionId: initialBody.data.custodyConnection.id,
+    });
+
+    const readSafeSetupState = async () => {
+      const [credentials, connections] = await Promise.all([
+        db
+          .prepare(
+            `SELECT id, project_id, status, credential_version,
+                      rotated_from_provider_credential_id, idempotency_key
+               FROM provider_credentials
+               ORDER BY id`
+          )
+          .all<Record<string, unknown>>(),
+        db
+          .prepare(
+            `SELECT id, project_id, status, provider_credential_id,
+                      default_custody_wallet_id, setup_metadata,
+                      last_check_status, last_check_at, last_check_failure_code,
+                      activated_at
+               FROM custody_connections
+               ORDER BY id`
+          )
+          .all<Record<string, unknown>>(),
+      ]);
+      return {
+        credentials: credentials.results,
+        connections: connections.results,
+      };
+    };
+
+    const stateBefore = await readSafeSetupState();
+    const countsBefore = await getDomainCounts();
+    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
+    const newKey = `blocked-${key}-new`;
+
+    const response = await submit(app, token, { key: newKey });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "CONFLICT",
+        message: "Privy custody setup already exists for this project",
+      },
+      meta: { requestId: "req_provider_credential_submit" },
+    });
+    expect(factory).not.toHaveBeenCalled();
+    expect(await readSafeSetupState()).toEqual(stateBefore);
+    expect(await getDomainCounts()).toEqual(countsBefore);
+    const newIntentCount = await db
+      .prepare(
+        `SELECT COUNT(*) AS count
+           FROM provider_credentials
+           WHERE idempotency_key = ?`
+      )
+      .bind(newKey)
+      .first<{ count: number }>();
+    expect(newIntentCount?.count).toBe(0);
   });
 
   it("reinstalls as a new root and preserves deactivated lineage replay", async () => {
@@ -916,6 +1183,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       connections: 0,
       wallets: 0,
     });
+    expect(consoleError).toHaveBeenCalledOnce();
     expect(consoleError).toHaveBeenCalledWith(
       "provider_credential_orphan_risk",
       expect.objectContaining({
@@ -1051,6 +1319,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
 
     expect(response.status).toBe(500);
+    expect(consoleError).toHaveBeenCalledOnce();
     expect(consoleError).toHaveBeenCalledWith(
       "provider_credential_orphan_risk",
       expect.objectContaining({
@@ -1099,27 +1368,54 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(auditCount?.count).toBe(1);
   });
 
-  it("anchors a post-ID concurrent key mismatch to the losing attempt", async () => {
+  it("compensates the losing GCP write in a cross-project idempotency race", async () => {
+    const otherProjectId = "prj_provider_credential_submit_other";
+    const db = getDb(env);
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO projects
+             (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
+        )
+        .bind(
+          otherProjectId,
+          ORGANIZATION_ID,
+          "Other Provider Credential Project",
+          "other-provider-credential-project",
+          USER_ID
+        ),
+      db
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'admin')`
+        )
+        .bind("pm_provider_credential_submit_other", otherProjectId, USER_ID),
+    ]);
+
     let writeCount = 0;
     let releaseWrites: (() => void) | undefined;
     const writesReady = new Promise<void>((resolve) => {
       releaseWrites = resolve;
     });
+    const write = vi.fn(async ({ providerCredentialId }: { providerCredentialId: string }) => {
+      writeCount += 1;
+      if (writeCount === 2) {
+        releaseWrites?.();
+      }
+      await writesReady;
+      return {
+        storageBackend: "gcp_secret_manager" as const,
+        secretRef: `projects/sdp-test/secrets/${providerCredentialId}`,
+        secretVersionRef: `projects/sdp-test/secrets/${providerCredentialId}/versions/1`,
+      };
+    });
+    const destroyVersion = vi.fn().mockResolvedValue(undefined);
     const store: CredentialSecretStore = {
-      storageBackend: "encrypted_db",
-      write: vi.fn(async ({ providerCredentialId }) => {
-        writeCount += 1;
-        if (writeCount === 2) {
-          releaseWrites?.();
-        }
-        await writesReady;
-        return {
-          storageBackend: "encrypted_db" as const,
-          encryptedSecretPayload: `ciphertext:${providerCredentialId}`,
-        };
-      }),
+      storageBackend: "gcp_secret_manager",
+      write,
       read: vi.fn(),
-      destroyVersion: vi.fn(),
+      destroyVersion,
     };
     vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
     const { app, token } = buildApp();
@@ -1128,23 +1424,42 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       submit(app, token, { key: "concurrent-mismatched-key" }),
       submit(app, token, {
         key: "concurrent-mismatched-key",
-        body: {
-          ...VALID_BODY,
-          fields: {
-            ...VALID_BODY.fields,
-            credentialLabel: "Different submission intent",
-          },
-        },
+        projectId: otherProjectId,
       }),
     ]);
     expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
+    expect(write).toHaveBeenCalledTimes(2);
 
     const successResponse = responses.find((response) => response.status === 201);
     const successBody = (await successResponse?.json()) as
-      | { data: { providerCredential: { id: string } } }
+      | {
+          data: {
+            providerCredential: { id: string; projectId: string };
+            custodyConnection: { projectId: string };
+          };
+        }
       | undefined;
     const winnerId = successBody?.data.providerCredential.id;
     expect(winnerId).toMatch(/^pcred_/);
+    const winnerProjectId = successBody?.data.providerCredential.projectId;
+    expect(successBody?.data.custodyConnection.projectId).toBe(winnerProjectId);
+    expect([PROJECT_ID, otherProjectId]).toContain(winnerProjectId);
+
+    const writtenIds = write.mock.calls.map(([params]) => params.providerCredentialId);
+    expect(new Set(writtenIds).size).toBe(2);
+    expect(writtenIds).toContain(winnerId);
+    const loserId = writtenIds.find((id) => id !== winnerId);
+    if (!winnerId || !winnerProjectId || !loserId) {
+      throw new Error("Concurrent submission did not produce distinct winner and loser IDs");
+    }
+
+    expect(destroyVersion).toHaveBeenCalledOnce();
+    expect(destroyVersion).toHaveBeenCalledWith({
+      secretVersionRef: `projects/sdp-test/secrets/${loserId}/versions/1`,
+    });
+    expect(destroyVersion).not.toHaveBeenCalledWith({
+      secretVersionRef: `projects/sdp-test/secrets/${winnerId}/versions/1`,
+    });
 
     const audits = await getDb(env)
       .prepare(
@@ -1155,12 +1470,36 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       )
       .all<{ action: string; resource_id: string | null }>();
     const failedAudit = audits.results.find((audit) => audit.action === "submit_failed");
-    expect(failedAudit?.resource_id).toMatch(/^pcred_/);
-    expect(failedAudit?.resource_id).not.toBe(winnerId);
+    expect(failedAudit?.resource_id).toBe(loserId);
     expect(await getDomainCounts()).toEqual({
       credentials: 1,
       connections: 1,
       wallets: 0,
+    });
+
+    const persisted = await getDb(env)
+      .prepare(
+        `SELECT pc.id AS credential_id,
+                pc.project_id AS credential_project_id,
+                pc.secret_version_ref,
+                c.project_id AS connection_project_id,
+                c.provider_credential_id AS connection_credential_id
+         FROM provider_credentials pc
+         JOIN custody_connections c ON c.provider_credential_id = pc.id`
+      )
+      .first<{
+        credential_id: string;
+        credential_project_id: string;
+        secret_version_ref: string;
+        connection_project_id: string;
+        connection_credential_id: string;
+      }>();
+    expect(persisted).toEqual({
+      credential_id: winnerId,
+      credential_project_id: winnerProjectId,
+      secret_version_ref: `projects/sdp-test/secrets/${winnerId}/versions/1`,
+      connection_project_id: winnerProjectId,
+      connection_credential_id: winnerId,
     });
   });
 });
