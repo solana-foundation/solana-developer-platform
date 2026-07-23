@@ -80,6 +80,11 @@ export interface CachedApiKey {
   policyBindings?: ApiKeyWalletPolicyBindingSummary[];
   status: ApiKeyStatus;
   expiresAt: string | null;
+  /**
+   * Grace-period end for a rotated key. Undefined is reserved for legacy cache
+   * entries written before rotation-deadline enforcement was deployed.
+   */
+  rotationDeadline?: string | null;
 }
 
 // API Request/Response types

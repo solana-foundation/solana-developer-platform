@@ -6,13 +6,16 @@ import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import {
   TEST_API_KEY,
   TEST_CACHED_API_KEY,
   TEST_EXPIRED_KEY,
   TEST_REVOKED_KEY,
 } from "@/test/fixtures/api-keys";
-import { TEST_ORG } from "@/test/fixtures/organizations";
+import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -159,6 +162,18 @@ describe("Auth Middleware", () => {
   });
 
   describe("key status validation", () => {
+    it("treats the exact rotation deadline as expired for a zero-hour grace period", () => {
+      const deadline = "2026-07-23T12:00:00.000Z";
+      const deadlineMs = Date.parse(deadline);
+
+      expect(isRotationDeadlineReached(deadline, deadlineMs - 1)).toBe(false);
+      expect(isRotationDeadlineReached(deadline, deadlineMs)).toBe(true);
+    });
+
+    it("fails closed when a persisted rotation deadline is malformed", () => {
+      expect(isRotationDeadlineReached("not-a-timestamp", Date.now())).toBe(true);
+    });
+
     it("rejects revoked API keys", async () => {
       const revokedKeyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
       await seedCachedApiKey(env, revokedKeyHash, TEST_REVOKED_KEY);
@@ -181,6 +196,106 @@ describe("Auth Middleware", () => {
     it("rejects expired API keys", async () => {
       const expiredKeyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
       await seedCachedApiKey(env, expiredKeyHash, TEST_EXPIRED_KEY);
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("EXPIRED_API_KEY");
+    });
+
+    it("rejects rotated API keys after their cached grace period ends", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        rotationDeadline: "2020-01-01T00:00:00.000Z",
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("EXPIRED_API_KEY");
+    });
+
+    it("accepts rotated API keys while their cached grace period is active", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        rotationDeadline: "2999-01-01T00:00:00.000Z",
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+    });
+
+    it("bypasses a legacy cache entry and rejects a database key past its rotation deadline", async () => {
+      await getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(TEST_USER.id, TEST_USER.email)
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO projects
+             (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, ?, ?, ?, 'active', ?)`
+        )
+        .bind(
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          TEST_PROJECT.name,
+          TEST_PROJECT.slug,
+          TEST_PROJECT.environment,
+          TEST_USER.id
+        )
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_keys
+             (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
+              role, permissions, status, rotation_deadline)
+           VALUES (?, ?, ?, ?, 'Rotated key', ?, ?, 'api_admin', '["*"]', 'active', ?)`
+        )
+        .bind(
+          TEST_API_KEY.id,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_USER.id,
+          TEST_API_KEY.prefix,
+          validKeyHash,
+          "2020-01-01T00:00:00.000Z"
+        )
+        .run();
+
+      // Simulate the pre-enforcement payload shape still present in Redis at deploy time.
+      const { rotationDeadline: _, ...legacyCachedKey } = TEST_CACHED_API_KEY;
+      await createKVStoreSet(env).apiKeys.put(
+        `key:${validKeyHash}`,
+        JSON.stringify(legacyCachedKey)
+      );
 
       const res = await app.request(
         `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
