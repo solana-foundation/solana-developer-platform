@@ -251,7 +251,7 @@ export const deployToken = async (c: AppContext) => {
   }
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken({
+  let token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
     projectId,
@@ -310,6 +310,25 @@ export const deployToken = async (c: AppContext) => {
   if (replayed) {
     return success(c, { token });
   }
+
+  // Claim the token for deployment before reading the snapshot we mint from.
+  // This flips pending → deploying under a guard, so a concurrent identity PATCH
+  // (symbol/decimals/requiresAllowlist) can't land while the on-chain mint is
+  // created — which would otherwise leave the DB identity permanently out of
+  // sync with the immutable mint. `beginTokenDeploy` re-reads post-claim, so we
+  // mint from the now-frozen values.
+  const claimedToken = await tokenService.beginTokenDeploy(tokenId);
+  if (!claimedToken) {
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: "Token is already being deployed or was deployed",
+    });
+    throw new AppError(
+      "CONFLICT",
+      "Token is already being deployed or was deployed; re-fetch and retry"
+    );
+  }
+  token = claimedToken;
 
   const signingWalletId = resolveApiKeySigningWalletId(
     auth,
@@ -445,6 +464,12 @@ export const deployToken = async (c: AppContext) => {
         { mintAddress: error.result.mint }
       );
     }
+
+    // The mint did not land on-chain (the only "mint exists" failure is the
+    // MintMetadataUpdateError handled above). Release the deploy claim so the
+    // draft returns to pending and stays editable / redeployable. Guarded, so
+    // it's a no-op if the token already advanced to active.
+    await tokenService.releaseTokenDeploy(tokenId);
 
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
