@@ -218,6 +218,29 @@ async function seedCounterparty(externalId: string): Promise<string> {
   return id;
 }
 
+async function seedWalletPolicy(params: { destinationAllowlist: string[] }): Promise<void> {
+  const now = new Date().toISOString();
+
+  await getDb(env)
+    .prepare(
+      `INSERT INTO payment_wallet_policies
+         (id, custody_wallet_id, policy_type, policy, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      "pwp_batch_allowlist_test",
+      TEST_CUSTODY_WALLET_ID,
+      "destination_allowlist",
+      JSON.stringify({
+        version: 1,
+        destinationAllowlist: params.destinationAllowlist,
+      }),
+      now,
+      now
+    )
+    .run();
+}
+
 async function seedCryptoWalletCounterpartyAccount(params: {
   counterpartyId: string;
   walletAddress: string;
@@ -1066,5 +1089,125 @@ describe("payment transfer batches", () => {
     expect(body.data.batch.status).toBe("failed");
     expect(body.data.recipients).toMatchObject([{ status: "failed" }]);
     expect(body.data.transfers).toMatchObject([{ status: "failed" }]);
+  });
+
+  it("rejects the whole transfer batch when one recipient is not on the wallet destination allowlist", async () => {
+    await seedWalletPolicy({ destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2] });
+
+    const counterpartyId = await seedCounterparty("batch_allowlist_violation_counterparty");
+    const allowedAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const disallowedAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [
+            { counterpartyId, counterpartyAccountId: allowedAccountId, amount: "0.1" },
+            { counterpartyId, counterpartyAccountId: disallowedAccountId, amount: "0.2" },
+          ],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("FORBIDDEN");
+
+    const batchCount = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::int AS count
+           FROM payment_transfer_batches
+          WHERE organization_id = ? AND project_id = ?`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
+      .first<{ count: number }>();
+    expect(batchCount).toEqual({ count: 0 });
+
+    const recipientCount = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::int AS count
+           FROM payment_transfer_recipients r
+           JOIN payment_transfer_batches b ON b.id = r.batch_id
+          WHERE b.organization_id = ? AND b.project_id = ?`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
+      .first<{ count: number }>();
+    expect(recipientCount).toEqual({ count: 0 });
+  });
+
+  it("creates a transfer batch when every recipient is on the wallet destination allowlist", async () => {
+    await seedWalletPolicy({
+      destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2, TEST_SOLANA_ADDRESSES.wallet3],
+    });
+
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(FIRST_SIGNATURE)
+      .mockResolvedValueOnce(SECOND_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValueOnce({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+    const counterpartyId = await seedCounterparty("batch_allowlist_pass_counterparty");
+    const firstAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const secondAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [
+            { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" },
+            { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" },
+          ],
+          options: { maxRecipientsPerTransaction: 1, preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { batch: { status: string }; recipients: Array<{ status: string }> };
+    };
+    expect(body.data.batch.status).toBe("confirmed");
+    expect(body.data.recipients.every((recipient) => recipient.status === "confirmed")).toBe(true);
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 });
