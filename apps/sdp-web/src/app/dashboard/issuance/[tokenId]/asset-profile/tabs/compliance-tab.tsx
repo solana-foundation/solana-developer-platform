@@ -59,6 +59,13 @@ export function ComplianceTab({
   // not the policy editor (also enforced server-side on the profile PATCH).
   const showPolicyEditor = canManageTokenAdmin;
   const twoColumn = showPolicyEditor && hasControls;
+  // A lone control (the allow/deny list, for non-admins) reads better as the
+  // card title than as a single always-on pill, so collapse the pill row and
+  // title the card with the list's name.
+  const singleAction = availableActions.length === 1 ? availableActions[0] : null;
+  const singleActionDisabledReason = singleAction
+    ? (ops.complianceActionDisabledReasons[singleAction.id] ?? null)
+    : null;
 
   return (
     // Editor beside controls on widescreens; single column when only one side is
@@ -110,11 +117,17 @@ export function ComplianceTab({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-base font-medium text-primary">
-                {t("DashboardIssuance.compliance.controls")}
+                {singleAction ? singleAction.label : t("DashboardIssuance.compliance.controls")}
               </p>
               <p className="mt-0.5 text-sm text-tertiary">
-                {t("DashboardIssuance.compliance.controlsDescription")}
+                {singleAction
+                  ? (ops.controlListCopy?.description ??
+                    t("DashboardIssuance.compliance.controlsDescription"))
+                  : t("DashboardIssuance.compliance.controlsDescription")}
               </p>
+              {singleActionDisabledReason ? (
+                <p className="mt-1 text-sm text-tertiary">{singleActionDisabledReason}</p>
+              ) : null}
             </div>
             {activeAction ? (
               <Button variant="outline" size="sm" className="shrink-0" asChild>
@@ -126,12 +139,14 @@ export function ComplianceTab({
             ) : null}
           </div>
           <div className="mt-4 space-y-3">
-            <ActionPills
-              actions={availableActions}
-              activeAction={activeAction}
-              disabledReasons={ops.complianceActionDisabledReasons}
-              onSelectAction={setActiveAction}
-            />
+            {singleAction ? null : (
+              <ActionPills
+                actions={availableActions}
+                activeAction={activeAction}
+                disabledReasons={ops.complianceActionDisabledReasons}
+                onSelectAction={setActiveAction}
+              />
+            )}
             <div className="flex flex-wrap gap-3">
               {ops.showControlList ? (
                 <CountCard
