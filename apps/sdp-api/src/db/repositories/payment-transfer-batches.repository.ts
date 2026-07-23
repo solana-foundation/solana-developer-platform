@@ -269,7 +269,9 @@ export interface PaymentTransferBatchesRepository {
   /**
    * Atomically settles a terminal chunk transfer: updates its recipient rows
    * to the matching terminal status and recomputes the parent batch status
-   * from all recipients, in one transaction.
+   * from all recipients, in one transaction. Concurrent settlements of the
+   * same batch are serialized on the batch row lock so the recompute never
+   * reads a sibling's uncommitted recipient statuses.
    *
    * @param input.transferId - Chunk transfer that reached a terminal status.
    * @param input.transferStatus - Terminal status the transfer reached.

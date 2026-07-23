@@ -62,19 +62,19 @@ async function updateTransferRecord(
  *
  * @param params.recipientsByIndex - Mutable recipient-index map shared across chunks.
  * @param params.recipientIndexes - Recipient indexes owned by this chunk.
- * @param params.transferId - Transfer row the recipients are linked to.
+ * @param params.transferId - Transfer row the recipients are linked to, or null when the chunk failed before its transfer row existed.
  * @param params.status - New recipient status.
  * @param params.error - Failure detail, or null.
  * @returns The updated recipient rows.
  */
-async function updateRecipientRows(
+export async function updateRecipientRows(
   c: AppContext,
   params: {
     recipientsByIndex: Map<number, PaymentTransferRecipientRow>;
     recipientIndexes: number[];
     organizationId: string;
     projectId: string;
-    transferId: string;
+    transferId: string | null;
     status: PaymentTransferRecipientRow["status"];
     error: string | null;
   }

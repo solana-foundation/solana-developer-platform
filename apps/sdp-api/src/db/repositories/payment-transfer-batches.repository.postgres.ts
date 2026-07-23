@@ -756,6 +756,21 @@ export function createPostgresPaymentTransferBatchesRepository(
         }
 
         const batchId = recipients.results[0].batch_id;
+        const locked = await tx
+          .prepare(
+            `SELECT id
+               FROM payment_transfer_batches
+              WHERE id = ?
+                AND organization_id = ?
+                AND project_id = ?
+                FOR UPDATE`
+          )
+          .bind(batchId, input.organizationId, input.projectId)
+          .first<{ id: string }>();
+        if (!locked) {
+          throw internalError("Transfer batch not found for settlement");
+        }
+
         const statusRows = await tx
           .prepare(
             `SELECT status

@@ -6,6 +6,7 @@ import {
   type PaymentTransferBatchRow,
   type PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
+import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { badRequest, internalError } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
@@ -13,7 +14,7 @@ import * as solanaServices from "@/services/solana";
 import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../../context";
 import { mapTransferRow } from "../../mappers";
 import { createTransferBatchSchema } from "../../schemas";
-import { executeChunk } from "./execute";
+import { executeChunk, updateRecipientRows } from "./execute";
 import { enforceBatchPolicies } from "./policy";
 import { resolveBatchRequest } from "./resolve";
 import {
@@ -32,6 +33,8 @@ import {
  * POST /transfer-batches — creates the batch aggregate, submits all chunks
  * concurrently, and responds without waiting for on-chain confirmation:
  * transfers come back processing and the pending-transfers job settles them.
+ * A chunk whose execution throws is settled as failed recipients rather than
+ * failing the request, so sibling submissions are never abandoned half-done.
  * Replays idempotently by Idempotency-Key + payload fingerprint.
  *
  * @param c - Request context.
@@ -176,7 +179,7 @@ export async function createTransferBatch(c: AppContext) {
     resolved.recipients.map((recipient, position) => [recipient.index, recipientRows[position]])
   );
 
-  const transfers = await Promise.all(
+  const outcomes = await Promise.allSettled(
     chunks.map((chunk) =>
       executeChunk({
         c,
@@ -188,8 +191,26 @@ export async function createTransferBatch(c: AppContext) {
       })
     )
   );
+  const transfers: PaymentTransferRow[] = [];
+  for (const [position, outcome] of outcomes.entries()) {
+    if (outcome.status === "fulfilled") {
+      transfers.push(outcome.value);
+      continue;
+    }
+    await updateRecipientRows(c, {
+      recipientsByIndex,
+      recipientIndexes: chunks[position].recipientIndexes,
+      organizationId: resolved.scope.auth.organizationId,
+      projectId: resolved.projectId,
+      transferId: null,
+      status: "failed",
+      error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
+    });
+  }
 
-  const status = deriveTransferBatchStatus(transfers.map((transfer) => transfer.status));
+  const status = deriveTransferBatchStatus(
+    Array.from(recipientsByIndex.values()).map((row) => row.status)
+  );
   const finalBatch = await batchRepository.updateTransferBatch({
     batchId: batch.id,
     organizationId: resolved.scope.auth.organizationId,
