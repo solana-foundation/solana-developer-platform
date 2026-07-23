@@ -18,6 +18,7 @@ import {
   assertProviderAvailable,
   getProviderAvailability,
 } from "@/services/provider-availability.service";
+import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 import { updateOrgSchema } from "./schemas";
 
@@ -234,6 +235,9 @@ export const deleteOrganization = async (c: AppContext) => {
       )
       .bind(orgId),
   ]);
+
+  const sessionService = new SessionService(db, c.var.kv.sessions);
+  await sessionService.revokeOrganizationSessions(orgId);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

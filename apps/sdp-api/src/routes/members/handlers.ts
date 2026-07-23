@@ -7,6 +7,7 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
+import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 import { acceptSchema, inviteSchema } from "./schemas";
 
@@ -372,6 +373,9 @@ export const removeMember = async (c: AppContext) => {
     .prepare("UPDATE organization_members SET status = 'removed' WHERE id = ?")
     .bind(memberId)
     .run();
+
+  const sessionService = new SessionService(getDb(c.env), c.var.kv.sessions);
+  await sessionService.revokeUserOrganizationSessions(member.user_id, organizationId);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

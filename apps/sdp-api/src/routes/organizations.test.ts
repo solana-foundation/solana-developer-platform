@@ -3,10 +3,12 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
-import type { Organization } from "@sdp/types";
+import { getPermissionsForOrgRole, type Organization } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { createKVStoreSet } from "@/runtime/kv-redis";
+import { SessionService } from "@/services/session.service";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -420,6 +422,36 @@ describe("Organizations routes", () => {
       for (const member of members.results) {
         expect(member.status).toBe("removed");
       }
+    });
+
+    it("revokes cached sessions for every organization member on delete", async () => {
+      const sessions = createKVStoreSet(env).sessions;
+      const sessionService = new SessionService(getDb(env), sessions);
+      const session = await sessionService.createSession(
+        TEST_USER.id,
+        TEST_ORG.id,
+        getPermissionsForOrgRole("admin"),
+        {}
+      );
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_ORG.id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(204);
+      const persisted = await getDb(env)
+        .prepare("SELECT revoked_at FROM sessions WHERE id = ?")
+        .bind(session.id)
+        .first<{ revoked_at: string | null }>();
+      expect(persisted?.revoked_at).not.toBeNull();
+      await expect(sessions.get(`session:${session.id}`)).resolves.toBeNull();
     });
 
     it("requires org:admin permission", async () => {

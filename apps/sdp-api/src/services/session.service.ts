@@ -86,27 +86,23 @@ export class SessionService {
   }
 
   /**
-   * Get session from cache or Postgres
+   * Get a session from Postgres and refresh its cache entry.
+   *
+   * Membership state and permissions are authorization data, so the KV entry
+   * must never be authoritative. Re-validating them here ensures removals and
+   * role changes take effect even when an older permissions snapshot is still
+   * cached.
    */
   async getSession(sessionId: string): Promise<CachedSession | null> {
-    // Try KV cache first
-    const cached = await this.getSessionCache(sessionId);
-    if (cached) {
-      // Check if expired
-      if (new Date(cached.expiresAt) < new Date()) {
-        await this.deleteSessionCache(sessionId);
-        return null;
-      }
-      return cached;
-    }
-
-    // Fallback to Postgres
     const row = await this.db
       .prepare(
         `SELECT s.id, s.user_id, s.organization_id, s.expires_at, s.revoked_at,
                 om.role
          FROM sessions s
-         JOIN organization_members om ON om.user_id = s.user_id AND om.organization_id = s.organization_id
+         JOIN organization_members om
+           ON om.user_id = s.user_id
+          AND om.organization_id = s.organization_id
+          AND om.status = 'active'
          WHERE s.id = ? AND s.revoked_at IS NULL`
       )
       .bind(sessionId)
@@ -120,11 +116,13 @@ export class SessionService {
       }>();
 
     if (!row) {
+      await this.deleteSessionCache(sessionId);
       return null;
     }
 
     // Check expiration
     if (new Date(row.expires_at) < new Date()) {
+      await this.deleteSessionCache(sessionId);
       return null;
     }
 
@@ -172,21 +170,38 @@ export class SessionService {
    * Revoke all sessions for a user
    */
   async revokeAllUserSessions(userId: string): Promise<void> {
-    const now = new Date().toISOString();
+    await this.revokeMatchingSessions("user_id = ?", [userId]);
+  }
 
-    // Get all session IDs first
+  /**
+   * Revoke a user's sessions for one organization.
+   */
+  async revokeUserOrganizationSessions(userId: string, organizationId: string): Promise<void> {
+    await this.revokeMatchingSessions("user_id = ? AND organization_id = ?", [
+      userId,
+      organizationId,
+    ]);
+  }
+
+  /**
+   * Revoke every session for an organization.
+   */
+  async revokeOrganizationSessions(organizationId: string): Promise<void> {
+    await this.revokeMatchingSessions("organization_id = ?", [organizationId]);
+  }
+
+  private async revokeMatchingSessions(whereClause: string, bindings: string[]): Promise<void> {
+    const now = new Date().toISOString();
     const sessions = await this.db
-      .prepare("SELECT id FROM sessions WHERE user_id = ? AND revoked_at IS NULL")
-      .bind(userId)
+      .prepare(`SELECT id FROM sessions WHERE ${whereClause} AND revoked_at IS NULL`)
+      .bind(...bindings)
       .all<{ id: string }>();
 
-    // Revoke in Postgres
     await this.db
-      .prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
-      .bind(now, userId)
+      .prepare(`UPDATE sessions SET revoked_at = ? WHERE ${whereClause} AND revoked_at IS NULL`)
+      .bind(now, ...bindings)
       .run();
 
-    // Clear from KV cache
     for (const session of sessions.results) {
       await this.deleteSessionCache(session.id);
     }
@@ -235,10 +250,6 @@ export class SessionService {
   // ═══════════════════════════════════════════════════════════════════════════
   // KV Cache Helpers
   // ═══════════════════════════════════════════════════════════════════════════
-
-  private async getSessionCache(sessionId: string): Promise<CachedSession | null> {
-    return this.sessionsKV.get<CachedSession>(`session:${sessionId}`, "json");
-  }
 
   private async setSessionCache(sessionId: string, data: CachedSession): Promise<void> {
     await this.sessionsKV.put(`session:${sessionId}`, JSON.stringify(data), {

@@ -5,12 +5,11 @@
  * Sessions are cached in KV for fast lookups.
  */
 
-import type { CachedSession } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getCookie } from "hono/cookie";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
-import type { KVStore } from "@/runtime/kv";
+import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 
 const SESSION_COOKIE_NAME = "sdp_session";
@@ -27,14 +26,9 @@ export function sessionAuthMiddleware() {
       throw new AppError("UNAUTHORIZED", "Session required");
     }
 
-    // Try KV cache first
     const sessionsKV = c.var.kv.sessions;
-    let cachedSession = await getSessionFromKV(sessionsKV, sessionId);
-
-    if (!cachedSession) {
-      // Fallback to Postgres
-      cachedSession = await getSessionFromDatabase(getDb(c.env), sessionsKV, sessionId);
-    }
+    const sessionService = new SessionService(getDb(c.env), sessionsKV);
+    const cachedSession = await sessionService.getSession(sessionId);
 
     if (!cachedSession) {
       throw new AppError("UNAUTHORIZED", "Invalid or expired session");
@@ -67,11 +61,8 @@ export function optionalSessionAuth() {
     if (sessionId) {
       try {
         const sessionsKV = c.var.kv.sessions;
-        let cachedSession = await getSessionFromKV(sessionsKV, sessionId);
-
-        if (!cachedSession) {
-          cachedSession = await getSessionFromDatabase(getDb(c.env), sessionsKV, sessionId);
-        }
+        const sessionService = new SessionService(getDb(c.env), sessionsKV);
+        const cachedSession = await sessionService.getSession(sessionId);
 
         if (cachedSession && new Date(cachedSession.expiresAt) >= new Date()) {
           c.set("session", cachedSession);
@@ -84,63 +75,6 @@ export function optionalSessionAuth() {
 
     await next();
   };
-}
-
-/**
- * Get session from KV cache
- */
-async function getSessionFromKV(kv: KVStore, sessionId: string): Promise<CachedSession | null> {
-  return kv.get<CachedSession>(`session:${sessionId}`, "json");
-}
-
-/**
- * Get session from Postgres and cache to KV
- */
-async function getSessionFromDatabase(
-  db: DatabaseClient,
-  kv: KVStore,
-  sessionId: string
-): Promise<CachedSession | null> {
-  const row = await db
-    .prepare(
-      `SELECT s.id, s.user_id, s.organization_id, s.expires_at, s.revoked_at,
-              om.role
-       FROM sessions s
-       JOIN organization_members om ON om.user_id = s.user_id AND om.organization_id = s.organization_id
-       WHERE s.id = ? AND s.revoked_at IS NULL`
-    )
-    .bind(sessionId)
-    .first<{
-      id: string;
-      user_id: string;
-      organization_id: string;
-      expires_at: string;
-      revoked_at: string | null;
-      role: string;
-    }>();
-
-  if (!row) {
-    return null;
-  }
-
-  // Get permissions for role
-  const { getPermissionsForOrgRole } = await import("@sdp/types");
-  const permissions = getPermissionsForOrgRole(row.role);
-
-  const cachedSession: CachedSession = {
-    id: row.id,
-    userId: row.user_id,
-    organizationId: row.organization_id,
-    permissions,
-    expiresAt: row.expires_at,
-  };
-
-  // Cache to KV
-  await kv.put(`session:${sessionId}`, JSON.stringify(cachedSession), {
-    expirationTtl: 3600, // 1 hour
-  });
-
-  return cachedSession;
 }
 
 /**

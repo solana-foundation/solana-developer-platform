@@ -6,12 +6,16 @@ import {
   buildBvnkOnrampPaymentRuleKey,
   buildBvnkOnrampWalletName,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { getPermissionsForOrgRole } from "@sdp/types";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { createKVStoreSet } from "@/runtime/kv-redis";
+import { SessionService } from "@/services/session.service";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString(
   "base64"
@@ -109,6 +113,7 @@ describe("Clerk webhooks", () => {
     env.CLERK_API_URL = undefined;
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
     await clearTestDatabase(env);
+    await clearKVStores(env);
   });
 
   it("creates and updates the SDP organization mapping from Clerk organization events", async () => {
@@ -452,20 +457,70 @@ describe("Clerk webhooks", () => {
 
     const membership = await getDb(env)
       .prepare(
-        `SELECT u.email, om.role, om.status
+        `SELECT u.email, om.user_id, om.organization_id, om.role, om.status
          FROM organization_members om
          JOIN users u ON u.id = om.user_id
          JOIN auth_user_identities aui ON aui.user_id = u.id
          WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
       )
       .bind("user_clerk_member")
-      .first<{ email: string; role: string; status: string }>();
+      .first<{
+        email: string;
+        user_id: string;
+        organization_id: string;
+        role: string;
+        status: string;
+      }>();
 
-    expect(membership).toEqual({
+    expect(membership).toMatchObject({
       email: "admin@example.com",
       role: "admin",
       status: "active",
     });
+
+    if (!membership) {
+      throw new Error("Expected the Clerk membership to exist");
+    }
+
+    const sessions = createKVStoreSet(env).sessions;
+    const sessionService = new SessionService(getDb(env), sessions);
+    const elevatedSession = await sessionService.createSession(
+      membership.user_id,
+      membership.organization_id,
+      getPermissionsForOrgRole("admin"),
+      {}
+    );
+
+    const roleUpdated = await simulateClerkWebhook({
+      type: "organizationMembership.updated",
+      data: {
+        organization: {
+          id: "org_clerk_membership",
+          name: "Membership Org",
+          slug: "membership-org",
+        },
+        role: "org:member",
+        public_user_data: {
+          user_id: "user_clerk_member",
+          identifier: "admin@example.com",
+        },
+      },
+    });
+
+    expect(roleUpdated.status).toBe(200);
+    const elevatedSessionRow = await getDb(env)
+      .prepare("SELECT revoked_at FROM sessions WHERE id = ?")
+      .bind(elevatedSession.id)
+      .first<{ revoked_at: string | null }>();
+    expect(elevatedSessionRow?.revoked_at).not.toBeNull();
+    await expect(sessions.get(`session:${elevatedSession.id}`)).resolves.toBeNull();
+
+    const memberSession = await sessionService.createSession(
+      membership.user_id,
+      membership.organization_id,
+      getPermissionsForOrgRole("member"),
+      {}
+    );
 
     const deleted = await simulateClerkWebhook({
       type: "organizationMembership.deleted",
@@ -492,6 +547,12 @@ describe("Clerk webhooks", () => {
       .first<{ status: string }>();
 
     expect(removed?.status).toBe("removed");
+    const memberSessionRow = await getDb(env)
+      .prepare("SELECT revoked_at FROM sessions WHERE id = ?")
+      .bind(memberSession.id)
+      .first<{ revoked_at: string | null }>();
+    expect(memberSessionRow?.revoked_at).not.toBeNull();
+    await expect(sessions.get(`session:${memberSession.id}`)).resolves.toBeNull();
 
     const delayedUserUpdate = await simulateClerkWebhook({
       type: "user.updated",
@@ -604,6 +665,29 @@ describe("Clerk webhooks", () => {
 
     const userId = user?.id;
     expect(userId).toBeTruthy();
+    if (!userId) {
+      throw new Error("Expected the Clerk user mapping to exist");
+    }
+
+    const organization = await getDb(env)
+      .prepare(
+        `SELECT organization_id
+         FROM auth_organization_identities
+         WHERE provider = 'clerk' AND provider_org_id = ?`
+      )
+      .bind("org_clerk_lifecycle")
+      .first<{ organization_id: string }>();
+    if (!organization) {
+      throw new Error("Expected the Clerk organization mapping to exist");
+    }
+    const sessions = createKVStoreSet(env).sessions;
+    const sessionService = new SessionService(getDb(env), sessions);
+    const userSession = await sessionService.createSession(
+      userId,
+      organization.organization_id,
+      getPermissionsForOrgRole("member"),
+      {}
+    );
 
     const apiKeyHash = "webhook_lifecycle_key_hash";
     const lifecycleProjectId = "prj_webhook_lifecycle";
@@ -660,6 +744,12 @@ describe("Clerk webhooks", () => {
       .first<{ status: string }>();
 
     expect(removedUser?.status).toBe("deleted");
+    const userSessionRow = await getDb(env)
+      .prepare("SELECT revoked_at FROM sessions WHERE id = ?")
+      .bind(userSession.id)
+      .first<{ revoked_at: string | null }>();
+    expect(userSessionRow?.revoked_at).not.toBeNull();
+    await expect(sessions.get(`session:${userSession.id}`)).resolves.toBeNull();
 
     const deletedOrg = await simulateClerkWebhook({
       type: "organization.deleted",
