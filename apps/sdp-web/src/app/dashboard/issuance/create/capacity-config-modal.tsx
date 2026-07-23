@@ -4,6 +4,7 @@ import { Plus, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { TimeField } from "@/components/ui/time-field";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
@@ -311,21 +312,31 @@ function TradingHoursFields({
 
           <div className="grid grid-cols-2 gap-3">
             <Field label={t("DashboardIssuance.config.capacityConfig.tradingHours.opensLabel")}>
-              <input
-                type="time"
-                className={INPUT_CLASS}
+              <TimeField
+                ariaLabel={t("DashboardIssuance.config.capacityConfig.tradingHours.opensLabel")}
+                hourColumnLabel={t(
+                  "DashboardIssuance.config.capacityConfig.tradingHours.hoursColumnLabel"
+                )}
+                minuteColumnLabel={t(
+                  "DashboardIssuance.config.capacityConfig.tradingHours.minutesColumnLabel"
+                )}
                 value={value?.open ?? ""}
                 disabled={disabled}
-                onChange={(event) => patch({ open: event.currentTarget.value })}
+                onChange={(next) => patch({ open: next })}
               />
             </Field>
             <Field label={t("DashboardIssuance.config.capacityConfig.tradingHours.closesLabel")}>
-              <input
-                type="time"
-                className={INPUT_CLASS}
+              <TimeField
+                ariaLabel={t("DashboardIssuance.config.capacityConfig.tradingHours.closesLabel")}
+                hourColumnLabel={t(
+                  "DashboardIssuance.config.capacityConfig.tradingHours.hoursColumnLabel"
+                )}
+                minuteColumnLabel={t(
+                  "DashboardIssuance.config.capacityConfig.tradingHours.minutesColumnLabel"
+                )}
                 value={value?.close ?? ""}
                 disabled={disabled}
-                onChange={(event) => patch({ close: event.currentTarget.value })}
+                onChange={(next) => patch({ close: next })}
               />
             </Field>
           </div>

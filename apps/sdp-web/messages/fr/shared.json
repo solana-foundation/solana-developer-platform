@@ -133,6 +133,7 @@
     "createWallet": "Créer un Wallet",
     "activateProvider": "Activer le provider",
     "newAsset": "Nouvel Asset",
+    "assetManagement": "Gestion de l’asset",
     "backToOverview": "Retour à l’aperçu",
     "recurringPayments": "Paiements récurrents",
     "recurringPayment": "Paiement récurrent",

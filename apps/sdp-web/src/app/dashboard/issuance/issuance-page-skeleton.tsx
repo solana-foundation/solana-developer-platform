@@ -1,5 +1,6 @@
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 
 const ISSUANCE_SKELETON_IDS = [
   "issuance-skeleton-1",
@@ -15,6 +16,12 @@ const ISSUANCE_DETAIL_ROW_IDS = [
   "issuance-detail-row-2",
   "issuance-detail-row-3",
   "issuance-detail-row-4",
+];
+
+const RECENT_ACTIVITY_ROW_IDS = [
+  "recent-activity-row-1",
+  "recent-activity-row-2",
+  "recent-activity-row-3",
 ];
 
 const ISSUANCE_DETAIL_TAB_IDS = [
@@ -38,10 +45,56 @@ const ISSUANCE_WIZARD_CARD_IDS = [
 function IssuanceTokenCardSkeleton() {
   return (
     <article
-      className="flex min-h-[340px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)] animate-pulse motion-reduce:animate-none"
+      className="flex min-h-[240px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5"
       data-loading-card="issuance-token"
     >
-      <div className="mb-4 h-14 w-14 rounded-full bg-fill" />
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <SkeletonBlock className="h-11 w-11 shrink-0 rounded-full" />
+          <div className="min-w-0 space-y-1.5">
+            <SkeletonBlock className="h-3 w-12" />
+            <SkeletonBlock className="h-5 w-32" />
+          </div>
+        </div>
+        <SkeletonBlock className="h-6 w-16 shrink-0 rounded-full" />
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <SkeletonBlock className="h-6 w-24 rounded-full" />
+        <SkeletonBlock className="h-6 w-20 rounded-full" />
+      </div>
+
+      <div className="mt-6 grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <SkeletonBlock className="h-3 w-14" />
+          <SkeletonBlock className="h-4 w-20" />
+        </div>
+        <div className="space-y-1.5">
+          <SkeletonBlock className="h-3 w-16" />
+          <SkeletonBlock className="h-4 w-12" />
+        </div>
+      </div>
+
+      <div className="mt-auto flex items-end justify-between pt-4">
+        <div className="space-y-1.5">
+          <SkeletonBlock className="h-3 w-14" />
+          <SkeletonBlock className="h-4 w-24" />
+        </div>
+        <SkeletonBlock className="size-9 shrink-0 rounded-[10px]" />
+      </div>
+    </article>
+  );
+}
+
+// Loading card for the legacy list (flag off): taller card with a Type/Supply/
+// Created stat box and a full-width Manage button, no chips or kebab.
+function LegacyIssuanceTokenCardSkeleton() {
+  return (
+    <article
+      className="flex min-h-[340px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5"
+      data-loading-card="issuance-token"
+    >
+      <SkeletonBlock className="mb-4 h-14 w-14 rounded-full" />
       <SkeletonBlock className="h-4 w-16" />
       <SkeletonBlock className="mt-3 h-8 w-3/4" />
       <div className="mt-6 space-y-3 rounded-xl border border-border-subtle bg-fill-subtle p-3">
@@ -57,15 +110,43 @@ function IssuanceTokenCardSkeleton() {
 }
 
 export function IssuancePageSkeleton() {
+  // Legacy list skeleton when the Asset Profiles UI flag is off, so the loading
+  // state matches the old grid instead of flashing the new one.
+  if (!isAssetProfilesUiEnabled()) {
+    return (
+      <DashboardWorkspaceOverviewPanel
+        className="space-y-6"
+        data-loading-layout="issuance-overview"
+        aria-busy="true"
+      >
+        <div className="flex items-center gap-3">
+          <SkeletonBlock className="h-10 flex-1 rounded-[10px]" />
+          <SkeletonBlock className="h-10 w-32 rounded-[10px]" />
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {ISSUANCE_SKELETON_IDS.map((id) => (
+            <LegacyIssuanceTokenCardSkeleton key={id} />
+          ))}
+        </div>
+      </DashboardWorkspaceOverviewPanel>
+    );
+  }
+
   return (
     <DashboardWorkspaceOverviewPanel
       className="space-y-6"
       data-loading-layout="issuance-overview"
       aria-busy="true"
     >
-      <div className="flex items-center gap-3">
-        <SkeletonBlock className="h-10 flex-1 rounded-[10px]" />
-        <SkeletonBlock className="h-10 w-32 rounded-[10px]" />
+      {/* Mirrors IssuanceWorkspace's toolbar so the shell doesn't shift on load. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex items-center gap-3 sm:flex-1">
+          <SkeletonBlock className="h-10 flex-1 rounded-[10px]" />
+          <SkeletonBlock className="h-10 w-10 shrink-0 rounded-[10px]" />
+          <SkeletonBlock className="h-10 w-10 shrink-0 rounded-[10px]" />
+        </div>
+        <SkeletonBlock className="h-10 w-full rounded-[10px] sm:w-32" />
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -265,10 +346,21 @@ export function IssuanceDetailSkeleton() {
               </div>
             </div>
           </section>
-          <section className="rounded-2xl border border-border-default bg-surface-raised p-4">
-            <SkeletonBlock className="h-4 w-36" />
-            <SkeletonBlock className="mt-3 h-3 w-full" />
-            <SkeletonBlock className="mt-2 h-3 w-4/5" />
+          {/* Low-fidelity placeholder; the event-shaped skeleton lives in the
+              live card's own loading state, not this whole-page fallback. */}
+          <section className="flex h-full flex-col rounded-2xl border border-border-default bg-surface-raised p-4">
+            <div className="flex items-center justify-between gap-2">
+              <SkeletonBlock className="h-4 w-28" />
+              <SkeletonBlock className="h-3 w-16" />
+            </div>
+            <div className="mt-4 flex flex-col gap-4">
+              {RECENT_ACTIVITY_ROW_IDS.map((id) => (
+                <div key={id} className="flex items-center justify-between gap-3">
+                  <SkeletonBlock className="h-3.5 w-2/5" />
+                  <SkeletonBlock className="h-3.5 w-14" />
+                </div>
+              ))}
+            </div>
           </section>
         </div>
       </div>

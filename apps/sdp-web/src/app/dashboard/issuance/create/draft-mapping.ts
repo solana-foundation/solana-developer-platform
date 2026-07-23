@@ -1,5 +1,6 @@
 import {
   ADVANCED_SETTINGS,
+  AUTHORITY_VALUED_SETTINGS,
   findIncompatibleExtensionPair,
   getRecommendedSettings,
   isSettingAllowed,
@@ -93,6 +94,9 @@ function buildSelectedSettings(
 }
 
 const SYMBOL_RE = /^[A-Za-z0-9.]{1,10}$/;
+// Mirrors the API's `description: z.string().max(500)` (create/updateTokenSchema)
+// so an over-long value is caught inline, not on a late 400.
+export const ASSET_DESCRIPTION_MAX_LENGTH = 500;
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 // Asset category -> deploy-time Token-2022 template (token creation still needs
@@ -585,8 +589,13 @@ export function getAssetDetailsErrors(
     errors.decimals = t("DashboardIssuance.errors.decimalsWholeNumber");
   }
 
-  if (!draft.description.trim()) {
+  const description = draft.description.trim();
+  if (!description) {
     errors.description = t("DashboardIssuance.errors.descriptionRequired");
+  } else if (description.length > ASSET_DESCRIPTION_MAX_LENGTH) {
+    errors.description = t("DashboardIssuance.errors.descriptionTooLong", {
+      max: ASSET_DESCRIPTION_MAX_LENGTH,
+    });
   }
 
   // Website and logo are optional, but must be valid URLs when provided.
@@ -626,6 +635,16 @@ export function getAssetDetailsErrors(
   });
   if (findIncompatibleExtensionPair(selectedExtensions)) {
     errors.advancedSettings = t("DashboardIssuance.errors.settingConflict");
+  }
+
+  // Authority-valued settings (e.g. permanent delegate) bind an on-chain authority
+  // to the signing wallet at deploy, so the server rejects the create without one.
+  // Require it here so the user gets inline guidance instead of a late 400.
+  const needsSigner = Object.keys(draft.advancedSettings).some((key) =>
+    (AUTHORITY_VALUED_SETTINGS as readonly string[]).includes(key)
+  );
+  if (needsSigner && !draft.signingWalletId.trim()) {
+    errors.signingWalletId = t("DashboardIssuance.errors.signerRequiredForSettings");
   }
 
   return errors;
