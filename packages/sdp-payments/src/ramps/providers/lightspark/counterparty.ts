@@ -9,6 +9,7 @@ import type {
 import type { CounterpartyRow } from "../../../counterparty";
 import { badRequest, unsupportedCounterparty } from "../../../errors";
 import {
+  ISO_DATE_PATTERN,
   parseCollectedFields,
   readyCounterparty,
   selectField,
@@ -19,7 +20,6 @@ import { latestLightsparkPayoutAccount, readLightsparkCustomerId } from "./provi
 
 const SWIFT_BIC_PATTERN = "^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$";
 const INTERNATIONAL_PHONE_PATTERN = "^\\+[0-9]{6,14}$";
-const ISO_DATE_PATTERN = "^\\d{4}-\\d{2}-\\d{2}$";
 
 const LIGHTSPARK_RAIL_LABELS = {
   ACH: "ACH",

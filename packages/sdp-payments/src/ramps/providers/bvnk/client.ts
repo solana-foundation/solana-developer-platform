@@ -71,13 +71,15 @@ const bvnkEstimateFiatCurrencySchema = z.enum(RAMP_FIAT_CURRENCIES);
 export const BVNK_DECLARED_RAIL_SUPPORT = {
   onramp: {
     countrySupport: UNREPORTED_COUNTRY_SUPPORT,
-    entityTypes: ["individual"],
+    entityTypes: ["individual", "business"],
   },
   offramp: {
     countrySupport: UNREPORTED_COUNTRY_SUPPORT,
     entityTypes: ["individual", "business"],
   },
 } as const satisfies ProviderDeclaredRailSupport;
+
+export const BVNK_V2_USE_CASE = "FIAT";
 
 interface BvnkSandboxBankAccount {
   accountNumber: string;
@@ -491,6 +493,16 @@ export interface BvnkAgreementSession {
   agreements: BvnkAgreement[];
 }
 
+export interface BvnkV2Agreement {
+  id: string;
+  status: string;
+}
+
+export interface BvnkV2Agreements {
+  reference: string;
+  agreements: BvnkV2Agreement[];
+}
+
 export interface BvnkCustomerState {
   reference: string;
   status: string;
@@ -522,6 +534,24 @@ export interface CreateBvnkCustomerInput {
   externalReference: string;
   signedAgreementSessionReference: string;
   individual: Record<string, unknown>;
+}
+
+export interface CreateBvnkAgreementsInput {
+  reference: string;
+  useCase: typeof BVNK_V2_USE_CASE;
+  customerType: "COMPANY";
+  countryCode: string;
+}
+
+export interface AcceptBvnkAgreementsInput {
+  reference: string;
+  agreementIds: string[];
+}
+
+export interface CreateBvnkCompanyCustomerInput {
+  reference: string;
+  useCase: typeof BVNK_V2_USE_CASE;
+  company: Record<string, unknown>;
 }
 
 export interface CreateBvnkFiatWalletInput {
@@ -623,6 +653,63 @@ function parseBvnkCustomerState(payload: unknown): BvnkCustomerState {
   };
 }
 
+function parseBvnkV2Agreements(payload: unknown): BvnkV2Agreements {
+  const data = readRecord(payload) ?? {};
+  const reference = readString(data.reference);
+  if (!reference) {
+    throw badRequest("BVNK agreements response is missing a reference");
+  }
+  if (!Array.isArray(data.agreements)) {
+    throw badRequest("BVNK agreements response is missing agreements");
+  }
+  const agreements = data.agreements.map((entry): BvnkV2Agreement => {
+    const agreement = readRecord(entry) ?? {};
+    const id = readString(agreement.id);
+    if (!id) {
+      throw badRequest("BVNK agreements response contains an agreement without an id");
+    }
+    const status = readString(agreement.status);
+    if (!status) {
+      throw badRequest("BVNK agreements response contains an agreement without a status");
+    }
+    return { id, status };
+  });
+  return { reference, agreements };
+}
+
+function assertBvnkV2AgreementsAccepted(payload: unknown): void {
+  const data = readRecord(payload) ?? {};
+  if (!Array.isArray(data.content)) {
+    throw badRequest("BVNK agreement actions response is missing content");
+  }
+  for (const entry of data.content) {
+    const action = readRecord(entry) ?? {};
+    if (readString(action.status) !== "ACCEPTED") {
+      throw badRequest(
+        `BVNK agreement action was not accepted: ${JSON.stringify(entry).slice(0, 600)}`
+      );
+    }
+  }
+}
+
+function parseBvnkV2CustomerState(payload: unknown): BvnkCustomerState {
+  const data = readRecord(payload) ?? {};
+  const reference = readString(data.id);
+  if (!reference) {
+    throw badRequest("BVNK customer response is missing an id");
+  }
+  const status = readString(data.status);
+  if (!status) {
+    throw badRequest("BVNK customer response is missing a status");
+  }
+  const authenticatedLink = readRecord(data.authenticatedLink);
+  return {
+    reference,
+    status,
+    verificationUrl: authenticatedLink ? readString(authenticatedLink.link) : undefined,
+  };
+}
+
 function parseBvnkFiatWallet(payload: unknown): BvnkFiatWallet {
   const data = readRecord(payload) ?? {};
   const id = readString(data.id);
@@ -662,7 +749,8 @@ export class BvnkRampClient implements RampProvider {
       method: ProviderRequestInit<unknown>["method"];
       body?: unknown;
       headers?: Record<string, string>;
-    }
+    },
+    options?: { onConflict?: () => Promise<T> }
   ): Promise<T> {
     const url = new URL(path, config.apiBaseUrl);
     const authorization = await buildBvnkHawkAuthorizationHeader(
@@ -683,6 +771,9 @@ export class BvnkRampClient implements RampProvider {
     });
 
     if (!response.ok) {
+      if (response.status === 409 && options?.onConflict) {
+        return options.onConflict();
+      }
       console.warn(`[bvnk] ${init.method} ${path} -> ${response.status}: ${raw.slice(0, 600)}`);
       const message = raw.trim() || `BVNK request failed with status ${response.status}`;
       throw mapBvnkErrorStatus(response.status, message, {
@@ -775,6 +866,69 @@ export class BvnkRampClient implements RampProvider {
     );
   }
 
+  async createBvnkAgreements(
+    { env, mode }: RampRuntimeContext,
+    input: CreateBvnkAgreementsInput
+  ): Promise<BvnkV2Agreements> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(
+      config,
+      "/platform/v2/agreements",
+      {
+        method: "POST",
+        body: {
+          reference: input.reference,
+          useCase: input.useCase,
+          customerType: input.customerType,
+          countryCode: input.countryCode,
+        },
+      },
+      {
+        onConflict: () =>
+          this.request(
+            config,
+            `/platform/v2/agreements?reference=${encodeURIComponent(input.reference)}`,
+            { method: "GET" }
+          ),
+      }
+    );
+    return parseBvnkV2Agreements(response);
+  }
+
+  async acceptBvnkAgreements(
+    { env, mode }: RampRuntimeContext,
+    input: AcceptBvnkAgreementsInput
+  ): Promise<void> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(config, "/platform/v2/agreements/actions", {
+      method: "POST",
+      body: {
+        reference: input.reference,
+        actions: input.agreementIds.map((agreementId) => ({
+          agreementId,
+          type: "ACCEPT",
+        })),
+      },
+    });
+    assertBvnkV2AgreementsAccepted(response);
+  }
+
+  async createBvnkCompanyCustomer(
+    { env, mode }: RampRuntimeContext,
+    input: CreateBvnkCompanyCustomerInput
+  ): Promise<BvnkCustomerState> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(config, "/platform/v2/customers", {
+      method: "POST",
+      body: {
+        useCase: input.useCase,
+        reference: input.reference,
+        company: input.company,
+      },
+    });
+    return parseBvnkV2CustomerState(response);
+  }
+
   async createBvnkCustomer(
     { env, mode }: RampRuntimeContext,
     input: CreateBvnkCustomerInput
@@ -803,6 +957,19 @@ export class BvnkRampClient implements RampProvider {
       { method: "GET" }
     );
     return parseBvnkCustomerState(response);
+  }
+
+  async getBvnkCustomerV2(
+    { env, mode }: RampRuntimeContext,
+    input: { id: string }
+  ): Promise<BvnkCustomerState> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(
+      config,
+      `/platform/v2/customers/${encodeURIComponent(input.id)}`,
+      { method: "GET" }
+    );
+    return parseBvnkV2CustomerState(response);
   }
 
   async getFiatWalletProfile(
