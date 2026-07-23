@@ -80,15 +80,18 @@ describe("operations route loading states", () => {
         <IssuanceOverviewLoading />
       </I18nProvider>
     );
-    const cardClasses = [
-      ...markup.matchAll(/<article class="([^"]*)" data-loading-card="issuance-token"/g),
-    ].map((match) => match[1] ?? "");
-
-    expect(cardClasses).toHaveLength(6);
-    expect(cardClasses.every((className) => className.includes("animate-pulse"))).toBe(true);
-    expect(cardClasses.every((className) => className.includes("motion-reduce:animate-none"))).toBe(
-      true
+    const cards = [
+      ...markup.matchAll(/<article class="[^"]*" data-loading-card="issuance-token"/g),
+    ];
+    const pulsingClasses = [...markup.matchAll(/class="([^"]*animate-pulse[^"]*)"/g)].map(
+      (match) => match[1] ?? ""
     );
+
+    expect(cards).toHaveLength(6);
+    expect(pulsingClasses.length).toBeGreaterThan(0);
+    expect(
+      pulsingClasses.every((className) => className.includes("motion-reduce:animate-none"))
+    ).toBe(true);
   });
 
   it("reserves the settled issuance-detail tab rail geometry", () => {

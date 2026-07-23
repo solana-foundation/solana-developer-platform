@@ -578,7 +578,7 @@ export function IssuanceWorkspace({
               >
                 <Plus className="h-6 w-6" />
                 <span className="text-sm font-medium">
-                  {t("DashboardIssuance.workspace.createDraft")}
+                  {t("DashboardIssuance.workspace.addNewToken")}
                 </span>
               </button>
             </div>
