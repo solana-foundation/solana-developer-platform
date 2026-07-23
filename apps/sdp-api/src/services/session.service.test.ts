@@ -1,6 +1,7 @@
 import { getPermissionsForOrgRole } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
@@ -168,5 +169,42 @@ describe("SessionService", () => {
     expect(revokedById.get(firstOrgSession.id)).not.toBeNull();
     expect(revokedById.get(otherUserFirstOrgSession.id)).not.toBeNull();
     expect(revokedById.get(secondOrgSession.id)).toBeNull();
+  });
+
+  it("keeps committed revocation successful when cache cleanup is unavailable", async () => {
+    const sessions = createKVStoreSet(env).sessions;
+    const session = await service.createSession(
+      USER_ONE,
+      ORG_ONE,
+      getPermissionsForOrgRole("admin"),
+      {}
+    );
+    const failingCache: KVStore = {
+      get: sessions.get.bind(sessions),
+      put: sessions.put.bind(sessions),
+      delete: async () => {
+        throw new Error("Redis unavailable");
+      },
+      list: sessions.list.bind(sessions),
+      admitSlidingWindow: sessions.admitSlidingWindow.bind(sessions),
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const serviceWithFailingCache = new SessionService(getDb(env), failingCache);
+
+    await expect(
+      serviceWithFailingCache.revokeUserOrganizationSessions(USER_ONE, ORG_ONE)
+    ).resolves.toBeUndefined();
+
+    const persisted = await getDb(env)
+      .prepare("SELECT revoked_at FROM sessions WHERE id = ?")
+      .bind(session.id)
+      .first<{ revoked_at: string | null }>();
+    expect(persisted?.revoked_at).not.toBeNull();
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to delete revoked session cache:",
+      expect.any(Error)
+    );
+
+    await expect(service.getSession(session.id)).resolves.toBeNull();
   });
 });

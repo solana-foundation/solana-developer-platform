@@ -202,8 +202,13 @@ export class SessionService {
       .bind(now, ...bindings)
       .run();
 
-    for (const session of sessions.results) {
-      await this.deleteSessionCache(session.id);
+    const cacheCleanup = await Promise.allSettled(
+      sessions.results.map((session) => this.deleteSessionCache(session.id))
+    );
+    for (const result of cacheCleanup) {
+      if (result.status === "rejected") {
+        console.error("Failed to delete revoked session cache:", result.reason);
+      }
     }
   }
 
