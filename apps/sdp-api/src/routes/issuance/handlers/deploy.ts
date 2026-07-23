@@ -330,13 +330,9 @@ export const deployToken = async (c: AppContext) => {
   }
   token = claimedToken;
 
-  const signingWalletId = resolveApiKeySigningWalletId(
-    auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
-    ["tokens:write"]
-  );
-
-  // Deploy using Mosaic templates - handles ABL setup automatically
+  // Deploy using Mosaic templates - handles ABL setup automatically. Pure reads
+  // of the frozen snapshot, so computing them here (before the try) can't strand
+  // the claim, and `aclMode` stays available to the catch's recovery path.
   const enableAbl = shouldEnableOnChainAcl(token);
   const aclMode = getMosaicAclMode(token);
 
@@ -345,6 +341,16 @@ export const deployToken = async (c: AppContext) => {
   let custodyAddress: Address | undefined;
 
   try {
+    // Resolve the signing wallet inside the try: it can throw, and now that we
+    // hold the deploy claim (status=deploying) any failure before the mint lands
+    // must release it (catch below) — otherwise the draft is stranded in
+    // `deploying`, uneditable and un-redeployable.
+    const signingWalletId = resolveApiKeySigningWalletId(
+      auth,
+      parsed.data.signingWalletId ?? token.signingWalletId,
+      ["tokens:write"]
+    );
+
     // Get custody signer (resolves via 3-tier: project → org → env fallback)
     const signer = await createOrgSigner(
       c.env,

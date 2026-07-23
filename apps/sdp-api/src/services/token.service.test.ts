@@ -330,6 +330,10 @@ describe("TokenService", () => {
       // Editable again after release.
       const updated = await tokenService.updateToken("tok_claim_release", { symbol: "REDO" });
       expect(updated.symbol).toBe("REDO");
+
+      // And re-claimable: a retried deploy after a failed one must not be stuck
+      // failing the pending-only claim.
+      expect(await tokenService.beginTokenDeploy("tok_claim_release")).not.toBeNull();
     });
 
     it("does not revert an already-deployed token when release is called", async () => {
