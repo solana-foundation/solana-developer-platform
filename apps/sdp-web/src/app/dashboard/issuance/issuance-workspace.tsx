@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
@@ -58,6 +57,7 @@ interface IssuanceTemplateOption {
 }
 
 interface IssuanceWorkspaceProps {
+  assetProfilesEnabled: boolean;
   tokens: IssuanceTokenView[];
   templates: IssuanceTemplateOption[];
   apiKeys: IssuanceApiKeyOption[];
@@ -72,6 +72,7 @@ interface IssuanceWorkspaceProps {
 const VIEW_STORAGE_KEY = "sdp.issuance.tokenView";
 
 export function IssuanceWorkspace({
+  assetProfilesEnabled,
   tokens,
   templates,
   apiKeys,
@@ -114,9 +115,8 @@ export function IssuanceWorkspace({
   };
 
   // Asset Profiles UI flag: on → full-page wizard; off → legacy modal.
-  const assetProfilesUiEnabled = isAssetProfilesUiEnabled();
   const startTokenCreation = () => {
-    if (assetProfilesUiEnabled) {
+    if (assetProfilesEnabled) {
       router.push(CREATE_DRAFT_PATH);
       return;
     }
@@ -211,7 +211,7 @@ export function IssuanceWorkspace({
   // Legacy overview when the Asset Profiles UI flag is off: the old card grid
   // with no classification chips, filters, view toggle, or kebab — just search,
   // a Type/Supply/Created stat box, and a Manage link per token.
-  if (!assetProfilesUiEnabled) {
+  if (!assetProfilesEnabled) {
     const needle = search.trim().toLowerCase();
     const legacyFilteredTokens = needle
       ? tokens.filter(

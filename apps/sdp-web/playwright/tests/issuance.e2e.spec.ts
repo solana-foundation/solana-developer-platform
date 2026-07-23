@@ -221,7 +221,7 @@ interface CreateDraftOptions {
 }
 
 // Creating a draft goes through one of two UIs depending on the
-// NEXT_PUBLIC_ASSET_PROFILES_ENABLED flag: the full-page wizard (flag on) or the
+// `asset-profiles` Vercel flag: the full-page wizard (flag on) or the
 // legacy modal (flag off). Detect which one the "Create draft" button opened —
 // the wizard navigates to its own route, the modal stays on the overview — and
 // drive whichever renders, so this passes under either flag value.
