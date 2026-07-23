@@ -1,28 +1,20 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import {
-  deriveTransferBatchStatus,
-  type PaymentTransferBatchRow,
-  type PaymentTransferRecipientRow,
+import type {
+  PaymentTransferBatchRow,
+  PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
-import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
-import { badRequest, internalError } from "@/lib/errors";
+import { badRequest } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import * as solanaServices from "@/services/solana";
 import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../../context";
-import { mapTransferRow } from "../../mappers";
 import { createTransferBatchSchema } from "../../schemas";
 import { executeChunk, updateRecipientRows } from "./execute";
 import { enforceBatchPolicies } from "./policy";
 import { resolveBatchRequest } from "./resolve";
-import {
-  buildTransferBatchResponse,
-  mapBatchRow,
-  mapRecipientRow,
-  resolveTransferBatchIdempotencyReplay,
-} from "./respond";
+import { buildTransferBatchResponse, resolveTransferBatchIdempotencyReplay } from "./respond";
 import {
   buildInstructionGroups,
   chunkInstructionGroups,
@@ -35,6 +27,9 @@ import {
  * transfers come back processing and the pending-transfers job settles them.
  * A chunk whose execution throws is settled as failed recipients rather than
  * failing the request, so sibling submissions are never abandoned half-done.
+ * The final batch status comes from the locked repository recompute — never
+ * from in-memory state — so a reconciliation run that settles chunks during
+ * the request cannot be overwritten with a stale status.
  * Replays idempotently by Idempotency-Key + payload fingerprint.
  *
  * @param c - Request context.
@@ -191,45 +186,33 @@ export async function createTransferBatch(c: AppContext) {
       })
     )
   );
-  const transfers: PaymentTransferRow[] = [];
   for (const [position, outcome] of outcomes.entries()) {
-    if (outcome.status === "fulfilled") {
-      transfers.push(outcome.value);
-      continue;
+    if (outcome.status === "rejected") {
+      await updateRecipientRows(c, {
+        recipientsByIndex,
+        recipientIndexes: chunks[position].recipientIndexes,
+        organizationId: resolved.scope.auth.organizationId,
+        projectId: resolved.projectId,
+        transferId: null,
+        status: "failed",
+        error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
+      });
     }
-    await updateRecipientRows(c, {
-      recipientsByIndex,
-      recipientIndexes: chunks[position].recipientIndexes,
-      organizationId: resolved.scope.auth.organizationId,
-      projectId: resolved.projectId,
-      transferId: null,
-      status: "failed",
-      error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
-    });
   }
 
-  const status = deriveTransferBatchStatus(
-    Array.from(recipientsByIndex.values()).map((row) => row.status)
-  );
-  const finalBatch = await batchRepository.updateTransferBatch({
+  const finalBatch = await batchRepository.recomputeTransferBatchStatus({
     batchId: batch.id,
     organizationId: resolved.scope.auth.organizationId,
     projectId: resolved.projectId,
-    status,
-    error:
-      status === "failed" || status === "partially_failed"
-        ? "One or more transfer batch transactions failed during execution"
-        : null,
   });
-  if (!finalBatch) {
-    throw internalError("Transfer batch not found for update");
-  }
 
-  return success(c, {
-    batch: mapBatchRow(finalBatch),
-    recipients: Array.from(recipientsByIndex.entries())
-      .sort(([a], [b]) => a - b)
-      .map(([, row]) => mapRecipientRow(row)),
-    transfers: transfers.map(mapTransferRow),
-  });
+  return success(
+    c,
+    await buildTransferBatchResponse(
+      c,
+      finalBatch,
+      resolved.scope.auth.organizationId,
+      resolved.projectId
+    )
+  );
 }

@@ -222,6 +222,12 @@ export interface SettlePaymentTransferBatchInput {
   error: string | null;
 }
 
+export interface RecomputeTransferBatchStatusInput {
+  batchId: string;
+  organizationId: string;
+  projectId: string;
+}
+
 export interface PaymentTransferBatchesRepository {
   createTransferBatchWithRecipients(
     input: CreatePaymentTransferBatchWithRecipientsInput
@@ -278,4 +284,16 @@ export interface PaymentTransferBatchesRepository {
    * @param input.error - Failure detail applied to failed recipients.
    */
   settleTransferBatch(input: SettlePaymentTransferBatchInput): Promise<void>;
+  /**
+   * Recomputes and writes a batch's status from its recipient rows under the
+   * batch row lock. The only sanctioned way to write a batch status after
+   * creation — every writer (chunk submission, reconciliation) goes through
+   * this protocol so none can overwrite a terminal status from a stale read.
+   *
+   * @param input.batchId - Batch to recompute.
+   * @returns The batch row after the recompute.
+   */
+  recomputeTransferBatchStatus(
+    input: RecomputeTransferBatchStatusInput
+  ): Promise<PaymentTransferBatchRow>;
 }

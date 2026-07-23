@@ -119,7 +119,6 @@ export async function updateRecipientRows(
  * @param params.recipientsByIndex - Mutable recipient-index map shared across chunks.
  * @param params.feePayment - Fee-payment adapter used to sponsor and send.
  * @param params.preflight - Whether to simulate before sending.
- * @returns The chunk's transfer row in its post-submit state.
  */
 export async function executeChunk(params: {
   c: AppContext;
@@ -128,7 +127,7 @@ export async function executeChunk(params: {
   recipientsByIndex: Map<number, PaymentTransferRecipientRow>;
   feePayment: ReturnType<typeof getFeePayment>;
   preflight: boolean;
-}): Promise<PaymentTransferRow> {
+}): Promise<void> {
   const { c, resolved, chunk } = params;
   const partiallySigned = await partiallySignTransactionMessageWithSigners(chunk.message);
   const serializedTx = getBase64EncodedWireTransaction(partiallySigned);
@@ -223,14 +222,15 @@ export async function executeChunk(params: {
     }
     signature = await params.feePayment.signAndSend(txBytes);
   } catch (error) {
-    return settle({
+    await settle({
       status: "failed",
       recipientStatus: "failed",
       error: error instanceof Error ? error.message : String(error),
     });
+    return;
   }
 
-  return settle({
+  await settle({
     status: "processing",
     recipientStatus: "processing",
     signature,

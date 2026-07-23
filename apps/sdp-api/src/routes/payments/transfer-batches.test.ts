@@ -6,6 +6,7 @@ import { address, createNoopSigner, generateKeyPairSigner, type Signature } from
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPaymentTransferBatchesRepository } from "@/db/repositories";
+import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
 import app from "@/index";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
@@ -1334,6 +1335,84 @@ describe("payment transfer batches", () => {
     }
   });
 
+  it("returns the terminal status when reconciliation settles the batch mid-request", async () => {
+    const createBatchesRepository =
+      batchesRepositoryPostgres.createPostgresPaymentTransferBatchesRepository;
+    const batchesSpy = vi.spyOn(
+      batchesRepositoryPostgres,
+      "createPostgresPaymentTransferBatchesRepository"
+    );
+    let reconciliationInjected = false;
+    batchesSpy.mockImplementation((db) => {
+      const repository = createBatchesRepository(db);
+      return {
+        ...repository,
+        recomputeTransferBatchStatus: async (input) => {
+          if (!reconciliationInjected) {
+            reconciliationInjected = true;
+            getSignatureStatusesMock.mockResolvedValueOnce([
+              { slot: 300n, confirmations: 3n, confirmationStatus: "confirmed", err: null },
+            ]);
+            await trackPendingTransfers(env);
+          }
+          return repository.recomputeTransferBatchStatus(input);
+        },
+      };
+    });
+
+    try {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+      const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
+      createFeePaymentAdapterMock.mockReturnValueOnce({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const counterpartyId = await seedCounterparty("batch_midflight_counterparty");
+      const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          batch: { status: string };
+          recipients: Array<{ status: string }>;
+          transfers: Array<{ status: string }>;
+        };
+      };
+      expect(reconciliationInjected).toBe(true);
+      expect(body.data.batch.status).toBe("confirmed");
+      expect(body.data.recipients).toMatchObject([{ status: "confirmed" }]);
+      expect(body.data.transfers).toMatchObject([{ status: "confirmed" }]);
+    } finally {
+      batchesSpy.mockRestore();
+    }
+  });
+
   it("resolves concurrent settlements of the same batch to the correct final status", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
@@ -1499,7 +1578,7 @@ describe("payment transfer batches", () => {
       env
     );
     expect(detailRes.status).toBe(200);
-    expect(listTransfersByIds).toHaveBeenCalledTimes(1);
+    expect(listTransfersByIds).toHaveBeenCalledTimes(2);
     expect(getTransferById).not.toHaveBeenCalled();
 
     const distinctDestinations = await getDb(env)
