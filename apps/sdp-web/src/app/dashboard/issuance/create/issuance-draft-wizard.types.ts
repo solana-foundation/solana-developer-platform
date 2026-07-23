@@ -23,10 +23,13 @@ export type AccessControlMode = "allowlist" | "blocklist" | "disabled";
 // under compliance.capacities.* in the issuance metadata. On-chain, extension-
 // backed controls (e.g. freeze via the pausable extension) live in the advanced
 // settings editor instead (issuance_metadata.settings), not here.
+// Display order: the checkbox-only policies (kyc, issueRetireControls) come
+// first, then the configurable ones, so simple toggles aren't interleaved with
+// rows that carry a Configure affordance.
 export const CAPACITY_KEYS = [
   "kyc",
-  "restrictTradingHours",
   "issueRetireControls",
+  "restrictTradingHours",
   "redemptionApprovals",
   "investorReporting",
   "transferApprovals",

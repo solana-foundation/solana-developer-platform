@@ -95,6 +95,11 @@
   --color-destructive-strongest: var(--crimson-strongest);
   --color-destructive-bg: var(--crimson-bg);
   --color-destructive-border: var(--crimson-brd);
+
+  /* Project-wide default for transition/transition-colors/transition-all
+     utilities that don't set an explicit duration-* (Tailwind's built-in
+     default is 150ms). DS components with hardcoded durations are unaffected. */
+  --default-transition-duration: 250ms;
 }
 
 /* Point design-system runtime tokens at SDP's product palette. */

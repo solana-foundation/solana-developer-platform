@@ -176,7 +176,7 @@ export const listAllowlist = async (c: AppContext) => {
   }
 
   const page = Number.parseInt(c.req.query("page") ?? "1", 10);
-  const pageSize = Math.min(Number.parseInt(c.req.query("pageSize") ?? "50", 10), 100);
+  const pageSize = Math.min(Number.parseInt(c.req.query("pageSize") ?? "50", 10), 500);
   const offset = (page - 1) * pageSize;
 
   const { entries, total } = await tokenService.listAllowlistEntries(tokenId, {
@@ -233,7 +233,6 @@ export const addAllowlistEntry = async (c: AppContext) => {
       });
     }
 
-    // Audit log
     const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "create",

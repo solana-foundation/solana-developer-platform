@@ -126,7 +126,7 @@ const STORE_PREFIXES = {
  * the stores hold a Promise<Redis>; the import and connection happen lazily
  * on the first method call. Fails fast on missing/whitespace REDIS_URL.
  */
-export function createRedisKVStoreSet(env: Env): KVStoreSet {
+export function createKVStoreSet(env: Env): KVStoreSet {
   const url = env.REDIS_URL?.trim();
   if (!url) {
     throw new Error(

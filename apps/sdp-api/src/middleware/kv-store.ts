@@ -20,7 +20,7 @@
  */
 
 import type { Context, Next } from "hono";
-import { createKVStoreSet } from "@/runtime/factory";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import type { Env } from "@/types/env";
 import { matchesFreePath } from "./path-match";
 

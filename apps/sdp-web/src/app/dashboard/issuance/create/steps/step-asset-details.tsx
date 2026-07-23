@@ -68,10 +68,19 @@ export function StepAssetDetails({
     return hasContent || showErrors ? message : undefined;
   };
   const descriptionError = fieldError("description");
+  const signerError = fieldError("signingWalletId");
+  // The neutral "optional signer" hint only applies when a signer isn't required
+  // and a real choice exists (>1 wallet) that the user hasn't made yet.
+  const showOptionalSignerHint =
+    !signerError &&
+    !signerWalletsError &&
+    signerWallets.length > 1 &&
+    !draft.signingWalletId.trim();
 
   // A failed continue attempt jumps to the tab holding the problem: most
-  // required fields live on Overview, but advanced-settings values live on
-  // Compliance. Prefer Overview when it has an error, else Compliance.
+  // required fields live on Overview, advanced-settings values on Compliance,
+  // and the signing wallet on Operational. Prefer Overview, then Operational
+  // (signer), then Compliance.
   //
   // Jump ONCE, guarded by a ref — `errors` is rebuilt every render, so keying
   // the jump off it would re-fire on each keystroke and pin the user to the
@@ -84,8 +93,16 @@ export function StepAssetDetails({
       return;
     }
     jumpedToErrorTab.current = true;
-    const overviewHasError = Object.keys(errors).some((key) => key !== "advancedSettings");
-    setTab(overviewHasError ? "overview" : "compliance");
+    const overviewHasError = Object.keys(errors).some(
+      (key) => key !== "advancedSettings" && key !== "signingWalletId"
+    );
+    if (overviewHasError) {
+      setTab("overview");
+    } else if (errors.signingWalletId) {
+      setTab("operational");
+    } else {
+      setTab("compliance");
+    }
   }, [showErrors, hasErrors, errors]);
 
   return (
@@ -256,13 +273,19 @@ export function StepAssetDetails({
               onSignerWalletIdChange={(value) => updateDraft({ signingWalletId: value })}
               label={t("DashboardIssuance.assetDetails.signingWallet")}
               showSelectionSummary
-              optional
+              optional={!signerError}
             />
-            {/* Signer is optional at draft stage — clarify the fallback only
-                when a choice is actually possible (more than one wallet) and
-                none is made. The 0-wallet and single-wallet cases show their
-                own message inside the field. */}
-            {!signerWalletsError && signerWallets.length > 1 && !draft.signingWalletId.trim() ? (
+            {/* A signer is normally optional at draft stage, but authority-valued
+                advanced settings (e.g. permanent delegate) require one — surface
+                that as an error. Otherwise clarify the fallback only when a real
+                choice exists (>1 wallet) and none is made; the 0-wallet and
+                single-wallet cases show their own message inside the field. */}
+            {signerError ? (
+              <p className="mt-1.5 text-xs text-destructive" role="alert">
+                {signerError}
+              </p>
+            ) : null}
+            {showOptionalSignerHint ? (
               <p className="mt-1.5 text-xs text-tertiary">
                 {t("DashboardIssuance.assetDetails.optionalSignerHint")}
               </p>

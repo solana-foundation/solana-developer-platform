@@ -6,8 +6,7 @@ import { hashString } from "@sdp/payments/hash";
 
 import { closeDatabasePools, getDb } from "@/db";
 import app from "@/index";
-import { createKVStoreSet } from "@/runtime/factory";
-import { closeAllRedisClients } from "@/runtime/kv-redis";
+import { closeAllRedisClients, createKVStoreSet } from "@/runtime/kv-redis";
 import { createFeePaymentAdapter, KoraAdapter, KoraClient } from "@/services/adapters";
 import { createSigningService } from "@/services/domain/signing.service";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
