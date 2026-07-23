@@ -10,6 +10,7 @@ import { createKVStoreSet } from "@/runtime/factory";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { createFeePaymentAdapter, KoraAdapter, KoraClient } from "@/services/adapters";
 import { createSigningService } from "@/services/domain/signing.service";
+import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner, createToken2022Service } from "@/services/solana";
 import { CustodyConfigStore, type CustodyWallet } from "@/services/stores/custody-config.store";
@@ -47,4 +48,5 @@ export const apiTestSupport = {
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
   TEST_USER,
+  trackPendingTransfers,
 };
