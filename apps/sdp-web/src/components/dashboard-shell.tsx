@@ -65,7 +65,7 @@ import { DashboardNavigationLink } from "@/components/dashboard-navigation-link"
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { LanguagePicker } from "@/components/language-picker";
-import { NetworkDebugPanel } from "@/components/network-debug-panel";
+import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -1031,7 +1031,12 @@ function DashboardSidebarContent({
             </DashboardNavigationLink>
           );
         })}
-        {variant === "desktop" ? <ThemeToggle collapsed={isCollapsed} /> : null}
+        {variant === "desktop" ? (
+          <>
+            <ThemeToggle collapsed={isCollapsed} />
+            <NetworkDebugToggle collapsed={isCollapsed} />
+          </>
+        ) : null}
       </div>
     </>
   );
