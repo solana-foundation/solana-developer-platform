@@ -58,8 +58,21 @@ async function seedAuth(tier: "individual" | "enterprise" = "enterprise"): Promi
 
   await getDb(env).batch([
     getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, tier, "active"),
+      .prepare(
+        "INSERT INTO organizations (id, name, slug, tier, settings, status) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_ORG.name,
+        TEST_ORG.slug,
+        tier,
+        JSON.stringify({
+          providerOverrides: {
+            compliance: { range: true, elliptic: true, trm: true, chainalysis: true },
+          },
+        }),
+        "active"
+      ),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -148,8 +161,8 @@ describe("Compliance routes", () => {
 
   it("returns forbidden when the organization has no enabled compliance providers", async () => {
     await getDb(env)
-      .prepare("UPDATE organizations SET tier = ? WHERE id = ?")
-      .bind("individual", TEST_ORG.id)
+      .prepare("UPDATE organizations SET settings = NULL WHERE id = ?")
+      .bind(TEST_ORG.id)
       .run();
 
     const res = await app.request(
@@ -171,7 +184,7 @@ describe("Compliance routes", () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("Compliance screening is only available");
+    expect(body.error.message).toContain("requires manual provider activation");
   });
 
   it("returns a self-hosted-flavored 403 when no compliance providers are configured in self-hosted mode", async () => {
@@ -202,8 +215,7 @@ describe("Compliance routes", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("at least one configured compliance provider");
-    // Importantly, must NOT mention "enterprise tier" — that wording is wrong in self-hosted mode
-    expect(body.error.message).not.toContain("enterprise tier");
+    expect(body.error.message).not.toContain("manual provider activation");
   });
 
   it("returns a Range risk score when Range API is configured", async () => {

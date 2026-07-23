@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
+import { getMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
 import {
+  capacityHasConfig,
   type DetailFieldKey,
+  defaultCapacityConfig,
   detailSectionsHaveField,
   getDetailSections,
   impliedBackingType,
+  summarizeCapacityConfig,
 } from "./asset-details-config";
+
+const messages = getMessages("en");
+const t = (key: MessageKey, values?: TranslationValues) => translate(messages, key, values);
 
 function fieldKeys(
   category: Parameters<typeof getDetailSections>[0],
@@ -70,5 +77,44 @@ describe("impliedBackingType", () => {
     expect(impliedBackingType("stablecoin", "generic")).toBeNull();
     expect(impliedBackingType("tokenized_security", "equity")).toBeNull();
     expect(impliedBackingType(null, null)).toBeNull();
+  });
+});
+
+describe("capacity config", () => {
+  it("marks only the four policies with a config form as configurable", () => {
+    expect(capacityHasConfig("restrictTradingHours")).toBe(true);
+    expect(capacityHasConfig("transferApprovals")).toBe(true);
+    expect(capacityHasConfig("redemptionApprovals")).toBe(true);
+    expect(capacityHasConfig("investorReporting")).toBe(true);
+    // Roster/authority and pure-commitment policies stay declaration-only.
+    expect(capacityHasConfig("kyc")).toBe(false);
+    expect(capacityHasConfig("issueRetireControls")).toBe(false);
+  });
+
+  it("returns a sensible default only for configurable policies", () => {
+    expect(defaultCapacityConfig("restrictTradingHours")).toEqual({ schedule: "market_hours" });
+    expect(defaultCapacityConfig("transferApprovals")).toEqual({ rule: "all" });
+    expect(defaultCapacityConfig("redemptionApprovals")).toEqual({ rule: "all" });
+    expect(defaultCapacityConfig("investorReporting")).toEqual({ cadence: "quarterly" });
+    expect(defaultCapacityConfig("kyc")).toBeUndefined();
+  });
+
+  it("summarizes each policy's config, and returns null when unconfigured", () => {
+    expect(summarizeCapacityConfig("transferApprovals", undefined, t)).toBeNull();
+    expect(summarizeCapacityConfig("kyc", undefined, t)).toBeNull();
+
+    expect(summarizeCapacityConfig("restrictTradingHours", { schedule: "market_hours" }, t)).toBe(
+      "Market hours"
+    );
+    expect(
+      summarizeCapacityConfig("transferApprovals", { rule: "above_amount", amount: "10000" }, t)
+    ).toBe("Above 10000 tokens");
+    expect(summarizeCapacityConfig("redemptionApprovals", { rule: "all" }, t)).toBe(
+      "All redemptions"
+    );
+    expect(
+      summarizeCapacityConfig("investorReporting", { cadence: "quarterly", format: "pdf" }, t)
+    ).toBe("Quarterly · PDF");
+    expect(summarizeCapacityConfig("investorReporting", { cadence: "annual" }, t)).toBe("Annual");
   });
 });

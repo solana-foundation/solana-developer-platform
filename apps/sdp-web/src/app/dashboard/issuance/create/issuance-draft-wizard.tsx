@@ -170,9 +170,16 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
     const toastId = toast.loading(t("DashboardIssuance.wizard.creatingDraft"), {
       position: "bottom-right",
     });
+    // TokenSignerSelect locks to the only wallet when exactly one exists, but a
+    // locked field never fires onChange — mirror that rule at submit so the
+    // payload carries the wallet the UI shows as selected.
+    const submittedDraft =
+      !signerWalletsError && signerWallets.length === 1
+        ? { ...draft, signingWalletId: signerWallets[0].walletId }
+        : draft;
     try {
       const result = await createAssetDraftAction({
-        token: buildTokenInput(draft),
+        token: buildTokenInput(submittedDraft),
         assetCategory: draft.assetCategory,
         assetType: draft.assetType,
         issuanceMetadata: buildIssuanceMetadata(draft),

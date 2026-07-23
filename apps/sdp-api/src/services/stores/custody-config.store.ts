@@ -9,6 +9,7 @@ import { SigningError, type SignStatus } from "@sdp/custody/signing";
 import type { CustodyWalletSettings, WellKnownTokenSymbol } from "@sdp/types";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
+import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type {
   CreateSigningRequestParams,
   SigningConfigStore,
@@ -16,7 +17,7 @@ import type {
   SigningRequestRecord,
   SigningRequestStore,
 } from "@/services/domain/signing.service";
-import { createEncryptionService, type EncryptionService } from "@/services/encryption.service";
+import type { Env } from "@/types/env";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -116,11 +117,11 @@ interface CustodyScopeDefaultRow {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class CustodyConfigStore implements SigningConfigStore {
-  private encryptionService: EncryptionService | null = null;
+  private custodyCipher: CustodyCipher | null = null;
 
   constructor(
     private db: DatabaseClient,
-    private encryptionKey?: string
+    private env: Env
   ) {}
 
   /**
@@ -335,11 +336,12 @@ export class CustodyConfigStore implements SigningConfigStore {
       .first<{ id: string }>();
 
     const configJson = JSON.stringify(config);
-    const encryption = this.getEncryptionService();
-    const encryptedConfig = await encryption.encrypt(orgId, configJson);
+    const encryptedConfig = await this.getCustodyCipher().encrypt(orgId, configJson);
+    const encryptionVersion = encryptedConfig.startsWith("v2.")
+      ? "sdp-custody-kms-v2"
+      : "sdp-custody-encryption-v1";
 
     if (existing) {
-      // Update existing config
       await this.db
         .prepare(
           `UPDATE custody_configs
@@ -348,8 +350,8 @@ export class CustodyConfigStore implements SigningConfigStore {
         )
         .bind(
           config.provider,
-          encryptedConfig.ciphertext,
-          "sdp-custody-encryption-v1",
+          encryptedConfig,
+          encryptionVersion,
           config.defaultWalletId ?? null,
           existing.id
         )
@@ -358,7 +360,6 @@ export class CustodyConfigStore implements SigningConfigStore {
       return existing.id;
     }
 
-    // Create new config
     const id = `cust_${crypto.randomUUID()}`;
 
     await this.db
@@ -371,8 +372,8 @@ export class CustodyConfigStore implements SigningConfigStore {
         orgId,
         normalizedProjectId,
         config.provider,
-        encryptedConfig.ciphertext,
-        "sdp-custody-encryption-v1",
+        encryptedConfig,
+        encryptionVersion,
         config.defaultWalletId ?? null
       )
       .run();
@@ -751,6 +752,7 @@ export class CustodyConfigStore implements SigningConfigStore {
       projectId: row.project_id,
       provider: row.provider as SigningProviderType,
       config: row.config_encrypted,
+      encryptionVersion: row.encryption_version,
       defaultWalletId: row.default_wallet_id,
       status: row.status as "active" | "inactive",
       createdAt: row.created_at,
@@ -758,11 +760,11 @@ export class CustodyConfigStore implements SigningConfigStore {
     };
   }
 
-  private getEncryptionService(): EncryptionService {
-    if (!this.encryptionService) {
-      this.encryptionService = createEncryptionService(this.encryptionKey);
+  private getCustodyCipher(): CustodyCipher {
+    if (!this.custodyCipher) {
+      this.custodyCipher = createCustodyCipher(this.env);
     }
-    return this.encryptionService;
+    return this.custodyCipher;
   }
 
   private async getScopeDefaultRow(
