@@ -15,7 +15,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
-import { createKVStoreSet } from "@/runtime/factory";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import * as SolanaServices from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
