@@ -6,7 +6,7 @@
  */
 
 import type { CachedApiKey } from "@sdp/types";
-import { createKVStoreSet } from "@/runtime/factory";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import type { Env } from "@/types/env";
 
 /**
