@@ -33,6 +33,7 @@ import { Modal } from "@/components/ui/modal";
 import { Select, SelectItem } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { cn } from "@/lib/utils";
@@ -41,6 +42,7 @@ import {
   type AuthoringDefaultAction,
   type AuthoringRuleAction,
   buildDisabledPolicyPayload,
+  buildPolicyAssetOptions,
   buildPolicyPayload,
   clearPolicyDraft,
   createPolicyAuthoringState,
@@ -851,12 +853,14 @@ function AssetEditor({
   onChange: (assets: string[]) => void;
 }) {
   const t = useTranslations();
+  const { sdpEnvironment } = useDashboardWorkspace();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [inputError, setInputError] = useState<"invalid" | "duplicate" | null>(null);
   const normalizedQuery = query.trim().toLowerCase();
-  const uniqueWalletAssets = walletAssets.filter(
-    (asset, index, values) => values.findIndex((item) => item.mint === asset.mint) === index
+  const uniqueWalletAssets = useMemo(
+    () => buildPolicyAssetOptions(walletAssets, sdpEnvironment),
+    [walletAssets, sdpEnvironment]
   );
   const matchingWalletAssets = uniqueWalletAssets
     .filter(
@@ -865,7 +869,7 @@ function AssetEditor({
         asset.token.toLowerCase().includes(normalizedQuery) ||
         asset.mint.toLowerCase().includes(normalizedQuery)
     )
-    .slice(0, 5);
+    .slice(0, 8);
   const canAddCustomMint =
     isValidSolanaAddress(query) &&
     !assets.includes(query.trim()) &&
@@ -968,7 +972,9 @@ function AssetEditor({
                       <span className="block text-sm font-medium text-primary">{asset.token}</span>
                       <span className="block truncate text-xs text-muted">{asset.mint}</span>
                     </span>
-                    <span className="shrink-0 text-xs text-secondary">{asset.uiAmount}</span>
+                    {asset.uiAmount ? (
+                      <span className="shrink-0 text-xs text-secondary">{asset.uiAmount}</span>
+                    ) : null}
                     <span
                       className={cn(
                         "flex size-5 shrink-0 items-center justify-center rounded border",
