@@ -1,11 +1,18 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import { getBase64EncodedWireTransaction, getTransactionEncoder } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
-import type { PaymentTransferRecipientRow } from "@/db/repositories/payment-transfer-batches.repository";
+import { getDb } from "@/db";
+import { asTransactionalClient } from "@/db/client";
+import type {
+  PaymentTransferBatchesRepository,
+  PaymentTransferRecipientRow,
+} from "@/db/repositories/payment-transfer-batches.repository";
+import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import type {
   PaymentTransferRow,
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
+import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { internalError, transactionFailed } from "@/lib/errors";
 import {
   type AppContext,
@@ -57,28 +64,31 @@ async function updateTransferRecord(
 }
 
 /**
- * Updates the recipient rows belonging to one chunk and refreshes the shared
- * recipient map with the returned rows.
+ * Updates the recipient rows belonging to one chunk and returns the updated
+ * rows keyed by recipient index. Callers apply the result to the shared
+ * recipient map via applyRecipientRowUpdates once the write is durable —
+ * transactional callers must wait for commit so a rollback never leaves the
+ * map claiming a link the database does not have.
  *
- * @param params.recipientsByIndex - Mutable recipient-index map shared across chunks.
+ * @param params.repository - Batches repository to write through; pass a
+ * transaction-bound repository to compose with other writes.
+ * @param params.recipientsByIndex - Recipient-index map shared across chunks (read only here).
  * @param params.recipientIndexes - Recipient indexes owned by this chunk.
  * @param params.transferId - Transfer row the recipients are linked to, or null when the chunk failed before its transfer row existed.
  * @param params.status - New recipient status.
  * @param params.error - Failure detail, or null.
- * @returns The updated recipient rows.
+ * @returns Updated recipient rows keyed by recipient index.
  */
-export async function updateRecipientRows(
-  c: AppContext,
-  params: {
-    recipientsByIndex: Map<number, PaymentTransferRecipientRow>;
-    recipientIndexes: number[];
-    organizationId: string;
-    projectId: string;
-    transferId: string | null;
-    status: PaymentTransferRecipientRow["status"];
-    error: string | null;
-  }
-): Promise<PaymentTransferRecipientRow[]> {
+export async function updateRecipientRows(params: {
+  repository: PaymentTransferBatchesRepository;
+  recipientsByIndex: Map<number, PaymentTransferRecipientRow>;
+  recipientIndexes: number[];
+  organizationId: string;
+  projectId: string;
+  transferId: string | null;
+  status: PaymentTransferRecipientRow["status"];
+  error: string | null;
+}): Promise<Map<number, PaymentTransferRecipientRow>> {
   const targets = params.recipientIndexes.map((index) => {
     const existing = params.recipientsByIndex.get(index);
     if (!existing) {
@@ -87,7 +97,7 @@ export async function updateRecipientRows(
     return { index, id: existing.id };
   });
 
-  const updatedRows = await getPaymentTransferBatchesRepository(c).updateTransferRecipientsStatus({
+  const updatedRows = await params.repository.updateTransferRecipientsStatus({
     recipientIds: targets.map((target) => target.id),
     organizationId: params.organizationId,
     projectId: params.projectId,
@@ -97,15 +107,31 @@ export async function updateRecipientRows(
   });
 
   const updatedById = new Map(updatedRows.map((row) => [row.id, row]));
+  const updatesByIndex = new Map<number, PaymentTransferRecipientRow>();
   for (const target of targets) {
     const updated = updatedById.get(target.id);
     if (!updated) {
       throw internalError("Transfer batch recipient row not found for update");
     }
-    params.recipientsByIndex.set(target.index, updated);
+    updatesByIndex.set(target.index, updated);
   }
 
-  return updatedRows;
+  return updatesByIndex;
+}
+
+/**
+ * Applies committed recipient-row updates to the shared recipient map.
+ *
+ * @param recipientsByIndex - Mutable recipient-index map shared across chunks.
+ * @param updates - Updated rows keyed by recipient index.
+ */
+export function applyRecipientRowUpdates(
+  recipientsByIndex: Map<number, PaymentTransferRecipientRow>,
+  updates: Map<number, PaymentTransferRecipientRow>
+): void {
+  for (const [index, row] of updates) {
+    recipientsByIndex.set(index, row);
+  }
 }
 
 /**
@@ -113,6 +139,9 @@ export async function updateRecipientRows(
  * confirmation: the transfer and its recipients settle as processing with the
  * signature stored, and the pending-transfers job finalizes them later.
  * Simulation or send failures settle the chunk as failed instead of throwing.
+ * The transfer row and its recipient links are written in ONE transaction so
+ * a processing chunk transfer always has linked recipients — the invariant
+ * settleTransferBatch enforces when the pending-transfers job settles it.
  *
  * @param params.resolved - Resolved batch request.
  * @param params.chunk - Chunk to sign and submit.
@@ -141,47 +170,55 @@ export async function executeChunk(params: {
   });
 
   const firstRecipient = recipientRows[0];
-  const transfer = await getPaymentsRepository(c).createTransfer({
-    organizationId: resolved.scope.auth.organizationId,
-    projectId: resolved.projectId,
-    walletId: resolved.sourceWallet.walletId,
-    counterpartyId: recipientRows.length === 1 ? firstRecipient.counterparty_id : null,
-    sourceAddress: resolved.sourceAddress,
-    destinationAddress: recipientRows.length === 1 ? firstRecipient.destination_address : null,
-    token: resolved.tokenContext.token,
-    amount: chunk.amount,
-    memo: null,
-    type: "transfer_batch",
-    direction: "outbound",
-    status: "processing",
-    provider: null,
-    providerReference: null,
-    deliveryMode: null,
-    fiatCurrency: null,
-    fiatAmount: null,
-    providerData: {
-      batchRecipientCount: recipientRows.length,
-      recipientIds: recipientRows.map((row) => row.id),
-    },
-    serializedTx,
-    signature: null,
-    slot: null,
-    initiatedByKeyId: resolved.scope.auth.id,
-  });
+  const linkedTransfer = await getDb(c.env).transaction(async (tx) => {
+    const txClient = asTransactionalClient(tx);
+    const created = await createPostgresPaymentsRepository(txClient).createTransfer({
+      organizationId: resolved.scope.auth.organizationId,
+      projectId: resolved.projectId,
+      walletId: resolved.sourceWallet.walletId,
+      counterpartyId: recipientRows.length === 1 ? firstRecipient.counterparty_id : null,
+      sourceAddress: resolved.sourceAddress,
+      destinationAddress: recipientRows.length === 1 ? firstRecipient.destination_address : null,
+      token: resolved.tokenContext.token,
+      amount: chunk.amount,
+      memo: null,
+      type: "transfer_batch",
+      direction: "outbound",
+      status: "processing",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {
+        batchRecipientCount: recipientRows.length,
+        recipientIds: recipientRows.map((row) => row.id),
+      },
+      serializedTx,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: resolved.scope.auth.id,
+    });
 
-  if (!transfer) {
-    throw internalError("Failed to create payment transfer record");
-  }
+    if (!created) {
+      throw internalError("Failed to create payment transfer record");
+    }
 
-  await updateRecipientRows(c, {
-    recipientsByIndex: params.recipientsByIndex,
-    recipientIndexes: chunk.recipientIndexes,
-    organizationId: resolved.scope.auth.organizationId,
-    projectId: resolved.projectId,
-    transferId: transfer.id,
-    status: "processing",
-    error: null,
+    const linked = await updateRecipientRows({
+      repository: createPostgresPaymentTransferBatchesRepository(txClient),
+      recipientsByIndex: params.recipientsByIndex,
+      recipientIndexes: chunk.recipientIndexes,
+      organizationId: resolved.scope.auth.organizationId,
+      projectId: resolved.projectId,
+      transferId: created.id,
+      status: "processing",
+      error: null,
+    });
+
+    return { created, linked };
   });
+  applyRecipientRowUpdates(params.recipientsByIndex, linkedTransfer.linked);
+  const transfer = linkedTransfer.created;
 
   const settle = async (params2: {
     status: PaymentTransferStatus;
@@ -189,7 +226,8 @@ export async function executeChunk(params: {
     signature?: string;
     error: string | null;
   }): Promise<PaymentTransferRow> => {
-    await updateRecipientRows(c, {
+    const updates = await updateRecipientRows({
+      repository: getPaymentTransferBatchesRepository(c),
       recipientsByIndex: params.recipientsByIndex,
       recipientIndexes: chunk.recipientIndexes,
       organizationId: resolved.scope.auth.organizationId,
@@ -198,6 +236,7 @@ export async function executeChunk(params: {
       status: params2.recipientStatus,
       error: params2.error,
     });
+    applyRecipientRowUpdates(params.recipientsByIndex, updates);
     return updateTransferRecord(c, {
       transferId: transfer.id,
       organizationId: resolved.scope.auth.organizationId,

@@ -5,13 +5,13 @@ import type {
   PaymentTransferBatchRow,
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
-import { badRequest } from "@/lib/errors";
+import { badRequest, internalError } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import * as solanaServices from "@/services/solana";
 import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../../context";
 import { createTransferBatchSchema } from "../../schemas";
-import { executeChunk, updateRecipientRows } from "./execute";
+import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import { enforceBatchPolicies } from "./policy";
 import { resolveBatchRequest } from "./resolve";
 import { buildTransferBatchResponse, resolveTransferBatchIdempotencyReplay } from "./respond";
@@ -27,6 +27,11 @@ import {
  * transfers come back processing and the pending-transfers job settles them.
  * A chunk whose execution throws is settled as failed recipients rather than
  * failing the request, so sibling submissions are never abandoned half-done.
+ * That cleanup only touches recipients still unlinked (transfer_id null):
+ * executeChunk creates its transfer row and links recipients in one
+ * transaction, so a linked recipient implies a live transfer row that the
+ * pending-transfers job settles via settleTransferBatch — unlinking it here
+ * would orphan that transfer as permanently processing.
  * The final batch status comes from the locked repository recompute — never
  * from in-memory state — so a reconciliation run that settles chunks during
  * the request cannot be overwritten with a stale status.
@@ -188,15 +193,27 @@ export async function createTransferBatch(c: AppContext) {
   );
   for (const [position, outcome] of outcomes.entries()) {
     if (outcome.status === "rejected") {
-      await updateRecipientRows(c, {
+      const unlinkedIndexes = chunks[position].recipientIndexes.filter((index) => {
+        const row = recipientsByIndex.get(index);
+        if (!row) {
+          throw internalError("Transfer batch recipient row is missing");
+        }
+        return row.transfer_id === null;
+      });
+      if (unlinkedIndexes.length === 0) {
+        continue;
+      }
+      const updates = await updateRecipientRows({
+        repository: getPaymentTransferBatchesRepository(c),
         recipientsByIndex,
-        recipientIndexes: chunks[position].recipientIndexes,
+        recipientIndexes: unlinkedIndexes,
         organizationId: resolved.scope.auth.organizationId,
         projectId: resolved.projectId,
         transferId: null,
         status: "failed",
         error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
       });
+      applyRecipientRowUpdates(recipientsByIndex, updates);
     }
   }
 
