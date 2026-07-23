@@ -17,7 +17,22 @@ export const listProjects = async (c: AppContext) => {
   const includeArchived = c.req.query("includeArchived") === "true";
 
   const projectService = new ProjectService(getDb(c.env));
-  const projectList = await projectService.listProjects(auth.organizationId, { includeArchived });
+  let projectList: ListProjectsResponse["projects"];
+
+  if (auth.authType === "api_key") {
+    if (!auth.projectId) {
+      throw notFound("Project");
+    }
+
+    const project = await projectService.getProject(auth.projectId);
+    if (!project || project.organizationId !== auth.organizationId) {
+      throw notFound("Project");
+    }
+
+    projectList = includeArchived || project.status === "active" ? [project] : [];
+  } else {
+    projectList = await projectService.listProjects(auth.organizationId, { includeArchived });
+  }
 
   const response: ListProjectsResponse = { projects: projectList };
   return success(c, response);
