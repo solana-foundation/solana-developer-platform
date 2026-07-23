@@ -1737,7 +1737,7 @@ describe("payment transfer batches", () => {
     const transferId = body.data.transfers[0].id;
 
     const repository = createPaymentTransferBatchesRepository(env);
-    const first = await repository.settleTransferBatch({
+    await repository.settleTransferBatch({
       transferId,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
@@ -1746,9 +1746,8 @@ describe("payment transfer batches", () => {
       slot: 500,
       updatedAt: new Date().toISOString(),
     });
-    expect(first).toBe("settled");
 
-    const delayed = await repository.settleTransferBatch({
+    await repository.settleTransferBatch({
       transferId,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
@@ -1757,7 +1756,6 @@ describe("payment transfer batches", () => {
       slot: 400,
       updatedAt: new Date().toISOString(),
     });
-    expect(delayed).toBe("already_settled");
 
     const transferRow = await getDb(env)
       .prepare("SELECT status, slot FROM payment_transfers WHERE id = ?")

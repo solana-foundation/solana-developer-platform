@@ -224,8 +224,6 @@ export interface SettlePaymentTransferBatchInput {
   updatedAt: string;
 }
 
-export type SettlePaymentTransferBatchResult = "settled" | "already_settled";
-
 export interface RecomputeTransferBatchStatusInput {
   batchId: string;
   organizationId: string;
@@ -287,9 +285,7 @@ export interface PaymentTransferBatchesRepository {
    * @param input.transferStatus - Terminal status the transfer reached.
    * @param input.error - Failure detail applied to failed recipients.
    */
-  settleTransferBatch(
-    input: SettlePaymentTransferBatchInput
-  ): Promise<SettlePaymentTransferBatchResult>;
+  settleTransferBatch(input: SettlePaymentTransferBatchInput): Promise<void>;
   /**
    * Recomputes and writes a batch's status from its recipient rows under the
    * batch row lock. The only sanctioned way to write a batch status after
