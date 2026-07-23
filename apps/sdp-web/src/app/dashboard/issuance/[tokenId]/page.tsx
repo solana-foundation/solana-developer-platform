@@ -1,8 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import type { AssetProfile, Token } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
+import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
-import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
@@ -102,10 +102,11 @@ function mapAssetProfile(payload: unknown): AssetProfile | null {
 }
 
 export default async function IssuanceTokenManagementPage({ params }: TokenManagementPageProps) {
-  const [t, { userId, orgId }, { tokenId }] = await Promise.all([
+  const [t, { userId, orgId }, { tokenId }, assetProfilesEnabled] = await Promise.all([
     getTranslations(),
     auth(),
     params,
+    assetProfiles(),
   ]);
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -121,7 +122,6 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
       createSdpApiClient(trace.childContext("dashboard.issuance.token.api"))
     );
 
-    const assetProfilesEnabled = isAssetProfilesUiEnabled();
     const profileResultPromise = assetProfilesEnabled
       ? trace.step("fetch_asset_profile", () =>
           fetchData<AssetProfile | null>(

@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.46.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.3...v0.46.4) (2026-07-23)
+
+### Refactors
+
+* **approvals:** design-system filters and date-range presets ([#886](https://github.com/solana-foundation/solana-developer-platform/pull/886)) ([6b5c525](https://github.com/solana-foundation/solana-developer-platform/commit/6b5c52568156fe1571e899d3fd155fcf23adebdd))
+
+## [0.46.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.2...v0.46.3) (2026-07-23)
+
+### Bug Fixes
+
+* **ci:** probe private Cloud Run candidate safely ([#891](https://github.com/solana-foundation/solana-developer-platform/pull/891)) ([fff1eee](https://github.com/solana-foundation/solana-developer-platform/commit/fff1eeee14f687c4234f7a310f05da221faf5e7d))
+
+## [0.46.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.1...v0.46.2) (2026-07-23)
+
+### Bug Fixes
+
+* **policies:** stabilize search input and polish controls layout ([#885](https://github.com/solana-foundation/solana-developer-platform/pull/885)) ([4d659b1](https://github.com/solana-foundation/solana-developer-platform/commit/4d659b16cba4230afa07bd07169075d2bf87bcef))
+
+### Other Changes
+
+* Backfill existing organizations as enterprise approved ([#888](https://github.com/solana-foundation/solana-developer-platform/pull/888)) ([cb7ef8a](https://github.com/solana-foundation/solana-developer-platform/commit/cb7ef8a89e135c3538d427511a04b9e801e269f3))
+
+## [0.46.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.0...v0.46.1) (2026-07-23)
+
+### Bug Fixes
+
+* **api:** enforce per-key rate limit tiers after auth ([#855](https://github.com/solana-foundation/solana-developer-platform/pull/855)) ([a7890f8](https://github.com/solana-foundation/solana-developer-platform/commit/a7890f8fee3a6cca611168b4330fdfc505f808a4))
+
+### Maintenance
+
+* **deps:** bump next from 16.2.7 to 16.2.11 ([#872](https://github.com/solana-foundation/solana-developer-platform/pull/872)) ([5dfdb6b](https://github.com/solana-foundation/solana-developer-platform/commit/5dfdb6bb1946130ad8709aa2a97a51088df34710))
+
+## [0.46.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.45.0...v0.46.0) (2026-07-23)
+
+### Features
+
+* updates on issuance workspace and asset management UI ([#874](https://github.com/solana-foundation/solana-developer-platform/pull/874)) ([4163068](https://github.com/solana-foundation/solana-developer-platform/commit/4163068e03241f58f33320b505a022508300ae5b))
+* add the debug panel to local dev ([#875](https://github.com/solana-foundation/solana-developer-platform/pull/875)) ([6bcb1d1](https://github.com/solana-foundation/solana-developer-platform/commit/6bcb1d1b8085c73b564e4f2d40da483e01a75b39))
+
+### Performance Improvements
+
+* async confirmation + parallel chunks for transfer batches ([#878](https://github.com/solana-foundation/solana-developer-platform/pull/878)) ([0442373](https://github.com/solana-foundation/solana-developer-platform/commit/0442373fd23538c8f7f5752c9141a3ce871a34d6))
+
+### Refactors
+
+* **kv:** inline the single-runtime KV factory into kv-redis ([#880](https://github.com/solana-foundation/solana-developer-platform/pull/880)) ([4ed7455](https://github.com/solana-foundation/solana-developer-platform/commit/4ed74553b1048149363a40edf2a3487923ec9c51))
+
 ## [0.45.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.44.0...v0.45.0) (2026-07-23)
 
 ### Features

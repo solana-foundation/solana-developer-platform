@@ -73,7 +73,6 @@ import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import {
   DASHBOARD_NAVIGATION_RECOVERY_TIMEOUT_MS,
   DASHBOARD_NAVIGATION_START_EVENT,
@@ -522,7 +521,8 @@ function getAccessControlPageConfig(
 
 function getIssuanceRoutePageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  assetProfilesEnabled: boolean
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/issuance") {
     return {
@@ -545,7 +545,7 @@ function getIssuanceRoutePageConfig(
   // Gate the chrome on the same flag the page uses to pick the workspace. Flag
   // on → the create flow's centered title + capped column; off → the legacy
   // left-aligned, full-width layout, untouched.
-  if (isAssetProfilesUiEnabled()) {
+  if (assetProfilesEnabled) {
     return actionPageConfig({
       centeredTitle: t("Shared.dashboardShell.assetManagement"),
       backHref: "/dashboard/issuance",
@@ -565,7 +565,8 @@ function getIssuanceRoutePageConfig(
 
 function getDashboardPageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  assetProfilesEnabled: boolean
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -612,7 +613,7 @@ function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
-  const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t);
+  const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
   if (pathname === "/dashboard/payments/counterparty") {
     return {
@@ -710,6 +711,7 @@ function AllowlistLoading() {
 }
 
 interface PageLoadingProps {
+  assetProfilesEnabled?: boolean;
   targetSearch?: string;
 }
 
@@ -1065,9 +1067,11 @@ function DashboardSidebarContent({
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
 export function DashboardShell({
+  assetProfilesEnabled,
   children,
   onboardingStatus,
 }: {
+  assetProfilesEnabled: boolean;
   children: ReactNode;
   onboardingStatus: OrganizationOnboardingStatus | null;
 }) {
@@ -1099,7 +1103,7 @@ export function DashboardShell({
     Boolean(pendingNavigationPathname) || isProjectSwitching || isOrganizationSwitching;
   const sidebarExpandedWidth = 296;
   const sidebarCollapsedWidth = 64;
-  const pageConfig = getDashboardPageConfig(shellPathname, t);
+  const pageConfig = getDashboardPageConfig(shellPathname, t, assetProfilesEnabled);
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     pendingApprovalCount,
@@ -1491,7 +1495,10 @@ export function DashboardShell({
                   aria-live="polite"
                 >
                   <span className="sr-only">{t("Shared.dashboardShell.loadingDashboard")}</span>
-                  <PageLoadingComponent targetSearch={pendingNavigation?.toSearch} />
+                  <PageLoadingComponent
+                    assetProfilesEnabled={assetProfilesEnabled}
+                    targetSearch={pendingNavigation?.toSearch}
+                  />
                 </div>
               ) : (
                 children

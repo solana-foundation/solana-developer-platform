@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { NetworkDebugProvider } from "@/contexts/network-debug-context";
+import { assetProfiles, organizationOnboarding } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
@@ -34,7 +35,11 @@ async function loadOnboardingStatus(): Promise<OrganizationOnboardingStatus | nu
 }
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  const { orgRole, orgId, userId } = await getSdpAuth();
+  const [{ orgRole, orgId, userId }, onboardingEnabled, assetProfilesEnabled] = await Promise.all([
+    getSdpAuth(),
+    organizationOnboarding(),
+    assetProfiles(),
+  ]);
 
   if (!userId || !orgId) {
     redirect(await getAuthEntryPath());
@@ -48,7 +53,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
 
   const [loadedProjects, onboardingStatus, cookieStore] = await Promise.all([
     loadProjects(),
-    loadOnboardingStatus(),
+    onboardingEnabled ? loadOnboardingStatus() : Promise.resolve(null),
     cookies(),
   ]);
   const projects = loadedProjects ?? [];
@@ -67,7 +72,12 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       shouldRepairInitialProjectCookie={projectSelection.shouldRepairCookie}
     >
       <NetworkDebugProvider>
-        <DashboardShell onboardingStatus={onboardingStatus}>{children}</DashboardShell>
+        <DashboardShell
+          assetProfilesEnabled={assetProfilesEnabled}
+          onboardingStatus={onboardingStatus}
+        >
+          {children}
+        </DashboardShell>
       </NetworkDebugProvider>
     </DashboardWorkspaceProvider>
   );
