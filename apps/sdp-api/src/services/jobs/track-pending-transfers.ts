@@ -18,9 +18,15 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import {
   createPaymentsRepository,
+  createPaymentTransferBatchesRepository,
   type PaymentsRepository,
   WALLET_TRANSFER_TYPES,
 } from "@/db/repositories";
+import type {
+  PaymentTransferRow,
+  UpdatePaymentTransferInput,
+} from "@/db/repositories/payments.repository";
+import { internalError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
@@ -28,12 +34,43 @@ const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
 // getSignatureStatuses accepts at most 256 signatures per call.
 const MAX_SIGNATURES_PER_BATCH = 256;
 
+/**
+ * Applies a terminal status to a transfer, settling its recipient rows and
+ * parent batch first when the transfer is a transfer_batch chunk: if
+ * settlement fails, the transfer stays processing and the next run retries
+ * both steps.
+ */
+async function updateTerminalTransfer(
+  env: Env,
+  repo: PaymentsRepository,
+  transfer: PaymentTransferRow,
+  input: UpdatePaymentTransferInput &
+    ({ status: "confirmed" | "finalized" } | { status: "failed"; error: string })
+): Promise<void> {
+  if (transfer.type === "transfer_batch") {
+    if (transfer.project_id === null) {
+      throw internalError("Transfer batch transfer is missing a project");
+    }
+    await createPaymentTransferBatchesRepository(env).settleTransferBatch({
+      transferId: transfer.id,
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+      transferStatus: input.status,
+      error: input.status === "failed" ? input.error : null,
+    });
+  }
+  const updated = await repo.updateTransfer(input);
+  if (!updated) {
+    throw internalError("Pending transfer not found for reconciliation");
+  }
+}
+
 export async function trackPendingTransfers(env: Env): Promise<void> {
   const repo = createPaymentsRepository(env);
   const now = new Date();
   const nowIso = now.toISOString();
 
-  await recoverStuckProcessingTransfers(repo, now, nowIso);
+  await recoverStuckProcessingTransfers(env, repo, now, nowIso);
   await syncProcessingTransfersOnChain(env, repo, nowIso);
 }
 
@@ -43,6 +80,7 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
  * obtaining a signature.
  */
 async function recoverStuckProcessingTransfers(
+  env: Env,
   repo: PaymentsRepository,
   now: Date,
   nowIso: string
@@ -59,7 +97,7 @@ async function recoverStuckProcessingTransfers(
 
   for (const transfer of stuckProcessing) {
     try {
-      await repo.updateTransfer({
+      await updateTerminalTransfer(env, repo, transfer, {
         transferId: transfer.id,
         status: "failed",
         error: "Transfer processing timed out",
@@ -122,7 +160,7 @@ async function syncProcessingTransfersOnChain(
         // enough, assume the transaction was dropped and mark it failed.
         const ageMs = now.getTime() - new Date(transfer.updated_at).getTime();
         if (ageMs > STUCK_PROCESSING_AFTER_MS) {
-          await repo.updateTransfer({
+          await updateTerminalTransfer(env, repo, transfer, {
             transferId: transfer.id,
             status: "failed",
             error: "Transaction not found on chain",
@@ -133,7 +171,7 @@ async function syncProcessingTransfersOnChain(
       }
 
       if (status.err) {
-        await repo.updateTransfer({
+        await updateTerminalTransfer(env, repo, transfer, {
           transferId: transfer.id,
           status: "failed",
           slot: Number(status.slot),
@@ -144,14 +182,14 @@ async function syncProcessingTransfersOnChain(
       }
 
       if (status.confirmationStatus === "finalized") {
-        await repo.updateTransfer({
+        await updateTerminalTransfer(env, repo, transfer, {
           transferId: transfer.id,
           status: "finalized",
           slot: Number(status.slot),
           updatedAt: nowIso,
         });
       } else if (status.confirmationStatus === "confirmed") {
-        await repo.updateTransfer({
+        await updateTerminalTransfer(env, repo, transfer, {
           transferId: transfer.id,
           status: "confirmed",
           slot: Number(status.slot),

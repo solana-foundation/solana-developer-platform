@@ -407,6 +407,26 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
       return row ? mapTransferRow(row) : null;
     },
 
+    async listTransfersByIds(params) {
+      if (params.transferIds.length === 0) {
+        return [];
+      }
+
+      const scope = buildTransferScopeWhere({
+        organizationId: params.organizationId,
+        projectId: params.projectId,
+        extraClauses: ["id = ANY(?)"],
+        extraValues: [params.transferIds],
+      });
+
+      const rows = await db
+        .prepare(`SELECT * FROM payment_transfers WHERE ${scope.where}`)
+        .bind(...scope.values)
+        .all<Record<string, unknown>>();
+
+      return rows.results.map(mapTransferRow);
+    },
+
     async getTransferByProviderReference(params) {
       const scope = params.organizationId
         ? buildTransferScopeWhere({

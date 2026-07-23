@@ -15,6 +15,7 @@ import type {
   PaymentTransferBatchesRepository,
   PaymentTransferBatchRow,
   PaymentTransferRecipientRow,
+  SettlePaymentTransferBatchInput,
   UpdatePaymentTransferBatchInput,
   UpdatePaymentTransferRecipientInput,
   UpdatePaymentTransferRecipientsStatusInput,
@@ -22,6 +23,7 @@ import type {
   UpsertPaymentTransferRecipientInput,
 } from "./payment-transfer-batches.repository";
 import {
+  deriveTransferBatchStatus,
   generatePaymentTransferBatchId,
   generatePaymentTransferRecipientId,
 } from "./payment-transfer-batches.repository";
@@ -723,6 +725,72 @@ export function createPostgresPaymentTransferBatchesRepository(
         rows: rowsResult.results.map(mapPaymentTransferRecipientRow),
         total: countRow?.total ?? 0,
       };
+    },
+
+    async settleTransferBatch(input: SettlePaymentTransferBatchInput) {
+      await db.transaction(async (tx) => {
+        const recipientStatus = input.transferStatus === "failed" ? "failed" : "confirmed";
+        const recipients = await tx
+          .prepare(
+            `UPDATE payment_transfer_recipients
+                SET status = ?,
+                    error = ?,
+                    updated_at = sdp_iso_now()
+              WHERE organization_id = ?
+                AND project_id = ?
+                AND transfer_id = ?
+                AND status <> 'archived'
+              RETURNING *`
+          )
+          .bind(
+            recipientStatus,
+            recipientStatus === "failed" ? input.error : null,
+            input.organizationId,
+            input.projectId,
+            input.transferId
+          )
+          .all<{ batch_id: string }>();
+
+        if (recipients.results.length === 0) {
+          throw internalError("Transfer batch recipients not found for settlement");
+        }
+
+        const batchId = recipients.results[0].batch_id;
+        const statusRows = await tx
+          .prepare(
+            `SELECT status
+               FROM payment_transfer_recipients
+              WHERE batch_id = ?
+                AND organization_id = ?
+                AND project_id = ?
+                AND status <> 'archived'`
+          )
+          .bind(batchId, input.organizationId, input.projectId)
+          .all<{ status: PaymentTransferRecipientRow["status"] }>();
+        const batchStatus = deriveTransferBatchStatus(statusRows.results.map((row) => row.status));
+        const batchError =
+          batchStatus === "failed" || batchStatus === "partially_failed"
+            ? "One or more transfer batch transactions failed during execution"
+            : null;
+
+        const updated = await tx
+          .prepare(
+            `UPDATE payment_transfer_batches
+                SET status = ?,
+                    error = ?,
+                    updated_at = sdp_iso_now()
+              WHERE id = ?
+                AND organization_id = ?
+                AND project_id = ?
+                AND status <> 'archived'
+              RETURNING id`
+          )
+          .bind(batchStatus, batchError, batchId, input.organizationId, input.projectId)
+          .first<{ id: string }>();
+        if (!updated) {
+          throw internalError("Transfer batch not found for settlement");
+        }
+      });
     },
   };
 }
