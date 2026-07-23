@@ -107,6 +107,74 @@ describe("RedisKVStore (HOO-510)", () => {
     });
   });
 
+  describe("admitSlidingWindow", () => {
+    it("admits and increments the current bucket under the limit", async () => {
+      const store = new RedisKVStore(raw, "test");
+      const result = await store.admitSlidingWindow("cur", "prev", {
+        maxRequests: 10,
+        previousWeight: 0,
+        expirationTtl: 120,
+      });
+      expect(result).toEqual({ admitted: true, current: 1, previous: 0 });
+      expect(await raw.get("test:cur")).toBe("1");
+    });
+
+    it("rejects at the limit without incrementing", async () => {
+      const store = new RedisKVStore(raw, "test");
+      await raw.set("test:cur", "10");
+      const result = await store.admitSlidingWindow("cur", "prev", {
+        maxRequests: 10,
+        previousWeight: 0,
+        expirationTtl: 120,
+      });
+      expect(result.admitted).toBe(false);
+      expect(result.current).toBe(10);
+      expect(await raw.get("test:cur")).toBe("10");
+    });
+
+    it("counts the previous bucket against the limit proportionally", async () => {
+      const store = new RedisKVStore(raw, "test");
+      await raw.set("test:prev", "100");
+      const result = await store.admitSlidingWindow("cur", "prev", {
+        maxRequests: 10,
+        previousWeight: 0.5,
+        expirationTtl: 120,
+      });
+      expect(result.admitted).toBe(false);
+      expect(result.previous).toBe(100);
+    });
+
+    it("sets the current bucket TTL on admission", async () => {
+      const store = new RedisKVStore(raw, "test");
+      await store.admitSlidingWindow("cur", "prev", {
+        maxRequests: 10,
+        previousWeight: 0,
+        expirationTtl: 120,
+      });
+      const pttl = await raw.pttl("test:cur");
+      expect(pttl).toBeGreaterThan(118_000);
+      expect(pttl).toBeLessThanOrEqual(120_000);
+    });
+
+    it("admits exactly maxRequests under concurrent load", async () => {
+      const store = new RedisKVStore(raw, "test");
+      const maxRequests = 50;
+      const attempts = 200;
+      const results = await Promise.all(
+        Array.from({ length: attempts }, () =>
+          store.admitSlidingWindow("cur", "prev", {
+            maxRequests,
+            previousWeight: 0,
+            expirationTtl: 120,
+          })
+        )
+      );
+      const admitted = results.filter((r) => r.admitted).length;
+      expect(admitted).toBe(maxRequests);
+      expect(await raw.get("test:cur")).toBe(String(maxRequests));
+    });
+  });
+
   describe("createKVStoreSet", () => {
     afterEach(async () => {
       // Factory uses a cached client; close between tests so reuse is observable.

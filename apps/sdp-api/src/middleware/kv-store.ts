@@ -13,7 +13,7 @@
  * sibling authed token routes a coarse prefix would.
  *
  * Every path skipped here MUST also be skipped by skipRateLimitPaths in the
- * same wiring — rateLimitMiddleware dereferences c.var.kv without a guard,
+ * same wiring — skipRateLimitPaths dereferences c.var.kv without a guard,
  * so a kv-skipped path that reaches rate-limit blows up as a TypeError. The
  * call site in index.ts shares a single KV_FREE_PATHS constant for both
  * middlewares to enforce this by construction.
