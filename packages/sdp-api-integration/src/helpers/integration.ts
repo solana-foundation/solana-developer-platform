@@ -708,7 +708,7 @@ async function createFundedLocalWallet(input: {
     throw new Error("Integration precondition failed: local signer configuration not found.");
   }
 
-  const configStore = new CustodyConfigStore(getDb(env), env.CUSTODY_ENCRYPTION_KEY);
+  const configStore = new CustodyConfigStore(getDb(env), env);
   // Local custody has one signing key; access tests still need distinct wallet IDs.
   const wallet = await configStore.createWallet(config.id, {
     walletId: `local_${crypto.randomUUID()}`,

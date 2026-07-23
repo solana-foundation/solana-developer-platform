@@ -19,7 +19,7 @@ import {
   ShieldCheckIcon,
   WalletIcon,
 } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ApiKeyAuthoringSkeleton,
@@ -65,7 +65,7 @@ import { DashboardNavigationLink } from "@/components/dashboard-navigation-link"
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { LanguagePicker } from "@/components/language-picker";
-import { NetworkDebugPanel } from "@/components/network-debug-panel";
+import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -73,6 +73,7 @@ import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import {
   DASHBOARD_NAVIGATION_RECOVERY_TIMEOUT_MS,
   DASHBOARD_NAVIGATION_START_EVENT,
@@ -82,6 +83,10 @@ import {
   type DashboardNavigationStartDetail,
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
+import {
+  type OrganizationOnboardingStatus,
+  shouldRedirectToOrganizationOnboarding,
+} from "@/lib/onboarding-route-guard";
 import { cn } from "@/lib/utils";
 
 type SubNavItem = {
@@ -262,7 +267,7 @@ function SidebarToggle({
       aria-label={t("Shared.dashboardShell.openNavigation")}
       onClick={() => setMobileSidebarOpen(true)}
       className={[
-        "inline-flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong lg:hidden",
+        "inline-flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong xl:hidden",
         isMobileSidebarOpen ? "invisible" : "",
       ].join(" ")}
     >
@@ -311,7 +316,7 @@ export function StandardDashboardTopBar({
 }) {
   return (
     <div
-      className="grid min-h-[40px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] lg:grid-cols-[0_minmax(0,1fr)_auto] lg:gap-x-0"
+      className="grid min-h-[40px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] xl:grid-cols-[0_minmax(0,1fr)_auto] xl:gap-x-0"
       data-dashboard-standard-topbar
     >
       <div className="col-start-1 row-start-1 flex min-w-0 items-center">{leadingContent}</div>
@@ -320,7 +325,7 @@ export function StandardDashboardTopBar({
           {title}
         </h1>
       )}
-      <div className="col-start-2 row-start-1 flex min-w-0 items-center justify-end gap-2 sm:col-start-3 lg:ml-3">
+      <div className="col-start-2 row-start-1 flex min-w-0 items-center justify-end gap-2 sm:col-start-3 xl:ml-3">
         {trailingContent}
       </div>
     </div>
@@ -360,7 +365,7 @@ function DashboardTopBar({
         }
         trailingContent={
           <>
-            <div className="lg:hidden">
+            <div className="xl:hidden">
               <ThemeToggle variant="header" />
             </div>
             <LanguagePicker />
@@ -384,7 +389,7 @@ function DashboardTopBar({
       }
       trailingContent={
         <>
-          <div className="lg:hidden">
+          <div className="xl:hidden">
             <ThemeToggle variant="header" />
           </div>
           <LanguagePicker />
@@ -515,6 +520,49 @@ function getAccessControlPageConfig(
   return null;
 }
 
+function getIssuanceRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/issuance") {
+    return {
+      title: t("Shared.dashboardShell.issuance"),
+      headerNav: <IssuanceHeaderTabs />,
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/issuance/create") {
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.newAsset"),
+      backHref: "/dashboard/issuance",
+      backLabel: t("Shared.dashboardShell.backToOverview"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (!pathname.startsWith("/dashboard/issuance/")) {
+    return null;
+  }
+  // Gate the chrome on the same flag the page uses to pick the workspace. Flag
+  // on → the create flow's centered title + capped column; off → the legacy
+  // left-aligned, full-width layout, untouched.
+  if (isAssetProfilesUiEnabled()) {
+    return actionPageConfig({
+      centeredTitle: t("Shared.dashboardShell.assetManagement"),
+      backHref: "/dashboard/issuance",
+      backLabel: t("Shared.dashboardShell.backToOverview"),
+      contentWidthClass: "max-w-7xl",
+    });
+  }
+  return {
+    title: t("Shared.dashboardShell.issuance"),
+    contentWidthClass: "max-w-none",
+    backAction: {
+      href: "/dashboard/issuance",
+      label: t("Shared.dashboardShell.backToOverview"),
+    },
+  };
+}
+
 function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
@@ -564,31 +612,8 @@ function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
-  if (pathname === "/dashboard/issuance") {
-    return {
-      title: t("Shared.dashboardShell.issuance"),
-      headerNav: <IssuanceHeaderTabs />,
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === "/dashboard/issuance/create") {
-    return actionPageConfig({
-      centeredTitle: t("Shared.dashboardShell.newAsset"),
-      backHref: "/dashboard/issuance",
-      backLabel: t("Shared.dashboardShell.backToOverview"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-  if (pathname.startsWith("/dashboard/issuance/")) {
-    return {
-      title: t("Shared.dashboardShell.issuance"),
-      contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/issuance",
-        label: t("Shared.dashboardShell.backToOverview"),
-      },
-    };
-  }
+  const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t);
+  if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
   if (pathname === "/dashboard/payments/counterparty") {
     return {
       title: t("Shared.dashboardShell.counterparty"),
@@ -1027,17 +1052,29 @@ function DashboardSidebarContent({
             </DashboardNavigationLink>
           );
         })}
-        {variant === "desktop" ? <ThemeToggle collapsed={isCollapsed} /> : null}
+        {variant === "desktop" ? (
+          <>
+            <ThemeToggle collapsed={isCollapsed} />
+            <NetworkDebugToggle collapsed={isCollapsed} />
+          </>
+        ) : null}
       </div>
     </>
   );
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
-export function DashboardShell({ children }: { children: ReactNode }) {
+export function DashboardShell({
+  children,
+  onboardingStatus,
+}: {
+  children: ReactNode;
+  onboardingStatus: OrganizationOnboardingStatus | null;
+}) {
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
+  const router = useRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -1108,6 +1145,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       shellPathname !== "/dashboard/custody/switch");
   const isWalletSetupRoute =
     shellPathname === "/dashboard/wallets/setup" || shellPathname === "/dashboard/custody/setup";
+  const isOrganizationOnboardingRoute = shellPathname === "/dashboard/onboarding";
   const shouldUseWorkspaceViewport =
     shellPathname === "/dashboard/issuance" ||
     shellPathname === "/dashboard/issuance/create" ||
@@ -1118,10 +1156,21 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     shellPathname === "/dashboard/wallets" ||
     shellPathname === "/dashboard/custody" ||
     isWalletSetupRoute ||
+    isOrganizationOnboardingRoute ||
     shellPathname.startsWith("/dashboard/approvals") ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
+  const shouldRedirectToOnboarding = shouldRedirectToOrganizationOnboarding(
+    onboardingStatus,
+    pathname
+  );
+
+  useEffect(() => {
+    if (shouldRedirectToOnboarding) {
+      router.replace("/dashboard/onboarding");
+    }
+  }, [router, shouldRedirectToOnboarding]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem("sdp.dashboard.payments-subnav-open");
@@ -1206,7 +1255,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     };
   }, [dashboardAccess.capabilities.canReadApprovals, selectedProjectId]);
 
-  if (!isLoaded) {
+  if (!isLoaded || shouldRedirectToOnboarding) {
     return <FullscreenLoadingIndicator />;
   }
 
@@ -1253,6 +1302,30 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     );
   }
 
+  if (isOrganizationOnboardingRoute) {
+    return (
+      <main className="h-screen overflow-hidden bg-[var(--sdp-shell-bg)] p-2 text-primary md:p-4">
+        <SentryUserContext />
+        <NetworkDebugPanel />
+        <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-border-subtle bg-surface-raised/90 shadow-sm">
+          <header className="relative flex h-16 shrink-0 items-center justify-between border-b border-border-subtle px-4 md:px-6">
+            <div className="min-w-0 max-w-[calc(100%-3rem)] sm:w-72">
+              <WorkspaceSwitcher
+                collapsed={false}
+                onOrganizationSwitchingChange={setOrganizationSwitching}
+              />
+            </div>
+            <span className="absolute left-1/2 hidden -translate-x-1/2 text-sm font-medium text-secondary sm:block">
+              {t("Shared.dashboardShell.workspace")}
+            </span>
+            <ThemeToggle variant="header" />
+          </header>
+          <section className="min-h-0 flex-1">{children}</section>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main
       aria-busy={isNavigationPending}
@@ -1267,12 +1340,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         className={[
           "mx-auto grid min-h-screen w-full max-w-none gap-0",
           shouldLockViewportScroll ? "h-full" : "",
-          "lg:grid-cols-[auto_1fr]",
+          "xl:grid-cols-[auto_1fr]",
         ].join(" ")}
       >
         <aside
           style={{ width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth }}
-          className="relative z-10 hidden bg-[var(--sdp-shell-bg)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between"
+          className="relative z-10 hidden bg-[var(--sdp-shell-bg)] xl:sticky xl:top-0 xl:flex xl:h-screen xl:flex-col xl:justify-between"
         >
           <DashboardSidebarContent
             bottomNavItems={bottomNavItems}
@@ -1301,7 +1374,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         </aside>
 
         {isMobileSidebarOpen ? (
-          <div className="fixed inset-0 z-50 flex lg:hidden">
+          <div className="fixed inset-0 z-50 flex xl:hidden">
             <button
               type="button"
               aria-label={t("Shared.dashboardShell.closeNavigationOverlay")}
@@ -1327,7 +1400,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
         <section
           className={[
-            "relative min-w-0 rounded-2xl border border-border-subtle bg-surface-raised/80 lg:rounded-tl-[16px]",
+            "relative min-w-0 rounded-2xl border border-border-subtle bg-surface-raised/80 xl:rounded-tl-[16px]",
             shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "px-3 py-5 md:p-6",
           ].join(" ")}
         >

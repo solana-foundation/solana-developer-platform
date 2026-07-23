@@ -14,6 +14,7 @@ import {
   Percent,
   Scaling,
   Snowflake,
+  SquarePen,
   UserCog,
   Webhook,
 } from "lucide-react";
@@ -24,6 +25,7 @@ import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import type {
   ExtensionRow,
   ExtensionRowId,
+  PermissionControlStatus,
   PermissionRow,
   PermissionRowId,
 } from "./token-management-workspace.types";
@@ -83,6 +85,28 @@ function extensionBadge(value: string): { className: string; showCheck: boolean 
   return { className: "bg-fill text-secondary", showCheck: false };
 }
 
+// Custody-control badge on each authority row: green when the authority is held
+// by an SDP custody wallet, amber when it's an external address SDP can't sign
+// for. Hidden while unknown (wallets loading) or when no authority is set.
+function ControlStatusBadge({ status }: { status?: PermissionControlStatus }) {
+  const t = useTranslations();
+  if (status !== "sdp" && status !== "external") {
+    return null;
+  }
+  const isSdp = status === "sdp";
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+        isSdp ? "bg-success-bg text-success" : "bg-warning-bg text-warning"
+      }`}
+    >
+      {isSdp
+        ? t("DashboardIssuance.permissions.managedBadge")
+        : t("DashboardIssuance.permissions.externalBadge")}
+    </span>
+  );
+}
+
 function IconTile({ icon: Icon }: { icon: LucideIcon }) {
   return (
     <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-border-subtle bg-fill-subtle text-secondary min-[450px]:flex">
@@ -140,46 +164,65 @@ export function TokenSettingsSection({
 
       {mode === "permissions" ? (
         <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
-          {permissionRows.map((row) => (
-            <div
-              key={row.id}
-              data-testid={`permission-row-${row.id}`}
-              className="flex flex-wrap items-center gap-x-3 gap-y-3 border-b border-border-subtle px-4 py-3.5 last:border-b-0"
-            >
-              <IconTile icon={PERMISSION_ROW_ICONS[row.id]} />
-              <div className="min-w-0 flex-1">
-                <p className="text-[15px] font-medium text-primary">{row.title}</p>
-                <p className="text-[13px] text-tertiary">{row.helper}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => onCopy(row.value)}
-                  className="inline-flex items-center gap-1 rounded-full border border-border-default bg-fill-subtle px-3 py-1 text-xs text-secondary"
-                >
-                  {formatValue(row.value, t)}
-                  {row.value ? <Copy className="h-3 w-3" /> : null}
-                </button>
-                <TokenDisabledActionTooltip
-                  reason={
-                    !canEditAuthorities
-                      ? "Token must be deployed before editing authorities."
-                      : (row.editDisabledReason ?? null)
-                  }
-                >
-                  <Button
+          {permissionRows.map((row) => {
+            const hasControlStatus =
+              row.controlStatus === "sdp" || row.controlStatus === "external";
+            return (
+              <div
+                key={row.id}
+                data-testid={`permission-row-${row.id}`}
+                className="flex flex-wrap items-center gap-x-3 gap-y-3 border-b border-border-subtle px-4 py-3.5 last:border-b-0"
+              >
+                <IconTile icon={PERMISSION_ROW_ICONS[row.id]} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-[15px] font-medium text-primary">{row.title}</p>
+                    {/* Inline beside the title on desktop; on mobile the row is too
+                      narrow, so it drops below the helper text instead. */}
+                    {hasControlStatus ? (
+                      <span className="hidden sm:inline-flex">
+                        <ControlStatusBadge status={row.controlStatus} />
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="text-[13px] text-tertiary">{row.helper}</p>
+                  {hasControlStatus ? (
+                    <div className="mt-2 sm:hidden">
+                      <ControlStatusBadge status={row.controlStatus} />
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
                     type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onEditAuthority(row)}
-                    disabled={!canEditAuthorities || Boolean(row.editDisabledReason)}
+                    onClick={() => onCopy(row.value)}
+                    className="inline-flex items-center gap-1 rounded-full border border-border-default bg-fill-subtle px-3 py-1 text-xs text-secondary"
                   >
-                    {t("DashboardIssuance.management.edit")}
-                  </Button>
-                </TokenDisabledActionTooltip>
+                    {formatValue(row.value, t)}
+                    {row.value ? <Copy className="h-3 w-3" /> : null}
+                  </button>
+                  <TokenDisabledActionTooltip
+                    reason={
+                      !canEditAuthorities
+                        ? "Token must be deployed before editing authorities."
+                        : (row.editDisabledReason ?? null)
+                    }
+                  >
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      iconLeft={<SquarePen />}
+                      onClick={() => onEditAuthority(row)}
+                      disabled={!canEditAuthorities || Boolean(row.editDisabledReason)}
+                    >
+                      {t("DashboardIssuance.management.edit")}
+                    </Button>
+                  </TokenDisabledActionTooltip>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="grid grid-cols-1 items-start gap-0 md:grid-cols-2 md:gap-3">

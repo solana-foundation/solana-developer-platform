@@ -1,9 +1,11 @@
 import {
   ADVANCED_SETTINGS,
+  AUTHORITY_VALUED_SETTINGS,
   findIncompatibleExtensionPair,
   getRecommendedSettings,
   isSettingAllowed,
   pruneIncompatibleSettings,
+  resolveSettingsToExtensions,
   type SettingKey,
 } from "@sdp/issuance/capabilities";
 import {
@@ -11,6 +13,8 @@ import {
   type AssetCategory,
   getAssetTypeRegistryEntry,
   type IssuanceMetadata,
+  type TokenExtensionsConfig,
+  type TokenTemplate,
 } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { detailFieldOptionLabel } from "./asset-details-config";
@@ -90,6 +94,9 @@ function buildSelectedSettings(
 }
 
 const SYMBOL_RE = /^[A-Za-z0-9.]{1,10}$/;
+// Mirrors the API's `description: z.string().max(500)` (create/updateTokenSchema)
+// so an over-long value is caught inline, not on a late 400.
+export const ASSET_DESCRIPTION_MAX_LENGTH = 500;
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 // Asset category -> deploy-time Token-2022 template (token creation still needs
@@ -143,6 +150,40 @@ export function buildTokenInput(draft: DraftState): TokenInput {
     uri: draft.metadataUri.trim() || undefined,
     imageUrl: draft.imageUrl.trim() || undefined,
     signingWalletId: draft.signingWalletId.trim() || undefined,
+  };
+}
+
+// A best-effort preview of what the draft's advanced settings compile to at deploy
+// time — the resolver output (base template, decimals, allowlist, and the resolved
+// Token-2022 extension config). Authorities are deliberately omitted: mint/freeze/
+// delegate are assigned server-side from the signing wallet's custody at deploy, so
+// the client can't show the real on-chain values (the resolver omits an authority
+// rather than emit a bricking placeholder). Returns null before a category/type is
+// chosen — nothing to resolve yet.
+export interface DeployConfigPreview {
+  template: TokenTemplate;
+  decimals: number;
+  requiresAllowlist: boolean;
+  extensions: TokenExtensionsConfig | null;
+}
+
+export function buildDeployConfigPreview(draft: DraftState): DeployConfigPreview | null {
+  if (!draft.assetCategory || !draft.assetType) {
+    return null;
+  }
+  const selected = buildSelectedSettings(
+    sanitizeAdvancedSettings(draft.assetCategory, draft.assetType, draft.advancedSettings)
+  );
+  const decimals = Number(draft.decimals);
+  const resolution = resolveSettingsToExtensions(draft.assetCategory, draft.assetType, selected, {
+    decimals: Number.isFinite(decimals) ? decimals : 0,
+    requiresAllowlist: draft.accessControl === "allowlist",
+  });
+  return {
+    template: resolution.template,
+    decimals: resolution.decimals,
+    requiresAllowlist: resolution.requiresAllowlist,
+    extensions: resolution.extensions,
   };
 }
 
@@ -211,8 +252,23 @@ export function buildIssuanceMetadata(draft: DraftState): IssuanceMetadata {
       .map((doc) => ({ type: doc.docType.trim(), name: doc.name.trim(), url: doc.url.trim() })),
   });
 
+  // Off-chain capacities: presence = enabled. Store `{ enabled: true, config? }`
+  // (not a bare `{}`) so pruneEmpty keeps an enabled-but-unconfigured policy —
+  // it drops empty objects. Disabled ⇒ undefined ⇒ pruned. readCapacities also
+  // accepts the legacy `{ key: true }` boolean encoding.
   const capacities = pruneEmpty(
-    Object.fromEntries(CAPACITY_KEYS.map((key) => [key, draft.capacities[key] ? true : undefined]))
+    Object.fromEntries(
+      CAPACITY_KEYS.map((key) => {
+        const selection = draft.capacities[key];
+        if (!selection.enabled) {
+          return [key, undefined];
+        }
+        return [
+          key,
+          selection.config ? { enabled: true, config: selection.config } : { enabled: true },
+        ];
+      })
+    )
   );
   const compliance = pruneEmpty({
     accessControl: draft.accessControl || undefined,
@@ -533,8 +589,13 @@ export function getAssetDetailsErrors(
     errors.decimals = t("DashboardIssuance.errors.decimalsWholeNumber");
   }
 
-  if (!draft.description.trim()) {
+  const description = draft.description.trim();
+  if (!description) {
     errors.description = t("DashboardIssuance.errors.descriptionRequired");
+  } else if (description.length > ASSET_DESCRIPTION_MAX_LENGTH) {
+    errors.description = t("DashboardIssuance.errors.descriptionTooLong", {
+      max: ASSET_DESCRIPTION_MAX_LENGTH,
+    });
   }
 
   // Website and logo are optional, but must be valid URLs when provided.
@@ -574,6 +635,16 @@ export function getAssetDetailsErrors(
   });
   if (findIncompatibleExtensionPair(selectedExtensions)) {
     errors.advancedSettings = t("DashboardIssuance.errors.settingConflict");
+  }
+
+  // Authority-valued settings (e.g. permanent delegate) bind an on-chain authority
+  // to the signing wallet at deploy, so the server rejects the create without one.
+  // Require it here so the user gets inline guidance instead of a late 400.
+  const needsSigner = Object.keys(draft.advancedSettings).some((key) =>
+    (AUTHORITY_VALUED_SETTINGS as readonly string[]).includes(key)
+  );
+  if (needsSigner && !draft.signingWalletId.trim()) {
+    errors.signingWalletId = t("DashboardIssuance.errors.signerRequiredForSettings");
   }
 
   return errors;

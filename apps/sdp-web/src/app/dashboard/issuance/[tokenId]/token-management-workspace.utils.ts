@@ -195,6 +195,56 @@ export function formatDate(value: string | null | undefined, locale: AppLocale):
   });
 }
 
+/** Full date + time, e.g. "Jul 21, 2026, 3:45 PM" — used in the audit table. */
+export function formatDateTime(value: string | null | undefined, locale: AppLocale): string {
+  if (!value) {
+    return "—";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString(locale, {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/**
+ * Compact activity timestamp: just the time when the event happened today,
+ * otherwise the short date. Keeps the recent-activity preview scannable.
+ */
+export function formatActivityTimestamp(
+  value: string | null | undefined,
+  locale: AppLocale
+): string {
+  if (!value) {
+    return "—";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const now = new Date();
+  const isToday =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+
+  if (isToday) {
+    return date.toLocaleString(locale, { hour: "numeric", minute: "2-digit" });
+  }
+
+  return formatDate(value, locale);
+}
+
 export function stringifyBody(body: unknown): string {
   try {
     return JSON.stringify(body, null, 2);

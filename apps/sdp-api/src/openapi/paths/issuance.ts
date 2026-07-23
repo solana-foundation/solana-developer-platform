@@ -32,6 +32,7 @@ import {
   projectScopeWithIdempotencyHeaders,
 } from "./helpers";
 import {
+  assetAuditListResponse,
   executeBurnResponse,
   executeForceBurnResponse,
   executeMintResponse,
@@ -307,6 +308,35 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       200: {
         description: "Token transactions",
         content: jsonContent(tokenTransactionsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/tokens/{tokenId}/audit",
+    tags: ["Issuance"],
+    summary: "Get asset audit history",
+    operationId: "getAssetAuditHistory",
+    description:
+      "Returns the aggregated audit history for an issued token: events logged against the token and its child resources (transactions, allowlist entries, frozen accounts), newest first. Supports filtering by action type.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      query: z.object({
+        action: z.string().optional().openapi({ description: "Filter by audit action." }),
+        page: pageQuerySchema.optional(),
+        pageSize: pageSizeQuerySchema.optional(),
+      }),
+    },
+    responses: {
+      200: {
+        description: "Asset audit history",
+        content: jsonContent(assetAuditListResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },

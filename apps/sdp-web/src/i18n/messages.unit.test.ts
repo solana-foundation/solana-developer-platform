@@ -25,8 +25,8 @@ describe("i18n messages", () => {
   });
 
   it("resolves typed catalog entries", () => {
-    expect(translate(getMessages("en"), "Home.joinWaitlist")).toBe("Join the waitlist");
-    expect(translate(getMessages("fr"), "Home.joinWaitlist")).toBe("Rejoindre la liste d’attente");
+    expect(translate(getMessages("en"), "Home.trySdp")).toBe("Try SDP");
+    expect(translate(getMessages("fr"), "Home.contactUs")).toBe("Nous contacter");
   });
 
   it("keeps non-English catalogs inventory-matched to English", () => {

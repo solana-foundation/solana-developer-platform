@@ -8,7 +8,7 @@
 import Redis from "ioredis";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
-import { closeAllRedisClients, createRedisKVStoreSet, RedisKVStore } from "./kv-redis";
+import { closeAllRedisClients, createKVStoreSet, RedisKVStore } from "./kv-redis";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 
@@ -107,14 +107,82 @@ describe("RedisKVStore (HOO-510)", () => {
     });
   });
 
-  describe("createRedisKVStoreSet", () => {
+  describe("admitSlidingWindow", () => {
+    it("admits and increments the current bucket under the limit", async () => {
+      const store = new RedisKVStore(raw, "test");
+      const result = await store.admitSlidingWindow("cur", "prev", {
+        maxRequests: 10,
+        previousWeight: 0,
+        expirationTtl: 120,
+      });
+      expect(result).toEqual({ admitted: true, current: 1, previous: 0 });
+      expect(await raw.get("test:cur")).toBe("1");
+    });
+
+    it("rejects at the limit without incrementing", async () => {
+      const store = new RedisKVStore(raw, "test");
+      await raw.set("test:cur", "10");
+      const result = await store.admitSlidingWindow("cur", "prev", {
+        maxRequests: 10,
+        previousWeight: 0,
+        expirationTtl: 120,
+      });
+      expect(result.admitted).toBe(false);
+      expect(result.current).toBe(10);
+      expect(await raw.get("test:cur")).toBe("10");
+    });
+
+    it("counts the previous bucket against the limit proportionally", async () => {
+      const store = new RedisKVStore(raw, "test");
+      await raw.set("test:prev", "100");
+      const result = await store.admitSlidingWindow("cur", "prev", {
+        maxRequests: 10,
+        previousWeight: 0.5,
+        expirationTtl: 120,
+      });
+      expect(result.admitted).toBe(false);
+      expect(result.previous).toBe(100);
+    });
+
+    it("sets the current bucket TTL on admission", async () => {
+      const store = new RedisKVStore(raw, "test");
+      await store.admitSlidingWindow("cur", "prev", {
+        maxRequests: 10,
+        previousWeight: 0,
+        expirationTtl: 120,
+      });
+      const pttl = await raw.pttl("test:cur");
+      expect(pttl).toBeGreaterThan(118_000);
+      expect(pttl).toBeLessThanOrEqual(120_000);
+    });
+
+    it("admits exactly maxRequests under concurrent load", async () => {
+      const store = new RedisKVStore(raw, "test");
+      const maxRequests = 50;
+      const attempts = 200;
+      const results = await Promise.all(
+        Array.from({ length: attempts }, () =>
+          store.admitSlidingWindow("cur", "prev", {
+            maxRequests,
+            previousWeight: 0,
+            expirationTtl: 120,
+          })
+        )
+      );
+      const admitted = results.filter((r) => r.admitted).length;
+      expect(admitted).toBe(maxRequests);
+      expect(await raw.get("test:cur")).toBe(String(maxRequests));
+    });
+  });
+
+  describe("createKVStoreSet", () => {
     afterEach(async () => {
       // Factory uses a cached client; close between tests so reuse is observable.
       await closeAllRedisClients();
     });
 
     it("wires four prefixed stores sharing one connection", async () => {
-      const set = createRedisKVStoreSet({ REDIS_URL } as Env);
+      const set = createKVStoreSet({ REDIS_URL } as Env);
       await set.apiKeys.put("same-key", "from-apiKeys");
       await set.rateLimits.put("same-key", "from-rateLimits");
       await set.cache.put("same-key", "from-cache");
@@ -129,21 +197,19 @@ describe("RedisKVStore (HOO-510)", () => {
     it("reuses the same Redis client across repeated calls (no connection leak)", () => {
       // Pin reference equality on the cached promise. If the factory ever
       // regresses to per-call construction, the connection-leak comes back.
-      const set1 = createRedisKVStoreSet({ REDIS_URL } as Env);
-      const set2 = createRedisKVStoreSet({ REDIS_URL } as Env);
+      const set1 = createKVStoreSet({ REDIS_URL } as Env);
+      const set2 = createKVStoreSet({ REDIS_URL } as Env);
       const p1 = (set1.apiKeys as unknown as { clientPromise: Promise<Redis> }).clientPromise;
       const p2 = (set2.apiKeys as unknown as { clientPromise: Promise<Redis> }).clientPromise;
       expect(p1).toBe(p2);
     });
 
     it("throws a clear error when REDIS_URL is missing", () => {
-      expect(() => createRedisKVStoreSet({} as Env)).toThrow(/REDIS_URL is required/);
+      expect(() => createKVStoreSet({} as Env)).toThrow(/REDIS_URL is required/);
     });
 
     it("throws when REDIS_URL is whitespace-only", () => {
-      expect(() => createRedisKVStoreSet({ REDIS_URL: "   " } as Env)).toThrow(
-        /REDIS_URL is required/
-      );
+      expect(() => createKVStoreSet({ REDIS_URL: "   " } as Env)).toThrow(/REDIS_URL is required/);
     });
   });
 });

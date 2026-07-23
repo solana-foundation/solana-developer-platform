@@ -330,7 +330,7 @@ export async function advanceCounterpartyRequirements(
       const customer = await ensureLightsparkCustomer(c, {
         counterparty: input.counterparty,
         projectId: input.projectId,
-        collectedData: input.direction === "offramp" ? input.collectedData : undefined,
+        collectedData: input.collectedData,
       });
       if (input.direction === "offramp") {
         await ensureLightsparkPayoutAccount(c, {

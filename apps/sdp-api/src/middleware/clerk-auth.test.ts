@@ -2,9 +2,10 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import { AppError } from "@/lib/errors";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
-import { rateLimitMiddleware } from "@/middleware/rate-limit";
+import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -103,12 +104,18 @@ describe("Clerk auth request cache", () => {
       c.set("verifiedClerkJwt", { token, payload });
       await next();
     });
-    app.use("*", rateLimitMiddleware());
+    app.use("*", skipRateLimitPaths());
     app.use("*", unifiedAuthMiddleware({ allowClerk: true }));
     app.get("/protected", requirePermissions("org:read"), (c) => {
       return c.json({
         organizationId: c.get("clerk")?.organizationId ?? null,
       });
+    });
+    app.onError((error, c) => {
+      if (error instanceof AppError) {
+        return c.json(error.toResponse(), error.statusCode as 401 | 403);
+      }
+      throw error;
     });
 
     return { app, token };
@@ -150,6 +157,117 @@ describe("Clerk auth request cache", () => {
       "default-production",
       "default-sandbox",
     ]);
+  });
+
+  it("rejects a stale Clerk JWT after the local organization membership is removed", async () => {
+    await getDb(env)
+      .prepare(
+        "UPDATE organization_members SET status = 'removed' WHERE organization_id = ? AND user_id = ?"
+      )
+      .bind(TEST_ORG.id, "usr_clerk_cached")
+      .run();
+
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_cached",
+      org_id: "clerk_org_cached",
+      org_role: "org:admin",
+      org_slug: TEST_ORG.slug,
+      email: "clerk-cache@example.com",
+      iss: "https://clerk.example.test",
+    };
+    const { app, token } = createProtectedApp(payload);
+
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(401);
+    const membership = await getDb(env)
+      .prepare("SELECT status FROM organization_members WHERE organization_id = ? AND user_id = ?")
+      .bind(TEST_ORG.id, "usr_clerk_cached")
+      .first<{ status: string }>();
+    expect(membership?.status).toBe("removed");
+  });
+
+  it("does not link a first-time Clerk identity until its primary email is verified", async () => {
+    await getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+      .bind("usr_email_collision_target", "collision-target@example.com")
+      .run();
+
+    env.CLERK_SECRET_KEY = "sk_test_clerk_auth_user_lookup";
+    env.CLERK_API_URL = "https://clerk.example.test/v1";
+    let verificationStatus = "unverified";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      expect(url).toBe(`${env.CLERK_API_URL}/users/clerk_user_first_login`);
+      return new Response(
+        JSON.stringify({
+          id: "clerk_user_first_login",
+          primary_email_address_id: "email_primary",
+          email_addresses: [
+            {
+              id: "email_primary",
+              email_address: "collision-target@example.com",
+              verification: { status: verificationStatus },
+            },
+            {
+              id: "email_secondary",
+              email_address: "verified-secondary@example.com",
+              verification: { status: "verified" },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_first_login",
+      org_id: "clerk_org_cached",
+      org_role: "org:member",
+      org_slug: TEST_ORG.slug,
+      email: "collision-target@example.com",
+      iss: "https://clerk.example.test",
+    };
+    const { app, token } = createProtectedApp(payload);
+
+    const unverified = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+    expect(unverified.status).toBe(401);
+
+    const missingIdentity = await getDb(env)
+      .prepare(
+        `SELECT user_id
+         FROM auth_user_identities
+         WHERE provider = 'clerk' AND provider_user_id = ?`
+      )
+      .bind("clerk_user_first_login")
+      .first<{ user_id: string }>();
+    expect(missingIdentity).toBeNull();
+
+    verificationStatus = "verified";
+    const verified = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+    expect(verified.status).toBe(200);
+
+    const linkedIdentity = await getDb(env)
+      .prepare(
+        `SELECT user_id
+         FROM auth_user_identities
+         WHERE provider = 'clerk' AND provider_user_id = ?`
+      )
+      .bind("clerk_user_first_login")
+      .first<{ user_id: string }>();
+    expect(linkedIdentity?.user_id).toBe("usr_email_collision_target");
   });
 
   it("provisions default projects when the membership webhook has not arrived", async () => {
