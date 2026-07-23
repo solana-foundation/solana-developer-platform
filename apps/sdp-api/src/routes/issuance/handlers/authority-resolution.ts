@@ -219,7 +219,7 @@ export async function resolveAuthoritySigner(params: {
     }
   }
 
-  const custodyStore = new CustodyConfigStore(getDb(env), env.CUSTODY_ENCRYPTION_KEY);
+  const custodyStore = new CustodyConfigStore(getDb(env), env);
   const authorityWallet = await custodyStore.findActiveWalletByPublicKey(
     auth.organizationId,
     auth.projectId ?? undefined,

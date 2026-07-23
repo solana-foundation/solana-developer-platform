@@ -66,6 +66,7 @@ export interface SigningConfigRecord {
   projectId: string | null;
   provider: SigningProviderType;
   config: string; // AES-256-GCM encrypted JSON (CUSTODY_ENCRYPTION_KEY); may include encrypted secrets.
+  encryptionVersion: string;
   defaultWalletId: string | null;
   status: "active" | "inactive";
   createdAt: string;

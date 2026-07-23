@@ -395,6 +395,7 @@ async function findScopeProviderConfigRecord(
                 project_id,
                 provider,
                 config_encrypted AS config,
+                encryption_version,
                 default_wallet_id,
                 status,
                 created_at,
@@ -407,6 +408,7 @@ async function findScopeProviderConfigRecord(
                 project_id,
                 provider,
                 config_encrypted AS config,
+                encryption_version,
                 default_wallet_id,
                 status,
                 created_at,
@@ -422,6 +424,7 @@ async function findScopeProviderConfigRecord(
       project_id: string | null;
       provider: CustodyProvider;
       config: string;
+      encryption_version: string;
       default_wallet_id: string | null;
       status: "active" | "inactive";
       created_at: string;
@@ -445,6 +448,7 @@ async function findScopeFireblocksConfig(
     projectId: record.project_id,
     provider: record.provider,
     config: record.config,
+    encryptionVersion: record.encryption_version,
     defaultWalletId: record.default_wallet_id,
     status: record.status,
     createdAt: record.created_at,

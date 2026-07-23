@@ -94,6 +94,7 @@
     "requestExecutionFailed": "Échec de l’exécution de la requête."
   },
   "dashboardShell": {
+    "workspace": "Espace de travail",
     "openNavigation": "Ouvrir la navigation",
     "closeNavigation": "Fermer la navigation",
     "sandbox": "Sandbox",
