@@ -51,6 +51,7 @@ interface ApiKeyContext {
   walletBindings: ApiKeyWalletBinding[];
 }
 
+/** Extract API key from Authorization header */
 function extractApiKey(c: Context<{ Bindings: Env }>): string | null {
   const authHeader = c.req.header("Authorization");
   if (!authHeader) {
@@ -90,11 +91,13 @@ function looksLikeJwt(token: string): boolean {
   return token.split(".").length === 3;
 }
 
+/** Look up API key in KV cache */
 async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | null> {
   const cached = await kv.get<CachedApiKey>(`key:${keyHash}`, "json");
   return cached;
 }
 
+/** Look up API key in Postgres and cache to KV */
 async function getFromDatabaseAndCache(
   db: DatabaseClient,
   kv: KVStore,

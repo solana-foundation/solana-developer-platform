@@ -1,3 +1,10 @@
+/**
+ * Token Service
+ *
+ * Manages token issuance, including CRUD operations,
+ * allowlist management, and freeze/unfreeze operations.
+ */
+
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import type {
   AllowlistEntryStatus,
