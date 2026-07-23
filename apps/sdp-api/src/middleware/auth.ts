@@ -71,9 +71,7 @@ function looksLikeJwt(token: string): boolean {
   return token.split(".").length === 3;
 }
 
-/**
- * Look up API key in KV cache
- */
+/** Look up API key in KV cache */
 async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | null> {
   const cached = await kv.get<CachedApiKey>(`key:${keyHash}`, "json");
   return cached;
@@ -90,9 +88,7 @@ async function cacheInvalidKey(kv: KVStore, keyHash: string): Promise<void> {
   });
 }
 
-/**
- * Look up API key in Postgres and cache to KV
- */
+/** Look up API key in Postgres and cache to KV */
 async function getFromDatabaseAndCache(
   db: DatabaseClient,
   kv: KVStore,

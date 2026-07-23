@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
 import {
+  ASSET_DESCRIPTION_MAX_LENGTH,
   buildIssuanceMetadata,
+  getAssetDetailsErrors,
   getDefaultPublicFields,
   getPublicFieldCandidates,
   togglePublicField,
@@ -19,6 +21,34 @@ function draftWith(overrides: Partial<DraftState>): DraftState {
 
 const t = (key: MessageKey, values?: TranslationValues) =>
   translate(getMessages("en"), key, values);
+
+describe("getAssetDetailsErrors (description length)", () => {
+  it("flags a description longer than the API max", () => {
+    const draft = draftWith({ description: "x".repeat(ASSET_DESCRIPTION_MAX_LENGTH + 1) });
+    expect(getAssetDetailsErrors(draft, t).description).toBe(
+      t("DashboardIssuance.errors.descriptionTooLong", { max: ASSET_DESCRIPTION_MAX_LENGTH })
+    );
+  });
+
+  it("allows a description exactly at the max", () => {
+    const draft = draftWith({ description: "x".repeat(ASSET_DESCRIPTION_MAX_LENGTH) });
+    expect(getAssetDetailsErrors(draft, t).description).toBeUndefined();
+  });
+
+  it("counts the trimmed length, matching what the client sends to the API", () => {
+    // Leading/trailing whitespace is stripped before the request (buildTokenInput
+    // and the details-tab save both send draft.description.trim()), so it must not
+    // count toward the limit — otherwise the client would over-reject.
+    const draft = draftWith({ description: `  ${"x".repeat(ASSET_DESCRIPTION_MAX_LENGTH)}  ` });
+    expect(getAssetDetailsErrors(draft, t).description).toBeUndefined();
+  });
+
+  it("still requires a non-empty description", () => {
+    expect(getAssetDetailsErrors(draftWith({ description: "   " }), t).description).toBe(
+      t("DashboardIssuance.errors.descriptionRequired")
+    );
+  });
+});
 
 describe("getDefaultPublicFields", () => {
   it("returns the registry projection for a known type", () => {

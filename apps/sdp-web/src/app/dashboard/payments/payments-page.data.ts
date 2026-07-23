@@ -1,4 +1,5 @@
 import type {
+  CustodyProvider,
   CustodyWalletAggregate,
   PaymentsDashboardWallet,
   PaymentTransferSummary,
@@ -50,6 +51,7 @@ export async function fetchPaymentsWallets(
           walletId?: string;
           publicKey?: string;
           label?: string | null;
+          provider?: string;
           balances?: PaymentsDashboardWallet["balances"];
         }>;
       };
@@ -74,6 +76,7 @@ export async function fetchPaymentsWallets(
         walletId: wallet.walletId,
         publicKey: wallet.publicKey,
         label: wallet.label ?? null,
+        ...(wallet.provider ? { provider: wallet.provider as CustodyProvider } : {}),
         ...(Array.isArray(wallet.balances) ? { balances: wallet.balances } : {}),
       }));
 

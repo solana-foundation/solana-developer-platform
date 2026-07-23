@@ -1,5 +1,5 @@
 import type { Address } from "@solana/addresses";
-import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
+import type { CustodyProvider, CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp-support.generated";
 import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
 import type {
@@ -19,6 +19,7 @@ export interface PaymentsDashboardWallet {
   walletId: string;
   publicKey: string;
   label: string | null;
+  provider?: CustodyProvider;
   balances?: CustodyWalletTokenBalance[];
 }
 

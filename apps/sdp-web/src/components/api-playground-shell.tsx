@@ -76,10 +76,21 @@ function prettyJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-function buildInitialFieldValues(endpoint: ApiPlaygroundEndpointConfig): Record<string, string> {
+function buildInitialFieldValues(
+  endpoint: ApiPlaygroundEndpointConfig,
+  preselect?: Record<string, string>
+): Record<string, string> {
   return [...endpoint.pathFields, ...endpoint.bodyFields].reduce<Record<string, string>>(
     (values, field) => {
-      values[field.key] = field.defaultValue ?? "";
+      // A URL-provided preselection (e.g. ?tokenId=…) wins over the field's
+      // default, but only when it's usable: any value for a text field, or a
+      // valid option for a select field. Otherwise fall back to the default.
+      const desired = preselect?.[field.key];
+      const isUsable =
+        desired != null &&
+        desired !== "" &&
+        (field.kind !== "select" || (field.options ?? []).some((o) => o.value === desired));
+      values[field.key] = isUsable ? desired : (field.defaultValue ?? "");
       return values;
     },
     {}
@@ -541,8 +552,16 @@ export function ApiPlaygroundShell({
   const initialEndpoint =
     endpoints.find((endpoint) => endpoint.id === defaultEndpointId) ?? endpoints[0];
   const initialEndpointId = initialEndpoint?.id ?? "";
+  // Deep links can preselect the active resource, e.g. ?tokenId=… from the asset
+  // management workspace, so the playground opens focused on that token. State
+  // stays shareable because it's the URL-driven endpoint + token.
+  const tokenIdParam = searchParams.get("tokenId");
+  const preselectedFieldValues = useMemo(
+    () => (tokenIdParam ? { tokenId: tokenIdParam } : undefined),
+    [tokenIdParam]
+  );
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
-    initialEndpoint ? buildInitialFieldValues(initialEndpoint) : {}
+    initialEndpoint ? buildInitialFieldValues(initialEndpoint, preselectedFieldValues) : {}
   );
   const [mobileSection, setMobileSection] = useState<"request" | "output">("request");
   const [activePanel, setActivePanel] = useState<"code" | "response" | "example">("code");
@@ -594,12 +613,12 @@ export function ApiPlaygroundShell({
       return;
     }
 
-    setFieldValues(buildInitialFieldValues(endpoint));
+    setFieldValues(buildInitialFieldValues(endpoint, preselectedFieldValues));
     setMobileSection("request");
     setActivePanel("code");
     setExecutionResult(null);
     setExecuteError(null);
-  }, [activeEndpointId]);
+  }, [activeEndpointId, preselectedFieldValues]);
 
   const requestBody = useMemo(
     () => (activeEndpoint ? buildRequestBody(activeEndpoint.bodyFields, fieldValues) : null),
@@ -660,7 +679,7 @@ export function ApiPlaygroundShell({
   };
 
   const handleReset = () => {
-    setFieldValues(buildInitialFieldValues(activeEndpoint));
+    setFieldValues(buildInitialFieldValues(activeEndpoint, preselectedFieldValues));
     setMobileSection("request");
     setActivePanel("code");
     setExecutionResult(null);
