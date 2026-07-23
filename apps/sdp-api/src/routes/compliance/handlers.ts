@@ -44,7 +44,7 @@ export async function screenAddress(c: AppContext) {
       "FORBIDDEN",
       isSelfHostedDeployment(c.env)
         ? "Compliance screening requires at least one configured compliance provider (set RANGE_API_KEY, ELLIPTIC_API_TOKEN, TRM_API_KEY, or CHAINALYSIS_API_KEY)."
-        : "Compliance screening is only available on enterprise tier organizations with an enabled provider."
+        : "Compliance screening requires manual provider activation for this organization."
     );
   }
 

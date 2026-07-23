@@ -124,9 +124,22 @@ export function StepClassification() {
                     category.category,
                     subType.type
                   );
+                  const baseAccessControl = getDefaultAccessControl(category.category);
+                  // The default combo may imply its own access-control mode (e.g. a
+                  // security preset → allowlist); otherwise fall back to the
+                  // category default.
                   const initial = defaultCombo
-                    ? applyCombo(defaultCombo, baseSettings, createInitialCapacities())
-                    : { settings: baseSettings, capacities: createInitialCapacities() };
+                    ? applyCombo(
+                        defaultCombo,
+                        baseSettings,
+                        createInitialCapacities(),
+                        baseAccessControl
+                      )
+                    : {
+                        settings: baseSettings,
+                        capacities: createInitialCapacities(),
+                        accessControl: baseAccessControl,
+                      };
                   updateDraft({
                     assetType: subType.type,
                     // Keep asset.backingType consistent with the chosen type so a
@@ -135,7 +148,7 @@ export function StepClassification() {
                     backingType: impliedBackingType(category.category, subType.type) ?? "",
                     capacities: initial.capacities,
                     advancedSettings: initial.settings,
-                    accessControl: getDefaultAccessControl(category.category),
+                    accessControl: initial.accessControl,
                     publicFields: getDefaultPublicFields(category.category, subType.type),
                   });
                 }}

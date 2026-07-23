@@ -9,11 +9,12 @@
 import { Hono } from "hono";
 import { clerkOnboardingMiddleware } from "@/middleware/clerk-onboarding";
 import type { Env } from "@/types/env";
-import { getOnboardingStatus } from "./handlers";
+import { completeOnboarding, getOnboardingStatus } from "./handlers";
 
 const onboarding = new Hono<{ Bindings: Env }>();
 
 onboarding.use("*", clerkOnboardingMiddleware());
 onboarding.get("/status", getOnboardingStatus);
+onboarding.post("/complete", completeOnboarding);
 
 export default onboarding;

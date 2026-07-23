@@ -22,15 +22,20 @@ import {
 import { AppError, unauthorized } from "@/lib/errors";
 import { ensureClerkOrganizationMapping } from "@/services/clerk-organization-provisioning.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
+import {
+  ClerkUsersService,
+  verifiedPrimaryEmailFromClerkUser,
+} from "@/services/clerk-users.service";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 
 async function resolveClerkUser(db: DatabaseClient, clerkUserId: string) {
   return db
     .prepare(
-      `SELECT user_id, email
-       FROM auth_user_identities
-       WHERE provider = 'clerk' AND provider_user_id = ?`
+      `SELECT aui.user_id, COALESCE(aui.email, u.email) AS email
+       FROM auth_user_identities aui
+       LEFT JOIN users u ON u.id = aui.user_id
+       WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
     )
     .bind(clerkUserId)
     .first<{ user_id: string; email: string | null }>();
@@ -111,28 +116,33 @@ async function resolveExistingClerkContext(
     }>();
 }
 
-async function resolveOrgRole(db: DatabaseClient, userId: string, organizationId: string) {
+async function resolveOrgMembership(db: DatabaseClient, userId: string, organizationId: string) {
   return db
     .prepare(
-      `SELECT role
+      `SELECT role, status
        FROM organization_members
-       WHERE user_id = ? AND organization_id = ? AND status = 'active'`
+       WHERE user_id = ? AND organization_id = ?`
     )
     .bind(userId, organizationId)
-    .first<{ role: string }>();
+    .first<{ role: string; status: string }>();
 }
 
 async function ensureClerkUser(
+  env: Env,
   db: DatabaseClient,
   clerkUserId: string,
-  email: string
+  fallbackEmail: string
 ): Promise<{ userId: string; email: string }> {
   const existing = await resolveClerkUser(db, clerkUserId);
   if (existing) {
-    return { userId: existing.user_id, email: existing.email ?? email };
+    return { userId: existing.user_id, email: existing.email ?? fallbackEmail };
   }
 
-  const normalizedEmail = email.toLowerCase();
+  const clerkUser = await new ClerkUsersService(env).getUser(clerkUserId);
+  const normalizedEmail = verifiedPrimaryEmailFromClerkUser(clerkUser);
+  if (!normalizedEmail) {
+    throw unauthorized("Clerk primary email must be verified");
+  }
   let user = await db
     .prepare("SELECT id, email FROM users WHERE email = ?")
     .bind(normalizedEmail)
@@ -180,8 +190,11 @@ async function ensureMembership(
     clerkRole?: string | null;
   }
 ): Promise<OrganizationRole> {
-  const existing = await resolveOrgRole(db, params.userId, params.organizationId);
-  if (existing?.role) {
+  const existing = await resolveOrgMembership(db, params.userId, params.organizationId);
+  if (existing && existing.status !== "active") {
+    throw unauthorized("Organization membership is inactive");
+  }
+  if (existing) {
     const normalizedRole = normalizeOrganizationRole(existing.role);
     if (normalizedRole !== existing.role) {
       await db
@@ -239,11 +252,19 @@ async function ensureMembership(
       )
       .bind(memberId, params.organizationId, params.userId, role)
       .run();
-  } catch {
-    const existingAfterInsert = await resolveOrgRole(db, params.userId, params.organizationId);
-    if (existingAfterInsert?.role) {
+  } catch (error) {
+    const existingAfterInsert = await resolveOrgMembership(
+      db,
+      params.userId,
+      params.organizationId
+    );
+    if (existingAfterInsert?.status === "active") {
       return normalizeOrganizationRole(existingAfterInsert.role);
     }
+    if (existingAfterInsert) {
+      throw unauthorized("Organization membership is inactive");
+    }
+    throw error;
   }
 
   if (pendingInvite && role === normalizeOrganizationRole(pendingInvite.role)) {
@@ -319,7 +340,7 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   }
 
   const [userIdentity, orgIdentity] = await Promise.all([
-    ensureClerkUser(getDb(c.env), payload.sub as string, email),
+    ensureClerkUser(c.env, getDb(c.env), payload.sub as string, email),
     resolveClerkOrganization(getDb(c.env), payload.org_id as string),
   ]);
 
@@ -342,7 +363,7 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   const role = await ensureMembership(getDb(c.env), {
     organizationId: resolvedOrgIdentity.organization_id,
     userId: userIdentity.userId,
-    email,
+    email: userIdentity.email,
     clerkRole: payload.org_role,
   });
   await ensureDefaultProjects(
@@ -360,7 +381,7 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     role,
     clerkUserId: payload.sub as string,
     clerkOrgId: payload.org_id as string,
-    email: email || userIdentity.email,
+    email: userIdentity.email,
     orgSlug: payload.org_slug ?? resolvedOrgIdentity.slug,
     orgRole: payload.org_role ?? null,
   };

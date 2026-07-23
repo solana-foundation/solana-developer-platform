@@ -648,6 +648,8 @@ export const createOnrampQuoteSchema = z.object({
   domain: z.string().min(1).optional(),
 });
 
+const collectedDataSchema = z.record(z.string(), z.string()).optional();
+
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
   z.object({ provider: z.literal("moneygram"), direction: rampDirectionSchema }),
@@ -658,23 +660,27 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       cryptoToken: rampCurrencyCodeSchema,
       destinationWallet: z.string().min(1),
       fiatCurrency: rampFiatCurrencySchema,
-      collectedData: z.record(z.string(), z.string()).optional(),
+      collectedData: collectedDataSchema,
     }),
     z.object({
       provider: z.literal("bvnk"),
       direction: z.literal("offramp"),
       cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
-      collectedData: z.record(z.string(), z.string()).optional(),
+      collectedData: collectedDataSchema,
     }),
   ]),
   z.discriminatedUnion("direction", [
-    z.object({ provider: z.literal("lightspark"), direction: z.literal("onramp") }),
+    z.object({
+      provider: z.literal("lightspark"),
+      direction: z.literal("onramp"),
+      collectedData: collectedDataSchema,
+    }),
     z.object({
       provider: z.literal("lightspark"),
       direction: z.literal("offramp"),
       fiatCurrency: rampFiatCurrencySchema,
-      collectedData: z.record(z.string(), z.string()).optional(),
+      collectedData: collectedDataSchema,
     }),
   ]),
   z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),

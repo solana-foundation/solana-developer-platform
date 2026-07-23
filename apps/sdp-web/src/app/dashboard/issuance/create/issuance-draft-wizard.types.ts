@@ -33,6 +33,72 @@ export const CAPACITY_KEYS = [
 ] as const;
 export type CapacityKey = (typeof CAPACITY_KEYS)[number];
 
+// --- Per-policy configuration -------------------------------------------------
+// Off-chain policies are policy objects, not scalars. Two layers: enabling a
+// policy (the checkbox — the *declaration* layer, what presets compose) is
+// separate from configuring how it works (the *config* layer, edited in the
+// per-policy modal on the asset-profile compliance tab). Config is heterogeneous
+// per capacity and always optional — a capacity may be enabled but not yet
+// configured (surfaced as a readiness item).
+
+export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+export type Weekday = (typeof WEEKDAYS)[number];
+export type TradingHoursSchedule = "24_7" | "market_hours" | "custom";
+
+export interface TradingHoursConfig {
+  schedule: TradingHoursSchedule;
+  // Only meaningful for the "custom" schedule: the open days and the daily
+  // window (local to `timezone`). "HH:MM" 24-hour strings.
+  days?: Weekday[];
+  open?: string;
+  close?: string;
+  timezone?: string; // IANA tz id, e.g. "America/New_York".
+}
+
+export type TransferApprovalRule = "all" | "above_amount" | "new_counterparty";
+export interface TransferApprovalsConfig {
+  rule: TransferApprovalRule;
+  // Only for "above_amount": threshold in whole tokens (string; may exceed 2^53).
+  amount?: string;
+  // Approver wallets/roles — a roster that may stay empty until wallets exist.
+  approvers?: string[];
+}
+
+// Redemptions redeem against reserves, so the rule keys off amount (not a
+// counterparty). Mirrors transfer approvals otherwise.
+export type RedemptionApprovalRule = "all" | "above_amount";
+export interface RedemptionApprovalsConfig {
+  rule: RedemptionApprovalRule;
+  amount?: string;
+  approvers?: string[];
+}
+
+export type ReportingCadence = "monthly" | "quarterly" | "annual";
+export type ReportingFormat = "pdf" | "csv" | "xlsx";
+export interface InvestorReportingConfig {
+  cadence: ReportingCadence;
+  format?: ReportingFormat;
+  // Report recipients (emails/names) — a roster that may stay empty until the
+  // investor set exists.
+  recipients?: string[];
+}
+
+// The config payload for a capacity that supports one. Absent config = enabled
+// but unconfigured. Narrowed by capacity key at the modal edge.
+export type CapacityConfig =
+  | TradingHoursConfig
+  | TransferApprovalsConfig
+  | RedemptionApprovalsConfig
+  | InvestorReportingConfig;
+
+// A single off-chain capacity selection. Mirrors the on-chain SelectedSetting
+// ({ params? }) so the whole compliance selection persists in one payload
+// (issuance_metadata.compliance.capacities).
+export interface CapacitySelection {
+  enabled: boolean;
+  config?: CapacityConfig;
+}
+
 // Selected advanced (Token-2022) settings, keyed by settingKey from the
 // @sdp/issuance/capabilities catalog. Presence = enabled; `params` holds expert
 // override values as strings (form inputs). Persisted under
@@ -102,7 +168,7 @@ export interface DraftState {
   documents: DocumentRow[];
   // Step 2 — compliance & access
   accessControl: AccessControlMode | "";
-  capacities: Record<CapacityKey, boolean>;
+  capacities: Record<CapacityKey, CapacitySelection>;
   // Step 2 — advanced (on-chain) settings (issuance_metadata.settings)
   advancedSettings: AdvancedSettingsDraft;
   // Step 2 — operational
@@ -116,15 +182,42 @@ export interface DraftState {
   publicFields: string[];
 }
 
-export function createInitialCapacities(): Record<CapacityKey, boolean> {
+export function createInitialCapacities(): Record<CapacityKey, CapacitySelection> {
   return {
-    kyc: false,
-    restrictTradingHours: false,
-    issueRetireControls: false,
-    redemptionApprovals: false,
-    investorReporting: false,
-    transferApprovals: false,
+    kyc: { enabled: false },
+    restrictTradingHours: { enabled: false },
+    issueRetireControls: { enabled: false },
+    redemptionApprovals: { enabled: false },
+    investorReporting: { enabled: false },
+    transferApprovals: { enabled: false },
   };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// Normalize a persisted capacities map to the current { enabled, config? } shape,
+// tolerating the legacy bare-boolean encoding ({ kyc: true }). The single coercion
+// point shared by every hydration path (wizard localStorage + asset-profile DB), so
+// an old payload never reaches the UI as a raw boolean (which would make the toggle
+// an uncontrolled input).
+export function coerceCapacities(value: unknown): Record<CapacityKey, CapacitySelection> {
+  const capacities = createInitialCapacities();
+  if (isPlainObject(value)) {
+    for (const key of CAPACITY_KEYS) {
+      const raw = value[key];
+      if (raw === true) {
+        capacities[key] = { enabled: true };
+      } else if (isPlainObject(raw) && raw.enabled === true) {
+        capacities[key] = {
+          enabled: true,
+          config: isPlainObject(raw.config) ? (raw.config as unknown as CapacityConfig) : undefined,
+        };
+      }
+    }
+  }
+  return capacities;
 }
 
 export function createInitialDraft(): DraftState {

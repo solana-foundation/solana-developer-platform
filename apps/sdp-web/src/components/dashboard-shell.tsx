@@ -19,7 +19,7 @@ import {
   ShieldCheckIcon,
   WalletIcon,
 } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ApiKeyAuthoringSkeleton,
@@ -65,7 +65,7 @@ import { DashboardNavigationLink } from "@/components/dashboard-navigation-link"
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { LanguagePicker } from "@/components/language-picker";
-import { NetworkDebugPanel } from "@/components/network-debug-panel";
+import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -82,6 +82,10 @@ import {
   type DashboardNavigationStartDetail,
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
+import {
+  type OrganizationOnboardingStatus,
+  shouldRedirectToOrganizationOnboarding,
+} from "@/lib/onboarding-route-guard";
 import { cn } from "@/lib/utils";
 
 type SubNavItem = {
@@ -1027,17 +1031,29 @@ function DashboardSidebarContent({
             </DashboardNavigationLink>
           );
         })}
-        {variant === "desktop" ? <ThemeToggle collapsed={isCollapsed} /> : null}
+        {variant === "desktop" ? (
+          <>
+            <ThemeToggle collapsed={isCollapsed} />
+            <NetworkDebugToggle collapsed={isCollapsed} />
+          </>
+        ) : null}
       </div>
     </>
   );
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
-export function DashboardShell({ children }: { children: ReactNode }) {
+export function DashboardShell({
+  children,
+  onboardingStatus,
+}: {
+  children: ReactNode;
+  onboardingStatus: OrganizationOnboardingStatus | null;
+}) {
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
+  const router = useRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -1108,6 +1124,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       shellPathname !== "/dashboard/custody/switch");
   const isWalletSetupRoute =
     shellPathname === "/dashboard/wallets/setup" || shellPathname === "/dashboard/custody/setup";
+  const isOrganizationOnboardingRoute = shellPathname === "/dashboard/onboarding";
   const shouldUseWorkspaceViewport =
     shellPathname === "/dashboard/issuance" ||
     shellPathname === "/dashboard/issuance/create" ||
@@ -1118,10 +1135,21 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     shellPathname === "/dashboard/wallets" ||
     shellPathname === "/dashboard/custody" ||
     isWalletSetupRoute ||
+    isOrganizationOnboardingRoute ||
     shellPathname.startsWith("/dashboard/approvals") ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
+  const shouldRedirectToOnboarding = shouldRedirectToOrganizationOnboarding(
+    onboardingStatus,
+    pathname
+  );
+
+  useEffect(() => {
+    if (shouldRedirectToOnboarding) {
+      router.replace("/dashboard/onboarding");
+    }
+  }, [router, shouldRedirectToOnboarding]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem("sdp.dashboard.payments-subnav-open");
@@ -1206,7 +1234,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     };
   }, [dashboardAccess.capabilities.canReadApprovals, selectedProjectId]);
 
-  if (!isLoaded) {
+  if (!isLoaded || shouldRedirectToOnboarding) {
     return <FullscreenLoadingIndicator />;
   }
 
@@ -1248,6 +1276,30 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           <div className="mt-6">
             <OrganizationSwitcher hidePersonal />
           </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (isOrganizationOnboardingRoute) {
+    return (
+      <main className="h-screen overflow-hidden bg-[var(--sdp-shell-bg)] p-2 text-primary md:p-4">
+        <SentryUserContext />
+        <NetworkDebugPanel />
+        <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-border-subtle bg-surface-raised/90 shadow-sm">
+          <header className="relative flex h-16 shrink-0 items-center justify-between border-b border-border-subtle px-4 md:px-6">
+            <div className="min-w-0 max-w-[calc(100%-3rem)] sm:w-72">
+              <WorkspaceSwitcher
+                collapsed={false}
+                onOrganizationSwitchingChange={setOrganizationSwitching}
+              />
+            </div>
+            <span className="absolute left-1/2 hidden -translate-x-1/2 text-sm font-medium text-secondary sm:block">
+              {t("Shared.dashboardShell.workspace")}
+            </span>
+            <ThemeToggle variant="header" />
+          </header>
+          <section className="min-h-0 flex-1">{children}</section>
         </div>
       </main>
     );

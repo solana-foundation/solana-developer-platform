@@ -8,44 +8,62 @@ import {
 } from "@sdp/issuance/capabilities";
 import type { AssetCategory, ParamFieldSpec } from "@sdp/types";
 import {
+  BadgeCheck,
   Ban,
   Boxes,
   Briefcase,
   CheckCheck,
+  ChevronRight,
   ClipboardCheck,
   Clock,
+  Code2,
   Coins,
+  ExternalLink,
   FileText,
+  Flame,
   Gift,
-  GraduationCap,
+  HandCoins,
   KeyRound,
   Landmark,
-  ListChecks,
   Lock,
   type LucideIcon,
+  Pause,
   Percent,
+  Play,
   Scaling,
   ShieldCheck,
   Snowflake,
+  Sun,
   TrendingUp,
   Undo2,
   UserCheck,
-  Users,
+  UserCog,
   Webhook,
+  Wrench,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { CAPACITY_META } from "./asset-details-config";
 import {
+  ACCESS_CONTROL_OPTIONS,
+  CAPACITY_META,
+  capacityHasConfig,
+  summarizeCapacityConfig,
+} from "./asset-details-config";
+import { CapacityConfigModal } from "./capacity-config-modal";
+import type { DeployConfigPreview } from "./draft-mapping";
+import {
+  type AccessControlMode,
   type AdvancedSettingsDraft,
   CAPACITY_KEYS,
   type CapacityKey,
+  type CapacitySelection,
 } from "./issuance-draft-wizard.types";
+import { JsonCodeBlock } from "./metadata-json";
+import { SegmentedControl } from "./segmented-control";
 import {
   applyCombo,
-  comboItemLabelKeys,
   getComboConflict,
   getCombosForCategory,
   isComboActive,
@@ -53,13 +71,14 @@ import {
   type SettingCombo,
 } from "./setting-combos";
 
-type Mode = "basic" | "detailed" | "expert";
 type SettingSelection = AdvancedSettingsDraft[string];
 
 const COMBO_ICONS: Record<string, LucideIcon> = {
   regulatedStablecoin: ShieldCheck,
-  publicSecurityOffering: Landmark,
-  privateFund: Users,
+  permissionedStablecoin: Landmark,
+  regulatedSecurity: Landmark,
+  fundOperations: HandCoins,
+  verifiedHolders: BadgeCheck,
   controlledAsset: KeyRound,
   loyaltyRewards: Gift,
   yieldNote: TrendingUp,
@@ -78,6 +97,16 @@ const SETTING_ICONS: Record<string, LucideIcon> = {
   transferHook: Webhook,
 };
 
+const ACTION_ICONS: Record<string, LucideIcon> = {
+  pause: Pause,
+  unpause: Play,
+  freeze: Snowflake,
+  unfreeze: Sun,
+  seize: HandCoins,
+  force_burn: Flame,
+  update_authority: UserCog,
+};
+
 const CAPACITY_ICONS: Record<CapacityKey, LucideIcon> = {
   kyc: UserCheck,
   restrictTradingHours: Clock,
@@ -87,29 +116,55 @@ const CAPACITY_ICONS: Record<CapacityKey, LucideIcon> = {
   transferApprovals: CheckCheck,
 };
 
-// Expert view uses technical names when they differ from manager-facing labels.
+// Technical labels for capacities whose plain-language name differs from technical.
 const CAPACITY_EXPERT_LABELS: Partial<Record<CapacityKey, MessageKey>> = {
   kyc: "DashboardIssuance.config.kycExpert",
   issueRetireControls: "DashboardIssuance.config.issueRetireControlsExpert",
 };
 
+// Technical descriptions: token/wallet/mint/burn phrasing reserved for technical mode.
+const CAPACITY_EXPERT_DESCRIPTIONS: Partial<Record<CapacityKey, MessageKey>> = {
+  kyc: "DashboardIssuance.config.kycDescriptionExpert",
+  restrictTradingHours: "DashboardIssuance.config.restrictTradingHoursDescriptionExpert",
+  issueRetireControls: "DashboardIssuance.config.issueRetireControlsDescriptionExpert",
+  redemptionApprovals: "DashboardIssuance.config.redemptionApprovalsDescriptionExpert",
+};
+
+// Returns the effect description for each access-control mode.
+function accessDescriptionKey(mode: AccessControlMode | ""): MessageKey {
+  switch (mode) {
+    case "allowlist":
+      return "DashboardIssuance.config.accessPolicyAllowlistEffect";
+    case "blocklist":
+      return "DashboardIssuance.config.accessPolicyBlocklistEffect";
+    case "disabled":
+      return "DashboardIssuance.config.accessPolicyDisabledEffect";
+    default:
+      return "DashboardIssuance.config.accessPolicyPrompt";
+  }
+}
+
 interface AdvancedSettingsEditorProps {
   category: AssetCategory | null;
   type: string | null;
-  // On-chain, extension-backed settings (permanent once deployed).
   settings: AdvancedSettingsDraft;
   onSettingsChange: (next: AdvancedSettingsDraft) => void;
-  // Off-chain compliance capacities (changeable after launch). Bulk setter so a
-  // combo can flip several at once in a single draft update.
-  capacities: Record<CapacityKey, boolean>;
-  onCapacitiesChange: (next: Record<CapacityKey, boolean>) => void;
-  // Reveal required-but-empty param errors (after a failed Continue attempt).
+  // Bulk setter so a preset can flip several at once.
+  capacities: Record<CapacityKey, CapacitySelection>;
+  onCapacitiesChange: (next: Record<CapacityKey, CapacitySelection>) => void;
+  // Reveal Configure button for policies; only the compliance tab opts in.
+  allowCapacityConfig?: boolean;
   showErrors?: boolean;
-  // Lock the on-chain settings (a deployed token: extensions are immutable) while
-  // leaving the off-chain capacities editable. Also hides the Basic preset view,
-  // whose combos bundle on-chain settings that can no longer change.
+  // Locks on-chain settings (deployed token) while keeping off-chain capacities editable.
   settingsReadOnly?: boolean;
   disabled?: boolean;
+  // OPTIONAL: create wizard opts in; compliance tab keeps its own card.
+  accessControl?: AccessControlMode | "";
+  onAccessControlChange?: (mode: AccessControlMode | "") => void;
+  accessControlReadOnly?: boolean;
+  accessControlDocsHref?: string;
+  // Deploy-config preview (technical mode only). Built by parent, not wired here.
+  deployConfig?: DeployConfigPreview | null;
 }
 
 function Pill({ children }: { children: ReactNode }) {
@@ -122,12 +177,19 @@ function Pill({ children }: { children: ReactNode }) {
 
 function Tag({ children }: { children: ReactNode }) {
   return (
-    <span className="rounded bg-fill-subtle px-1.5 py-0.5 text-[11px] font-medium text-secondary">
+    <span className="inline-flex items-center gap-1 rounded bg-fill-subtle px-1.5 py-0.5 text-[11px] font-medium text-secondary">
       {children}
     </span>
   );
 }
 
+// Convert underscore_case action IDs to spaced words for badges.
+function humanizeAction(action: string): string {
+  const text = action.replace(/_/g, " ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// Convert camelCase extension names to human-friendly spaced words.
 function humanizeExtension(name: string): string {
   return name.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
 }
@@ -150,7 +212,6 @@ function IconTile({ icon: Icon, active }: { icon: LucideIcon; active: boolean })
   );
 }
 
-// Card shell with checkbox, icon, label, and footer for params/expert info.
 function SettingShell({
   icon,
   checked,
@@ -159,6 +220,7 @@ function SettingShell({
   onToggle,
   label,
   badges,
+  actions,
   description,
   children,
 }: {
@@ -169,19 +231,21 @@ function SettingShell({
   onToggle: (checked: boolean) => void;
   label: string;
   badges?: ReactNode;
+  actions?: ReactNode;
   description: string;
   children?: ReactNode;
 }) {
   return (
     <div
       className={cn(
-        "rounded-xl border bg-surface-raised p-3 transition-colors",
+        "flex flex-col rounded-xl border bg-surface-raised transition-colors",
         checked ? "border-primary" : "border-border-default"
       )}
     >
       <label
         className={cn(
-          "flex items-center gap-3",
+          // Padding on label (not card) makes entire surface clickable and centered.
+          "flex flex-1 items-center gap-3 p-3",
           disabled ? "cursor-default" : "cursor-pointer",
           dimmed && "opacity-55"
         )}
@@ -195,19 +259,22 @@ function SettingShell({
         />
         <IconTile icon={icon} active={checked} />
         <span className="min-w-0 flex-1">
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
             <span className="text-sm font-medium text-primary">{label}</span>
             {badges}
           </span>
           <span className="mt-0.5 block text-xs text-tertiary">{description}</span>
+          {actions ? (
+            <span className="mt-2 flex flex-wrap items-center gap-2.5">{actions}</span>
+          ) : null}
         </span>
       </label>
-      {children}
+      {/* Params/conflict outside label so input clicks don't toggle checkbox. */}
+      {children ? <div className="px-3 pb-3">{children}</div> : null}
     </div>
   );
 }
 
-// Three views: Basic (curated presets), Detailed (individual settings), Expert (with extension names).
 export function AdvancedSettingsEditor({
   category,
   type,
@@ -215,52 +282,48 @@ export function AdvancedSettingsEditor({
   onSettingsChange,
   capacities,
   onCapacitiesChange,
+  allowCapacityConfig,
   showErrors,
   settingsReadOnly,
   disabled,
+  accessControl,
+  onAccessControlChange,
+  accessControlReadOnly,
+  accessControlDocsHref,
+  deployConfig,
 }: AdvancedSettingsEditorProps) {
   const t = useTranslations();
-  const [mode, setMode] = useState<Mode>(settingsReadOnly ? "detailed" : "basic");
+  const [showTechnical, setShowTechnical] = useState(false);
+  const [showDeployConfig, setShowDeployConfig] = useState(false);
+  const [configuringCapacity, setConfiguringCapacity] = useState<CapacityKey | null>(null);
 
   if (!category || !type) {
     return null;
   }
 
   const permanent = listSettingsForType(category, type);
-  const expert = mode === "expert";
-  // Deployed tokens can't use Basic mode (its combos require writable on-chain settings).
-  const availableModes: Mode[] = settingsReadOnly
-    ? ["detailed", "expert"]
-    : ["basic", "detailed", "expert"];
 
+  const access = accessControl ?? "";
   const combos = getCombosForCategory(category);
-  const activeCombos = combos.filter((combo) => isComboActive(combo, settings, capacities));
+  const activeCombos = combos.filter((combo) => isComboActive(combo, settings, capacities, access));
   const toggleCombo = (combo: SettingCombo, enabled: boolean) => {
     const next = enabled
-      ? applyCombo(combo, settings, capacities)
+      ? applyCombo(combo, settings, capacities, access)
       : removeCombo(
           combo,
           settings,
           capacities,
-          activeCombos.filter((other) => other.key !== combo.key)
+          activeCombos.filter((other) => other.key !== combo.key),
+          access
         );
     onSettingsChange(next.settings);
     onCapacitiesChange(next.capacities);
+    onAccessControlChange?.(next.accessControl);
   };
-
-  // Detect when selections don't match any preset (show custom selection note in Basic view).
-  const lockedKeys = new Set(
-    permanent.filter((entry) => entry.availability === "locked").map((entry) => entry.key)
-  );
-  const hasCustomSelection =
-    activeCombos.length === 0 &&
-    (Object.keys(settings).some((key) => !lockedKeys.has(key as SettingKey)) ||
-      CAPACITY_KEYS.some((key) => capacities[key]));
 
   const setEnabled = (entry: GroupedSetting, enabled: boolean) => {
     const next = { ...settings };
     if (enabled) {
-      // Populate default param values on enable.
       const params: Record<string, string> = {};
       for (const param of entry.setting.params ?? []) {
         if (param.defaultValue !== undefined) {
@@ -288,8 +351,6 @@ export function AdvancedSettingsEditor({
   const labelByKey = new Map<string, string>(
     permanent.map((entry) => [entry.key, t(entry.setting.labelKey as MessageKey)])
   );
-  const settingByKey = new Map(permanent.map((entry) => [entry.key, entry.setting]));
-  // Return the label of any enabled setting that conflicts with this key, if any.
   const conflictBlocker = (key: SettingKey): string | undefined => {
     if (settings[key] !== undefined) {
       return undefined;
@@ -309,117 +370,72 @@ export function AdvancedSettingsEditor({
             {t("DashboardIssuance.config.advancedSettingsTitle")}
           </p>
         </div>
-        <div
-          className="flex w-full shrink-0 rounded-lg border border-border-default bg-fill-subtle p-0.5 sm:inline-flex sm:w-auto"
-          role="tablist"
-          aria-label={t("DashboardIssuance.config.settingsModeAria")}
+        <button
+          type="button"
+          aria-pressed={showTechnical}
+          onClick={() => setShowTechnical((value) => !value)}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-default px-3 py-1 text-xs font-medium text-primary transition-colors hover:bg-fill-subtle"
         >
-          {availableModes.map((m) => {
-            const Icon = m === "basic" ? Briefcase : m === "detailed" ? ListChecks : GraduationCap;
-            const labelKey: MessageKey =
-              m === "basic"
-                ? "DashboardIssuance.config.settingsModeBasic"
-                : m === "detailed"
-                  ? "DashboardIssuance.config.settingsModeDetailed"
-                  : "DashboardIssuance.config.settingsModeExpert";
-            return (
-              <button
-                key={m}
-                type="button"
-                role="tab"
-                aria-selected={mode === m}
-                onClick={() => setMode(m)}
-                className={cn(
-                  "inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors sm:flex-none",
-                  mode === m ? "bg-surface-raised text-primary" : "text-tertiary hover:text-primary"
-                )}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {t(labelKey)}
-              </button>
-            );
-          })}
-        </div>
+          {showTechnical ? (
+            <Wrench className="h-3.5 w-3.5" />
+          ) : (
+            <Briefcase className="h-3.5 w-3.5" />
+          )}
+          {t("DashboardIssuance.config.showTechnicalDetail")}
+        </button>
       </div>
 
-      {mode === "basic" ? (
+      {/* Quick-fill presets — hidden once on-chain settings are locked. */}
+      {!settingsReadOnly && combos.length > 0 ? (
         <section className="mt-5">
-          {hasCustomSelection ? (
-            <p className="mt-3 rounded-lg border border-border-default bg-fill-subtle px-3 py-2 text-[11px] text-secondary">
-              {t("DashboardIssuance.config.comboCustomSelection")}
-            </p>
-          ) : null}
-          <div className="mt-3 grid gap-2.5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
+            {t("DashboardIssuance.config.quickFillLabel")}
+          </p>
+          <p className="mt-0.5 text-xs text-tertiary">
+            {t("DashboardIssuance.config.quickFillHint")}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
             {combos.map((combo) => {
-              const active = isComboActive(combo, settings, capacities);
+              const active = isComboActive(combo, settings, capacities, access);
               const conflict = active ? null : getComboConflict(combo, settings);
               const blocked = conflict !== null;
-              const includeKeys = comboItemLabelKeys(combo);
-              // Show required param fields inline for active combos.
-              const paramRows = active
-                ? combo.settings.flatMap((sk) =>
-                    (settingByKey.get(sk)?.params ?? [])
-                      .filter((param) => param.required)
-                      .map((param) => ({ settingKey: sk, param }))
-                  )
-                : [];
+              const Icon = COMBO_ICONS[combo.key] ?? Boxes;
               return (
-                <SettingShell
+                <button
                   key={combo.key}
-                  icon={COMBO_ICONS[combo.key] ?? Boxes}
-                  checked={active}
+                  type="button"
                   disabled={disabled || blocked}
-                  dimmed={blocked}
-                  onToggle={(checked) => toggleCombo(combo, checked)}
-                  label={t(combo.labelKey as MessageKey)}
-                  description={t(combo.descriptionKey as MessageKey)}
-                >
-                  {conflict ? (
-                    <p className="mt-2 border-t border-border-subtle pt-2 text-[11px] leading-relaxed text-tertiary">
-                      {t("DashboardIssuance.config.settingConflictsWith")}{" "}
-                      <Tag>{t(conflict.withLabelKey as MessageKey)}</Tag> —{" "}
-                      {t(conflict.reasonKey as MessageKey)}
-                    </p>
-                  ) : (
-                    <>
-                      {includeKeys.length > 0 ? (
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border-subtle pt-2">
-                          {includeKeys.map((key) => (
-                            <Tag key={key}>{t(key as MessageKey)}</Tag>
-                          ))}
-                        </div>
-                      ) : null}
-                      {paramRows.length > 0 ? (
-                        <div className="mt-2.5 grid items-start gap-x-3 gap-y-2 border-t border-border-subtle pt-2.5 sm:grid-cols-2">
-                          {paramRows.map(({ settingKey: sk, param }) => (
-                            <ParamField
-                              key={`${sk}-${param.key}`}
-                              param={param}
-                              settingKey={sk}
-                              value={settings[sk]?.params?.[param.key] ?? ""}
-                              invalid={
-                                !!showErrors &&
-                                (settings[sk]?.params?.[param.key] ?? "").trim() === ""
-                              }
-                              disabled={disabled}
-                              onChange={(value) => setParam(sk, param.key, value)}
-                            />
-                          ))}
-                        </div>
-                      ) : null}
-                    </>
+                  aria-pressed={active}
+                  onClick={() => toggleCombo(combo, !active)}
+                  title={
+                    conflict
+                      ? `${t("DashboardIssuance.config.settingConflictsWith")} ${t(conflict.withLabelKey as MessageKey)}`
+                      : undefined
+                  }
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                    active
+                      ? "border-primary text-primary"
+                      : "border-border-default text-tertiary hover:text-primary",
+                    blocked && "cursor-not-allowed opacity-50"
                   )}
-                </SettingShell>
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {t(combo.labelKey as MessageKey)}
+                </button>
               );
             })}
           </div>
         </section>
-      ) : (
-        <>
-          <section className="mt-5">
+      ) : null}
+
+      {/* Permanent · on-chain, set at creation --------------------------- */}
+      <section className="mt-6">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
               {t(
-                expert
+                showTechnical
                   ? "DashboardIssuance.config.settingsOnchainTitle"
                   : "DashboardIssuance.config.settingsPermanentTitle"
               )}
@@ -431,63 +447,197 @@ export function AdvancedSettingsEditor({
                   : "DashboardIssuance.config.settingsPermanentSubtitle"
               )}
             </p>
-            <div className="mt-3 grid gap-2.5">
-              {permanent.map((entry) => (
-                <PermanentRow
-                  key={entry.key}
-                  entry={entry}
-                  selection={settings[entry.key]}
-                  expert={expert}
-                  showErrors={showErrors}
-                  disabled={disabled || settingsReadOnly}
-                  conflictWith={conflictBlocker(entry.key)}
-                  onToggle={(enabled) => setEnabled(entry, enabled)}
-                  onParam={setParam}
-                />
-              ))}
-            </div>
-          </section>
-
-          <section className="mt-6">
-            <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
-              {t(
-                expert
-                  ? "DashboardIssuance.config.settingsOffchainTitle"
-                  : "DashboardIssuance.config.settingsOngoingTitle"
+          </div>
+          {showTechnical && deployConfig ? (
+            <button
+              type="button"
+              aria-pressed={showDeployConfig}
+              onClick={() => setShowDeployConfig((value) => !value)}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-default px-3 py-1 text-xs font-medium transition-colors",
+                showDeployConfig
+                  ? "bg-fill-subtle text-primary"
+                  : "text-tertiary hover:text-primary"
               )}
+            >
+              <Code2 className="h-3.5 w-3.5" />
+              {t("DashboardIssuance.config.deployPreview")}
+            </button>
+          ) : null}
+        </div>
+
+        {/* Deploy payload preview in technical mode. */}
+        {showTechnical && showDeployConfig && deployConfig ? (
+          <div className="mt-3">
+            <p className="mb-2 text-xs text-tertiary">
+              {t("DashboardIssuance.assetDetails.deployConfigAuthorityNote")}
             </p>
-            <p className="mt-0.5 text-xs text-tertiary">
-              {t("DashboardIssuance.config.settingsOngoingSubtitle")}
-            </p>
-            <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
-              {CAPACITY_KEYS.map((key) => {
-                const meta = CAPACITY_META[key];
-                const expertLabel = CAPACITY_EXPERT_LABELS[key];
-                return (
-                  <SettingShell
-                    key={key}
-                    icon={CAPACITY_ICONS[key]}
-                    checked={capacities[key]}
-                    disabled={disabled}
-                    onToggle={(checked) => onCapacitiesChange({ ...capacities, [key]: checked })}
-                    label={expert && expertLabel ? t(expertLabel) : t(meta.labelKey)}
-                    description={t(meta.descriptionKey)}
-                  />
-                );
-              })}
-            </div>
-          </section>
-        </>
-      )}
+            <JsonCodeBlock value={deployConfig} />
+          </div>
+        ) : null}
+
+        <div className="mt-3 grid gap-2.5">
+          {onAccessControlChange ? (
+            <AccessControlRow
+              mode={accessControl ?? ""}
+              onChange={onAccessControlChange}
+              disabled={disabled || accessControlReadOnly}
+              showTechnical={showTechnical}
+              docsHref={accessControlDocsHref}
+            />
+          ) : null}
+          {permanent.map((entry) => (
+            <PermanentRow
+              key={entry.key}
+              entry={entry}
+              selection={settings[entry.key]}
+              showTechnical={showTechnical}
+              showErrors={showErrors}
+              disabled={disabled || settingsReadOnly}
+              conflictWith={conflictBlocker(entry.key)}
+              onToggle={(enabled) => setEnabled(entry, enabled)}
+              onParam={setParam}
+            />
+          ))}
+        </div>
+      </section>
+
+      {/* Ongoing · off-chain, changeable anytime ------------------------- */}
+      <section className="mt-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
+          {t(
+            showTechnical
+              ? "DashboardIssuance.config.settingsOffchainTitle"
+              : "DashboardIssuance.config.settingsOngoingTitle"
+          )}
+        </p>
+        <p className="mt-0.5 text-xs text-tertiary">
+          {t(
+            allowCapacityConfig
+              ? "DashboardIssuance.config.settingsOngoingSubtitle"
+              : "DashboardIssuance.config.settingsOngoingSubtitleDraft"
+          )}
+        </p>
+        <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+          {CAPACITY_KEYS.map((key) => {
+            const selection = capacities[key];
+            const configurable = capacityHasConfig(key);
+            return (
+              <CapacityRow
+                key={key}
+                capKey={key}
+                checked={selection.enabled}
+                disabled={disabled}
+                showTechnical={showTechnical}
+                configurable={configurable}
+                allowConfig={allowCapacityConfig}
+                summary={configurable ? summarizeCapacityConfig(key, selection.config, t) : null}
+                onToggle={(checked) =>
+                  onCapacitiesChange({
+                    ...capacities,
+                    [key]: { ...selection, enabled: checked },
+                  })
+                }
+                onConfigure={() => setConfiguringCapacity(key)}
+              />
+            );
+          })}
+        </div>
+      </section>
+
+      <CapacityConfigModal
+        capKey={configuringCapacity}
+        config={configuringCapacity ? capacities[configuringCapacity].config : undefined}
+        disabled={disabled}
+        onClose={() => setConfiguringCapacity(null)}
+        onSave={(config) => {
+          if (!configuringCapacity) {
+            return;
+          }
+          onCapacitiesChange({
+            ...capacities,
+            [configuringCapacity]: { ...capacities[configuringCapacity], config },
+          });
+        }}
+      />
     </div>
   );
 }
 
-// Locked settings are checked and non-deselectable; expert mode reveals mechanics.
+// 3-way mode (allowlist/blocklist/disabled) rendered as segmented control.
+function AccessControlRow({
+  mode,
+  onChange,
+  disabled,
+  showTechnical,
+  docsHref,
+}: {
+  mode: AccessControlMode | "";
+  onChange: (mode: AccessControlMode | "") => void;
+  disabled?: boolean;
+  showTechnical?: boolean;
+  docsHref?: string;
+}) {
+  const t = useTranslations();
+  // "Gated" = a holder restriction is in effect (allowlist or blocklist).
+  const gated = mode === "allowlist" || mode === "blocklist";
+  return (
+    <div
+      className={cn(
+        "rounded-xl border bg-surface-raised p-3 transition-colors",
+        gated ? "border-primary" : "border-border-default"
+      )}
+    >
+      <div className={cn("flex items-start gap-3", disabled && "opacity-55")}>
+        <IconTile icon={ShieldCheck} active={gated} />
+        <div className="min-w-0 flex-1">
+          <span className="text-sm font-medium text-primary">
+            {t("DashboardIssuance.compliance.accessControl")}
+          </span>
+          <span className="mt-0.5 block text-xs text-tertiary">
+            {t(accessDescriptionKey(mode))}
+          </span>
+        </div>
+      </div>
+      <SegmentedControl
+        className="mt-3"
+        ariaLabel={t("DashboardIssuance.compliance.accessControl")}
+        value={mode}
+        onChange={(value) => onChange(value as AccessControlMode | "")}
+        disabled={disabled}
+        optionClassName="py-1"
+        selectedClassName="bg-primary text-on-primary"
+        options={ACCESS_CONTROL_OPTIONS.map((option) => ({
+          value: option.value,
+          label: t(option.labelKey),
+        }))}
+      />
+      {docsHref ? (
+        <div className="mt-2.5">
+          <a
+            href={docsHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs font-medium text-tertiary underline-offset-2 transition-colors hover:text-primary hover:underline"
+          >
+            {t("DashboardIssuance.assetDetails.learnLists")}
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
+      ) : null}
+      {showTechnical ? (
+        <p className="mt-2 border-t border-border-subtle pt-2 text-[11px] leading-relaxed text-tertiary">
+          {t("DashboardIssuance.config.accessPolicyTechnical")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function PermanentRow({
   entry,
   selection,
-  expert,
+  showTechnical,
   showErrors,
   disabled,
   conflictWith,
@@ -496,7 +646,7 @@ function PermanentRow({
 }: {
   entry: GroupedSetting;
   selection: SettingSelection | undefined;
-  expert: boolean;
+  showTechnical?: boolean;
   showErrors?: boolean;
   disabled?: boolean;
   conflictWith?: string;
@@ -517,7 +667,7 @@ function PermanentRow({
       disabled={disabled || isLocked || blocked}
       dimmed={blocked}
       onToggle={onToggle}
-      label={expert ? extensionTitle(setting.extensions) : t(setting.labelKey as MessageKey)}
+      label={showTechnical ? extensionTitle(setting.extensions) : t(setting.labelKey as MessageKey)}
       description={t(setting.descriptionKey as MessageKey)}
       badges={
         isLocked ? (
@@ -526,15 +676,28 @@ function PermanentRow({
           <Pill>{t("DashboardIssuance.config.settingRecommended")}</Pill>
         ) : null
       }
+      actions={
+        showTechnical && setting.actions.length > 0
+          ? setting.actions.map((action) => {
+              const ActionIcon = ACTION_ICONS[action];
+              return (
+                <Tag key={action}>
+                  {ActionIcon ? <ActionIcon className="h-3 w-3 text-tertiary" /> : null}
+                  {humanizeAction(action)}
+                </Tag>
+              );
+            })
+          : null
+      }
     >
+      {/* Render conflict or params, but not both (footer adds phantom padding otherwise). */}
       {blocked ? (
-        <p className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border-subtle pt-2 text-[11px] text-tertiary">
+        <p className="flex flex-wrap items-center gap-1.5 border-t border-border-subtle pt-2 text-[11px] text-tertiary">
           {t("DashboardIssuance.config.settingConflictsWith")}
           <Tag>{conflictWith}</Tag>
         </p>
-      ) : null}
-      {checked && params.length > 0 ? (
-        <div className="mt-2.5 grid items-start gap-x-3 gap-y-2 border-t border-border-subtle pt-2.5 sm:grid-cols-2">
+      ) : checked && params.length > 0 ? (
+        <div className="grid items-start gap-x-3 gap-y-2 border-t border-border-subtle pt-2.5 sm:grid-cols-2">
           {params.map((param) => (
             <ParamField
               key={param.key}
@@ -552,15 +715,60 @@ function PermanentRow({
           ))}
         </div>
       ) : null}
+    </SettingShell>
+  );
+}
 
-      {expert && setting.actions.length > 0 ? (
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border-subtle pt-2 text-[11px]">
-          <span className="text-tertiary">
-            {t("DashboardIssuance.config.settingExpertUnlocks")}
+function CapacityRow({
+  capKey,
+  checked,
+  disabled,
+  showTechnical,
+  configurable,
+  allowConfig,
+  summary,
+  onToggle,
+  onConfigure,
+}: {
+  capKey: CapacityKey;
+  checked: boolean;
+  disabled?: boolean;
+  showTechnical?: boolean;
+  configurable?: boolean;
+  allowConfig?: boolean;
+  summary?: string | null;
+  onToggle: (checked: boolean) => void;
+  onConfigure?: () => void;
+}) {
+  const t = useTranslations();
+  const meta = CAPACITY_META[capKey];
+  const expertLabel = CAPACITY_EXPERT_LABELS[capKey];
+  const expertDescription = CAPACITY_EXPERT_DESCRIPTIONS[capKey];
+  return (
+    <SettingShell
+      icon={CAPACITY_ICONS[capKey]}
+      checked={checked}
+      disabled={disabled}
+      onToggle={onToggle}
+      label={showTechnical && expertLabel ? t(expertLabel) : t(meta.labelKey)}
+      description={
+        showTechnical && expertDescription ? t(expertDescription) : t(meta.descriptionKey)
+      }
+    >
+      {checked && configurable && allowConfig ? (
+        <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-border-subtle pt-2.5">
+          <span className="min-w-0 flex-1 truncate text-xs text-tertiary">
+            {summary ?? t("DashboardIssuance.config.capacityConfig.notConfigured")}
           </span>
-          {setting.actions.map((action) => (
-            <Tag key={action}>{action}</Tag>
-          ))}
+          <button
+            type="button"
+            onClick={onConfigure}
+            disabled={disabled}
+            className="inline-flex shrink-0 items-center gap-0.5 text-xs font-medium text-primary transition-colors hover:underline"
+          >
+            {t("DashboardIssuance.config.capacityConfig.configure")}
+            <ChevronRight className="h-3 w-3" />
+          </button>
         </div>
       ) : null}
     </SettingShell>

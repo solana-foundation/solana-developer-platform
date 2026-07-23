@@ -36,6 +36,7 @@ import {
   type SigningConfigRecord,
 } from "@/services/adapters";
 import * as custodyProvisioning from "@/services/custody/provisioning";
+import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {
   assertCustodyProviderCanCreateWallet,
   assertCustodyProviderCanDeleteWallet,
@@ -61,7 +62,6 @@ import {
   createProviderWallet,
   deleteProviderWallet,
 } from "@/services/domain/signing/provider-wallet-lifecycle";
-import { createEncryptionService, type EncryptionService } from "@/services/encryption.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   CustodyConfigStore,
@@ -292,7 +292,7 @@ interface ListWalletsOptions {
  */
 export class SigningService {
   private providerCache = new Map<string, SigningPort>();
-  private encryptionService: EncryptionService | null = null;
+  private custodyCipher: CustodyCipher | null = null;
 
   constructor(
     private configStore: SigningConfigStore & {
@@ -312,11 +312,11 @@ export class SigningService {
    * Get the encryption service, lazily initialized.
    * Required for storing encrypted private keys.
    */
-  private getEncryptionService(): EncryptionService {
-    if (!this.encryptionService) {
-      this.encryptionService = createEncryptionService(this.env.CUSTODY_ENCRYPTION_KEY);
+  private getCustodyCipher(): CustodyCipher {
+    if (!this.custodyCipher) {
+      this.custodyCipher = createCustodyCipher(this.env);
     }
-    return this.encryptionService;
+    return this.custodyCipher;
   }
 
   private async assertProviderEnabled(
@@ -552,8 +552,8 @@ export class SigningService {
     const privateKeyBase58 = base58.decode(privateKeyBytes);
 
     // Encrypt the private key for storage
-    const encryption = this.getEncryptionService();
-    const encryptedKey = await encryption.encryptPrivateKey(orgId, privateKeyBase58);
+    const cipher = this.getCustodyCipher();
+    const encryptedKey = await cipher.encrypt(orgId, privateKeyBase58);
 
     // Create config with encrypted private key
     const configJson: LocalProviderConfig = {
@@ -612,8 +612,8 @@ export class SigningService {
     }
 
     // Encrypt the API secret for storage
-    const encryption = this.getEncryptionService();
-    const encryptedSecret = await encryption.encryptPrivateKey(orgId, options.apiSecretPem);
+    const cipher = this.getCustodyCipher();
+    const encryptedSecret = await cipher.encrypt(orgId, options.apiSecretPem);
 
     // Create config with Fireblocks credentials
     const configJson: FireblocksProviderConfig = {
@@ -1431,7 +1431,7 @@ export class SigningService {
     await this.assertProviderEnabled(orgId, config.provider);
     assertCustodyProviderCanCreateWallet(config.provider);
 
-    const parsed = await parseConfigRecord(this.env, orgId, config);
+    const parsed = await parseConfigRecord(this.env, orgId, config, this.getCustodyCipher());
     const { walletId, publicKey } = await createProviderWallet({
       env: this.env,
       orgId,
@@ -1440,6 +1440,7 @@ export class SigningService {
         label: params.label,
       },
       parsed,
+      cipher: this.getCustodyCipher(),
     });
 
     let wallet: CustodyWallet;
@@ -1515,7 +1516,7 @@ export class SigningService {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
 
-    const parsed = await parseConfigRecord(this.env, orgId, config);
+    const parsed = await parseConfigRecord(this.env, orgId, config, this.getCustodyCipher());
     const deactivateResult = await this.configStore.deactivateWalletIfNotLast(
       config.id,
       targetWallet.walletId
@@ -1590,16 +1591,16 @@ export class SigningService {
     // Direct database update for the config JSON
     // This is safe because we're only updating our own config
     const db = getDb(this.env);
-    const encryption = this.getEncryptionService();
-    const encryptedConfig = await encryption.encrypt(
-      existing.organizationId,
-      JSON.stringify(config)
-    );
+    const cipher = this.getCustodyCipher();
+    const encryptedConfig = await cipher.encrypt(existing.organizationId, JSON.stringify(config));
+    const encryptionVersion = encryptedConfig.startsWith("v2.")
+      ? "sdp-custody-kms-v2"
+      : "sdp-custody-encryption-v1";
     await db
       .prepare(
         "UPDATE custody_configs SET config_encrypted = ?, encryption_version = ?, updated_at = datetime('now') WHERE id = ?"
       )
-      .bind(encryptedConfig.ciphertext, "sdp-custody-encryption-v1", configId)
+      .bind(encryptedConfig, encryptionVersion, configId)
       .run();
   }
 
@@ -1636,7 +1637,12 @@ export class SigningService {
       return cached;
     }
 
-    const adapter = await createAdapterFromEncryptedConfig(this.env, orgId, config);
+    const adapter = await createAdapterFromEncryptedConfig(
+      this.env,
+      orgId,
+      config,
+      this.getCustodyCipher()
+    );
 
     this.providerCache.set(cacheKey, adapter);
     return adapter;
@@ -1875,7 +1881,12 @@ export class SigningService {
     }
 
     // Use encrypted config handler to properly decrypt credentials
-    const adapter = await createAdapterFromEncryptedConfig(this.env, record.organizationId, config);
+    const adapter = await createAdapterFromEncryptedConfig(
+      this.env,
+      record.organizationId,
+      config,
+      this.getCustodyCipher()
+    );
 
     if (!adapter.getSignStatus) {
       return { status: "pending" };
@@ -2010,7 +2021,7 @@ function decodeBase64(base64: string): Uint8Array {
  * @returns Configured SigningService instance
  */
 export function createSigningService(env: Env): SigningService {
-  const configStore = new CustodyConfigStore(getDb(env), env.CUSTODY_ENCRYPTION_KEY);
+  const configStore = new CustodyConfigStore(getDb(env), env);
   const signingStore = new SigningRequestStorePg(getDb(env));
 
   return new SigningService(configStore, signingStore, env);

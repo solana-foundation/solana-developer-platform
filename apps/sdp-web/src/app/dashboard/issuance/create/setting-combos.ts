@@ -5,7 +5,12 @@ import {
 } from "@sdp/issuance/capabilities";
 import type { AdvancedSetting, AssetCategory, TokenExtensionName } from "@sdp/types";
 import { CAPACITY_META } from "./asset-details-config";
-import type { AdvancedSettingsDraft, CapacityKey } from "./issuance-draft-wizard.types";
+import type {
+  AccessControlMode,
+  AdvancedSettingsDraft,
+  CapacityKey,
+  CapacitySelection,
+} from "./issuance-draft-wizard.types";
 
 // Basic-mode preset: curated bundle of optional settings + capacities.
 // Enables underlying settings shown in Detailed/Expert; multiple combos' settings union.
@@ -16,6 +21,12 @@ export interface SettingCombo {
   descriptionKey: string;
   settings: readonly SettingKey[];
   capacities: readonly CapacityKey[];
+  // The access-control mode this preset implies (e.g. "allowlist" for a
+  // verified-holder scenario). Undefined = the preset leaves access control alone.
+  // Kept separate from `settings` — accessControl is its own draft field, not a
+  // catalog extension. Several combos may share a mode (a richer scenario nests a
+  // simpler one); removeCombo's cascade keeps them coherently deselectable.
+  accessControl?: AccessControlMode;
 }
 
 const cfg = (leaf: string): string => `DashboardIssuance.config.${leaf}`;
@@ -28,24 +39,61 @@ export const SETTING_COMBOS: readonly SettingCombo[] = [
     descriptionKey: cfg("comboRegulatedStablecoinDescription"),
     settings: [],
     capacities: ["kyc", "issueRetireControls", "redemptionApprovals", "investorReporting"],
+    // A public fiat-backed coin is open to everyone except sanctioned wallets — a
+    // blocklist (freeze known-bad addresses), not an allowlist. This is the model
+    // for USDC/USDT-style coins and matches the stablecoin template default.
+    accessControl: "blocklist",
   },
   {
-    key: "publicSecurityOffering",
+    key: "permissionedStablecoin",
+    category: "stablecoin",
+    labelKey: cfg("comboPermissionedStablecoin"),
+    descriptionKey: cfg("comboPermissionedStablecoinDescription"),
+    settings: [],
+    capacities: ["kyc", "issueRetireControls", "transferApprovals"],
+    // The opposite access model AND ops model. A closed-network settlement coin:
+    // only approved institutions may hold it (allowlist), and movements between
+    // them are reviewed (transferApprovals) — no public redemption desk. Contrast
+    // the regulated coin's open blocklist + redemption/reserve-reporting stack.
+    accessControl: "allowlist",
+  },
+  {
+    key: "regulatedSecurity",
     category: "tokenized_security",
-    labelKey: cfg("comboPublicSecurityOffering"),
-    descriptionKey: cfg("comboPublicSecurityOfferingDescription"),
+    labelKey: cfg("comboRegulatedSecurity"),
+    descriptionKey: cfg("comboRegulatedSecurityDescription"),
     settings: ["scaledUiAmount"],
     capacities: ["kyc", "transferApprovals", "investorReporting", "restrictTradingHours"],
+    // The compliance base every tokenized security needs: verified investors on an
+    // on-chain allowlist, reviewed transfers, market-hours trading, and reporting.
+    accessControl: "allowlist",
   },
   {
-    key: "privateFund",
+    key: "fundOperations",
     category: "tokenized_security",
-    labelKey: cfg("comboPrivateFund"),
-    descriptionKey: cfg("comboPrivateFundDescription"),
+    labelKey: cfg("comboFundOperations"),
+    descriptionKey: cfg("comboFundOperationsDescription"),
     settings: ["scaledUiAmount"],
-    capacities: ["kyc", "redemptionApprovals", "transferApprovals", "investorReporting"],
+    capacities: ["kyc", "redemptionApprovals", "issueRetireControls"],
+    // A complementary lifecycle layer — subscriptions/redemptions with issuer-managed
+    // supply. Same allowlist as the base, so it stacks onto regulatedSecurity (giving a
+    // fund) instead of contradicting it: the two are combinable, not mutually exclusive.
+    accessControl: "allowlist",
   },
   // --- generic (custom substrate, all settings available) ------------------
+  {
+    key: "verifiedHolders",
+    category: "generic",
+    labelKey: cfg("comboVerifiedHolders"),
+    descriptionKey: cfg("comboVerifiedHoldersDescription"),
+    settings: [],
+    capacities: ["kyc"],
+    // The atomic "only approved wallets" preset: verified holders = KYC (the
+    // off-chain gate deciding who qualifies) + an on-chain allowlist (the
+    // enforcement). The richer generic scenarios below build on this exact pair;
+    // deselecting this preset cascades them off (see removeCombo).
+    accessControl: "allowlist",
+  },
   {
     key: "controlledAsset",
     category: "generic",
@@ -53,6 +101,8 @@ export const SETTING_COMBOS: readonly SettingCombo[] = [
     descriptionKey: cfg("comboControlledAssetDescription"),
     settings: ["freezeTransfers", "permanentDelegate"],
     capacities: ["kyc"],
+    // "Limited to verified holders" — the allowlist is what actually enforces it.
+    accessControl: "allowlist",
   },
   {
     key: "gatedAccess",
@@ -61,6 +111,8 @@ export const SETTING_COMBOS: readonly SettingCombo[] = [
     descriptionKey: cfg("comboGatedAccessDescription"),
     settings: ["freezeTransfers"],
     capacities: ["kyc", "restrictTradingHours"],
+    // "New accounts start frozen until you approve them" — that's the allowlist.
+    accessControl: "allowlist",
   },
   {
     key: "yieldNote",
@@ -69,6 +121,8 @@ export const SETTING_COMBOS: readonly SettingCombo[] = [
     descriptionKey: cfg("comboYieldNoteDescription"),
     settings: ["interestBearing"],
     capacities: ["kyc", "issueRetireControls"],
+    // "For verified holders" — enforced by the allowlist.
+    accessControl: "allowlist",
   },
   {
     key: "revenueShare",
@@ -94,7 +148,7 @@ export function getCombosForCategory(category: AssetCategory): SettingCombo[] {
 
 const DEFAULT_COMBO_KEY: Partial<Record<AssetCategory, string>> = {
   stablecoin: "regulatedStablecoin",
-  tokenized_security: "publicSecurityOffering",
+  tokenized_security: "regulatedSecurity",
 };
 
 export function getDefaultCombo(category: AssetCategory): SettingCombo | undefined {
@@ -113,11 +167,13 @@ export function comboItemLabelKeys(combo: SettingCombo): string[] {
 export function isComboActive(
   combo: SettingCombo,
   settings: AdvancedSettingsDraft,
-  capacities: Record<CapacityKey, boolean>
+  capacities: Record<CapacityKey, CapacitySelection>,
+  accessControl: AccessControlMode | "" = ""
 ): boolean {
   return (
     combo.settings.every((key) => settings[key] !== undefined) &&
-    combo.capacities.every((key) => capacities[key] === true)
+    combo.capacities.every((key) => capacities[key].enabled) &&
+    (combo.accessControl === undefined || combo.accessControl === accessControl)
   );
 }
 
@@ -205,8 +261,13 @@ function defaultParamsFor(key: SettingKey): Record<string, string> {
 export function applyCombo(
   combo: SettingCombo,
   settings: AdvancedSettingsDraft,
-  capacities: Record<CapacityKey, boolean>
-): { settings: AdvancedSettingsDraft; capacities: Record<CapacityKey, boolean> } {
+  capacities: Record<CapacityKey, CapacitySelection>,
+  accessControl: AccessControlMode | "" = ""
+): {
+  settings: AdvancedSettingsDraft;
+  capacities: Record<CapacityKey, CapacitySelection>;
+  accessControl: AccessControlMode | "";
+} {
   const nextSettings: AdvancedSettingsDraft = { ...settings };
   for (const key of combo.settings) {
     if (nextSettings[key] === undefined) {
@@ -216,38 +277,89 @@ export function applyCombo(
   }
   const nextCapacities = { ...capacities };
   for (const key of combo.capacities) {
-    nextCapacities[key] = true;
+    // Preset only flips the enable bit; any existing per-policy config is kept.
+    nextCapacities[key] = { ...nextCapacities[key], enabled: true };
   }
-  return { settings: nextSettings, capacities: nextCapacities };
+  return {
+    settings: nextSettings,
+    capacities: nextCapacities,
+    accessControl: combo.accessControl ?? accessControl,
+  };
+}
+
+// The full defining item-set of a combo: settings, capacities, and (as a namespaced
+// token) its access-control mode. Used to detect when one preset nests another.
+function comboItemKeys(combo: SettingCombo): string[] {
+  return [
+    ...combo.settings,
+    ...combo.capacities,
+    ...(combo.accessControl ? [`access:${combo.accessControl}`] : []),
+  ];
+}
+
+// True when `sup` contains every defining item of `sub` — i.e. `sup` is a richer
+// scenario built on top of `sub` (e.g. gatedAccess ⊇ verifiedHolders).
+function isSupersetOf(sup: SettingCombo, sub: SettingCombo): boolean {
+  const supItems = new Set(comboItemKeys(sup));
+  return comboItemKeys(sub).every((item) => supItems.has(item));
 }
 
 export function removeCombo(
   combo: SettingCombo,
   settings: AdvancedSettingsDraft,
-  capacities: Record<CapacityKey, boolean>,
-  otherActiveCombos: readonly SettingCombo[]
-): { settings: AdvancedSettingsDraft; capacities: Record<CapacityKey, boolean> } {
+  capacities: Record<CapacityKey, CapacitySelection>,
+  otherActiveCombos: readonly SettingCombo[],
+  accessControl: AccessControlMode | "" = ""
+): {
+  settings: AdvancedSettingsDraft;
+  capacities: Record<CapacityKey, CapacitySelection>;
+  accessControl: AccessControlMode | "";
+} {
+  // Cascade: deactivating `combo` also deactivates any other active preset built on
+  // top of it (a superset of its items) — you can't keep "gated access" after
+  // removing the verified-holder requirement it depends on.
+  const alsoRemove = otherActiveCombos.filter((other) => isSupersetOf(other, combo));
+  const keepCombos = otherActiveCombos.filter((other) => !alsoRemove.includes(other));
+  const removed = [combo, ...alsoRemove];
+
+  // Items still owned by a combo that stays active must survive the removal.
   const keepSettings = new Set<string>();
   const keepCapacities = new Set<string>();
-  for (const other of otherActiveCombos) {
-    for (const key of other.settings) {
+  for (const keep of keepCombos) {
+    for (const key of keep.settings) {
       keepSettings.add(key);
     }
-    for (const key of other.capacities) {
+    for (const key of keep.capacities) {
       keepCapacities.add(key);
     }
   }
+
   const nextSettings: AdvancedSettingsDraft = { ...settings };
-  for (const key of combo.settings) {
-    if (!keepSettings.has(key)) {
-      delete nextSettings[key];
-    }
-  }
   const nextCapacities = { ...capacities };
-  for (const key of combo.capacities) {
-    if (!keepCapacities.has(key)) {
-      nextCapacities[key] = false;
+  for (const target of removed) {
+    for (const key of target.settings) {
+      if (!keepSettings.has(key)) {
+        delete nextSettings[key];
+      }
+    }
+    for (const key of target.capacities) {
+      if (!keepCapacities.has(key)) {
+        // Only clear the enable bit; keep any config the user entered so
+        // re-selecting the preset restores their settings.
+        nextCapacities[key] = { ...nextCapacities[key], enabled: false };
+      }
     }
   }
-  return { settings: nextSettings, capacities: nextCapacities };
+
+  // Reset access control to an explicit "None" if one of the removed combos owned
+  // the current mode and no combo that stays active still needs it. "disabled"
+  // (not "") because deselecting a gating preset is a deliberate "no restriction"
+  // choice — the row should land on None, not the blank "not chosen yet" prompt.
+  let nextAccessControl: AccessControlMode | "" = accessControl;
+  const removedOwnsMode = removed.some((target) => target.accessControl === accessControl);
+  const keptNeedsMode = keepCombos.some((keep) => keep.accessControl === accessControl);
+  if (accessControl !== "" && removedOwnsMode && !keptNeedsMode) {
+    nextAccessControl = "disabled";
+  }
+  return { settings: nextSettings, capacities: nextCapacities, accessControl: nextAccessControl };
 }
