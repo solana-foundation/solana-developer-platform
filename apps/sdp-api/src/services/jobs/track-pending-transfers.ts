@@ -35,10 +35,13 @@ const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
 const MAX_SIGNATURES_PER_BATCH = 256;
 
 /**
- * Applies a terminal status to a transfer, settling its recipient rows and
- * parent batch first when the transfer is a transfer_batch chunk: if
- * settlement fails, the transfer stays processing and the next run retries
- * both steps.
+ * Applies a terminal status to a transfer. Batch chunks settle through
+ * settleTransferBatch, which atomically claims the transfer row from
+ * processing, settles its recipients, and recomputes the parent batch — a
+ * concurrent run that already settled the chunk makes this a no-op, so a
+ * delayed observation can never regress a newer terminal status. Other
+ * transfers settle through a processing-guarded update with the same
+ * no-op-on-conflict semantics.
  */
 async function updateTerminalTransfer(
   env: Env,
@@ -57,12 +60,12 @@ async function updateTerminalTransfer(
       projectId: transfer.project_id,
       transferStatus: input.status,
       error: input.status === "failed" ? input.error : null,
+      slot: input.slot === undefined ? null : input.slot,
+      updatedAt: input.updatedAt,
     });
+    return;
   }
-  const updated = await repo.updateTransfer(input);
-  if (!updated) {
-    throw internalError("Pending transfer not found for reconciliation");
-  }
+  await repo.updateTransfer({ ...input, expectedStatus: "processing" });
 }
 
 export async function trackPendingTransfers(env: Env): Promise<void> {

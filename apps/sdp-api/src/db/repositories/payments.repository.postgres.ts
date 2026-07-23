@@ -300,6 +300,10 @@ export function createPostgresPaymentsRepository(db: DatabaseExecutor): Payments
         clauses.push("project_id IS NOT DISTINCT FROM ?");
         values.push(input.projectId);
       }
+      if (input.expectedStatus !== undefined) {
+        clauses.push("status = ?");
+        values.push(input.expectedStatus);
+      }
 
       const row = await db
         .prepare(

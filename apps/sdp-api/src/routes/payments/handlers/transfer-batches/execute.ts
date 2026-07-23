@@ -136,12 +136,14 @@ export function applyRecipientRowUpdates(
 
 /**
  * Signs and submits one transaction chunk without awaiting on-chain
- * confirmation: the transfer and its recipients settle as processing with the
- * signature stored, and the pending-transfers job finalizes them later.
+ * confirmation: the pending-transfers job finalizes the chunk later.
  * Simulation or send failures settle the chunk as failed instead of throwing.
  * The transfer row and its recipient links are written in ONE transaction so
  * a processing chunk transfer always has linked recipients — the invariant
  * settleTransferBatch enforces when the pending-transfers job settles it.
+ * After signAndSend the signature is persisted as the sole immediate write
+ * (recipients are already processing and linked), keeping the window where a
+ * submitted payment lacks its recovery signature to a single database call.
  *
  * @param params.resolved - Resolved batch request.
  * @param params.chunk - Chunk to sign and submit.
@@ -269,10 +271,13 @@ export async function executeChunk(params: {
     return;
   }
 
-  await settle({
+  await updateTransferRecord(c, {
+    transferId: transfer.id,
+    organizationId: resolved.scope.auth.organizationId,
+    projectId: resolved.projectId,
     status: "processing",
-    recipientStatus: "processing",
     signature,
+    serializedTx,
     error: null,
   });
 }

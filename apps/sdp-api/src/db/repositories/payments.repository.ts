@@ -104,6 +104,7 @@ export interface UpdatePaymentTransferInput {
   transferId: string;
   organizationId?: string;
   projectId?: string | null;
+  expectedStatus?: PaymentTransferStatus;
   status?: PaymentTransferStatus;
   signature?: string | null;
   serializedTx?: string | null;

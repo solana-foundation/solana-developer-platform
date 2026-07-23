@@ -5,7 +5,10 @@ import { type CachedApiKey, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/t
 import { address, createNoopSigner, generateKeyPairSigner, type Signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createPaymentTransferBatchesRepository } from "@/db/repositories";
+import {
+  createPaymentsRepository,
+  createPaymentTransferBatchesRepository,
+} from "@/db/repositories";
 import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
 import app from "@/index";
@@ -1428,26 +1431,24 @@ describe("payment transfer batches", () => {
     }
   });
 
-  it("leaves linked recipients for reconciliation when settlement fails after submission", async () => {
-    const createBatchesRepository =
-      batchesRepositoryPostgres.createPostgresPaymentTransferBatchesRepository;
-    const batchesSpy = vi.spyOn(
-      batchesRepositoryPostgres,
-      "createPostgresPaymentTransferBatchesRepository"
-    );
-    let linkedWriteCalls = 0;
+  it("leaves linked recipients for reconciliation when the signature persist fails after submission", async () => {
+    const createRepository = paymentsRepositoryPostgres.createPostgresPaymentsRepository;
+    const batchesSpy = vi.spyOn(paymentsRepositoryPostgres, "createPostgresPaymentsRepository");
+    let signaturePersistInjected = false;
     batchesSpy.mockImplementation((db) => {
-      const repository = createBatchesRepository(db);
+      const repository = createRepository(db);
       return {
         ...repository,
-        updateTransferRecipientsStatus: async (input) => {
-          if (input.transferId !== null) {
-            linkedWriteCalls += 1;
-            if (linkedWriteCalls === 2) {
-              throw new Error("simulated settlement write failure");
-            }
+        updateTransfer: async (input) => {
+          if (
+            !signaturePersistInjected &&
+            input.status === "processing" &&
+            input.signature !== undefined
+          ) {
+            signaturePersistInjected = true;
+            throw new Error("simulated signature persist failure");
           }
-          return repository.updateTransferRecipientsStatus(input);
+          return repository.updateTransfer(input);
         },
       };
     });
@@ -1673,6 +1674,8 @@ describe("payment transfer batches", () => {
         projectId: TEST_PROJECT.id,
         transferStatus: "confirmed",
         error: null,
+        slot: null,
+        updatedAt: new Date().toISOString(),
       }),
       repository.settleTransferBatch({
         transferId: body.data.transfers[1].id,
@@ -1680,6 +1683,8 @@ describe("payment transfer batches", () => {
         projectId: TEST_PROJECT.id,
         transferStatus: "failed",
         error: "on-chain failure",
+        slot: null,
+        updatedAt: new Date().toISOString(),
       }),
     ]);
 
@@ -1688,6 +1693,86 @@ describe("payment transfer batches", () => {
       .bind(body.data.batch.id)
       .first<{ status: string }>();
     expect(batchRow?.status).toBe("partially_failed");
+  });
+
+  it("never regresses a terminal chunk status when a delayed reconciliation run settles late", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+    createFeePaymentAdapterMock.mockReturnValueOnce({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: vi.fn(async () => FIRST_SIGNATURE as Signature),
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+    const counterpartyId = await seedCounterparty("batch_stale_settle_counterparty");
+    const accountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { batch: { id: string }; transfers: Array<{ id: string }> };
+    };
+    expect(body.data.transfers).toHaveLength(1);
+    const transferId = body.data.transfers[0].id;
+
+    const repository = createPaymentTransferBatchesRepository(env);
+    const first = await repository.settleTransferBatch({
+      transferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      transferStatus: "finalized",
+      error: null,
+      slot: 500,
+      updatedAt: new Date().toISOString(),
+    });
+    expect(first).toBe("settled");
+
+    const delayed = await repository.settleTransferBatch({
+      transferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      transferStatus: "confirmed",
+      error: null,
+      slot: 400,
+      updatedAt: new Date().toISOString(),
+    });
+    expect(delayed).toBe("already_settled");
+
+    const transferRow = await getDb(env)
+      .prepare("SELECT status, slot FROM payment_transfers WHERE id = ?")
+      .bind(transferId)
+      .first<{ status: string; slot: number | string }>();
+    expect(transferRow?.status).toBe("finalized");
+    expect(Number(transferRow?.slot)).toBe(500);
+
+    const guarded = await createPaymentsRepository(env).updateTransfer({
+      transferId,
+      status: "confirmed",
+      expectedStatus: "processing",
+      updatedAt: new Date().toISOString(),
+    });
+    expect(guarded).toBeNull();
   });
 
   it("creates a 500-recipient batch within a bounded time", async () => {

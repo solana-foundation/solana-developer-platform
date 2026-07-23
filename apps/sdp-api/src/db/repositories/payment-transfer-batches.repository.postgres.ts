@@ -729,7 +729,36 @@ export function createPostgresPaymentTransferBatchesRepository(
     },
 
     async settleTransferBatch(input: SettlePaymentTransferBatchInput) {
-      await db.transaction(async (tx) => {
+      return db.transaction(async (tx) => {
+        const claimed = await tx
+          .prepare(
+            `UPDATE payment_transfers
+                SET status = ?,
+                    slot = CASE WHEN ?::boolean THEN ? ELSE slot END,
+                    error = ?,
+                    updated_at = ?
+              WHERE id = ?
+                AND organization_id = ?
+                AND project_id IS NOT DISTINCT FROM ?
+                AND status = 'processing'
+              RETURNING id`
+          )
+          .bind(
+            input.transferStatus,
+            input.slot !== null,
+            input.slot,
+            input.error,
+            input.updatedAt,
+            input.transferId,
+            input.organizationId,
+            input.projectId
+          )
+          .all<{ id: string }>();
+
+        if (claimed.results.length === 0) {
+          return "already_settled" as const;
+        }
+
         const recipientStatus = input.transferStatus === "failed" ? "failed" : "confirmed";
         const recipients = await tx
           .prepare(
@@ -740,7 +769,7 @@ export function createPostgresPaymentTransferBatchesRepository(
               WHERE organization_id = ?
                 AND project_id = ?
                 AND transfer_id = ?
-                AND status <> 'archived'
+                AND status = 'processing'
               RETURNING *`
           )
           .bind(
@@ -761,6 +790,8 @@ export function createPostgresPaymentTransferBatchesRepository(
           organizationId: input.organizationId,
           projectId: input.projectId,
         });
+
+        return "settled" as const;
       });
     },
 
