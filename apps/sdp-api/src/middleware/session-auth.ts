@@ -34,13 +34,6 @@ export function sessionAuthMiddleware() {
       throw new AppError("UNAUTHORIZED", "Invalid or expired session");
     }
 
-    // Check expiration
-    if (new Date(cachedSession.expiresAt) < new Date()) {
-      // Clean up expired session
-      await sessionsKV.delete(`session:${sessionId}`);
-      throw new AppError("UNAUTHORIZED", "Session expired");
-    }
-
     // Set session context
     c.set("session", cachedSession);
 
@@ -64,7 +57,7 @@ export function optionalSessionAuth() {
         const sessionService = new SessionService(getDb(c.env), sessionsKV);
         const cachedSession = await sessionService.getSession(sessionId);
 
-        if (cachedSession && new Date(cachedSession.expiresAt) >= new Date()) {
+        if (cachedSession) {
           c.set("session", cachedSession);
           updateLastActivity(getDb(c.env), sessionId);
         }
