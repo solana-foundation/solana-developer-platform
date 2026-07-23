@@ -33,6 +33,8 @@ describe("OrganizationOnboardingFlow", () => {
 
     expect(markup).toContain("Set up your workspace");
     expect(markup).toContain("Step 1 of 2");
+    expect(markup).toContain("You can change your RPC provider later in Settings.");
+    expect(markup).not.toContain("You can change your custody provider later in Settings.");
     expect(markup).toContain("Alchemy");
     expect(markup).toContain("Helius");
     expect(markup).toContain("QuickNode");
@@ -55,6 +57,8 @@ describe("OrganizationOnboardingFlow", () => {
 
     expect(markup).toContain("Step 2 of 2");
     expect(markup).toContain("Choose your custody provider");
+    expect(markup).toContain("You can change your custody provider later in Settings.");
+    expect(markup).not.toContain("You can change your RPC provider later in Settings.");
     expect(markup).toContain("Privy");
     expect(markup).toContain("Coinbase CDP");
     expect(markup).toContain("Para");
