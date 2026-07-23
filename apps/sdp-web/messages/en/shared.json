@@ -146,6 +146,7 @@
     "createWallet": "Create wallet",
     "activateProvider": "Activate provider",
     "newAsset": "New asset",
+    "assetManagement": "Asset management",
     "backToOverview": "Back to overview",
     "recurringPayments": "Recurring payments",
     "recurringPayment": "Recurring payment",

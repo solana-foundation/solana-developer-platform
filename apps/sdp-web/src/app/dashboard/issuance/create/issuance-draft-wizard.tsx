@@ -109,7 +109,7 @@ function renderStep(
 function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardProps) {
   const t = useTranslations();
   const router = useDashboardRouter();
-  const { draft, currentStep, updatedAt, advance, goBack, reset, clearStoredDraft } =
+  const { draft, updateDraft, currentStep, updatedAt, advance, goBack, reset, clearStoredDraft } =
     useIssuanceDraft();
   const [submitting, setSubmitting] = useState(false);
   // Gates the Create-draft action behind a confirmation dialog, so it never
@@ -137,6 +137,16 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
   useEffect(() => {
     setAttemptedAdvance(false);
   }, [currentStep]);
+
+  // A lone signer wallet renders as a locked card, not a picker, so the user
+  // never actively "selects" it — persist it into the draft anyway so it's sent.
+  // Without this, authority-valued settings (e.g. permanent delegate) fail with a
+  // server-side "signing wallet is required" for the wallet that's right on screen.
+  useEffect(() => {
+    if (signerWallets.length === 1 && !draft.signingWalletId) {
+      updateDraft({ signingWalletId: signerWallets[0].walletId });
+    }
+  }, [signerWallets, draft.signingWalletId, updateDraft]);
 
   // On the Asset-details form, Continue stays enabled until the user attempts to
   // advance with validation errors — then it locks (and the fields highlight)

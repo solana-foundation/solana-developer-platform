@@ -103,4 +103,19 @@ describe("AdvancedSettingsEditor", () => {
     const readOnly = renderWithI18n(<AdvancedSettingsEditor {...baseProps} settingsReadOnly />);
     expect(readOnly).not.toContain("Start from a scenario");
   });
+
+  it("hides unselected on-chain options once deployed, keeping required ones", () => {
+    // tokenized_security locks freeze/reclaim and marks scaledUiAmount recommended.
+    const securityProps = { ...baseProps, category: "tokenized_security" as const, type: "equity" };
+
+    // Editable draft: the recommended-but-unselected option is still offered.
+    const editable = renderWithI18n(<AdvancedSettingsEditor {...securityProps} />);
+    expect(editable).toContain("Scaled display amount");
+    expect(editable).toContain("Freeze transfers");
+
+    // Deployed (read-only): the unselected option is dropped; required stays.
+    const deployed = renderWithI18n(<AdvancedSettingsEditor {...securityProps} settingsReadOnly />);
+    expect(deployed).not.toContain("Scaled display amount");
+    expect(deployed).toContain("Freeze transfers");
+  });
 });

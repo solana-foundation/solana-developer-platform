@@ -6,6 +6,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { useTranslations } from "@/i18n/provider";
 import { TokenValidationMessage } from "./token-validation-message";
+import { useInlineValidationMessage } from "./use-inline-validation-message";
 
 interface TokenWalletAddressFieldProps {
   label: string;
@@ -17,6 +18,9 @@ interface TokenWalletAddressFieldProps {
   title?: string;
   placeholder?: string;
   error?: string | null;
+  // Hides the "Type to filter…" helper line under the input. The asset-profiles
+  // surfaces opt in to a cleaner, hint-free form; the legacy card keeps it.
+  hideFilterHint?: boolean;
 }
 
 export function TokenWalletAddressField({
@@ -29,9 +33,13 @@ export function TokenWalletAddressField({
   title,
   placeholder,
   error,
+  hideFilterHint = false,
 }: TokenWalletAddressFieldProps) {
   const t = useTranslations();
   const inputId = useId();
+  const errorId = useId();
+  const { message: nativeError, onInvalid, revalidate } = useInlineValidationMessage(label);
+  const hasError = Boolean(error) || nativeError !== null;
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const availableWallets = walletOptions.filter((wallet) => wallet.publicKey.trim());
@@ -83,7 +91,9 @@ export function TokenWalletAddressField({
           title={title}
           placeholder={placeholder ?? t("DashboardIssuance.wallet.chooseOrPaste")}
           autoComplete="off"
-          aria-invalid={Boolean(error)}
+          aria-invalid={hasError}
+          aria-describedby={hasError ? errorId : undefined}
+          onInvalid={onInvalid}
           onFocus={() => {
             if (availableWallets.length > 0) {
               setIsOpen(true);
@@ -91,6 +101,7 @@ export function TokenWalletAddressField({
           }}
           onChange={(event) => {
             onChange(event.currentTarget.value);
+            revalidate(event.currentTarget);
             if (availableWallets.length > 0) {
               setIsOpen(true);
             }
@@ -143,10 +154,10 @@ export function TokenWalletAddressField({
           </div>
         ) : null}
       </div>
-      {availableWallets.length > 0 ? (
+      {!hideFilterHint && availableWallets.length > 0 ? (
         <p className="text-sm text-secondary">{t("DashboardIssuance.wallet.filterHint")}</p>
       ) : null}
-      <TokenValidationMessage message={error ?? null} />
+      <TokenValidationMessage id={errorId} message={error ?? nativeError} />
     </div>
   );
 }

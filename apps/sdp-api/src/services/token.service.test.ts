@@ -4,6 +4,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import { AppError } from "@/lib/errors";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT, TEST_PROJECT_API_KEY } from "@/test/fixtures/tokens";
@@ -159,5 +160,84 @@ describe("TokenService", () => {
     expect(storedRows.results[0]?.id).toBe(firstFreeze.id);
     expect(storedRows.results[0]?.reason).toBe("Frozen again");
     expect(storedRows.results[0]?.unfrozen_at).toBeNull();
+  });
+
+  describe("updateToken undeployed guard", () => {
+    async function insertToken(
+      id: string,
+      overrides: { mintAddress?: string | null; status?: string }
+    ): Promise<void> {
+      await db
+        .prepare(
+          `INSERT INTO issued_tokens (
+            id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+            name, symbol, decimals, total_supply_cached, is_mintable, freeze_authority_enabled,
+            allowlist_enabled, status, created_by
+          ) VALUES (?, ?, ?, ?, NULL, NULL, 'Guarded Token', 'GRD', 9, '0', 1, 1, 0, ?, ?)`
+        )
+        .bind(
+          id,
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          overrides.mintAddress ?? null,
+          overrides.status ?? "pending",
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+    }
+
+    it("applies symbol/decimals changes while the token is an undeployed draft", async () => {
+      await insertToken("tok_guard_pending", { status: "pending", mintAddress: null });
+
+      const updated = await tokenService.updateToken("tok_guard_pending", {
+        symbol: "RENAMED",
+        decimals: 2,
+      });
+
+      expect(updated.symbol).toBe("RENAMED");
+      expect(updated.decimals).toBe(2);
+    });
+
+    it("refuses symbol/decimals changes once the token is deployed (optimistic lock)", async () => {
+      // Simulates a deploy landing between the handler's guard read and this
+      // write: the row is active with a mint by the time the UPDATE runs.
+      await insertToken("tok_guard_deployed", {
+        status: "active",
+        mintAddress: "Dep1oyed11111111111111111111111111111111111",
+      });
+
+      await expect(
+        tokenService.updateToken("tok_guard_deployed", { symbol: "RENAMED", decimals: 2 })
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+
+      const row = await db
+        .prepare("SELECT symbol, decimals FROM issued_tokens WHERE id = ?")
+        .bind("tok_guard_deployed")
+        .first<{ symbol: string; decimals: number }>();
+      expect(row?.symbol).toBe("GRD");
+      expect(row?.decimals).toBe(9);
+    });
+
+    it("still allows metadata (name) changes on a deployed token", async () => {
+      await insertToken("tok_guard_metadata", {
+        status: "active",
+        mintAddress: "Metadata111111111111111111111111111111111111",
+      });
+
+      const updated = await tokenService.updateToken("tok_guard_metadata", {
+        name: "New Display Name",
+      });
+
+      expect(updated.name).toBe("New Display Name");
+    });
+
+    it("throws a plain not-found error for a missing token", async () => {
+      await expect(
+        tokenService.updateToken("tok_does_not_exist", { name: "Nope" })
+      ).rejects.toThrow("TOKEN_NOT_FOUND");
+      await expect(
+        tokenService.updateToken("tok_does_not_exist", { name: "Nope" })
+      ).rejects.not.toBeInstanceOf(AppError);
+    });
   });
 });
