@@ -1,13 +1,14 @@
 "use client";
 
 import type { AssetProfile, Token } from "@sdp/types";
-import { ArrowUpRight, Copy, Play, Rocket } from "lucide-react";
+import { ArrowUpRight, Copy, Play, Rocket, Terminal } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { getCategoryPresentation, getSubTypePresentation } from "../../create/asset-taxonomy";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
+import { buildIssuancePlaygroundHref } from "./playground-links";
 
 // SDP design-system badge tokens (sdp-design-system.css): .badge-gray,
 // .badge-green, .badge-amber, .badge-red — tinted fill + semantic text, no border.
@@ -141,6 +142,13 @@ export function AssetProfileHeader({
       </div>
 
       <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <Button variant="outline" asChild>
+          <Link href={buildIssuancePlaygroundHref(token.id)}>
+            <Terminal className="h-4 w-4" />
+            {t("DashboardIssuance.playground.viewApiContext")}
+          </Link>
+        </Button>
+
         {explorerHref ? (
           <Button variant="outline" asChild>
             <Link href={explorerHref} target="_blank" rel="noopener noreferrer">

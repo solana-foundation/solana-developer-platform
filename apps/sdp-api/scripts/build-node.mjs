@@ -17,6 +17,8 @@ await esbuild.build({
     server: "src/server.ts",
     job: "src/job.ts",
     migrate: "scripts/migrate-postgres.mjs",
+    // custody-backfill.js re-encrypts legacy custody rows to KMS envelopes from the prebuilt image.
+    "custody-backfill": "scripts/migrate-custody-encryption.ts",
     // configure.js generates a self-hosted .env in the terminal from the prebuilt image.
     configure: "scripts/configure.ts",
   },

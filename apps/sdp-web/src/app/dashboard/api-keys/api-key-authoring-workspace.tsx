@@ -181,49 +181,29 @@ function WizardProgress({ currentStep }: { currentStep: ApiKeyAuthoringStep }) {
   ];
 
   return (
-    <div>
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1.5" aria-hidden="true">
-          {API_KEY_AUTHORING_STEPS.map((step, index) => (
-            <span
-              key={step}
-              className={cn(
-                "h-1.5 rounded-full transition-all",
-                index === currentIndex
-                  ? "w-4 bg-primary"
-                  : index < currentIndex
-                    ? "w-1.5 bg-primary"
-                    : "w-1.5 bg-fill-strong"
-              )}
-            />
-          ))}
-        </div>
-        <span className="text-xs text-muted">
-          {t("DashboardCustody.stepOf", {
-            current: currentIndex + 1,
-            total: API_KEY_AUTHORING_STEPS.length,
-          })}
-        </span>
-      </div>
-      <ol
-        className="mt-5 grid grid-cols-4 border-b border-border-default"
-        aria-label={t("DashboardCustody.apiKeyAuthoringProgress")}
-      >
-        {labels.map((label, index) => (
-          <li
-            key={label}
-            aria-current={index === currentIndex ? "step" : undefined}
+    <div className="flex items-center gap-3">
+      <div className="flex items-center gap-1.5" aria-hidden="true">
+        {API_KEY_AUTHORING_STEPS.map((step, index) => (
+          <span
+            key={step}
             className={cn(
-              "min-w-0 border-b-2 px-2 pb-2 text-center text-xs sm:text-sm",
+              "h-1.5 rounded-full transition-all",
               index === currentIndex
-                ? "border-primary font-medium text-primary"
-                : "border-transparent text-tertiary"
+                ? "w-4 bg-primary"
+                : index < currentIndex
+                  ? "w-1.5 bg-primary"
+                  : "w-1.5 bg-fill-strong"
             )}
-          >
-            {label}
-          </li>
+          />
         ))}
-      </ol>
+      </div>
+      <span className="text-xs text-muted">
+        {t("DashboardCustody.stepOf", {
+          current: currentIndex + 1,
+          total: API_KEY_AUTHORING_STEPS.length,
+        })}
+        <span className="sr-only">: {labels[currentIndex]}</span>
+      </span>
     </div>
   );
 }
@@ -636,11 +616,15 @@ function WalletPolicyStep({
   draft,
   wallets,
   hadExistingRestrictions,
+  walletSelectionTouched,
+  onWalletSelectionTouched,
   update,
 }: {
   draft: ApiKeyAuthoringDraft;
   wallets: ApiKeyAuthoringWallet[];
   hadExistingRestrictions: boolean;
+  walletSelectionTouched: boolean;
+  onWalletSelectionTouched: () => void;
   update: (patch: Partial<ApiKeyAuthoringDraft>) => void;
 }) {
   const t = useTranslations();
@@ -657,6 +641,7 @@ function WalletPolicyStep({
       .includes(query);
   });
   const toggleWallet = (walletId: string) => {
+    onWalletSelectionTouched();
     const selectedWalletIds = draft.selectedWalletIds.includes(walletId)
       ? draft.selectedWalletIds.filter((item) => item !== walletId)
       : [...draft.selectedWalletIds, walletId];
@@ -702,7 +687,10 @@ function WalletPolicyStep({
                 type="radio"
                 name="wallet-scope"
                 checked={draft.walletScope === "selected"}
-                onChange={() => update({ walletScope: "selected" })}
+                onChange={() => {
+                  onWalletSelectionTouched();
+                  update({ walletScope: "selected" });
+                }}
                 className="mt-1"
               />
               <span>
@@ -752,7 +740,7 @@ function WalletPolicyStep({
                   </p>
                 )}
               </div>
-              {selectedWallets.length === 0 ? (
+              {walletSelectionTouched && selectedWallets.length === 0 ? (
                 <p className="mt-2 text-xs text-destructive">
                   {t("DashboardCustody.apiKeyWalletRequired")}
                 </p>
@@ -1133,6 +1121,7 @@ export function ApiKeyAuthoringWorkspace({
   const { sdpEnvironment } = useDashboardWorkspace();
   const [currentStep, setCurrentStep] = useState<ApiKeyAuthoringStep>("details");
   const [draft, setDraft] = useState(() => draftFromInitialKey(initialKey));
+  const [walletSelectionTouched, setWalletSelectionTouched] = useState(false);
   const [dialogConfirmation, setDialogConfirmation] = useState<BindingConfirmation | null>(null);
   const [isPending, startTransition] = useTransition();
   const initialState = initialKey
@@ -1235,6 +1224,8 @@ export function ApiKeyAuthoringWorkspace({
                 draft={draft}
                 wallets={wallets}
                 hadExistingRestrictions={hadExistingRestrictions}
+                walletSelectionTouched={walletSelectionTouched}
+                onWalletSelectionTouched={() => setWalletSelectionTouched(true)}
                 update={update}
               />
             ) : null}

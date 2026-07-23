@@ -1,0 +1,114 @@
+.stage {
+  position: relative;
+  width: 13rem;
+  height: 10rem;
+  border: 1px solid var(--border-l);
+  border-radius: 2rem;
+  background: radial-gradient(circle at 50% 50%, var(--t3), transparent 58%), var(--surface-sunken);
+  overflow: hidden;
+}
+
+.stage::before,
+.stage::after {
+  position: absolute;
+  content: "";
+  top: 50%;
+  left: 50%;
+  width: 10.25rem;
+  height: 5.5rem;
+  border: 1px solid var(--border-l);
+  border-radius: 50%;
+  opacity: 0.7;
+  transform: translate(-50%, -50%) rotate(-12deg);
+}
+
+.stage::after {
+  width: 8rem;
+  height: 4rem;
+  border-color: var(--border-xl);
+  opacity: 0.55;
+  transform: translate(-50%, -50%) rotate(18deg);
+}
+
+.orbit {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 50%;
+  background: var(--emph-m);
+  box-shadow:
+    -4.6rem -1.6rem 0 -1px var(--emph-l),
+    4.4rem 1.5rem 0 -1px var(--emph-l);
+  opacity: 0.45;
+  transform: translate(-50%, -50%);
+}
+
+.traveler {
+  position: absolute;
+  z-index: 1;
+  top: calc(50% - 1.7rem);
+  left: calc(50% - 1.9rem);
+  width: 3.8rem;
+  height: 3.4rem;
+  animation: logo-drift 8s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  will-change: transform;
+}
+
+.logoPlate {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  border: 1px solid var(--border-m);
+  border-radius: 1rem;
+  background: var(--surface-raised);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  animation: logo-float 2.6s ease-in-out infinite;
+}
+
+.logo {
+  width: 2.6rem;
+  height: auto;
+}
+
+@keyframes logo-drift {
+  0%,
+  100% {
+    transform: translate3d(-4.1rem, -0.8rem, 0) rotate(-5deg);
+  }
+  22% {
+    transform: translate3d(-1.5rem, -2.5rem, 0) rotate(4deg);
+  }
+  46% {
+    transform: translate3d(4rem, -1rem, 0) rotate(-2deg);
+  }
+  70% {
+    transform: translate3d(2.25rem, 2.35rem, 0) rotate(5deg);
+  }
+  88% {
+    transform: translate3d(-2.8rem, 1.95rem, 0) rotate(-4deg);
+  }
+}
+
+@keyframes logo-float {
+  0%,
+  100% {
+    transform: translateY(-0.12rem);
+  }
+  50% {
+    transform: translateY(0.12rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .traveler,
+  .logoPlate {
+    animation: none;
+  }
+
+  .traveler {
+    transform: translate3d(0, 0, 0);
+  }
+}

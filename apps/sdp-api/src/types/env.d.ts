@@ -50,6 +50,9 @@ export interface Env {
   API_KEY_PEPPER?: string;
   CREDENTIAL_FINGERPRINT_PEPPER?: string;
   CUSTODY_ENCRYPTION_KEY?: string; // For encrypting org private keys in DB
+  CUSTODY_KMS_KEY_NAME?: string;
+  CUSTODY_KMS_API_BASE_URL?: string;
+  CUSTODY_KMS_METADATA_TOKEN_URL?: string;
   SENTRY_DSN?: string;
   SENTRY_TRACES_SAMPLE_RATE?: string;
 

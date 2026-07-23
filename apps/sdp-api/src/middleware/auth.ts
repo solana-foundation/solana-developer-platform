@@ -20,11 +20,14 @@ import {
   parsePostgresJson,
   parsePostgresJsonOr,
 } from "@/db/postgres-utils";
+import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { AppError } from "@/lib/errors";
 import type { KVStore } from "@/runtime/kv";
 import type { Env } from "@/types/env";
+import { enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
 
 const KV_TTL_SECONDS = 3600; // 1 hour cache
+const INVALID_KEY_CACHE_TTL_SECONDS = 30;
 const NODE_LAST_USED_WRITE_INTERVAL_MS = 5 * 60_000;
 
 interface LastUsedWriteState {
@@ -51,27 +54,6 @@ interface ApiKeyContext {
   walletBindings: ApiKeyWalletBinding[];
 }
 
-/**
- * Extract API key from Authorization header
- */
-function extractApiKey(c: Context<{ Bindings: Env }>): string | null {
-  const authHeader = c.req.header("Authorization");
-  if (!authHeader) {
-    return null;
-  }
-
-  // Support both "Bearer sk_xxx" and just "sk_xxx"
-  if (authHeader.startsWith("Bearer ")) {
-    return authHeader.slice(7);
-  }
-
-  if (authHeader.startsWith("sk_")) {
-    return authHeader;
-  }
-
-  return null;
-}
-
 function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
   const authHeader = c.req.header("Authorization");
   if (!authHeader) {
@@ -85,25 +67,32 @@ function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
   return authHeader.slice(7);
 }
 
-function looksLikeApiKey(token: string): boolean {
-  return token.startsWith("sk_");
-}
-
 function looksLikeJwt(token: string): boolean {
   return token.split(".").length === 3;
 }
 
-/**
- * Look up API key in KV cache
- */
+/** Look up API key in KV cache */
 async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | null> {
   const cached = await kv.get<CachedApiKey>(`key:${keyHash}`, "json");
   return cached;
 }
 
-/**
- * Look up API key in Postgres and cache to KV
- */
+async function isKnownInvalidKey(kv: KVStore, keyHash: string): Promise<boolean> {
+  const marker = await kv.get<{ invalid: true }>(`invalid:${keyHash}`, "json");
+  return marker?.invalid === true;
+}
+
+async function cacheInvalidKey(kv: KVStore, keyHash: string): Promise<void> {
+  try {
+    await kv.put(`invalid:${keyHash}`, JSON.stringify({ invalid: true }), {
+      expirationTtl: INVALID_KEY_CACHE_TTL_SECONDS,
+    });
+  } catch (err) {
+    console.error("Failed to cache invalid api key:", err);
+  }
+}
+
+/** Look up API key in Postgres and cache to KV */
 async function getFromDatabaseAndCache(
   db: DatabaseClient,
   kv: KVStore,
@@ -349,7 +338,13 @@ export function authMiddleware() {
     const apiKeysKV = c.var.kv.apiKeys;
     let cachedKey = await getFromKV(apiKeysKV, keyHash);
     if (!cachedKey) {
+      if (await isKnownInvalidKey(apiKeysKV, keyHash)) {
+        throw new AppError("INVALID_API_KEY", "Invalid API key");
+      }
       cachedKey = await getFromDatabaseAndCache(getDb(c.env), apiKeysKV, keyHash);
+      if (!cachedKey) {
+        await cacheInvalidKey(apiKeysKV, keyHash);
+      }
     }
 
     if (!cachedKey) {
@@ -369,6 +364,8 @@ export function authMiddleware() {
     if (cachedKey.expiresAt && new Date(cachedKey.expiresAt) < new Date()) {
       throw new AppError("EXPIRED_API_KEY");
     }
+
+    await enforceRateLimit(c, cachedKey.id, RATE_LIMIT_TIERS[cachedKey.rateLimitTier]);
 
     // Set auth context
     const normalizedWalletBindings = normalizeWalletBindings(cachedKey);
@@ -436,12 +433,15 @@ export function optionalAuth() {
     const apiKey = extractApiKey(c);
 
     if (apiKey && looksLikeApiKey(apiKey)) {
-      // Reuse the main auth logic but catch errors
+      // Reuse the main auth logic; swallow auth failures (the key is optional)
+      // but never rate limiting — a limited key must not proceed as anonymous.
       try {
         const authMw = authMiddleware();
         await authMw(c, async () => {});
-      } catch {
-        // Ignore auth errors for optional auth
+      } catch (error) {
+        if (error instanceof AppError && error.code === "RATE_LIMITED") {
+          throw error;
+        }
       }
     }
 

@@ -661,13 +661,16 @@ export async function ensureLinkedOrg(
       const userId = await ensureLocalUserIdentity(client, identity);
 
       await client.query(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES ($1, $2, $3, $4, 'active')
+        `INSERT INTO organizations
+           (id, name, slug, tier, status, onboarding_completed_at, onboarding_version)
+         VALUES ($1, $2, $3, $4, 'active', sdp_datetime_now(), 1)
          ON CONFLICT (id) DO UPDATE SET
            name = EXCLUDED.name,
            slug = EXCLUDED.slug,
            tier = EXCLUDED.tier,
            status = EXCLUDED.status,
+           onboarding_completed_at = sdp_datetime_now(),
+           onboarding_version = 1,
            updated_at = sdp_datetime_now()`,
         [organization.id, organization.name, organization.slug, tier]
       );

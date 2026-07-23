@@ -1,5 +1,5 @@
 import { getDeploymentMode } from "@/lib/runtime-env";
-import { createEncryptionService, type EncryptionService } from "@/services/encryption.service";
+import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type { Env } from "@/types/env";
 
 export type CredentialSecretStorageBackend = "gcp_secret_manager" | "encrypted_db" | "runtime_env";
@@ -56,14 +56,15 @@ export class CredentialSecretStoreError extends Error {
 export class EncryptedDbCredentialSecretStore implements CredentialSecretStore {
   readonly storageBackend = "encrypted_db" as const;
 
-  constructor(private readonly encryption: EncryptionService) {}
+  constructor(private readonly encryption: CustodyCipher) {}
 
   async write(params: WriteCredentialSecretParams): Promise<StoredCredentialSecret> {
     let encryptedSecretPayload: string;
     try {
-      encryptedSecretPayload = (
-        await this.encryption.encrypt(params.orgId, JSON.stringify(params.payload))
-      ).ciphertext;
+      encryptedSecretPayload = await this.encryption.encrypt(
+        params.orgId,
+        JSON.stringify(params.payload)
+      );
     } catch (error) {
       if (error instanceof CredentialSecretStoreError) {
         throw error;
@@ -448,9 +449,8 @@ export function createCredentialSecretStore(env: Env): CredentialSecretStore {
     return new RuntimeEnvCredentialSecretStore(env);
   }
 
-  return new EncryptedDbCredentialSecretStore(
-    createEncryptionService(requireEnv(env.CUSTODY_ENCRYPTION_KEY, "CUSTODY_ENCRYPTION_KEY"))
-  );
+  requireEnv(env.CUSTODY_ENCRYPTION_KEY, "CUSTODY_ENCRYPTION_KEY");
+  return new EncryptedDbCredentialSecretStore(createCustodyCipher(env));
 }
 
 export function resolveCredentialSecretStoreBackend(env: Env): CredentialSecretStorageBackend {

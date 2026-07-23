@@ -72,6 +72,12 @@ test("empty optional fields are omitted so runtime fallbacks apply", () => {
   assert.doesNotMatch(env, /^FEE_PAYER_PRIVATE_KEY=/m);
 });
 
+test("Cloud KMS custody key is emitted when configured", () => {
+  const keyName = "projects/sdp/locations/global/keyRings/custody/cryptoKeys/envelope";
+  const env = generateEnv({ ...defaultValues(), CUSTODY_KMS_KEY_NAME: keyName });
+  assert.match(env, new RegExp(`^CUSTODY_KMS_KEY_NAME=${keyName}$`, "m"));
+});
+
 test("a value with surrounding whitespace is emitted trimmed", () => {
   const env = generateEnv({ ...defaultValues(), CLERK_SECRET_KEY: "  sk_test_x  " });
   assert.match(env, /^CLERK_SECRET_KEY=sk_test_x$/m);

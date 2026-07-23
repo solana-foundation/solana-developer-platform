@@ -552,6 +552,14 @@ export const FIELDS: EnvField[] = [
     label: "Custody encryption key",
     required: true,
   },
+  {
+    key: "CUSTODY_KMS_KEY_NAME",
+    section: "secrets",
+    kind: "text",
+    label: "Cloud KMS key name",
+    pattern: /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+$/,
+    help: "Optional Cloud KMS key used for custody envelope encryption. Keep the custody encryption key configured so existing legacy rows remain readable.",
+  },
 
   // Advanced (defaulted, collapsed)
   {

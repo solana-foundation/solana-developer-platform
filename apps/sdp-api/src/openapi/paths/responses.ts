@@ -46,6 +46,7 @@ import {
   listSessionsResponseSchema,
   listTemplatesResponseSchema,
   offrampCurrenciesResponseSchema,
+  onboardingCompleteResponseSchema,
   onboardingStatusResponseSchema,
   onrampCurrenciesResponseSchema,
   onrampQuoteResponseSchema,
@@ -167,6 +168,22 @@ export const tokenAllowlistResponse = successResponseSchema(tokenAllowlistRespon
 export const frozenAccountResponse = successResponseSchema(frozenAccountResponseSchema);
 export const frozenAccountListResponse = paginatedResponseSchema(frozenAccountSchema);
 
+const assetAuditEventSchema = z
+  .object({
+    id: z.string(),
+    action: z.string().openapi({ example: "freeze" }),
+    resourceType: z.string().openapi({ example: "frozen_account" }),
+    resourceId: z.string().nullable(),
+    actorType: z.enum(["user", "api_key", "system"]).openapi({ example: "user" }),
+    actorLabel: z.string().openapi({ example: "Jordan Lee" }),
+    status: z.enum(["success", "failure"]).openapi({ example: "success" }),
+    createdAt: z.string().openapi({ example: "2026-07-19T12:00:00.000Z" }),
+    metadata: z.record(z.string(), z.unknown()).nullable(),
+  })
+  .openapi({ description: "A single audit event scoped to an asset." });
+
+export const assetAuditListResponse = paginatedResponseSchema(assetAuditEventSchema);
+
 export const prepareDeployResponse = successResponseSchema(prepareDeployResponseSchema);
 export const prepareDeployMetadataResponse = successResponseSchema(
   prepareDeployMetadataResponseSchema
@@ -220,6 +237,7 @@ export const tokenTemplateResponse = successResponseSchema(tokenTemplateResponse
 export const listTemplatesResponse = successResponseSchema(listTemplatesResponseSchema);
 
 export const onboardingStatusResponse = successResponseSchema(onboardingStatusResponseSchema);
+export const onboardingCompleteResponse = successResponseSchema(onboardingCompleteResponseSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
 export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSchema);
 export const policyControlInventoryResponse = successResponseSchema(
