@@ -429,6 +429,25 @@ describe("LightsparkRampClient", () => {
     ]);
   });
 
+  it("treats a replayed verification for an approved customer as approved", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: "INVALID_INPUT",
+          reason: "Customer KYC status is already APPROVED",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    const client = new LightsparkRampClient();
+    const verification = await client.submitVerification(LIGHTSPARK_CONTEXT, {
+      customerId: "Customer:cus_123",
+    });
+
+    expect(verification).toEqual({ verificationStatus: "APPROVED", errors: [] });
+  });
+
   it("derives content-addressed payout account keys", async () => {
     const key = await lightsparkPayoutAccountKey("USD", {
       paymentRails: "ACH",

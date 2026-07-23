@@ -609,17 +609,32 @@ export class LightsparkRampClient implements RampProvider {
    * Submits a customer for Grid KYC/KYB verification. Business customers are
    * created UNVERIFIED and cannot quote in either direction until approved;
    * sandbox approves synchronously, production returns the outstanding
-   * requirements in `errors`.
+   * requirements in `errors`. Grid rejects a replayed submission for an
+   * already-approved customer with 400 "Customer KYC status is already
+   * APPROVED"; we normalize that to an approved result so concurrent or
+   * retried provisioning converges instead of surfacing the rejection.
    */
   async submitVerification(
     { env, mode }: RampRuntimeContext,
     input: { customerId: string }
   ): Promise<LightsparkVerification> {
     const config = readLightsparkConfig(env, mode);
-    return this.request<LightsparkVerification, { customerId: string }>(config, "verifications", {
-      method: "POST",
-      body: { customerId: input.customerId },
-    });
+    try {
+      return await this.request<LightsparkVerification, { customerId: string }>(
+        config,
+        "verifications",
+        { method: "POST", body: { customerId: input.customerId } }
+      );
+    } catch (error) {
+      if (
+        error instanceof SdpPaymentsError &&
+        error.code === "BAD_REQUEST" &&
+        error.message.includes("already APPROVED")
+      ) {
+        return { verificationStatus: "APPROVED", errors: [] };
+      }
+      throw error;
+    }
   }
 
   /** Looks up an existing Grid customer by the platform-side id we assigned. */
