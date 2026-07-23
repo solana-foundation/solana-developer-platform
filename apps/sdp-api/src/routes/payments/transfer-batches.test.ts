@@ -2,10 +2,17 @@ import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { type CachedApiKey, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
-import { address, createNoopSigner, generateKeyPairSigner } from "@solana/kit";
+import { address, createNoopSigner, generateKeyPairSigner, type Signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import {
+  createPaymentsRepository,
+  createPaymentTransferBatchesRepository,
+} from "@/db/repositories";
+import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
+import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
 import app from "@/index";
+import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
@@ -16,6 +23,7 @@ const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
 const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
+const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
 const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
 
@@ -218,12 +226,26 @@ async function seedCounterparty(externalId: string): Promise<string> {
   return id;
 }
 
-async function seedCryptoWalletCounterpartyAccount(params: {
-  counterpartyId: string;
-  walletAddress: string;
-}): Promise<string> {
-  const id = `counterparty_account_${crypto.randomUUID()}`;
+async function seedCryptoWalletCounterpartyAccounts(
+  counterpartyId: string,
+  walletAddresses: string[]
+): Promise<string[]> {
   const now = new Date().toISOString();
+  const ids = walletAddresses.map(() => `counterparty_account_${crypto.randomUUID()}`);
+  const placeholders = walletAddresses.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+  const values = walletAddresses.flatMap((walletAddress, index) => [
+    ids[index],
+    TEST_ORG.id,
+    TEST_PROJECT.id,
+    counterpartyId,
+    "crypto_wallet",
+    "Batch payment wallet",
+    JSON.stringify({ network: "solana", address: walletAddress }),
+    JSON.stringify({}),
+    "active",
+    now,
+    now,
+  ]);
 
   await getDb(env)
     .prepare(
@@ -239,23 +261,21 @@ async function seedCryptoWalletCounterpartyAccount(params: {
          status,
          created_at,
          updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES ${placeholders}`
     )
-    .bind(
-      id,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
-      params.counterpartyId,
-      "crypto_wallet",
-      "Batch payment wallet",
-      JSON.stringify({ network: "solana", address: params.walletAddress }),
-      JSON.stringify({}),
-      "active",
-      now,
-      now
-    )
+    .bind(...values)
     .run();
 
+  return ids;
+}
+
+async function seedCryptoWalletCounterpartyAccount(params: {
+  counterpartyId: string;
+  walletAddress: string;
+}): Promise<string> {
+  const [id] = await seedCryptoWalletCounterpartyAccounts(params.counterpartyId, [
+    params.walletAddress,
+  ]);
   return id;
 }
 
@@ -488,22 +508,23 @@ describe("payment transfer batches", () => {
       };
     };
     expect(body.data.batch).toMatchObject({
-      status: "confirmed",
+      status: "processing",
       externalId: "batch-create-001",
       totalAmount: "0.3",
       recipientCount: 2,
       transactionCount: 2,
     });
     expect(body.data.recipients).toHaveLength(2);
-    expect(body.data.recipients.every((recipient) => recipient.status === "confirmed")).toBe(true);
+    expect(body.data.recipients.every((recipient) => recipient.status === "processing")).toBe(true);
     expect(body.data.recipients.every((recipient) => Boolean(recipient.transferId))).toBe(true);
     expect(body.data.transfers).toHaveLength(2);
-    expect(body.data.transfers.map((transfer) => transfer.signature)).toEqual([
-      FIRST_SIGNATURE,
-      SECOND_SIGNATURE,
-    ]);
+    expect(body.data.transfers.map((transfer) => transfer.signature).sort()).toEqual(
+      [FIRST_SIGNATURE, SECOND_SIGNATURE].sort()
+    );
     expect(body.data.transfers.every((transfer) => transfer.type === "transfer_batch")).toBe(true);
+    expect(body.data.transfers.every((transfer) => transfer.status === "processing")).toBe(true);
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(confirmTransactionMock).not.toHaveBeenCalled();
 
     const batchRow = await getDb(env)
       .prepare(
@@ -519,7 +540,7 @@ describe("payment transfer batches", () => {
         transaction_count: number;
       }>();
     expect(batchRow).toMatchObject({
-      status: "confirmed",
+      status: "processing",
       total_amount: "0.3",
       recipient_count: 2,
       transaction_count: 2,
@@ -535,7 +556,9 @@ describe("payment transfer batches", () => {
       .bind(body.data.batch.id)
       .all<{ status: string; transfer_id: string | null }>();
     expect(recipientRows.results).toHaveLength(2);
-    expect(recipientRows.results.every((recipient) => recipient.status === "confirmed")).toBe(true);
+    expect(recipientRows.results.every((recipient) => recipient.status === "processing")).toBe(
+      true
+    );
     expect(recipientRows.results.every((recipient) => Boolean(recipient.transfer_id))).toBe(true);
 
     const transferRows = await getDb(env)
@@ -547,7 +570,42 @@ describe("payment transfer batches", () => {
       )
       .all<{ type: string; status: string; signature: string | null }>();
     expect(transferRows.results).toHaveLength(2);
-    expect(transferRows.results.every((transfer) => transfer.status === "confirmed")).toBe(true);
+    expect(transferRows.results.every((transfer) => transfer.status === "processing")).toBe(true);
+
+    getSignatureStatusesMock.mockResolvedValueOnce([
+      {
+        slot: 101n,
+        confirmations: 1n,
+        confirmationStatus: "confirmed",
+        err: null,
+      },
+      {
+        slot: 102n,
+        confirmations: 0n,
+        confirmationStatus: "confirmed",
+        err: { InstructionError: [0, "InsufficientFunds"] },
+      },
+    ]);
+    await trackPendingTransfers(env);
+
+    const settledBatch = await getDb(env)
+      .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
+      .bind(body.data.batch.id)
+      .first<{ status: string }>();
+    const settledRecipients = await getDb(env)
+      .prepare(
+        `SELECT status
+           FROM payment_transfer_recipients
+          WHERE batch_id = ?
+          ORDER BY status ASC`
+      )
+      .bind(body.data.batch.id)
+      .all<{ status: string }>();
+    expect(settledBatch?.status).toBe("partially_failed");
+    expect(settledRecipients.results.map((recipient) => recipient.status).sort()).toEqual([
+      "confirmed",
+      "failed",
+    ]);
 
     const detailRes = await app.request(
       `/v1/payments/transfer-batches/${body.data.batch.id}`,
@@ -934,27 +992,45 @@ describe("payment transfer batches", () => {
       };
     };
     expect(body.data.batch).toMatchObject({
-      status: "confirmed",
+      status: "processing",
       token: expectedMint,
       totalAmount: "1.25",
     });
     expect(body.data.recipients).toMatchObject([
       {
-        status: "confirmed",
+        status: "processing",
         destination: TEST_SOLANA_ADDRESSES.wallet2,
       },
     ]);
     expect(body.data.transfers).toMatchObject([
       {
         type: "transfer_batch",
-        status: "confirmed",
+        status: "processing",
         signature: FIRST_SIGNATURE,
       },
     ]);
     expect(signAndSendMock).toHaveBeenCalledTimes(1);
+    getSignatureStatusesMock.mockResolvedValueOnce([
+      {
+        slot: 103n,
+        confirmations: 1n,
+        confirmationStatus: "confirmed",
+        err: null,
+      },
+    ]);
+    await trackPendingTransfers(env);
+    const settledBatch = await getDb(env)
+      .prepare(
+        `SELECT status
+           FROM payment_transfer_batches
+          ORDER BY created_at DESC
+          LIMIT 1`
+      )
+      .first<{ status: string }>();
+    expect(settledBatch?.status).toBe("confirmed");
   });
 
-  it("keeps a chunk processing when confirmation times out (tx may still land)", async () => {
+  it("returns a submitted chunk as processing without confirming in-request", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
@@ -966,9 +1042,6 @@ describe("payment transfer batches", () => {
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
-    confirmTransactionMock.mockRejectedValueOnce(
-      new Error(`Transaction ${FIRST_SIGNATURE} confirmation timed out`)
-    );
 
     const counterpartyId = await seedCounterparty("batch_timeout_counterparty");
     const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -997,7 +1070,7 @@ describe("payment transfer batches", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       data: {
-        batch: { status: string };
+        batch: { id: string; status: string };
         recipients: Array<{ status: string }>;
         transfers: Array<{ status: string; signature: string | null }>;
       };
@@ -1008,9 +1081,10 @@ describe("payment transfer batches", () => {
       { status: "processing", signature: FIRST_SIGNATURE },
     ]);
     expect(signAndSendMock).toHaveBeenCalledTimes(1);
+    expect(confirmTransactionMock).not.toHaveBeenCalled();
   });
 
-  it("marks a chunk failed on a definitive on-chain error", async () => {
+  it("does not inspect on-chain status during batch creation", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
@@ -1022,14 +1096,6 @@ describe("payment transfer batches", () => {
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
-    confirmTransactionMock.mockResolvedValueOnce({
-      signature: FIRST_SIGNATURE as Awaited<
-        ReturnType<typeof solanaRpc.confirmTransaction>
-      >["signature"],
-      slot: 100n,
-      confirmationStatus: "confirmed",
-      err: { InstructionError: [0, { Custom: 1 }] },
-    } as Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>);
 
     const counterpartyId = await seedCounterparty("batch_onchain_error_counterparty");
     const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -1058,13 +1124,803 @@ describe("payment transfer batches", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       data: {
-        batch: { status: string };
+        batch: { id: string; status: string };
         recipients: Array<{ status: string }>;
         transfers: Array<{ status: string }>;
       };
     };
-    expect(body.data.batch.status).toBe("failed");
-    expect(body.data.recipients).toMatchObject([{ status: "failed" }]);
-    expect(body.data.transfers).toMatchObject([{ status: "failed" }]);
+    expect(body.data.batch.status).toBe("processing");
+    expect(body.data.recipients).toMatchObject([{ status: "processing" }]);
+    expect(body.data.transfers).toMatchObject([{ status: "processing" }]);
+    expect(confirmTransactionMock).not.toHaveBeenCalled();
+
+    getSignatureStatusesMock.mockResolvedValueOnce([
+      {
+        slot: 104n,
+        confirmations: 0n,
+        confirmationStatus: "confirmed",
+        err: { InstructionError: [0, "InsufficientFunds"] },
+      },
+    ]);
+    await trackPendingTransfers(env);
+    const settledBatch = await getDb(env)
+      .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
+      .bind(body.data.batch.id)
+      .first<{ status: string }>();
+    expect(settledBatch?.status).toBe("failed");
   });
+
+  it("settles a mixed batch to partially_failed via the reconciliation job", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(FIRST_SIGNATURE)
+      .mockResolvedValueOnce(SECOND_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValueOnce({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+    const counterpartyId = await seedCounterparty("batch_settlement_counterparty");
+    const firstAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const secondAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [
+            { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" },
+            { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" },
+          ],
+          options: { preflight: false, maxRecipientsPerTransaction: 1 },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        batch: { id: string; status: string };
+        transfers: Array<{ status: string }>;
+      };
+    };
+    expect(body.data.batch.status).toBe("processing");
+    expect(body.data.transfers).toHaveLength(2);
+
+    getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
+      signatures.map((signature) =>
+        String(signature) === FIRST_SIGNATURE
+          ? { slot: 200n, confirmations: 5n, confirmationStatus: "confirmed" as const, err: null }
+          : {
+              slot: 201n,
+              confirmations: 0n,
+              confirmationStatus: "confirmed" as const,
+              err: { InstructionError: [0, "Custom"] },
+            }
+      )
+    );
+    await trackPendingTransfers(env);
+
+    const batchRow = await getDb(env)
+      .prepare("SELECT status, error FROM payment_transfer_batches WHERE id = ?")
+      .bind(body.data.batch.id)
+      .first<{ status: string; error: string | null }>();
+    expect(batchRow?.status).toBe("partially_failed");
+    expect(batchRow?.error).toBe("One or more transfer batch transactions failed during execution");
+
+    const recipientRows = await getDb(env)
+      .prepare(
+        `SELECT r.status, r.error, t.signature
+           FROM payment_transfer_recipients r
+           JOIN payment_transfers t ON t.id = r.transfer_id
+          WHERE r.batch_id = ?
+          ORDER BY t.signature`
+      )
+      .bind(body.data.batch.id)
+      .all<{ status: string; error: string | null; signature: string }>();
+    expect(recipientRows.results).toMatchObject([
+      { status: "confirmed", error: null, signature: FIRST_SIGNATURE },
+      { status: "failed", signature: SECOND_SIGNATURE },
+    ]);
+    expect(recipientRows.results[1].error).toContain("InstructionError");
+  });
+
+  it("settles a chunk's recipients as failed when its execution throws mid-flight", async () => {
+    const createRepository = paymentsRepositoryPostgres.createPostgresPaymentsRepository;
+    const repositorySpy = vi.spyOn(paymentsRepositoryPostgres, "createPostgresPaymentsRepository");
+    let createTransferCalls = 0;
+    repositorySpy.mockImplementation((db) => {
+      const repository = createRepository(db);
+      return {
+        ...repository,
+        createTransfer: async (params) => {
+          createTransferCalls += 1;
+          if (createTransferCalls === 2) {
+            throw new Error("simulated transfer persistence failure");
+          }
+          return repository.createTransfer(params);
+        },
+      };
+    });
+
+    try {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+      let signatureIndex = 0;
+      const signAndSendMock = vi.fn(
+        async () => `${FIRST_SIGNATURE}${signatureIndex++}` as Signature
+      );
+      createFeePaymentAdapterMock.mockReturnValueOnce({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const counterpartyId = await seedCounterparty("batch_stranded_counterparty");
+      const firstAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const secondAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            token: "SOL",
+            recipients: [
+              { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" },
+              { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" },
+            ],
+            options: { preflight: false, maxRecipientsPerTransaction: 1 },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          batch: { id: string; status: string };
+          recipients: Array<{ status: string; error: string | null }>;
+          transfers: Array<{ status: string }>;
+        };
+      };
+      expect(body.data.transfers).toHaveLength(1);
+      expect(body.data.batch.status).toBe("processing");
+      const statuses = body.data.recipients.map((recipient) => recipient.status).sort();
+      expect(statuses).toEqual(["failed", "processing"]);
+      const failedRecipient = body.data.recipients.find(
+        (recipient) => recipient.status === "failed"
+      );
+      expect(failedRecipient?.error).toContain("simulated transfer persistence failure");
+
+      const pendingRows = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*) AS count FROM payment_transfer_recipients WHERE batch_id = ? AND status = 'pending'"
+        )
+        .bind(body.data.batch.id)
+        .first<{ count: number | string }>();
+      expect(Number(pendingRows?.count)).toBe(0);
+    } finally {
+      repositorySpy.mockRestore();
+    }
+  });
+
+  it("rolls back the chunk transfer when recipient linking fails so reconciliation never sees an orphan", async () => {
+    const createBatchesRepository =
+      batchesRepositoryPostgres.createPostgresPaymentTransferBatchesRepository;
+    const batchesSpy = vi.spyOn(
+      batchesRepositoryPostgres,
+      "createPostgresPaymentTransferBatchesRepository"
+    );
+    let linkFailureInjected = false;
+    batchesSpy.mockImplementation((db) => {
+      const repository = createBatchesRepository(db);
+      return {
+        ...repository,
+        updateTransferRecipientsStatus: async (input) => {
+          if (!linkFailureInjected && input.transferId !== null && input.status === "processing") {
+            linkFailureInjected = true;
+            throw new Error("simulated recipient link failure");
+          }
+          return repository.updateTransferRecipientsStatus(input);
+        },
+      };
+    });
+
+    try {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+      const signAndSendMock = vi.fn(async () => FIRST_SIGNATURE as Signature);
+      createFeePaymentAdapterMock.mockReturnValueOnce({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const counterpartyId = await seedCounterparty("batch_link_failure_counterparty");
+      const accountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          batch: { id: string; status: string };
+          recipients: Array<{ status: string; error: string | null; transferId: string | null }>;
+          transfers: Array<{ status: string }>;
+        };
+      };
+      expect(signAndSendMock).not.toHaveBeenCalled();
+      expect(body.data.batch.status).toBe("failed");
+      expect(body.data.transfers).toHaveLength(0);
+      expect(body.data.recipients).toHaveLength(1);
+      expect(body.data.recipients[0].status).toBe("failed");
+      expect(body.data.recipients[0].error).toContain("simulated recipient link failure");
+
+      const orphanRows = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*) AS count FROM payment_transfers WHERE type = 'transfer_batch' AND status = 'processing'"
+        )
+        .first<{ count: number | string }>();
+      expect(Number(orphanRows?.count)).toBe(0);
+
+      await trackPendingTransfers(env);
+      await trackPendingTransfers(env);
+
+      const batchRow = await getDb(env)
+        .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
+        .bind(body.data.batch.id)
+        .first<{ status: string }>();
+      expect(batchRow?.status).toBe("failed");
+    } finally {
+      batchesSpy.mockRestore();
+    }
+  });
+
+  it("leaves linked recipients for reconciliation when the signature persist fails after submission", async () => {
+    const createRepository = paymentsRepositoryPostgres.createPostgresPaymentsRepository;
+    const batchesSpy = vi.spyOn(paymentsRepositoryPostgres, "createPostgresPaymentsRepository");
+    let signaturePersistInjected = false;
+    batchesSpy.mockImplementation((db) => {
+      const repository = createRepository(db);
+      return {
+        ...repository,
+        updateTransfer: async (input) => {
+          if (
+            !signaturePersistInjected &&
+            input.status === "processing" &&
+            input.signature !== undefined
+          ) {
+            signaturePersistInjected = true;
+            throw new Error("simulated signature persist failure");
+          }
+          return repository.updateTransfer(input);
+        },
+      };
+    });
+
+    try {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+      const signAndSendMock = vi.fn(async () => FIRST_SIGNATURE as Signature);
+      createFeePaymentAdapterMock.mockReturnValueOnce({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const counterpartyId = await seedCounterparty("batch_settle_failure_counterparty");
+      const accountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { batch: { id: string; status: string } };
+      };
+      expect(signAndSendMock).toHaveBeenCalledTimes(1);
+
+      const linkedRecipient = await getDb(env)
+        .prepare("SELECT status, transfer_id FROM payment_transfer_recipients WHERE batch_id = ?")
+        .bind(body.data.batch.id)
+        .first<{ status: string; transfer_id: string | null }>();
+      expect(linkedRecipient?.transfer_id).not.toBeNull();
+      expect(linkedRecipient?.status).toBe("processing");
+
+      await getDb(env)
+        .prepare(
+          `UPDATE payment_transfers
+              SET updated_at = ?
+            WHERE type = 'transfer_batch' AND status = 'processing'`
+        )
+        .bind(new Date(Date.now() - 10 * 60 * 1000).toISOString())
+        .run();
+
+      await trackPendingTransfers(env);
+
+      const transferRow = await getDb(env)
+        .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+        .bind(linkedRecipient?.transfer_id)
+        .first<{ status: string }>();
+      expect(transferRow?.status).toBe("failed");
+
+      const settledRecipient = await getDb(env)
+        .prepare("SELECT status, transfer_id FROM payment_transfer_recipients WHERE batch_id = ?")
+        .bind(body.data.batch.id)
+        .first<{ status: string; transfer_id: string | null }>();
+      expect(settledRecipient?.status).toBe("failed");
+      expect(settledRecipient?.transfer_id).toBe(linkedRecipient?.transfer_id);
+
+      const batchRow = await getDb(env)
+        .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
+        .bind(body.data.batch.id)
+        .first<{ status: string }>();
+      expect(batchRow?.status).toBe("failed");
+    } finally {
+      batchesSpy.mockRestore();
+    }
+  });
+
+  it("returns the terminal status when reconciliation settles the batch mid-request", async () => {
+    const createBatchesRepository =
+      batchesRepositoryPostgres.createPostgresPaymentTransferBatchesRepository;
+    const batchesSpy = vi.spyOn(
+      batchesRepositoryPostgres,
+      "createPostgresPaymentTransferBatchesRepository"
+    );
+    let reconciliationInjected = false;
+    batchesSpy.mockImplementation((db) => {
+      const repository = createBatchesRepository(db);
+      return {
+        ...repository,
+        recomputeTransferBatchStatus: async (input) => {
+          if (!reconciliationInjected) {
+            reconciliationInjected = true;
+            getSignatureStatusesMock.mockResolvedValueOnce([
+              { slot: 300n, confirmations: 3n, confirmationStatus: "confirmed", err: null },
+            ]);
+            await trackPendingTransfers(env);
+          }
+          return repository.recomputeTransferBatchStatus(input);
+        },
+      };
+    });
+
+    try {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+      const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
+      createFeePaymentAdapterMock.mockReturnValueOnce({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const counterpartyId = await seedCounterparty("batch_midflight_counterparty");
+      const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          batch: { status: string };
+          recipients: Array<{ status: string }>;
+          transfers: Array<{ status: string }>;
+        };
+      };
+      expect(reconciliationInjected).toBe(true);
+      expect(body.data.batch.status).toBe("confirmed");
+      expect(body.data.recipients).toMatchObject([{ status: "confirmed" }]);
+      expect(body.data.transfers).toMatchObject([{ status: "confirmed" }]);
+    } finally {
+      batchesSpy.mockRestore();
+    }
+  });
+
+  it("resolves concurrent settlements of the same batch to the correct final status", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(FIRST_SIGNATURE)
+      .mockResolvedValueOnce(SECOND_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValueOnce({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+    const counterpartyId = await seedCounterparty("batch_concurrent_settle_counterparty");
+    const firstAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const secondAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [
+            { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" },
+            { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" },
+          ],
+          options: { preflight: false, maxRecipientsPerTransaction: 1 },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { batch: { id: string }; transfers: Array<{ id: string }> };
+    };
+    expect(body.data.transfers).toHaveLength(2);
+
+    const repository = createPaymentTransferBatchesRepository(env);
+    await Promise.all([
+      repository.settleTransferBatch({
+        transferId: body.data.transfers[0].id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        transferStatus: "confirmed",
+        error: null,
+        slot: null,
+        updatedAt: new Date().toISOString(),
+      }),
+      repository.settleTransferBatch({
+        transferId: body.data.transfers[1].id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        transferStatus: "failed",
+        error: "on-chain failure",
+        slot: null,
+        updatedAt: new Date().toISOString(),
+      }),
+    ]);
+
+    const batchRow = await getDb(env)
+      .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
+      .bind(body.data.batch.id)
+      .first<{ status: string }>();
+    expect(batchRow?.status).toBe("partially_failed");
+  });
+
+  it("never regresses a terminal chunk status when a delayed reconciliation run settles late", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+    createFeePaymentAdapterMock.mockReturnValueOnce({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: vi.fn(async () => FIRST_SIGNATURE as Signature),
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+    const counterpartyId = await seedCounterparty("batch_stale_settle_counterparty");
+    const accountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { batch: { id: string }; transfers: Array<{ id: string }> };
+    };
+    expect(body.data.transfers).toHaveLength(1);
+    const transferId = body.data.transfers[0].id;
+
+    const repository = createPaymentTransferBatchesRepository(env);
+    await repository.settleTransferBatch({
+      transferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      transferStatus: "finalized",
+      error: null,
+      slot: 500,
+      updatedAt: new Date().toISOString(),
+    });
+
+    await repository.settleTransferBatch({
+      transferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      transferStatus: "confirmed",
+      error: null,
+      slot: 400,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const transferRow = await getDb(env)
+      .prepare("SELECT status, slot FROM payment_transfers WHERE id = ?")
+      .bind(transferId)
+      .first<{ status: string; slot: number | string }>();
+    expect(transferRow?.status).toBe("finalized");
+    expect(Number(transferRow?.slot)).toBe(500);
+
+    const guarded = await createPaymentsRepository(env).updateTransfer({
+      transferId,
+      status: "confirmed",
+      expectedStatus: "processing",
+      updatedAt: new Date().toISOString(),
+    });
+    expect(guarded).toBeNull();
+  });
+
+  it("creates a 500-recipient batch within a bounded time", async () => {
+    const createRepository = paymentsRepositoryPostgres.createPostgresPaymentsRepository;
+    const getWalletPolicies = vi.fn();
+    const listTransfersByIds = vi.fn();
+    const getTransferById = vi.fn();
+    vi.spyOn(paymentsRepositoryPostgres, "createPostgresPaymentsRepository").mockImplementation(
+      (db) => {
+        const repository = createRepository(db);
+        return {
+          ...repository,
+          getWalletPoliciesByCustodyWalletId: async (custodyWalletId) => {
+            getWalletPolicies(custodyWalletId);
+            return repository.getWalletPoliciesByCustodyWalletId(custodyWalletId);
+          },
+          listTransfersByIds: async (params) => {
+            listTransfersByIds(params);
+            return repository.listTransfersByIds(params);
+          },
+          getTransferById: async (params) => {
+            getTransferById(params);
+            return repository.getTransferById(params);
+          },
+        };
+      }
+    );
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    let signatureIndex = 0;
+    const signAndSendMock = vi.fn(async () => `${FIRST_SIGNATURE}${signatureIndex++}` as Signature);
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const counterpartyId = await seedCounterparty("batch_stress_counterparty");
+    const destinationSigners = await Promise.all(
+      Array.from({ length: 500 }, () => generateKeyPairSigner())
+    );
+    const counterpartyAccountIds = await seedCryptoWalletCounterpartyAccounts(
+      counterpartyId,
+      destinationSigners.map((destinationSigner) => destinationSigner.address)
+    );
+    const recipients = counterpartyAccountIds.map((counterpartyAccountId, index) => ({
+      externalId: `stress-recipient-${index}`,
+      counterpartyId,
+      counterpartyAccountId,
+      amount: "0.000001",
+    }));
+
+    const startedAt = performance.now();
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients,
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { batch: { id: string } } };
+    expect(performance.now() - startedAt).toBeLessThan(15_000);
+    expect(signAndSendMock).toHaveBeenCalled();
+    expect(confirmTransactionMock).not.toHaveBeenCalled();
+    expect(getWalletPolicies).toHaveBeenCalledTimes(1);
+
+    const detailRes = await app.request(
+      `/v1/payments/transfer-batches/${body.data.batch.id}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+    expect(detailRes.status).toBe(200);
+    expect(listTransfersByIds).toHaveBeenCalledTimes(2);
+    expect(getTransferById).not.toHaveBeenCalled();
+
+    const distinctDestinations = await getDb(env)
+      .prepare(
+        `SELECT COUNT(DISTINCT destination_address) AS count
+           FROM payment_transfer_recipients
+          WHERE batch_id = ?`
+      )
+      .bind(body.data.batch.id)
+      .first<{ count: number | string }>();
+    expect(Number(distinctDestinations?.count)).toBe(500);
+  }, 30_000);
+
+  it("handles a burst of five concurrent batch creates", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    let signatureIndex = 0;
+    const signAndSendMock = vi.fn(async () => `${FIRST_SIGNATURE}${signatureIndex++}` as Signature);
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const counterpartyId = await seedCounterparty("batch_burst_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const recipients = Array.from({ length: 50 }, (_, index) => ({
+      externalId: `burst-recipient-${index}`,
+      counterpartyId,
+      counterpartyAccountId,
+      amount: "0.000001",
+    }));
+
+    const responses = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        app.request(
+          "/v1/payments/transfer-batches",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              source: TEST_WALLET_ID,
+              token: "SOL",
+              recipients,
+              options: { preflight: false },
+            }),
+          },
+          env
+        )
+      )
+    );
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200, 200]);
+  }, 20_000);
 });
