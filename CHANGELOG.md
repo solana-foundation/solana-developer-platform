@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.46.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.2...v0.46.3) (2026-07-23)
+
+### Bug Fixes
+
+* **ci:** probe private Cloud Run candidate safely ([#891](https://github.com/solana-foundation/solana-developer-platform/pull/891)) ([fff1eee](https://github.com/solana-foundation/solana-developer-platform/commit/fff1eeee14f687c4234f7a310f05da221faf5e7d))
+
 ## [0.46.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.1...v0.46.2) (2026-07-23)
 
 ### Bug Fixes
