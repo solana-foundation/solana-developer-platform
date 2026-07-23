@@ -158,15 +158,11 @@ export function ActivityTab({ tokenId }: { tokenId: string }) {
               <TableHeader>
                 <TableRow>
                   <TableHead align="left">{t("DashboardIssuance.activity.columnAction")}</TableHead>
-                  <TableHead align="left">
-                    {t("DashboardIssuance.activity.columnActor")}
-                  </TableHead>
+                  <TableHead align="left">{t("DashboardIssuance.activity.columnActor")}</TableHead>
                   <TableHead align="left">
                     {t("DashboardIssuance.activity.columnActorType")}
                   </TableHead>
-                  <TableHead align="left">
-                    {t("DashboardIssuance.activity.columnStatus")}
-                  </TableHead>
+                  <TableHead align="left">{t("DashboardIssuance.activity.columnStatus")}</TableHead>
                   <TableHead align="right">{t("DashboardIssuance.activity.columnTime")}</TableHead>
                 </TableRow>
               </TableHeader>
