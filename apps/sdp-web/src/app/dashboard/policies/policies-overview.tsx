@@ -254,7 +254,11 @@ function ConfigureMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button iconLeft={<ShieldCheckIcon />} iconRight={<ChevronDownIcon />}>
+        <Button
+          className="whitespace-nowrap"
+          iconLeft={<ShieldCheckIcon />}
+          iconRight={<ChevronDownIcon />}
+        >
           {t("DashboardPolicies.configureControls")}
         </Button>
       </DropdownMenuTrigger>
@@ -344,16 +348,16 @@ function InventoryTable({
   }
   return (
     <div data-desktop-inventory className="hidden lg:block">
-      <Table className="rounded-none border-0 [&_table]:min-w-[900px] [&_table]:table-fixed">
+      <Table className="rounded-none border-0 [&::after]:hidden [&::before]:hidden [&_table]:min-w-[1160px] [&_table]:table-fixed [&_td]:whitespace-nowrap [&_td]:py-4 [&_th]:whitespace-nowrap">
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[24%]">{t("DashboardPolicies.target")}</TableHead>
-            <TableHead className="w-[12%]">{t("DashboardPolicies.status")}</TableHead>
-            <TableHead className="w-[13%]">{t("DashboardPolicies.defaultAction")}</TableHead>
-            <TableHead className="w-[11%]">{t("DashboardPolicies.rules")}</TableHead>
-            <TableHead className="w-[14%]">{t("DashboardPolicies.bindings")}</TableHead>
-            <TableHead className="w-[16%]">{t("DashboardPolicies.lastUpdated")}</TableHead>
-            <TableHead className="w-[10%] text-right">{t("DashboardPolicies.actions")}</TableHead>
+            <TableHead className="w-[22%]">{t("DashboardPolicies.target")}</TableHead>
+            <TableHead className="w-[13%]">{t("DashboardPolicies.status")}</TableHead>
+            <TableHead className="w-[15%]">{t("DashboardPolicies.defaultAction")}</TableHead>
+            <TableHead className="w-[12%]">{t("DashboardPolicies.rules")}</TableHead>
+            <TableHead className="w-[15%]">{t("DashboardPolicies.bindings")}</TableHead>
+            <TableHead className="w-[15%]">{t("DashboardPolicies.lastUpdated")}</TableHead>
+            <TableHead className="w-[8%] text-right">{t("DashboardPolicies.actions")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -489,7 +493,7 @@ function SummaryRail({
     : [];
   return (
     <aside
-      className="border-t border-border-default bg-fill-subtle p-5 lg:border-t-0 lg:border-l"
+      className="overflow-hidden rounded-lg border border-border-default bg-surface-raised p-5 lg:sticky lg:top-5"
       data-summary-rail
     >
       <h2 className="text-sm font-semibold text-primary">{t("DashboardPolicies.policySummary")}</h2>
@@ -552,93 +556,93 @@ export function PoliciesOverviewSurface({
 
   return (
     <div className="h-full min-h-0 overflow-y-auto px-3 pt-5 pb-6 md:px-6">
-      <div className="overflow-hidden rounded-lg border border-border-default bg-surface-raised">
-        <div className="border-b border-border-default px-4">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-stretch xl:justify-between xl:gap-6">
-            <div
-              className="flex h-12 shrink-0 gap-6 overflow-x-auto xl:h-16"
-              aria-label={t("DashboardPolicies.target")}
-              role="tablist"
-            >
-              {TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={state.tab === tab.id}
-                  onClick={() => onStateChange({ tab: tab.id, page: 1 })}
-                  onFocus={() => onTabPreload(tab.id)}
-                  onPointerEnter={() => onTabPreload(tab.id)}
-                  className={cn(
-                    "relative h-full whitespace-nowrap rounded-sm text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-black/40 focus-visible:ring-offset-2",
-                    state.tab === tab.id ? "text-primary" : "text-secondary hover:text-primary"
-                  )}
-                >
-                  {t(tab.labelKey)}
-                  {state.tab === tab.id ? (
-                    <motion.span
-                      layoutId="policies-active-tab"
-                      className="absolute right-0 bottom-0 left-0 h-0.5 bg-primary"
-                      transition={
-                        reducedMotion
-                          ? { duration: 0 }
-                          : { type: "spring", stiffness: 520, damping: 42, mass: 0.7 }
-                      }
-                    />
-                  ) : null}
-                </button>
-              ))}
-            </div>
-
-            <div className="grid gap-2 pb-4 sm:grid-cols-[minmax(240px,1fr)_180px_auto] xl:w-[680px] xl:py-3">
-              <Input
-                value={searchValue}
-                onChange={(event) => onSearchChange(event.target.value)}
-                placeholder={t("DashboardPolicies.searchPlaceholder")}
-                aria-label={t("DashboardPolicies.searchPlaceholder")}
-                iconLeft={<SearchIcon />}
-                iconRight={
-                  searchValue ? (
-                    <button
-                      type="button"
-                      aria-label={t("DashboardPolicies.clearSearch")}
-                      onClick={() => onSearchChange("")}
-                      className="rounded text-tertiary hover:text-primary"
-                    >
-                      <XIcon />
-                    </button>
-                  ) : undefined
-                }
-              />
-              <Select
-                value={state.status || "all"}
-                onValueChange={(value) =>
-                  onStateChange({
-                    status: value === "all" ? "" : (value as PolicyControlInventoryStatus),
-                    page: 1,
-                  })
-                }
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px] lg:items-start">
+        <div className="min-w-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised">
+          <div className="border-b border-border-default px-4">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-stretch xl:justify-between xl:gap-4">
+              <div
+                className="flex h-12 shrink-0 gap-6 overflow-x-auto xl:h-16"
+                aria-label={t("DashboardPolicies.target")}
+                role="tablist"
               >
-                {STATUS_OPTIONS.map((option) => (
-                  <SelectItem key={option.id} value={option.id}>
-                    {t(option.labelKey)}
-                  </SelectItem>
+                {TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={state.tab === tab.id}
+                    onClick={() => onStateChange({ tab: tab.id, page: 1 })}
+                    onFocus={() => onTabPreload(tab.id)}
+                    onPointerEnter={() => onTabPreload(tab.id)}
+                    className={cn(
+                      "relative h-full whitespace-nowrap rounded-sm text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-black/40 focus-visible:ring-offset-2",
+                      state.tab === tab.id ? "text-primary" : "text-secondary hover:text-primary"
+                    )}
+                  >
+                    {t(tab.labelKey)}
+                    {state.tab === tab.id ? (
+                      <motion.span
+                        layoutId="policies-active-tab"
+                        className="absolute right-0 bottom-0 left-0 h-0.5 bg-primary"
+                        transition={
+                          reducedMotion
+                            ? { duration: 0 }
+                            : { type: "spring", stiffness: 520, damping: 42, mass: 0.7 }
+                        }
+                      />
+                    ) : null}
+                  </button>
                 ))}
-              </Select>
-              <ConfigureMenu />
+              </div>
+
+              <div className="grid min-w-0 gap-2 pb-4 sm:grid-cols-[minmax(160px,1fr)_170px_auto] xl:max-w-[680px] xl:flex-1 xl:py-3">
+                <Input
+                  value={searchValue}
+                  onChange={(event) => onSearchChange(event.target.value)}
+                  placeholder={t("DashboardPolicies.searchPlaceholder")}
+                  aria-label={t("DashboardPolicies.searchPlaceholder")}
+                  iconLeft={<SearchIcon />}
+                  iconRight={
+                    searchValue ? (
+                      <button
+                        type="button"
+                        aria-label={t("DashboardPolicies.clearSearch")}
+                        onClick={() => onSearchChange("")}
+                        className="rounded text-tertiary hover:text-primary"
+                      >
+                        <XIcon />
+                      </button>
+                    ) : undefined
+                  }
+                />
+                <Select
+                  value={state.status || "all"}
+                  onValueChange={(value) =>
+                    onStateChange({
+                      status: value === "all" ? "" : (value as PolicyControlInventoryStatus),
+                      page: 1,
+                    })
+                  }
+                >
+                  {STATUS_OPTIONS.map((option) => (
+                    <SelectItem key={option.id} value={option.id}>
+                      {t(option.labelKey)}
+                    </SelectItem>
+                  ))}
+                </Select>
+                <ConfigureMenu />
+              </div>
             </div>
           </div>
-        </div>
 
-        <motion.div
-          key={state.tab}
-          initial={reducedMotion ? false : { opacity: 0.94, y: 3 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={reducedMotion ? { duration: 0 } : { duration: 0.16, ease: "easeOut" }}
-          className="grid lg:grid-cols-[minmax(0,1fr)_300px]"
-          aria-busy={loading}
-        >
-          <section className="min-w-0">
+          <motion.div
+            key={state.tab}
+            initial={reducedMotion ? false : { opacity: 0.94, y: 3 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={reducedMotion ? { duration: 0 } : { duration: 0.16, ease: "easeOut" }}
+            className="min-w-0"
+            aria-busy={loading}
+          >
             {error ? (
               <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
                 <p className="text-sm font-medium text-primary">
@@ -696,9 +700,10 @@ export function PoliciesOverviewSurface({
                 ) : null}
               </>
             )}
-          </section>
-          <SummaryRail inventory={inventory} loading={loading} error={error} />
-        </motion.div>
+          </motion.div>
+        </div>
+
+        <SummaryRail inventory={inventory} loading={loading} error={error} />
       </div>
     </div>
   );
@@ -711,15 +716,27 @@ export function PoliciesOverview({ inventory, error, state }: PoliciesOverviewPr
   const [searchValue, setSearchValue] = useState(state.query);
   const [isPending, startTransition] = useTransition();
   const debouncedSearch = useDebounce(searchValue.trim(), 300);
+  // The query this component last wrote to the URL. Lets the URL→input sync below
+  // distinguish its own echoes from genuine external navigation.
+  const lastPushedQueryRef = useRef(state.query);
 
   useEffect(() => {
     stateRef.current = state;
     setDisplayState(state);
   }, [state]);
-  useEffect(() => setSearchValue(state.query), [state.query]);
+  // Mirror the URL into the input only on *external* navigation (e.g. back/forward).
+  // Ignoring echoes of our own pushes stops a slow RSC round-trip from overwriting text
+  // the user has typed since it was dispatched — the "search sticks on old text" bug.
+  useEffect(() => {
+    if (state.query !== lastPushedQueryRef.current) {
+      lastPushedQueryRef.current = state.query;
+      setSearchValue(state.query);
+    }
+  }, [state.query]);
   useEffect(() => {
     const currentState = stateRef.current;
     if (debouncedSearch !== currentState.query) {
+      lastPushedQueryRef.current = debouncedSearch;
       const nextState = { ...currentState, query: debouncedSearch, page: 1 };
       stateRef.current = nextState;
       setDisplayState(nextState);
@@ -747,6 +764,11 @@ export function PoliciesOverview({ inventory, error, state }: PoliciesOverviewPr
     const currentState = stateRef.current;
     const nextState = { ...currentState, ...changes };
     stateRef.current = nextState;
+    // Clearing filters routes a query change through here too — record it as our own
+    // push so the URL→input sync doesn't later clobber freshly typed text.
+    if (changes.query !== undefined) {
+      lastPushedQueryRef.current = changes.query;
+    }
     setDisplayState(nextState);
     startTransition(() => {
       router.replace(buildPoliciesHref(currentState, changes), { scroll: false });
