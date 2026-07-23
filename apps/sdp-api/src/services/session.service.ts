@@ -80,7 +80,7 @@ export class SessionService {
       permissions,
       expiresAt: session.expiresAt,
     };
-    await this.setSessionCache(session.id, cachedSession);
+    await this.setSessionCacheBestEffort(session.id, cachedSession);
 
     return session;
   }
@@ -137,8 +137,7 @@ export class SessionService {
       expiresAt: row.expires_at,
     };
 
-    // Populate cache
-    await this.setSessionCache(sessionId, cachedSession);
+    await this.setSessionCacheBestEffort(sessionId, cachedSession);
 
     return cachedSession;
   }
@@ -255,6 +254,14 @@ export class SessionService {
     await this.sessionsKV.put(`session:${sessionId}`, JSON.stringify(data), {
       expirationTtl: SESSION_CACHE_TTL,
     });
+  }
+
+  private async setSessionCacheBestEffort(sessionId: string, data: CachedSession): Promise<void> {
+    try {
+      await this.setSessionCache(sessionId, data);
+    } catch (error) {
+      console.error("Failed to refresh session cache:", error);
+    }
   }
 
   private async deleteSessionCache(sessionId: string): Promise<void> {

@@ -207,4 +207,38 @@ describe("SessionService", () => {
 
     await expect(serviceWithFailingCache.getSession(session.id)).resolves.toBeNull();
   });
+
+  it("accepts a valid database-authorized session when cache refresh is unavailable", async () => {
+    const sessions = createKVStoreSet(env).sessions;
+    const session = await service.createSession(
+      USER_ONE,
+      ORG_ONE,
+      getPermissionsForOrgRole("admin"),
+      {}
+    );
+    const failingCache: KVStore = {
+      get: sessions.get.bind(sessions),
+      put: async () => {
+        throw new Error("Redis unavailable");
+      },
+      delete: sessions.delete.bind(sessions),
+      list: sessions.list.bind(sessions),
+      admitSlidingWindow: sessions.admitSlidingWindow.bind(sessions),
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const serviceWithFailingCache = new SessionService(getDb(env), failingCache);
+
+    const authorized = await serviceWithFailingCache.getSession(session.id);
+
+    expect(authorized).toMatchObject({
+      id: session.id,
+      userId: USER_ONE,
+      organizationId: ORG_ONE,
+      permissions: getPermissionsForOrgRole("admin"),
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to refresh session cache:",
+      expect.any(Error)
+    );
+  });
 });
