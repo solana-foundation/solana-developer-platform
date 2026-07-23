@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.4...v0.47.0) (2026-07-23)
+
+### Features
+
+* issuance ui improvements and compliance tab gating ([#903](https://github.com/solana-foundation/solana-developer-platform/pull/903)) ([469400b](https://github.com/solana-foundation/solana-developer-platform/commit/469400b0e561a718108f3412bb899f1b9d55674b))
+* **web:** move product rollouts to Vercel Flags ([#894](https://github.com/solana-foundation/solana-developer-platform/pull/894)) ([3c578f1](https://github.com/solana-foundation/solana-developer-platform/commit/3c578f1a8d31937845722d89e9aea2ea3a4d7484))
+
 ## [0.46.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.3...v0.46.4) (2026-07-23)
 
 ### Refactors
