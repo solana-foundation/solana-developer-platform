@@ -165,13 +165,29 @@ describe("lightsparkCounterpartyRequirements", () => {
     expect(requirements.status).toBe("unsupported");
   });
 
-  it("returns unsupported for business on-ramp", () => {
+  it("collects businessInfo fields for a business on-ramp without a Grid customer", () => {
     const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
       direction: "onramp",
       providerData: {},
     });
 
-    expect(requirements.status).toBe("unsupported");
+    if (requirements.status !== "collect") {
+      throw new Error("Expected collect requirements");
+    }
+    expect(requirements.fields.map((field) => field.key)).toEqual([
+      "businessLegalName",
+      "businessTaxId",
+      "businessIncorporatedOn",
+    ]);
+  });
+
+  it("returns ready for a business on-ramp once the Grid customer exists", () => {
+    const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
+      direction: "onramp",
+      providerData: { lightspark: { customerId: "Customer:cus_123" } },
+    });
+
+    expect(requirements).toEqual({ provider: "lightspark", direction: "onramp", status: "ready" });
   });
 
   it("collects businessInfo fields before the payout fields for a business without a Grid customer", () => {
