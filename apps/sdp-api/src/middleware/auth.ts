@@ -83,9 +83,13 @@ async function isKnownInvalidKey(kv: KVStore, keyHash: string): Promise<boolean>
 }
 
 async function cacheInvalidKey(kv: KVStore, keyHash: string): Promise<void> {
-  await kv.put(`invalid:${keyHash}`, JSON.stringify({ invalid: true }), {
-    expirationTtl: INVALID_KEY_CACHE_TTL_SECONDS,
-  });
+  try {
+    await kv.put(`invalid:${keyHash}`, JSON.stringify({ invalid: true }), {
+      expirationTtl: INVALID_KEY_CACHE_TTL_SECONDS,
+    });
+  } catch (err) {
+    console.error("Failed to cache invalid api key:", err);
+  }
 }
 
 /** Look up API key in Postgres and cache to KV */
