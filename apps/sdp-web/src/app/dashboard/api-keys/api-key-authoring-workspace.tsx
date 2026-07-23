@@ -173,6 +173,12 @@ function WorkSection({
 function WizardProgress({ currentStep }: { currentStep: ApiKeyAuthoringStep }) {
   const t = useTranslations();
   const currentIndex = API_KEY_AUTHORING_STEPS.indexOf(currentStep);
+  const labels = [
+    t("DashboardCustody.apiKeyStepDetails"),
+    t("DashboardCustody.apiKeyStepPermissions"),
+    t("DashboardCustody.apiKeyStepWalletAccess"),
+    t("DashboardCustody.apiKeyStepReview"),
+  ];
 
   return (
     <div className="flex items-center gap-3">
@@ -196,6 +202,7 @@ function WizardProgress({ currentStep }: { currentStep: ApiKeyAuthoringStep }) {
           current: currentIndex + 1,
           total: API_KEY_AUTHORING_STEPS.length,
         })}
+        <span className="sr-only">: {labels[currentIndex]}</span>
       </span>
     </div>
   );
@@ -680,7 +687,10 @@ function WalletPolicyStep({
                 type="radio"
                 name="wallet-scope"
                 checked={draft.walletScope === "selected"}
-                onChange={() => update({ walletScope: "selected" })}
+                onChange={() => {
+                  onWalletSelectionTouched();
+                  update({ walletScope: "selected" });
+                }}
                 className="mt-1"
               />
               <span>
