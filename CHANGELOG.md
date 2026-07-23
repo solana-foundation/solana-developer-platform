@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.45.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.44.0...v0.45.0) (2026-07-23)
+
+### Features
+
+* support business counterparties on Lightspark on-ramp ([#873](https://github.com/solana-foundation/solana-developer-platform/pull/873)) ([4094f81](https://github.com/solana-foundation/solana-developer-platform/commit/4094f81676bb4b94274aa2baa91da0fe8ef0c456))
+* add organization provider onboarding ([#844](https://github.com/solana-foundation/solana-developer-platform/pull/844)) ([496ac56](https://github.com/solana-foundation/solana-developer-platform/commit/496ac56a0b9b15ceeb2d4b7a7d7c32b4cd299efa))
+* compliance advanced settings ui improvements ([#861](https://github.com/solana-foundation/solana-developer-platform/pull/861)) ([e24451e](https://github.com/solana-foundation/solana-developer-platform/commit/e24451e2865a823f13c3c2959d25c1efc6a2eb1a))
+* **HOO-856:** move custody master key from plaintext env var to KMS envelope encryption ([#812](https://github.com/solana-foundation/solana-developer-platform/pull/812)) ([0d162f4](https://github.com/solana-foundation/solana-developer-platform/commit/0d162f402f3a73c4cd5ec94f71e9e58c5e73b0fa))
+
+### Bug Fixes
+
+* simplify API key wizard progress ([#869](https://github.com/solana-foundation/solana-developer-platform/pull/869)) ([2a4ac34](https://github.com/solana-foundation/solana-developer-platform/commit/2a4ac3496a58dd6bb8b2b26860f9bb8e0cc85588))
+* resolve boolean query param parsing and allow cancelling pending_activation recurring payments ([#789](https://github.com/solana-foundation/solana-developer-platform/pull/789)) ([87dac13](https://github.com/solana-foundation/solana-developer-platform/commit/87dac130b34658a1e2bee8621ca74c9b3d6e36df))
+* **api:** close DeepSec high-severity findings ([#848](https://github.com/solana-foundation/solana-developer-platform/pull/848)) ([68fe35d](https://github.com/solana-foundation/solana-developer-platform/commit/68fe35d3e4fd2036e8f7b649b74e53f5ddbf1188))
+
+### Maintenance
+
+* **deps:** bump the actions group across 1 directory with 10 updates ([#728](https://github.com/solana-foundation/solana-developer-platform/pull/728)) ([55e8acd](https://github.com/solana-foundation/solana-developer-platform/commit/55e8acd9df9cbd0802e66715b17a3d1a3b9d21d7))
+
 ## [0.44.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.43.1...v0.44.0) (2026-07-22)
 
 ### Features
