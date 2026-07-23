@@ -258,8 +258,11 @@ export class AuditService {
   ): Promise<AssetAuditRecord[]> {
     const { limit = 50, offset = 0, ...filters } = options;
 
-    // metadata is stored as JSON text; cast to jsonb to read `tokenId`. All
-    // org-scoped rows are SDP-written via JSON.stringify, so the cast is safe.
+    // metadata is stored as JSON text. Reading `tokenId` needs a jsonb cast, but a
+    // single non-null malformed row would abort the whole org scan (the OR is
+    // evaluated per row), so the cast is guarded by pg_input_is_valid (PG16+)
+    // inside a CASE — Postgres does not short-circuit AND in a WHERE clause, so a
+    // plain `... AND pg_input_is_valid(...) AND (cast)` could still hit the cast.
     let query = `
       SELECT a.id, a.user_id, a.api_key_id, a.action, a.resource_type, a.resource_id,
              a.metadata, a.status, a.created_at,
@@ -270,7 +273,13 @@ export class AuditService {
       WHERE a.organization_id = ?
         AND (
           a.resource_id = ?
-          OR (a.metadata IS NOT NULL AND (a.metadata::jsonb) ->> 'tokenId' = ?)
+          OR (
+            CASE
+              WHEN a.metadata IS NOT NULL AND pg_input_is_valid(a.metadata, 'jsonb')
+              THEN (a.metadata::jsonb) ->> 'tokenId' = ?
+              ELSE false
+            END
+          )
         )
     `;
     const params: (string | number)[] = [organizationId, tokenId, tokenId];
@@ -331,7 +340,13 @@ export class AuditService {
       WHERE a.organization_id = ?
         AND (
           a.resource_id = ?
-          OR (a.metadata IS NOT NULL AND (a.metadata::jsonb) ->> 'tokenId' = ?)
+          OR (
+            CASE
+              WHEN a.metadata IS NOT NULL AND pg_input_is_valid(a.metadata, 'jsonb')
+              THEN (a.metadata::jsonb) ->> 'tokenId' = ?
+              ELSE false
+            END
+          )
         )
     `;
     const params: (string | number)[] = [organizationId, tokenId, tokenId];

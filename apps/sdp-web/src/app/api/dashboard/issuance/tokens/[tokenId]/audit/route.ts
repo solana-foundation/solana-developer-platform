@@ -15,7 +15,10 @@ function parseErrorMessage(body: string): string {
   }
 }
 
-const ALLOWED_PAGE_SIZE = 200;
+// Matches the API's server-side pageSize cap (the parsePositiveInteger max in the
+// issuance audit handler). The API pins this feed to page 1, so this is the most
+// events it can ever return.
+const ALLOWED_PAGE_SIZE = 100;
 
 export async function GET(request: Request, { params }: { params: Promise<{ tokenId: string }> }) {
   const trace = createTimedTrace("route.dashboard.issuance.token.audit", request);
@@ -72,7 +75,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       data: Array.isArray(payload.data) ? payload.data : [],
       error: null,
       total: typeof payload.meta?.total === "number" ? payload.meta.total : 0,
-      hasMore: payload.meta?.hasMore === true,
+      // Force hasMore off once the window hits the cap. Growing pageSize beyond it
+      // just clamps back to the same page-1 window, so the API's hasMore (total >
+      // window) would otherwise keep "Load More" visible forever without ever
+      // returning new rows.
+      hasMore: payload.meta?.hasMore === true && pageSize < ALLOWED_PAGE_SIZE,
     });
   } catch (error) {
     return NextResponse.json(
