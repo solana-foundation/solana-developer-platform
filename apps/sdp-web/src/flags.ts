@@ -58,6 +58,7 @@ export const assetProfiles = flag<boolean, DashboardFlagEntities>({
   adapter: vercelAdapter(),
   identify: identifyDashboardEntities,
   defaultValue: getAssetProfilesDefault({
+    assetProfilesEnabled: process.env.ASSET_PROFILES_ENABLED,
     nodeEnvironment: process.env.NODE_ENV,
     sdpEnvironment: process.env.NEXT_PUBLIC_SDP_ENVIRONMENT,
     vercelEnvironment: process.env.VERCEL_ENV,

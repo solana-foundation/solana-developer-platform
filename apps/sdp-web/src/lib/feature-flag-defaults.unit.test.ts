@@ -60,6 +60,16 @@ describe("getAssetProfilesDefault", () => {
     ).toBe(false);
   });
 
+  it("honors the server-only self-hosted production opt-in", () => {
+    expect(
+      getAssetProfilesDefault({
+        assetProfilesEnabled: " TRUE ",
+        nodeEnvironment: "production",
+        sdpEnvironment: "production",
+      })
+    ).toBe(true);
+  });
+
   it.each(["development", "test"])("enables local %s", (nodeEnvironment) => {
     expect(getAssetProfilesDefault({ nodeEnvironment })).toBe(true);
   });

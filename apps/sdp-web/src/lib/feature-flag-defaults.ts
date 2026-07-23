@@ -1,4 +1,5 @@
 type RuntimeFlagEnvironment = {
+  assetProfilesEnabled?: string;
   nodeEnvironment?: string;
   sdpEnvironment?: string;
   vercelEnvironment?: string;
@@ -17,6 +18,7 @@ export function getHomepageOpenSignupDefault({
 }
 
 export function getAssetProfilesDefault({
+  assetProfilesEnabled,
   nodeEnvironment,
   sdpEnvironment,
   vercelEnvironment,
@@ -28,7 +30,7 @@ export function getAssetProfilesDefault({
 
   const sdp = normalize(sdpEnvironment);
   if (sdp) {
-    return sdp === "development";
+    return sdp === "development" || normalize(assetProfilesEnabled) === "true";
   }
 
   const node = normalize(nodeEnvironment);
