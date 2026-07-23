@@ -180,6 +180,7 @@ export function ComplianceTab({
               activeAction={activeAction}
               submitAlignment="end"
               formVariant="bare"
+              hideAllowlistTitle={Boolean(singleAction)}
             />
           </div>
         </div>
