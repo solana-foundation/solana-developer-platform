@@ -1,10 +1,3 @@
-/**
- * Token Service
- *
- * Manages token issuance, including CRUD operations,
- * allowlist management, and freeze/unfreeze operations.
- */
-
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import type {
   AllowlistEntryStatus,
@@ -37,7 +30,6 @@ export interface CreateTokenInput {
   description?: string;
   uri?: string;
   imageUrl?: string;
-  /** Token template */
   template?: TokenTemplate;
   extensions?: TokenExtensionsConfig;
   maxSupply?: string;
@@ -48,6 +40,10 @@ export interface CreateTokenInput {
 
 export interface UpdateTokenInput {
   name?: string;
+  /** Only accepted while the token is undeployed (enforced by the route handler). */
+  symbol?: string;
+  /** Only accepted while the token is undeployed (enforced by the route handler). */
+  decimals?: number;
   description?: string | null;
   uri?: string | null;
   imageUrl?: string | null;
@@ -568,6 +564,16 @@ export class TokenService {
     if (input.name !== undefined) {
       updates.push("name = ?");
       values.push(input.name);
+    }
+
+    if (input.symbol !== undefined) {
+      updates.push("symbol = ?");
+      values.push(input.symbol);
+    }
+
+    if (input.decimals !== undefined) {
+      updates.push("decimals = ?");
+      values.push(input.decimals);
     }
 
     if (input.description !== undefined) {

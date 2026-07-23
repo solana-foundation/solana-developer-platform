@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import type { AssetCategory, IssuanceMetadata } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
+import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
@@ -277,6 +278,9 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.issuance.api"))
     );
+    // Asset profiles only drive the flag-on workspace; skip the fetch entirely
+    // when it's off so the legacy list renders from token fields alone.
+    const assetProfilesEnabled = isAssetProfilesUiEnabled();
     const [
       templatesResult,
       tokensResult,
@@ -286,7 +290,9 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
     ] = await Promise.all([
       trace.step("fetch_templates", () => fetchTemplates(apiClient.request, t)),
       trace.step("fetch_tokens", () => fetchTokens(apiClient.request, t)),
-      trace.step("fetch_asset_profiles", () => fetchAssetProfiles(apiClient.request)),
+      assetProfilesEnabled
+        ? trace.step("fetch_asset_profiles", () => fetchAssetProfiles(apiClient.request))
+        : Promise.resolve(new Map<string, IssuanceAssetProfileView>()),
       trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
       trace.step("fetch_signer_wallets", () =>
         fetchPaymentsWallets(apiClient.request, { view: "summary" })

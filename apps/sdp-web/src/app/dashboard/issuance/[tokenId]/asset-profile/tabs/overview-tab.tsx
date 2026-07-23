@@ -17,6 +17,7 @@ import {
   TriangleAlert,
   Wallet,
 } from "lucide-react";
+import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { cn } from "@/lib/utils";
@@ -201,9 +202,28 @@ function RecentActivityCard({ tokenId, onViewAll }: { tokenId: string; onViewAll
       </div>
       <div className="mt-3 flex min-h-0 flex-1 flex-col">
         {isLoading && events.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center">
-            <p className="text-[13px] text-muted">{t("DashboardIssuance.activity.loading")}</p>
-          </div>
+          // Mirror the loaded layout so the skeleton reflows identically: two
+          // stacked rows on the narrow card, one subgrid row at @xl (desktop).
+          <ul
+            className="grid min-h-0 flex-1 auto-rows-fr @xl:grid-cols-[max-content_minmax(0,1fr)_max-content_max-content] @xl:gap-x-3"
+            aria-busy="true"
+          >
+            {["a", "b", "c"].map((skeletonRow) => (
+              <li
+                key={skeletonRow}
+                className="flex flex-col justify-center gap-2 border-t border-border-subtle py-3 first:border-t-0 @xl:col-span-full @xl:grid @xl:grid-cols-subgrid @xl:items-center @xl:justify-normal @xl:gap-x-3"
+              >
+                <div className="flex items-center justify-between gap-2 @xl:contents">
+                  <SkeletonBlock className="h-6 w-28 rounded-md @xl:col-start-1 @xl:row-start-1 @xl:justify-self-start" />
+                  <SkeletonBlock className="h-3.5 w-24 @xl:col-start-4 @xl:row-start-1 @xl:justify-self-end" />
+                </div>
+                <div className="flex items-center justify-between gap-2 @xl:contents">
+                  <SkeletonBlock className="h-3.5 w-32 @xl:col-start-2 @xl:row-start-1" />
+                  <SkeletonBlock className="h-4 w-16 rounded-full @xl:col-start-3 @xl:row-start-1 @xl:justify-self-end" />
+                </div>
+              </li>
+            ))}
+          </ul>
         ) : events.length === 0 ? (
           <div className="flex flex-1 items-center justify-center">
             <p className="text-[13px] text-muted">{t("DashboardIssuance.activity.empty")}</p>
@@ -265,7 +285,7 @@ function IdentityFields({
 }) {
   const t = useTranslations();
   return (
-    <div className="mt-4 flex flex-col gap-3 md:mt-auto">
+    <div className="mt-6 flex flex-col gap-3 md:mt-auto md:pt-6">
       {website ? (
         <div>
           <div className="flex items-center gap-1.5 text-tertiary">

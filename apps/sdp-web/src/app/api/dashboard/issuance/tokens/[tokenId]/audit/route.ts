@@ -24,6 +24,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
     const { tokenId } = await params;
     const requestUrl = new URL(request.url);
     const action = requestUrl.searchParams.get("action")?.trim();
+    const status = requestUrl.searchParams.get("status")?.trim();
+    const type = requestUrl.searchParams.get("type")?.trim();
     const pageSizeRaw = Number.parseInt(requestUrl.searchParams.get("pageSize") ?? "50", 10);
     const pageSize = Number.isInteger(pageSizeRaw)
       ? Math.min(Math.max(pageSizeRaw, 1), ALLOWED_PAGE_SIZE)
@@ -36,6 +38,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
     const query = new URLSearchParams({ page: "1", pageSize: String(pageSize) });
     if (action) {
       query.set("action", action);
+    }
+    if (status) {
+      query.set("status", status);
+    }
+    if (type) {
+      query.set("type", type);
     }
 
     const response = await apiClient.request(

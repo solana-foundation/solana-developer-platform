@@ -1,7 +1,3 @@
-/**
- * Issuance Routes
- */
-
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
@@ -35,7 +31,6 @@ const issuance = new Hono<{ Bindings: Env }>();
 // for this path is wired via KV_FREE_PATHS in app.ts.
 issuance.get("/tokens/:tokenId/metadata.json", serveTokenMetadata);
 
-// All routes require authentication
 issuance.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 issuance.use("*", projectContextMiddleware());
 

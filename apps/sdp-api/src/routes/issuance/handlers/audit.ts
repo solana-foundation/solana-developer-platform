@@ -1,4 +1,10 @@
-import type { AssetAuditEvent } from "@sdp/types";
+import {
+  type AssetAuditActorType,
+  type AssetAuditEvent,
+  type AssetAuditStatus,
+  isAssetAuditActorType,
+  isAssetAuditStatus,
+} from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { badRequest, notFound } from "@/lib/errors";
@@ -48,14 +54,38 @@ export const getAssetAuditHistory = async (c: AppContext) => {
     action = actionRaw;
   }
 
+  const statusRaw = c.req.query("status")?.trim();
+  let status: AssetAuditStatus | undefined;
+  if (statusRaw) {
+    if (!isAssetAuditStatus(statusRaw)) {
+      throw badRequest("Invalid status query parameter", { status: statusRaw });
+    }
+    status = statusRaw;
+  }
+
+  const typeRaw = c.req.query("type")?.trim();
+  let actorType: AssetAuditActorType | undefined;
+  if (typeRaw) {
+    if (!isAssetAuditActorType(typeRaw)) {
+      throw badRequest("Invalid type query parameter", { type: typeRaw });
+    }
+    actorType = typeRaw;
+  }
+
   const page = parsePositiveInteger(c.req.query("page"), 1, Number.MAX_SAFE_INTEGER);
   const pageSize = parsePositiveInteger(c.req.query("pageSize"), 50, 100);
   const offset = (page - 1) * pageSize;
 
   const auditService = new AuditService(db);
   const [events, total] = await Promise.all([
-    auditService.getForAsset(orgId, tokenId, { action, limit: pageSize, offset }),
-    auditService.countForAsset(orgId, tokenId, { action }),
+    auditService.getForAsset(orgId, tokenId, {
+      action,
+      status,
+      actorType,
+      limit: pageSize,
+      offset,
+    }),
+    auditService.countForAsset(orgId, tokenId, { action, status, actorType }),
   ]);
 
   const data: AssetAuditEvent[] = events.map((event) => ({

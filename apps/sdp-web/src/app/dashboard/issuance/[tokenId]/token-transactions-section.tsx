@@ -14,7 +14,7 @@ import {
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatDisplayLabel } from "@/lib/utils";
 import { auditActionIcon, auditActionLabel } from "./asset-profile/asset-audit-presentation";
-import { formatDate } from "./token-management-workspace.utils";
+import { formatDateTime } from "./token-management-workspace.utils";
 
 interface TokenTransactionsSectionProps {
   transactions: TokenTransaction[];
@@ -76,7 +76,9 @@ export function TokenTransactionsSection({
                   <TableHead>{t("DashboardIssuance.transactions.type")}</TableHead>
                   <TableHead>{t("DashboardIssuance.transactions.status")}</TableHead>
                   <TableHead>{t("DashboardIssuance.transactions.signature")}</TableHead>
-                  <TableHead>{t("DashboardIssuance.transactions.created")}</TableHead>
+                  <TableHead className="text-right">
+                    {t("DashboardIssuance.transactions.created")}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -105,7 +107,9 @@ export function TokenTransactionsSection({
                       <TableCell className="max-w-[220px] truncate font-mono text-xs">
                         {transaction.signature ?? "—"}
                       </TableCell>
-                      <TableCell>{formatDate(transaction.createdAt, locale)}</TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        {formatDateTime(transaction.createdAt, locale)}
+                      </TableCell>
                     </TableRow>
                   );
                 })}

@@ -99,7 +99,7 @@ describe("AuditService", () => {
 
       expect(events[0]).toMatchObject({ actorType: "user", actorLabel: "Jordan Lee" });
       expect(events[1]).toMatchObject({ actorType: "api_key", actorLabel: "CI key" });
-      expect(events[2]).toMatchObject({ actorType: "system", actorLabel: "Automated" });
+      expect(events[2]).toMatchObject({ actorType: "system", actorLabel: "SDP" });
       expect(events[0]?.metadata).toEqual({ tokenId: "tok_1" });
       expect(events[2]?.metadata).toBeNull();
     });
@@ -127,6 +127,49 @@ describe("AuditService", () => {
       const sql = String(prepare.mock.calls[0]?.[0]);
       expect(sql).toContain("a.action = ?");
       expect(bind).toHaveBeenCalledWith("org_1", "tok_1", "tok_1", "freeze", 10, 5);
+    });
+
+    it("applies the status filter as a bound parameter", async () => {
+      const { db, prepare, bind } = mockDb([]);
+
+      await new AuditService(db).getForAsset("org_1", "tok_1", { status: "failure" });
+
+      const sql = String(prepare.mock.calls[0]?.[0]);
+      expect(sql).toContain("a.status = ?");
+      expect(bind).toHaveBeenCalledWith("org_1", "tok_1", "tok_1", "failure", 50, 0);
+    });
+
+    it("maps the actorType filter to id-presence predicates without bound params", async () => {
+      const cases = [
+        { actorType: "user" as const, clause: "a.user_id IS NOT NULL" },
+        { actorType: "api_key" as const, clause: "a.user_id IS NULL AND a.api_key_id IS NOT NULL" },
+        { actorType: "system" as const, clause: "a.user_id IS NULL AND a.api_key_id IS NULL" },
+      ];
+
+      for (const { actorType, clause } of cases) {
+        const { db, prepare, bind } = mockDb([]);
+        await new AuditService(db).getForAsset("org_1", "tok_1", { actorType });
+
+        const sql = String(prepare.mock.calls[0]?.[0]);
+        expect(sql).toContain(clause);
+        // actorType is derived, not stored, so it adds no bound parameter.
+        expect(bind).toHaveBeenCalledWith("org_1", "tok_1", "tok_1", 50, 0);
+      }
+    });
+
+    it("combines filters in a stable parameter order", async () => {
+      const { db, bind } = mockDb([]);
+
+      await new AuditService(db).getForAsset("org_1", "tok_1", {
+        action: "freeze",
+        status: "success",
+        actorType: "user",
+        limit: 10,
+        offset: 5,
+      });
+
+      // org, tokenId x2, then action, status (actorType adds no param), then limit, offset.
+      expect(bind).toHaveBeenCalledWith("org_1", "tok_1", "tok_1", "freeze", "success", 10, 5);
     });
   });
 });

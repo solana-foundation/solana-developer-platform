@@ -1,11 +1,17 @@
 "use client";
 
-import { ASSET_AUDIT_ACTIONS } from "@sdp/types";
+import { ASSET_AUDIT_ACTIONS, ASSET_AUDIT_ACTOR_TYPES, ASSET_AUDIT_STATUSES } from "@sdp/types";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Select, SelectItem } from "@/components/ui/select";
 import {
   Table,
@@ -29,24 +35,39 @@ import {
 
 const PAGE_STEP = 50;
 // Sentinel select value for the "no filter" option (Select treats null/"" as the
-// empty placeholder, so the reset option needs a real value).
-const ALL_ACTIONS = "__all__";
+// empty placeholder, so the reset option needs a real value). Shared across the
+// action/status/type filters — each Select is independent.
+const ALL = "__all__";
 
 export function ActivityTab({ tokenId }: { tokenId: string }) {
   const t = useTranslations();
   const locale = useLocale();
   const [action, setAction] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [actorType, setActorType] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(PAGE_STEP);
 
   const { data, error, isLoading } = usePersistedDashboardSWR(
-    ["asset-audit", tokenId, action ?? "all", pageSize] as const,
-    ([, id, act, size]) =>
+    [
+      "asset-audit",
+      tokenId,
+      action ?? "all",
+      status ?? "all",
+      actorType ?? "all",
+      pageSize,
+    ] as const,
+    ([, id, act, st, ty, size]) =>
       fetchAssetAuditHistory(id, {
         action: act === "all" ? null : act,
+        status: st === "all" ? null : st,
+        actorType: ty === "all" ? null : ty,
         pageSize: Number(size),
       }),
     { revalidateOnFocus: true, revalidateIfStale: true },
-    { key: `token.${tokenId}.audit.${action ?? "all"}.${pageSize}`, ttlMs: 30_000 }
+    {
+      key: `token.${tokenId}.audit.${action ?? "all"}.${status ?? "all"}.${actorType ?? "all"}.${pageSize}`,
+      ttlMs: 30_000,
+    }
   );
 
   const events = data?.events ?? [];
@@ -58,25 +79,20 @@ export function ActivityTab({ tokenId }: { tokenId: string }) {
 
   return (
     <Card className="gap-4">
-      <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <CardTitle>{t("DashboardIssuance.activity.title")}</CardTitle>
-          <CardDescription>{t("DashboardIssuance.activity.description")}</CardDescription>
-        </div>
-        <div className="min-w-[200px]">
-          <Label>{t("DashboardIssuance.activity.filterLabel")}</Label>
-          <div className="mt-1.5">
+      <CardHeader>
+        <CardTitle>{t("DashboardIssuance.activity.title")}</CardTitle>
+        <CardDescription>{t("DashboardIssuance.activity.description")}</CardDescription>
+        <CardAction className="flex flex-wrap items-center justify-end gap-2">
+          <div className="w-40">
             <Select
-              value={action ?? ALL_ACTIONS}
+              ariaLabel={t("DashboardIssuance.activity.filterLabel")}
+              value={action ?? ALL}
               onValueChange={(value) => {
-                setAction(value === ALL_ACTIONS ? null : value);
+                setAction(value === ALL ? null : value);
                 setPageSize(PAGE_STEP);
               }}
-              placeholder={t("DashboardIssuance.activity.filterAll")}
             >
-              <SelectItem value={ALL_ACTIONS}>
-                {t("DashboardIssuance.activity.filterAll")}
-              </SelectItem>
+              <SelectItem value={ALL}>{t("DashboardIssuance.activity.filterAll")}</SelectItem>
               {ASSET_AUDIT_ACTIONS.map((value) => (
                 <SelectItem key={value} value={value}>
                   {auditActionLabel(value)}
@@ -84,7 +100,45 @@ export function ActivityTab({ tokenId }: { tokenId: string }) {
               ))}
             </Select>
           </div>
-        </div>
+          <div className="w-40">
+            <Select
+              ariaLabel={t("DashboardIssuance.activity.columnStatus")}
+              value={status ?? ALL}
+              onValueChange={(value) => {
+                setStatus(value === ALL ? null : value);
+                setPageSize(PAGE_STEP);
+              }}
+            >
+              <SelectItem value={ALL}>
+                {t("DashboardIssuance.activity.filterAllStatuses")}
+              </SelectItem>
+              {ASSET_AUDIT_STATUSES.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {value === "failure"
+                    ? t("DashboardIssuance.activity.statusFailure")
+                    : t("DashboardIssuance.activity.statusSuccess")}
+                </SelectItem>
+              ))}
+            </Select>
+          </div>
+          <div className="w-40">
+            <Select
+              ariaLabel={t("DashboardIssuance.activity.columnActorType")}
+              value={actorType ?? ALL}
+              onValueChange={(value) => {
+                setActorType(value === ALL ? null : value);
+                setPageSize(PAGE_STEP);
+              }}
+            >
+              <SelectItem value={ALL}>{t("DashboardIssuance.activity.filterAllTypes")}</SelectItem>
+              {ASSET_AUDIT_ACTOR_TYPES.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {auditActorTypeLabel(value, t)}
+                </SelectItem>
+              ))}
+            </Select>
+          </div>
+        </CardAction>
       </CardHeader>
       <CardContent>
         {isLoading && events.length === 0 ? (

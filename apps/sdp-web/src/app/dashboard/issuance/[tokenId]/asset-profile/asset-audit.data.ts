@@ -17,11 +17,23 @@ interface AssetAuditEnvelope {
 
 export async function fetchAssetAuditHistory(
   tokenId: string,
-  options: { action?: string | null; pageSize?: number; signal?: AbortSignal } = {}
+  options: {
+    action?: string | null;
+    status?: string | null;
+    actorType?: string | null;
+    pageSize?: number;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<AssetAuditHistory> {
   const query = new URLSearchParams();
   if (options.action) {
     query.set("action", options.action);
+  }
+  if (options.status) {
+    query.set("status", options.status);
+  }
+  if (options.actorType) {
+    query.set("type", options.actorType);
   }
   if (options.pageSize) {
     query.set("pageSize", String(options.pageSize));

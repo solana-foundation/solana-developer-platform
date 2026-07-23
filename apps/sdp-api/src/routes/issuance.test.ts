@@ -1475,6 +1475,65 @@ describe("Issuance Routes", () => {
       const body = await res.json();
       expect(body.error.message).toContain("requiresAllowlist");
     });
+
+    it("updates symbol and decimals while the token is undeployed", async () => {
+      const res = await app.request(
+        `/v1/issuance/tokens/${tokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ symbol: "RENAMED", decimals: 2 }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.token.symbol).toBe("RENAMED");
+      expect(body.data.token.decimals).toBe(2);
+    });
+
+    it("rejects symbol and decimals changes after deployment", async () => {
+      const db = getDb(env);
+      const deployedTokenId = "tok_symbollocked1";
+
+      await db
+        .prepare(
+          `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+           name, symbol, decimals, total_supply_cached, is_mintable, freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, 'Locked Token', 'LOCK', 6, '0', 1, 1, 0, 'active', '2024-01-02T00:00:00.000Z', ?)`
+        )
+        .bind(
+          deployedTokenId,
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          TEST_ACTIVE_TOKEN.mintAddress,
+          TEST_ACTIVE_TOKEN.mintAuthority,
+          TEST_ACTIVE_TOKEN.freezeAuthority,
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${deployedTokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ symbol: "NEWSYM" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.message).toContain("symbol and decimals");
+    });
   });
 
   describe("POST /v1/issuance/tokens/:tokenId/supply/refresh", () => {

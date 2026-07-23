@@ -188,6 +188,8 @@ export function AssetManagementWorkspace({
   const effectivePauseDisabledReason = ops.effectivePauseDisabledReason;
 
   return (
+    // Width + centering come from the dashboard shell's action-page layout;
+    // the workspace just fills the column it's given.
     <div className="space-y-4 pb-8">
       <AssetProfileHeader
         token={token}

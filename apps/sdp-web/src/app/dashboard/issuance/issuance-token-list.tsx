@@ -5,11 +5,11 @@ import {
   ChevronDown,
   Copy,
   ExternalLink,
-  FlaskConical,
   type LucideIcon,
   MoreHorizontal,
   Plus,
   SlidersHorizontal,
+  Terminal,
 } from "lucide-react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import { useState } from "react";
@@ -120,7 +120,7 @@ export function ManageKebab({
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link href={playgroundHref}>
-            <FlaskConical className="h-4 w-4 shrink-0 text-tertiary" aria-hidden="true" />
+            <Terminal className="h-4 w-4 shrink-0 text-tertiary" aria-hidden="true" />
             {t("DashboardIssuance.playground.openInPlayground")}
           </Link>
         </DropdownMenuItem>
@@ -252,7 +252,7 @@ function IssuanceTokenListRow({ token }: { token: IssuanceTokenView }) {
       <AnimatePresence initial={false}>
         {expanded ? (
           <HeightReveal key="panel" durationSeconds={reduceMotion ? 0 : 0.28}>
-            <div className="border-t border-border-subtle bg-fill-subtle px-5 py-5">
+            <div className="border-t border-border-subtle bg-surface-raised px-5 py-5">
               <div className="grid grid-cols-2 gap-x-8 gap-y-4 sm:grid-cols-3">
                 {fields.map((field) => (
                   <FieldRow key={field.label} {...field} />

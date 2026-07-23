@@ -93,9 +93,6 @@ export interface AuditLogEntry {
 export class AuditService {
   constructor(private db: DatabaseClient) {}
 
-  /**
-   * Log an audit event
-   */
   async log(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): Promise<void> {
     // Resolve the actor from whichever auth context is present. Dashboard
     // requests carry a Clerk/session context (a user), API requests carry an
@@ -150,9 +147,6 @@ export class AuditService {
     }
   }
 
-  /**
-   * Query audit logs for an organization
-   */
   async getForOrganization(
     organizationId: string,
     options: {
@@ -260,9 +254,9 @@ export class AuditService {
   async getForAsset(
     organizationId: string,
     tokenId: string,
-    options: { limit?: number; offset?: number; action?: AuditAction } = {}
+    options: AssetAuditFilters & { limit?: number; offset?: number } = {}
   ): Promise<AssetAuditRecord[]> {
-    const { limit = 50, offset = 0, action } = options;
+    const { limit = 50, offset = 0, ...filters } = options;
 
     // metadata is stored as JSON text; cast to jsonb to read `tokenId`. All
     // org-scoped rows are SDP-written via JSON.stringify, so the cast is safe.
@@ -281,10 +275,9 @@ export class AuditService {
     `;
     const params: (string | number)[] = [organizationId, tokenId, tokenId];
 
-    if (action) {
-      query += " AND a.action = ?";
-      params.push(action);
-    }
+    const filter = buildAssetFilterClause(filters);
+    query += filter.clause;
+    params.push(...filter.params);
 
     query += " ORDER BY a.created_at DESC LIMIT ? OFFSET ?";
     params.push(limit, offset);
@@ -306,7 +299,7 @@ export class AuditService {
         ? (row.user_name as string | null) || (row.user_email as string | null) || "Team member"
         : apiKeyId
           ? (row.api_key_name as string | null) || "API key"
-          : "Automated";
+          : "SDP";
 
       return {
         id: row.id as string,
@@ -330,10 +323,8 @@ export class AuditService {
   async countForAsset(
     organizationId: string,
     tokenId: string,
-    options: { action?: AuditAction } = {}
+    options: AssetAuditFilters = {}
   ): Promise<number> {
-    const { action } = options;
-
     let query = `
       SELECT COUNT(*) as count
       FROM audit_logs a
@@ -343,12 +334,11 @@ export class AuditService {
           OR (a.metadata IS NOT NULL AND (a.metadata::jsonb) ->> 'tokenId' = ?)
         )
     `;
-    const params: string[] = [organizationId, tokenId, tokenId];
+    const params: (string | number)[] = [organizationId, tokenId, tokenId];
 
-    if (action) {
-      query += " AND a.action = ?";
-      params.push(action);
-    }
+    const filter = buildAssetFilterClause(options);
+    query += filter.clause;
+    params.push(...filter.params);
 
     const result = await this.db
       .prepare(query)
@@ -357,6 +347,49 @@ export class AuditService {
 
     return result?.count || 0;
   }
+}
+
+/**
+ * Filters for the per-asset activity feed. `actorType` has no stored column —
+ * it's derived from which actor id is set, so it maps to id-presence predicates.
+ */
+export interface AssetAuditFilters {
+  action?: AuditAction;
+  status?: "success" | "failure";
+  actorType?: "user" | "api_key" | "system";
+}
+
+/** Build the shared `AND ...` filter clause used by getForAsset/countForAsset. */
+function buildAssetFilterClause(filters: AssetAuditFilters): {
+  clause: string;
+  params: (string | number)[];
+} {
+  let clause = "";
+  const params: (string | number)[] = [];
+
+  if (filters.action) {
+    clause += " AND a.action = ?";
+    params.push(filters.action);
+  }
+  if (filters.status) {
+    clause += " AND a.status = ?";
+    params.push(filters.status);
+  }
+  // actorType mirrors the actorType derivation in getForAsset: user wins if a
+  // user id is set, else api_key, else system (no human/key actor).
+  switch (filters.actorType) {
+    case "user":
+      clause += " AND a.user_id IS NOT NULL";
+      break;
+    case "api_key":
+      clause += " AND a.user_id IS NULL AND a.api_key_id IS NOT NULL";
+      break;
+    case "system":
+      clause += " AND a.user_id IS NULL AND a.api_key_id IS NULL";
+      break;
+  }
+
+  return { clause, params };
 }
 
 /** An audit event scoped to one asset, with the actor resolved to a label. */
