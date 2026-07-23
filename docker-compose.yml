@@ -51,6 +51,7 @@ services:
       # Core
       ENVIRONMENT: ${ENVIRONMENT:-development}
       ASSET_PROFILES_ENABLED: ${ASSET_PROFILES_ENABLED:-true}
+      PRIVY_BYOK_PROVISIONING_ENABLED: ${PRIVY_BYOK_PROVISIONING_ENABLED:-false}
       API_VERSION: ${API_VERSION:-local-compose}
       SDP_DEPLOYMENT_MODE: ${SDP_DEPLOYMENT_MODE:-self_hosted}
       DATABASE_URL: postgresql://sdp:sdp@postgres:5432/sdp

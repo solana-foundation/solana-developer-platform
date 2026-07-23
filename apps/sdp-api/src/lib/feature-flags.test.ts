@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAssetProfilesEnabled } from "./feature-flags";
+import { isAssetProfilesEnabled, isPrivyByokProvisioningEnabled } from "./feature-flags";
 
 describe("isAssetProfilesEnabled", () => {
   it.each([
@@ -37,6 +37,24 @@ describe("isAssetProfilesEnabled", () => {
       isAssetProfilesEnabled({
         ENVIRONMENT: "production",
         ASSET_PROFILES_ENABLED: flag,
+      })
+    ).toBe(true);
+  });
+});
+
+describe("isPrivyByokProvisioningEnabled", () => {
+  it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
+    expect(
+      isPrivyByokProvisioningEnabled({
+        PRIVY_BYOK_PROVISIONING_ENABLED: flag,
+      })
+    ).toBe(false);
+  });
+
+  it.each(["1", "true", " TRUE ", "yes", "on"])("honors the opt-in value %s", (flag) => {
+    expect(
+      isPrivyByokProvisioningEnabled({
+        PRIVY_BYOK_PROVISIONING_ENABLED: flag,
       })
     ).toBe(true);
   });

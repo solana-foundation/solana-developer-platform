@@ -32,6 +32,7 @@ import counterparties from "@/routes/counterparties";
 import wallets from "@/routes/custody";
 import docs from "@/routes/docs";
 import health from "@/routes/health";
+import internalCustody from "@/routes/internal-custody";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
@@ -357,6 +358,9 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   }
 
   app.route("/v1", v1);
+
+  // Dashboard-only internal APIs
+  app.route("/internal/dashboard/custody", internalCustody);
 
   // Admin routes (internal)
   app.route("/admin/allowlist", allowlist);

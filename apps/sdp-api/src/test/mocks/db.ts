@@ -22,6 +22,8 @@ const POSTGRES_TEST_TABLES = [
   "wallet_control_profiles",
   "api_key_wallet_permissions",
   "custody_scope_defaults",
+  "custody_connections",
+  "provider_credentials",
   "custody_wallets",
   "signing_requests",
   "custody_configs",
