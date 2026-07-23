@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.46.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.0...v0.46.1) (2026-07-23)
+
+### Bug Fixes
+
+* **api:** enforce per-key rate limit tiers after auth ([#855](https://github.com/solana-foundation/solana-developer-platform/pull/855)) ([a7890f8](https://github.com/solana-foundation/solana-developer-platform/commit/a7890f8fee3a6cca611168b4330fdfc505f808a4))
+
+### Maintenance
+
+* **deps:** bump next from 16.2.7 to 16.2.11 ([#872](https://github.com/solana-foundation/solana-developer-platform/pull/872)) ([5dfdb6b](https://github.com/solana-foundation/solana-developer-platform/commit/5dfdb6bb1946130ad8709aa2a97a51088df34710))
+
 ## [0.46.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.45.0...v0.46.0) (2026-07-23)
 
 ### Features
