@@ -9,6 +9,8 @@
     "dashboard": "Dashboard",
     "title": "Build any financial product, without worrying about the infrastructure",
     "description": "Whether you're issuing a stablecoin, orchestrating cross-border payments, or tokenizing real-world assets, SDP provides the most reliable APIs and infrastructure to make it happen.",
+    "trySdp": "Try SDP",
+    "contactUs": "Contact us",
     "joinWaitlist": "Join the waitlist"
   },
   "NotFound": {
