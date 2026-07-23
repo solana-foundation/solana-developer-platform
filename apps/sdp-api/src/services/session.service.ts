@@ -116,13 +116,13 @@ export class SessionService {
       }>();
 
     if (!row) {
-      await this.deleteSessionCache(sessionId);
+      await this.deleteSessionCacheBestEffort(sessionId);
       return null;
     }
 
     // Check expiration
     if (new Date(row.expires_at) < new Date()) {
-      await this.deleteSessionCache(sessionId);
+      await this.deleteSessionCacheBestEffort(sessionId);
       return null;
     }
 
@@ -163,7 +163,7 @@ export class SessionService {
       .prepare("UPDATE sessions SET revoked_at = ? WHERE id = ?")
       .bind(now, sessionId)
       .run();
-    await this.deleteSessionCache(sessionId);
+    await this.deleteSessionCacheBestEffort(sessionId);
   }
 
   /**
@@ -202,14 +202,9 @@ export class SessionService {
       .bind(now, ...bindings)
       .run();
 
-    const cacheCleanup = await Promise.allSettled(
-      sessions.results.map((session) => this.deleteSessionCache(session.id))
+    await Promise.all(
+      sessions.results.map((session) => this.deleteSessionCacheBestEffort(session.id))
     );
-    for (const result of cacheCleanup) {
-      if (result.status === "rejected") {
-        console.error("Failed to delete revoked session cache:", result.reason);
-      }
-    }
   }
 
   /**
@@ -264,5 +259,13 @@ export class SessionService {
 
   private async deleteSessionCache(sessionId: string): Promise<void> {
     await this.sessionsKV.delete(`session:${sessionId}`);
+  }
+
+  private async deleteSessionCacheBestEffort(sessionId: string): Promise<void> {
+    try {
+      await this.deleteSessionCache(sessionId);
+    } catch (error) {
+      console.error("Failed to delete revoked session cache:", error);
+    }
   }
 }

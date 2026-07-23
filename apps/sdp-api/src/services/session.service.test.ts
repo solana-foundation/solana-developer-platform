@@ -205,6 +205,6 @@ describe("SessionService", () => {
       expect.any(Error)
     );
 
-    await expect(service.getSession(session.id)).resolves.toBeNull();
+    await expect(serviceWithFailingCache.getSession(session.id)).resolves.toBeNull();
   });
 });
