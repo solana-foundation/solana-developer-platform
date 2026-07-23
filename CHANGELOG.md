@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.46.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.3...v0.46.4) (2026-07-23)
+
+### Refactors
+
+* **approvals:** design-system filters and date-range presets ([#886](https://github.com/solana-foundation/solana-developer-platform/pull/886)) ([6b5c525](https://github.com/solana-foundation/solana-developer-platform/commit/6b5c52568156fe1571e899d3fd155fcf23adebdd))
+
 ## [0.46.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.2...v0.46.3) (2026-07-23)
 
 ### Bug Fixes
