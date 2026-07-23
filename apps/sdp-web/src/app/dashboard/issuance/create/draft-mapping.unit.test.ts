@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
 import {
+  ASSET_DESCRIPTION_MAX_LENGTH,
   buildIssuanceMetadata,
+  getAssetDetailsErrors,
   getDefaultPublicFields,
   getPublicFieldCandidates,
   togglePublicField,
@@ -20,6 +22,34 @@ function draftWith(overrides: Partial<DraftState>): DraftState {
 const t = (key: MessageKey, values?: TranslationValues) =>
   translate(getMessages("en"), key, values);
 
+describe("getAssetDetailsErrors (description length)", () => {
+  it("flags a description longer than the API max", () => {
+    const draft = draftWith({ description: "x".repeat(ASSET_DESCRIPTION_MAX_LENGTH + 1) });
+    expect(getAssetDetailsErrors(draft, t).description).toBe(
+      t("DashboardIssuance.errors.descriptionTooLong", { max: ASSET_DESCRIPTION_MAX_LENGTH })
+    );
+  });
+
+  it("allows a description exactly at the max", () => {
+    const draft = draftWith({ description: "x".repeat(ASSET_DESCRIPTION_MAX_LENGTH) });
+    expect(getAssetDetailsErrors(draft, t).description).toBeUndefined();
+  });
+
+  it("counts the trimmed length, matching what the client sends to the API", () => {
+    // Leading/trailing whitespace is stripped before the request (buildTokenInput
+    // and the details-tab save both send draft.description.trim()), so it must not
+    // count toward the limit — otherwise the client would over-reject.
+    const draft = draftWith({ description: `  ${"x".repeat(ASSET_DESCRIPTION_MAX_LENGTH)}  ` });
+    expect(getAssetDetailsErrors(draft, t).description).toBeUndefined();
+  });
+
+  it("still requires a non-empty description", () => {
+    expect(getAssetDetailsErrors(draftWith({ description: "   " }), t).description).toBe(
+      t("DashboardIssuance.errors.descriptionRequired")
+    );
+  });
+});
+
 describe("getDefaultPublicFields", () => {
   it("returns the registry projection for a known type", () => {
     expect(getDefaultPublicFields("stablecoin", "fiat_backed")).toEqual([
@@ -31,8 +61,44 @@ describe("getDefaultPublicFields", () => {
     ]);
   });
 
+  it("exposes on-chain collateral posture by default for crypto-backed", () => {
+    // Crypto-backing's trust comes from transparent collateral, so backing type,
+    // collateral assets, and target ratio are public by default.
+    expect(getDefaultPublicFields("stablecoin", "crypto_backed")).toEqual([
+      "asset.name",
+      "asset.pegCurrency",
+      "asset.backingType",
+      "asset.reserveAsset",
+      "asset.collateralizationRatio",
+      "chain.decimals",
+      "asset.website",
+    ]);
+  });
+
   it("returns an empty list for an unknown type", () => {
     expect(getDefaultPublicFields("stablecoin", "not_a_type")).toEqual([]);
+  });
+});
+
+describe("getPublicFieldCandidates (crypto-backed collateral)", () => {
+  it("surfaces the crypto collateral fields with their values", () => {
+    const draft = draftWith({
+      assetType: "crypto_backed",
+      backingType: "crypto",
+      reserveAsset: "SOL, wBTC",
+      collateralizationRatio: "150",
+      oracleProvider: "Pyth",
+      publicFields: [],
+    });
+    const paths = getPublicFieldCandidates(draft, t).map((candidate) => candidate.path);
+    expect(paths).toContain("asset.collateralizationRatio");
+    expect(paths).toContain("asset.oracleProvider");
+    expect(paths).toContain("asset.reserveAsset");
+    // Select-backed backingType shows its human label, not the raw value.
+    const backing = getPublicFieldCandidates(draft, t).find(
+      (candidate) => candidate.path === "asset.backingType"
+    );
+    expect(backing?.value).toBe("Crypto-backed");
   });
 });
 
@@ -75,6 +141,36 @@ describe("getPublicFieldCandidates", () => {
     expect(candidates.find((candidate) => candidate.path === "asset.issuerName")?.label).toBe(
       "Issuer name"
     );
+  });
+
+  it("surfaces the votingRights toggle as an Enabled candidate when on", () => {
+    const draft = draftWith({
+      assetCategory: "tokenized_security",
+      assetType: "equity",
+      shareClass: "Class A common",
+      votingRights: true,
+      publicFields: ["asset.votingRights"],
+    });
+    const candidate = getPublicFieldCandidates(draft, t).find(
+      (entry) => entry.path === "asset.votingRights"
+    );
+    expect(candidate).toMatchObject({
+      label: "Voting rights",
+      // Boolean toggle renders a human label, not the literal "true".
+      value: "Enabled",
+      enabled: true,
+    });
+  });
+
+  it("omits the votingRights toggle when off", () => {
+    const draft = draftWith({
+      assetCategory: "tokenized_security",
+      assetType: "equity",
+      votingRights: false,
+    });
+    expect(
+      getPublicFieldCandidates(draft, t).some((entry) => entry.path === "asset.votingRights")
+    ).toBe(false);
   });
 });
 

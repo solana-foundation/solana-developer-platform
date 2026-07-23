@@ -6,7 +6,7 @@
  */
 
 import type { CachedApiKey } from "@sdp/types";
-import { createKVStoreSet } from "@/runtime/factory";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import type { Env } from "@/types/env";
 
 /**
@@ -26,7 +26,7 @@ export async function seedCachedApiKey(
 /**
  * Clears all KV data
  */
-export async function clearKVNamespaces(env: Env): Promise<void> {
+export async function clearKVStores(env: Env): Promise<void> {
   const kv = createKVStoreSet(env);
   const stores = [kv.apiKeys, kv.rateLimits, kv.cache];
 

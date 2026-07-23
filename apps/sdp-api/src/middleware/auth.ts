@@ -21,7 +21,6 @@ import {
   parsePostgresJsonOr,
 } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
-import { getRuntime, type SdpRuntime } from "@/lib/runtime-env";
 import type { KVStore } from "@/runtime/kv";
 import type { Env } from "@/types/env";
 
@@ -52,9 +51,7 @@ interface ApiKeyContext {
   walletBindings: ApiKeyWalletBinding[];
 }
 
-/**
- * Extract API key from Authorization header
- */
+/** Extract API key from Authorization header */
 function extractApiKey(c: Context<{ Bindings: Env }>): string | null {
   const authHeader = c.req.header("Authorization");
   if (!authHeader) {
@@ -94,17 +91,13 @@ function looksLikeJwt(token: string): boolean {
   return token.split(".").length === 3;
 }
 
-/**
- * Look up API key in KV cache
- */
+/** Look up API key in KV cache */
 async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | null> {
   const cached = await kv.get<CachedApiKey>(`key:${keyHash}`, "json");
   return cached;
 }
 
-/**
- * Look up API key in Postgres and cache to KV
- */
+/** Look up API key in Postgres and cache to KV */
 async function getFromDatabaseAndCache(
   db: DatabaseClient,
   kv: KVStore,
@@ -229,21 +222,12 @@ function sweepExpiredLastUsedWrites(cache: LastUsedWriteCache, now: number): voi
   cache.nextSweepAt = now + NODE_LAST_USED_WRITE_INTERVAL_MS;
 }
 
-/**
- * Updates last_used_at without putting a write on every Node request. Workers
- * keep their existing per-request behavior because their isolate lifetime is
- * not a useful process-local coalescing boundary.
- */
+/** Updates last_used_at without putting a write on every request. */
 export function scheduleApiKeyLastUsedUpdate(
   db: DatabaseClient,
   keyId: string,
-  runtime: SdpRuntime,
   now = Date.now()
 ): Promise<void> {
-  if (runtime === "cloudflare") {
-    return writeLastUsed(db, keyId).catch(logLastUsedWriteError);
-  }
-
   const cache = getLastUsedWriteCache(db);
   sweepExpiredLastUsedWrites(cache, now);
   const existing = cache.writes.get(keyId);
@@ -398,7 +382,7 @@ export function authMiddleware() {
     c.set("apiKey", authContext);
 
     // Update last used (fire and forget). Node coalesces this write per key.
-    void scheduleApiKeyLastUsedUpdate(getDb(c.env), cachedKey.id, getRuntime(c.env));
+    void scheduleApiKeyLastUsedUpdate(getDb(c.env), cachedKey.id);
 
     await next();
   };

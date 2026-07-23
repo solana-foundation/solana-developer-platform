@@ -126,12 +126,12 @@ function getPlaywrightApiRuntimeEnv(): PlaywrightApiRuntimeEnv {
   };
 }
 
-function getLocalDevVars(): Map<string, string> {
-  const devVarsPath = path.resolve(__dirname, "../../../sdp-api/.dev.vars");
+function getLocalEnvValues(): Map<string, string> {
+  const localEnvPath = path.resolve(__dirname, "../../../sdp-api/.env.local");
   const values = new Map<string, string>();
 
-  if (fs.existsSync(devVarsPath)) {
-    const contents = fs.readFileSync(devVarsPath, "utf8");
+  if (fs.existsSync(localEnvPath)) {
+    const contents = fs.readFileSync(localEnvPath, "utf8");
     for (const rawLine of contents.split(/\r?\n/)) {
       const line = rawLine.trim();
       if (!line || line.startsWith("#")) {
@@ -155,7 +155,7 @@ function getLocalDevVar(name: string): string | null {
     return explicitValue;
   }
 
-  return getLocalDevVars().get(name) ?? null;
+  return getLocalEnvValues().get(name) ?? null;
 }
 
 function isKoraSurfpoolShim(): boolean {
@@ -661,13 +661,16 @@ export async function ensureLinkedOrg(
       const userId = await ensureLocalUserIdentity(client, identity);
 
       await client.query(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES ($1, $2, $3, $4, 'active')
+        `INSERT INTO organizations
+           (id, name, slug, tier, status, onboarding_completed_at, onboarding_version)
+         VALUES ($1, $2, $3, $4, 'active', sdp_datetime_now(), 1)
          ON CONFLICT (id) DO UPDATE SET
            name = EXCLUDED.name,
            slug = EXCLUDED.slug,
            tier = EXCLUDED.tier,
            status = EXCLUDED.status,
+           onboarding_completed_at = sdp_datetime_now(),
+           onboarding_version = 1,
            updated_at = sdp_datetime_now()`,
         [organization.id, organization.name, organization.slug, tier]
       );

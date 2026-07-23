@@ -773,7 +773,7 @@
             "description": "Updates stored token fields. For deployed tokens, metadata fields are also written on-chain through the current metadata authority.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true\n}",
+              "raw": "{\n  \"name\": \"Example Token Updated\",\n  \"symbol\": \"\",\n  \"decimals\": 0,\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -807,6 +807,15 @@
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/transactions",
             "description": "Lists token transactions for an issued token."
+          }
+        },
+        {
+          "name": "Get asset audit history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/audit",
+            "description": "Returns the aggregated audit history for an issued token: events logged against the token and its child resources (transactions, allowlist entries, frozen accounts), newest first. Supports filtering by action type."
           }
         },
         {
@@ -2005,7 +2014,7 @@
             "description": "Updates an asset profile. At least one field must be provided. The resulting category/type pair must be supported. Public metadata is recomputed when metadata or the asset type changes; set issuanceMetadata.visibility.public to control which fields are exposed (asset.* and chain.decimals only).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\",\n      \"website\": \"https://acme.example\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    },\n    \"visibility\": {\n      \"public\": [\n        \"asset.name\",\n        \"asset.issuerName\",\n        \"asset.pegCurrency\",\n        \"chain.decimals\"\n      ]\n    }\n  }\n}",
+              "raw": "{\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\",\n      \"website\": \"https://acme.example\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    },\n    \"visibility\": {\n      \"public\": [\n        \"asset.name\",\n        \"asset.issuerName\",\n        \"asset.pegCurrency\",\n        \"chain.decimals\"\n      ]\n    },\n    \"settings\": {\n      \"version\": 1,\n      \"selected\": {\n        \"freezeTransfers\": {},\n        \"transferFee\": {\n          \"params\": {\n            \"basisPoints\": 50,\n            \"maxFee\": \"100\"\n          }\n        }\n      }\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"

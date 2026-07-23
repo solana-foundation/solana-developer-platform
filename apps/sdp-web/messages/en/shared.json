@@ -94,10 +94,12 @@
     "requestExecutionFailed": "Request execution failed."
   },
   "dashboardShell": {
+    "workspace": "Workspace",
     "openNavigation": "Open navigation",
     "closeNavigation": "Close navigation",
     "sandbox": "Sandbox",
     "loadingDashboard": "Loading dashboard...",
+    "reloadDashboard": "Reload dashboard",
     "signInToContinue": "Sign in to continue",
     "signInDescription": "Access your organization workspace and wallet controls.",
     "signIn": "Sign in",
@@ -144,6 +146,7 @@
     "createWallet": "Create wallet",
     "activateProvider": "Activate provider",
     "newAsset": "New asset",
+    "assetManagement": "Asset management",
     "backToOverview": "Back to overview",
     "recurringPayments": "Recurring payments",
     "recurringPayment": "Recurring payment",

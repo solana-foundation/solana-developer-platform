@@ -15,8 +15,7 @@ import {
   useTransition,
 } from "react";
 import { SWRConfig } from "swr";
-import { Button } from "@/components/ui/button";
-import { useTranslations } from "@/i18n/provider";
+import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
@@ -61,22 +60,6 @@ type DashboardWorkspaceContextValue = {
 const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue | undefined>(
   undefined
 );
-
-function DashboardScopeRefreshFallback() {
-  const router = useRouter();
-  const t = useTranslations();
-
-  return (
-    <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
-      <div className="mx-auto max-w-5xl space-y-4 border border-border-subtle bg-surface-raised/70 p-6">
-        <p className="text-sm text-tertiary">{t("Shared.dashboardShell.loadingDashboard")}</p>
-        <Button type="button" variant="ghost" size="sm" onClick={() => router.refresh()}>
-          {t("Shared.SharedComponents.retry")}
-        </Button>
-      </div>
-    </main>
-  );
-}
 
 type DashboardWorkspaceProviderProps = {
   children: ReactNode;
@@ -196,16 +179,22 @@ export function DashboardWorkspaceProvider({
     const previousPathname = previousPathnameRef.current;
     if (previousPathname === pathname) return;
     previousPathnameRef.current = pathname;
+    // Read the tab straight from the URL, not the useSyncExternalStore snapshot:
+    // App Router <Link> navigation fires no popstate/custom event, so the snapshot
+    // can still hold the previous page's tab. Acting on that stale value would wipe
+    // an explicit deep-link destination (e.g. ?tab=playground) that just committed.
+    const tab =
+      typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("tab");
     if (
       shouldClearDashboardTabAfterPathnameChange({
         previousPathname,
         pathname,
-        tab: searchParams.get("tab"),
+        tab,
       })
     ) {
       replaceSearchParams({ tab: null });
     }
-  }, [pathname, searchParams, replaceSearchParams]);
+  }, [pathname, replaceSearchParams]);
 
   const issuanceTab: IssuanceWorkspaceTab = useMemo(() => {
     const tab = searchParams.get("tab");
@@ -305,7 +294,11 @@ export function DashboardWorkspaceProvider({
   return (
     <DashboardWorkspaceContext.Provider value={value}>
       <SWRConfig key={swrScopeKey} value={scopedSwrConfig}>
-        {shouldRenderScopeRefreshFallback ? <DashboardScopeRefreshFallback /> : children}
+        {shouldRenderScopeRefreshFallback ? (
+          <FullscreenLoadingIndicator allowDelayedReload />
+        ) : (
+          children
+        )}
       </SWRConfig>
     </DashboardWorkspaceContext.Provider>
   );

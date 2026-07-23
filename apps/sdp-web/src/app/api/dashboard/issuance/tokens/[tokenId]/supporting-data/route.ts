@@ -89,7 +89,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       trace.step("fetch_allowlist", () =>
         fetchList<TokenAllowlistEntry>(
           apiClient.request,
-          `/v1/issuance/tokens/${tokenId}/allowlist?page=1&pageSize=100`
+          // 500 so the compliance tab's client-side allowlist/denylist search
+          // covers the whole list without a dedicated server-search endpoint.
+          `/v1/issuance/tokens/${tokenId}/allowlist?page=1&pageSize=500`
         )
       ),
       trace.step("fetch_frozen_accounts", () =>

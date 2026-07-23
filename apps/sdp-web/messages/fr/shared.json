@@ -94,10 +94,12 @@
     "requestExecutionFailed": "Échec de l’exécution de la requête."
   },
   "dashboardShell": {
+    "workspace": "Espace de travail",
     "openNavigation": "Ouvrir la navigation",
     "closeNavigation": "Fermer la navigation",
     "sandbox": "Sandbox",
     "loadingDashboard": "Chargement du dashboard...",
+    "reloadDashboard": "Recharger le dashboard",
     "signInToContinue": "Connectez-vous pour continuer",
     "signInDescription": "Accédez à votre espace organisation et aux contrôles Wallet.",
     "signIn": "Se connecter",
@@ -131,6 +133,7 @@
     "createWallet": "Créer un Wallet",
     "activateProvider": "Activer le provider",
     "newAsset": "Nouvel Asset",
+    "assetManagement": "Gestion de l’asset",
     "backToOverview": "Retour à l’aperçu",
     "recurringPayments": "Paiements récurrents",
     "recurringPayment": "Paiement récurrent",

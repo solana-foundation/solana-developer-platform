@@ -11,9 +11,6 @@ import {
 // Extension Schemas
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Transfer fee extension configuration
- */
 const transferFeeConfigSchema = z.object({
   basisPoints: z.number().int().min(0).max(10000),
   maxFee: z.string().refine((value) => isDecimalString(value), {
@@ -23,24 +20,15 @@ const transferFeeConfigSchema = z.object({
   withdrawWithheldAuthority: z.string().optional(),
 });
 
-/**
- * Interest-bearing extension configuration
- */
 const interestBearingConfigSchema = z.object({
   rate: z.number(),
   rateAuthority: z.string().optional(),
 });
 
-/**
- * Pausable extension configuration
- */
 const pausableConfigSchema = z.object({
   authority: z.string().min(32).max(44).optional(),
 });
 
-/**
- * Scaled UI amount extension configuration
- */
 const scaledUiAmountConfigSchema = z.object({
   authority: z.string().min(32).max(44).optional(),
   multiplier: z.number().positive().optional(),
@@ -48,20 +36,12 @@ const scaledUiAmountConfigSchema = z.object({
   newMultiplierEffectiveTimestamp: z.number().int().nonnegative().optional(),
 });
 
-/**
- * Transfer hook extension configuration
- */
 const transferHookConfigSchema = z.object({
   programId: z.string().min(32).max(44),
   authority: z.string().min(32).max(44).optional(),
 });
 
-/**
- * Extension overrides schema
- * Each extension can be:
- * - true/false: enable/disable
- * - config object: enable with specific configuration
- */
+// Each extension can be: true/false (enable/disable) or a config object for custom settings
 const extensionOverridesSchema = z
   .object({
     transferFee: z.union([z.literal(false), transferFeeConfigSchema]).optional(),
@@ -75,9 +55,6 @@ const extensionOverridesSchema = z
   })
   .strict();
 
-/**
- * Template overrides schema
- */
 const templateOverridesSchema = z.object({
   extensions: extensionOverridesSchema.optional(),
   requiresAllowlist: z.boolean().optional(),
@@ -87,19 +64,14 @@ const templateOverridesSchema = z.object({
 // Token Schemas
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Template type enum
- */
+// Normalize legacy template names (tokenized_security, rwa) to canonical form
 export const tokenTemplateSchema = z.preprocess(
   (value) => (value === "tokenized_security" || value === "rwa" ? "tokenized-security" : value),
   z.enum(["stablecoin", "arcade", "tokenized-security", "custom"])
 );
 
-/**
- * Create token request schema
- *
- * Supports template mode with optional overrides.
- */
+// Supports template mode with optional overrides for customization
+
 export const createTokenSchema = z.object({
   name: z.string().min(1).max(100),
   symbol: z
@@ -143,6 +115,15 @@ export type CreateTokenWithAssetProfileInput = z.infer<typeof createTokenWithAss
 
 export const updateTokenSchema = z.object({
   name: z.string().min(1).max(100).optional(),
+  // Symbol and decimals define the mint; the handler rejects them after deploy.
+  // Same constraints as createTokenSchema.
+  symbol: z
+    .string()
+    .min(1)
+    .max(10)
+    .regex(/^[A-Za-z0-9.]+$/)
+    .optional(),
+  decimals: z.number().int().min(0).max(18).optional(),
   description: z.string().max(500).nullable().optional(),
   uri: z.string().url().nullable().optional(),
   imageUrl: z.string().url().nullable().optional(),

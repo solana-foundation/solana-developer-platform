@@ -10,15 +10,19 @@ import type { SdpEnvironment } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { isSelfHostedDeployment } from "@/lib/runtime-env";
-import type { ClerkOrganization } from "@/services/clerk-organizations.service";
-import { type ClerkUser, ClerkUsersService } from "@/services/clerk-users.service";
+import {
+  ensureClerkOrganizationMapping,
+  findClerkOrganizationMapping,
+  syncClerkOrganization,
+} from "@/services/clerk-organization-provisioning.service";
+import {
+  ClerkUsersService,
+  verifiedPrimaryEmailFromClerkUser,
+} from "@/services/clerk-users.service";
 import { ProjectService } from "@/services/project.service";
-import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 import { BvnkWebhookProcessor } from "./ramps/bvnk";
 import { CoinbaseWebhookProcessor } from "./ramps/coinbase";
@@ -52,149 +56,26 @@ function parseRampWebhookProvider(value: string | undefined): WebhookRampProvide
   throw badRequest("Unsupported ramp webhook provider");
 }
 
-function slugify(input: string): string {
-  return input
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-async function ensureUniqueSlug(
-  db: DatabaseClient,
-  base: string,
-  excludeOrganizationId?: string
-): Promise<string> {
-  const normalized = slugify(base) || `org-${crypto.randomUUID().slice(0, 8)}`;
-  const existing = await db
-    .prepare(
-      excludeOrganizationId
-        ? "SELECT id FROM organizations WHERE slug = ? AND id <> ?"
-        : "SELECT id FROM organizations WHERE slug = ?"
-    )
-    .bind(...(excludeOrganizationId ? [normalized, excludeOrganizationId] : [normalized]))
-    .first();
-
-  if (!existing) {
-    return normalized;
-  }
-
-  let suffix = crypto.randomUUID().slice(0, 6);
-  let candidate = `${normalized}-${suffix}`;
-
-  for (let i = 0; i < 3; i += 1) {
-    const taken = await db
-      .prepare(
-        excludeOrganizationId
-          ? "SELECT id FROM organizations WHERE slug = ? AND id <> ?"
-          : "SELECT id FROM organizations WHERE slug = ?"
-      )
-      .bind(...(excludeOrganizationId ? [candidate, excludeOrganizationId] : [candidate]))
-      .first();
-    if (!taken) {
-      return candidate;
-    }
-    suffix = crypto.randomUUID().slice(0, 6);
-    candidate = `${normalized}-${suffix}`;
-  }
-
-  return candidate;
-}
-
-function toClerkOrganization(data: OrganizationJSON): ClerkOrganization {
-  return {
-    id: data.id,
-    name: data.name,
-    slug: data.slug,
-    private_metadata: data.private_metadata,
-  };
-}
-
 async function findOrganizationMapping(c: AppContext, clerkOrgId: string) {
-  return getDb(c.env)
-    .prepare(
-      `SELECT organization_id, slug
-       FROM auth_organization_identities
-       WHERE provider = 'clerk' AND provider_org_id = ?`
-    )
-    .bind(clerkOrgId)
-    .first<{ organization_id: string; slug: string | null }>();
+  const mapping = await findClerkOrganizationMapping(getDb(c.env), clerkOrgId);
+  return mapping ? { organization_id: mapping.organizationId, slug: mapping.slug } : null;
 }
 
 async function ensureOrganizationMapping(c: AppContext, org: OrganizationJSON): Promise<string> {
-  const existing = await findOrganizationMapping(c, org.id);
-  if (existing) {
-    return existing.organization_id;
-  }
-
-  const orgName = org.name.trim();
-  const slug = await ensureUniqueSlug(getDb(c.env), org.slug);
-  const orgId = `org_${crypto.randomUUID()}`;
-  const authOrgId = `aoi_${crypto.randomUUID()}`;
-
-  try {
-    await getDb(c.env).batch([
-      getDb(c.env)
-        .prepare(
-          `INSERT INTO organizations (id, name, slug, tier, status)
-           VALUES (?, ?, ?, 'enterprise', 'active')`
-        )
-        .bind(orgId, orgName, slug),
-      getDb(c.env)
-        .prepare(
-          `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
-           VALUES (?, 'clerk', ?, ?, ?)`
-        )
-        .bind(authOrgId, org.id, orgId, slug),
-    ]);
-
-    if (!isSelfHostedDeployment(c.env)) {
-      await syncProviderAccessFromClerk(getDb(c.env), {
-        organizationId: orgId,
-        clerkOrganization: toClerkOrganization(org),
-      });
-    }
-  } catch (err) {
-    if (isPostgresUniqueViolation(err)) {
-      const retry = await findOrganizationMapping(c, org.id);
-      if (retry) {
-        return retry.organization_id;
-      }
-    }
-    throw err;
-  }
-
-  return orgId;
+  const mapping = await ensureClerkOrganizationMapping({
+    env: c.env,
+    db: getDb(c.env),
+    organization: org,
+  });
+  return mapping.organizationId;
 }
 
 async function syncOrganization(c: AppContext, data: OrganizationJSON) {
-  const db = getDb(c.env);
-  const organizationId = await ensureOrganizationMapping(c, data);
-
-  const slug = await ensureUniqueSlug(db, data.slug, organizationId);
-  await db.batch([
-    db
-      .prepare(
-        `UPDATE auth_organization_identities
-         SET slug = ?, updated_at = datetime('now')
-         WHERE provider = 'clerk' AND provider_org_id = ?`
-      )
-      .bind(slug, data.id),
-    db
-      .prepare(
-        `UPDATE organizations
-         SET name = ?, slug = ?, updated_at = datetime('now')
-         WHERE id = ?`
-      )
-      .bind(data.name.trim(), slug, organizationId),
-  ]);
-
-  if (!isSelfHostedDeployment(c.env)) {
-    await syncProviderAccessFromClerk(db, {
-      organizationId,
-      clerkOrganization: toClerkOrganization(data),
-    });
-  }
+  await syncClerkOrganization({
+    env: c.env,
+    db: getDb(c.env),
+    organization: data,
+  });
 }
 
 async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
@@ -228,33 +109,17 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
   ]);
 }
 
-function primaryEmailFromClerkUser(user: ClerkUser): string | null {
-  const emails = user.email_addresses || [];
-  const primary = emails.find((item) => item.id === user.primary_email_address_id) || emails[0];
-  return primary?.email_address?.toLowerCase() ?? null;
-}
-
-async function resolveUserEmail(env: Env, userId: string, fallbackEmail?: string | null) {
-  if (fallbackEmail?.includes("@")) {
-    return fallbackEmail.toLowerCase();
-  }
-
+async function resolveVerifiedUserEmail(env: Env, userId: string): Promise<string | null> {
   const user = await new ClerkUsersService(env).getUser(userId);
-  const email = primaryEmailFromClerkUser(user);
-
-  if (!email) {
-    throw badRequest("Clerk user missing email");
-  }
-
-  return email;
+  return verifiedPrimaryEmailFromClerkUser(user);
 }
 
 async function ensureUserMapping(
   c: AppContext,
-  user: { id: string; email?: string | null; name?: string | null }
+  user: { id: string; email: string; name?: string | null }
 ): Promise<string> {
   const db = getDb(c.env);
-  const email = await resolveUserEmail(c.env, user.id, user.email);
+  const email = user.email.toLowerCase();
   const existing = await db
     .prepare(
       `SELECT aui.user_id, u.email
@@ -331,12 +196,27 @@ async function ensureUserMapping(
 }
 
 async function syncUser(c: AppContext, data: UserJSON) {
+  const email = verifiedPrimaryEmailFromClerkUser(data);
+  if (!email) {
+    return;
+  }
   const fullName = [data.first_name, data.last_name].filter(Boolean).join(" ").trim();
-  await ensureUserMapping(c, {
+  const userId = await ensureUserMapping(c, {
     id: data.id,
-    email: primaryEmailFromClerkUser(data),
+    email,
     name: fullName || data.username,
   });
+  const memberships = await new ClerkUsersService(c.env).getOrganizationMemberships(data.id);
+  await Promise.all(
+    memberships.map((membership) =>
+      upsertVerifiedMembership(c, {
+        organization: membership.organization,
+        userId,
+        role: membership.role,
+        reactivateRemoved: false,
+      })
+    )
+  );
 }
 
 async function deleteUser(c: AppContext, data: UserDeletedJSON) {
@@ -365,12 +245,16 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
   ]);
 }
 
-async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON) {
+async function upsertVerifiedMembership(
+  c: AppContext,
+  data: {
+    organization: OrganizationJSON;
+    userId: string;
+    role: string;
+    reactivateRemoved: boolean;
+  }
+) {
   const organizationId = await ensureOrganizationMapping(c, data.organization);
-  const userId = await ensureUserMapping(c, {
-    id: data.public_user_data.user_id,
-    email: data.public_user_data.identifier,
-  });
   const role = mapClerkRoleToOrgRole(data.role);
   const memberId = `mem_${crypto.randomUUID()}`;
 
@@ -381,16 +265,37 @@ async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON)
        ON CONFLICT(organization_id, user_id)
        DO UPDATE SET
          role = excluded.role,
-         status = 'active'`
+         status = CASE
+           WHEN organization_members.status = 'removed' AND ? = 0
+             THEN organization_members.status
+           ELSE 'active'
+         END`
     )
-    .bind(memberId, organizationId, userId, role)
+    .bind(memberId, organizationId, data.userId, role, data.reactivateRemoved ? 1 : 0)
     .run();
 
   const projectService = new ProjectService(getDb(c.env));
   await Promise.all([
-    projectService.findOrCreateDefault(organizationId, "sandbox", userId),
-    projectService.findOrCreateDefault(organizationId, "production", userId),
+    projectService.findOrCreateDefault(organizationId, "sandbox", data.userId),
+    projectService.findOrCreateDefault(organizationId, "production", data.userId),
   ]);
+}
+
+async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON) {
+  const email = await resolveVerifiedUserEmail(c.env, data.public_user_data.user_id);
+  if (!email) {
+    return;
+  }
+  const userId = await ensureUserMapping(c, {
+    id: data.public_user_data.user_id,
+    email,
+  });
+  await upsertVerifiedMembership(c, {
+    organization: data.organization,
+    userId,
+    role: data.role,
+    reactivateRemoved: true,
+  });
 }
 
 async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON) {

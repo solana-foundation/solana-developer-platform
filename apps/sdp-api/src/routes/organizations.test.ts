@@ -11,7 +11,7 @@ import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_PROJECT = {
   id: "prj_test_organizations",
@@ -31,7 +31,7 @@ describe("Organizations routes", () => {
 
   afterEach(async () => {
     await clearTestDatabase(env);
-    await clearKVNamespaces(env);
+    await clearKVStores(env);
   });
 
   describe("POST /v1/organizations", () => {
@@ -274,7 +274,7 @@ describe("Organizations routes", () => {
 
     it("requires org:write permission", async () => {
       // Re-seed with limited permissions
-      await clearKVNamespaces(env);
+      await clearKVStores(env);
       await seedCachedApiKey(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         permissions: ["org:read"], // No write permission
@@ -423,7 +423,7 @@ describe("Organizations routes", () => {
     });
 
     it("requires org:admin permission", async () => {
-      await clearKVNamespaces(env);
+      await clearKVStores(env);
       await seedCachedApiKey(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         permissions: ["org:read", "org:write"], // No admin permission

@@ -479,20 +479,21 @@ export function lightsparkCounterpartyRequirements(
   counterparty: Counterparty,
   { direction, providerData, fiatCurrency }: ValidateCounterpartyOptions
 ): CounterpartyRequirements {
-  if (direction === "onramp") {
-    if (counterparty.entityType === "business") {
-      return unsupportedCounterparty(
-        "lightspark",
-        direction,
-        "Lightspark on-ramp does not support business counterparties."
-      );
-    }
-    return readyCounterparty("lightspark", direction);
-  }
   const businessInfoFields =
     counterparty.entityType === "business" && !readLightsparkCustomerId(providerData)
       ? LIGHTSPARK_BUSINESS_INFO_FIELDS
       : [];
+  if (direction === "onramp") {
+    if (businessInfoFields.length > 0) {
+      return {
+        provider: "lightspark",
+        direction,
+        status: "collect",
+        fields: [...businessInfoFields],
+      };
+    }
+    return readyCounterparty("lightspark", direction);
+  }
   if (!fiatCurrency) {
     throw badRequest("fiatCurrency is required for Lightspark off-ramp requirements.");
   }

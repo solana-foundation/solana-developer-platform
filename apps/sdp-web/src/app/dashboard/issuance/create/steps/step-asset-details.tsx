@@ -2,18 +2,17 @@
 
 import { DEFAULT_SDP_DOCS_URL, type PaymentsDashboardWallet } from "@sdp/types";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
-import { ExternalLink } from "lucide-react";
 import { motion } from "motion/react";
-import { type ReactNode, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Label } from "@/components/ui/label";
-import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { TokenSignerSelect } from "../../[tokenId]/token-signer-select";
-import { AdvancedCapacities } from "../advanced-capacities";
-import { ACCESS_CONTROL_OPTIONS, getCategorySections } from "../asset-details-config";
+import { AdvancedSettingsEditor } from "../advanced-settings-editor";
+import { getDetailSections } from "../asset-details-config";
 import { DocumentRows } from "../document-rows";
 import {
+  buildDeployConfigPreview,
   buildIssuanceMetadata,
   getAssetDetailsErrors,
   getRequiredAssetDetailKeys,
@@ -30,20 +29,6 @@ const DOCS_BASE =
   process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
   (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
 const ACCESS_CONTROL_DOCS_HREF = `${DOCS_BASE}/tokens/allowlists`;
-
-function DocsLink({ href, children }: { href: string; children: ReactNode }) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-xs font-medium text-tertiary underline-offset-2 transition-colors hover:text-primary hover:underline"
-    >
-      {children}
-      <ExternalLink className="h-3 w-3" />
-    </a>
-  );
-}
 
 export function StepAssetDetails({
   signerWallets,
@@ -64,8 +49,9 @@ export function StepAssetDetails({
   const { draft, updateDraft } = useIssuanceDraft();
   const [tab, setTab] = useState<string>("overview");
   const [jsonOpen, setJsonOpen] = useState(false);
-  const sections = getCategorySections(draft.assetCategory);
+  const sections = getDetailSections(draft.assetCategory, draft.assetType);
   const metadata = buildIssuanceMetadata(draft);
+  const deployConfig = buildDeployConfigPreview(draft);
   const errors = getAssetDetailsErrors(draft, t);
   const requiredKeys = getRequiredAssetDetailKeys(draft);
   const hasErrors = Object.keys(errors).length > 0;
@@ -82,14 +68,42 @@ export function StepAssetDetails({
     return hasContent || showErrors ? message : undefined;
   };
   const descriptionError = fieldError("description");
+  const signerError = fieldError("signingWalletId");
+  // The neutral "optional signer" hint only applies when a signer isn't required
+  // and a real choice exists (>1 wallet) that the user hasn't made yet.
+  const showOptionalSignerHint =
+    !signerError &&
+    !signerWalletsError &&
+    signerWallets.length > 1 &&
+    !draft.signingWalletId.trim();
 
-  // A failed continue attempt highlights fields that all live on the Overview
-  // tab — jump there so the user can see what needs fixing.
+  // A failed continue attempt jumps to the tab holding the problem: most
+  // required fields live on Overview, advanced-settings values on Compliance,
+  // and the signing wallet on Operational. Prefer Overview, then Operational
+  // (signer), then Compliance.
+  //
+  // Jump ONCE, guarded by a ref — `errors` is rebuilt every render, so keying
+  // the jump off it would re-fire on each keystroke and pin the user to the
+  // error tab, blocking any manual tab switch while an error is unresolved.
+  // The component remounts when the user leaves/returns to this step, so the
+  // guard resets and the next failed attempt jumps again.
+  const jumpedToErrorTab = useRef(false);
   useEffect(() => {
-    if (showErrors && hasErrors) {
-      setTab("overview");
+    if (!showErrors || !hasErrors || jumpedToErrorTab.current) {
+      return;
     }
-  }, [showErrors, hasErrors]);
+    jumpedToErrorTab.current = true;
+    const overviewHasError = Object.keys(errors).some(
+      (key) => key !== "advancedSettings" && key !== "signingWalletId"
+    );
+    if (overviewHasError) {
+      setTab("overview");
+    } else if (errors.signingWalletId) {
+      setTab("operational");
+    } else {
+      setTab("compliance");
+    }
+  }, [showErrors, hasErrors, errors]);
 
   return (
     <motion.div
@@ -230,39 +244,18 @@ export function StepAssetDetails({
 
       {tab === "compliance" ? (
         <div className="space-y-5">
-          <FormCard
-            title={t("DashboardIssuance.compliance.accessControl")}
-            description={t("DashboardIssuance.assetDetails.accessControlDescription")}
-          >
-            <div className="max-w-xs">
-              <Label>{t("DashboardIssuance.compliance.accessControl")}</Label>
-              <div className="mt-1.5">
-                <Select
-                  value={draft.accessControl || null}
-                  onValueChange={(value) =>
-                    updateDraft({ accessControl: (value ?? "") as DraftState["accessControl"] })
-                  }
-                  placeholder={t("DashboardIssuance.compliance.selectAccessControl")}
-                >
-                  {ACCESS_CONTROL_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {t(option.labelKey)}
-                    </SelectItem>
-                  ))}
-                </Select>
-              </div>
-            </div>
-            <div className="mt-3">
-              <DocsLink href={ACCESS_CONTROL_DOCS_HREF}>
-                {t("DashboardIssuance.assetDetails.learnLists")}
-              </DocsLink>
-            </div>
-          </FormCard>
-          <AdvancedCapacities
-            value={draft.capacities}
-            onChange={(key, checked) =>
-              updateDraft({ capacities: { ...draft.capacities, [key]: checked } })
-            }
+          <AdvancedSettingsEditor
+            category={draft.assetCategory}
+            type={draft.assetType}
+            settings={draft.advancedSettings}
+            onSettingsChange={(advancedSettings) => updateDraft({ advancedSettings })}
+            capacities={draft.capacities}
+            onCapacitiesChange={(capacities) => updateDraft({ capacities })}
+            showErrors={showErrors}
+            accessControl={draft.accessControl}
+            onAccessControlChange={(accessControl) => updateDraft({ accessControl })}
+            accessControlDocsHref={ACCESS_CONTROL_DOCS_HREF}
+            deployConfig={deployConfig}
           />
         </div>
       ) : null}
@@ -280,13 +273,19 @@ export function StepAssetDetails({
               onSignerWalletIdChange={(value) => updateDraft({ signingWalletId: value })}
               label={t("DashboardIssuance.assetDetails.signingWallet")}
               showSelectionSummary
-              optional
+              optional={!signerError}
             />
-            {/* Signer is optional at draft stage — clarify the fallback only
-                when a choice is actually possible (more than one wallet) and
-                none is made. The 0-wallet and single-wallet cases show their
-                own message inside the field. */}
-            {!signerWalletsError && signerWallets.length > 1 && !draft.signingWalletId.trim() ? (
+            {/* A signer is normally optional at draft stage, but authority-valued
+                advanced settings (e.g. permanent delegate) require one — surface
+                that as an error. Otherwise clarify the fallback only when a real
+                choice exists (>1 wallet) and none is made; the 0-wallet and
+                single-wallet cases show their own message inside the field. */}
+            {signerError ? (
+              <p className="mt-1.5 text-xs text-destructive" role="alert">
+                {signerError}
+              </p>
+            ) : null}
+            {showOptionalSignerHint ? (
               <p className="mt-1.5 text-xs text-tertiary">
                 {t("DashboardIssuance.assetDetails.optionalSignerHint")}
               </p>

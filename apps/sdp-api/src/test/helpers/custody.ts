@@ -114,7 +114,7 @@ export async function getTestCustodyConfig(
 ): Promise<SigningConfigRecord | null> {
   const row = await getDb(env)
     .prepare(
-      `SELECT id, organization_id, project_id, provider, config_encrypted as config, default_wallet_id, status, created_at, updated_at
+      `SELECT id, organization_id, project_id, provider, config_encrypted as config, encryption_version, default_wallet_id, status, created_at, updated_at
      FROM custody_configs WHERE id = ?`
     )
     .bind(configId)
@@ -124,6 +124,7 @@ export async function getTestCustodyConfig(
       project_id: string | null;
       provider: string;
       config: string;
+      encryption_version: string;
       default_wallet_id: string | null;
       status: string;
       created_at: string;
@@ -144,6 +145,7 @@ export async function getTestCustodyConfig(
       | "para"
       | "turnkey",
     config: row.config,
+    encryptionVersion: row.encryption_version,
     defaultWalletId: row.default_wallet_id,
     status: row.status as "active" | "inactive",
     createdAt: row.created_at,
@@ -160,9 +162,9 @@ export async function getTestCustodyConfigByOrg(
   projectId?: string
 ): Promise<SigningConfigRecord | null> {
   const query = projectId
-    ? `SELECT id, organization_id, project_id, provider, config_encrypted as config, default_wallet_id, status, created_at, updated_at
+    ? `SELECT id, organization_id, project_id, provider, config_encrypted as config, encryption_version, default_wallet_id, status, created_at, updated_at
        FROM custody_configs WHERE organization_id = ? AND project_id = ? AND status = 'active'`
-    : `SELECT id, organization_id, project_id, provider, config_encrypted as config, default_wallet_id, status, created_at, updated_at
+    : `SELECT id, organization_id, project_id, provider, config_encrypted as config, encryption_version, default_wallet_id, status, created_at, updated_at
        FROM custody_configs WHERE organization_id = ? AND project_id IS NULL AND status = 'active'`;
 
   const row = await getDb(env)
@@ -174,6 +176,7 @@ export async function getTestCustodyConfigByOrg(
       project_id: string | null;
       provider: string;
       config: string;
+      encryption_version: string;
       default_wallet_id: string | null;
       status: string;
       created_at: string;
@@ -194,6 +197,7 @@ export async function getTestCustodyConfigByOrg(
       | "para"
       | "turnkey",
     config: row.config,
+    encryptionVersion: row.encryption_version,
     defaultWalletId: row.default_wallet_id,
     status: row.status as "active" | "inactive",
     createdAt: row.created_at,

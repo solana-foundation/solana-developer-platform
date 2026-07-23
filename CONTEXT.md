@@ -4,9 +4,21 @@ Solana Developer Platform gives organizations project-scoped access to tokenizat
 
 ## Language
 
+**Organization**:
+The team workspace through which every SDP user accesses projects and product capabilities. SDP does not model a separate individual-user product tier.
+_Avoid_: Individual account, enterprise customer, personal workspace
+
+**Generally Available Provider**:
+A **Provider** that any **Organization** may use when it is configured in the current deployment environment.
+_Avoid_: Individual-tier provider, free-tier provider, default entitlement
+
+**Manual Provider Activation**:
+An organization-specific approval that makes a manually onboarded **Provider** available after the organization contacts SDP and completes the required commercial or operational onboarding.
+_Avoid_: Enterprise tier, vetted user, provider override
+
 **Provider Availability**:
-Whether an **Organization** can use a **Provider** in a **Provider Family** in the current deployment environment.
-_Avoid_: Runtime health, selected provider, project setup
+Whether an **Organization** can use a **Provider** in a **Provider Family** in the current deployment environment. A provider must be configured and must either be **Generally Available** or have a **Manual Provider Activation** for that organization.
+_Avoid_: Customer tier, runtime health, selected provider, project setup
 
 **Private Transfer**:
 A **Payment Transfer** whose transaction is built by a private-transfer **Provider** and executed through provider-specific routing metadata before final settlement.
@@ -63,6 +75,9 @@ _Avoid_: Raw email, Clerk organization invitation, generic notification
 ## Relationships
 
 - An **Organization** has **Provider Availability** for each **Provider** in each **Provider Family**.
+- Every SDP user operates through an **Organization**; organization membership is not an access tier.
+- A **Generally Available Provider** does not require organization-specific approval.
+- A manually onboarded **Provider** requires a **Manual Provider Activation** for each **Organization** that uses it.
 - **Provider Availability** is distinct from provider runtime health.
 - **Provider Availability** is distinct from whether a **Project** has selected or initialized a **Provider**.
 - A **Private Transfer** is still a **Payment Transfer**; privacy changes how the transfer is prepared and submitted, not the wallet permission model.
@@ -80,14 +95,18 @@ _Avoid_: Raw email, Clerk organization invitation, generic notification
 ## Example Dialogue
 
 > **Dev:** "MoonPay is configured in the environment, so is it available for every organization?"
-> **Domain expert:** "No. A provider is available only when the organization is entitled to it and the deployment environment is configured for it."
+> **Domain expert:** "Only if MoonPay is generally available. A manually onboarded provider also needs an activation for that organization."
+
+> **Dev:** "Should we make this organization enterprise so it can use Fireblocks?"
+> **Domain expert:** "No. Activate Fireblocks for that organization; provider access is independent of customer tiers."
 
 > **Dev:** "Can this API key policy let the key transfer from a wallet whose wallet policy denies transfers?"
 > **Domain expert:** "No. The wallet policy is the baseline; the API key policy can only narrow access or route the operation into approval."
 
 ## Flagged Ambiguities
 
-- "Available" can mean entitlement, environment configuration, runtime health, or project setup; resolved: **Provider Availability** means entitlement plus deployment configuration only.
+- "Available" can mean access policy, environment configuration, runtime health, or project setup; resolved: **Provider Availability** means deployment configuration plus general availability or a **Manual Provider Activation**.
+- "Team", "organization", and "enterprise" were previously mixed with provider access; resolved: every user operates through an **Organization**, and manually onboarded providers are activated independently of organization type.
 - "Policy" can mean **Wallet Policy**, **API Key Policy**, provider-native policy, or payment policy; resolved: use the specific term instead of the generic word when discussing custody controls.
 - "Wallet" in policy discussions means an SDP custody source wallet, not a **Counterparty Account** or token account.
 - "Approval" can mean an SDP **Approval Request** or a provider-native approval flow; resolved: SDP creates the **Approval Request**, while provider-native approval is reached through **Provider Control Mapping**.

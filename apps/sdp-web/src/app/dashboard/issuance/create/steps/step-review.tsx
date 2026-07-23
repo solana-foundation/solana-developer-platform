@@ -24,7 +24,7 @@ import {
 import { motion } from "motion/react";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { getCategorySections, getPegSummary } from "../asset-details-config";
+import { detailSectionsHaveField, getPegSummary } from "../asset-details-config";
 import { getAssetTypeLabel, getCategoryLabelKey } from "../asset-taxonomy";
 import { safeLinkHref } from "../draft-mapping";
 import type { DraftState, WizardStep } from "../issuance-draft-wizard.types";
@@ -84,13 +84,15 @@ export function StepReview() {
   const transferRestrictionsEnabled =
     draft.accessControl === "allowlist" ||
     draft.accessControl === "blocklist" ||
-    draft.capacities.transferApprovals;
+    draft.capacities.transferApprovals.enabled;
   const website = draft.website.trim();
   const logo = draft.imageUrl.trim();
   // Issuer name is only collected for categories whose detail form includes it
   // (stablecoins & tokenized securities), so only surface it when it applies.
-  const collectsIssuerName = getCategorySections(draft.assetCategory).some((section) =>
-    section.fields.some((field) => field.key === "issuerName")
+  const collectsIssuerName = detailSectionsHaveField(
+    draft.assetCategory,
+    draft.assetType,
+    "issuerName"
   );
   const pegSummary = getPegSummary(draft);
 
@@ -170,10 +172,10 @@ export function StepReview() {
         {
           icon: ClipboardList,
           label: t("DashboardIssuance.review.investorReporting"),
-          value: draft.capacities.investorReporting
+          value: draft.capacities.investorReporting.enabled
             ? t("DashboardIssuance.review.enabled")
             : t("DashboardIssuance.review.disabled"),
-          hint: draft.capacities.investorReporting
+          hint: draft.capacities.investorReporting.enabled
             ? t("DashboardIssuance.review.investorReportingHint")
             : undefined,
         },

@@ -15,6 +15,7 @@ import {
 import type {
   ActionExecutionInput,
   AdminAction,
+  PermissionControlStatus,
   PermissionRow,
   RunActionOptions,
 } from "../token-management-workspace.types";
@@ -27,6 +28,7 @@ import {
   createInitialFreezeForm,
   createInitialMintForm,
   createInitialSeizeForm,
+  findWalletByPublicKey,
   findWalletByWalletId,
   getBurnValidationErrors,
   getBurnValidationReason,
@@ -288,6 +290,9 @@ export function useTokenOperations({
   const freezeSignerSelection = signerSelectionFor("freeze");
   const pauseSignerSelection = signerSelectionFor("pause");
 
+  // Custody control is only knowable once the authority wallets have loaded
+  // without error; until then a row's control status is "unknown" (no badge).
+  const authorityControlKnown = !authorityWalletsLoading && !authorityWalletsError;
   const permissionRows = getPermissionRows(token, metadataAuthority, t).map((row) => {
     const displayedAuthorityAddress = getDisplayedAuthorityAddress({
       token,
@@ -296,9 +301,17 @@ export function useTokenOperations({
       authorityWallets,
     });
     const rowWithDisplayedValue = { ...row, value: displayedAuthorityAddress };
+    const controlStatus: PermissionControlStatus = !displayedAuthorityAddress
+      ? "none"
+      : !authorityControlKnown
+        ? "unknown"
+        : findWalletByPublicKey(authorityWallets, displayedAuthorityAddress)
+          ? "sdp"
+          : "external";
 
     return {
       ...rowWithDisplayedValue,
+      controlStatus,
       editDisabledReason: canManageTokenAdmin
         ? withWalletLoadError(
             getSignerSelectionForAction({
@@ -313,6 +326,22 @@ export function useTokenOperations({
         : t("DashboardIssuance.management.onlyAdminsCanEditAuthorities"),
     };
   });
+
+  // Roll-up for the overview "Authorities SDP-controlled: N of M" tile and the
+  // permissions-tab external-authority warning. Counts only authorities that are
+  // actually set (control status other than none/unknown).
+  const authoritySummary = (() => {
+    const known = permissionRows.filter(
+      (row) => row.controlStatus === "sdp" || row.controlStatus === "external"
+    );
+    const controlled = known.filter((row) => row.controlStatus === "sdp").length;
+    return {
+      controlled,
+      total: known.length,
+      hasExternal: known.some((row) => row.controlStatus === "external"),
+      known: authorityControlKnown,
+    };
+  })();
   const displayedMintAuthority = getDisplayedAuthorityAddress({
     token,
     role: "mint",
@@ -407,11 +436,20 @@ export function useTokenOperations({
     mint: effectiveMintDisabledReason ?? mintValidationReason,
     burn: effectiveBurnDisabledReason ?? burnValidationReason,
   };
+  // Allowlist mutations only touch the chain when the token has an on-chain ABL
+  // list; then the list is governed by the freeze-authority delegate (sRFC-37
+  // Token ACL), so it needs the freeze authority under SDP custody — same check
+  // as freeze. DB-only allowlists need no signer and stay ungated.
+  const allowlistDisabledReason = token.ablListAddress
+    ? freezeSignerSelection.unavailableReason
+    : null;
+
   const complianceActionDisabledReasons: Partial<Record<AdminAction, string | null>> = {
     seize: effectiveSeizeDisabledReason ?? seizeValidationReason,
     "force-burn": effectiveForceBurnDisabledReason ?? forceBurnValidationReason,
     freeze: effectiveFreezeDisabledReason,
     pause: effectivePauseDisabledReason,
+    allowlist: allowlistDisabledReason,
   };
 
   const handleCopy = async (
@@ -766,6 +804,10 @@ export function useTokenOperations({
   };
 
   const handleAddAllowlist = () => {
+    if (allowlistDisabledReason) {
+      toast.error(allowlistDisabledReason);
+      return;
+    }
     const address = allowlistForm.address.trim();
     if (!address) {
       toast.error(
@@ -787,6 +829,10 @@ export function useTokenOperations({
   };
 
   const handleRemoveAllowlist = (entryId: string) => {
+    if (allowlistDisabledReason) {
+      toast.error(allowlistDisabledReason);
+      return;
+    }
     runAction(
       {
         label:
@@ -1008,6 +1054,14 @@ export function useTokenOperations({
           // Pause authority is always single
           onSignerWalletIdChange: (_value: string) => {},
         };
+      case "allowlist":
+        return {
+          signerWallets: [] as PaymentsDashboardWallet[],
+          // On-chain allowlist mutations are signed by the freeze-authority
+          // delegate, so gate on the same custody availability.
+          signerUnavailableReason: allowlistDisabledReason,
+          onSignerWalletIdChange: (_value: string) => {},
+        };
       default:
         return {
           signerWallets: [] as PaymentsDashboardWallet[],
@@ -1054,6 +1108,7 @@ export function useTokenOperations({
     frozenAccountsHasMore,
     // rows
     permissionRows,
+    authoritySummary,
     extensionRows,
     displayedMintAuthority,
     // form state
