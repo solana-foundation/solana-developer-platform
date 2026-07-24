@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.47.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.4...v0.47.0) (2026-07-24)
+
+### Features
+
+* issuance ui improvements and compliance tab gating ([#903](https://github.com/solana-foundation/solana-developer-platform/pull/903)) ([469400b](https://github.com/solana-foundation/solana-developer-platform/commit/469400b0e561a718108f3412bb899f1b9d55674b))
+* **web:** move product rollouts to Vercel Flags ([#894](https://github.com/solana-foundation/solana-developer-platform/pull/894)) ([3c578f1](https://github.com/solana-foundation/solana-developer-platform/commit/3c578f1a8d31937845722d89e9aea2ea3a4d7484))
+
+### Bug Fixes
+
+* **api:** enforce API key rotation deadlines ([#897](https://github.com/solana-foundation/solana-developer-platform/pull/897)) ([6a1130b](https://github.com/solana-foundation/solana-developer-platform/commit/6a1130ba4ff2db87ee20d5ee4668e8a17b920911))
+* **api:** enforce API key project isolation ([#899](https://github.com/solana-foundation/solana-developer-platform/pull/899)) ([eebea25](https://github.com/solana-foundation/solana-developer-platform/commit/eebea25eb9156518035ab6c473d3b650f41946ae))
+* **api:** enforce API key IP allowlists ([#895](https://github.com/solana-foundation/solana-developer-platform/pull/895)) ([fee986b](https://github.com/solana-foundation/solana-developer-platform/commit/fee986ba1b25adea9b28df232042ffdaff9dac9a))
+* **web:** clarify onboarding choices can change ([#905](https://github.com/solana-foundation/solana-developer-platform/pull/905)) ([c9d753c](https://github.com/solana-foundation/solana-developer-platform/commit/c9d753cf8d133eb62e18fc456462d635b22f1b69))
+
 ## [0.46.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.3...v0.46.4) (2026-07-23)
 
 ### Refactors
