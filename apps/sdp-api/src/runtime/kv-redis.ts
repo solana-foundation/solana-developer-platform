@@ -1,6 +1,6 @@
 /**
  * Redis-backed KVStore implementation. One ioredis client per REDIS_URL is shared
- * across the four logical stores (apiKeys / rateLimits / cache / sessions);
+ * across the three logical stores (apiKeys / rateLimits / cache);
  * each store prefixes its keys so list() doesn't bleed across domains.
  *
  * ioredis is loaded lazily — the top-level `import type` is erased at emit
@@ -169,7 +169,6 @@ const STORE_PREFIXES = {
   apiKeys: "apiKeys",
   rateLimits: "rateLimits",
   cache: "cache",
-  sessions: "sessions",
 } as const;
 
 /**
@@ -189,7 +188,6 @@ export function createKVStoreSet(env: Env): KVStoreSet {
     apiKeys: new RedisKVStore(clientPromise, STORE_PREFIXES.apiKeys),
     rateLimits: new RedisKVStore(clientPromise, STORE_PREFIXES.rateLimits),
     cache: new RedisKVStore(clientPromise, STORE_PREFIXES.cache),
-    sessions: new RedisKVStore(clientPromise, STORE_PREFIXES.sessions),
   };
 }
 
