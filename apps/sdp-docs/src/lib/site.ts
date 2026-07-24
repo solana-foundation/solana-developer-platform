@@ -15,7 +15,7 @@ export function getDocsPagePath(pageSlug: string): string {
  */
 function buildSiteUrls(docsUrl: string, apiUrl: string) {
   const docsOrigin = new URL(docsUrl).origin;
-  const aiGuidePath = getDocsPagePath("reference/ai-consumption");
+  const aiGuidePath = getDocsPagePath("reference/docs-for-ai");
   const aiLlmsPath = "/docs/ai/llms.txt";
   const aiLlmsFullPath = "/docs/ai/llms-full.txt";
   return {

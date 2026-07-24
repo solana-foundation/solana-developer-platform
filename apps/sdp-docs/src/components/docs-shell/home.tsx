@@ -1,102 +1,250 @@
 import {
-  ArrowRight,
-  Building2,
-  CircleDollarSign,
-  Coins,
-  FolderOpen,
-  KeyRound,
-  Lock,
-  Shield,
-  Zap,
+  ArrowLeftRightIcon,
+  ArrowRightIcon,
+  BotIcon,
+  BracesIcon,
+  CircleDollarSignIcon,
+  FileTextIcon,
+  HandshakeIcon,
+  LandmarkIcon,
+  LayersIcon,
+  LinkIcon,
+  type LucideIcon,
+  ReceiptTextIcon,
+  RepeatIcon,
+  ServerIcon,
+  ShieldCheckIcon,
 } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { HomePageClass } from "./home-page-class";
+import {
+  ArchitectureSketch,
+  IssuanceSketch,
+  MarketsSketch,
+  RampsSketch,
+  TransfersSketch,
+  WalletsSketch,
+} from "./home-sketches";
 
-export const HOME_TOC = [
-  { title: "Platform model", url: "#platform-model", depth: 2 },
-  { title: "Outcomes", url: "#outcomes", depth: 2 },
-  { title: "Quickstart", url: "#quickstart", depth: 2 },
-  { title: "Key concepts", url: "#key-concepts", depth: 2 },
+const HOME_SECTIONS = {
+  gettingStarted: { id: "platform-model", title: "Getting Started" },
+  tutorials: { id: "tutorials", title: "Tutorials" },
+  buildWithAi: { id: "build-with-ai", title: "Build with AI" },
+  partners: { id: "supported-partners", title: "Supported Partners" },
+} as const satisfies Record<string, { id: string; title: string }>;
+
+export const HOME_TOC = Object.values(HOME_SECTIONS).map((section) => ({
+  title: section.title,
+  url: `#${section.id}`,
+  depth: 2,
+}));
+
+/**
+ * Section heading that doubles as a deep link: the heading carries the id and
+ * wraps itself in an anchor to it, so every section label is linkable. The
+ * link icon is revealed on hover, after the text.
+ */
+function SectionHeading({ id, title }: { id: string; title: string }) {
+  return (
+    <h2 id={id} className="launch-home-section-label">
+      <a href={`#${id}`} className="launch-home-heading-anchor">
+        <span className="launch-home-heading-anchor-text">{title}</span>
+        <LinkIcon size={17} aria-hidden="true" />
+      </a>
+    </h2>
+  );
+}
+
+function HomeCardLink({ card }: { card: HomeCard }) {
+  const content = (
+    <>
+      {"graphic" in card ? (
+        <div className="launch-home-outcome-sketch">{card.graphic}</div>
+      ) : (
+        <div className="launch-home-outcome-icon-wrap">
+          <card.Icon size={20} aria-hidden="true" />
+        </div>
+      )}
+      <div className="launch-home-outcome-divider" aria-hidden="true" />
+      <div className="launch-home-outcome-body">
+        <h3 className="launch-home-outcome-title">
+          {card.name}
+          {card.badge ? <span className="launch-badge">{card.badge}</span> : null}
+        </h3>
+        <p className="launch-home-outcome-desc">{card.desc}</p>
+      </div>
+    </>
+  );
+
+  if ("disabled" in card) {
+    return <div className="launch-home-outcome is-disabled">{content}</div>;
+  }
+
+  return (
+    <Link href={card.href} className="launch-home-outcome">
+      {content}
+    </Link>
+  );
+}
+
+type Partner = { name: string; src: string; h: number };
+
+const PARTNER_ROWS: { category: string; Icon: LucideIcon; partners: Partner[] }[] = [
+  {
+    category: "Institutional Custody",
+    Icon: LandmarkIcon,
+    partners: [
+      { name: "Privy", h: 22, src: "/images/partners/privy.svg" },
+      { name: "Fireblocks", h: 24, src: "/images/partners/fireblocks.svg" },
+      { name: "Coinbase CDP", h: 22, src: "/images/partners/coinbase.svg" },
+      { name: "Turnkey", h: 22, src: "/images/partners/turnkey.svg" },
+      { name: "Anchorage Digital", h: 22, src: "/images/partners/anchorage.svg" },
+      { name: "Dfns", h: 20, src: "/images/partners/dfns.svg" },
+      { name: "IBM Haven", h: 22, src: "/images/partners/ibm-haven.svg" },
+      { name: "Para", h: 20, src: "/images/partners/para.svg" },
+      { name: "Utila", h: 20, src: "/images/partners/utila.svg" },
+    ],
+  },
+  {
+    category: "Ramps",
+    Icon: ArrowLeftRightIcon,
+    partners: [
+      { name: "MoonPay", h: 24, src: "/images/partners/moonpay.svg" },
+      { name: "Lightspark", h: 22, src: "/images/partners/lightspark.svg" },
+      { name: "BVNK", h: 18, src: "/images/partners/bvnk.svg" },
+      { name: "Coinbase", h: 22, src: "/images/partners/coinbase.svg" },
+      { name: "Stripe", h: 30, src: "/images/partners/stripe.svg" },
+      { name: "MoneyGram", h: 24, src: "/images/partners/moneygram.svg" },
+      { name: "Mural Pay", h: 20, src: "/images/partners/muralpay.svg" },
+    ],
+  },
+  {
+    category: "Onchain Compliance",
+    Icon: ShieldCheckIcon,
+    partners: [
+      { name: "Range", h: 18, src: "/images/partners/range.svg" },
+      { name: "TRM", h: 19, src: "/images/partners/trm.svg" },
+      { name: "Chainalysis", h: 22, src: "/images/partners/chainalysis.svg" },
+      { name: "Elliptic", h: 15, src: "/images/partners/elliptic.svg" },
+    ],
+  },
+  {
+    category: "RPC Node Providers",
+    Icon: ServerIcon,
+    partners: [
+      { name: "Helius", h: 19, src: "/images/partners/helius.svg" },
+      { name: "Triton", h: 21, src: "/images/partners/triton.svg" },
+      { name: "Alchemy", h: 22, src: "/images/partners/alchemy.svg" },
+      { name: "QuickNode", h: 22, src: "/images/partners/quicknode.svg" },
+    ],
+  },
 ];
 
-const CUSTODY_PROVIDERS = ["Privy", "Fireblocks", "Coinbase CDP", "Turnkey"];
+type HomeCard = {
+  name: string;
+  desc: string;
+  badge?: string;
+} & ({ Icon: LucideIcon } | { graphic: ReactNode }) &
+  ({ href: string } | { disabled: true });
 
-const modelSteps = [
+const modelSteps: HomeCard[] = [
   {
-    name: "Organization",
-    desc: "Top-level entity — owns projects, wallets, and members.",
-    href: "/docs/guides/setup-organization",
-    Icon: Building2,
-  },
-  {
-    name: "Projects",
-    desc: "Scoped environments within an org with their own API keys and members.",
-    href: "/docs/guides/setup-organization",
-    Icon: FolderOpen,
-  },
-  {
-    name: "Wallets & keys",
-    desc: "Provision custody wallets and generate project-scoped API keys.",
-    href: "/docs/guides/setup-wallets",
-    Icon: KeyRound,
-  },
-  {
-    name: "Tokens",
-    desc: "Create, deploy, and configure Token-2022 assets.",
-    href: "/docs/tokens/create-a-token",
-    Icon: Coins,
-  },
-  {
-    name: "Operations",
-    desc: "Mint, burn, and transfer tokens via dashboard or API.",
-    href: "/docs/tokens/mint-and-burn",
-    Icon: Zap,
-  },
-  {
-    name: "Compliance",
-    desc: "Freeze, allowlist, and screen for regulated issuance.",
-    href: "/docs/tokens/freeze-and-compliance",
-    Icon: Shield,
-  },
-];
-
-const outcomes = [
-  {
-    title: "Issuance — bring RWAs onchain",
-    desc: "Deploy tokenized securities, stablecoins, or funds using pre-built templates with compliance controls baked in.",
-    href: "/docs/tokens/create-a-token",
-    Icon: CircleDollarSign,
-  },
-  {
-    title: "Payments — move assets between wallets",
-    desc: "Orchestrate transfers, manage wallet custody, and integrate payment rails into your existing systems.",
-    href: "/docs/payments/send-basic-payment",
-    Icon: Building2,
-  },
-  {
-    title: "Markets — connect to liquidity",
-    desc: "Enable secondary market activity for your issued assets through SDP's markets infrastructure.",
-    // TODO: replace with a dedicated markets page when available
+    name: "Understanding SDP",
+    desc: "The interfaces, authentication, and conventions you build against.",
     href: "/docs/introduction",
-    Icon: Lock,
+    graphic: <ArchitectureSketch />,
+  },
+  {
+    name: "Wallets & Policies",
+    desc: "Provision custody wallets and control signing with policies.",
+    href: "/docs/guides/setup-wallets",
+    graphic: <WalletsSketch />,
+  },
+  {
+    name: "Issuance & Operations",
+    desc: "Create and deploy Token-2022 assets with compliance controls.",
+    href: "/docs/tokens/create-a-token",
+    graphic: <IssuanceSketch />,
+  },
+  {
+    name: "Ramps",
+    desc: "Move between fiat and crypto through our onramp and offramp partners.",
+    href: "/docs/payments/ramps",
+    graphic: <RampsSketch />,
+  },
+  {
+    name: "Onchain Transfers",
+    desc: "Send batch transfers, recurring payments, or public payment requests onchain.",
+    href: "/docs/payments/send-basic-payment",
+    graphic: <TransfersSketch />,
+  },
+  {
+    name: "Markets",
+    desc: "Enable secondary market activity for your issued assets.",
+    graphic: <MarketsSketch />,
+    badge: "Coming soon",
+    disabled: true,
   },
 ];
 
-const quickstart = [
+const tutorials: HomeCard[] = [
   {
-    title: "Set up your account",
-    desc: "Create your org, provision a custody wallet, and generate scoped API keys.",
-    href: "/docs/guides/setup-organization",
+    name: "Issue a Regulated Stablecoin",
+    desc: "Build a GENIUS-compliant digital dollar on Solana with institutional custody and integrated compliance.",
+    href: "/docs/tutorials/issue-a-regulated-stablecoin",
+    Icon: CircleDollarSignIcon,
   },
   {
-    title: "Issue your first token",
-    desc: "Pick a template (stablecoin, tokenized security, or custom), configure, and deploy.",
-    href: "/docs/tokens/create-a-token",
+    name: "Manage Payroll with Recurring Payments",
+    desc: "Schedule recurring onchain transfers to pay your team on time, every time.",
+    href: "/docs/payments/send-payouts",
+    Icon: RepeatIcon,
   },
   {
-    title: "Operate",
-    desc: "Mint, transfer, freeze accounts, and screen addresses through the dashboard or API.",
-    href: "/docs/tokens/mint-and-burn",
+    name: "Cash In, Cash Out",
+    desc: "Move between fiat and crypto through our onramp and offramp partners.",
+    href: "/docs/payments/ramps",
+    Icon: ArrowLeftRightIcon,
+  },
+  {
+    name: "Batch Payments",
+    desc: "Disburse to many recipients in a single batch transfer.",
+    href: "/docs/payments/send-payouts",
+    Icon: LayersIcon,
+  },
+  {
+    name: "Payment Requests",
+    desc: "Request and track inbound payments to your custody wallets.",
+    href: "/docs/payments/accept-overview",
+    Icon: ReceiptTextIcon,
+  },
+  {
+    name: "Self-Hosting",
+    desc: "Deploy and operate SDP on your own infrastructure. Customize it to your use case.",
+    href: "/docs/self-hosting",
+    Icon: ServerIcon,
+  },
+];
+
+const aiResources: HomeCard[] = [
+  {
+    name: "Documentation for AI",
+    desc: "Machine-readable entry points and ingestion guidance for agents consuming SDP.",
+    href: "/docs/reference/docs-for-ai",
+    Icon: BotIcon,
+  },
+  {
+    name: "llms.txt",
+    desc: "Concise discovery file with canonical URLs, supported surfaces, and key starting pages.",
+    href: "/docs/ai/llms.txt",
+    Icon: FileTextIcon,
+  },
+  {
+    name: "OpenAPI Contract",
+    desc: "Machine-readable API contract for the public SDP API.",
+    href: "https://api.solana.com/openapi.json",
+    Icon: BracesIcon,
   },
 ];
 
@@ -104,151 +252,96 @@ export function DocsHome() {
   return (
     <div className="launch-home">
       <HomePageClass />
-      <div className="launch-home-hero-divider" aria-hidden="true" />
-
-      {/* ── Hero ── */}
-      <section className="launch-home-hero">
-        <h1 className="launch-home-hero-headline">
-          Real-world asset issuance, payments, and markets on Solana
-        </h1>
-        <p className="launch-home-hero-sub">
-          A dashboard and REST API for real-world asset issuance, payments, and markets on Solana —
-          with built-in compliance controls.
-        </p>
-        <div className="launch-home-actions">
-          <Link href="/docs/guides/setup-organization" className="launch-home-cta-primary">
-            Dashboard setup <ArrowRight size={14} aria-hidden="true" />
-          </Link>
-          <Link href="/docs/reference/api" className="launch-home-cta-secondary">
-            API quickstart <ArrowRight size={14} aria-hidden="true" />
-          </Link>
-        </div>
-      </section>
-
+      <div className="launch-home-actions">
+        <Link href="/docs/guides/setup-organization" className="launch-home-cta-primary">
+          Dashboard setup <ArrowRightIcon size={14} aria-hidden="true" />
+        </Link>
+        <Link href="/docs/introduction" className="launch-home-cta-secondary">
+          Learn more <ArrowRightIcon size={14} aria-hidden="true" />
+        </Link>
+      </div>
       {/* ── Platform model ── */}
-      <section id="platform-model" className="launch-home-section">
-        <h2 className="launch-home-section-label">Platform model</h2>
+      <section className="launch-home-section">
+        <SectionHeading {...HOME_SECTIONS.gettingStarted} />
         <div className="launch-home-outcomes launch-home-model-cards">
           {modelSteps.map((step) => (
-            <Link
-              key={step.name}
-              href={step.href}
-              className="launch-home-outcome launch-home-outcome--h"
-            >
-              <div className="launch-home-outcome-icon-wrap">
-                <step.Icon size={16} aria-hidden="true" />
-              </div>
-              <div className="launch-home-outcome-body">
-                <h3 className="launch-home-outcome-title">{step.name}</h3>
-                <p className="launch-home-outcome-desc">{step.desc}</p>
-              </div>
-            </Link>
+            <HomeCardLink key={step.name} card={step} />
           ))}
         </div>
       </section>
 
-      {/* ── Trust + availability strip ── */}
-      <div className="launch-home-strip">
-        <div className="launch-home-strip-row">
-          <span className="launch-home-strip-label">Custody</span>
-          <div className="launch-home-strip-pills">
-            {CUSTODY_PROVIDERS.map((p) => (
-              <span key={p} className="launch-home-strip-pill">
-                {p}
-              </span>
-            ))}
-          </div>
+      {/* ── Tutorials ── */}
+      <section className="launch-home-section">
+        <SectionHeading {...HOME_SECTIONS.tutorials} />
+        <div className="launch-home-outcomes launch-home-model-cards">
+          {tutorials.map((tutorial) => (
+            <HomeCardLink key={tutorial.name} card={tutorial} />
+          ))}
         </div>
-        <div className="launch-home-strip-divider" aria-hidden="true" />
-        <div className="launch-home-strip-row">
-          <span className="launch-home-strip-label">Status</span>
-          <div className="launch-home-strip-pills">
-            <span className="launch-home-strip-pill">Sandbox live</span>
-            <span className="launch-home-strip-pill">Production by request</span>
-            <span className="launch-home-strip-pill">First token in &lt;1 day</span>
-          </div>
-        </div>
-      </div>
+      </section>
 
-      {/* ── Outcomes ── */}
-      <section id="outcomes" className="launch-home-section">
-        <h2 className="launch-home-section-label">Outcomes</h2>
-        <div className="launch-home-outcomes">
-          {outcomes.map((o) => (
-            <Link key={o.href} href={o.href} className="launch-home-outcome">
-              <div className="launch-home-outcome-icon-wrap">
-                <o.Icon size={16} aria-hidden="true" />
+      {/* ── Build with AI ── */}
+      <section className="launch-home-section">
+        <SectionHeading {...HOME_SECTIONS.buildWithAi} />
+        <div className="launch-home-outcomes launch-home-model-cards">
+          {aiResources.map((resource) => (
+            <HomeCardLink key={resource.name} card={resource} />
+          ))}
+        </div>
+      </section>
+
+      {/* ── Supported partners ── */}
+      <section className="launch-home-section">
+        <SectionHeading {...HOME_SECTIONS.partners} />
+        <p className="launch-home-section-intro">
+          Access the best of the Solana ecosystem with a unified experience. We provide a stable and
+          consistent API and dashboard to utilize these providers according to your requirements.
+        </p>
+        <div className="launch-home-partners">
+          {PARTNER_ROWS.map((row) => (
+            <div key={row.category} className="launch-home-partners-row">
+              <div className="launch-home-partners-category">
+                <row.Icon size={17} aria-hidden="true" />
+                {row.category}
               </div>
-              <h3 className="launch-home-outcome-title">{o.title}</h3>
-              <p className="launch-home-outcome-desc">{o.desc}</p>
-            </Link>
+              <div className="launch-home-partners-logos">
+                {row.partners.map((p) => (
+                  <img
+                    key={p.name}
+                    src={p.src}
+                    alt={p.name}
+                    style={{ height: p.h }}
+                    loading="lazy"
+                    className="launch-home-partners-wordmark"
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
-        <Link href="/docs/introduction" className="launch-home-more launch-home-more--below">
-          See all capabilities <ArrowRight size={12} aria-hidden="true" />
-        </Link>
       </section>
+    </div>
+  );
+}
 
-      {/* ── Quickstart ── */}
-      <section id="quickstart" className="launch-home-section">
-        <h2 className="launch-home-section-label">Quickstart</h2>
-        <ol className="launch-home-quick">
-          {quickstart.map((step, i) => (
-            <li key={step.href} className="launch-home-quick-step">
-              <Link href={step.href} className="launch-home-quick-link">
-                <span className="launch-home-quick-num" aria-hidden="true">
-                  {i + 1}
-                </span>
-                <div className="launch-home-quick-content">
-                  <h3 className="launch-home-quick-title">{step.title}</h3>
-                  <p className="launch-home-quick-desc">{step.desc}</p>
-                </div>
-                <ArrowRight className="launch-home-quick-arrow" size={15} aria-hidden="true" />
-              </Link>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      {/* ── Key concepts ── */}
-      <section id="key-concepts" className="launch-home-section">
-        <h2 className="launch-home-section-label">Key concepts</h2>
-        <dl className="launch-home-concepts">
-          <div className="launch-home-concept">
-            <dt className="launch-home-concept-term">Environment</dt>
-            <dd className="launch-home-concept-def">
-              <code>sandbox</code> runs on devnet — <code>production</code> runs on mainnet-beta
-            </dd>
-          </div>
-          <div className="launch-home-concept">
-            <dt className="launch-home-concept-term">API key prefix</dt>
-            <dd className="launch-home-concept-def">
-              <code>sk_test_</code> for sandbox · <code>sk_live_</code> for production
-            </dd>
-          </div>
-          <div className="launch-home-concept">
-            <dt className="launch-home-concept-term">Idempotency</dt>
-            <dd className="launch-home-concept-def">
-              Include an <code>Idempotency-Key</code> header on mutation requests to prevent
-              duplicates
-            </dd>
-          </div>
-          <div className="launch-home-concept">
-            <dt className="launch-home-concept-term">Signing modes</dt>
-            <dd className="launch-home-concept-def">
-              Execute (SDP signs &amp; submits) or Prepare (SDP builds, you sign) —{" "}
-              <Link href="/docs/tokens/prepare-vs-execute" className="launch-home-concept-link">
-                Prepare vs Execute
-              </Link>
-            </dd>
-          </div>
-        </dl>
-      </section>
-
-      {/* ── Footer hint ── */}
-      <p className="launch-home-footer-note">
-        Full API reference, endpoint pages, and provider onboarding live in the docs sidebar.
+/**
+ * Compact provider-onboarding card shown under the "On this page" TOC on the
+ * docs home page.
+ */
+export function ProviderCallout() {
+  return (
+    <div className="launch-docs-toc-card">
+      <p className="launch-docs-toc-card-title">
+        <HandshakeIcon size={16} aria-hidden="true" />
+        Interested in being a provider?
       </p>
+      <p className="launch-docs-toc-card-desc">
+        We onboard custody, RPC, compliance, and ramp integrations through a self-service
+        contribution process.
+      </p>
+      <Link href="/docs/reference/provider-onboarding" className="launch-docs-toc-card-link">
+        Visit our guide <ArrowRightIcon size={12} aria-hidden="true" />
+      </Link>
     </div>
   );
 }

@@ -1,0 +1,75 @@
+/* ── Ramp provider rotator — inline vertical carousel injected into
+   `rotate-providers` code fences by the shiki transformer in source.config.ts.
+   Imported by the MDX pages that use the flag, so it only loads there.
+   The chip is a static label; only the track of [icon][id] rows rotates
+   inside it. Only the first row is real text; looping rows draw their id from
+   `content: attr(data-name)` so copied code contains a single value. ── */
+.rpr {
+  display: inline-block;
+  box-sizing: border-box;
+  height: 1lh;
+  padding: 0 5px;
+  border: 1px solid var(--launch-border);
+  border-radius: 5px;
+  background: var(--launch-inline-code-bg);
+  overflow: hidden;
+  vertical-align: bottom;
+  font-size: 0.92em;
+}
+
+.rpr-track {
+  display: flex;
+  flex-direction: column;
+  animation: rpr-cycle 21s infinite;
+}
+
+.rpr-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 1lh;
+}
+
+.rpr-item[data-name]::after {
+  content: attr(data-name);
+}
+
+@keyframes rpr-cycle {
+  0%,
+  12.3% {
+    transform: translateY(0);
+  }
+  14.28%,
+  26.6% {
+    transform: translateY(-1lh);
+  }
+  28.57%,
+  40.9% {
+    transform: translateY(-2lh);
+  }
+  42.86%,
+  55.2% {
+    transform: translateY(-3lh);
+  }
+  57.14%,
+  69.4% {
+    transform: translateY(-4lh);
+  }
+  71.43%,
+  83.7% {
+    transform: translateY(-5lh);
+  }
+  85.71%,
+  98% {
+    transform: translateY(-6lh);
+  }
+  100% {
+    transform: translateY(-7lh);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rpr-track {
+    animation: none;
+  }
+}

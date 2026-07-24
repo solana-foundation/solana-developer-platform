@@ -7,100 +7,471 @@
 - API: https://api.solana.com
 - Interactive API docs: https://api.solana.com/docs
 - OpenAPI: https://api.solana.com/openapi.json
-- AI guide: https://platform.solana.com/docs/reference/ai-consumption
+- AI guide: https://platform.solana.com/docs/reference/docs-for-ai
 
 ## Docs
 
-### Solana Developer Platform Docs
-Source: https://platform.solana.com/docs/home
+### What is SDP?
+Source: https://platform.solana.com/docs/introduction
 
-> A dashboard and REST API for real-world asset issuance, payments, and markets on Solana — with built-in compliance controls.
+> Putting institutional-grade capital markets at your fingertips. Issue, move, and manage regulated assets on Solana.
 
-<DocsHome />
+## Background
+
+Institutional capital is moving onchain. As of July 2026, tokenized real-world assets total roughly [$35 billion across public blockchains](https://app.rwa.xyz/), alongside nearly $300 billion in stablecoins. On Solana that includes about [$3.2 billion in tokenized assets](https://app.rwa.xyz/networks/solana) and a $15.8 billion stablecoin supply that settled over [$560 billion in transfers](https://solana.com/data) in the past 30 days.
+
+Tokenized stocks are the fastest-growing slice of that market. Onchain equities now total [roughly $1.9 billion](https://app.rwa.xyz/stocks), and Solana settles [about 95% of all tokenized stock trading](https://cryptobriefing.com/solana-tokenized-stocks-volume-surges-h1-2026/), with $4.9 billion in volume in the first half of 2026 alone. Names like Micron, SanDisk, Tesla, and Apple already trade onchain, alongside tokenized ETFs like the iShares Core S&P 500.
+
+Assets at this scale need the same guarantees traditional markets provide: regulated custody, enforceable compliance, and auditable operational controls. Building that from raw Solana primitives means standing up wallet infrastructure, transaction construction, and compliance tooling before shipping anything.
+
+And there is more to be done: most of the world's capital still sits offchain. SDP aims to attract it by providing simplified programming models through a unified application layer for issuance, ramps, transfers, and compliance operations, so you can start without needing to maintain a huge team of Solana developers.
+
+## Core Features
+
+<Steps>
+<Step>
+### Unified Programming Interface
+
+SDP puts one stable API in front of the Solana ecosystem's providers, so you integrate once and swap or add providers without changing your code. The same onramp call works for every ramp provider. The `provider` field is the only thing that changes.
+
+<Tabs items={["JavaScript", "Python", "curl"]}>
+<Tab value="JavaScript">
+```javascript title="onramp-quote.js" rotate-providers
+const response = await fetch(
+  "https://api.solana.com/v1/payments/ramps/onramp/quote",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      provider: "moonpay",
+      counterpartyId: "cp_...",
+      destinationWallet: "wal_...",
+      cryptoToken: "USDC",
+      fiatCurrency: "USD",
+      fiatAmount: "100.00",
+    }),
+  },
+);
+const quote = await response.json();
+```
+</Tab>
+<Tab value="Python">
+```python title="onramp_quote.py" rotate-providers
+
+response = requests.post(
+    "https://api.solana.com/v1/payments/ramps/onramp/quote",
+    headers={"Authorization": "Bearer sk_test_..."},
+    json={
+        "provider": "moonpay",
+        "counterpartyId": "cp_...",
+        "destinationWallet": "wal_...",
+        "cryptoToken": "USDC",
+        "fiatCurrency": "USD",
+        "fiatAmount": "100.00",
+    },
+)
+quote = response.json()
+```
+</Tab>
+<Tab value="curl">
+```bash title="Terminal" rotate-providers
+curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "moonpay",
+    "counterpartyId": "cp_...",
+    "destinationWallet": "wal_...",
+    "cryptoToken": "USDC",
+    "fiatCurrency": "USD",
+    "fiatAmount": "100.00"
+  }'
+```
+</Tab>
+</Tabs>
+</Step>
+<Step>
+### Wallet Custody
+
+Provision signing wallets through integrated custody providers, so your team never handles private keys. Hosted keys never leave the provider's MPC or TEE infrastructure and SDP only handles the signed transaction. Local development keys are encrypted at rest with `AES-256-GCM` using per-organization derived keys, and every signing request passes policy and permission checks before it executes.
+
+1. **Built on `@solana/keychain`**
+
+   The unified Solana signing interface. Every custody backend is a keychain adapter behind the same signing API, which is what makes providers interchangeable.
+
+2. **[Wallet policies](/docs/wallet-operations/policies)**
+
+   Constrain how a wallet can move funds. Destination controls, amount limits, operation permissions, approval requirements, and audit visibility, enforced before any operation executes.
+
+3. **Scoped custody configuration**
+
+   Custody settings resolve per project, then organization, then environment, so different teams can run different providers side by side.
+</Step>
+<Step>
+### Issuance and Compliance with Token-2022
+
+Create tokens from pre-built templates (stablecoin, tokenized security) or configure your own using Token-2022 extensions. Deploy, mint, burn, and manage supply through the dashboard or API.
+
+Those same extensions are what make compliance enforceable onchain. Freeze individual accounts, pause token activity, seize tokens, and manage allowlists for regulated issuance flows. Selected compliance actions accept reason or memo fields for audit trails. Every enforcement action is one POST on the same token surface.
+
+<Tabs items={["JavaScript", "Python", "curl"]}>
+<Tab value="JavaScript">
+```javascript title="compliance-action.js" rotate-token-ops
+const response = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(operationParams),
+  },
+);
+const result = await response.json();
+```
+</Tab>
+<Tab value="Python">
+```python title="compliance_action.py" rotate-token-ops
+
+response = requests.post(
+    "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
+    headers={"Authorization": "Bearer sk_test_..."},
+    json=operation_params,
+)
+result = response.json()
+```
+</Tab>
+<Tab value="curl">
+```bash title="Terminal" rotate-token-ops
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d "$OPERATION_PARAMS"
+```
+</Tab>
+</Tabs>
+</Step>
+<Step>
+### Ramps and Onchain Transfers
+
+Send stablecoins from custody wallets — single transfers, memo-tagged payments, and batch payouts — and move between fiat and crypto through our integrated ramp partners. One API covers rate estimates, quotes, and settlement across every provider and corridor, with counterparty KYC requirements collected per provider exactly when they are needed. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
+</Step>
+<Step>
+### Audit Trails
+
+Every sensitive operation is recorded automatically. Each entry captures the acting user or API key, the resource touched, success or failure, client IP, user agent, request id, and secret-redacted metadata, and is queryable per organization.
+
+| Area                    | Recorded events                                                                    |
+| ----------------------- | ---------------------------------------------------------------------------------- |
+| API keys                | Create, revoke, and rotate, for both organization and project-scoped keys          |
+| Token issuance          | Deploy, mint, burn, force-burn, supply changes, and authority updates              |
+| Compliance actions      | Freeze, unfreeze, pause, unpause, seize, and allowlist changes                     |
+| Custody                 | Provider configuration, wallet provisioning, and credential lifecycle changes      |
+| Transactions & signing  | Signing requests, submissions, and failed submissions                              |
+| Organization & access   | Members, invitations, projects, project membership, and login sessions             |
+| Counterparties & assets | Counterparty and payout account changes, asset profile changes                     |
+</Step>
+</Steps>
 
 ---
 
-### Introduction
-Source: https://platform.solana.com/docs/introduction
+## Developing with SDP
 
-> What SDP is, what it provides, and how it works.
+### Overview
+Source: https://platform.solana.com/docs/developing-with-sdp
 
-Solana Developer Platform (SDP) is a dashboard and REST API for real-world asset (RWA) issuance, payments, and markets on Solana. It handles wallet custody, onchain transaction construction, and compliance operations so your team can bring regulated assets onchain without managing keys or setting up Solana infrastructure.
-
-## What you get
-
-**Token lifecycle management** — Create tokens from pre-built templates (stablecoin, tokenized security) or configure your own using Token-2022 extensions. Deploy, mint, burn, and manage supply through the dashboard or API.
-
-**Wallet custody** — Provision signing wallets through integrated custody providers. SDP manages the signing infrastructure so your team never handles private keys directly.
-
-**Projects and scoped access** — Organize integrations by project, assign members, and issue project-scoped API keys so teams or environments do not share the same wallet and token surface.
-
-**Compliance operations** — Freeze individual accounts, pause token activity, seize tokens, and manage allowlists for regulated issuance flows. Selected compliance actions accept reason or memo fields for audit trails.
-
-**Two signing modes** — SDP supports both modes for transaction-building flows such as issuance, payments, and compliance actions:
-
-- **Execute** — SDP builds, signs, and submits the transaction in one API call
-- **Prepare** — SDP builds the transaction and returns it unsigned. You sign with your own infrastructure (hardware wallet, multisig, internal HSM) and submit it yourself.
-
-**Transaction simulation** — Prepare endpoints accept a `simulate: true` option that dry-runs the transaction before you sign, returning compute units consumed, program logs, and any errors.
-
-**Scoped API keys** — Generate keys with specific permission sets (`tokens:read`, `tokens:write`, `tokens:admin`, etc.) and rotate them without downtime.
-
-## Architecture
+> The interfaces, environments, and conventions you build against.
 
 SDP exposes two interfaces that connect to the same backend:
 
 - **Dashboard** — browser-based UI for setup, token management, and compliance operations. Sign in with email, Google, or GitHub.
 - **REST API** — programmatic access for backend integrations. Authenticate with an API key in the `Authorization` header.
 
+Everything the dashboard does is available through the API. Build against the API for automation and integrations; use the dashboard to set up your organization, inspect state, and perform one-off operations.
+
 ## Environments
 
-| Environment | API key prefix | Solana network | Purpose                                     |
-| ----------- | -------------- | -------------- | ------------------------------------------- |
-| Sandbox     | `sk_test_`     | devnet         | Development and testing with no real assets |
-| Production  | `sk_live_`     | mainnet-beta   | Live operations with real assets            |
+| Environment  | Network      | API key prefix |
+| ------------ | ------------ | -------------- |
+| `sandbox`    | devnet       | `sk_test_`     |
+| `production` | mainnet-beta | `sk_live_`     |
 
 Both environments expose identical APIs. Develop and test against sandbox, then switch to production by swapping your API key.
+
+## Signing modes
+
+Most transaction endpoints support Execute (SDP signs and submits) or Prepare (SDP builds the transaction, you sign). See [Prepare vs Execute](/docs/guides/prepare-vs-execute).
+
+---
+
+### Idempotency
+Source: https://platform.solana.com/docs/developing-with-sdp/idempotency
+
+> Prevent duplicate operations by sending an Idempotency-Key header on mutation requests.
+
+Include an `Idempotency-Key` header on mutation requests to prevent duplicates. If a request times out or your client retries, replaying the same key returns the original result instead of performing the operation twice.
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/transfers \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Idempotency-Key: 8a2f6c1e-9d4b-4f3a-b7e5-2c8d9f0a1b3c" \
+  -H "Content-Type: application/json" \
+  -d '{ ... }'
+```
+
+Use a unique key per logical operation (a UUID works well) and reuse the same key for retries of that operation.
+
+---
+
+### Authentication
+Source: https://platform.solana.com/docs/developing-with-sdp/authentication
+
+> Authenticate API requests with project-scoped API keys.
+
+Every API request carries an API key in the `Authorization` header:
+
+```bash title="Terminal"
+curl https://api.solana.com/v1/wallets \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+Key prefixes tell you which environment a key belongs to: `sk_test_` keys are sandbox, `sk_live_` keys are production.
+
+Keys are project-scoped — a key can only reach the wallets, tokens, and payments of the project it was issued for. See [Manage API Keys](/docs/developing-with-sdp/manage-api-keys) for creating, rotating, and revoking keys.
+
+---
+
+### Manage API Keys
+Source: https://platform.solana.com/docs/developing-with-sdp/manage-api-keys
+
+> Create, rotate, and revoke API keys with role-based access and environment scoping.
+
+API keys authenticate every request to the SDP API. Each key is scoped to an environment (sandbox or production) and assigned a role that determines what operations it can perform.
+
+## Key format
+
+| Environment | Prefix | Solana network |
+| --- | --- | --- |
+| Sandbox | `sk_test_` | devnet |
+| Production | `sk_live_` | mainnet-beta |
+
+## Roles
+
+| Role | Description |
+| --- | --- |
+| `api_admin` | Full access including custody and platform operations |
+| `api_developer` | Read/write access, excludes custody actions |
+| `api_readonly` | Read-only access to all resources |
+
+## Create a key
+
+<Tabs items={["Dashboard", "API"]}>
+<Tab value="Dashboard">
+
+Navigate to **API keys** in the sidebar. You'll start with an empty list.
+
+![API keys page with no keys yet](/images/getting-started/api-keys-empty.png)
+
+Click **New API key** in the top right. Fill in the key details:
+
+- **Name** — a descriptive label (e.g., "CI deploy key")
+- **Role** — Admin, Developer, or Read only
+- **Environment** — Sandbox or Production
+- **Wallet access** — All wallets or Selected wallets
+- **Expiration (optional)** — date/time picker
+
+![Create API key modal](/images/getting-started/api-key-create.png)
+
+Click **Continue**. Review the summary and click **Create key**.
+
+![Review API key modal](/images/getting-started/api-key-review.png)
+
+The full key appears once in the **API key generated** modal. Click **Copy** and save it — it will not be shown again.
+
+![API key generated modal showing the full key](/images/getting-started/api-key-generated.png)
+
+After dismissing, the key appears in the table with its prefix, role, environment, and status.
+
+![API keys list with one active key](/images/getting-started/api-keys-list.png)
+
+</Tab>
+<Tab value="API">
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/api-keys \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "CI deploy key",
+    "role": "api_developer",
+    "environment": "sandbox",
+    "walletScope": "all",
+    "expiresAt": "2026-12-31T23:59:59Z"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="create-api-key.ts"
+const response = await fetch("https://api.solana.com/v1/api-keys", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    name: "CI deploy key",
+    role: "api_developer",
+    environment: "sandbox",
+    walletScope: "all",
+    expiresAt: "2026-12-31T23:59:59Z",
+  }),
+});
+const { data } = await response.json();
+// data.apiKey.key — save this, only shown once
+```
+</Tab>
+<Tab value="Java">
+```java title="CreateApiKey.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/api-keys"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "name": "CI deploy key",
+          "role": "api_developer",
+          "environment": "sandbox",
+          "walletScope": "all",
+          "expiresAt": "2026-12-31T23:59:59Z"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The response includes the full `key` value — **save it, it is only returned once**.
+
+Optional fields: `allowedIps` (CIDR ranges), `permissions` (fine-grained), `signingWalletId`, `walletBindings`.
+
+</Tab>
+</Tabs>
+
+## Rotate a key
+
+<Tabs items={["Dashboard", "API"]}>
+<Tab value="Dashboard">
+
+In the API keys table, open the **Actions** dropdown next to the key and click **Rotate key (24h grace)**. The dashboard always uses a 24-hour grace period — use the API if you need a custom value (0–168h).
+
+![Actions dropdown showing Rotate key and Delete key options](/images/getting-started/api-key-rotate.png)
+
+During the grace period both the old and new key are valid. The new key value appears once in the generated key modal — save it immediately.
+
+</Tab>
+<Tab value="API">
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/api-keys/key_abc123/rotate \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "gracePeriodHours": 24 }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="rotate-api-key.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/api-keys/key_abc123/rotate",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ gracePeriodHours: 24 }),
+  }
+);
+const { data } = await response.json();
+// data.apiKey — the new key
+```
+</Tab>
+<Tab value="Java">
+```java title="RotateApiKey.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/api-keys/key_abc123/rotate"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        { "gracePeriodHours": 24 }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The old key remains valid for the grace period (0–168 hours).
+
+</Tab>
+</Tabs>
+
+## Revoke a key
+
+<Tabs items={["Dashboard", "API"]}>
+<Tab value="Dashboard">
+
+Open the **Actions** dropdown next to the key and click **Delete key**. The key stops working immediately and cannot be restored.
+
+</Tab>
+<Tab value="API">
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X DELETE https://api.solana.com/v1/api-keys/key_abc123 \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "confirmation": "CI deploy key" }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="revoke-api-key.ts"
+await fetch("https://api.solana.com/v1/api-keys/key_abc123", {
+  method: "DELETE",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({ confirmation: "CI deploy key" }),
+});
+```
+</Tab>
+<Tab value="Java">
+```java title="RevokeApiKey.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/api-keys/key_abc123"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .method("DELETE", HttpRequest.BodyPublishers.ofString("""
+        { "confirmation": "CI deploy key" }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The `confirmation` field must match the key's **name**. The key stops working immediately.
+
+</Tab>
+</Tabs>
 
 ---
 
 ## Getting Started
-
-### Set Up Your Organization
-Source: https://platform.solana.com/docs/guides/setup-organization
-
-> Create and configure your SDP organization through the dashboard.
-
-An organization is the top-level container for all your SDP resources — projects, wallets, API keys, and tokens. Every API request is scoped to an organization.
-
-### 1. Sign up
-
-Go to [platform.solana.com](https://platform.solana.com) and click **Dashboard**. On the sign-in screen, click **Sign up** to create a new account.
-
-![SDP sign-in screen with Sign up link](/images/getting-started/sign-in.png)
-
-Enter your email address and a password to create your account.
-
-![Create your account screen](/images/getting-started/create-account.png)
-
-### 2. Create or select an organization
-
-After signing in you'll be prompted to set up your organization. Upload a logo and enter your organization name, then click **Continue**.
-
-![Setup your organization screen](/images/getting-started/setup-organization.png)
-
-If you already have an organization, the **Organization Switcher** in the top-left of the sidebar lets you switch between them or create a new one.
-
-<img src="/images/getting-started/org-switcher.png" alt="Organization Switcher dropdown" width="436" style={{ display: "block", maxWidth: "100%" }} />
-
-### 3. Next steps
-
-- [Set up wallets](/docs/guides/setup-wallets) for signing transactions
-- [Create API keys](/docs/guides/manage-api-keys) for programmatic access
-- [Projects API reference](/docs/reference/api/projects) when you want to segment apps, tenants, or environments within the organization
-- [Create your first token](/docs/guides/create-a-token)
-
----
 
 ### Set Up Wallets
 Source: https://platform.solana.com/docs/guides/setup-wallets
@@ -163,7 +534,7 @@ Each provider supports a different set of operations shown as capability chips:
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/wallets/initialize \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -174,7 +545,7 @@ curl -X POST https://api.solana.com/v1/wallets/initialize \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="initialize-wallet-provider.ts"
 const response = await fetch("https://api.solana.com/v1/wallets/initialize", {
   method: "POST",
   headers: {
@@ -191,7 +562,7 @@ const { data } = await response.json();
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="InitializeWalletProvider.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/wallets/initialize"))
     .header("Authorization", "Bearer sk_test_...")
@@ -210,7 +581,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/wallets \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -222,7 +593,7 @@ curl -X POST https://api.solana.com/v1/wallets \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="create-wallet.ts"
 const response = await fetch("https://api.solana.com/v1/wallets", {
   method: "POST",
   headers: {
@@ -238,7 +609,7 @@ const response = await fetch("https://api.solana.com/v1/wallets", {
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="CreateWallet.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/wallets"))
     .header("Authorization", "Bearer sk_test_...")
@@ -260,13 +631,13 @@ The `purpose` field is optional metadata in the API. The current dashboard creat
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl "https://api.solana.com/v1/wallets?view=summary" \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="list-wallets.ts"
 const response = await fetch("https://api.solana.com/v1/wallets?view=summary", {
   headers: { "Authorization": "Bearer sk_test_..." },
 });
@@ -275,7 +646,7 @@ const { data } = await response.json();
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="ListWallets.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/wallets?view=summary"))
     .header("Authorization", "Bearer sk_test_...")
@@ -291,7 +662,7 @@ Use the returned `walletId` when setting a default wallet or binding wallet-scop
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/wallets/default-wallet \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -299,7 +670,7 @@ curl -X POST https://api.solana.com/v1/wallets/default-wallet \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="set-default-wallet.ts"
 await fetch("https://api.solana.com/v1/wallets/default-wallet", {
   method: "POST",
   headers: {
@@ -311,7 +682,7 @@ await fetch("https://api.solana.com/v1/wallets/default-wallet", {
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="SetDefaultWallet.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/wallets/default-wallet"))
     .header("Authorization", "Bearer sk_test_...")
@@ -322,232 +693,6 @@ HttpRequest request = HttpRequest.newBuilder()
 ```
 </Tab>
 </Tabs>
-
-</Tab>
-</Tabs>
-
----
-
-### Manage API Keys
-Source: https://platform.solana.com/docs/guides/manage-api-keys
-
-> Create, rotate, and revoke API keys with role-based access and environment scoping.
-
-API keys authenticate every request to the SDP API. Each key is scoped to an environment (sandbox or production) and assigned a role that determines what operations it can perform.
-
-## Key format
-
-| Environment | Prefix | Solana network |
-| --- | --- | --- |
-| Sandbox | `sk_test_` | devnet |
-| Production | `sk_live_` | mainnet-beta |
-
-## Roles
-
-| Role | Description |
-| --- | --- |
-| `api_admin` | Full access including custody and platform operations |
-| `api_developer` | Read/write access, excludes custody actions |
-| `api_readonly` | Read-only access to all resources |
-
-## Create a key
-
-<Tabs items={["Dashboard", "API"]}>
-<Tab value="Dashboard">
-
-Navigate to **API keys** in the sidebar. You'll start with an empty list.
-
-![API keys page with no keys yet](/images/getting-started/api-keys-empty.png)
-
-Click **New API key** in the top right. Fill in the key details:
-
-- **Name** — a descriptive label (e.g., "CI deploy key")
-- **Role** — Admin, Developer, or Read only
-- **Environment** — Sandbox or Production
-- **Wallet access** — All wallets or Selected wallets
-- **Expiration (optional)** — date/time picker
-
-![Create API key modal](/images/getting-started/api-key-create.png)
-
-Click **Continue**. Review the summary and click **Create key**.
-
-![Review API key modal](/images/getting-started/api-key-review.png)
-
-The full key appears once in the **API key generated** modal. Click **Copy** and save it — it will not be shown again.
-
-![API key generated modal showing the full key](/images/getting-started/api-key-generated.png)
-
-After dismissing, the key appears in the table with its prefix, role, environment, and status.
-
-![API keys list with one active key](/images/getting-started/api-keys-list.png)
-
-</Tab>
-<Tab value="API">
-
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
-```bash
-curl -X POST https://api.solana.com/v1/api-keys \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "CI deploy key",
-    "role": "api_developer",
-    "environment": "sandbox",
-    "walletScope": "all",
-    "expiresAt": "2026-12-31T23:59:59Z"
-  }'
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript
-const response = await fetch("https://api.solana.com/v1/api-keys", {
-  method: "POST",
-  headers: {
-    "Authorization": "Bearer sk_test_...",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    name: "CI deploy key",
-    role: "api_developer",
-    environment: "sandbox",
-    walletScope: "all",
-    expiresAt: "2026-12-31T23:59:59Z",
-  }),
-});
-const { data } = await response.json();
-// data.apiKey.key — save this, only shown once
-```
-</Tab>
-<Tab value="Java">
-```java
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/api-keys"))
-    .header("Authorization", "Bearer sk_test_...")
-    .header("Content-Type", "application/json")
-    .POST(HttpRequest.BodyPublishers.ofString("""
-        {
-          "name": "CI deploy key",
-          "role": "api_developer",
-          "environment": "sandbox",
-          "walletScope": "all",
-          "expiresAt": "2026-12-31T23:59:59Z"
-        }"""))
-    .build();
-```
-</Tab>
-</Tabs>
-
-The response includes the full `key` value — **save it, it is only returned once**.
-
-Optional fields: `allowedIps` (CIDR ranges), `permissions` (fine-grained), `signingWalletId`, `walletBindings`.
-
-</Tab>
-</Tabs>
-
-## Rotate a key
-
-<Tabs items={["Dashboard", "API"]}>
-<Tab value="Dashboard">
-
-In the API keys table, open the **Actions** dropdown next to the key and click **Rotate key (24h grace)**. The dashboard always uses a 24-hour grace period — use the API if you need a custom value (0–168h).
-
-![Actions dropdown showing Rotate key and Delete key options](/images/getting-started/api-key-rotate.png)
-
-During the grace period both the old and new key are valid. The new key value appears once in the generated key modal — save it immediately.
-
-</Tab>
-<Tab value="API">
-
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
-```bash
-curl -X POST https://api.solana.com/v1/api-keys/key_abc123/rotate \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{ "gracePeriodHours": 24 }'
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript
-const response = await fetch(
-  "https://api.solana.com/v1/api-keys/key_abc123/rotate",
-  {
-    method: "POST",
-    headers: {
-      "Authorization": "Bearer sk_test_...",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ gracePeriodHours: 24 }),
-  }
-);
-const { data } = await response.json();
-// data.apiKey — the new key
-```
-</Tab>
-<Tab value="Java">
-```java
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/api-keys/key_abc123/rotate"))
-    .header("Authorization", "Bearer sk_test_...")
-    .header("Content-Type", "application/json")
-    .POST(HttpRequest.BodyPublishers.ofString("""
-        { "gracePeriodHours": 24 }"""))
-    .build();
-```
-</Tab>
-</Tabs>
-
-The old key remains valid for the grace period (0–168 hours).
-
-</Tab>
-</Tabs>
-
-## Revoke a key
-
-<Tabs items={["Dashboard", "API"]}>
-<Tab value="Dashboard">
-
-Open the **Actions** dropdown next to the key and click **Delete key**. The key stops working immediately and cannot be restored.
-
-</Tab>
-<Tab value="API">
-
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
-```bash
-curl -X DELETE https://api.solana.com/v1/api-keys/key_abc123 \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{ "confirmation": "CI deploy key" }'
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript
-await fetch("https://api.solana.com/v1/api-keys/key_abc123", {
-  method: "DELETE",
-  headers: {
-    "Authorization": "Bearer sk_test_...",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({ confirmation: "CI deploy key" }),
-});
-```
-</Tab>
-<Tab value="Java">
-```java
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/api-keys/key_abc123"))
-    .header("Authorization", "Bearer sk_test_...")
-    .header("Content-Type", "application/json")
-    .method("DELETE", HttpRequest.BodyPublishers.ofString("""
-        { "confirmation": "CI deploy key" }"""))
-    .build();
-```
-</Tab>
-</Tabs>
-
-The `confirmation` field must match the key's **name**. The key stops working immediately.
 
 </Tab>
 </Tabs>
@@ -580,9 +725,9 @@ Use SDP-controlled custody wallets for your main authorities when you expect SDP
 
 Each step links to its own guide with UI and API instructions:
 
-1. [Set Up Your Organization](/docs/guides/setup-organization)
+1. [Set Up Your Organization & Projects](/docs/guides/setup-organization)
 2. [Set Up Wallets](/docs/guides/setup-wallets)
-3. [Manage API Keys](/docs/guides/manage-api-keys)
+3. [Manage API Keys](/docs/developing-with-sdp/manage-api-keys)
 4. [Create a Token](/docs/tokens/create-a-token)
 5. [Deploy a Token](/docs/tokens/deploy-a-token)
 6. [Mint and Burn](/docs/tokens/mint-and-burn)
@@ -615,7 +760,7 @@ See the full schema in the [Issuance API reference](/docs/reference/api/issuance
 
 ## For AI agents
 
-If you are driving SDP through an agent workflow, start from [AI Consumption](/docs/reference/ai-consumption). That page links the machine-readable SDP discovery files and keeps AI-facing guidance grounded in the supported public API surface.
+If you are driving SDP through an agent workflow, start from [Documentation for AI](/docs/reference/docs-for-ai). That page links the machine-readable SDP discovery files and keeps AI-facing guidance grounded in the supported public API surface.
 
 ---
 
@@ -665,12 +810,12 @@ Select a template and click **Continue**.
 
 List available templates to see what fields each one pre-configures:
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/templates \
   -H "Authorization: Bearer sk_test_..."
 ```
 
-```typescript
+```typescript title="list-templates.ts"
 const res = await fetch("https://api.solana.com/v1/issuance/templates", {
   headers: { Authorization: "Bearer sk_test_..." },
 });
@@ -708,7 +853,7 @@ Click **Continue** when ready.
 
 Pass identity fields in the `POST /v1/issuance/tokens` body:
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -749,7 +894,7 @@ Click **Create token** to save the draft.
 
 Add operational fields to the same body:
 
-```typescript
+```typescript title="create-token.ts"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
   method: "POST",
   headers: {
@@ -771,7 +916,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
 
 For a custom token, omit `template` or set it to `"custom"` and pass `overrides.extensions`:
 
-```typescript
+```typescript title="create-custom-token.ts"
 body: JSON.stringify({
   name: "Game Coin",
   symbol: "GAME",
@@ -815,7 +960,7 @@ Open the token to see its detail page. The status shows **Not deployed** and a *
 
 A successful response returns the new token object:
 
-```typescript
+```typescript title="create-token.ts"
 const { data } = await res.json();
 // data.token.id     — save this; used in all subsequent calls
 // data.token.status — "pending"
@@ -868,7 +1013,7 @@ The **Deploy** button appears in the token header and in the fund management pan
 
 You need the `tokenId` returned when you created the token. If you don't have it, list your tokens:
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens \
   -H "Authorization: Bearer sk_test_..."
 ```
@@ -904,13 +1049,13 @@ SDP submits the transaction to Solana and polls for confirmation. The page updat
 
 **Execute mode** — SDP signs and submits:
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
   -H "Authorization: Bearer sk_test_..." \
   -H "Idempotency-Key: deploy-acme-001"
 ```
 
-```typescript
+```typescript title="deploy-token.ts"
 const res = await fetch(
   "https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy",
   {
@@ -927,7 +1072,7 @@ const { data } = await res.json();
 
 **Prepare mode** — returns an unsigned transaction:
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/prepare \
   -H "Authorization: Bearer sk_test_..."
 ```
@@ -959,14 +1104,14 @@ The token status badge changes from `Not deployed` to the onchain mint address. 
 
 The deploy response includes the confirmed state:
 
-```typescript
+```typescript title="deploy-token.ts"
 // data.token.status      — "active"
 // data.token.mintAddress — e.g., "AcMeXYZ..."
 ```
 
 Fetch the token at any time to verify:
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
   -H "Authorization: Bearer sk_test_..."
 ```
@@ -1016,7 +1161,7 @@ The **Fund management** panel shows the current supply with two primary actions:
 
 All supply operations share this URL pattern:
 
-```
+```text title="Endpoints"
 POST /v1/issuance/tokens/{tokenId}/mint
 POST /v1/issuance/tokens/{tokenId}/burn
 POST /v1/issuance/tokens/{tokenId}/force-burn
@@ -1061,7 +1206,7 @@ Once confirmed, the mint appears in the Transactions table with a `confirmed` st
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -1075,7 +1220,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
   }'
 ```
 
-```typescript
+```typescript title="mint-tokens.ts"
 const res = await fetch(
   "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
   {
@@ -1139,7 +1284,7 @@ For **Force burn** (requires `tokens:admin`), use the Compliance tab instead of 
 
 **Burn from a controlled account:**
 
-```typescript
+```typescript title="burn-tokens.ts"
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
   method: "POST",
   headers: {
@@ -1155,7 +1300,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
 
 **Force-burn from any holder** (requires `tokens:admin`):
 
-```typescript
+```typescript title="force-burn-tokens.ts"
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
   method: "POST",
   headers: {
@@ -1194,7 +1339,7 @@ Reload the token detail page if the displayed supply value appears stale.
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh \
   -H "Authorization: Bearer sk_test_..."
 ```
@@ -1248,7 +1393,7 @@ The Compliance tab on the token detail page shows the allowlist management inter
 
 Set `requiresAllowlist: true` when creating the token:
 
-```typescript
+```typescript title="enable-allowlist.ts"
 body: JSON.stringify({
   name: "Acme Security",
   symbol: "ACMES",
@@ -1289,7 +1434,7 @@ After adding, the entry appears below the form with a **Remove entry** button.
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -1299,7 +1444,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
   }'
 ```
 
-```typescript
+```typescript title="add-allowlist-entry.ts"
 const res = await fetch(
   "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist",
   {
@@ -1335,12 +1480,12 @@ Use the search field to find a specific address by label or public key.
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
   -H "Authorization: Bearer sk_test_..."
 ```
 
-```typescript
+```typescript title="list-allowlist.ts"
 const { data, meta } = await res.json();
 // meta: { total, page, pageSize, hasMore }
 ```
@@ -1366,7 +1511,7 @@ In the **Compliance → Allowlist** tab, click **Remove entry** next to the addr
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl -X DELETE \
   https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123 \
   -H "Authorization: Bearer sk_test_..."
@@ -1424,7 +1569,7 @@ Enter the wallet address and select the intent (e.g., transfer destination or al
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/compliance/address-screenings \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -1435,7 +1580,7 @@ curl -X POST https://api.solana.com/v1/compliance/address-screenings \
   }'
 ```
 
-```typescript
+```typescript title="screen-address.ts"
 const { data } = await res.json();
 // data.screening.providers[]
 // → { provider, status, riskScore, riskLevel, message, evaluatedAt }
@@ -1486,7 +1631,7 @@ The "Unfreeze transaction finalized." toast appears and the Frozen Accounts coun
 
 **Freeze:**
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -1500,7 +1645,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 
 **Unfreeze:**
 
-```typescript
+```typescript title="unfreeze-account.ts"
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
   method: "POST",
   headers: { Authorization: "Bearer sk_test_...", "Content-Type": "application/json" },
@@ -1510,7 +1655,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
 
 **List frozen accounts:**
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123/frozen \
   -H "Authorization: Bearer sk_test_..."
 ```
@@ -1548,7 +1693,7 @@ To resume, click **Unpause token** and confirm.
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 # Pause
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/pause \
   -H "Authorization: Bearer sk_test_..."
@@ -1579,7 +1724,7 @@ In the **Compliance** tab, click **Seize tokens**. Provide the source, destinati
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -1654,12 +1799,12 @@ The **Extensions** tab shows the template and each operational flag — allowlis
 
 Fetch the current token state:
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
   -H "Authorization: Bearer sk_test_..."
 ```
 
-```typescript
+```typescript title="get-token-settings.ts"
 const { data } = await res.json();
 // data.token.authorities — { mintAuthority, freezeAuthority, permanentDelegate }
 // data.token.extensions  — active extensions on the token
@@ -1691,7 +1836,7 @@ On the token detail page, go to **Permissions**. Click **Edit** next to the auth
 
 **Execute mode** — SDP signs the authority rotation:
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -1706,7 +1851,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
 
 **Prepare mode** — returns unsigned transaction for external signing:
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority/prepare \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -1741,7 +1886,7 @@ In **Settings → Authorities**, click **Revoke** next to the authority and conf
 
 Set `newAuthority` to `null` to revoke:
 
-```typescript
+```typescript title="revoke-authority.ts"
 body: JSON.stringify({
   authority: {
     type: "mintAuthority",
@@ -1778,7 +1923,7 @@ Call a mutation endpoint without the `/prepare` suffix and SDP handles everythin
 3. Submits it to Solana
 4. Returns the confirmed result with a transaction signature
 
-```typescript
+```typescript title="mint-execute.ts"
 const res = await fetch(
   "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
   {
@@ -1809,7 +1954,7 @@ Issuance `amount` fields use **UI units** (decimal strings such as `"1000"` for 
 
 Add `/prepare` to a mutation endpoint and SDP builds the transaction but returns it unsigned:
 
-```typescript
+```typescript title="mint-prepare.ts"
 const res = await fetch(
   "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare",
   {
@@ -1897,7 +2042,7 @@ The current wallet-policy and balance endpoints remain under `/v1/payments/walle
 
 - [Set up wallets](/docs/guides/setup-wallets) — provision the wallet before configuring controls.
 - [Payments](/docs/payments) — payment and ramp flows that can use a policy-controlled wallet.
-- [Manage API keys](/docs/guides/manage-api-keys) — configure caller permissions separately from wallet operation permissions.
+- [Manage API keys](/docs/developing-with-sdp/manage-api-keys) — configure caller permissions separately from wallet operation permissions.
 
 ---
 
@@ -1914,13 +2059,13 @@ Use policies for treasury wallets, automated payout wallets, or any custody wall
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="get-wallet-policies.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
   { headers: { Authorization: "Bearer sk_test_..." } }
@@ -1937,7 +2082,7 @@ const { data } = await response.json();
 
 The payload is wrapped in the standard `data` / `meta` envelope, with the policy under a `policy` key:
 
-```json
+```json title="response.json"
 {
   "data": {
     "policy": {
@@ -2018,7 +2163,7 @@ Wallet policies can match operations at two levels:
 - **Operation family** rules apply to every evaluated operation in a broad product area.
 - **Operation type** rules match one exact operation identifier and take precedence when you need a narrower decision.
 
-These are wallet-policy selectors, not API-key permissions. API-key permissions such as `payments:write` and `tokens:write` determine whether a caller may invoke an endpoint; operation permissions determine what the selected wallet may do after the request is authorized. See [Manage API keys](/docs/guides/manage-api-keys) for caller permissions.
+These are wallet-policy selectors, not API-key permissions. API-key permissions such as `payments:write` and `tokens:write` determine whether a caller may invoke an endpoint; operation permissions determine what the selected wallet may do after the request is authorized. See [Manage API keys](/docs/developing-with-sdp/manage-api-keys) for caller permissions.
 
 ### Operation families
 
@@ -2088,7 +2233,7 @@ Set both for defense in depth: a per-transaction cap that catches obvious mistak
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X PUT https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -2103,7 +2248,7 @@ curl -X PUT https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="update-wallet-policies.ts"
 await fetch(
   "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
   {
@@ -2150,13 +2295,13 @@ Source: https://platform.solana.com/docs/wallet-operations/balances
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/payments/wallets/wal_abc123/balances \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="get-wallet-balances.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/wallets/wal_abc123/balances",
   { headers: { Authorization: "Bearer sk_test_..." } }
@@ -2166,7 +2311,7 @@ const { data } = await response.json();
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="GetWalletBalances.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/wallets/wal_abc123/balances"))
     .header("Authorization", "Bearer sk_test_...")
@@ -2180,7 +2325,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 The payload is wrapped in the standard `data` / `meta` envelope, with the balances under a `walletBalances` key:
 
-```json
+```json title="response.json"
 {
   "data": {
     "walletBalances": {
@@ -2413,7 +2558,7 @@ Fill in:
 
 Build the request body:
 
-```typescript
+```typescript title="transfer-request.ts"
 const body = {
   source: "privy_wallet_123",              // `walletId` from GET /v1/wallets
   destination: "7xKXz...9fGh",         // recipient wallet (owner) address
@@ -2448,7 +2593,7 @@ The transfer status updates to `Confirmed` once the transaction is finalized.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -2462,7 +2607,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="execute-transfer.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/transfers",
   {
@@ -2485,7 +2630,7 @@ const { data } = await response.json();
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="ExecuteTransfer.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
     .header("Authorization", "Bearer sk_test_...")
@@ -2526,14 +2671,14 @@ Click the record to see full details including the Solana Explorer link.
 </Tab>
 <Tab value="API">
 
-```typescript
+```typescript title="verify-transfer.ts"
 // data.transfer.status    — "confirmed"
 // data.transfer.signature — onchain tx signature
 ```
 
 Poll status for async confirmations:
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
   -H "Authorization: Bearer sk_test_..."
 ```
@@ -2586,7 +2731,7 @@ Memos are stored by SDP. They are **not** automatically attached as a Solana mem
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -2600,7 +2745,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="send-payment-with-memo.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/transfers",
   {
@@ -2622,7 +2767,7 @@ const { data } = await response.json();
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="SendPaymentWithMemo.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
     .header("Authorization", "Bearer sk_test_...")
@@ -2642,7 +2787,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 The memo is preserved on the transfer record:
 
-```json
+```json title="response.json"
 {
   "id": "xfr_...",
   "memo": "order_2026-05-14_4837",
@@ -2706,7 +2851,7 @@ If your retry path replays a transfer with identical inputs but a fresh request,
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -2720,7 +2865,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="payout-recipient.ts"
 async function payoutRecipient(row: PayoutRow): Promise<string> {
   if (row.transferId) return row.transferId; // already submitted
 
@@ -2750,7 +2895,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="PayoutRecipient.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
     .header("Authorization", "Bearer sk_test_...")
@@ -2774,13 +2919,13 @@ After the loop finishes, list all outbound transfers in the run's time window an
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl "https://api.solana.com/v1/payments/transfers?direction=outbound&from=2026-05-14T00:00:00Z&to=2026-05-14T23:59:59Z&pageSize=100" \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="list-outbound-transfers.ts"
 async function* listOutboundTransfers(from: string, to: string) {
   let page = 1;
   while (true) {
@@ -2971,13 +3116,13 @@ The minimal inbound-only request:
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl "https://api.solana.com/v1/payments/transfers?direction=inbound&pageSize=50" \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="list-inbound-transfers.ts"
 const url = new URL("https://api.solana.com/v1/payments/transfers");
 url.searchParams.set("direction", "inbound");
 url.searchParams.set("pageSize", "50");
@@ -3021,7 +3166,7 @@ Customer-initiated inbound transfers do **not** populate `Transfer.memo` (memo-p
 The typical inbound match cycle:
 
 1. **Read** the recent inbound transfers for the relevant token, using the **org-scoped path** (no `wallet`/`walletAddress` filter) so `from`/`to` are honored:
-   ```
+   ```text title="Request"
    GET /v1/payments/transfers
      ?direction=inbound
      &token=<mint or SOL>
@@ -3045,7 +3190,7 @@ A reconciliation worker that wakes on a tick and asks "what is new since last ti
 
 <Tabs items={["TypeScript"]}>
 <Tab value="TypeScript">
-```typescript
+```typescript title="reconcile-tick.ts"
 const OVERLAP_MS = 5_000; // re-query the last 5s on each tick to catch boundary arrivals
 
 async function reconcileTick(state: WorkerState) {
@@ -3123,7 +3268,7 @@ The end-user journey:
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/execute \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -3138,7 +3283,7 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/execute \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="onramp-execute.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/ramps/onramp/execute",
   {
@@ -3163,7 +3308,7 @@ const { data } = await response.json();
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="OnrampExecute.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/ramps/onramp/execute"))
     .header("Authorization", "Bearer sk_test_...")
@@ -3201,7 +3346,7 @@ The mirror image — convert from crypto to fiat from a wallet you control:
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/ramps/offramp/execute \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -3215,7 +3360,7 @@ curl -X POST https://api.solana.com/v1/payments/ramps/offramp/execute \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="offramp-execute.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/ramps/offramp/execute",
   {
@@ -3333,7 +3478,7 @@ BVNK uses Hawk authentication. Bearer-token auth is not currently supported.
 
 BVNK is the only provider that currently accepts the `bvnkCompliance` field on the ramp request — an object of the form `{ "partyDetails": [...] }` carrying compliance party records used to satisfy travel-rule and KYC sharing requirements. The exact shape of each party record is provider-defined; see BVNK's compliance docs for the field schema.
 
-```json
+```json title="request.json"
 {
   "provider": "bvnk",
   "destinationWallet": "wal_...",
@@ -3422,7 +3567,7 @@ From the dashboard, mint an org-scoped API key with **Role: Admin**, **Environme
 
 With the Admin key, call `GET /v1/projects` and pick the project with slug `default-sandbox`. Every organization is provisioned with exactly one sandbox and one production project automatically — isolation between workloads comes from separate organizations, not additional projects. The project ID is what you'll need in the next step:
 
-```json
+```json title="response.json"
 {
   "data": {
     "projects": [
@@ -3449,7 +3594,7 @@ With the Admin key, call `GET /v1/projects` and pick the project with slug `defa
 
 Call `POST /v1/projects/{projectId}/api-keys` twice to mint two project-scoped keys: one with `role: "api_developer"` for routine create, mint, and burn calls, and one with `role: "api_admin"` for compliance operations (screening, freeze, seize, force-burn). Each response includes the full key value exactly once:
 
-```json
+```json title="response.json"
 {
   "data": {
     "apiKey": {
@@ -3507,7 +3652,7 @@ The canonical SDP API URL is `https://api.solana.com`. Use this hostname for eve
 
 Wire two HTTP clients (one per project-scoped key) using a thin wrapper around `fetch`:
 
-```javascript
+```javascript title="sdp-client.js"
 const BASE = "https://api.solana.com";
 
 class SdpClient {
@@ -3542,14 +3687,14 @@ Use `sdp` for routine operations (create, mint, burn) and `sdpAdmin` for complia
 
 Now confirm the setup by listing the wallets bound to your project:
 
-```javascript
+```javascript title="list-wallets.js"
 const { data } = await sdp.get("/v1/wallets");
 console.log(`Custody wallets configured: ${data.wallets.length}`);
 ```
 
 A working setup prints:
 
-```
+```text title="Output"
 Custody wallets configured: 2
 ```
 
@@ -3595,7 +3740,7 @@ You can delegate or revoke any of these later via `POST /v1/issuance/tokens/{id}
 
 Section 4 takes one input: the configuration object representing the design choices above. For the Treasury Pilot USD example this tutorial uses end-to-end:
 
-```javascript
+```javascript title="token-config.js"
 const tokenConfig = {
   template: "stablecoin",
   name: "Treasury Pilot USD",
@@ -3618,7 +3763,7 @@ Three API calls take a design from object literal to a deployed regulated stable
 
 Every state-mutating execute endpoint in SDP (deploy, mint, burn, seize, force-burn, authority) supports an `Idempotency-Key` HTTP header. A retry with the same key replays the original response. A retry with a different key is a new request. The header is how you make network-level retries safe under partial failure. Replace the `SdpClient` definition from Section 2 with this version:
 
-```javascript
+```javascript title="sdp-client.js"
 class SdpClient {
   constructor(apiKey, baseUrl = BASE) {
     this.apiKey = apiKey;
@@ -3657,14 +3802,14 @@ Generate one key per logical operation, not per retry. Create the key once befor
 
 The first call writes the token's metadata to SDP's database. Nothing happens on Solana yet. The token starts in `status: "pending"` with no `mintAddress`:
 
-```javascript
+```javascript title="create-token.js"
 const created = await sdp.post("/v1/issuance/tokens", tokenConfig);
 const tokenId = created.data.token.id;
 ```
 
 A successful response:
 
-```json
+```json title="response.json"
 {
   "data": {
     "token": {
@@ -3689,7 +3834,7 @@ Save the `tok_*` ID; the deploy call uses it.
 
 The deploy call submits a Token-2022 mint creation transaction to Solana via the custody signer, and updates the token record with the resulting on-chain addresses:
 
-```javascript
+```javascript title="deploy-token.js"
 const deployKey = idempotencyKey("deploy");
 const deployed = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/deploy`,
@@ -3701,7 +3846,7 @@ const mintAddress = deployed.data.token.mintAddress;
 
 A successful response carries the deployed token record with `status: "active"` and the on-chain `mintAddress` populated:
 
-```json
+```json title="response.json"
 {
   "data": {
     "token": {
@@ -3729,7 +3874,7 @@ The `mintAuthority`, `freezeAuthority`, and `metadataAuthority` all resolve to t
 Deploy can return a bare `500 INTERNAL_ERROR` with no `details` field. The most common cause on devnet is an unfunded custody wallet (Section 2 covered the airdrop fix), but any downstream Solana RPC failure surfaces this way. The SDP team is closing this gap so deploy will return the underlying Solana error directly; until that ships, the diagnostic move is to call the `/prepare` variant of the same endpoint.
 </Callout>
 
-```javascript
+```javascript title="deploy-prepare.js"
 const prepared = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/deploy/prepare`,
   {}
@@ -3739,7 +3884,7 @@ console.log(prepared.data.simulation);
 
 `/prepare` builds the transaction and runs simulation against Solana without submitting. Its response surfaces the real error in `simulation.error`:
 
-```json
+```json title="response.json"
 {
   "data": {
     "preparedTransaction": { "serialized": "...", "blockhash": "..." },
@@ -3759,7 +3904,7 @@ This prepare-as-diagnostic pattern works for every endpoint that has a `/prepare
 
 Before moving to Section 5, confirm the on-chain state matches the record:
 
-```javascript
+```javascript title="confirm-deploy.js"
 const { data } = await sdp.get(`/v1/issuance/tokens/${tokenId}`);
 console.log(`Status: ${data.token.status}`);
 console.log(`Mint:   ${data.token.mintAddress}`);
@@ -3767,7 +3912,7 @@ console.log(`Mint:   ${data.token.mintAddress}`);
 
 A working deploy prints:
 
-```
+```text title="Output"
 Status: active
 Mint:   6V5bTuMsmXyhdY2Hj6VWQZsuacugACBmPqNtQgGtar8L
 ```
@@ -3788,7 +3933,7 @@ Section 4(a)(5) of the GENIUS Act treats a permitted payment stablecoin issuer a
 
 Every transfer destination and every allowlist entry gets screened before your application acts on it. One API call, one response.
 
-```javascript
+```javascript title="screen-address.js"
 const response = await sdpAdmin.post("/v1/compliance/address-screenings", {
   address: destinationAddress,
   network: "solana",
@@ -3810,7 +3955,7 @@ On the sandbox response this tutorial cites, Range and Elliptic return numeric s
 
 Freezing halts one holder's account without touching any other holder. The freeze is on-chain, enforced by the Token-2022 program. SDP signs the freeze instruction with the freeze authority that was set at deploy; the on-chain program does the enforcement.
 
-```javascript
+```javascript title="freeze-account.js"
 const holderFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/freeze`,
@@ -3832,7 +3977,7 @@ Section 7 demonstrates the resulting error: an HTTP 502 `SOLANA_RPC_ERROR` from 
 
 Seize moves tokens out of a holder's account without their signature, via the **permanent delegate** authority set at deploy. The permanent delegate is a Token-2022 extension that grants a named authority the right to transfer or burn any holder's tokens regardless of holder signature. This is the technological capability the GENIUS Act requires you to have ready for lawful orders. The institutional use case is a court-ordered transfer or a sanctions matter where you must recover specific tokens to a controlled wallet.
 
-```javascript
+```javascript title="seize-tokens.js"
 const seizeKey = idempotencyKey("seize");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/seize`,
@@ -3854,7 +3999,7 @@ The memo persists on the transaction record. It's the audit attribution your com
 
 Force-burn destroys tokens at a holder's account. Same authority as seize, different effect. Reach for it only when the tokens cannot be recovered to a controlled wallet, for example a self-custodied address whose key you cannot obtain.
 
-```javascript
+```javascript title="force-burn.js"
 const forceBurnKey = idempotencyKey("force-burn");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/force-burn`,
@@ -3886,7 +4031,7 @@ Minting is how new supply enters circulation. For a regulated stablecoin, every 
 
 Minting requires the `tokens:write` permission, so the Developer key (`sdp`) is the right credential:
 
-```javascript
+```javascript title="mint-tokens.js"
 const mintKey = idempotencyKey("mint");
 const minted = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/mint`,
@@ -3911,7 +4056,7 @@ Three field rules to keep clear:
 
 A successful mint returns the transaction record and the token account that received the tokens:
 
-```json
+```json title="response.json"
 {
   "data": {
     "transaction": {
@@ -3948,14 +4093,14 @@ The pattern that does not work is mint memos that don't reconcile cleanly to a r
 
 ### 4. Confirm the supply
 
-```javascript
+```javascript title="confirm-supply.js"
 const { data } = await sdp.get(`/v1/issuance/tokens/${tokenId}`);
 console.log(`Total supply: ${data.token.totalSupply}`);
 ```
 
 Prints:
 
-```
+```text title="Output"
 Total supply: 1000000
 ```
 
@@ -3969,7 +4114,7 @@ Section 5's compliance controls only matter if they enforce. This section moves 
 
 Transfers run on the `/v1/payments/transfers` endpoint family, separate from the issuance family that Section 4 used. The required permissions are `payments:write` and `wallets:read`, both of which the Developer key (`sdp`) carries:
 
-```javascript
+```javascript title="transfer-tokens.js"
 const { data } = await sdp.get("/v1/wallets");
 const sourceWalletId = data.wallets[0].walletId;
 
@@ -4002,7 +4147,7 @@ Three field rules to keep clear:
 
 A successful response includes the on-chain signature once the transaction confirms:
 
-```json
+```json title="response.json"
 {
   "data": {
     "transfer": {
@@ -4025,7 +4170,7 @@ A successful response includes the on-chain signature once the transaction confi
 
 To demonstrate the on-chain block, freeze the destination's TPUSD account using the Admin key. Freeze requires `tokens:admin`, which the Developer key does not carry:
 
-```javascript
+```javascript title="freeze-destination.js"
 const transferFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/freeze`,
@@ -4045,7 +4190,7 @@ The freeze records a frozen account in SDP's audit trail and applies the Token-2
 
 Run the same transfer call. This time it fails:
 
-```javascript
+```javascript title="transfer-blocked.js"
 try {
   await sdp.post("/v1/payments/transfers", {
     source: sourceWalletId,
@@ -4061,7 +4206,7 @@ try {
 
 The error envelope SDP returns:
 
-```json
+```json title="response.json"
 {
   "error": {
     "code": "SOLANA_RPC_ERROR",
@@ -4078,7 +4223,7 @@ The outer error code is `SOLANA_RPC_ERROR`, but it is upstream-call diagnostic, 
 The institutional pattern is to write your error handler against the wrapped on-chain code rather than the outer SDP code. The outer code tells you something went wrong upstream; the wrapped code tells you what.
 </Callout>
 
-```javascript
+```javascript title="parse-error.js"
 function isOnChainCompliance(error) {
   return error.message?.includes("custom program error: 0x11");
 }
@@ -4101,7 +4246,7 @@ Token-2022's `0x11` is `AccountFrozen` (decimal 17). Treat it as a compliance ve
 
 For a production environment, unfreezing happens only after the underlying compliance review resolves. For sandbox testing, you can unfreeze immediately:
 
-```javascript
+```javascript title="unfreeze-account.js"
 await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
   accountAddress: destinationAddress,
 });
@@ -4258,7 +4403,7 @@ Docker daemon is running.
 The install script downloads `compose.yml` and `.env.example` for the latest
 release into `~/sdp` and verifies them against the release checksums.
 
-```bash
+```bash title="Terminal"
 curl -fsSL https://github.com/solana-foundation/solana-developer-platform/releases/latest/download/install.sh | bash
 ```
 
@@ -4281,7 +4426,7 @@ the app secrets, and validates your answers.
   answer the prompts, and download the `.env` into `~/sdp`.
 - **In your terminal** — run the configurator from the API image:
 
-  ```bash
+  ```bash title="Terminal"
   docker run --rm -it -v "$HOME/sdp:/out" \
     ghcr.io/solana-foundation/sdp/sdp-api:latest \
     node configure.js --out /out/.env
@@ -4295,7 +4440,7 @@ variable means and which are required.
 
 ## 3. Bring up the stack
 
-```bash
+```bash title="Terminal"
 cd ~/sdp
 docker compose up -d
 ```
@@ -4306,7 +4451,7 @@ minutes.
 
 ## 4. Verify
 
-```bash
+```bash title="Terminal"
 docker compose ps
 docker compose logs -f sdp-api
 ```
@@ -4357,7 +4502,7 @@ devnet RPC endpoint from your provider before treating this flow as reliable.
 
 From the directory where the installer placed `compose.yml` and `.env`:
 
-```bash
+```bash title="Terminal"
 cd ~/sdp
 docker compose up -d
 docker compose ps
@@ -4409,7 +4554,7 @@ The signing step generates a local Solana signer in the browser and shows the
 public key to fund on devnet. Save the generated file as `~/sdp/.env`, then
 restart the stack:
 
-```bash
+```bash title="Terminal"
 cd ~/sdp
 docker compose up -d
 ```
@@ -4432,7 +4577,7 @@ show the organization and project context instead of onboarding errors.
 
 If the dashboard loads but organization state does not appear, check the API logs:
 
-```bash
+```bash title="Terminal"
 docker compose logs -f sdp-api
 ```
 
@@ -4450,7 +4595,7 @@ named `Devnet local wallet`.
 
 If you prefer the API path, use an admin key from the dashboard:
 
-```bash
+```bash title="Terminal"
 curl -X POST http://localhost:8787/v1/wallets/initialize \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -4483,7 +4628,7 @@ Save the full key when the dashboard shows it. SDP only displays it once.
 
 Use the new key against your self-hosted API:
 
-```bash
+```bash title="Terminal"
 export SDP_API_KEY="sk_test_..."
 
 curl "http://localhost:8787/v1/wallets?view=summary" \
@@ -4646,7 +4791,7 @@ A release ships new container images plus an updated `compose.yml`. To upgrade:
    checksums) and leaves any existing `.env` and `.env.example` in place, printing
    a link to the new release's `.env.example` so you can check for new variables.
 
-   ```bash
+   ```bash title="Terminal"
    curl -fsSL https://github.com/solana-foundation/solana-developer-platform/releases/latest/download/install.sh | bash
    ```
 
@@ -4656,7 +4801,7 @@ A release ships new container images plus an updated `compose.yml`. To upgrade:
 
 3. **Pull and restart.**
 
-   ```bash
+   ```bash title="Terminal"
    cd ~/sdp
    docker compose pull
    docker compose up -d
@@ -4695,7 +4840,7 @@ Take a logical dump with `pg_dump` from the running container. Running it throug
 `sh -c` lets `pg_dump` read `POSTGRES_USER` and `POSTGRES_DB` from inside the
 container, so custom values are honored:
 
-```bash
+```bash title="Terminal"
 cd ~/sdp
 docker compose exec -T postgres \
   sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > sdp-backup.sql
@@ -4710,7 +4855,7 @@ into an **empty** database and let the stack start on top of it. Do not restore
 over an already-migrated database, or the dump's schema collides with the one
 `sdp-migrate` created on the previous `up`.
 
-```bash
+```bash title="Terminal"
 cd ~/sdp
 docker compose down                       # stop every service
 docker volume rm sdp_sdp-postgres-data    # discard the current database (destructive)
@@ -4742,7 +4887,7 @@ Source: https://platform.solana.com/docs/self-hosting/troubleshooting
 Most self-hosting problems surface at startup. Start by looking at the service
 state and logs:
 
-```bash
+```bash title="Terminal"
 cd ~/sdp
 docker compose ps
 docker compose logs -f sdp-api
@@ -4786,7 +4931,7 @@ process holds one of them, the service won't bind. Override the host port in
 `sdp-migrate` runs once before the API starts; if it fails, the API stays down.
 Inspect it with:
 
-```bash
+```bash title="Terminal"
 docker compose logs sdp-migrate
 ```
 
@@ -5024,8 +5169,8 @@ Open the pull request after intake is complete, or after the SDP team has create
 
 ---
 
-### AI Consumption
-Source: https://platform.solana.com/docs/reference/ai-consumption
+### Documentation for AI
+Source: https://platform.solana.com/docs/reference/docs-for-ai
 
 > Public machine-readable entry points and guidance for agents and AI systems consuming SDP docs and APIs.
 

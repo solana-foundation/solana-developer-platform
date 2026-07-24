@@ -19,7 +19,7 @@ Memos are stored by SDP. They are **not** automatically attached as a Solana mem
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -33,7 +33,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="send-payment-with-memo.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/transfers",
   {
@@ -55,7 +55,7 @@ const { data } = await response.json();
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="SendPaymentWithMemo.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
     .header("Authorization", "Bearer sk_test_...")
@@ -75,7 +75,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 The memo is preserved on the transfer record:
 
-```json
+```json title="response.json"
 {
   "id": "xfr_...",
   "memo": "order_2026-05-14_4837",

@@ -53,7 +53,7 @@ From the dashboard, mint an org-scoped API key with **Role: Admin**, **Environme
 
 With the Admin key, call `GET /v1/projects` and pick the project with slug `default-sandbox`. Every organization is provisioned with exactly one sandbox and one production project automatically — isolation between workloads comes from separate organizations, not additional projects. The project ID is what you'll need in the next step:
 
-```json
+```json title="response.json"
 {
   "data": {
     "projects": [
@@ -80,7 +80,7 @@ With the Admin key, call `GET /v1/projects` and pick the project with slug `defa
 
 Call `POST /v1/projects/{projectId}/api-keys` twice to mint two project-scoped keys: one with `role: "api_developer"` for routine create, mint, and burn calls, and one with `role: "api_admin"` for compliance operations (screening, freeze, seize, force-burn). Each response includes the full key value exactly once:
 
-```json
+```json title="response.json"
 {
   "data": {
     "apiKey": {
@@ -138,7 +138,7 @@ The canonical SDP API URL is `https://api.solana.com`. Use this hostname for eve
 
 Wire two HTTP clients (one per project-scoped key) using a thin wrapper around `fetch`:
 
-```javascript
+```javascript title="sdp-client.js"
 const BASE = "https://api.solana.com";
 
 class SdpClient {
@@ -173,14 +173,14 @@ Use `sdp` for routine operations (create, mint, burn) and `sdpAdmin` for complia
 
 Now confirm the setup by listing the wallets bound to your project:
 
-```javascript
+```javascript title="list-wallets.js"
 const { data } = await sdp.get("/v1/wallets");
 console.log(`Custody wallets configured: ${data.wallets.length}`);
 ```
 
 A working setup prints:
 
-```
+```text title="Output"
 Custody wallets configured: 2
 ```
 
@@ -226,7 +226,7 @@ You can delegate or revoke any of these later via `POST /v1/issuance/tokens/{id}
 
 Section 4 takes one input: the configuration object representing the design choices above. For the Treasury Pilot USD example this tutorial uses end-to-end:
 
-```javascript
+```javascript title="token-config.js"
 const tokenConfig = {
   template: "stablecoin",
   name: "Treasury Pilot USD",
@@ -249,7 +249,7 @@ Three API calls take a design from object literal to a deployed regulated stable
 
 Every state-mutating execute endpoint in SDP (deploy, mint, burn, seize, force-burn, authority) supports an `Idempotency-Key` HTTP header. A retry with the same key replays the original response. A retry with a different key is a new request. The header is how you make network-level retries safe under partial failure. Replace the `SdpClient` definition from Section 2 with this version:
 
-```javascript
+```javascript title="sdp-client.js"
 class SdpClient {
   constructor(apiKey, baseUrl = BASE) {
     this.apiKey = apiKey;
@@ -288,14 +288,14 @@ Generate one key per logical operation, not per retry. Create the key once befor
 
 The first call writes the token's metadata to SDP's database. Nothing happens on Solana yet. The token starts in `status: "pending"` with no `mintAddress`:
 
-```javascript
+```javascript title="create-token.js"
 const created = await sdp.post("/v1/issuance/tokens", tokenConfig);
 const tokenId = created.data.token.id;
 ```
 
 A successful response:
 
-```json
+```json title="response.json"
 {
   "data": {
     "token": {
@@ -320,7 +320,7 @@ Save the `tok_*` ID; the deploy call uses it.
 
 The deploy call submits a Token-2022 mint creation transaction to Solana via the custody signer, and updates the token record with the resulting on-chain addresses:
 
-```javascript
+```javascript title="deploy-token.js"
 const deployKey = idempotencyKey("deploy");
 const deployed = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/deploy`,
@@ -332,7 +332,7 @@ const mintAddress = deployed.data.token.mintAddress;
 
 A successful response carries the deployed token record with `status: "active"` and the on-chain `mintAddress` populated:
 
-```json
+```json title="response.json"
 {
   "data": {
     "token": {
@@ -361,7 +361,7 @@ Deploy can return a bare `500 INTERNAL_ERROR` with no `details` field. The most 
 </Callout>
 
 
-```javascript
+```javascript title="deploy-prepare.js"
 const prepared = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/deploy/prepare`,
   {}
@@ -371,7 +371,7 @@ console.log(prepared.data.simulation);
 
 `/prepare` builds the transaction and runs simulation against Solana without submitting. Its response surfaces the real error in `simulation.error`:
 
-```json
+```json title="response.json"
 {
   "data": {
     "preparedTransaction": { "serialized": "...", "blockhash": "..." },
@@ -391,7 +391,7 @@ This prepare-as-diagnostic pattern works for every endpoint that has a `/prepare
 
 Before moving to Section 5, confirm the on-chain state matches the record:
 
-```javascript
+```javascript title="confirm-deploy.js"
 const { data } = await sdp.get(`/v1/issuance/tokens/${tokenId}`);
 console.log(`Status: ${data.token.status}`);
 console.log(`Mint:   ${data.token.mintAddress}`);
@@ -399,7 +399,7 @@ console.log(`Mint:   ${data.token.mintAddress}`);
 
 A working deploy prints:
 
-```
+```text title="Output"
 Status: active
 Mint:   6V5bTuMsmXyhdY2Hj6VWQZsuacugACBmPqNtQgGtar8L
 ```
@@ -420,7 +420,7 @@ Section 4(a)(5) of the GENIUS Act treats a permitted payment stablecoin issuer a
 
 Every transfer destination and every allowlist entry gets screened before your application acts on it. One API call, one response.
 
-```javascript
+```javascript title="screen-address.js"
 const response = await sdpAdmin.post("/v1/compliance/address-screenings", {
   address: destinationAddress,
   network: "solana",
@@ -442,7 +442,7 @@ On the sandbox response this tutorial cites, Range and Elliptic return numeric s
 
 Freezing halts one holder's account without touching any other holder. The freeze is on-chain, enforced by the Token-2022 program. SDP signs the freeze instruction with the freeze authority that was set at deploy; the on-chain program does the enforcement.
 
-```javascript
+```javascript title="freeze-account.js"
 const holderFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/freeze`,
@@ -464,7 +464,7 @@ Section 7 demonstrates the resulting error: an HTTP 502 `SOLANA_RPC_ERROR` from 
 
 Seize moves tokens out of a holder's account without their signature, via the **permanent delegate** authority set at deploy. The permanent delegate is a Token-2022 extension that grants a named authority the right to transfer or burn any holder's tokens regardless of holder signature. This is the technological capability the GENIUS Act requires you to have ready for lawful orders. The institutional use case is a court-ordered transfer or a sanctions matter where you must recover specific tokens to a controlled wallet.
 
-```javascript
+```javascript title="seize-tokens.js"
 const seizeKey = idempotencyKey("seize");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/seize`,
@@ -486,7 +486,7 @@ The memo persists on the transaction record. It's the audit attribution your com
 
 Force-burn destroys tokens at a holder's account. Same authority as seize, different effect. Reach for it only when the tokens cannot be recovered to a controlled wallet, for example a self-custodied address whose key you cannot obtain.
 
-```javascript
+```javascript title="force-burn.js"
 const forceBurnKey = idempotencyKey("force-burn");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/force-burn`,
@@ -518,7 +518,7 @@ Minting is how new supply enters circulation. For a regulated stablecoin, every 
 
 Minting requires the `tokens:write` permission, so the Developer key (`sdp`) is the right credential:
 
-```javascript
+```javascript title="mint-tokens.js"
 const mintKey = idempotencyKey("mint");
 const minted = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/mint`,
@@ -543,7 +543,7 @@ Three field rules to keep clear:
 
 A successful mint returns the transaction record and the token account that received the tokens:
 
-```json
+```json title="response.json"
 {
   "data": {
     "transaction": {
@@ -580,14 +580,14 @@ The pattern that does not work is mint memos that don't reconcile cleanly to a r
 
 ### 4. Confirm the supply
 
-```javascript
+```javascript title="confirm-supply.js"
 const { data } = await sdp.get(`/v1/issuance/tokens/${tokenId}`);
 console.log(`Total supply: ${data.token.totalSupply}`);
 ```
 
 Prints:
 
-```
+```text title="Output"
 Total supply: 1000000
 ```
 
@@ -601,7 +601,7 @@ Section 5's compliance controls only matter if they enforce. This section moves 
 
 Transfers run on the `/v1/payments/transfers` endpoint family, separate from the issuance family that Section 4 used. The required permissions are `payments:write` and `wallets:read`, both of which the Developer key (`sdp`) carries:
 
-```javascript
+```javascript title="transfer-tokens.js"
 const { data } = await sdp.get("/v1/wallets");
 const sourceWalletId = data.wallets[0].walletId;
 
@@ -634,7 +634,7 @@ Three field rules to keep clear:
 
 A successful response includes the on-chain signature once the transaction confirms:
 
-```json
+```json title="response.json"
 {
   "data": {
     "transfer": {
@@ -657,7 +657,7 @@ A successful response includes the on-chain signature once the transaction confi
 
 To demonstrate the on-chain block, freeze the destination's TPUSD account using the Admin key. Freeze requires `tokens:admin`, which the Developer key does not carry:
 
-```javascript
+```javascript title="freeze-destination.js"
 const transferFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/freeze`,
@@ -677,7 +677,7 @@ The freeze records a frozen account in SDP's audit trail and applies the Token-2
 
 Run the same transfer call. This time it fails:
 
-```javascript
+```javascript title="transfer-blocked.js"
 try {
   await sdp.post("/v1/payments/transfers", {
     source: sourceWalletId,
@@ -693,7 +693,7 @@ try {
 
 The error envelope SDP returns:
 
-```json
+```json title="response.json"
 {
   "error": {
     "code": "SOLANA_RPC_ERROR",
@@ -711,7 +711,7 @@ The institutional pattern is to write your error handler against the wrapped on-
 </Callout>
 
 
-```javascript
+```javascript title="parse-error.js"
 function isOnChainCompliance(error) {
   return error.message?.includes("custom program error: 0x11");
 }
@@ -734,7 +734,7 @@ Token-2022's `0x11` is `AccountFrozen` (decimal 17). Treat it as a compliance ve
 
 For a production environment, unfreezing happens only after the underlying compliance review resolves. For sandbox testing, you can unfreeze immediately:
 
-```javascript
+```javascript title="unfreeze-account.js"
 await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
   accountAddress: destinationAddress,
 });

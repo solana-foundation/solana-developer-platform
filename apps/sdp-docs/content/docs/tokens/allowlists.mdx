@@ -40,7 +40,7 @@ The Compliance tab on the token detail page shows the allowlist management inter
 
 Set `requiresAllowlist: true` when creating the token:
 
-```typescript
+```typescript title="enable-allowlist.ts"
 body: JSON.stringify({
   name: "Acme Security",
   symbol: "ACMES",
@@ -81,7 +81,7 @@ After adding, the entry appears below the form with a **Remove entry** button.
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -91,7 +91,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
   }'
 ```
 
-```typescript
+```typescript title="add-allowlist-entry.ts"
 const res = await fetch(
   "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist",
   {
@@ -127,12 +127,12 @@ Use the search field to find a specific address by label or public key.
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
   -H "Authorization: Bearer sk_test_..."
 ```
 
-```typescript
+```typescript title="list-allowlist.ts"
 const { data, meta } = await res.json();
 // meta: { total, page, pageSize, hasMore }
 ```
@@ -158,7 +158,7 @@ In the **Compliance → Allowlist** tab, click **Remove entry** next to the addr
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl -X DELETE \
   https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123 \
   -H "Authorization: Bearer sk_test_..."

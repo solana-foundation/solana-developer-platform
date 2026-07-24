@@ -1,5 +1,6 @@
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import defaultMdxComponents from "fumadocs-ui/mdx";
+import { ArrowUpRightIcon } from "lucide-react";
 import type React from "react";
 import { DocsHome } from "@/components/docs-shell/home";
 import { HowItWorks, Step, StepPanel } from "@/components/docs-shell/how-it-works";
@@ -39,8 +40,29 @@ function MDXParagraph({ className, ...props }: React.ComponentPropsWithoutRef<"p
   return <p className={cn("launch-mdx-paragraph", className)} {...props} />;
 }
 
-function MDXLink({ className, ...props }: React.ComponentPropsWithoutRef<"a">) {
-  return <a className={cn("launch-mdx-link", className)} {...props} />;
+function MDXLink({ className, href, children, ...props }: React.ComponentPropsWithoutRef<"a">) {
+  const isExternal = typeof href === "string" && href.startsWith("http");
+
+  if (isExternal) {
+    return (
+      <a
+        href={href}
+        className={cn("launch-mdx-link launch-mdx-link-external", className)}
+        target="_blank"
+        rel="noreferrer"
+        {...props}
+      >
+        {children}
+        <ArrowUpRightIcon size={13} aria-hidden="true" />
+      </a>
+    );
+  }
+
+  return (
+    <a href={href} className={cn("launch-mdx-link", className)} {...props}>
+      {children}
+    </a>
+  );
 }
 
 function MDXUnorderedList({ className, ...props }: React.ComponentPropsWithoutRef<"ul">) {

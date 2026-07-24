@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import Script from "next/script";
 import { AppToaster } from "@/components/app-toaster";
 import { ClerkClientProvider } from "@/components/clerk-client-provider";
 import { ThemeProvider } from "@/contexts/theme-context";
@@ -32,6 +33,15 @@ export default async function RootLayout({
 
   return (
     <html lang={locale} suppressHydrationWarning>
+      <head>
+        {process.env.NODE_ENV === "development" && (
+          <Script
+            src="//unpkg.com/react-grab/dist/index.global.js"
+            crossOrigin="anonymous"
+            strategy="beforeInteractive"
+          />
+        )}
+      </head>
       <body>
         <ThemeProvider>
           <I18nProvider locale={locale} messages={messages}>

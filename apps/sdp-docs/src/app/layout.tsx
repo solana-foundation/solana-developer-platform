@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import Script from "next/script";
 import "fumadocs-ui/style.css";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import { docsOrigin, docsUrl } from "@/lib/site";
@@ -51,7 +52,7 @@ const berkeleyMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Solana Developer Platform Docs",
+  title: "Solana Developer Platform Documentation",
   description: "Documentation for Solana Developer Platform",
   metadataBase: new URL(docsOrigin),
   alternates: {
@@ -70,6 +71,15 @@ export default function RootLayout({
       className={`${inter.variable} ${abcDiatype.variable} ${berkeleyMono.variable}`}
       suppressHydrationWarning
     >
+      <head>
+        {process.env.NODE_ENV === "development" && (
+          <Script
+            src="//unpkg.com/react-grab/dist/index.global.js"
+            crossOrigin="anonymous"
+            strategy="beforeInteractive"
+          />
+        )}
+      </head>
       <body className="antialiased">
         <RootProvider>{children}</RootProvider>
       </body>

@@ -49,12 +49,12 @@ Select a template and click **Continue**.
 
 List available templates to see what fields each one pre-configures:
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/templates \
   -H "Authorization: Bearer sk_test_..."
 ```
 
-```typescript
+```typescript title="list-templates.ts"
 const res = await fetch("https://api.solana.com/v1/issuance/templates", {
   headers: { Authorization: "Bearer sk_test_..." },
 });
@@ -92,7 +92,7 @@ Click **Continue** when ready.
 
 Pass identity fields in the `POST /v1/issuance/tokens` body:
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -133,7 +133,7 @@ Click **Create token** to save the draft.
 
 Add operational fields to the same body:
 
-```typescript
+```typescript title="create-token.ts"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
   method: "POST",
   headers: {
@@ -155,7 +155,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
 
 For a custom token, omit `template` or set it to `"custom"` and pass `overrides.extensions`:
 
-```typescript
+```typescript title="create-custom-token.ts"
 body: JSON.stringify({
   name: "Game Coin",
   symbol: "GAME",
@@ -199,7 +199,7 @@ Open the token to see its detail page. The status shows **Not deployed** and a *
 
 A successful response returns the new token object:
 
-```typescript
+```typescript title="create-token.ts"
 const { data } = await res.json();
 // data.token.id     — save this; used in all subsequent calls
 // data.token.status — "pending"

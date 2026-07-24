@@ -1,0 +1,4 @@
+{
+  "title": "Developing with SDP",
+  "pages": ["index", "idempotency", "authentication", "manage-api-keys"]
+}

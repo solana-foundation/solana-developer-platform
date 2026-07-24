@@ -30,7 +30,7 @@ If your retry path replays a transfer with identical inputs but a fresh request,
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -44,7 +44,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="payout-recipient.ts"
 async function payoutRecipient(row: PayoutRow): Promise<string> {
   if (row.transferId) return row.transferId; // already submitted
 
@@ -74,7 +74,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="PayoutRecipient.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
     .header("Authorization", "Bearer sk_test_...")
@@ -98,13 +98,13 @@ After the loop finishes, list all outbound transfers in the run's time window an
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl "https://api.solana.com/v1/payments/transfers?direction=outbound&from=2026-05-14T00:00:00Z&to=2026-05-14T23:59:59Z&pageSize=100" \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="list-outbound-transfers.ts"
 async function* listOutboundTransfers(from: string, to: string) {
   let page = 1;
   while (true) {

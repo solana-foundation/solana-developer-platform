@@ -34,7 +34,7 @@ Enter the wallet address and select the intent (e.g., transfer destination or al
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/compliance/address-screenings \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -45,7 +45,7 @@ curl -X POST https://api.solana.com/v1/compliance/address-screenings \
   }'
 ```
 
-```typescript
+```typescript title="screen-address.ts"
 const { data } = await res.json();
 // data.screening.providers[]
 // → { provider, status, riskScore, riskLevel, message, evaluatedAt }
@@ -96,7 +96,7 @@ The "Unfreeze transaction finalized." toast appears and the Frozen Accounts coun
 
 **Freeze:**
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -110,7 +110,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 
 **Unfreeze:**
 
-```typescript
+```typescript title="unfreeze-account.ts"
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
   method: "POST",
   headers: { Authorization: "Bearer sk_test_...", "Content-Type": "application/json" },
@@ -120,7 +120,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
 
 **List frozen accounts:**
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123/frozen \
   -H "Authorization: Bearer sk_test_..."
 ```
@@ -158,7 +158,7 @@ To resume, click **Unpause token** and confirm.
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 # Pause
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/pause \
   -H "Authorization: Bearer sk_test_..."
@@ -189,7 +189,7 @@ In the **Compliance** tab, click **Seize tokens**. Provide the source, destinati
 </Tab>
 <Tab value="API">
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
