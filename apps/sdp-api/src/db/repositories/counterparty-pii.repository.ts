@@ -51,11 +51,7 @@ export function providerLookupReferences(providerData: CounterpartyProviderData)
   muralOrganizationId: string | null;
 } {
   return {
-    bvnkCustomerReference: nestedString(providerData, [
-      "bvnk",
-      "customer",
-      "customerReference",
-    ]),
+    bvnkCustomerReference: nestedString(providerData, ["bvnk", "customer", "customerReference"]),
     muralOrganizationId: nestedString(providerData, ["mural", "organization", "id"]),
   };
 }
