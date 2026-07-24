@@ -84,6 +84,8 @@ export interface Env {
   SOLANA_RPC_QUICKNODE_API_KEY?: string;
   SOLANA_RPC_VALIDATIONCLOUD_URL?: string;
   SOLANA_RPC_VALIDATIONCLOUD_API_KEY?: string;
+  SOLANA_RPC_NODIT_URL?: string;
+  SOLANA_RPC_NODIT_API_KEY?: string;
   SOLANA_NETWORK?: "devnet" | "mainnet-beta";
   CUSTODY_PRIVATE_KEY?: string;
   SOLANA_MOCK?: string;

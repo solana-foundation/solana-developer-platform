@@ -467,6 +467,7 @@
     "onboardingRpcDefaultDescription": "Use SDP-managed RPC infrastructure with no credentials to configure.",
     "onboardingRpcAlchemyDescription": "Route Solana requests through your configured Alchemy connection.",
     "onboardingRpcHeliusDescription": "Use Helius infrastructure for Solana RPC requests.",
+    "onboardingRpcNoditDescription": "Use Nodit for your Solana RPC traffic.",
     "onboardingRpcQuickNodeDescription": "Use your configured QuickNode endpoint for Solana RPC.",
     "onboardingRpcTritonDescription": "Route Solana requests through Triton's infrastructure.",
     "onboardingRpcValidationCloudDescription": "Use Validation Cloud for your Solana RPC traffic.",

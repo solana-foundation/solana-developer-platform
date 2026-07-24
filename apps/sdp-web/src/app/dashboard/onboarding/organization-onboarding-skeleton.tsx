@@ -3,6 +3,7 @@ import { SkeletonBlock } from "@/components/ui/skeleton-block";
 const RPC_CARD_SKELETON_IDS = [
   "rpc-card-alchemy",
   "rpc-card-helius",
+  "rpc-card-nodit",
   "rpc-card-quicknode",
   "rpc-card-triton",
   "rpc-card-validation-cloud",

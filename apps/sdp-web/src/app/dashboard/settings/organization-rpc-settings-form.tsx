@@ -175,6 +175,7 @@ const RPC_PROVIDER_LABELS: Record<OrganizationRpcProvider, string> = {
   alchemy: "Alchemy",
   default: "SDP",
   helius: "Helius",
+  nodit: "Nodit",
   quicknode: "QuickNode",
   triton: "Triton",
   validationcloud: "Validation Cloud",

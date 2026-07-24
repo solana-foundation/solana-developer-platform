@@ -26,6 +26,8 @@ type MutableRpcEnv = {
   SOLANA_RPC_QUICKNODE_API_KEY?: string;
   SOLANA_RPC_VALIDATIONCLOUD_URL?: string;
   SOLANA_RPC_VALIDATIONCLOUD_API_KEY?: string;
+  SOLANA_RPC_NODIT_URL?: string;
+  SOLANA_RPC_NODIT_API_KEY?: string;
   SDP_DEPLOYMENT_MODE?: string;
 };
 
@@ -106,6 +108,8 @@ describe("rpc-relay.service", () => {
     rpcEnv.SOLANA_RPC_QUICKNODE_API_KEY = undefined;
     rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_URL = undefined;
     rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = undefined;
+    rpcEnv.SOLANA_RPC_NODIT_URL = undefined;
+    rpcEnv.SOLANA_RPC_NODIT_API_KEY = undefined;
     rpcEnv.SDP_DEPLOYMENT_MODE = undefined;
   });
 
@@ -343,6 +347,96 @@ describe("rpc-relay.service", () => {
     expect(target.endpointLabel).toContain("/v1/***");
     expect(target.endpointLabel).not.toContain("vc+secret");
     expect(target.endpointLabel).not.toContain("vc%2Bsecret");
+  });
+
+  it("resolves Nodit with URL-only authentication and redacted endpoint labels", async () => {
+    await db
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "nodit" }), TEST_ORG_ID)
+      .run();
+
+    rpcEnv.SOLANA_RPC_NODIT_URL = "https://solana-devnet.nodit.io/{API_KEY}";
+    rpcEnv.SOLANA_RPC_NODIT_API_KEY = "nodit+secret/with=chars";
+
+    const target = await resolveRpcTarget({
+      env: appEnv,
+      kv,
+      db,
+      organizationId: TEST_ORG_ID,
+      authProjectId: null,
+      requestedProjectId: null,
+    });
+    const providers = await listRpcProviders({
+      env: appEnv,
+      kv,
+      db,
+      organizationId: TEST_ORG_ID,
+      authProjectId: null,
+      requestedProjectId: null,
+    });
+    const listedNodit = providers.providers.find((provider) => provider.id === "nodit");
+
+    expect(target.providerId).toBe("nodit");
+    expect(target.selectionMode).toBe("organization_provider");
+    expect(target.endpoint).toBe("https://solana-devnet.nodit.io/nodit%2Bsecret%2Fwith%3Dchars");
+    expect(target.headers).toEqual({});
+    expect(target.endpointLabel).toContain("/***");
+    expect(target.endpointLabel).not.toContain("nodit+secret");
+    expect(target.endpointLabel).not.toContain("nodit%2Bsecret");
+    expect(listedNodit?.endpoint).toContain("/***");
+    expect(listedNodit?.endpoint).not.toContain("nodit+secret");
+    expect(listedNodit?.endpoint).not.toContain("nodit%2Bsecret");
+  });
+
+  it("resolves a complete Nodit URL without a separate key like other providers", async () => {
+    await db
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "nodit" }), TEST_ORG_ID)
+      .run();
+
+    rpcEnv.SOLANA_RPC_NODIT_URL = "https://rpc.nodit.test/rpc";
+    rpcEnv.SOLANA_RPC_NODIT_API_KEY = undefined;
+
+    const target = await resolveRpcTarget({
+      env: appEnv,
+      kv,
+      db,
+      organizationId: TEST_ORG_ID,
+      authProjectId: null,
+      requestedProjectId: null,
+    });
+    expect(target.providerId).toBe("nodit");
+    expect(target.endpoint).toBe("https://rpc.nodit.test/rpc");
+  });
+
+  it("preserves existing provider order and appends Nodit before default", async () => {
+    rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+    rpcEnv.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+    rpcEnv.SOLANA_RPC_ALCHEMY_URL = "https://rpc.alchemy.test";
+    rpcEnv.SOLANA_RPC_QUICKNODE_URL = "https://rpc.quicknode.test";
+    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://rpc.validationcloud.test";
+    rpcEnv.SOLANA_RPC_NODIT_URL = "https://rpc.nodit.test/{API_KEY}";
+    rpcEnv.SOLANA_RPC_NODIT_API_KEY = "nodit-key";
+    rpcEnv.SOLANA_RPC_URL = "https://rpc.default.test";
+
+    const providers = await listRpcProviders({
+      env: appEnv,
+      kv,
+      db,
+      organizationId: TEST_ORG_ID,
+      authProjectId: null,
+      requestedProjectId: null,
+    });
+
+    expect(providers.roundRobinOrder).toEqual([
+      "triton",
+      "helius",
+      "alchemy",
+      "quicknode",
+      "validationcloud",
+      "nodit",
+      "default",
+    ]);
   });
 
   it("honors default provider ordering and exposes quicknode in provider list", async () => {

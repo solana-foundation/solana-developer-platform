@@ -13,7 +13,7 @@ import {
   applyApiKeyTemplate,
   withAlchemyApiKey,
   withHeliusApiKey,
-  withQuickNodeApiKey,
+  withOptionalApiKeyTemplate,
 } from "./config";
 import { SdpRpcError } from "./errors";
 import type { DatabaseClient, KVStore, KVStoreSet, RpcEnv } from "./types";
@@ -120,6 +120,9 @@ const RPC_PROVIDER_AVAILABILITY_DEFINITIONS = {
   },
   helius: {
     isConfigured: (env) => hasEnv(env, "SOLANA_RPC_HELIUS_URL"),
+  },
+  nodit: {
+    isConfigured: (env) => hasEnv(env, "SOLANA_RPC_NODIT_URL"),
   },
   quicknode: {
     isConfigured: (env) => hasEnv(env, "SOLANA_RPC_QUICKNODE_URL"),
@@ -228,6 +231,9 @@ function collectRpcApiKeys(env: RpcEnv): string[] {
       value.trim().length > 0
     ) {
       secrets.push(value);
+      if (value !== value.trim()) {
+        secrets.push(value.trim());
+      }
     }
   }
   // Longest first: replacing a shorter overlapping key before a longer one
@@ -239,7 +245,7 @@ function collectRpcApiKeys(env: RpcEnv): string[] {
 // query-param heuristic covers keys passed as query values (Helius) and
 // customer-supplied custom endpoints whose secret we don't know. The known-key
 // redaction covers path-segment keys (Alchemy, QuickNode, Triton, Validation
-// Cloud), which the query heuristic alone would leave in the path.
+// Cloud, Nodit), which the query heuristic alone would leave in the path.
 function maskEndpoint(url: string, env: RpcEnv): string {
   let masked = url;
   for (const secret of collectRpcApiKeys(env)) {
@@ -341,7 +347,10 @@ function resolveManagedProviders(env: RpcEnv): ManagedRpcProvider[] {
   if (env.SOLANA_RPC_QUICKNODE_URL) {
     providers.push({
       id: "quicknode",
-      url: withQuickNodeApiKey(env.SOLANA_RPC_QUICKNODE_URL, env.SOLANA_RPC_QUICKNODE_API_KEY),
+      url: withOptionalApiKeyTemplate(
+        env.SOLANA_RPC_QUICKNODE_URL,
+        env.SOLANA_RPC_QUICKNODE_API_KEY
+      ),
       headers: {},
     });
   }
@@ -353,6 +362,14 @@ function resolveManagedProviders(env: RpcEnv): ManagedRpcProvider[] {
         env.SOLANA_RPC_VALIDATIONCLOUD_URL,
         env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY ?? ""
       ),
+      headers: {},
+    });
+  }
+
+  if (env.SOLANA_RPC_NODIT_URL) {
+    providers.push({
+      id: "nodit",
+      url: withOptionalApiKeyTemplate(env.SOLANA_RPC_NODIT_URL, env.SOLANA_RPC_NODIT_API_KEY),
       headers: {},
     });
   }

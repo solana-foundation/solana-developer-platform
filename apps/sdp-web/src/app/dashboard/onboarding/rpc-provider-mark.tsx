@@ -15,6 +15,11 @@ const RPC_PROVIDER_LOGOS: Record<
     backgroundClassName: "bg-[white]",
     paddingClassName: "p-0.5",
   },
+  nodit: {
+    src: "/provider-logos/nodit.svg",
+    backgroundClassName: "bg-[white]",
+    paddingClassName: "p-1",
+  },
   quicknode: {
     src: "/provider-logos/quicknode.svg",
     backgroundClassName: "bg-[#080b09]",
