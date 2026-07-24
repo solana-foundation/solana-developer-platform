@@ -53,19 +53,25 @@ export function OrganizationOnboardingFlow({
   initialRpcProvider,
   rpcProviders,
   custodyProviders,
+  useDefaultRpc = false,
 }: {
   organizationId: string;
   currentStep: "rpc" | "custody";
   initialRpcProvider: OrganizationRpcProvider | null;
   rpcProviders: OrganizationRpcProvider[];
   custodyProviders: CustodyProvider[];
+  useDefaultRpc?: boolean;
 }) {
   const t = useTranslations();
   const router = useDashboardRouter();
   const [isPending, startTransition] = useTransition();
   const [currentStep, setCurrentStep] = useState(initialStep);
   const [rpcProvider, setRpcProvider] = useState<OrganizationRpcProvider | null>(
-    initialRpcProvider === "default" ? null : initialRpcProvider
+    initialRpcProvider !== null &&
+      initialRpcProvider !== "default" &&
+      rpcProviders.includes(initialRpcProvider)
+      ? initialRpcProvider
+      : null
   );
   const [custodyProvider, setCustodyProvider] = useState<CustodyProvider | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -98,7 +104,10 @@ export function OrganizationOnboardingFlow({
     if (!custodyProvider || isPending) return;
     setErrorMessage(null);
     startTransition(async () => {
-      const result = await completeOrganizationOnboardingAction(custodyProvider);
+      const result = await completeOrganizationOnboardingAction({
+        custodyProvider,
+        useDefaultRpc,
+      });
       if (result.status === "error") {
         setErrorMessage(result.message);
         return;
@@ -108,7 +117,10 @@ export function OrganizationOnboardingFlow({
     });
   };
 
-  const stepIndex = ONBOARDING_STEPS.indexOf(currentStep);
+  const onboardingSteps: readonly ("rpc" | "custody")[] = useDefaultRpc
+    ? ["custody"]
+    : ONBOARDING_STEPS;
+  const stepIndex = onboardingSteps.indexOf(currentStep);
   const formId = `organization-onboarding-${currentStep}`;
 
   return (
@@ -129,9 +141,9 @@ export function OrganizationOnboardingFlow({
               currentStep={stepIndex}
               progressLabel={t("DashboardCustody.stepOf", {
                 current: stepIndex + 1,
-                total: ONBOARDING_STEPS.length,
+                total: onboardingSteps.length,
               })}
-              steps={ONBOARDING_STEPS}
+              steps={onboardingSteps}
             />
           </div>
         </div>
@@ -216,7 +228,7 @@ export function OrganizationOnboardingFlow({
         data-organization-onboarding-actions="true"
       >
         <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-3">
-          {currentStep === "custody" ? (
+          {currentStep === "custody" && !useDefaultRpc && visibleRpcProviders.length > 0 ? (
             <Button
               type="button"
               variant="secondary"
