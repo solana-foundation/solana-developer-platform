@@ -33,6 +33,7 @@ describe("transaction amount presentation", () => {
           id: "transfer_1",
           status: "confirmed",
           signature: null,
+          rampsMemo: {},
           amount: "1250",
           token: mint,
         },
