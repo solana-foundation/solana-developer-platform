@@ -182,6 +182,69 @@ const RPC_PROVIDER_LABELS: Record<OrganizationRpcProvider, string> = {
   validationcloud: "Validation Cloud",
 };
 
+function RpcTestResultPanel({ result }: { result: RpcTestResult }) {
+  const t = useTranslations();
+  return (
+    <div className="rounded-xl border border-border-default bg-fill-subtle p-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium text-primary">
+          {t("DashboardCustody.rpcDetailTitle")}
+        </span>
+        <Badge variant={result.status === "success" ? "success" : "danger"}>
+          {result.status === "success"
+            ? t("DashboardCustody.rpcDetailReachable")
+            : t("DashboardCustody.rpcDetailUnreachable")}
+        </Badge>
+      </div>
+      {result.status === "error" ? (
+        <p className="mt-2 text-sm text-error">{result.message}</p>
+      ) : null}
+      <dl className="mt-3 grid gap-2 text-sm">
+        {result.resolvedProvider ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-tertiary">{t("DashboardCustody.rpcDetailResolvedProvider")}</dt>
+            <dd className="text-primary">
+              {RPC_PROVIDER_LABELS[result.resolvedProvider as OrganizationRpcProvider] ??
+                result.resolvedProvider}
+            </dd>
+          </div>
+        ) : null}
+        {result.selectionMode ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-tertiary">{t("DashboardCustody.rpcDetailSelectionMode")}</dt>
+            <dd className="text-primary">{result.selectionMode}</dd>
+          </div>
+        ) : null}
+        {result.endpoint ? (
+          <div className="flex items-start justify-between gap-3">
+            <dt className="shrink-0 text-tertiary">{t("DashboardCustody.rpcDetailEndpoint")}</dt>
+            <dd className="min-w-0 break-all text-right font-mono text-xs text-primary">
+              {result.endpoint}
+            </dd>
+          </div>
+        ) : null}
+        {result.upstreamStatus !== undefined ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-tertiary">{t("DashboardCustody.rpcDetailUpstream")}</dt>
+            <dd className="text-primary">
+              {result.upstreamStatus}
+              {result.upstreamStatusText ? ` ${result.upstreamStatusText}` : ""}
+            </dd>
+          </div>
+        ) : null}
+        {result.latencyMs !== undefined ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-tertiary">{t("DashboardCustody.rpcDetailLatency")}</dt>
+            <dd className="text-primary">
+              {t("DashboardCustody.rpcDetailLatencyValue", { ms: result.latencyMs })}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </div>
+  );
+}
+
 export function OrganizationRpcSettingsForm({
   canManageSettings,
   enabledProviders,
@@ -403,69 +466,7 @@ export function OrganizationRpcSettingsForm({
           </div>
         </div>
 
-        {lastTest ? (
-          <div className="rounded-xl border border-border-default bg-fill-subtle p-4">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-medium text-primary">
-                {t("DashboardCustody.rpcDetailTitle")}
-              </span>
-              <Badge variant={lastTest.status === "success" ? "success" : "danger"}>
-                {lastTest.status === "success"
-                  ? t("DashboardCustody.rpcDetailReachable")
-                  : t("DashboardCustody.rpcDetailUnreachable")}
-              </Badge>
-            </div>
-            {lastTest.status === "error" ? (
-              <p className="mt-2 text-sm text-error">{lastTest.message}</p>
-            ) : null}
-            <dl className="mt-3 grid gap-2 text-sm">
-              {lastTest.resolvedProvider ? (
-                <div className="flex items-center justify-between gap-3">
-                  <dt className="text-tertiary">
-                    {t("DashboardCustody.rpcDetailResolvedProvider")}
-                  </dt>
-                  <dd className="text-primary">
-                    {RPC_PROVIDER_LABELS[lastTest.resolvedProvider as OrganizationRpcProvider] ??
-                      lastTest.resolvedProvider}
-                  </dd>
-                </div>
-              ) : null}
-              {lastTest.selectionMode ? (
-                <div className="flex items-center justify-between gap-3">
-                  <dt className="text-tertiary">{t("DashboardCustody.rpcDetailSelectionMode")}</dt>
-                  <dd className="text-primary">{lastTest.selectionMode}</dd>
-                </div>
-              ) : null}
-              {lastTest.endpoint ? (
-                <div className="flex items-start justify-between gap-3">
-                  <dt className="shrink-0 text-tertiary">
-                    {t("DashboardCustody.rpcDetailEndpoint")}
-                  </dt>
-                  <dd className="min-w-0 break-all text-right font-mono text-xs text-primary">
-                    {lastTest.endpoint}
-                  </dd>
-                </div>
-              ) : null}
-              {lastTest.upstreamStatus !== undefined ? (
-                <div className="flex items-center justify-between gap-3">
-                  <dt className="text-tertiary">{t("DashboardCustody.rpcDetailUpstream")}</dt>
-                  <dd className="text-primary">
-                    {lastTest.upstreamStatus}
-                    {lastTest.upstreamStatusText ? ` ${lastTest.upstreamStatusText}` : ""}
-                  </dd>
-                </div>
-              ) : null}
-              {lastTest.latencyMs !== undefined ? (
-                <div className="flex items-center justify-between gap-3">
-                  <dt className="text-tertiary">{t("DashboardCustody.rpcDetailLatency")}</dt>
-                  <dd className="text-primary">
-                    {t("DashboardCustody.rpcDetailLatencyValue", { ms: lastTest.latencyMs })}
-                  </dd>
-                </div>
-              ) : null}
-            </dl>
-          </div>
-        ) : null}
+        {lastTest ? <RpcTestResultPanel result={lastTest} /> : null}
       </div>
 
       {errorMessage ? (
