@@ -143,9 +143,7 @@ export function OrganizationOnboardingFlow({
                 : t("DashboardCustody.onboardingChooseCustody")}
             </h2>
             <p className="mt-1 text-sm leading-6 text-tertiary">
-              {currentStep === "rpc"
-                ? t("DashboardCustody.onboardingRpcChangeLater")
-                : t("DashboardCustody.onboardingCustodyChangeLater")}
+              {t("DashboardCustody.onboardingProvidersChangeLater")}
             </p>
           </div>
 
