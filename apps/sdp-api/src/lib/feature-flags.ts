@@ -25,3 +25,9 @@ export function isAssetProfilesEnabled(
 
   return env.ENVIRONMENT === "development" || isTruthyFlag(env.ASSET_PROFILES_ENABLED);
 }
+
+export function isPrivyByokProvisioningEnabled(
+  env: Pick<Env, "PRIVY_BYOK_PROVISIONING_ENABLED">
+): boolean {
+  return isTruthyFlag(env.PRIVY_BYOK_PROVISIONING_ENABLED);
+}

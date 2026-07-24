@@ -44,9 +44,11 @@ export interface Env {
   GCP_SECRET_MANAGER_PROJECT_ID?: string;
   GCP_SECRET_MANAGER_SECRET_PREFIX?: string;
   GCP_SECRET_MANAGER_API_BASE_URL?: string;
+  PRIVY_BYOK_PROVISIONING_ENABLED?: string;
 
   // Application secrets
   API_KEY_PEPPER?: string;
+  CREDENTIAL_FINGERPRINT_PEPPER?: string;
   CUSTODY_ENCRYPTION_KEY?: string; // For encrypting org private keys in DB
   CUSTODY_KMS_KEY_NAME?: string;
   CUSTODY_KMS_API_BASE_URL?: string;
