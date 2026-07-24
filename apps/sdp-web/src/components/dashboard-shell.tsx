@@ -1372,10 +1372,13 @@ export function DashboardShell({
                 ? t("Shared.dashboardShell.collapseSidebar")
                 : t("Shared.dashboardShell.expandSidebar")
             }
-            className="absolute top-1/2 right-0 z-20 flex size-6 -translate-y-1/2 translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border-default bg-surface-raised text-secondary shadow-sm transition-colors hover:border-border-strong hover:text-primary"
+            className="absolute top-1/2 right-0 z-20 flex size-6 -translate-y-1/2 translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border-default bg-surface-raised text-secondary shadow-sm transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:border-border-strong hover:text-primary"
           >
             <ChevronLeftIcon
-              className={cn("size-3.5 transition-transform", !isSidebarOpen && "rotate-180")}
+              className={cn(
+                "size-3.5 transition-transform motion-reduce:transition-none",
+                !isSidebarOpen && "rotate-180"
+              )}
             />
           </button>
         </aside>
