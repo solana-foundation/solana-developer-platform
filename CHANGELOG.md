@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.47.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.47.1...v0.47.2) (2026-07-24)
+
+### Bug Fixes
+
+* **web:** prevent API key menu layout shift ([#931](https://github.com/solana-foundation/solana-developer-platform/pull/931)) ([610c7b1](https://github.com/solana-foundation/solana-developer-platform/commit/610c7b1d09ad8e43c443e02eda67e36bbaa8a491))
+* **payments:** stop the Activity card stretching into dead space ([#918](https://github.com/solana-foundation/solana-developer-platform/pull/918)) ([348e950](https://github.com/solana-foundation/solana-developer-platform/commit/348e95064e2d9e5b2864d87de08e2db4b9542105))
+* **shell:** make the sidebar collapse toggle visible and stop rail overflow ([#921](https://github.com/solana-foundation/solana-developer-platform/pull/921)) ([8ef540e](https://github.com/solana-foundation/solana-developer-platform/commit/8ef540e742321383073888765c63efdc24375dd2))
+* **settings:** use the design-system Select for the RPC provider field ([#919](https://github.com/solana-foundation/solana-developer-platform/pull/919)) ([807a038](https://github.com/solana-foundation/solana-developer-platform/commit/807a0387a50475c91812ce630340f3054652eff1))
+* **payments:** point explorer links at the active cluster ([#917](https://github.com/solana-foundation/solana-developer-platform/pull/917)) ([eb4ba6b](https://github.com/solana-foundation/solana-developer-platform/commit/eb4ba6b7ece1c8647e0f34551830bfa50ad68039))
+* **payments:** point explorer links at the active cluster ([#917](https://github.com/solana-foundation/solana-developer-platform/pull/917)) ([bd59e4e](https://github.com/solana-foundation/solana-developer-platform/commit/bd59e4e3faef2f63f9879147f468f1c7817efe0a))
+* **playground:** give the un-run Response tab a real empty state ([#922](https://github.com/solana-foundation/solana-developer-platform/pull/922)) ([da3e730](https://github.com/solana-foundation/solana-developer-platform/commit/da3e73089ca486e3119487353664674c8bb2f5d0))
+
+### Maintenance
+
+* **api:** remove dead sessions KV store ([#915](https://github.com/solana-foundation/solana-developer-platform/pull/915)) ([c9e6e67](https://github.com/solana-foundation/solana-developer-platform/commit/c9e6e674a2ea990bcccec9180329868550bc937b))
+
 ## [0.47.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.47.0...v0.47.1) (2026-07-24)
 
 ### Bug Fixes
