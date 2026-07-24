@@ -9,12 +9,13 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { explorerTxUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import {
   createTransfer,
   fetchTransfers,
   fetchWalletPolicy,
   fetchWallets,
-  getDevnetExplorerUrl,
   runComplianceCheck,
   updateWalletPolicy,
 } from "./payments-workspace.data";
@@ -81,6 +82,7 @@ export interface PaymentsWorkspaceState {
 
 export function usePaymentsWorkspace(): PaymentsWorkspaceState {
   const t = useTranslations();
+  const cluster = useSolanaCluster();
   const {
     data: wallets = [],
     error: walletsFetchError,
@@ -387,7 +389,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
             <span>
               {t("DashboardPayments.workspace.transactionSent")}{" "}
               <a
-                href={getDevnetExplorerUrl(transfer.signature)}
+                href={explorerTxUrl(transfer.signature, cluster)}
                 target="_blank"
                 rel="noreferrer"
                 className="underline underline-offset-2"

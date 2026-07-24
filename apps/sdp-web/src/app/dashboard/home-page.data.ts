@@ -10,6 +10,11 @@ import type { FetchResult } from "./payments/payments-page.data";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
+export interface HomeActivityExplorerRef {
+  kind: "tx" | "address";
+  value: string;
+}
+
 export interface HomeActivityRow {
   id: string;
   createdAt: string;
@@ -17,6 +22,7 @@ export interface HomeActivityRow {
   token: string;
   amount: string;
   address: string;
+  explorer: HomeActivityExplorerRef | null;
   sourceKind: "payments" | "issuance";
 }
 
@@ -70,6 +76,34 @@ function resolvePaymentsAddress(transfer: PaymentTransferSummary): string {
   return transfer.destination ?? transfer.source ?? "—";
 }
 
+// Prefer the counterparty address (what the row shows) and fall back to the tx signature so the
+// row is still linkable before an address is known. Cluster is applied later, in the client.
+function resolvePaymentsExplorer(transfer: PaymentTransferSummary): HomeActivityExplorerRef | null {
+  const address = resolvePaymentsAddress(transfer);
+  if (address !== "—") {
+    return { kind: "address", value: address };
+  }
+  if (transfer.signature) {
+    return { kind: "tx", value: transfer.signature };
+  }
+  return null;
+}
+
+function resolveIssuanceExplorer(transaction: TokenTransaction): HomeActivityExplorerRef | null {
+  const destination = readTransactionParam(transaction.params, "destination");
+  if (destination !== null) {
+    return { kind: "address", value: String(destination) };
+  }
+  const source = readTransactionParam(transaction.params, "source");
+  if (source !== null) {
+    return { kind: "address", value: String(source) };
+  }
+  if (transaction.signature) {
+    return { kind: "tx", value: transaction.signature };
+  }
+  return null;
+}
+
 export function computeTodaysVolume(transfers: PaymentTransferSummary[]): number | null {
   const now = new Date();
   const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -114,6 +148,7 @@ export function buildHomeActivityRows(
       token: transfer.token ?? "—",
       amount: transfer.amount ?? "—",
       address: resolvePaymentsAddress(transfer),
+      explorer: resolvePaymentsExplorer(transfer),
       sourceKind: "payments" as const,
     }));
 
@@ -132,6 +167,7 @@ export function buildHomeActivityRows(
       token: token.symbol || token.name || "—",
       amount: resolveIssuanceAmount(transaction),
       address: resolveIssuanceAddress(transaction),
+      explorer: resolveIssuanceExplorer(transaction),
       sourceKind: "issuance" as const,
     }));
 
