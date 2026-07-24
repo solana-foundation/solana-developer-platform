@@ -1,4 +1,5 @@
 import { getDb } from "@/db";
+import { LocalPiiCipher } from "@/services/pii-cipher/pii-cipher";
 import type { Env } from "@/types/env";
 
 // CI runs under Doppler. Only pass through the test data-service endpoints so
@@ -27,4 +28,5 @@ if (!providedEnv.REDIS_URL) {
 export const env = {
   ...providedEnv,
   db: getDb(providedEnv),
+  counterpartyPiiCipher: new LocalPiiCipher("BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc="),
 };

@@ -1,4 +1,5 @@
 import { getDb } from "@/db";
+import { createPiiCipher, type PiiCipher } from "@/services/pii-cipher/pii-cipher";
 import type { Env } from "@/types/env";
 import type { AssetProfilesRepository } from "./asset-profile.repository";
 import { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
@@ -44,11 +45,16 @@ export function createPaymentTransferBatchesRepository(env: Env): PaymentTransfe
 }
 
 export function createCounterpartiesRepository(env: Env): CounterpartiesRepository {
-  return createPostgresCounterpartiesRepository(getDb(env));
+  const testCipher = (env as Env & { counterpartyPiiCipher?: PiiCipher }).counterpartyPiiCipher;
+  return createPostgresCounterpartiesRepository(getDb(env), testCipher ?? createPiiCipher(env));
 }
 
 export function createCounterpartyAccountsRepository(env: Env): CounterpartyAccountsRepository {
-  return createPostgresCounterpartyAccountsRepository(getDb(env));
+  const testCipher = (env as Env & { counterpartyPiiCipher?: PiiCipher }).counterpartyPiiCipher;
+  return createPostgresCounterpartyAccountsRepository(
+    getDb(env),
+    testCipher ?? createPiiCipher(env)
+  );
 }
 
 export function createTokenRepository(env: Env): TokenRepository {

@@ -70,6 +70,14 @@ describe("Counterparties Routes", () => {
       .prepare("DELETE FROM projects")
       .run()
       .catch(() => {});
+    await db
+      .prepare(
+        `UPDATE counterparty_pii_migration_state
+            SET phase = 'dual_write',
+                fallback_read_count = 0,
+                last_fallback_read_at = NULL`
+      )
+      .run();
 
     await db
       .prepare(
@@ -197,6 +205,18 @@ describe("Counterparties Routes", () => {
       expect(body.data.counterparty.createdBy).toBe(TEST_USER.id);
       expect(body.data.counterparty.identity.firstName).toBe(BASE_IDENTITY.firstName);
       expect(body.data.counterparty.identity.dateOfBirth).toBe(BASE_IDENTITY.dateOfBirth);
+
+      const stored = await getDb(env)
+        .prepare(
+          `SELECT pii_encrypted, provider_data_encrypted
+             FROM counterparties
+            WHERE id = ?`
+        )
+        .bind(body.data.counterparty.id)
+        .first<{ pii_encrypted: string; provider_data_encrypted: string }>();
+      expect(stored?.pii_encrypted).toMatch(/^pii-local-v1\./);
+      expect(stored?.pii_encrypted).not.toContain("alice@example.com");
+      expect(stored?.provider_data_encrypted).toMatch(/^pii-local-v1\./);
     });
 
     it("returns 409 on duplicate externalId", async () => {
@@ -205,6 +225,35 @@ describe("Counterparties Routes", () => {
       expect(res.status).toBe(409);
       const body = await res.json();
       expect(body.error.code).toBe("CONFLICT");
+    });
+
+    it("writes no legacy identity or provider PII after encrypted-only cutover", async () => {
+      await getDb(env)
+        .prepare(
+          `UPDATE counterparty_pii_migration_state
+              SET phase = 'encrypted_only'
+            WHERE id = 'counterparty-pii-v1'`
+        )
+        .run();
+
+      const res = await createCounterparty({ externalId: "opaque_001" });
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.counterparty.email).toBe("alice@example.com");
+
+      const stored = await getDb(env)
+        .prepare(
+          `SELECT email, identity, provider_data, pii_encrypted, provider_data_encrypted
+             FROM counterparties
+            WHERE id = ?`
+        )
+        .bind(body.data.counterparty.id)
+        .first<Record<string, unknown>>();
+      expect(stored?.email).toBeNull();
+      expect(stored?.identity).toBeNull();
+      expect(stored?.provider_data).toBeNull();
+      expect(stored?.pii_encrypted).toMatch(/^pii-local-v1\./);
+      expect(stored?.provider_data_encrypted).toMatch(/^pii-local-v1\./);
     });
 
     it("returns 400 on invalid body", async () => {

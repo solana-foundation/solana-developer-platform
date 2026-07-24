@@ -19,11 +19,16 @@ test("randomBase64_32 decodes to 32 bytes and varies", () => {
 
 test("generateSecret honors a field's secretEncoding", () => {
   assert.equal(Buffer.from(generateSecret("CUSTODY_ENCRYPTION_KEY"), "base64").length, 32);
+  assert.equal(Buffer.from(generateSecret("COUNTERPARTY_PII_ENCRYPTION_KEY"), "base64").length, 32);
   assert.match(generateSecret("API_KEY_PEPPER"), /^[0-9a-f]{64}$/);
 });
 
 test("autoSecretKeys without values lists only secret-kind fields", () => {
-  assert.deepEqual([...autoSecretKeys()].sort(), ["API_KEY_PEPPER", "CUSTODY_ENCRYPTION_KEY"]);
+  assert.deepEqual([...autoSecretKeys()].sort(), [
+    "API_KEY_PEPPER",
+    "COUNTERPARTY_PII_ENCRYPTION_KEY",
+    "CUSTODY_ENCRYPTION_KEY",
+  ]);
 });
 
 test("autoSecretKeys with default values includes the auto-mode Postgres password", () => {

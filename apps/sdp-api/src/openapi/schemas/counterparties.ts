@@ -265,12 +265,14 @@ export const counterpartySchema = withOpenApi(
       description: "Project scope when the counterparty is project-scoped.",
     }),
     externalId: withOpenApi(z.string().nullable(), {
-      description: "Caller-supplied identifier for cross-system reference.",
+      description:
+        "Caller-supplied opaque identifier for cross-system reference. Do not place personal data in this indexed field.",
       example: "customer_42",
     }),
     entityType: counterpartyEntityTypeSchema,
     displayName: withOpenApi(z.string(), {
-      description: "Human-readable display name.",
+      description:
+        "Human-readable, searchable display name. Keep it minimal because this indexed field is not application-encrypted.",
       example: "Jane Doe",
     }),
     email: withOpenApi(z.string(), {
@@ -475,11 +477,13 @@ export const listCounterpartyAccountsQuerySchema = listCounterpartyAccountsQuery
 
 const createCounterpartyDocFields = {
   externalId: withOpenApi(createIndividualCounterpartySchemaBase.shape.externalId, {
-    description: "Caller-supplied identifier for cross-system reference.",
+    description:
+      "Caller-supplied opaque identifier for cross-system reference. Do not place personal data in this indexed field.",
     example: "customer_42",
   }),
   displayName: withOpenApi(createIndividualCounterpartySchemaBase.shape.displayName, {
-    description: "Human-readable display name.",
+    description:
+      "Human-readable, searchable display name. Keep it minimal because this indexed field is not application-encrypted.",
     example: "Jane Doe",
   }),
   email: withOpenApi(createIndividualCounterpartySchemaBase.shape.email, {
@@ -546,7 +550,7 @@ export const createCounterpartyAccountRequestSchema = withOpenApi(
 export const updateCounterpartyRequestSchema = withOpenApi(
   updateCounterpartyObjectSchemaBase.extend({
     externalId: withOpenApi(updateCounterpartyObjectSchemaBase.shape.externalId, {
-      description: "Updated external ID. Use null to clear.",
+      description: "Updated opaque external ID. Do not include personal data. Use null to clear.",
       example: "customer_42",
     }),
     entityType: withOpenApi(updateCounterpartyObjectSchemaBase.shape.entityType, {
@@ -554,7 +558,7 @@ export const updateCounterpartyRequestSchema = withOpenApi(
       example: "business",
     }),
     displayName: withOpenApi(updateCounterpartyObjectSchemaBase.shape.displayName, {
-      description: "Updated display name.",
+      description: "Updated searchable display name. Keep it minimal.",
       example: "Jane Q. Doe",
     }),
     email: withOpenApi(updateCounterpartyObjectSchemaBase.shape.email, {

@@ -367,7 +367,6 @@ export const createCounterparty = async (c: AppContext) => {
     resourceId: counterparty.id,
     metadata: {
       entityType: parsed.data.entityType,
-      externalId: parsed.data.externalId,
     },
   });
 
