@@ -3,7 +3,6 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
-import { getPermissionsForOrgRole } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -101,16 +100,13 @@ describe("Projects Routes", () => {
       )
       .bind(TEST_ORG.id, TEST_USER.id)
       .run();
-    await kv.sessions.put(
-      `session:${TEST_SESSION_ID}`,
-      JSON.stringify({
-        id: TEST_SESSION_ID,
-        userId: TEST_USER.id,
-        organizationId: TEST_ORG.id,
-        permissions: getPermissionsForOrgRole("admin"),
-        expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      })
-    );
+    await db
+      .prepare(
+        `INSERT OR REPLACE INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+         VALUES (?, ?, ?, 'session', ?)`
+      )
+      .bind(TEST_SESSION_ID, TEST_USER.id, TEST_ORG.id, new Date(Date.now() + 60_000).toISOString())
+      .run();
 
     // Seed a default project so the API key has a parent project
     await db
