@@ -136,11 +136,16 @@ export function OrganizationOnboardingFlow({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-8">
         <div className="mx-auto w-full max-w-4xl pb-10">
-          <h2 className="mb-6 text-2xl font-medium tracking-tight text-primary">
-            {currentStep === "rpc"
-              ? t("DashboardCustody.onboardingChooseRpc")
-              : t("DashboardCustody.onboardingChooseCustody")}
-          </h2>
+          <div className="mb-6">
+            <h2 className="text-2xl font-medium tracking-tight text-primary">
+              {currentStep === "rpc"
+                ? t("DashboardCustody.onboardingChooseRpc")
+                : t("DashboardCustody.onboardingChooseCustody")}
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-tertiary">
+              {t("DashboardCustody.onboardingProvidersChangeLater")}
+            </p>
+          </div>
 
           {currentStep === "rpc" ? (
             <form id={formId} onSubmit={submitRpc} className="grid gap-4 md:grid-cols-2">
