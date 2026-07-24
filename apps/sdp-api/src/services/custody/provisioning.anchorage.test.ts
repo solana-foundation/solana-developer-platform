@@ -24,6 +24,24 @@ describe("anchorage wallet provisioning", () => {
     expect(headers.Authorization).toBeUndefined();
   });
 
+  it("uses only the server-configured Anchorage endpoint", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse({ walletId: "wa_anch_env", address: "anch_env" }, 200));
+
+    await provisionAnchorageWallet(
+      createAnchorageEnv({
+        ANCHORAGE_API_BASE_URL: "https://trusted.anchorage.test",
+      }),
+      {}
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://trusted.anchorage.test/v1/wallets",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
   it("falls back to Bearer auth when Api-Key auth is rejected", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
