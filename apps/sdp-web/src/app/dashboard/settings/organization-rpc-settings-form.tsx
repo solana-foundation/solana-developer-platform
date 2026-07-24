@@ -3,6 +3,8 @@
 import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { RpcProviderMark } from "@/app/dashboard/onboarding/rpc-provider-mark";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
@@ -213,6 +215,7 @@ export function OrganizationRpcSettingsForm({
   const [isTesting, setIsTesting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isApplyingFallback, setIsApplyingFallback] = useState(false);
+  const [lastTest, setLastTest] = useState<RpcTestResult | null>(null);
 
   useEffect(() => {
     setSelectedProvider(hasPersistedProviderEnabled ? rpcProvider : fallbackProvider);
@@ -263,6 +266,7 @@ export function OrganizationRpcSettingsForm({
 
     try {
       const result = await runRpcProviderTest(selectedProvider, t);
+      setLastTest(result);
       const requestedLabel =
         RPC_PROVIDER_LABELS[result.requestedProvider] ?? result.requestedProvider;
       const resolvedLabel = result.resolvedProvider
@@ -315,12 +319,8 @@ export function OrganizationRpcSettingsForm({
   return (
     <div className="grid gap-5">
       <div className="w-full max-w-3xl space-y-5">
-        <div className="rounded-xl border border-border-default bg-fill-subtle px-3 py-2">
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-secondary">
-              {t("DashboardCustody.editingOrganization", { name: organization.name })}
-            </span>
-          </div>
+        <div className="flex h-10 w-full items-center rounded-xl border border-border-default bg-fill-subtle px-3 text-sm text-secondary">
+          {t("DashboardCustody.editingOrganization", { name: organization.name })}
         </div>
 
         {!canManageSettings ? (
@@ -367,7 +367,7 @@ export function OrganizationRpcSettingsForm({
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_112px] sm:items-center">
             <Select
               ariaLabel={t("DashboardCustody.rpcProvider")}
-              className="w-full min-w-0"
+              className="w-full"
               value={selectedProvider}
               disabled={!canManageSettings || !hasEnabledProviders || isSaving || isTesting}
               onValueChange={(value) => {
@@ -379,15 +379,17 @@ export function OrganizationRpcSettingsForm({
             >
               {availableProviders.map((provider) => (
                 <SelectItem key={provider} value={provider}>
-                  {RPC_PROVIDER_LABELS[provider]}
+                  <span className="flex items-center gap-2">
+                    <RpcProviderMark provider={provider} />
+                    {RPC_PROVIDER_LABELS[provider]}
+                  </span>
                 </SelectItem>
               ))}
             </Select>
             <Button
               type="button"
-              size="sm"
               variant="secondary"
-              className="w-full sm:w-[112px] sm:justify-center"
+              className="w-full sm:justify-center"
               disabled={!hasEnabledProviders || isTesting || isSaving}
               onClick={() => {
                 void testProvider();
@@ -397,6 +399,70 @@ export function OrganizationRpcSettingsForm({
             </Button>
           </div>
         </div>
+
+        {lastTest ? (
+          <div className="rounded-xl border border-border-default bg-fill-subtle p-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium text-primary">
+                {t("DashboardCustody.rpcDetailTitle")}
+              </span>
+              <Badge variant={lastTest.status === "success" ? "success" : "danger"}>
+                {lastTest.status === "success"
+                  ? t("DashboardCustody.rpcDetailReachable")
+                  : t("DashboardCustody.rpcDetailUnreachable")}
+              </Badge>
+            </div>
+            {lastTest.status === "error" ? (
+              <p className="mt-2 text-sm text-error">{lastTest.message}</p>
+            ) : null}
+            <dl className="mt-3 grid gap-2 text-sm">
+              {lastTest.resolvedProvider ? (
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-tertiary">
+                    {t("DashboardCustody.rpcDetailResolvedProvider")}
+                  </dt>
+                  <dd className="text-primary">
+                    {RPC_PROVIDER_LABELS[lastTest.resolvedProvider as OrganizationRpcProvider] ??
+                      lastTest.resolvedProvider}
+                  </dd>
+                </div>
+              ) : null}
+              {lastTest.selectionMode ? (
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-tertiary">{t("DashboardCustody.rpcDetailSelectionMode")}</dt>
+                  <dd className="text-primary">{lastTest.selectionMode}</dd>
+                </div>
+              ) : null}
+              {lastTest.endpoint ? (
+                <div className="flex items-start justify-between gap-3">
+                  <dt className="shrink-0 text-tertiary">
+                    {t("DashboardCustody.rpcDetailEndpoint")}
+                  </dt>
+                  <dd className="min-w-0 break-all text-right font-mono text-xs text-primary">
+                    {lastTest.endpoint}
+                  </dd>
+                </div>
+              ) : null}
+              {lastTest.upstreamStatus !== undefined ? (
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-tertiary">{t("DashboardCustody.rpcDetailUpstream")}</dt>
+                  <dd className="text-primary">
+                    {lastTest.upstreamStatus}
+                    {lastTest.upstreamStatusText ? ` ${lastTest.upstreamStatusText}` : ""}
+                  </dd>
+                </div>
+              ) : null}
+              {lastTest.latencyMs !== undefined ? (
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-tertiary">{t("DashboardCustody.rpcDetailLatency")}</dt>
+                  <dd className="text-primary">
+                    {t("DashboardCustody.rpcDetailLatencyValue", { ms: lastTest.latencyMs })}
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+          </div>
+        ) : null}
       </div>
 
       {errorMessage ? (
