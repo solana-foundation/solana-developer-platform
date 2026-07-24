@@ -1,54 +1,48 @@
-/**
- * CORS Middleware Configuration
- */
-
 import { getSdpDocsOrigin } from "@sdp/types";
 import { cors } from "hono/cors";
 import type { Env } from "@/types/env";
 
-/**
- * CORS middleware with environment-aware configuration
- */
+const PRODUCTION_ORIGINS = [
+  "https://solana.com",
+  "https://www.solana.com",
+  "https://developer.solana.com",
+];
+
+const DEVELOPMENT_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "http://localhost:5173",
+];
+
+const DEVELOPMENT_ORIGIN_PATTERNS = ["https://*.vercel.app"];
+
+function wildcardToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${escaped.replace(/\\\*/g, "[^.]*")}$`);
+}
+
+export function createOriginMatcher(
+  exactOrigins: string[],
+  wildcardPatterns: string[]
+): (origin: string) => boolean {
+  const exact = new Set(exactOrigins);
+  const patterns = wildcardPatterns.map(wildcardToRegExp);
+  return (origin) => exact.has(origin) || patterns.some((pattern) => pattern.test(origin));
+}
+
 export function corsMiddleware(env: Env["ENVIRONMENT"]) {
-  const allowedOrigins =
-    env === "production"
-      ? [
-          "https://solana.com",
-          "https://www.solana.com",
-          "https://developer.solana.com",
-          getSdpDocsOrigin(),
-        ]
-      : [
-          "http://localhost:3000",
-          "http://localhost:3001",
-          "http://localhost:5173",
-          "https://*.vercel.app",
-        ];
+  const isProduction = env === "production";
+  const exactOrigins = isProduction
+    ? [...PRODUCTION_ORIGINS, getSdpDocsOrigin()]
+    : DEVELOPMENT_ORIGINS;
+  const wildcardPatterns = isProduction ? [] : DEVELOPMENT_ORIGIN_PATTERNS;
+  const isAllowedOrigin = createOriginMatcher(exactOrigins, wildcardPatterns);
 
   return cors({
     origin: (origin) => {
       if (!origin) return null;
-
-      // Check exact matches
-      if (allowedOrigins.includes(origin)) {
-        return origin;
-      }
-
-      // Check wildcard patterns
-      for (const pattern of allowedOrigins) {
-        if (pattern.includes("*")) {
-          const regex = new RegExp(`^${pattern.replace("*", ".*")}$`);
-          if (regex.test(origin)) {
-            return origin;
-          }
-        }
-      }
-
-      // In development, allow all origins
-      if (env !== "production") {
-        return origin;
-      }
-
+      if (isAllowedOrigin(origin)) return origin;
+      if (!isProduction) return origin;
       return null;
     },
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -61,7 +55,7 @@ export function corsMiddleware(env: Env["ENVIRONMENT"]) {
       "X-RateLimit-Remaining",
       "X-RateLimit-Reset",
     ],
-    maxAge: 86400, // 24 hours
+    maxAge: 86400,
     credentials: true,
   });
 }
