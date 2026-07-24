@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { RpcProviderMark } from "@/app/dashboard/onboarding/rpc-provider-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { updateOrganizationRpcSettingsAction } from "./actions";
@@ -363,7 +362,11 @@ export function OrganizationRpcSettingsForm({
         ) : null}
 
         <div className="grid gap-2">
-          <Label>{t("DashboardCustody.rpcProvider")}</Label>
+          {/* Not a <label>: the DS Select has no associable id, so a bound label
+              would be a dead click target. The Select carries its own ariaLabel. */}
+          <span className="text-sm font-medium text-primary">
+            {t("DashboardCustody.rpcProvider")}
+          </span>
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_112px] sm:items-center">
             <Select
               ariaLabel={t("DashboardCustody.rpcProvider")}
