@@ -22,7 +22,9 @@ import {
 } from "@/db/postgres-utils";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
+import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
+import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import type { KVStore } from "@/runtime/kv";
 import type { Env } from "@/types/env";
 import { enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
@@ -374,6 +376,10 @@ export function authMiddleware() {
 
     if (isRotationDeadlineReached(cachedKey.rotationDeadline)) {
       throw new AppError("EXPIRED_API_KEY");
+    }
+
+    if (!isClientIpAllowed(getClientIp(c), cachedKey.allowedIps)) {
+      throw new AppError("FORBIDDEN", "Request origin is not allowed for this API key");
     }
 
     await enforceRateLimit(c, cachedKey.id, RATE_LIMIT_TIERS[cachedKey.rateLimitTier]);

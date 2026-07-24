@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
@@ -58,6 +57,7 @@ interface IssuanceTemplateOption {
 }
 
 interface IssuanceWorkspaceProps {
+  assetProfilesEnabled: boolean;
   tokens: IssuanceTokenView[];
   templates: IssuanceTemplateOption[];
   apiKeys: IssuanceApiKeyOption[];
@@ -72,6 +72,7 @@ interface IssuanceWorkspaceProps {
 const VIEW_STORAGE_KEY = "sdp.issuance.tokenView";
 
 export function IssuanceWorkspace({
+  assetProfilesEnabled,
   tokens,
   templates,
   apiKeys,
@@ -114,9 +115,8 @@ export function IssuanceWorkspace({
   };
 
   // Asset Profiles UI flag: on → full-page wizard; off → legacy modal.
-  const assetProfilesUiEnabled = isAssetProfilesUiEnabled();
   const startTokenCreation = () => {
-    if (assetProfilesUiEnabled) {
+    if (assetProfilesEnabled) {
       router.push(CREATE_DRAFT_PATH);
       return;
     }
@@ -211,7 +211,7 @@ export function IssuanceWorkspace({
   // Legacy overview when the Asset Profiles UI flag is off: the old card grid
   // with no classification chips, filters, view toggle, or kebab — just search,
   // a Type/Supply/Created stat box, and a Manage link per token.
-  if (!assetProfilesUiEnabled) {
+  if (!assetProfilesEnabled) {
     const needle = search.trim().toLowerCase();
     const legacyFilteredTokens = needle
       ? tokens.filter(
@@ -273,7 +273,7 @@ export function IssuanceWorkspace({
                     className="flex min-h-[340px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5"
                   >
                     <div className="mb-4 flex items-start justify-between gap-3">
-                      <div className="h-14 w-14 overflow-hidden rounded-full border border-border-default bg-[white]">
+                      <div className="h-14 w-14 overflow-hidden rounded-full border border-border-default bg-fill-subtle">
                         {token.imageUrl ? (
                           // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
                           <img
@@ -474,7 +474,7 @@ export function IssuanceWorkspace({
                     />
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-3">
-                        <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full border border-border-default bg-[white]">
+                        <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full border border-border-default bg-fill-subtle">
                           {token.imageUrl ? (
                             // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
                             <img
@@ -492,7 +492,7 @@ export function IssuanceWorkspace({
                           <p className="text-xs font-medium tracking-wide text-tertiary">
                             {token.symbol}
                           </p>
-                          <h3 className="truncate text-lg font-semibold leading-tight text-primary">
+                          <h3 className="mt-0.5 truncate text-lg font-medium leading-tight text-primary">
                             {token.name}
                           </h3>
                         </div>
@@ -539,7 +539,7 @@ export function IssuanceWorkspace({
                         <p className="text-xs text-tertiary">
                           {t("DashboardIssuance.workspace.supply")}
                         </p>
-                        <p className="mt-0.5 truncate text-sm font-medium text-primary">
+                        <p className="mt-0.5 truncate text-sm font-normal text-primary">
                           {formatSupply(token.totalSupply, locale)}
                         </p>
                       </div>
@@ -547,7 +547,7 @@ export function IssuanceWorkspace({
                         <p className="text-xs text-tertiary">
                           {t("DashboardIssuance.list.decimals")}
                         </p>
-                        <p className="mt-0.5 truncate text-sm font-medium text-primary">
+                        <p className="mt-0.5 truncate text-sm font-normal text-primary">
                           {token.decimals}
                         </p>
                       </div>
@@ -558,7 +558,7 @@ export function IssuanceWorkspace({
                         <p className="text-xs text-tertiary">
                           {t("DashboardIssuance.workspace.created")}
                         </p>
-                        <p className="mt-0.5 truncate text-sm font-medium text-primary">
+                        <p className="mt-0.5 truncate text-sm font-normal text-primary">
                           {formatDate(token.createdAt, locale)}
                         </p>
                       </div>

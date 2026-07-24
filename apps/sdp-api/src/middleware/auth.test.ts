@@ -159,6 +159,168 @@ describe("Auth Middleware", () => {
       // Auth succeeded and org exists
       expect(res.status).toBe(200);
     });
+
+    it("rejects a cached API key used outside its IPv4 allowlist", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        allowedIps: ["203.0.113.0/24"],
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "x-forwarded-for": "198.51.100.42",
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("FORBIDDEN");
+    });
+
+    it("accepts a cached API key used from an allowed IPv4 address", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        allowedIps: ["203.0.113.0/24"],
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "x-forwarded-for": "203.0.113.42",
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+    });
+
+    it("uses the Cloud Run verified client instead of an untrusted forwarded prefix", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        allowedIps: ["198.51.100.99/32"],
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "x-forwarded-for": "198.51.100.99, 203.0.113.10, 192.0.2.20",
+          },
+        },
+        { ...env, K_SERVICE: "sdp-api" }
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects a restricted API key when no trusted client IP is available", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        allowedIps: ["203.0.113.0/24"],
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects malformed allowlist data already stored in the cache", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        allowedIps: ["not-an-ip-range"],
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "x-forwarded-for": "203.0.113.42",
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it("enforces the allowlist after loading an API key from Postgres", async () => {
+      await getDb(env)
+        .prepare("INSERT INTO users (id, email, status) VALUES (?, ?, ?), (?, ?, ?)")
+        .bind(
+          TEST_USER.id,
+          TEST_USER.email,
+          TEST_USER.status,
+          "usr_api_key_creator",
+          "api-key-creator@example.com",
+          "active"
+        )
+        .run();
+      await getDb(env)
+        .prepare(
+          "INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          TEST_PROJECT.name,
+          TEST_PROJECT.slug,
+          TEST_PROJECT.environment,
+          TEST_PROJECT.status,
+          TEST_USER.id
+        )
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_keys (
+             id, organization_id, project_id, created_by, name, key_prefix, key_hash,
+             role, allowed_ips, status
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          TEST_API_KEY.id,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          "usr_api_key_creator",
+          "Restricted key",
+          TEST_API_KEY.prefix,
+          validKeyHash,
+          "api_admin",
+          JSON.stringify(["203.0.113.0/24"]),
+          "active"
+        )
+        .run();
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "x-forwarded-for": "198.51.100.42",
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+    });
   });
 
   describe("key status validation", () => {

@@ -46,7 +46,7 @@ export interface ApiKey {
   permissions: Permission[] | null; // Override permissions, null = use role defaults
   environment: ApiKeyEnvironment;
   rateLimitTier: RateLimitTier;
-  allowedIps: string[] | null; // CIDR ranges for IP restriction
+  allowedIps: string[] | null; // IPv4/IPv6 addresses or CIDR ranges for IP restriction
   lastUsedAt: string | null;
   expiresAt: string | null;
   revokedAt: string | null;
@@ -94,7 +94,7 @@ export interface CreateApiKeyRequest {
   role?: ApiKeyRole;
   permissions?: Permission[];
   walletScope: ApiKeyWalletScope;
-  allowedIps?: string[]; // CIDR ranges for IP restriction
+  allowedIps?: string[]; // IPv4/IPv6 addresses or CIDR ranges for IP restriction
   expiresAt?: string; // ISO date string
   signingWalletId?: string;
   signingWalletIds?: string[];

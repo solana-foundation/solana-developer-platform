@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "motion/react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 
 interface HeightRevealProps {
   children: ReactNode;
@@ -20,7 +20,11 @@ export function HeightReveal({ children, durationSeconds = 0.3 }: HeightRevealPr
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState(0);
 
-  useEffect(() => {
+  // Measure before paint (not `useEffect`) so the first open commits the real
+  // target height in one render, instead of painting a clipped height-0 frame
+  // and then re-rendering to start the animation — which is what makes the
+  // first expand of a freshly-mounted panel stutter.
+  useLayoutEffect(() => {
     const el = contentRef.current;
     if (!el) {
       return;
