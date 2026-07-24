@@ -237,7 +237,11 @@ export const deleteOrganization = async (c: AppContext) => {
   ]);
 
   const sessionService = new SessionService(db);
-  await sessionService.revokeOrganizationSessions(orgId);
+  await sessionService
+    .revokeOrganizationSessions(orgId)
+    .catch((error) =>
+      console.error("Failed to revoke sessions after organization deletion:", error)
+    );
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

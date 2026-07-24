@@ -110,7 +110,11 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
   ]);
 
   const sessionService = new SessionService(getDb(c.env));
-  await sessionService.revokeOrganizationSessions(mapping.organization_id);
+  await sessionService
+    .revokeOrganizationSessions(mapping.organization_id)
+    .catch((error) =>
+      console.error("Failed to revoke sessions after organization deletion:", error)
+    );
 }
 
 async function resolveVerifiedUserEmail(env: Env, userId: string): Promise<string | null> {
@@ -249,7 +253,9 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
   ]);
 
   const sessionService = new SessionService(getDb(c.env));
-  await sessionService.revokeAllUserSessions(identity.user_id);
+  await sessionService
+    .revokeAllUserSessions(identity.user_id)
+    .catch((error) => console.error("Failed to revoke sessions after user deletion:", error));
 }
 
 async function upsertVerifiedMembership(
@@ -291,7 +297,11 @@ async function upsertVerifiedMembership(
 
   if (existing?.status === "active" && existing.role !== role) {
     const sessionService = new SessionService(getDb(c.env));
-    await sessionService.revokeUserOrganizationSessions(data.userId, organizationId);
+    await sessionService
+      .revokeUserOrganizationSessions(data.userId, organizationId)
+      .catch((error) =>
+        console.error("Failed to revoke sessions after membership role change:", error)
+      );
   }
 
   const projectService = new ProjectService(getDb(c.env));
@@ -347,7 +357,9 @@ async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON)
     .run();
 
   const sessionService = new SessionService(getDb(c.env));
-  await sessionService.revokeUserOrganizationSessions(identity.user_id, mapping.organization_id);
+  await sessionService
+    .revokeUserOrganizationSessions(identity.user_id, mapping.organization_id)
+    .catch((error) => console.error("Failed to revoke sessions after membership deletion:", error));
 }
 
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {

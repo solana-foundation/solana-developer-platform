@@ -375,7 +375,9 @@ export const removeMember = async (c: AppContext) => {
     .run();
 
   const sessionService = new SessionService(getDb(c.env));
-  await sessionService.revokeUserOrganizationSessions(member.user_id, organizationId);
+  await sessionService
+    .revokeUserOrganizationSessions(member.user_id, organizationId)
+    .catch((error) => console.error("Failed to revoke sessions after member removal:", error));
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
