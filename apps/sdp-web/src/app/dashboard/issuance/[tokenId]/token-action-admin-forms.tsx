@@ -689,6 +689,7 @@ function ControlListFilters({
   activeLabel,
   onLabelChange,
   labels,
+  busy,
 }: {
   t: ReturnType<typeof useTranslations>;
   query: string;
@@ -697,6 +698,10 @@ function ControlListFilters({
   activeLabel: string;
   onLabelChange: (value: string) => void;
   labels: string[];
+  // While a fetch is in flight both filters show a spinner; the label Select is
+  // blocked like the button, but the search box stays typeable (it's debounced,
+  // so disabling it would interrupt typing).
+  busy: boolean;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -706,10 +711,13 @@ function ControlListFilters({
         onChange={(event) => onQueryChange(event.currentTarget.value)}
         placeholder={searchPlaceholder}
         iconLeft={<Search />}
+        iconRight={busy ? <Loader2 className="animate-spin" /> : undefined}
       />
       <Select
         className="w-44 shrink-0"
         value={activeLabel}
+        disabled={busy}
+        trailing={busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
         onValueChange={(value) => onLabelChange(value ?? ALL_LABELS)}
         ariaLabel={t("DashboardIssuance.controlLists.filterByLabel")}
       >
@@ -760,7 +768,9 @@ function ControlListEntryRow({
 
 function ControlListResults({
   t,
-  isLoading,
+  isInitialLoading,
+  isRefreshing,
+  busy,
   errorMessage,
   entries,
   total,
@@ -773,7 +783,9 @@ function ControlListResults({
   onLoadMore,
 }: {
   t: ReturnType<typeof useTranslations>;
-  isLoading: boolean;
+  isInitialLoading: boolean;
+  isRefreshing: boolean;
+  busy: boolean;
   errorMessage: string | null;
   entries: TokenAllowlistEntry[];
   total: number;
@@ -785,7 +797,7 @@ function ControlListResults({
   onRemove: (entryId: string) => void;
   onLoadMore: () => void;
 }) {
-  if (isLoading && entries.length === 0) {
+  if (isInitialLoading) {
     return (
       <div className="flex items-center justify-center gap-2 py-8 text-sm text-secondary">
         <Loader2 className="h-4 w-4 animate-spin" />
@@ -807,7 +819,10 @@ function ControlListResults({
     );
   }
   return (
-    <div className="space-y-2">
+    <div
+      aria-busy={isRefreshing}
+      className={`space-y-2 transition-opacity ${isRefreshing ? "opacity-60" : ""}`}
+    >
       {entries.map((entry) => (
         <ControlListEntryRow
           key={entry.id}
@@ -826,7 +841,8 @@ function ControlListResults({
             type="button"
             variant="outline"
             size="sm"
-            disabled={isLoading}
+            disabled={busy}
+            iconLeft={busy ? <Loader2 className="animate-spin" /> : undefined}
             onClick={onLoadMore}
           >
             {t("DashboardIssuance.controlLists.loadMore")}
@@ -884,7 +900,7 @@ function ControlListEntries({
   const searchParam = debouncedQuery.length > 0 ? debouncedQuery : null;
   const labelParam = activeLabel !== ALL_LABELS && activeLabel.length > 0 ? activeLabel : null;
 
-  const { data, error, isLoading } = usePersistedDashboardSWR(
+  const { data, error, isLoading, isValidating } = usePersistedDashboardSWR(
     [TOKEN_ALLOWLIST_KEY, tokenId, searchParam ?? "", labelParam ?? "", pageSize] as const,
     () =>
       fetchTokenAllowlistPage(tokenId, {
@@ -903,6 +919,13 @@ function ControlListEntries({
   const entries = data?.entries ?? [];
   const total = data?.total ?? 0;
   const hasFilter = searchParam !== null || labelParam !== null;
+  // `busy` = any in-flight fetch. With keepPreviousData, isLoading is only true on
+  // the first load, so isValidating is what catches search/label changes and
+  // "Load more". Filters + button are blocked while busy; a refetch over
+  // already-shown rows also dims them.
+  const busy = isValidating;
+  const isInitialLoading = isLoading && entries.length === 0;
+  const isRefreshing = busy && entries.length > 0;
   const errorMessage = error
     ? error instanceof Error
       ? error.message
@@ -925,11 +948,14 @@ function ControlListEntries({
           setPageSize(CONTROL_LIST_PAGE_STEP);
         }}
         labels={labels}
+        busy={busy}
       />
 
       <ControlListResults
         t={t}
-        isLoading={isLoading}
+        isInitialLoading={isInitialLoading}
+        isRefreshing={isRefreshing}
+        busy={busy}
         errorMessage={errorMessage}
         entries={entries}
         total={total}
