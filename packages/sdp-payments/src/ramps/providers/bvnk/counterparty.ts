@@ -12,6 +12,7 @@ import {
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
+  RampDirection,
   RequirementField,
 } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
@@ -20,6 +21,7 @@ import { badRequest, SdpPaymentsError, unsupportedCounterparty } from "../../../
 import {
   buildRequirementSchema,
   enumOptions,
+  ISO_DATE_PATTERN,
   readyCounterparty,
   selectField,
   textField,
@@ -41,6 +43,175 @@ interface BvnkOnrampField {
 
 const COUNTRY_OPTIONS = COUNTRIES.map((country) => ({ value: country.code, label: country.name }));
 const US_STATE_OPTIONS = US_STATES.map((state) => ({ value: state.code, label: state.name }));
+
+const BVNK_COMPANY_ENTITY_TYPES = [
+  "CORPORATION",
+  "LIMITED_LIABILITY_COMPANY",
+  "PARTNERSHIP",
+  "TRUST",
+] as const;
+const BVNK_COMPANY_MONTHLY_EXPECTED_VOLUMES = [
+  "FROM_100K_TO_1M",
+  "FROM_1M_TO_10M",
+  "ABOVE_10M",
+] as const;
+const BVNK_COMPANY_SOURCES_OF_FUNDS = [
+  "COMMERCIAL_ACTIVITIES",
+  "SHAREHOLDER_CAPITAL",
+  "SALE_OF_ASSETS",
+] as const;
+const BVNK_COMPANY_INTENDED_USES = ["SUPPLIER_VENDOR_PAYMENTS", "PAYROLL"] as const;
+
+const BVNK_COMPANY_ONRAMP_FIELDS: RequirementField[] = [
+  selectField({
+    key: "company.entityType",
+    label: "Company entity type",
+    required: true,
+    options: enumOptions(BVNK_COMPANY_ENTITY_TYPES),
+  }),
+  textField({
+    key: "company.registrationNumber",
+    label: "Company registration number",
+    required: true,
+  }),
+  textField({
+    key: "company.taxIdentification.number",
+    label: "Company tax identification number",
+    required: true,
+  }),
+  selectField({
+    key: "company.taxIdentification.taxResidenceCountryCode",
+    label: "Company tax residence country",
+    required: true,
+    options: COUNTRY_OPTIONS,
+  }),
+  textField({
+    key: "company.incorporationDate",
+    label: "Company incorporation date",
+    required: true,
+    pattern: ISO_DATE_PATTERN,
+    placeholder: "2019-01-15",
+  }),
+  textField({
+    key: "company.businessOperationsStartDate",
+    label: "Business operations start date",
+    required: true,
+    pattern: ISO_DATE_PATTERN,
+    placeholder: "2019-01-15",
+  }),
+  textField({
+    key: "company.businessProfile.naicsCode",
+    label: "NAICS code",
+    required: true,
+    pattern: "^\\d{2,6}$",
+    placeholder: "5239",
+  }),
+  textField({
+    key: "company.businessProfile.website",
+    label: "Company website",
+    required: true,
+    pattern: "^https?://.+",
+  }),
+  selectField({
+    key: "company.businessProfile.monthlyExpectedVolumes",
+    label: "Expected monthly volume",
+    required: true,
+    options: enumOptions(BVNK_COMPANY_MONTHLY_EXPECTED_VOLUMES),
+  }),
+  selectField({
+    key: "company.businessProfile.sourceOfFunds",
+    label: "Source of funds",
+    required: true,
+    options: enumOptions(BVNK_COMPANY_SOURCES_OF_FUNDS),
+  }),
+  selectField({
+    key: "company.businessProfile.intendedUseOfAccount",
+    label: "Intended use of account",
+    required: true,
+    options: enumOptions(BVNK_COMPANY_INTENDED_USES),
+  }),
+  selectField({
+    key: "company.businessProfile.isRegulated",
+    label: "Is the company regulated?",
+    required: true,
+    options: [
+      { value: "true", label: "Yes" },
+      { value: "false", label: "No" },
+    ],
+  }),
+  textField({ key: "associate.firstName", label: "Associate first name", required: true }),
+  textField({ key: "associate.lastName", label: "Associate last name", required: true }),
+  textField({
+    key: "associate.dateOfBirth",
+    label: "Associate date of birth",
+    required: true,
+    pattern: ISO_DATE_PATTERN,
+    placeholder: "1982-03-24",
+  }),
+  selectField({
+    key: "associate.nationality",
+    label: "Associate nationality",
+    required: true,
+    options: COUNTRY_OPTIONS,
+  }),
+  selectField({
+    key: "associate.birthCountryCode",
+    label: "Associate country of birth",
+    required: true,
+    options: COUNTRY_OPTIONS,
+  }),
+  textField({
+    key: "associate.emailAddress",
+    label: "Associate email address",
+    required: true,
+  }),
+  textField({
+    key: "associate.taxIdentification.number",
+    label: "Associate tax identification number",
+    required: true,
+  }),
+  selectField({
+    key: "associate.taxIdentification.taxResidenceCountryCode",
+    label: "Associate tax residence country",
+    required: true,
+    options: COUNTRY_OPTIONS,
+  }),
+  textField({
+    key: "associate.ownership.percentage",
+    label: "Associate ownership percentage",
+    required: true,
+    pattern: "^(100|[1-9]?\\d)$",
+    placeholder: "100",
+  }),
+];
+
+const BVNK_COMPANY_SCHEMA = buildRequirementSchema(BVNK_COMPANY_ONRAMP_FIELDS);
+
+/**
+ * Builds the unsupported-counterparty requirements naming stored identity
+ * fields a BVNK on-ramp needs but the counterparty lacks, or null when all
+ * labelled values are present.
+ *
+ * @param direction Ramp direction the requirements decision is for.
+ * @param fields Human-readable label to stored identity value.
+ * @returns Unsupported requirements listing the missing labels, or null.
+ */
+function missingBvnkIdentityRequirements(
+  direction: RampDirection,
+  fields: Record<string, string | undefined>
+): CounterpartyRequirements | null {
+  const missing = Object.entries(fields)
+    .filter(([, value]) => !value)
+    .map(([label]) => label);
+  if (missing.length === 0) {
+    return null;
+  }
+  return unsupportedCounterparty(
+    "bvnk",
+    direction,
+    `Counterparty is missing details required for BVNK on-ramp: ${missing.join(", ")}.`
+  );
+}
 
 const BVNK_ONRAMP_BASE_FIELDS: BvnkOnrampField[] = [
   {
@@ -315,6 +486,85 @@ export function buildBvnkIndividualPayload(
   };
 }
 
+/** Builds BVNK's v2 company customer payload from stored identity and transient JIT fields. */
+export function buildBvnkCompanyPayload(
+  counterparty: CounterpartyRow,
+  collectedData: CollectedFieldData | undefined
+): Record<string, unknown> {
+  if (counterparty.entity_type !== "business") {
+    throw badRequest("BVNK company on-ramp requires a business counterparty.");
+  }
+  const result = BVNK_COMPANY_SCHEMA.safeParse(collectedData);
+  if (!result.success) {
+    throw new SdpPaymentsError(
+      "BAD_REQUEST",
+      "Missing or invalid company details required for BVNK on-ramp.",
+      { errors: z.treeifyError(result.error) }
+    );
+  }
+  const readCollected = (key: string): string => {
+    const value = result.data[key];
+    if (typeof value !== "string") {
+      throw badRequest(`Missing required field "${key}" for BVNK company on-ramp.`);
+    }
+    return value;
+  };
+  const address = counterparty.identity.address;
+  const companyAddress = {
+    addressLine1: address.line1,
+    ...(address.line2 ? { addressLine2: address.line2 } : {}),
+    city: address.city,
+    ...(address.postalCode ? { postalCode: address.postalCode } : {}),
+    countryCode: address.countryCode,
+  };
+
+  return {
+    name: counterparty.display_name,
+    entityType: readCollected("company.entityType"),
+    taxIdentification: {
+      number: readCollected("company.taxIdentification.number"),
+      taxResidenceCountryCode: readCollected("company.taxIdentification.taxResidenceCountryCode"),
+    },
+    registrationNumber: readCollected("company.registrationNumber"),
+    incorporationDate: readCollected("company.incorporationDate"),
+    businessOperationsStartDate: readCollected("company.businessOperationsStartDate"),
+    address: companyAddress,
+    isOperationalAddressDifferent: false,
+    businessProfile: {
+      naicsCode: readCollected("company.businessProfile.naicsCode"),
+      website: readCollected("company.businessProfile.website"),
+      monthlyExpectedVolumes: readCollected("company.businessProfile.monthlyExpectedVolumes"),
+      intendedUseOfAccount: readCollected("company.businessProfile.intendedUseOfAccount"),
+      isRegulated: readCollected("company.businessProfile.isRegulated") === "true",
+      sourceOfFunds: readCollected("company.businessProfile.sourceOfFunds"),
+    },
+    associates: [
+      {
+        person: {
+          firstName: readCollected("associate.firstName"),
+          lastName: readCollected("associate.lastName"),
+          dateOfBirth: readCollected("associate.dateOfBirth"),
+          nationality: readCollected("associate.nationality"),
+          birthCountryCode: readCollected("associate.birthCountryCode"),
+          address: companyAddress,
+          contactInfo: { emailAddress: readCollected("associate.emailAddress") },
+          taxIdentification: {
+            number: readCollected("associate.taxIdentification.number"),
+            taxResidenceCountryCode: readCollected(
+              "associate.taxIdentification.taxResidenceCountryCode"
+            ),
+          },
+        },
+        titles: ["UBO", "DIRECTOR", "SIGNATORY", "ACCOUNT_REPRESENTATIVE"],
+        ownership: {
+          percentage: readCollected("associate.ownership.percentage"),
+          type: "DIRECT",
+        },
+      },
+    ],
+  };
+}
+
 /**
  * Decides what BVNK still needs from a counterparty before a ramp can run.
  * Pure decision over stored `provider_data` plus the caller-resolved ramp
@@ -375,16 +625,9 @@ export function validateBvnkCounterparty(
     return readyCounterparty("bvnk", direction);
   }
 
-  if (counterparty.entityType !== "individual") {
-    return unsupportedCounterparty(
-      "bvnk",
-      direction,
-      "BVNK on-ramp supports individual counterparties only."
-    );
-  }
   const identity = counterparty.identity;
 
-  if (!identity.address?.countryCode) {
+  if (!identity.address.countryCode) {
     return unsupportedCounterparty(
       "bvnk",
       direction,
@@ -397,23 +640,37 @@ export function validateBvnkCounterparty(
     return onrampConfiguredStatus();
   }
 
-  const missingIdentity = [
-    identity.firstName ? null : "first name",
-    identity.lastName ? null : "last name",
-    identity.dateOfBirth ? null : "date of birth",
-    identity.address.line1 ? null : "address line 1",
-    identity.address.city ? null : "address city",
-  ].filter((entry): entry is string => entry !== null);
-  if (missingIdentity.length > 0) {
-    return unsupportedCounterparty(
-      "bvnk",
+  if (counterparty.entityType === "business") {
+    const missingIdentity = missingBvnkIdentityRequirements(direction, {
+      "display name": counterparty.displayName,
+      "address line 1": identity.address.line1,
+      "address city": identity.address.city,
+    });
+    if (missingIdentity) {
+      return missingIdentity;
+    }
+    return {
+      provider: "bvnk",
       direction,
-      `Counterparty is missing details required for BVNK on-ramp: ${missingIdentity.join(", ")}.`
-    );
+      status: "collect",
+      fields: BVNK_COMPANY_ONRAMP_FIELDS,
+    };
   }
 
-  const missing = bvnkOnrampFields(identity)
-    .filter((field) => field.read(identity) === undefined)
+  const individualIdentity = counterparty.identity;
+  const missingIdentity = missingBvnkIdentityRequirements(direction, {
+    "first name": individualIdentity.firstName,
+    "last name": individualIdentity.lastName,
+    "date of birth": individualIdentity.dateOfBirth,
+    "address line 1": individualIdentity.address.line1,
+    "address city": individualIdentity.address.city,
+  });
+  if (missingIdentity) {
+    return missingIdentity;
+  }
+
+  const missing = bvnkOnrampFields(individualIdentity)
+    .filter((field) => field.read(individualIdentity) === undefined)
     .map((field) => field.descriptor);
   if (missing.length === 0) {
     return onrampConfiguredStatus();

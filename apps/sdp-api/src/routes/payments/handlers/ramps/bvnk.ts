@@ -1,7 +1,12 @@
 import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import type { BvnkFiatWallet } from "@sdp/payments/ramps/providers/bvnk/client";
 import {
+  BVNK_V2_USE_CASE,
+  type BvnkCustomerState,
+  type BvnkFiatWallet,
+} from "@sdp/payments/ramps/providers/bvnk/client";
+import {
+  buildBvnkCompanyPayload,
   buildBvnkIndividualPayload,
   bvnkOfframpAccountType,
   bvnkOfframpFields,
@@ -135,6 +140,29 @@ type BvnkOnrampQuote = PaymentRampQuote & {
 
 function requesterIpAddress(c: AppContext): string {
   return getClientIp(c) ?? "0.0.0.0";
+}
+
+/**
+ * Maps a freshly created BVNK customer into the provider_data resolution shape.
+ *
+ * @param externalReference SDP-side `cp_<uuid>` reference sent to BVNK at creation.
+ * @param created Customer state parsed from BVNK's create response.
+ * @param apiVersion Set to "v2" for company customers created via the Customers API v2.
+ * @returns Resolution to persist under provider_data.bvnk.customer.
+ */
+function createdBvnkCustomerResolution(
+  externalReference: string,
+  created: BvnkCustomerState,
+  apiVersion?: "v2"
+): BvnkCustomerResolution {
+  return {
+    externalReference,
+    customerReference: created.reference,
+    status: created.status,
+    verificationStatus: created.verificationStatus,
+    verificationUrl: created.verificationUrl,
+    ...(apiVersion ? { apiVersion } : {}),
+  };
 }
 
 async function persistBvnkOnrampState(
@@ -346,9 +374,6 @@ export async function ensureBvnkCustomer(
     collectedData?: CollectedFieldData;
   }
 ): Promise<BvnkCustomerResolution> {
-  if (counterparty.entity_type === "business") {
-    throw badRequest("BVNK supports individual counterparties only.");
-  }
   const countryCode = counterparty.identity.address?.countryCode;
   if (!countryCode) {
     throw badRequest("Counterparty address country is required for BVNK.");
@@ -362,32 +387,46 @@ export async function ensureBvnkCustomer(
   const expectedExternalReference = buildBvnkCustomerExternalReference(counterparty.id);
 
   if (!customer.customerReference) {
-    const individual = buildBvnkIndividualPayload(
-      counterparty,
-      params.collectedData,
-      params.fiatCurrency
-    );
-    const session = await client.createAgreementSession(ctx, {
-      customerType: "INDIVIDUAL",
-      countryCode,
-      useCase: "EMBEDDED_FIAT_ACCOUNTS",
-    });
-    await client.signAgreement(ctx, {
-      reference: session.reference,
-      ipAddress: requesterIpAddress(c),
-    });
-    const created = await client.createBvnkCustomer(ctx, {
-      externalReference: expectedExternalReference,
-      signedAgreementSessionReference: session.reference,
-      individual,
-    });
-    customer = {
-      externalReference: expectedExternalReference,
-      customerReference: created.reference,
-      status: created.status,
-      verificationStatus: created.verificationStatus,
-      verificationUrl: created.verificationUrl,
-    };
+    if (counterparty.entity_type === "individual") {
+      const individual = buildBvnkIndividualPayload(
+        counterparty,
+        params.collectedData,
+        params.fiatCurrency
+      );
+      const session = await client.createAgreementSession(ctx, {
+        customerType: "INDIVIDUAL",
+        countryCode,
+        useCase: "EMBEDDED_FIAT_ACCOUNTS",
+      });
+      await client.signAgreement(ctx, {
+        reference: session.reference,
+        ipAddress: requesterIpAddress(c),
+      });
+      const created = await client.createBvnkCustomer(ctx, {
+        externalReference: expectedExternalReference,
+        signedAgreementSessionReference: session.reference,
+        individual,
+      });
+      customer = createdBvnkCustomerResolution(expectedExternalReference, created);
+    } else {
+      const company = buildBvnkCompanyPayload(counterparty, params.collectedData);
+      const agreements = await client.createBvnkAgreements(ctx, {
+        reference: expectedExternalReference,
+        useCase: BVNK_V2_USE_CASE,
+        customerType: "COMPANY",
+        countryCode,
+      });
+      await client.acceptBvnkAgreements(ctx, {
+        reference: expectedExternalReference,
+        agreementIds: agreements.agreements.map((agreement) => agreement.id),
+      });
+      const created = await client.createBvnkCompanyCustomer(ctx, {
+        reference: expectedExternalReference,
+        useCase: BVNK_V2_USE_CASE,
+        company,
+      });
+      customer = createdBvnkCustomerResolution(expectedExternalReference, created, "v2");
+    }
     await repo.upsertBvnkCustomerProviderData({
       counterpartyId: counterparty.id,
       organizationId: counterparty.organization_id,
@@ -397,7 +436,10 @@ export async function ensureBvnkCustomer(
   }
 
   if (customer.customerReference && !isBvnkCustomerVerified(customer.status)) {
-    const latest = await client.getBvnkCustomer(ctx, { reference: customer.customerReference });
+    const latest =
+      customer.apiVersion === "v2"
+        ? await client.getBvnkCustomerV2(ctx, { id: customer.customerReference })
+        : await client.getBvnkCustomer(ctx, { reference: customer.customerReference });
     customer = {
       ...customer,
       status: latest.status,
