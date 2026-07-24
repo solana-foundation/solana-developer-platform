@@ -1,15 +1,15 @@
 import { auth } from "@clerk/nextjs/server";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
+import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
-import { isAssetProfilesUiEnabled } from "@/lib/asset-profiles-feature";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import { IssuanceDraftWizard } from "./issuance-draft-wizard";
 
 export default async function CreateAssetPage() {
-  if (!isAssetProfilesUiEnabled()) {
+  if (!(await assetProfiles())) {
     notFound();
   }
 
