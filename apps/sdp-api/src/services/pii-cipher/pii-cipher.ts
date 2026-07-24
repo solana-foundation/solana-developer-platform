@@ -195,7 +195,17 @@ export class LocalPiiCipher implements PiiCipher {
 }
 
 export function createPiiCipher(env: Env): PiiCipher {
-  if (getDeploymentMode(env) === "managed") {
+  const isManaged = getDeploymentMode(env) === "managed";
+  const isCloudRun = Boolean(env.K_SERVICE || env.CLOUD_RUN_JOB);
+  const hasLocalKey = Boolean(env.COUNTERPARTY_PII_ENCRYPTION_KEY);
+
+  // Local test/development processes retain managed product semantics while
+  // using the separate local PII key. A managed Cloud Run service or job must
+  // always use KMS, even if a local key is accidentally injected.
+  const useManagedKms =
+    isManaged && (isCloudRun || Boolean(env.COUNTERPARTY_PII_KMS_KEY_NAME) || !hasLocalKey);
+
+  if (useManagedKms) {
     if (!env.COUNTERPARTY_PII_KMS_KEY_NAME) {
       throw new PiiCipherError("COUNTERPARTY_PII_KMS_KEY_NAME is required for managed deployments");
     }

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Env } from "@/types/env";
 import {
+  createPiiCipher,
   KmsPiiCipher,
   LocalPiiCipher,
   type PiiCipherContext,
@@ -119,5 +121,35 @@ describe("LocalPiiCipher", () => {
     await expect(
       cipher.decrypt({ ...context, resourceId: "counterparty_2" }, encrypted)
     ).rejects.toThrow(/authentication/i);
+  });
+});
+
+describe("createPiiCipher", () => {
+  const localKey = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
+  const baseEnv = {
+    ENVIRONMENT: "development",
+    API_VERSION: "test",
+  } as Env;
+
+  it("uses the separate local key for a local managed-mode process", () => {
+    expect(
+      createPiiCipher({
+        ...baseEnv,
+        COUNTERPARTY_PII_ENCRYPTION_KEY: localKey,
+      })
+    ).toBeInstanceOf(LocalPiiCipher);
+  });
+
+  it.each([
+    { K_SERVICE: "sdp-api" },
+    { CLOUD_RUN_JOB: "sdp-dev-counterparty-pii-migrate" },
+  ])("requires KMS for a managed Cloud Run runtime", (runtime) => {
+    expect(() =>
+      createPiiCipher({
+        ...baseEnv,
+        ...runtime,
+        COUNTERPARTY_PII_ENCRYPTION_KEY: localKey,
+      })
+    ).toThrow(/COUNTERPARTY_PII_KMS_KEY_NAME/);
   });
 });

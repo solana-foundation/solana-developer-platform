@@ -17,9 +17,10 @@ export interface Env {
   // Environment variables
   ENVIRONMENT: "development" | "production";
   API_VERSION: string;
-  // Injected automatically by Cloud Run services. Local processes and jobs omit them.
+  // Injected automatically by Cloud Run services and jobs.
   K_SERVICE?: string;
   K_REVISION?: string;
+  CLOUD_RUN_JOB?: string;
 
   // Public-facing origin of this API (e.g. "https://api.example.com"). When set,
   // it overrides the request-derived origin used to build the SDP-hosted token
