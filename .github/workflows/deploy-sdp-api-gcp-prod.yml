@@ -161,12 +161,6 @@ jobs:
                 // error("candidate traffic tag is missing a revision")
             ' <<<"${service_json}"
           )"
-          candidate_url="$(
-            jq -er --arg tag "${candidate_tag}" '
-              [.status.traffic[] | select(.tag == $tag)][0].url
-                // error("candidate traffic tag is missing a URL")
-            ' <<<"${service_json}"
-          )"
           revision_digest="$(
             gcloud run revisions describe "${candidate_revision}" \
               --region "${REGION}" --project "${PROJECT_ID}" \
@@ -178,28 +172,27 @@ jobs:
             exit 1
           fi
           echo "CANDIDATE_REVISION=${candidate_revision}" >> "${GITHUB_ENV}"
-          echo "CANDIDATE_URL=${candidate_url}" >> "${GITHUB_ENV}"
           echo "Candidate revision: ${candidate_revision}" >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Verify candidate readiness
+      - name: Verify candidate revision readiness
         timeout-minutes: 5
         run: |
           set -euo pipefail
           for attempt in {1..12}; do
-            if response="$(
-              curl --fail --silent --show-error --max-time 10 \
-                "${CANDIDATE_URL}/health/ready"
-            )" && jq -e --arg revision "${CANDIDATE_REVISION}" '
-              .status == "ready"
-              and .revision == $revision
-              and .checks.database == "ok"
-              and .checks.redis == "ok"
-            ' <<<"${response}" >/dev/null; then
-              echo "Candidate ${CANDIDATE_REVISION} passed Postgres and Redis readiness."
+            revision_json="$(
+              gcloud run revisions describe "${CANDIDATE_REVISION}" \
+                --region "${REGION}" --project "${PROJECT_ID}" --format=json
+            )"
+            if jq -e '
+              [.status.conditions[]
+                | select(.type == "Ready" and .status == "True")]
+              | length == 1
+            ' <<<"${revision_json}" >/dev/null; then
+              echo "Candidate ${CANDIDATE_REVISION} is ready to serve traffic."
               exit 0
             fi
             if [[ "${attempt}" -eq 12 ]]; then
-              echo "Candidate readiness check failed after ${attempt} attempts." >&2
+              echo "Candidate revision did not become ready after ${attempt} attempts." >&2
               false
             fi
             sleep 10

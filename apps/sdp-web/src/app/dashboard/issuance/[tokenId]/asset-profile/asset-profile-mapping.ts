@@ -58,7 +58,9 @@ export interface UpdateAssetProfileActionInput {
     description: string | null;
     uri: string | null;
     imageUrl: string | null;
-    // Only sent while the token is undeployed (the API rejects it after deploy).
+    // Only sent while the token is undeployed (the API rejects these after deploy).
+    symbol?: string;
+    decimals?: number;
     requiresAllowlist?: boolean;
   };
 }

@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
 import { togglePublicField } from "../../create/draft-mapping";
 import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
 import { TokenAuthorityModal } from "../token-authority-modal";
@@ -18,6 +19,7 @@ import { TokenManagementModalShell } from "../token-management-modal-shell";
 import { TokenSignerSelect } from "../token-signer-select";
 import { AssetProfileHeader } from "./asset-profile-header";
 import { AssetProfileSaveBar } from "./asset-profile-save-bar";
+import { ActivityTab } from "./tabs/activity-tab";
 import { ComplianceTab } from "./tabs/compliance-tab";
 import { DetailsTab } from "./tabs/details-tab";
 import { OperationsTab } from "./tabs/operations-tab";
@@ -34,7 +36,8 @@ type AssetManagementTab =
   | "public-info"
   | "compliance"
   | "operations"
-  | "permissions";
+  | "permissions"
+  | "activity";
 
 const managementTabIds: AssetManagementTab[] = [
   "overview",
@@ -43,6 +46,7 @@ const managementTabIds: AssetManagementTab[] = [
   "compliance",
   "operations",
   "permissions",
+  "activity",
 ];
 
 // Deep links minted for the legacy workspace keep working.
@@ -84,12 +88,21 @@ export function AssetManagementWorkspace({
   const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
   const canManageTokenAdmin = dashboardAccess.capabilities.canManageTokenAdmin;
+  // Admins get the full compliance tab (policy editor + controls). Non-admins
+  // see it only for tokens that have a control list, and then only the allowlist
+  // controls — the policy editor stays admin-only (also enforced server-side).
+  const showControlList = hasAccessControlList(getTokenAccessControlMode(token));
+  const canViewComplianceTab = canManageTokenAdmin || showControlList;
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const requestedTabParam = searchParams.get("tab");
-  const activeTab = resolveTab(requestedTabParam);
+  const requestedTab = resolveTab(requestedTabParam);
+  // A direct ?tab=compliance deep link falls back to the overview when the tab
+  // isn't available to this user.
+  const activeTab: AssetManagementTab =
+    requestedTab === "compliance" && !canViewComplianceTab ? "overview" : requestedTab;
   const [pendingFundManagementModalAction, setPendingFundManagementModalAction] = useState<
     "deploy" | "mint" | "burn" | null
   >(null);
@@ -97,7 +110,9 @@ export function AssetManagementWorkspace({
   const ops = useTokenOperations({
     token,
     shouldLoadSupportingData: activeTab !== "overview",
-    shouldLoadAuthorityWallets: activeTab !== "overview" || token.status === "pending",
+    // Authority wallets are also needed on the overview for the SDP-controlled
+    // authorities tile (custody-vs-external roll-up), so load them everywhere.
+    shouldLoadAuthorityWallets: true,
     canManageTokenAdmin,
   });
   const form = useAssetProfileForm({ token, assetProfile });
@@ -105,9 +120,13 @@ export function AssetManagementWorkspace({
     { id: "overview", label: t("DashboardIssuance.tabs.overview") },
     { id: "details", label: t("DashboardIssuance.tabs.details") },
     { id: "public-info", label: t("DashboardIssuance.tabs.publicInformation") },
-    { id: "compliance", label: t("DashboardIssuance.tabs.compliance") },
+    // Full tab for admins; allowlist-only for non-admins on control-list tokens.
+    ...(canViewComplianceTab
+      ? [{ id: "compliance" as const, label: t("DashboardIssuance.tabs.compliance") }]
+      : []),
     { id: "operations", label: t("DashboardIssuance.tabs.operations") },
     { id: "permissions", label: t("DashboardIssuance.tabs.permissions") },
+    { id: "activity", label: t("DashboardIssuance.tabs.activity") },
   ];
 
   const syncActiveTabInUrl = useCallback(
@@ -182,6 +201,8 @@ export function AssetManagementWorkspace({
   const effectivePauseDisabledReason = ops.effectivePauseDisabledReason;
 
   return (
+    // Width + centering come from the dashboard shell's action-page layout;
+    // the workspace just fills the column it's given.
     <div className="space-y-4 pb-8">
       <AssetProfileHeader
         token={token}
@@ -258,7 +279,8 @@ export function AssetManagementWorkspace({
             assetProfile={form.assetProfile}
             draft={form.draft}
             ops={ops}
-            onDeploy={handleDeploy}
+            onViewActivity={() => syncActiveTabInUrl("activity")}
+            onViewPermissions={() => syncActiveTabInUrl("permissions")}
           />
         ) : null}
         {activeTab === "details" ? <DetailsTab token={token} form={form} ops={ops} /> : null}
@@ -287,6 +309,7 @@ export function AssetManagementWorkspace({
         {activeTab === "permissions" ? (
           <PermissionsTab ops={ops} canManageTokenAdmin={canManageTokenAdmin} />
         ) : null}
+        {activeTab === "activity" ? <ActivityTab tokenId={token.id} /> : null}
       </motion.div>
 
       <AssetProfileSaveBar

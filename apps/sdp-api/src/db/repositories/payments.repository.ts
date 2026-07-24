@@ -104,6 +104,7 @@ export interface UpdatePaymentTransferInput {
   transferId: string;
   organizationId?: string;
   projectId?: string | null;
+  expectedStatus?: PaymentTransferStatus;
   status?: PaymentTransferStatus;
   signature?: string | null;
   serializedTx?: string | null;
@@ -216,6 +217,11 @@ export interface PaymentsRepository {
     organizationId: string;
     projectId: string | null;
   }): Promise<PaymentTransferRow | null>;
+  listTransfersByIds(params: {
+    transferIds: string[];
+    organizationId: string;
+    projectId: string | null;
+  }): Promise<PaymentTransferRow[]>;
   getTransferByProviderReference(
     params: GetTransferByProviderReferenceInput
   ): Promise<PaymentTransferRow | null>;

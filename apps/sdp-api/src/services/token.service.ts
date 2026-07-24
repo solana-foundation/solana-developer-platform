@@ -37,7 +37,6 @@ export interface CreateTokenInput {
   description?: string;
   uri?: string;
   imageUrl?: string;
-  /** Token template */
   template?: TokenTemplate;
   extensions?: TokenExtensionsConfig;
   maxSupply?: string;
@@ -48,6 +47,10 @@ export interface CreateTokenInput {
 
 export interface UpdateTokenInput {
   name?: string;
+  /** Only accepted while the token is undeployed (enforced by the route handler). */
+  symbol?: string;
+  /** Only accepted while the token is undeployed (enforced by the route handler). */
+  decimals?: number;
   description?: string | null;
   uri?: string | null;
   imageUrl?: string | null;
@@ -570,6 +573,16 @@ export class TokenService {
       values.push(input.name);
     }
 
+    if (input.symbol !== undefined) {
+      updates.push("symbol = ?");
+      values.push(input.symbol);
+    }
+
+    if (input.decimals !== undefined) {
+      updates.push("decimals = ?");
+      values.push(input.decimals);
+    }
+
     if (input.description !== undefined) {
       updates.push("description = ?");
       values.push(input.description);
@@ -608,10 +621,34 @@ export class TokenService {
     values.push(now);
     values.push(tokenId);
 
-    await this.db
-      .prepare(`UPDATE issued_tokens SET ${updates.join(", ")} WHERE id = ?`)
+    // symbol/decimals/requiresAllowlist are only mutable pre-deploy. The route
+    // handler enforces that from a read of `existing`, but a concurrent
+    // `deployToken` can flip status/mint_address between that read and this
+    // write. Re-assert the pending/undeployed condition inside the UPDATE
+    // itself (optimistic lock) so the race loses the write — matching 0 rows —
+    // instead of silently mutating a mint that's already in flight on-chain.
+    const requiresUndeployedGuard =
+      input.symbol !== undefined ||
+      input.decimals !== undefined ||
+      input.requiresAllowlist !== undefined;
+
+    const whereClause = requiresUndeployedGuard
+      ? "WHERE id = ? AND status = 'pending' AND mint_address IS NULL"
+      : "WHERE id = ?";
+
+    const rowsAffected = await this.db
+      .prepare(`UPDATE issued_tokens SET ${updates.join(", ")} ${whereClause}`)
       .bind(...values)
       .run();
+
+    // The row existed at the top-of-method read, so a guarded 0-row result means
+    // it was deployed during the window — surface a 409 rather than a 404.
+    if (requiresUndeployedGuard && rowsAffected === 0) {
+      throw new AppError(
+        "CONFLICT",
+        "Token was deployed while this update was in flight; re-fetch and retry"
+      );
+    }
 
     const updated = await this._getTokenById(tokenId);
     if (!updated) {
@@ -696,6 +733,59 @@ export class TokenService {
     }
 
     return updated;
+  }
+
+  /**
+   * Atomically claim a pending token for deployment, flipping it to the
+   * transient `deploying` state and returning the now-frozen snapshot.
+   *
+   * This closes the window the `updateToken` undeployed guard alone can't: a
+   * deploy reads a pending token, then spends seconds creating the on-chain mint
+   * from that snapshot, and only afterwards records `active` + the mint address.
+   * Throughout that gap the row is still `pending`/no-mint, so a concurrent
+   * identity PATCH (symbol/decimals/requiresAllowlist) would pass the guard and
+   * mutate the row — permanently diverging the DB identity from the immutable
+   * mint. Once claimed, the row is no longer `pending`, so both the route- and
+   * service-level PATCH guards reject those edits for the whole mint window.
+   *
+   * Guarded on `pending`/no-mint so exactly one caller wins; returns null if the
+   * token wasn't claimable (already deploying, deployed, or gone). `deploying`
+   * is internal and transient — never surfaced long-term: it advances to
+   * `active` via {@link setTokenDeployed} or back to `pending` via
+   * {@link releaseTokenDeploy}.
+   */
+  async beginTokenDeploy(tokenId: string): Promise<Token | null> {
+    const now = new Date().toISOString();
+    const rowsAffected = await this.db
+      .prepare(
+        `UPDATE issued_tokens SET status = 'deploying', updated_at = ?
+         WHERE id = ? AND status = 'pending' AND mint_address IS NULL`
+      )
+      .bind(now, tokenId)
+      .run();
+
+    if (rowsAffected === 0) {
+      return null;
+    }
+
+    return this._getTokenById(tokenId);
+  }
+
+  /**
+   * Release a `deploying` claim back to `pending` when a deploy fails before the
+   * mint lands on-chain, so the draft stays editable and redeployable. Guarded
+   * on `deploying`/no-mint, so it's a no-op once the mint is recorded (status
+   * `active`) — safe to call unconditionally from a deploy catch block.
+   */
+  async releaseTokenDeploy(tokenId: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this.db
+      .prepare(
+        `UPDATE issued_tokens SET status = 'pending', updated_at = ?
+         WHERE id = ? AND status = 'deploying' AND mint_address IS NULL`
+      )
+      .bind(now, tokenId)
+      .run();
   }
 
   /**
@@ -1184,18 +1274,23 @@ export class TokenService {
           publicKeys.length > 0
             ? config.publicKeyFields.map(
                 (key) =>
-                  `tx.operation_params::jsonb ->> '${key}' IN (${publicKeys.map(() => "?").join(", ")})`
+                  // operation_params is TEXT; a malformed row would abort the whole
+                  // scan on the ::jsonb cast, so guard it with pg_input_is_valid
+                  // (PG16+) inside a CASE (WHERE AND is not short-circuited).
+                  `CASE WHEN pg_input_is_valid(tx.operation_params, 'jsonb') THEN tx.operation_params::jsonb ->> '${key}' IN (${publicKeys.map(() => "?").join(", ")}) ELSE false END`
               )
             : [];
         const tokenAccountConditions =
           tokenAccounts.length > 0
             ? config.tokenAccountFields.map(
-                (key) => `EXISTS (
+                // Same guard as above: the CASE keeps the ::jsonb cast (inside the
+                // EXISTS) from running on a malformed operation_params row.
+                (key) => `CASE WHEN pg_input_is_valid(tx.operation_params, 'jsonb') THEN EXISTS (
                   SELECT 1
                   FROM wallet_token_accounts wta
                   WHERE wta.token_id = tx.token_id
                     AND wta.token_account = (tx.operation_params::jsonb ->> '${key}')
-                )`
+                ) ELSE false END`
               )
             : [];
         const matchConditions = [...publicKeyConditions, ...tokenAccountConditions];

@@ -5361,6 +5361,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `GET` | `/v1/issuance/tokens/{tokenId}/allowlist` | List token allowlist |
 | `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | Add token allowlist entry |
 | `DELETE` | `/v1/issuance/tokens/{tokenId}/allowlist/{entryId}` | Remove token allowlist entry |
+| `GET` | `/v1/issuance/tokens/{tokenId}/audit` | Get asset audit history |
 | `POST` | `/v1/issuance/tokens/{tokenId}/authority` | Execute authority update |
 | `POST` | `/v1/issuance/tokens/{tokenId}/authority/prepare` | Prepare authority update |
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Execute burn |

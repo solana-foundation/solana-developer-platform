@@ -1,4 +1,31 @@
-import type { PaymentTransferBatchRecipientStatus, PaymentTransferBatchStatus } from "@sdp/types";
+import type {
+  PaymentTransferBatchRecipientStatus,
+  PaymentTransferBatchStatus,
+  PaymentTransferStatus,
+} from "@sdp/types";
+
+/**
+ * Rolls member statuses (chunk transfers or recipient rows) up into the parent
+ * batch status. Any in-flight member keeps the batch processing; otherwise the
+ * batch is confirmed, failed, or partially_failed by how many members settled.
+ *
+ * @param statuses - Statuses of every member of the batch.
+ * @returns The batch status implied by its members.
+ */
+export function deriveTransferBatchStatus(
+  statuses: ReadonlyArray<PaymentTransferStatus | PaymentTransferBatchRecipientStatus>
+): PaymentTransferBatchStatus {
+  if (statuses.some((status) => status === "pending" || status === "processing")) {
+    return "processing";
+  }
+  const settled = statuses.filter(
+    (status) => status === "confirmed" || status === "finalized"
+  ).length;
+  if (settled === statuses.length) {
+    return "confirmed";
+  }
+  return settled === 0 ? "failed" : "partially_failed";
+}
 
 export function generatePaymentTransferBatchId(): string {
   return `xbatch_${crypto.randomUUID()}`;
@@ -187,6 +214,22 @@ export interface UpdatePaymentTransferRecipientsStatusInput {
   error: string | null;
 }
 
+export interface SettlePaymentTransferBatchInput {
+  transferId: string;
+  organizationId: string;
+  projectId: string;
+  transferStatus: "confirmed" | "finalized" | "failed";
+  error: string | null;
+  slot: number | null;
+  updatedAt: string;
+}
+
+export interface RecomputeTransferBatchStatusInput {
+  batchId: string;
+  organizationId: string;
+  projectId: string;
+}
+
 export interface PaymentTransferBatchesRepository {
   createTransferBatchWithRecipients(
     input: CreatePaymentTransferBatchWithRecipientsInput
@@ -231,4 +274,28 @@ export interface PaymentTransferBatchesRepository {
   listTransferRecipientsByBatch(
     input: ListPaymentTransferRecipientsInput
   ): Promise<ListPaymentTransferRecipientsResult>;
+  /**
+   * Atomically settles a terminal chunk transfer: updates its recipient rows
+   * to the matching terminal status and recomputes the parent batch status
+   * from all recipients, in one transaction. Concurrent settlements of the
+   * same batch are serialized on the batch row lock so the recompute never
+   * reads a sibling's uncommitted recipient statuses.
+   *
+   * @param input.transferId - Chunk transfer that reached a terminal status.
+   * @param input.transferStatus - Terminal status the transfer reached.
+   * @param input.error - Failure detail applied to failed recipients.
+   */
+  settleTransferBatch(input: SettlePaymentTransferBatchInput): Promise<void>;
+  /**
+   * Recomputes and writes a batch's status from its recipient rows under the
+   * batch row lock. The only sanctioned way to write a batch status after
+   * creation — every writer (chunk submission, reconciliation) goes through
+   * this protocol so none can overwrite a terminal status from a stale read.
+   *
+   * @param input.batchId - Batch to recompute.
+   * @returns The batch row after the recompute.
+   */
+  recomputeTransferBatchStatus(
+    input: RecomputeTransferBatchStatusInput
+  ): Promise<PaymentTransferBatchRow>;
 }

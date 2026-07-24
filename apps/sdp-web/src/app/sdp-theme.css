@@ -95,6 +95,11 @@
   --color-destructive-strongest: var(--crimson-strongest);
   --color-destructive-bg: var(--crimson-bg);
   --color-destructive-border: var(--crimson-brd);
+
+  /* Project-wide default for transition/transition-colors/transition-all
+     utilities that don't set an explicit duration-* (Tailwind's built-in
+     default is 150ms). DS components with hardcoded durations are unaffected. */
+  --default-transition-duration: 250ms;
 }
 
 /* Point design-system runtime tokens at SDP's product palette. */
@@ -150,18 +155,21 @@
   --border-l: rgba(252, 252, 250, 0.12);
   --border-m: rgba(252, 252, 250, 0.2);
 
-  /* Contrast-verified dark status palette from @solana/design-system. */
+  /* Dark status palette from @solana/design-system (text/border contrast-verified).
+     The *-bg fills are lifted from the DS default (L~0.21) to L~0.27 (amber a touch
+     higher at 0.28) so the tinted panels sit just above the page surface and read
+     calmer against the bright text. */
   --green-tx: oklch(0.78 0.1 155);
-  --green-bg: oklch(0.21 0.03 155);
+  --green-bg: oklch(0.27 0.04 155);
   --green-brd: oklch(0.42 0.08 155);
   --amber-tx: oklch(0.8 0.11 85);
-  --amber-bg: oklch(0.22 0.035 85);
+  --amber-bg: oklch(0.28 0.045 85);
   --amber-brd: oklch(0.46 0.09 85);
   --red-tx: oklch(0.8 0.12 25);
-  --red-bg: oklch(0.21 0.04 25);
+  --red-bg: oklch(0.27 0.05 25);
   --red-brd: oklch(0.45 0.1 25);
   --blue-tx: oklch(0.79 0.1 250);
-  --blue-bg: oklch(0.21 0.035 250);
+  --blue-bg: oklch(0.27 0.045 250);
   --blue-brd: oklch(0.43 0.08 250);
 
   --crimson: oklch(0.72 0.16 25);

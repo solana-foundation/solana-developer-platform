@@ -35,6 +35,7 @@ export const TEST_PROJECT_CACHED_KEY: CachedApiKey = {
   signingWalletId: null,
   status: "active",
   expiresAt: null,
+  rotationDeadline: null,
 };
 
 export const TEST_TOKEN: Token = {

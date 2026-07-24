@@ -24,6 +24,7 @@ export const TEST_CACHED_API_KEY: CachedApiKey = {
   signingWalletId: null,
   status: "active",
   expiresAt: null,
+  rotationDeadline: null,
 };
 
 export const TEST_REVOKED_KEY: CachedApiKey = {
