@@ -25,6 +25,30 @@ describe("OpenAPI spec", () => {
     expect(refreshPath?.operationId).toBe("refreshTokenSupply");
   });
 
+  it("documents allowlist search/label filters and the labels endpoint", () => {
+    const doc = createOpenApiDocument();
+
+    const listPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/allowlist"]?.get;
+    const queryParamNames = listPath?.parameters
+      ?.filter((parameter) => "in" in parameter && parameter.in === "query")
+      .map((parameter) => ("name" in parameter ? parameter.name : undefined));
+    expect(queryParamNames).toEqual(expect.arrayContaining(["search", "label"]));
+
+    const labelsPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/allowlist/labels"]?.get;
+    expect(labelsPath).toBeDefined();
+    expect(labelsPath?.operationId).toBe("listTokenAllowlistLabels");
+  });
+
+  it("documents the transaction type filter", () => {
+    const doc = createOpenApiDocument();
+
+    const listPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/transactions"]?.get;
+    const queryParamNames = listPath?.parameters
+      ?.filter((parameter) => "in" in parameter && parameter.in === "query")
+      .map((parameter) => ("name" in parameter ? parameter.name : undefined));
+    expect(queryParamNames).toEqual(expect.arrayContaining(["type", "status", "page", "pageSize"]));
+  });
+
   it("documents the wallet metadata fast path and balance-on default", () => {
     const doc = createOpenApiDocument();
     const operation = doc.paths?.["/v1/wallets/{walletId}"]?.get;

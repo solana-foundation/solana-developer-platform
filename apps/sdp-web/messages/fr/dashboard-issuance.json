@@ -9,7 +9,14 @@
       "status": "Statut",
       "signature": "Signature",
       "created": "Créé",
-      "showing": "Affichage des {count} premières transactions{total}. Utilisez la pagination pour voir les anciennes."
+      "showing": "Affichage des {count} premières transactions{total}. Utilisez la pagination pour voir les anciennes.",
+      "loadError": "Impossible de charger les transactions.",
+      "noMatches": "Aucune transaction ne correspond à ces filtres.",
+      "loadMore": "Afficher plus",
+      "filterByType": "Filtrer par type",
+      "filterAllTypes": "Tous les types",
+      "filterByStatus": "Filtrer par statut",
+      "filterAllStatuses": "Tous les statuts"
     },
     "errors": {
       "unknown": "Erreur inconnue",
@@ -74,7 +81,11 @@
       "searchPlaceholder": "Rechercher dans {label}…",
       "allLabels": "Tous les libellés",
       "noMatches": "Aucune entrée ne correspond à votre recherche.",
-      "filterByLabel": "Filtrer par libellé"
+      "filterByLabel": "Filtrer par libellé",
+      "loading": "Chargement des entrées…",
+      "loadError": "Impossible de charger les entrées.",
+      "loadMore": "Afficher plus",
+      "showingCount": "Affichage de {shown} sur {total}"
     },
     "wallet": {
       "none": "Aucun",
@@ -1019,6 +1030,7 @@
       "unfreezeAccount": "Unfreeze compte",
       "listFrozenAccounts": "Lister les comptes Freeze",
       "listAllowlist": "Lister l'Allowlist",
+      "listAllowlistLabels": "Lister les libellés de l'Allowlist",
       "addAllowlistEntry": "Ajouter une entrée Allowlist",
       "removeAllowlistEntry": "Supprimer une entrée Allowlist",
       "tokenIdPlaceholder": "ID Token (ex. tok_abc123)",

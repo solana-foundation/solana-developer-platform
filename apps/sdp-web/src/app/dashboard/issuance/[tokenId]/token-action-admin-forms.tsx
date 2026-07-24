@@ -6,6 +6,7 @@ import {
   HandCoins,
   Inbox,
   Info,
+  Loader2,
   Pause,
   Play,
   Plus,
@@ -21,13 +22,16 @@ import {
   type ReactNode,
   type SetStateAction,
   useId,
-  useMemo,
   useState,
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
+import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { useDebounce } from "@/lib/use-debounce";
+import { fetchTokenAllowlistLabels, fetchTokenAllowlistPage } from "./asset-profile/allowlist.data";
+import { TOKEN_ALLOWLIST_KEY, TOKEN_ALLOWLIST_LABELS_KEY } from "./asset-profile/allowlist-cache";
 import { TokenActionCard } from "./token-action-card";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import type {
@@ -63,6 +67,11 @@ interface TokenActionAdminFormsProps {
   setFreezeForm: Dispatch<SetStateAction<FreezeFormState>>;
   allowlistForm: AllowlistFormState;
   setAllowlistForm: Dispatch<SetStateAction<AllowlistFormState>>;
+  tokenId: string;
+  // Server-driven search + label filter + paging (asset-profile compliance tab).
+  // When false, the control list renders as a static, unsearchable list from
+  // `allowlistEntries` — the legacy workspace's original behavior.
+  enableControlListSearch?: boolean;
   allowlistEntries: TokenAllowlistEntry[];
   allowlistError: string | null;
   controlListLabel: string | null;
@@ -107,6 +116,8 @@ export function TokenActionAdminForms({
   setFreezeForm,
   allowlistForm,
   setAllowlistForm,
+  tokenId,
+  enableControlListSearch = false,
   allowlistEntries,
   allowlistError,
   controlListLabel,
@@ -614,20 +625,48 @@ export function TokenActionAdminForms({
               </Button>
             </div>
 
-            {allowlistError ? (
+            {enableControlListSearch ? (
+              <ControlListEntries
+                tokenId={tokenId}
+                emptyState={controlListEmptyState}
+                searchPlaceholder={t("DashboardIssuance.controlLists.searchPlaceholder", {
+                  label: controlListLabel,
+                })}
+                removeIcon={icon.removeEntry}
+                isPending={isPending}
+                onRemove={onRemoveAllowlist}
+              />
+            ) : allowlistError ? (
               <TokenValidationMessage message={allowlistError} reserveSpace={false} />
-            ) : null}
-
-            <ControlListEntries
-              entries={allowlistEntries}
-              emptyState={controlListEmptyState}
-              searchPlaceholder={t("DashboardIssuance.controlLists.searchPlaceholder", {
-                label: controlListLabel,
-              })}
-              removeIcon={icon.removeEntry}
-              isPending={isPending}
-              onRemove={onRemoveAllowlist}
-            />
+            ) : allowlistEntries.length === 0 ? (
+              <p className="text-sm text-secondary">{controlListEmptyState}</p>
+            ) : (
+              <div className="space-y-2">
+                {allowlistEntries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-border-default px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-xs text-primary">{entry.address}</p>
+                      <p className="text-xs text-secondary">
+                        {entry.label ?? t("DashboardIssuance.forms.noLabel")}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      iconLeft={icon.removeEntry}
+                      onClick={() => onRemoveAllowlist(entry.id)}
+                      disabled={isPending}
+                    >
+                      {t("DashboardIssuance.forms.removeEntry")}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </form>
         </TokenActionCard>
       ) : null}
@@ -635,17 +674,22 @@ export function TokenActionAdminForms({
   );
 }
 
-// Search + label-filter + list for a control list; filtering is client-side over
-// the loaded entries.
+// One "Load more" step; also the initial page size for the control list.
+const CONTROL_LIST_PAGE_STEP = 25;
+const ALL_LABELS = "all";
+
+// Server-driven search + label-filter + paged list for a control list. Search
+// (address/label contains) and the label filter run against the whole list on
+// the API, so results aren't capped by what's loaded in the browser.
 function ControlListEntries({
-  entries,
+  tokenId,
   emptyState,
   searchPlaceholder,
   removeIcon,
   isPending,
   onRemove,
 }: {
-  entries: TokenAllowlistEntry[];
+  tokenId: string;
   emptyState: string;
   searchPlaceholder: string;
   removeIcon: ReactNode;
@@ -654,34 +698,49 @@ function ControlListEntries({
 }) {
   const t = useTranslations();
   const [query, setQuery] = useState("");
-  const [labelFilter, setLabelFilter] = useState("all");
+  const [labelFilter, setLabelFilter] = useState(ALL_LABELS);
+  const [pageSize, setPageSize] = useState(CONTROL_LIST_PAGE_STEP);
+  const debouncedQuery = useDebounce(query.trim(), 300);
 
-  // Distinct labels on the loaded entries feed the "All labels" dropdown.
-  const labels = useMemo(() => {
-    const seen = new Set<string>();
-    for (const entry of entries) {
-      if (entry.label) {
-        seen.add(entry.label);
-      }
+  // Distinct labels for the whole control list, fetched server-side so the
+  // filter covers every entry rather than just the loaded page. Same SWR key
+  // use-token-operations uses for the summary count, so the fetch is deduped.
+  const { data: labelsData } = usePersistedDashboardSWR(
+    [TOKEN_ALLOWLIST_LABELS_KEY, tokenId] as const,
+    ([, id]: readonly [string, string]) => fetchTokenAllowlistLabels(id),
+    { revalidateOnFocus: true, revalidateIfStale: true },
+    { key: `token.${tokenId}.allowlist-labels`, ttlMs: 30_000 }
+  );
+  const labels = labelsData?.labels ?? [];
+
+  // Fall back to "all" if the selected label vanished (its last entry removed).
+  const activeLabel =
+    labelFilter !== ALL_LABELS && labels.includes(labelFilter) ? labelFilter : ALL_LABELS;
+
+  const { data, error, isLoading } = usePersistedDashboardSWR(
+    [TOKEN_ALLOWLIST_KEY, tokenId, debouncedQuery || ALL_LABELS, activeLabel, pageSize] as const,
+    ([, id, search, label, size]) =>
+      fetchTokenAllowlistPage(id, {
+        page: 1,
+        pageSize: Number(size),
+        search: search === ALL_LABELS ? null : search,
+        label: label === ALL_LABELS ? null : label,
+      }),
+    { revalidateOnFocus: true, revalidateIfStale: true, keepPreviousData: true },
+    {
+      key: `token.${tokenId}.allowlist.${debouncedQuery || ALL_LABELS}.${activeLabel}.${pageSize}`,
+      ttlMs: 30_000,
     }
-    return Array.from(seen).sort((a, b) => a.localeCompare(b));
-  }, [entries]);
+  );
 
-  // Fall back to "all" if the selected label vanished (its last entry was removed).
-  const activeLabel = labelFilter !== "all" && labels.includes(labelFilter) ? labelFilter : "all";
-
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return entries.filter((entry) => {
-      if (activeLabel !== "all" && entry.label !== activeLabel) {
-        return false;
-      }
-      if (!needle) {
-        return true;
-      }
-      return `${entry.address} ${entry.label ?? ""}`.toLowerCase().includes(needle);
-    });
-  }, [entries, query, activeLabel]);
+  const entries = data?.entries ?? [];
+  const total = data?.total ?? 0;
+  const hasFilter = debouncedQuery.length > 0 || activeLabel !== ALL_LABELS;
+  const errorMessage = error
+    ? error instanceof Error
+      ? error.message
+      : t("DashboardIssuance.controlLists.loadError")
+    : null;
 
   return (
     <div className="space-y-3 border-t border-border-subtle pt-4">
@@ -689,17 +748,25 @@ function ControlListEntries({
         <Input
           className="min-w-0 flex-1"
           value={query}
-          onChange={(event) => setQuery(event.currentTarget.value)}
+          onChange={(event) => {
+            setQuery(event.currentTarget.value);
+            setPageSize(CONTROL_LIST_PAGE_STEP);
+          }}
           placeholder={searchPlaceholder}
           iconLeft={<Search />}
         />
         <Select
           className="w-44 shrink-0"
           value={activeLabel}
-          onValueChange={(value) => setLabelFilter(value ?? "all")}
+          onValueChange={(value) => {
+            setLabelFilter(value ?? ALL_LABELS);
+            setPageSize(CONTROL_LIST_PAGE_STEP);
+          }}
           ariaLabel={t("DashboardIssuance.controlLists.filterByLabel")}
         >
-          <SelectItem value="all">{t("DashboardIssuance.controlLists.allLabels")}</SelectItem>
+          <SelectItem value={ALL_LABELS}>
+            {t("DashboardIssuance.controlLists.allLabels")}
+          </SelectItem>
           {labels.map((label) => (
             <SelectItem key={label} value={label}>
               {label}
@@ -708,9 +775,16 @@ function ControlListEntries({
         </Select>
       </div>
 
-      {filtered.length > 0 ? (
+      {isLoading && entries.length === 0 ? (
+        <div className="flex items-center justify-center gap-2 py-8 text-sm text-secondary">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>{t("DashboardIssuance.controlLists.loading")}</span>
+        </div>
+      ) : errorMessage ? (
+        <p className="py-8 text-center text-sm text-error">{errorMessage}</p>
+      ) : entries.length > 0 ? (
         <div className="space-y-2">
-          {filtered.map((entry) => (
+          {entries.map((entry) => (
             <div
               key={entry.id}
               className="flex items-center justify-between gap-2 rounded-lg border border-border-default px-3 py-2"
@@ -733,12 +807,31 @@ function ControlListEntries({
               </Button>
             </div>
           ))}
+          {data?.hasMore ? (
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <span className="text-xs text-tertiary">
+                {t("DashboardIssuance.controlLists.showingCount", {
+                  shown: entries.length,
+                  total,
+                })}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isLoading}
+                onClick={() => setPageSize((size) => size + CONTROL_LIST_PAGE_STEP)}
+              >
+                {t("DashboardIssuance.controlLists.loadMore")}
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="flex flex-col items-center gap-2 py-8 text-center">
           <Inbox className="h-6 w-6 text-tertiary" />
           <p className="text-sm text-secondary">
-            {entries.length === 0 ? emptyState : t("DashboardIssuance.controlLists.noMatches")}
+            {hasFilter ? t("DashboardIssuance.controlLists.noMatches") : emptyState}
           </p>
         </div>
       )}

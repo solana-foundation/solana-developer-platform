@@ -3,6 +3,7 @@
 import type { PaymentsDashboardWallet, Token } from "@sdp/types";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useSWRConfig } from "swr";
 import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
@@ -49,11 +50,15 @@ import {
   resolveAuthorityAddressForRole,
 } from "../token-management-workspace.utils";
 import { useTokenActionRunner } from "../use-token-action-runner";
+import { fetchTokenAllowlistLabels } from "./allowlist.data";
+import { isTokenAllowlistKey, TOKEN_ALLOWLIST_LABELS_KEY } from "./allowlist-cache";
+import { isTokenTransactionsKey } from "./transactions-cache";
 
 // Same cache keys and TTLs as the old TokenManagementWorkspace, so the two UIs
 // share warm caches for a given token.
 const TOKEN_AUTHORITY_WALLETS_CACHE_TTL_MS = 60_000;
 const TOKEN_SUPPORTING_DATA_CACHE_TTL_MS = 60_000;
+const TOKEN_ALLOWLIST_LABELS_CACHE_TTL_MS = 30_000;
 
 const EMPTY_SUPPORTING_DATA: TokenManagementSupportingData = {
   authorityWallets: [],
@@ -123,6 +128,7 @@ export function useTokenOperations({
   canManageTokenAdmin: boolean;
 }) {
   const t = useTranslations();
+  const { mutate: globalMutate } = useSWRConfig();
   const {
     isPending,
     actionConfirmation,
@@ -176,7 +182,14 @@ export function useTokenOperations({
     mutate: mutateSupportingData,
   } = usePersistedDashboardSWR(
     shouldLoadSupportingData ? ["token-management-supporting-data", token.id] : null,
-    ([, tokenId]: readonly [string, string]) => fetchTokenManagementSupportingData(tokenId, t),
+    // Skip the allowlist and transactions here — the control list is owned by
+    // ControlListEntries (paged/search), transactions by TokenTransactionsBrowser
+    // (paged/filtered), and the allowlist count comes from the labels endpoint below.
+    ([, tokenId]: readonly [string, string]) =>
+      fetchTokenManagementSupportingData(tokenId, t, {
+        includeAllowlist: false,
+        includeTransactions: false,
+      }),
     {
       refreshInterval: 60_000,
       revalidateOnFocus: true,
@@ -187,6 +200,17 @@ export function useTokenOperations({
       ttlMs: TOKEN_SUPPORTING_DATA_CACHE_TTL_MS,
     }
   );
+
+  // Distinct labels + unfiltered entry count for the control list. Same SWR key
+  // ControlListEntries uses, so its dropdown fetch is deduped; here it feeds the
+  // compliance tab's summary count without touching supporting-data.
+  const { data: allowlistLabelsData, error: allowlistLabelsRequestError } =
+    usePersistedDashboardSWR(
+      showControlList ? [TOKEN_ALLOWLIST_LABELS_KEY, token.id] : null,
+      ([, tokenId]: readonly [string, string]) => fetchTokenAllowlistLabels(tokenId),
+      { revalidateOnFocus: true, revalidateIfStale: true },
+      { key: `token.${token.id}.allowlist-labels`, ttlMs: TOKEN_ALLOWLIST_LABELS_CACHE_TTL_MS }
+    );
 
   const supportingDataError = supportingDataRequestError
     ? supportingDataRequestError instanceof Error
@@ -211,6 +235,13 @@ export function useTokenOperations({
     if (shouldLoadSupportingData) {
       await mutateSupportingData();
     }
+    // The control-list search/labels fetch lives inside ControlListEntries with
+    // its own SWR keys; refresh every cached page + labels facet for this token
+    // so add/remove is reflected there and in the count.
+    await globalMutate((key) => isTokenAllowlistKey(key, token.id));
+    // TokenTransactionsBrowser owns its own paged/filtered SWR keys; refresh them
+    // so a mint/burn/etc. shows up in the transactions list right away.
+    await globalMutate((key) => isTokenTransactionsKey(key, token.id));
   };
   const runAction = (input: ActionExecutionInput, options: RunActionOptions = {}) =>
     runActionBase(input, {
@@ -242,10 +273,17 @@ export function useTokenOperations({
   const transactionsError = supportingDataError ?? resolvedSupportingData.transactionsError;
   const transactionsTotal = resolvedSupportingData.transactionsTotal;
   const transactionsHasMore = resolvedSupportingData.transactionsHasMore;
+  // The control list is served by ControlListEntries (paged/search); asset-profile
+  // no longer pulls entries through supporting-data. Count + error come from the
+  // labels fetch above.
   const allowlistEntries = resolvedSupportingData.allowlistEntries;
-  const allowlistError = supportingDataError ?? resolvedSupportingData.allowlistError;
-  const allowlistTotal = resolvedSupportingData.allowlistTotal;
-  const allowlistHasMore = resolvedSupportingData.allowlistHasMore;
+  const allowlistError = allowlistLabelsRequestError
+    ? allowlistLabelsRequestError instanceof Error
+      ? allowlistLabelsRequestError.message
+      : t("DashboardIssuance.management.unableToLoadData")
+    : null;
+  const allowlistTotal = allowlistLabelsData?.total ?? null;
+  const allowlistHasMore = false;
   const frozenAccounts = resolvedSupportingData.frozenAccounts;
   const frozenAccountsError = supportingDataError ?? resolvedSupportingData.frozenAccountsError;
   const frozenAccountsTotal = resolvedSupportingData.frozenAccountsTotal;
@@ -833,42 +871,15 @@ export function useTokenOperations({
       toast.error(allowlistDisabledReason);
       return;
     }
-    runAction(
-      {
-        label:
-          controlListCopy?.removeActionLabel ??
-          t("DashboardIssuance.management.removeAllowlistEntry"),
-        method: "DELETE",
-        path: `${tokenBasePath}/allowlist/${entryId}`,
-      },
-      {
-        onSuccess: async () => {
-          await mutateSupportingData(
-            (current) => {
-              if (!current) {
-                return current;
-              }
-
-              const nextAllowlistEntries = current.allowlistEntries.filter(
-                (entry) => entry.id !== entryId
-              );
-              const removedCount = current.allowlistEntries.length - nextAllowlistEntries.length;
-              const nextAllowlistTotal =
-                current.allowlistTotal === null
-                  ? null
-                  : Math.max(0, current.allowlistTotal - removedCount);
-
-              return {
-                ...current,
-                allowlistEntries: nextAllowlistEntries,
-                allowlistTotal: nextAllowlistTotal,
-              };
-            },
-            { revalidate: false }
-          );
-        },
-      }
-    );
+    // The list + labels/count refresh via the allowlist SWR keys in
+    // revalidateAfterSuccess, so no local optimistic update is needed here.
+    runAction({
+      label:
+        controlListCopy?.removeActionLabel ??
+        t("DashboardIssuance.management.removeAllowlistEntry"),
+      method: "DELETE",
+      path: `${tokenBasePath}/allowlist/${entryId}`,
+    });
   };
 
   const handleAuthorityModalOpen = (row: PermissionRow) => {

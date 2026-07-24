@@ -2,6 +2,7 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { LayoutGrid, List, Plus, Search, Settings2 } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
@@ -71,6 +72,12 @@ interface IssuanceWorkspaceProps {
 // localStorage key for the grid ⇄ list view toggle.
 const VIEW_STORAGE_KEY = "sdp.issuance.tokenView";
 
+// Grid ⇄ list cross-fade. Matches the workspace tab-shell transition so the two
+// views dissolve into each other rather than hard-swapping. `mode="wait"` lets
+// the outgoing layout leave before the (differently-sized) incoming one mounts,
+// avoiding a stacked-height jump mid-animation.
+const viewTransition = { duration: 0.18, ease: "easeOut" } as const;
+
 export function IssuanceWorkspace({
   assetProfilesEnabled,
   tokens,
@@ -93,6 +100,7 @@ export function IssuanceWorkspace({
 
   // Grid ⇄ list view (persisted).
   const [view, setView] = useState<TokenView>("grid");
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     try {
@@ -450,139 +458,151 @@ export function IssuanceWorkspace({
             </p>
           ) : null}
 
-          {view === "list" ? (
-            <IssuanceTokenList tokens={filteredTokens} onCreate={startTokenCreation} />
-          ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {filteredTokens.map((token) => {
-                const deploymentStatus = getDeploymentStatus(token);
-                const chips = getTokenChips(token, t);
-                return (
-                  <article
-                    key={token.id}
-                    data-testid={`token-card-${token.id}`}
-                    className="relative flex min-h-[240px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 transition-colors hover:border-primary/40"
-                  >
-                    {/* Full-bleed overlay link makes the whole tile navigate; the
-                        kebab sits above it (z-10) so its menu stays clickable. */}
-                    <Link
-                      href={`/dashboard/issuance/${token.id}`}
-                      aria-label={t("DashboardIssuance.workspace.manageAsset", {
-                        name: token.name,
-                      })}
-                      className="absolute inset-0 z-0 cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)] focus-visible:ring-inset"
-                    />
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full border border-border-default bg-fill-subtle">
-                          {token.imageUrl ? (
-                            // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
-                            <img
-                              src={token.imageUrl}
-                              alt={t("DashboardIssuance.workspace.tokenLogo", { name: token.name })}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-tertiary">
-                              {token.symbol.slice(0, 1) || "?"}
-                            </div>
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium tracking-wide text-tertiary">
-                            {token.symbol}
-                          </p>
-                          <h3 className="mt-0.5 truncate text-lg font-medium leading-tight text-primary">
-                            {token.name}
-                          </h3>
-                        </div>
-                      </div>
-                      <span
-                        data-testid={`token-card-status-${token.id}`}
-                        className={[
-                          "inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium capitalize",
-                          deploymentStatus === "active"
-                            ? "bg-success-bg text-success"
-                            : "bg-fill text-secondary",
-                        ].join(" ")}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={view}
+              initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
+              transition={viewTransition}
+            >
+              {view === "list" ? (
+                <IssuanceTokenList tokens={filteredTokens} onCreate={startTokenCreation} />
+              ) : (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {filteredTokens.map((token) => {
+                    const deploymentStatus = getDeploymentStatus(token);
+                    const chips = getTokenChips(token, t);
+                    return (
+                      <article
+                        key={token.id}
+                        data-testid={`token-card-${token.id}`}
+                        className="relative flex min-h-[240px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 transition-colors hover:border-primary/40"
                       >
-                        {deploymentStatus === "active"
-                          ? t("DashboardIssuance.workspace.active")
-                          : t("DashboardIssuance.workspace.draft")}
-                      </span>
-                    </div>
-
-                    {chips.length > 0 ? (
-                      <div className="mt-4 flex flex-wrap items-center gap-2">
-                        {chips.map((chip) => {
-                          const Icon = chip.icon;
-                          return (
-                            <span
-                              key={chip.label}
-                              className="inline-flex max-w-full items-center gap-1 rounded-full border border-border-subtle bg-fill-subtle px-2 py-0.5 text-xs text-secondary"
-                            >
-                              {Icon ? (
-                                <Icon
-                                  className="h-3.5 w-3.5 shrink-0 text-tertiary"
-                                  aria-hidden="true"
+                        {/* Full-bleed overlay link makes the whole tile navigate; the
+                        kebab sits above it (z-10) so its menu stays clickable. */}
+                        <Link
+                          href={`/dashboard/issuance/${token.id}`}
+                          aria-label={t("DashboardIssuance.workspace.manageAsset", {
+                            name: token.name,
+                          })}
+                          className="absolute inset-0 z-0 cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)] focus-visible:ring-inset"
+                        />
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full border border-border-default bg-fill-subtle">
+                              {token.imageUrl ? (
+                                // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
+                                <img
+                                  src={token.imageUrl}
+                                  alt={t("DashboardIssuance.workspace.tokenLogo", {
+                                    name: token.name,
+                                  })}
+                                  className="h-full w-full object-cover"
                                 />
-                              ) : null}
-                              <span className="truncate">{chip.label}</span>
-                            </span>
-                          );
-                        })}
-                      </div>
-                    ) : null}
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-tertiary">
+                                  {token.symbol.slice(0, 1) || "?"}
+                                </div>
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium tracking-wide text-tertiary">
+                                {token.symbol}
+                              </p>
+                              <h3 className="mt-0.5 truncate text-lg font-medium leading-tight text-primary">
+                                {token.name}
+                              </h3>
+                            </div>
+                          </div>
+                          <span
+                            data-testid={`token-card-status-${token.id}`}
+                            className={[
+                              "inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium capitalize",
+                              deploymentStatus === "active"
+                                ? "bg-success-bg text-success"
+                                : "bg-fill text-secondary",
+                            ].join(" ")}
+                          >
+                            {deploymentStatus === "active"
+                              ? t("DashboardIssuance.workspace.active")
+                              : t("DashboardIssuance.workspace.draft")}
+                          </span>
+                        </div>
 
-                    <div className="mt-6 grid grid-cols-2 gap-4">
-                      <div className="min-w-0">
-                        <p className="text-xs text-tertiary">
-                          {t("DashboardIssuance.workspace.supply")}
-                        </p>
-                        <p className="mt-0.5 truncate text-sm font-normal text-primary">
-                          {formatSupply(token.totalSupply, locale)}
-                        </p>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs text-tertiary">
-                          {t("DashboardIssuance.list.decimals")}
-                        </p>
-                        <p className="mt-0.5 truncate text-sm font-normal text-primary">
-                          {token.decimals}
-                        </p>
-                      </div>
-                    </div>
+                        {chips.length > 0 ? (
+                          <div className="mt-4 flex flex-wrap items-center gap-2">
+                            {chips.map((chip) => {
+                              const Icon = chip.icon;
+                              return (
+                                <span
+                                  key={chip.label}
+                                  className="inline-flex max-w-full items-center gap-1 rounded-full border border-border-subtle bg-fill-subtle px-2 py-0.5 text-xs text-secondary"
+                                >
+                                  {Icon ? (
+                                    <Icon
+                                      className="h-3.5 w-3.5 shrink-0 text-tertiary"
+                                      aria-hidden="true"
+                                    />
+                                  ) : null}
+                                  <span className="truncate">{chip.label}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : null}
 
-                    <div className="mt-auto flex items-end justify-between pt-4">
-                      <div className="min-w-0">
-                        <p className="text-xs text-tertiary">
-                          {t("DashboardIssuance.workspace.created")}
-                        </p>
-                        <p className="mt-0.5 truncate text-sm font-normal text-primary">
-                          {formatDate(token.createdAt, locale)}
-                        </p>
-                      </div>
-                      <div className="relative z-10">
-                        <ManageKebab token={token} icon={Settings2} triggerVariant="outline" />
-                      </div>
-                    </div>
-                  </article>
-                );
-              })}
+                        <div className="mt-6 grid grid-cols-2 gap-4">
+                          <div className="min-w-0">
+                            <p className="text-xs text-tertiary">
+                              {t("DashboardIssuance.workspace.supply")}
+                            </p>
+                            <p className="mt-0.5 truncate text-sm font-normal text-primary">
+                              {formatSupply(token.totalSupply, locale)}
+                            </p>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs text-tertiary">
+                              {t("DashboardIssuance.list.decimals")}
+                            </p>
+                            <p className="mt-0.5 truncate text-sm font-normal text-primary">
+                              {token.decimals}
+                            </p>
+                          </div>
+                        </div>
 
-              <button
-                type="button"
-                onClick={startTokenCreation}
-                data-testid="token-add-card"
-                className="flex min-h-[240px] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary"
-              >
-                <Plus className="h-6 w-6" />
-                <span className="text-sm font-medium">
-                  {t("DashboardIssuance.workspace.addNewToken")}
-                </span>
-              </button>
-            </div>
-          )}
+                        <div className="mt-auto flex items-end justify-between pt-4">
+                          <div className="min-w-0">
+                            <p className="text-xs text-tertiary">
+                              {t("DashboardIssuance.workspace.created")}
+                            </p>
+                            <p className="mt-0.5 truncate text-sm font-normal text-primary">
+                              {formatDate(token.createdAt, locale)}
+                            </p>
+                          </div>
+                          <div className="relative z-10">
+                            <ManageKebab token={token} icon={Settings2} triggerVariant="outline" />
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+
+                  <button
+                    type="button"
+                    onClick={startTokenCreation}
+                    data-testid="token-add-card"
+                    className="flex min-h-[240px] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary"
+                  >
+                    <Plus className="h-6 w-6" />
+                    <span className="text-sm font-medium">
+                      {t("DashboardIssuance.workspace.addNewToken")}
+                    </span>
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </AnimatePresence>
         </>
       }
       playground={playgroundContent}
