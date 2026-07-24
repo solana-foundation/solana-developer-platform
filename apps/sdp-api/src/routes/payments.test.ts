@@ -5608,6 +5608,7 @@ describe("Payments routes", () => {
           fiatCurrency: "USD",
           fiatAmount: "120.50",
           redirectUrl: "https://example.com/onramp-done",
+          metadata: { invoice: "INV-123", po: "PO-9" },
         }),
       },
       env
@@ -5642,6 +5643,73 @@ describe("Payments routes", () => {
     expect(hostedUrl.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("moonpay_user_123");
     expect(hostedUrl.searchParams.get("externalTransactionId")).toBe(body.data.quote.id);
     assertMoonPaySignature(hostedUrl);
+
+    const transfersRes = await app.request(
+      `/v1/payments/transfers?provider=moonpay&providerReference=${body.data.quote.id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+    expect(transfersRes.status).toBe(200);
+    const transfersBody = (await transfersRes.json()) as {
+      data: [{ id: string; metadata: Record<string, string> }];
+    };
+    expect(transfersBody.data).toHaveLength(1);
+    expect(transfersBody.data[0].metadata).toEqual({ invoice: "INV-123", po: "PO-9" });
+
+    const transferRes = await app.request(
+      `/v1/payments/transfers/${transfersBody.data[0].id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+    expect(transferRes.status).toBe(200);
+    const transferBody = (await transferRes.json()) as {
+      data: { transfer: { metadata: Record<string, string> } };
+    };
+    expect(transferBody.data.transfer.metadata).toEqual({ invoice: "INV-123", po: "PO-9" });
+  });
+
+  it("rejects ramp quote metadata with more than 20 fields", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "moonpay_metadata_limit" });
+    const metadata = Object.fromEntries(
+      Array.from({ length: 21 }, (_, index) => [`key_${index}`, `value_${index}`])
+    );
+
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "SOL",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+          metadata,
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { details: { errors: { metadata: string[] } } };
+    };
+    expect(body.error.details.errors.metadata).toContain(
+      "metadata must contain at most 20 key-value pairs"
+    );
   });
 
   it("rejects quotes for corridors the support matrix does not list the provider on", async () => {
@@ -5748,6 +5816,7 @@ describe("Payments routes", () => {
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
+          metadata: { invoice: "INV-123", po: "PO-9" },
         }),
       },
       env
@@ -5801,6 +5870,21 @@ describe("Payments routes", () => {
     expect(channelPayload.displayCurrency).toBe("USD");
     expect(channelPayload.customerId).toBe("customer_456");
     expect(channelPayload.complianceDetails.partyDetails).toHaveLength(1);
+
+    const transfersRes = await app.request(
+      `/v1/payments/transfers?provider=bvnk&providerReference=${body.data.quote.id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+    expect(transfersRes.status).toBe(200);
+    const transfersBody = (await transfersRes.json()) as {
+      data: [{ metadata: Record<string, string> }];
+    };
+    expect(transfersBody.data[0].metadata).toEqual({ invoice: "INV-123", po: "PO-9" });
     fetchSpy.mockRestore();
   });
 

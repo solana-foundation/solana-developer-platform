@@ -69,6 +69,7 @@ export async function createPendingBvnkOfframpTransfer(
     cryptoToken: string;
     cryptoAmount: string;
     fiatCurrency: RampFiatCurrency;
+    metadata: Record<string, string> | undefined;
   }
 ): Promise<PaymentTransferRow> {
   const apiKey = c.get("apiKey");
@@ -90,6 +91,7 @@ export async function createPendingBvnkOfframpTransfer(
     deliveryMode: null,
     fiatCurrency: input.fiatCurrency,
     fiatAmount: null,
+    metadata: input.metadata,
     providerData: {},
     serializedTx: null,
     signature: null,

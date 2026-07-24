@@ -22,6 +22,7 @@ function transferRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransf
     delivery_mode: "session_widget",
     fiat_currency: "USD",
     fiat_amount: null,
+    metadata: {},
     provider_data: {},
     signature: null,
     serialized_tx: null,

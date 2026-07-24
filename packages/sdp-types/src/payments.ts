@@ -198,6 +198,7 @@ export interface PaymentTransferSummary {
   token?: string;
   amount?: string;
   memo?: string;
+  metadata: Record<string, string>;
   provider?: RampProviderId;
   counterpartyId?: string;
   counterpartyDisplayName?: string;
@@ -855,6 +856,35 @@ export interface PaymentRampEstimateEnvelope {
   error?: {
     message?: string;
   };
+}
+
+export const TRANSFER_METADATA_LIMITS = {
+  maxEntries: 20,
+  maxKeyLength: 64,
+  maxValueLength: 256,
+} as const satisfies Record<string, number>;
+
+export interface PaymentOnrampQuoteRequest {
+  provider: RampProviderId;
+  counterpartyId: string;
+  destinationWallet: string;
+  cryptoToken: string;
+  fiatCurrency: RampFiatCurrency;
+  fiatAmount: string;
+  redirectUrl?: string;
+  domain?: string;
+  metadata?: Record<string, string>;
+}
+
+export interface PaymentOfframpQuoteRequest {
+  provider: RampProviderId;
+  counterpartyId: string;
+  sourceWallet: string;
+  cryptoToken: string;
+  fiatCurrency?: RampFiatCurrency;
+  cryptoAmount: string;
+  redirectUrl?: string;
+  metadata?: Record<string, string>;
 }
 
 export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted" | "session_widget";

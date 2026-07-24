@@ -733,6 +733,10 @@ export const transferSchema = z
       .max(256)
       .optional()
       .openapi({ description: "Optional memo for the transfer." }),
+    metadata: z.record(z.string(), z.string()).openapi({
+      description: "Free-form key-value metadata for offchain reconciliation.",
+      example: { invoice: "INV-123", po: "PO-9" },
+    }),
     token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema.optional(),
     provider: z.enum(RAMP_PROVIDERS).optional().openapi({
@@ -1685,6 +1689,10 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
     redirectUrl: withOpenApi(createOnrampQuoteSchemaBase.shape.redirectUrl, {
       description: "Optional return URL after hosted provider flow completes.",
       example: "https://example.com/onramp/complete",
+    }),
+    metadata: withOpenApi(createOnrampQuoteSchemaBase.shape.metadata, {
+      description: "Optional key-value metadata stored on the resulting transfer.",
+      example: { invoice: "INV-123", po: "PO-9" },
     }),
   })
   .openapi({
