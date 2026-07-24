@@ -1,12 +1,18 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
+import {
+  acquireCounterpartyPiiWriteLock,
+  getCounterpartyPiiMigrationPhase,
+} from "@/db/repositories/counterparty-pii.repository";
+import type { PiiCipher } from "@/services/pii-cipher/pii-cipher";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import {
   backfillAccounts,
   backfillCounterparties,
+  cutoverCounterpartyPii,
   purgeCounterpartyPii,
   restoreCounterpartyPiiPlaintext,
   verifyCounterpartyPii,
@@ -127,13 +133,7 @@ describe("counterparty PII migration lifecycle", () => {
     expect(encrypted?.bvnk_customer_reference).toBe("bvnk-customer-1");
     expect(encrypted?.mural_organization_id).toBe("mural-org-1");
 
-    await db
-      .prepare(
-        `UPDATE counterparty_pii_migration_state
-            SET phase = 'encrypted_only',
-                fallback_read_count = 0`
-      )
-      .run();
+    await cutoverCounterpartyPii(db, cipher);
     await expect(purgeCounterpartyPii(db, cipher)).resolves.toBeUndefined();
 
     const purged = await db
@@ -216,5 +216,104 @@ describe("counterparty PII migration lifecycle", () => {
       providerA: { status: "ready" },
       providerB: { status: "active" },
     });
+  });
+
+  it("waits for an in-flight live-write lock before committing cutover", async () => {
+    const db = getDb(env);
+    const cipher = env.counterpartyPiiCipher;
+    await backfillCounterparties(db, cipher);
+    await backfillAccounts(db, cipher);
+
+    let releaseWrite: () => void = () => {};
+    const writeMayFinish = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let writeLocked: () => void = () => {};
+    const writeHasLock = new Promise<void>((resolve) => {
+      writeLocked = resolve;
+    });
+    const liveWrite = db.transaction(async (tx) => {
+      await acquireCounterpartyPiiWriteLock(tx);
+      writeLocked();
+      await writeMayFinish;
+    });
+    await writeHasLock;
+
+    let cutoverFinished = false;
+    const cutover = cutoverCounterpartyPii(db, cipher).then(() => {
+      cutoverFinished = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(cutoverFinished).toBe(false);
+
+    releaseWrite();
+    await Promise.all([liveWrite, cutover]);
+    await expect(getCounterpartyPiiMigrationPhase(db)).resolves.toBe("encrypted_only");
+  });
+
+  it("blocks live updates until emergency plaintext restoration is complete", async () => {
+    const db = getDb(env);
+    const cipher = env.counterpartyPiiCipher;
+    await backfillCounterparties(db, cipher);
+    await backfillAccounts(db, cipher);
+    await cutoverCounterpartyPii(db, cipher);
+    await purgeCounterpartyPii(db, cipher);
+
+    let allowDecrypt: () => void = () => {};
+    const decryptMayFinish = new Promise<void>((resolve) => {
+      allowDecrypt = resolve;
+    });
+    let decryptStarted: () => void = () => {};
+    const restoreHasLock = new Promise<void>((resolve) => {
+      decryptStarted = resolve;
+    });
+    let firstDecrypt = true;
+    const blockingCipher: PiiCipher = {
+      encrypt: (context, plaintext) => cipher.encrypt(context, plaintext),
+      async decrypt(context, ciphertext) {
+        if (firstDecrypt) {
+          firstDecrypt = false;
+          decryptStarted();
+          await decryptMayFinish;
+        }
+        return cipher.decrypt(context, ciphertext);
+      },
+    };
+
+    process.argv.push("--confirm-security-regression");
+    try {
+      const restore = restoreCounterpartyPiiPlaintext(db, blockingCipher);
+      await restoreHasLock;
+
+      const repo = createPostgresCounterpartiesRepository(db, cipher);
+      let updateFinished = false;
+      const update = repo
+        .updateCounterparty({
+          counterpartyId: COUNTERPARTY_ID,
+          organizationId: TEST_ORG.id,
+          projectId: PROJECT_ID,
+          email: "updated-after-restore@example.com",
+        })
+        .then(() => {
+          updateFinished = true;
+        });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(updateFinished).toBe(false);
+
+      allowDecrypt();
+      await Promise.all([restore, update]);
+    } finally {
+      const confirmationIndex = process.argv.indexOf("--confirm-security-regression");
+      if (confirmationIndex >= 0) {
+        process.argv.splice(confirmationIndex, 1);
+      }
+    }
+
+    await expect(getCounterpartyPiiMigrationPhase(db)).resolves.toBe("dual_write");
+    const legacy = await db
+      .prepare("SELECT email FROM counterparties WHERE id = ?")
+      .bind(COUNTERPARTY_ID)
+      .first<{ email: string | null }>();
+    expect(legacy?.email).toBe("updated-after-restore@example.com");
   });
 });

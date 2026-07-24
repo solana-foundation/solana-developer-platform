@@ -20,6 +20,7 @@ import type {
 } from "./counterparty.repository";
 import { generateCounterpartyId } from "./counterparty.repository";
 import {
+  acquireCounterpartyPiiWriteLock,
   getCounterpartyPiiMigrationPhase,
   providerLookupReferences,
   recordCounterpartyPiiFallbackRead,
@@ -186,9 +187,9 @@ async function updateProviderData(
   db: DatabaseExecutor,
   cipher: PiiCipher,
   current: CounterpartyRow,
-  providerData: CounterpartyProviderData
+  providerData: CounterpartyProviderData,
+  phase: "dual_write" | "encrypted_only"
 ): Promise<void> {
-  const phase = await getCounterpartyPiiMigrationPhase(db);
   const providerDataEncrypted = await cipher.encrypt(
     piiContext({
       organizationId: current.organization_id,
@@ -225,6 +226,8 @@ async function mutateProviderDataLocked(
   params: MutateCounterpartyProviderDataInput
 ): Promise<CounterpartyRow | null> {
   return db.transaction(async (tx) => {
+    await acquireCounterpartyPiiWriteLock(tx);
+    const phase = await getCounterpartyPiiMigrationPhase(tx);
     const row = await tx
       .prepare(
         `SELECT * FROM counterparties
@@ -240,7 +243,7 @@ async function mutateProviderDataLocked(
       return null;
     }
     const current = await mapCounterpartyRow(tx, cipher, row);
-    await updateProviderData(tx, cipher, current, params.mutate(current.provider_data));
+    await updateProviderData(tx, cipher, current, params.mutate(current.provider_data), phase);
     return getCounterpartyByIdInternal(tx, cipher, params);
   });
 }
@@ -261,35 +264,38 @@ export function createPostgresCounterpartiesRepository(
         identity: input.identity,
         providerData,
       });
-      const phase = await getCounterpartyPiiMigrationPhase(db);
       const refs = providerLookupReferences(providerData);
 
-      await db
-        .prepare(
-          `INSERT INTO counterparties (
-             id, organization_id, project_id, external_id, entity_type,
-             display_name, email, identity, provider_data, pii_encrypted,
-             provider_data_encrypted, bvnk_customer_reference,
-             mural_organization_id, status, created_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
-        )
-        .bind(
-          id,
-          input.organizationId,
-          input.projectId,
-          input.externalId,
-          input.entityType,
-          input.displayName,
-          phase === "dual_write" ? input.email : null,
-          phase === "dual_write" ? input.identity : null,
-          phase === "dual_write" ? providerData : null,
-          encrypted.piiEncrypted,
-          encrypted.providerDataEncrypted,
-          refs.bvnkCustomerReference,
-          refs.muralOrganizationId,
-          input.createdBy
-        )
-        .run();
+      await db.transaction(async (tx) => {
+        await acquireCounterpartyPiiWriteLock(tx);
+        const phase = await getCounterpartyPiiMigrationPhase(tx);
+        await tx
+          .prepare(
+            `INSERT INTO counterparties (
+               id, organization_id, project_id, external_id, entity_type,
+               display_name, email, identity, provider_data, pii_encrypted,
+               provider_data_encrypted, bvnk_customer_reference,
+               mural_organization_id, status, created_by
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+          )
+          .bind(
+            id,
+            input.organizationId,
+            input.projectId,
+            input.externalId,
+            input.entityType,
+            input.displayName,
+            phase === "dual_write" ? input.email : null,
+            phase === "dual_write" ? input.identity : null,
+            phase === "dual_write" ? providerData : null,
+            encrypted.piiEncrypted,
+            encrypted.providerDataEncrypted,
+            refs.bvnkCustomerReference,
+            refs.muralOrganizationId,
+            input.createdBy
+          )
+          .run();
+      });
 
       return getCounterpartyByIdInternal(db, cipher, {
         counterpartyId: id,
@@ -300,6 +306,8 @@ export function createPostgresCounterpartiesRepository(
 
     async updateCounterparty(input: UpdateCounterpartyInput) {
       return db.transaction(async (tx) => {
+        await acquireCounterpartyPiiWriteLock(tx);
+        const phase = await getCounterpartyPiiMigrationPhase(tx);
         const row = await tx
           .prepare(
             `SELECT * FROM counterparties
@@ -326,7 +334,6 @@ export function createPostgresCounterpartiesRepository(
           identity,
           providerData,
         });
-        const phase = await getCounterpartyPiiMigrationPhase(tx);
         const refs = providerLookupReferences(providerData);
 
         await tx
@@ -494,6 +501,8 @@ export function createPostgresCounterpartiesRepository(
 
     async patchMuralOrganizationById(params) {
       await db.transaction(async (tx) => {
+        await acquireCounterpartyPiiWriteLock(tx);
+        const phase = await getCounterpartyPiiMigrationPhase(tx);
         const row = await tx
           .prepare(
             `SELECT * FROM counterparties
@@ -522,13 +531,19 @@ export function createPostgresCounterpartiesRepository(
           mural.organization && typeof mural.organization === "object"
             ? (mural.organization as Record<string, unknown>)
             : {};
-        await updateProviderData(tx, cipher, current, {
-          ...current.provider_data,
-          mural: {
-            ...mural,
-            organization: { ...organization, ...params.organization },
+        await updateProviderData(
+          tx,
+          cipher,
+          current,
+          {
+            ...current.provider_data,
+            mural: {
+              ...mural,
+              organization: { ...organization, ...params.organization },
+            },
           },
-        });
+          phase
+        );
       });
     },
 

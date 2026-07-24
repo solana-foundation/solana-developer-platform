@@ -5,6 +5,17 @@ export const COUNTERPARTY_PII_MIGRATION_ID = "counterparty-pii-v1";
 
 export type CounterpartyPiiMigrationPhase = "dual_write" | "encrypted_only";
 
+export async function acquireCounterpartyPiiWriteLock(db: DatabaseExecutor): Promise<void> {
+  await db.execute("SELECT pg_advisory_xact_lock_shared(hashtext(?))", [
+    COUNTERPARTY_PII_MIGRATION_ID,
+  ]);
+}
+
+export async function acquireCounterpartyPiiLifecycleLock(db: DatabaseExecutor): Promise<void> {
+  // biome-ignore lint/security/noSecrets: PostgreSQL advisory-lock function, not a credential.
+  await db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", [COUNTERPARTY_PII_MIGRATION_ID]);
+}
+
 export async function getCounterpartyPiiMigrationPhase(
   db: DatabaseExecutor
 ): Promise<CounterpartyPiiMigrationPhase> {

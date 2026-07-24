@@ -17,6 +17,7 @@ import type {
 } from "./counterparty-account.repository";
 import { generateCounterpartyAccountId } from "./counterparty-account.repository";
 import {
+  acquireCounterpartyPiiWriteLock,
   cryptoAccountLookup,
   getCounterpartyPiiMigrationPhase,
   recordCounterpartyPiiFallbackRead,
@@ -161,31 +162,34 @@ export function createPostgresCounterpartyAccountsRepository(
         details,
         providerAccountData,
       });
-      const phase = await getCounterpartyPiiMigrationPhase(db);
       const lookup = cryptoAccountLookup(details);
 
-      await db
-        .prepare(
-          `INSERT INTO counterparty_accounts (
-             id, organization_id, project_id, counterparty_id, account_kind,
-             label, details, provider_account_data, sensitive_data_encrypted,
-             network, address
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          id,
-          input.organizationId,
-          input.projectId,
-          input.counterpartyId,
-          input.accountKind,
-          phase === "dual_write" ? label : null,
-          phase === "dual_write" ? details : null,
-          phase === "dual_write" ? providerAccountData : null,
-          encrypted,
-          lookup.network,
-          lookup.address
-        )
-        .run();
+      await db.transaction(async (tx) => {
+        await acquireCounterpartyPiiWriteLock(tx);
+        const phase = await getCounterpartyPiiMigrationPhase(tx);
+        await tx
+          .prepare(
+            `INSERT INTO counterparty_accounts (
+               id, organization_id, project_id, counterparty_id, account_kind,
+               label, details, provider_account_data, sensitive_data_encrypted,
+               network, address
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .bind(
+            id,
+            input.organizationId,
+            input.projectId,
+            input.counterpartyId,
+            input.accountKind,
+            phase === "dual_write" ? label : null,
+            phase === "dual_write" ? details : null,
+            phase === "dual_write" ? providerAccountData : null,
+            encrypted,
+            lookup.network,
+            lookup.address
+          )
+          .run();
+      });
 
       return getCounterpartyAccountByIdInternal(db, cipher, {
         counterpartyAccountId: id,
@@ -196,6 +200,8 @@ export function createPostgresCounterpartyAccountsRepository(
 
     async updateCounterpartyAccount(input: UpdateCounterpartyAccountInput) {
       return db.transaction(async (tx) => {
+        await acquireCounterpartyPiiWriteLock(tx);
+        const phase = await getCounterpartyPiiMigrationPhase(tx);
         const row = await tx
           .prepare(
             `SELECT * FROM counterparty_accounts
@@ -228,7 +234,6 @@ export function createPostgresCounterpartyAccountsRepository(
           details,
           providerAccountData,
         });
-        const phase = await getCounterpartyPiiMigrationPhase(tx);
         const lookup = cryptoAccountLookup(details);
 
         await tx

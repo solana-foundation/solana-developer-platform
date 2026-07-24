@@ -5,8 +5,9 @@ import type {
   CounterpartyIdentity,
   CounterpartyProviderData,
 } from "@sdp/types";
-import { closeDatabasePools, type DatabaseExecutor, getDb } from "../src/db";
+import { type AppDb, closeDatabasePools, type DatabaseExecutor, getDb } from "../src/db";
 import {
+  acquireCounterpartyPiiLifecycleLock,
   COUNTERPARTY_PII_MIGRATION_ID,
   cryptoAccountLookup,
   providerLookupReferences,
@@ -343,166 +344,187 @@ export async function verifyCounterpartyPii(
   );
 }
 
-export async function purgeCounterpartyPii(db: DatabaseExecutor, cipher: PiiCipher): Promise<void> {
-  await verifyCounterpartyPii(db, cipher);
-  const state = await db.queryOne<{ phase: string; fallback_read_count: number }>(
-    `SELECT phase, fallback_read_count
-       FROM counterparty_pii_migration_state
-      WHERE id = ?`,
-    [COUNTERPARTY_PII_MIGRATION_ID]
-  );
-  if (state?.phase !== "encrypted_only") {
-    throw new Error("Counterparty PII must be cut over before purge");
-  }
-  if (state.fallback_read_count !== 0) {
-    throw new Error("Counterparty PII fallback reads occurred after cutover");
-  }
-
-  let counterparties = 0;
-  while (true) {
-    const purged = await db.execute(
-      `UPDATE counterparties
-          SET email = NULL, identity = NULL, provider_data = NULL
-        WHERE id IN (
-          SELECT id
-            FROM counterparties
-           WHERE email IS NOT NULL OR identity IS NOT NULL OR provider_data IS NOT NULL
-           ORDER BY id
-           LIMIT ${BATCH_SIZE}
-        )`
+export async function cutoverCounterpartyPii(db: AppDb, cipher: PiiCipher): Promise<void> {
+  await db.transaction(async (tx) => {
+    await acquireCounterpartyPiiLifecycleLock(tx);
+    await verifyCounterpartyPii(tx, cipher);
+    await tx.execute(
+      `UPDATE counterparty_pii_migration_state
+          SET phase = 'encrypted_only',
+              fallback_read_count = 0,
+              last_fallback_read_at = NULL,
+              updated_at = sdp_iso_now()
+        WHERE id = ?`,
+      [COUNTERPARTY_PII_MIGRATION_ID]
     );
-    counterparties += purged;
-    if (purged === 0) {
-      break;
-    }
-  }
-
-  let accounts = 0;
-  while (true) {
-    const purged = await db.execute(
-      `UPDATE counterparty_accounts
-          SET label = NULL, details = NULL, provider_account_data = NULL
-        WHERE id IN (
-          SELECT id
-            FROM counterparty_accounts
-           WHERE label IS NOT NULL OR details IS NOT NULL OR provider_account_data IS NOT NULL
-           ORDER BY id
-           LIMIT ${BATCH_SIZE}
-        )`
-    );
-    accounts += purged;
-    if (purged === 0) {
-      break;
-    }
-  }
-  console.info(JSON.stringify({ phase: "purge", counterparties, accounts, result: "ok" }));
+  });
+  console.info(JSON.stringify({ phase: "cutover", result: "ok" }));
 }
 
-export async function restoreCounterpartyPiiPlaintext(
-  db: DatabaseExecutor,
-  cipher: PiiCipher
-): Promise<void> {
+export async function purgeCounterpartyPii(db: AppDb, cipher: PiiCipher): Promise<void> {
+  const result = await db.transaction(async (tx) => {
+    await acquireCounterpartyPiiLifecycleLock(tx);
+    await verifyCounterpartyPii(tx, cipher);
+    const state = await tx.queryOne<{ phase: string; fallback_read_count: number }>(
+      `SELECT phase, fallback_read_count
+         FROM counterparty_pii_migration_state
+        WHERE id = ?`,
+      [COUNTERPARTY_PII_MIGRATION_ID]
+    );
+    if (state?.phase !== "encrypted_only") {
+      throw new Error("Counterparty PII must be cut over before purge");
+    }
+    if (state.fallback_read_count !== 0) {
+      throw new Error("Counterparty PII fallback reads occurred after cutover");
+    }
+
+    let counterparties = 0;
+    while (true) {
+      const purged = await tx.execute(
+        `UPDATE counterparties
+            SET email = NULL, identity = NULL, provider_data = NULL
+          WHERE id IN (
+            SELECT id
+              FROM counterparties
+             WHERE email IS NOT NULL OR identity IS NOT NULL OR provider_data IS NOT NULL
+             ORDER BY id
+             LIMIT ${BATCH_SIZE}
+          )`
+      );
+      counterparties += purged;
+      if (purged === 0) {
+        break;
+      }
+    }
+
+    let accounts = 0;
+    while (true) {
+      const purged = await tx.execute(
+        `UPDATE counterparty_accounts
+            SET label = NULL, details = NULL, provider_account_data = NULL
+          WHERE id IN (
+            SELECT id
+              FROM counterparty_accounts
+             WHERE label IS NOT NULL OR details IS NOT NULL OR provider_account_data IS NOT NULL
+             ORDER BY id
+             LIMIT ${BATCH_SIZE}
+          )`
+      );
+      accounts += purged;
+      if (purged === 0) {
+        break;
+      }
+    }
+    return { counterparties, accounts };
+  });
+  console.info(JSON.stringify({ phase: "purge", ...result, result: "ok" }));
+}
+
+export async function restoreCounterpartyPiiPlaintext(db: AppDb, cipher: PiiCipher): Promise<void> {
   if (!process.argv.includes("--confirm-security-regression")) {
     throw new Error(
       "restore-plaintext requires --confirm-security-regression because it rematerializes PII"
     );
   }
 
-  let restoredCounterparties = 0;
-  let counterpartyCursor = "";
-  while (true) {
-    const rows = await db.queryMany<CounterpartyStorageRow>(
-      `SELECT id, organization_id, project_id, email, identity, provider_data,
-              pii_encrypted, provider_data_encrypted,
-              bvnk_customer_reference, mural_organization_id
-         FROM counterparties
-        WHERE id > ?
-        ORDER BY id
-        LIMIT ${BATCH_SIZE}`,
-      [counterpartyCursor]
-    );
-    if (rows.length === 0) {
-      break;
-    }
-    await mapLimit(rows, async (row) => {
-      if (!row.pii_encrypted || !row.provider_data_encrypted) {
-        throw new Error("Cannot restore plaintext from an incomplete encrypted row");
+  const result = await db.transaction(async (tx) => {
+    await acquireCounterpartyPiiLifecycleLock(tx);
+    let counterparties = 0;
+    let counterpartyCursor = "";
+    while (true) {
+      const rows = await tx.queryMany<CounterpartyStorageRow>(
+        `SELECT id, organization_id, project_id, email, identity, provider_data,
+                pii_encrypted, provider_data_encrypted,
+                bvnk_customer_reference, mural_organization_id
+           FROM counterparties
+          WHERE id > ?
+          ORDER BY id
+          LIMIT ${BATCH_SIZE}`,
+        [counterpartyCursor]
+      );
+      if (rows.length === 0) {
+        break;
       }
-      const pii = parseObject<{ email: string; identity: CounterpartyIdentity }>(
-        await cipher.decrypt(context(row, "counterparty", "identity"), row.pii_encrypted),
-        "counterparty PII"
-      );
-      const providerData = parseObject<CounterpartyProviderData>(
-        await cipher.decrypt(
-          context(row, "counterparty", "provider_data"),
-          row.provider_data_encrypted
-        ),
-        "counterparty provider data"
-      );
-      restoredCounterparties += await db.execute(
-        `UPDATE counterparties
-            SET email = ?, identity = ?, provider_data = ?
-          WHERE id = ?`,
-        [pii.email, pii.identity, providerData, row.id]
-      );
-    });
-    counterpartyCursor = rows.at(-1)?.id ?? counterpartyCursor;
-  }
-
-  let restoredAccounts = 0;
-  let accountCursor = "";
-  while (true) {
-    const rows = await db.queryMany<AccountStorageRow>(
-      `SELECT id, organization_id, project_id, label, details, provider_account_data,
-              sensitive_data_encrypted, network, address
-         FROM counterparty_accounts
-        WHERE id > ?
-        ORDER BY id
-        LIMIT ${BATCH_SIZE}`,
-      [accountCursor]
-    );
-    if (rows.length === 0) {
-      break;
+      await mapLimit(rows, async (row) => {
+        if (!row.pii_encrypted || !row.provider_data_encrypted) {
+          throw new Error("Cannot restore plaintext from an incomplete encrypted row");
+        }
+        const pii = parseObject<{ email: string; identity: CounterpartyIdentity }>(
+          await cipher.decrypt(context(row, "counterparty", "identity"), row.pii_encrypted),
+          "counterparty PII"
+        );
+        const providerData = parseObject<CounterpartyProviderData>(
+          await cipher.decrypt(
+            context(row, "counterparty", "provider_data"),
+            row.provider_data_encrypted
+          ),
+          "counterparty provider data"
+        );
+        counterparties += await tx.execute(
+          `UPDATE counterparties
+              SET email = ?, identity = ?, provider_data = ?
+            WHERE id = ?`,
+          [pii.email, pii.identity, providerData, row.id]
+        );
+      });
+      counterpartyCursor = rows.at(-1)?.id ?? counterpartyCursor;
     }
-    await mapLimit(rows, async (row) => {
-      if (!row.sensitive_data_encrypted) {
-        throw new Error("Cannot restore plaintext from an incomplete encrypted account row");
-      }
-      const payload = parseObject<{
-        label: string | null;
-        details: CounterpartyAccountDetails;
-        providerAccountData: CounterpartyAccountProviderData;
-      }>(
-        await cipher.decrypt(
-          context(row, "counterparty_account", "account_data"),
-          row.sensitive_data_encrypted
-        ),
-        "counterparty account data"
-      );
-      restoredAccounts += await db.execute(
-        `UPDATE counterparty_accounts
-            SET label = ?, details = ?, provider_account_data = ?
-          WHERE id = ?`,
-        [payload.label, payload.details, payload.providerAccountData, row.id]
-      );
-    });
-    accountCursor = rows.at(-1)?.id ?? accountCursor;
-  }
 
-  await db.execute(
-    `UPDATE counterparty_pii_migration_state
-        SET phase = 'dual_write',
-            fallback_read_count = 0,
-            last_fallback_read_at = NULL,
-            updated_at = sdp_iso_now()
-      WHERE id = ?`,
-    [COUNTERPARTY_PII_MIGRATION_ID]
-  );
+    let accounts = 0;
+    let accountCursor = "";
+    while (true) {
+      const rows = await tx.queryMany<AccountStorageRow>(
+        `SELECT id, organization_id, project_id, label, details, provider_account_data,
+                sensitive_data_encrypted, network, address
+           FROM counterparty_accounts
+          WHERE id > ?
+          ORDER BY id
+          LIMIT ${BATCH_SIZE}`,
+        [accountCursor]
+      );
+      if (rows.length === 0) {
+        break;
+      }
+      await mapLimit(rows, async (row) => {
+        if (!row.sensitive_data_encrypted) {
+          throw new Error("Cannot restore plaintext from an incomplete encrypted account row");
+        }
+        const payload = parseObject<{
+          label: string | null;
+          details: CounterpartyAccountDetails;
+          providerAccountData: CounterpartyAccountProviderData;
+        }>(
+          await cipher.decrypt(
+            context(row, "counterparty_account", "account_data"),
+            row.sensitive_data_encrypted
+          ),
+          "counterparty account data"
+        );
+        accounts += await tx.execute(
+          `UPDATE counterparty_accounts
+              SET label = ?, details = ?, provider_account_data = ?
+            WHERE id = ?`,
+          [payload.label, payload.details, payload.providerAccountData, row.id]
+        );
+      });
+      accountCursor = rows.at(-1)?.id ?? accountCursor;
+    }
+
+    await tx.execute(
+      `UPDATE counterparty_pii_migration_state
+          SET phase = 'dual_write',
+              fallback_read_count = 0,
+              last_fallback_read_at = NULL,
+              updated_at = sdp_iso_now()
+        WHERE id = ?`,
+      [COUNTERPARTY_PII_MIGRATION_ID]
+    );
+    return { counterparties, accounts };
+  });
   console.info(
     JSON.stringify({
       phase: "restore-plaintext",
-      counterparties: restoredCounterparties,
-      accounts: restoredAccounts,
+      ...result,
       result: "ok",
     })
   );
@@ -538,17 +560,7 @@ async function main(env: Env): Promise<void> {
     return;
   }
   if (phase === "cutover") {
-    await verifyCounterpartyPii(db, cipher);
-    await db.execute(
-      `UPDATE counterparty_pii_migration_state
-          SET phase = 'encrypted_only',
-              fallback_read_count = 0,
-              last_fallback_read_at = NULL,
-              updated_at = sdp_iso_now()
-        WHERE id = ?`,
-      [COUNTERPARTY_PII_MIGRATION_ID]
-    );
-    console.info(JSON.stringify({ phase, result: "ok" }));
+    await cutoverCounterpartyPii(db, cipher);
     return;
   }
   if (phase === "purge") {
