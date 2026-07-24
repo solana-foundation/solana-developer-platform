@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge } from "@solana/design-system/badge";
-import { Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
+import { Braces, Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -343,6 +343,18 @@ function EmptyState({ children }: { children: string }) {
   return (
     <div className="rounded-2xl border border-dashed border-border-default bg-surface-raised/50 px-4 py-5 text-sm text-tertiary">
       {children}
+    </div>
+  );
+}
+
+/** Shown in the Response panel before a request runs, instead of placeholder JSON. */
+function ResponseEmptyState({ message }: { message: string }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+      <span className="flex size-11 items-center justify-center rounded-xl bg-fill-strong text-tertiary">
+        <Braces className="size-5" aria-hidden="true" />
+      </span>
+      <p className="max-w-xs text-sm text-tertiary">{message}</p>
     </div>
   );
 }
@@ -996,7 +1008,13 @@ export function ApiPlaygroundShell({
               }}
             >
               <div className="min-h-0 flex-1 overflow-hidden">
-                <CodeBlockContent content={panelContent} language={panelLanguage} />
+                {activePanel === "response" && !executionResult && !executeError ? (
+                  <ResponseEmptyState
+                    message={t("Shared.SharedComponents.runRequestToInspectOutput")}
+                  />
+                ) : (
+                  <CodeBlockContent content={panelContent} language={panelLanguage} />
+                )}
               </div>
               <div
                 className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3 text-sm"
