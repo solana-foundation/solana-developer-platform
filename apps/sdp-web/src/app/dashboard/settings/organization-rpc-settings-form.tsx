@@ -3,8 +3,10 @@
 import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { RpcProviderMark } from "@/app/dashboard/onboarding/rpc-provider-mark";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { updateOrganizationRpcSettingsAction } from "./actions";
 
@@ -180,6 +182,69 @@ const RPC_PROVIDER_LABELS: Record<OrganizationRpcProvider, string> = {
   validationcloud: "Validation Cloud",
 };
 
+function RpcTestResultPanel({ result }: { result: RpcTestResult }) {
+  const t = useTranslations();
+  return (
+    <div className="rounded-xl border border-border-default bg-fill-subtle p-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium text-primary">
+          {t("DashboardCustody.rpcDetailTitle")}
+        </span>
+        <Badge variant={result.status === "success" ? "success" : "danger"}>
+          {result.status === "success"
+            ? t("DashboardCustody.rpcDetailReachable")
+            : t("DashboardCustody.rpcDetailUnreachable")}
+        </Badge>
+      </div>
+      {result.status === "error" ? (
+        <p className="mt-2 text-sm text-error">{result.message}</p>
+      ) : null}
+      <dl className="mt-3 grid gap-2 text-sm">
+        {result.resolvedProvider ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-tertiary">{t("DashboardCustody.rpcDetailResolvedProvider")}</dt>
+            <dd className="text-primary">
+              {RPC_PROVIDER_LABELS[result.resolvedProvider as OrganizationRpcProvider] ??
+                result.resolvedProvider}
+            </dd>
+          </div>
+        ) : null}
+        {result.selectionMode ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-tertiary">{t("DashboardCustody.rpcDetailSelectionMode")}</dt>
+            <dd className="text-primary">{result.selectionMode}</dd>
+          </div>
+        ) : null}
+        {result.endpoint ? (
+          <div className="flex items-start justify-between gap-3">
+            <dt className="shrink-0 text-tertiary">{t("DashboardCustody.rpcDetailEndpoint")}</dt>
+            <dd className="min-w-0 break-all text-right font-mono text-xs text-primary">
+              {result.endpoint}
+            </dd>
+          </div>
+        ) : null}
+        {result.upstreamStatus !== undefined ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-tertiary">{t("DashboardCustody.rpcDetailUpstream")}</dt>
+            <dd className="text-primary">
+              {result.upstreamStatus}
+              {result.upstreamStatusText ? ` ${result.upstreamStatusText}` : ""}
+            </dd>
+          </div>
+        ) : null}
+        {result.latencyMs !== undefined ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-tertiary">{t("DashboardCustody.rpcDetailLatency")}</dt>
+            <dd className="text-primary">
+              {t("DashboardCustody.rpcDetailLatencyValue", { ms: result.latencyMs })}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </div>
+  );
+}
+
 export function OrganizationRpcSettingsForm({
   canManageSettings,
   enabledProviders,
@@ -212,6 +277,7 @@ export function OrganizationRpcSettingsForm({
   const [isTesting, setIsTesting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isApplyingFallback, setIsApplyingFallback] = useState(false);
+  const [lastTest, setLastTest] = useState<RpcTestResult | null>(null);
 
   useEffect(() => {
     setSelectedProvider(hasPersistedProviderEnabled ? rpcProvider : fallbackProvider);
@@ -262,6 +328,7 @@ export function OrganizationRpcSettingsForm({
 
     try {
       const result = await runRpcProviderTest(selectedProvider, t);
+      setLastTest(result);
       const requestedLabel =
         RPC_PROVIDER_LABELS[result.requestedProvider] ?? result.requestedProvider;
       const resolvedLabel = result.resolvedProvider
@@ -314,12 +381,8 @@ export function OrganizationRpcSettingsForm({
   return (
     <div className="grid gap-5">
       <div className="w-full max-w-3xl space-y-5">
-        <div className="rounded-xl border border-border-default bg-fill-subtle px-3 py-2">
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-secondary">
-              {t("DashboardCustody.editingOrganization", { name: organization.name })}
-            </span>
-          </div>
+        <div className="flex h-10 w-full items-center rounded-xl border border-border-default bg-fill-subtle px-3 text-sm text-secondary">
+          {t("DashboardCustody.editingOrganization", { name: organization.name })}
         </div>
 
         {!canManageSettings ? (
@@ -362,31 +425,37 @@ export function OrganizationRpcSettingsForm({
         ) : null}
 
         <div className="grid gap-2">
-          <Label htmlFor="rpcProvider">{t("DashboardCustody.rpcProvider")}</Label>
+          {/* Not a <label>: the DS Select has no associable id, so a bound label
+              would be a dead click target. The Select carries its own ariaLabel. */}
+          <span className="text-sm font-medium text-primary">
+            {t("DashboardCustody.rpcProvider")}
+          </span>
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_112px] sm:items-center">
-            <select
-              id="rpcProvider"
-              name="rpcProvider"
-              className="h-10 w-full min-w-0 rounded-lg border border-border-default bg-surface-raised px-3 text-sm text-primary"
+            <Select
+              ariaLabel={t("DashboardCustody.rpcProvider")}
+              className="w-full"
               value={selectedProvider}
               disabled={!canManageSettings || !hasEnabledProviders || isSaving || isTesting}
-              onChange={(event) => {
-                const nextProvider = event.currentTarget.value as typeof selectedProvider;
+              onValueChange={(value) => {
+                if (!value) return;
+                const nextProvider = value as typeof selectedProvider;
                 setSelectedProvider(nextProvider);
                 void saveProvider(nextProvider);
               }}
             >
               {availableProviders.map((provider) => (
-                <option key={provider} value={provider}>
-                  {RPC_PROVIDER_LABELS[provider]}
-                </option>
+                <SelectItem key={provider} value={provider}>
+                  <span className="flex items-center gap-2">
+                    <RpcProviderMark provider={provider} />
+                    {RPC_PROVIDER_LABELS[provider]}
+                  </span>
+                </SelectItem>
               ))}
-            </select>
+            </Select>
             <Button
               type="button"
-              size="sm"
               variant="secondary"
-              className="w-full sm:w-[112px] sm:justify-center"
+              className="w-full sm:justify-center"
               disabled={!hasEnabledProviders || isTesting || isSaving}
               onClick={() => {
                 void testProvider();
@@ -396,6 +465,8 @@ export function OrganizationRpcSettingsForm({
             </Button>
           </div>
         </div>
+
+        {lastTest ? <RpcTestResultPanel result={lastTest} /> : null}
       </div>
 
       {errorMessage ? (
