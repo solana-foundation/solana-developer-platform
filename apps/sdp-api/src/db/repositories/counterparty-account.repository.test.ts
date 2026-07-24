@@ -25,6 +25,14 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
     await db.prepare("DELETE FROM counterparty_accounts").run();
     await db.prepare("DELETE FROM counterparties").run();
     await db.prepare("DELETE FROM projects").run();
+    await db
+      .prepare(
+        `UPDATE counterparty_pii_migration_state
+            SET phase = 'dual_write',
+                fallback_read_count = 0,
+                last_fallback_read_at = NULL`
+      )
+      .run();
 
     await db
       .prepare(
@@ -48,11 +56,14 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_USER.id)
       .run();
 
-    repo = createPostgresCounterpartyAccountsRepository(db);
+    repo = createPostgresCounterpartyAccountsRepository(db, env.counterpartyPiiCipher);
   });
 
   async function seedCounterparty(externalId: string | null = null) {
-    const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
+    const counterpartiesRepo = createPostgresCounterpartiesRepository(
+      getDb(env),
+      env.counterpartyPiiCipher
+    );
     const row = await counterpartiesRepo.createCounterparty({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
@@ -97,6 +108,58 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       expect(row?.details).toMatchObject({ network: "solana", address: "7xK...Pump" });
       expect(row?.provider_account_data).toMatchObject({ provider: "grid" });
       expect(row?.status).toBe("active");
+
+      const stored = await getDb(env)
+        .prepare(
+          `SELECT sensitive_data_encrypted, label, details, provider_account_data
+             FROM counterparty_accounts
+            WHERE id = ?`
+        )
+        .bind(row?.id)
+        .first<{
+          sensitive_data_encrypted: string;
+          label: string;
+          details: Record<string, unknown>;
+          provider_account_data: Record<string, unknown>;
+        }>();
+      expect(stored?.sensitive_data_encrypted).toMatch(/^pii-local-v1\./);
+      expect(stored?.sensitive_data_encrypted).not.toContain("Alice");
+      expect(stored?.label).toBe("Alice's Solana");
+      expect(stored?.details.address).toBe("7xK...Pump");
+    });
+
+    it("writes no legacy account PII after encrypted-only cutover", async () => {
+      const counterparty = await seedCounterparty();
+      await getDb(env)
+        .prepare(
+          `UPDATE counterparty_pii_migration_state
+              SET phase = 'encrypted_only'
+            WHERE id = 'counterparty-pii-v1'`
+        )
+        .run();
+
+      const row = await repo.createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        accountKind: "bank_account",
+        label: "Sensitive",
+        details: { accountNumber: "00012345" },
+        providerAccountData: { beneficiaryId: "beneficiary_1" },
+      });
+
+      const stored = await getDb(env)
+        .prepare(
+          `SELECT sensitive_data_encrypted, label, details, provider_account_data
+             FROM counterparty_accounts
+            WHERE id = ?`
+        )
+        .bind(row?.id)
+        .first<Record<string, unknown>>();
+      expect(stored?.sensitive_data_encrypted).toMatch(/^pii-local-v1\./);
+      expect(stored?.label).toBeNull();
+      expect(stored?.details).toBeNull();
+      expect(stored?.provider_account_data).toBeNull();
     });
 
     it("defaults details and provider_account_data to {} when omitted", async () => {
@@ -513,7 +576,10 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
 
   describe("listBatchRecipients", () => {
     async function seedNamed(displayName: string, externalId: string) {
-      const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
+      const counterpartiesRepo = createPostgresCounterpartiesRepository(
+        getDb(env),
+        env.counterpartyPiiCipher
+      );
       const row = await counterpartiesRepo.createCounterparty({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,

@@ -146,19 +146,21 @@ async function persistBvnkOnrampState(
   entry: BvnkOnrampPaymentRuleState
 ): Promise<void> {
   const repo = getCounterpartiesRepository(c);
-  const bvnk = readBvnkData(counterparty.provider_data);
-  const wallets = readBvnkWallets(counterparty.provider_data);
-  await repo.updateCounterparty({
+  await repo.mutateProviderData({
     counterpartyId: counterparty.id,
     organizationId: counterparty.organization_id,
     projectId,
-    providerData: {
-      ...counterparty.provider_data,
-      bvnk: {
-        ...bvnk,
-        customer: { ...readBvnkCustomer(counterparty.provider_data), ...customer },
-        wallets: { ...wallets, [key]: { ...wallets[key], ...entry } },
-      },
+    mutate(providerData) {
+      const bvnk = readBvnkData(providerData);
+      const wallets = readBvnkWallets(providerData);
+      return {
+        ...providerData,
+        bvnk: {
+          ...bvnk,
+          customer: { ...readBvnkCustomer(providerData), ...customer },
+          wallets: { ...wallets, [key]: { ...wallets[key], ...entry } },
+        },
+      };
     },
   });
 }
@@ -172,25 +174,27 @@ async function persistBvnkOfframpWallet(
   wallet: BvnkFiatWallet
 ): Promise<void> {
   const repo = getCounterpartiesRepository(c);
-  const bvnk = readBvnkData(counterparty.provider_data);
-  const offramp =
-    bvnk.offramp && typeof bvnk.offramp === "object"
-      ? (bvnk.offramp as Record<string, unknown>)
-      : {};
-  const wallets = readBvnkOfframpWallets(counterparty.provider_data);
-  await repo.updateCounterparty({
+  await repo.mutateProviderData({
     counterpartyId: counterparty.id,
     organizationId: counterparty.organization_id,
     projectId,
-    providerData: {
-      ...counterparty.provider_data,
-      bvnk: {
-        ...bvnk,
-        offramp: {
-          ...offramp,
-          wallets: { ...wallets, [fiatCurrency]: { id: wallet.id, status: wallet.status } },
+    mutate(providerData) {
+      const bvnk = readBvnkData(providerData);
+      const offramp =
+        bvnk.offramp && typeof bvnk.offramp === "object"
+          ? (bvnk.offramp as Record<string, unknown>)
+          : {};
+      const wallets = readBvnkOfframpWallets(providerData);
+      return {
+        ...providerData,
+        bvnk: {
+          ...bvnk,
+          offramp: {
+            ...offramp,
+            wallets: { ...wallets, [fiatCurrency]: { id: wallet.id, status: wallet.status } },
+          },
         },
-      },
+      };
     },
   });
 }
@@ -243,25 +247,27 @@ async function persistBvnkOfframpBeneficiary(
   beneficiary: BvnkOfframpBeneficiary
 ): Promise<void> {
   const repo = getCounterpartiesRepository(c);
-  const bvnk = readBvnkData(counterparty.provider_data);
-  const offramp =
-    bvnk.offramp && typeof bvnk.offramp === "object"
-      ? (bvnk.offramp as Record<string, unknown>)
-      : {};
-  const beneficiaries = readBvnkOfframpBeneficiaries(counterparty.provider_data);
-  await repo.updateCounterparty({
+  await repo.mutateProviderData({
     counterpartyId: counterparty.id,
     organizationId: counterparty.organization_id,
     projectId,
-    providerData: {
-      ...counterparty.provider_data,
-      bvnk: {
-        ...bvnk,
-        offramp: {
-          ...offramp,
-          beneficiaries: { ...beneficiaries, [beneficiary.key]: beneficiary },
+    mutate(providerData) {
+      const bvnk = readBvnkData(providerData);
+      const offramp =
+        bvnk.offramp && typeof bvnk.offramp === "object"
+          ? (bvnk.offramp as Record<string, unknown>)
+          : {};
+      const beneficiaries = readBvnkOfframpBeneficiaries(providerData);
+      return {
+        ...providerData,
+        bvnk: {
+          ...bvnk,
+          offramp: {
+            ...offramp,
+            beneficiaries: { ...beneficiaries, [beneficiary.key]: beneficiary },
+          },
         },
-      },
+      };
     },
   });
 }

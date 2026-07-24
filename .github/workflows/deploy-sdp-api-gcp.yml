@@ -32,6 +32,7 @@ jobs:
       SERVICE: sdp-dev-api-public
       JOB: sdp-dev-api-public-cron
       MIGRATE_JOB: sdp-dev-api-public-migrate
+      PII_MIGRATE_JOB: sdp-dev-counterparty-pii-migrate
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
@@ -71,4 +72,6 @@ jobs:
       - name: Update cron job image
         run: |
           gcloud run jobs update "${JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+          gcloud run jobs update "${PII_MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"

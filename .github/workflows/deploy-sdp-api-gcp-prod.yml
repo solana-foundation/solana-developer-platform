@@ -37,6 +37,7 @@ jobs:
       SERVICE: sdp-prod-api-public
       JOB: sdp-prod-api-public-cron
       MIGRATE_JOB: sdp-prod-api-public-migrate
+      PII_MIGRATE_JOB: sdp-prod-counterparty-pii-migrate
     steps:
       - name: Validate deploy image SHA
         env:
@@ -133,12 +134,22 @@ jobs:
               --region "${REGION}" --project "${PROJECT_ID}" \
               --format='value(spec.template.spec.template.spec.containers[0].image)'
           )"
+          previous_pii_migrate_image="$(
+            gcloud run jobs describe "${PII_MIGRATE_JOB}" \
+              --region "${REGION}" --project "${PROJECT_ID}" \
+              --format='value(spec.template.spec.template.spec.containers[0].image)'
+          )"
           if [[ -z "${previous_cron_image}" ]]; then
             echo "Could not resolve the current cron job image." >&2
             exit 1
           fi
+          if [[ -z "${previous_pii_migrate_image}" ]]; then
+            echo "Could not resolve the current counterparty PII migration job image." >&2
+            exit 1
+          fi
           echo "PREVIOUS_TRAFFIC=${previous_traffic}" >> "${GITHUB_ENV}"
           echo "PREVIOUS_CRON_IMAGE=${previous_cron_image}" >> "${GITHUB_ENV}"
+          echo "PREVIOUS_PII_MIGRATE_IMAGE=${previous_pii_migrate_image}" >> "${GITHUB_ENV}"
 
       - name: Deploy candidate without production traffic
         timeout-minutes: 5
@@ -228,6 +239,8 @@ jobs:
 
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+          gcloud run jobs update "${PII_MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
           echo "ROLLOUT_COMPLETE=true" >> "${GITHUB_ENV}"
 
       - name: Roll back incomplete rollout
@@ -247,6 +260,9 @@ jobs:
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --image "${PREVIOUS_CRON_IMAGE}" || rollback_failed=1
+          gcloud run jobs update "${PII_MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --image "${PREVIOUS_PII_MIGRATE_IMAGE}" || rollback_failed=1
           if [[ "${rollback_failed}" -ne 0 ]]; then
             echo "Automatic rollback was incomplete; escalate immediately." >&2
             exit 1

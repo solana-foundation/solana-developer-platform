@@ -552,6 +552,22 @@ export const FIELDS: EnvField[] = [
     pattern: /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+$/,
     help: "Optional Cloud KMS key used for custody envelope encryption. Keep the custody encryption key configured so existing legacy rows remain readable.",
   },
+  {
+    key: "COUNTERPARTY_PII_ENCRYPTION_KEY",
+    section: "secrets",
+    kind: "secret",
+    secretEncoding: "base64",
+    label: "Counterparty PII encryption key",
+    help: "Required for self-hosted deployments. Use a dedicated 32-byte key and never reuse the custody encryption key.",
+  },
+  {
+    key: "COUNTERPARTY_PII_KMS_KEY_NAME",
+    section: "secrets",
+    kind: "text",
+    label: "Counterparty PII Cloud KMS key name",
+    pattern: /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+$/,
+    help: "Required for managed deployments. Dedicated Cloud KMS key used for counterparty PII envelope encryption.",
+  },
 
   // Advanced (defaulted, collapsed)
   {
