@@ -74,7 +74,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       selectedRampPair,
       cryptoToken,
       collectedData,
-      metadata,
+      rampsMemo,
     }) =>
       ({
         provider,
@@ -86,7 +86,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
         redirectUrl: `${window.location.origin}/dashboard/payments`,
         // Coinbase renders its Apple Pay link on this domain; must match a CDP-verified domain.
         domain: window.location.hostname,
-        metadata,
+        rampsMemo,
         collectedData,
       }) satisfies PaymentOnrampQuoteRequest & { collectedData: CollectedFieldData },
     onQuoteCreated: () => {

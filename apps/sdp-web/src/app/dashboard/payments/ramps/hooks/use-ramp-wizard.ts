@@ -54,7 +54,7 @@ export interface RampQuotePayloadArgs {
   selectedRampPair: SelectedRampPair;
   cryptoToken: string;
   collectedData: CollectedFieldData;
-  metadata: Record<string, string>;
+  rampsMemo: Record<string, string>;
 }
 
 export interface RampWizardConfig<TId extends string = string> {
@@ -151,7 +151,7 @@ export function useRampWizard<TId extends string>(
   const [quote, setQuote] = useState<PaymentRampQuote | null>(null);
   const [hostedQuoteLoading, setHostedQuoteLoading] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
-  const [metadata, setMetadata] = useState<Record<string, string>>({});
+  const [rampsMemo, setRampsMemo] = useState<Record<string, string>>({});
   const { values: fields, setField } = useZodForm(rampSelectionSchema, {
     walletId: "",
     amount: "",
@@ -263,7 +263,7 @@ export function useRampWizard<TId extends string>(
           selectedRampPair,
           cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
           collectedData: requirements.collectedData,
-          metadata,
+          rampsMemo,
         }),
         t
       );
@@ -305,7 +305,7 @@ export function useRampWizard<TId extends string>(
           selectedRampPair,
           cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
           collectedData: requirements.collectedData,
-          metadata,
+          rampsMemo,
         }),
         t
       );
@@ -473,8 +473,8 @@ export function useRampWizard<TId extends string>(
     fields,
     setField,
     quote,
-    metadata,
-    setMetadata,
+    rampsMemo,
+    setRampsMemo,
     refreshQuote,
     onboarding: requirements.onboarding,
     isAdvancing: requirements.isAdvancing,

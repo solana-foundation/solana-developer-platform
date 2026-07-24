@@ -1,29 +1,29 @@
 "use client";
 
-import { TRANSFER_METADATA_LIMITS } from "@sdp/types";
+import { RAMPS_MEMO_LIMITS } from "@sdp/types";
 import { PlusIcon, XIcon } from "lucide-react";
 import { type ClipboardEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import {
-  emptyMetadataRow,
-  isEmptyMetadataRow,
-  type MetadataRow,
-  type MetadataRowError,
-  metadataRowsToRecord,
-  splitPastedMetadataRows,
-  validateMetadataRows,
-} from "../metadata";
+  emptyMemoRow,
+  isEmptyMemoRow,
+  type MemoRow,
+  type MemoRowError,
+  memoRowsToRecord,
+  splitPastedMemoRows,
+  validateMemoRows,
+} from "../memo";
 
-interface MetadataDialogProps {
+interface MemoDialogProps {
   open: boolean;
-  metadata: Record<string, string>;
+  memo: Record<string, string>;
   onClose: () => void;
-  onSave: (metadata: Record<string, string>) => void;
+  onSave: (memo: Record<string, string>) => void;
 }
 
-interface EditableMetadataRow extends MetadataRow {
+interface EditableMemoRow extends MemoRow {
   id: string;
 }
 
@@ -31,34 +31,32 @@ const INPUT_CLASS =
   "h-10 w-full rounded-lg border border-border-default bg-[var(--input-bg-idle)] px-3 text-sm text-primary placeholder:text-tertiary hover:bg-[var(--input-bg-hover)] focus:border-[var(--input-border-focus)] focus:outline-none";
 
 /**
- * Creates an editable metadata row with stable render identity.
+ * Creates an editable memo row with stable render identity.
  *
- * @param row - The metadata key and value.
- * @returns An editable metadata row.
+ * @param row - The memo key and value.
+ * @returns An editable memo row.
  */
-function editableMetadataRow(row: MetadataRow): EditableMetadataRow {
+function editableMemoRow(row: MemoRow): EditableMemoRow {
   return { ...row, id: crypto.randomUUID() };
 }
 
 /**
- * Renders the editable metadata modal for ramp quote reconciliation fields.
+ * Renders the editable memo modal for ramp quote reconciliation fields.
  * Mounted only while open so each opening reseeds the grid from the saved
- * metadata.
+ * memo.
  *
- * @param props - Dialog visibility, saved metadata, and close/save callbacks.
- * @returns The metadata editing modal.
+ * @param props - Dialog visibility, saved memo, and close/save callbacks.
+ * @returns The memo editing modal.
  */
-export function MetadataDialog({ open, metadata, onClose, onSave }: MetadataDialogProps) {
+export function MemoDialog({ open, memo, onClose, onSave }: MemoDialogProps) {
   const t = useTranslations();
-  const [rows, setRows] = useState<EditableMetadataRow[]>(() => {
-    const savedRows = Object.entries(metadata).map(([key, value]) =>
-      editableMetadataRow({ key, value })
-    );
-    return savedRows.length === 0 ? [editableMetadataRow(emptyMetadataRow())] : savedRows;
+  const [rows, setRows] = useState<EditableMemoRow[]>(() => {
+    const savedRows = Object.entries(memo).map(([key, value]) => editableMemoRow({ key, value }));
+    return savedRows.length === 0 ? [editableMemoRow(emptyMemoRow())] : savedRows;
   });
-  const [errors, setErrors] = useState<MetadataRowError[]>([]);
+  const [errors, setErrors] = useState<MemoRowError[]>([]);
 
-  const updateRow = (index: number, field: keyof MetadataRow, value: string) => {
+  const updateRow = (index: number, field: keyof MemoRow, value: string) => {
     setRows((current) =>
       current.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row))
     );
@@ -68,31 +66,31 @@ export function MetadataDialog({ open, metadata, onClose, onSave }: MetadataDial
   const removeRow = (index: number) => {
     setRows((current) => {
       const remaining = current.filter((_, rowIndex) => rowIndex !== index);
-      return remaining.length === 0 ? [editableMetadataRow(emptyMetadataRow())] : remaining;
+      return remaining.length === 0 ? [editableMemoRow(emptyMemoRow())] : remaining;
     });
     setErrors([]);
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
-    const parsed = splitPastedMetadataRows(event.clipboardData.getData("text"));
+    const parsed = splitPastedMemoRows(event.clipboardData.getData("text"));
     if (parsed.length === 0) {
       return;
     }
     event.preventDefault();
     setRows((current) => {
-      const populated = current.filter((row) => !isEmptyMetadataRow(row));
-      return [...populated, ...parsed.map(editableMetadataRow)];
+      const populated = current.filter((row) => !isEmptyMemoRow(row));
+      return [...populated, ...parsed.map(editableMemoRow)];
     });
     setErrors([]);
   };
 
   const handleSave = () => {
-    const validationErrors = validateMetadataRows(rows);
+    const validationErrors = validateMemoRows(rows);
     if (validationErrors.length > 0) {
       setErrors(validationErrors);
       return;
     }
-    onSave(metadataRowsToRecord(rows));
+    onSave(memoRowsToRecord(rows));
     onClose();
   };
 
@@ -127,7 +125,7 @@ export function MetadataDialog({ open, metadata, onClose, onSave }: MetadataDial
                   onChange={(event) => updateRow(index, "key", event.currentTarget.value)}
                   onPaste={handlePaste}
                   placeholder={t("DashboardPayments.ramps.memoKeyPlaceholder")}
-                  maxLength={TRANSFER_METADATA_LIMITS.maxKeyLength}
+                  maxLength={RAMPS_MEMO_LIMITS.maxKeyLength}
                   aria-invalid={rowErrors.length > 0}
                   className={INPUT_CLASS}
                 />
@@ -136,7 +134,7 @@ export function MetadataDialog({ open, metadata, onClose, onSave }: MetadataDial
                   onChange={(event) => updateRow(index, "value", event.currentTarget.value)}
                   onPaste={handlePaste}
                   placeholder={t("DashboardPayments.ramps.memoValuePlaceholder")}
-                  maxLength={TRANSFER_METADATA_LIMITS.maxValueLength}
+                  maxLength={RAMPS_MEMO_LIMITS.maxValueLength}
                   aria-invalid={rowErrors.length > 0}
                   className={INPUT_CLASS}
                 />
@@ -162,10 +160,8 @@ export function MetadataDialog({ open, metadata, onClose, onSave }: MetadataDial
 
         <button
           type="button"
-          onClick={() =>
-            setRows((current) => [...current, editableMetadataRow(emptyMetadataRow())])
-          }
-          disabled={rows.length >= TRANSFER_METADATA_LIMITS.maxEntries}
+          onClick={() => setRows((current) => [...current, editableMemoRow(emptyMemoRow())])}
+          disabled={rows.length >= RAMPS_MEMO_LIMITS.maxEntries}
           className="flex items-center gap-1.5 text-sm font-medium text-tertiary transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
         >
           <PlusIcon className="size-4" />

@@ -101,7 +101,7 @@ describe("transaction counterparty presentation", () => {
           id: "transfer_1",
           status: "confirmed",
           signature: null,
-          metadata: {},
+          rampsMemo: {},
           counterpartyId: "counterparty_1",
         },
         {
@@ -122,7 +122,7 @@ describe("transaction counterparty presentation", () => {
           id: "transfer_1",
           status: "confirmed",
           signature: null,
-          metadata: {},
+          rampsMemo: {},
           counterpartyDisplayName: "Updated Acme Studio",
         },
         { counterpartyDisplayName: "Acme Studio" }

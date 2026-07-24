@@ -11,7 +11,7 @@ import { toRampCryptoToken } from "@/lib/ramps";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import { walletComboboxOptions } from "../wallet-options";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
-import { MetadataField } from "./metadata-field";
+import { MemoField } from "./memo-field";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { hasOnboardingLifecycle } from "./providers";
@@ -116,8 +116,8 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     refreshQuote,
     onboarding,
     retryOnboarding,
-    metadata,
-    setMetadata,
+    rampsMemo,
+    setRampsMemo,
   } = wizard;
 
   const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
@@ -168,7 +168,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
           onPairChange={handlePairChange}
           onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
         />
-        <MetadataField metadata={metadata} onChange={setMetadata} />
+        <MemoField memo={rampsMemo} onChange={setRampsMemo} />
         {requirementsBlocker ? (
           <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
             {requirementsBlocker}

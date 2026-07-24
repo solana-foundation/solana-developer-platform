@@ -2,23 +2,23 @@
 
 import { useState } from "react";
 import { useTranslations } from "@/i18n/provider";
-import { MetadataDialog } from "./metadata-dialog";
+import { MemoDialog } from "./memo-dialog";
 
-interface MetadataFieldProps {
-  metadata: Record<string, string>;
-  onChange: (metadata: Record<string, string>) => void;
+interface MemoFieldProps {
+  memo: Record<string, string>;
+  onChange: (memo: Record<string, string>) => void;
 }
 
 /**
- * Renders the ramp memo trigger and its metadata editing dialog.
+ * Renders the ramp memo trigger and its memo editing dialog.
  *
- * @param props - Metadata value and change callback.
+ * @param props - Memo value and change callback.
  * @returns The memo trigger row and modal.
  */
-export function MetadataField({ metadata, onChange }: MetadataFieldProps) {
+export function MemoField({ memo, onChange }: MemoFieldProps) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
-  const fieldCount = Object.keys(metadata).length;
+  const fieldCount = Object.keys(memo).length;
 
   return (
     <>
@@ -35,12 +35,7 @@ export function MetadataField({ metadata, onChange }: MetadataFieldProps) {
         <span className="text-tertiary">{t("DashboardPayments.ramps.memoOptional")}</span>
       </button>
       {open ? (
-        <MetadataDialog
-          open={open}
-          metadata={metadata}
-          onClose={() => setOpen(false)}
-          onSave={onChange}
-        />
+        <MemoDialog open={open} memo={memo} onClose={() => setOpen(false)} onSave={onChange} />
       ) : null}
     </>
   );

@@ -5608,7 +5608,7 @@ describe("Payments routes", () => {
           fiatCurrency: "USD",
           fiatAmount: "120.50",
           redirectUrl: "https://example.com/onramp-done",
-          metadata: { invoice: "INV-123", po: "PO-9" },
+          rampsMemo: { invoice: "INV-123", po: "PO-9" },
         }),
       },
       env
@@ -5655,10 +5655,10 @@ describe("Payments routes", () => {
     );
     expect(transfersRes.status).toBe(200);
     const transfersBody = (await transfersRes.json()) as {
-      data: [{ id: string; metadata: Record<string, string> }];
+      data: [{ id: string; rampsMemo: Record<string, string> }];
     };
     expect(transfersBody.data).toHaveLength(1);
-    expect(transfersBody.data[0].metadata).toEqual({ invoice: "INV-123", po: "PO-9" });
+    expect(transfersBody.data[0].rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
 
     const transferRes = await app.request(
       `/v1/payments/transfers/${transfersBody.data[0].id}`,
@@ -5671,14 +5671,14 @@ describe("Payments routes", () => {
     );
     expect(transferRes.status).toBe(200);
     const transferBody = (await transferRes.json()) as {
-      data: { transfer: { metadata: Record<string, string> } };
+      data: { transfer: { rampsMemo: Record<string, string> } };
     };
-    expect(transferBody.data.transfer.metadata).toEqual({ invoice: "INV-123", po: "PO-9" });
+    expect(transferBody.data.transfer.rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
   });
 
-  it("rejects ramp quote metadata with more than 20 fields", async () => {
-    const counterpartyId = await seedCounterparty({ externalId: "moonpay_metadata_limit" });
-    const metadata = Object.fromEntries(
+  it("rejects a ramp quote memo with more than 20 fields", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "moonpay_memo_limit" });
+    const rampsMemo = Object.fromEntries(
       Array.from({ length: 21 }, (_, index) => [`key_${index}`, `value_${index}`])
     );
 
@@ -5697,7 +5697,7 @@ describe("Payments routes", () => {
           cryptoToken: "SOL",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
-          metadata,
+          rampsMemo,
         }),
       },
       env
@@ -5705,10 +5705,10 @@ describe("Payments routes", () => {
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as {
-      error: { details: { errors: { metadata: string[] } } };
+      error: { details: { errors: { rampsMemo: string[] } } };
     };
-    expect(body.error.details.errors.metadata).toContain(
-      "metadata must contain at most 20 key-value pairs"
+    expect(body.error.details.errors.rampsMemo).toContain(
+      "rampsMemo must contain at most 20 key-value pairs"
     );
   });
 
@@ -5816,7 +5816,7 @@ describe("Payments routes", () => {
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
-          metadata: { invoice: "INV-123", po: "PO-9" },
+          rampsMemo: { invoice: "INV-123", po: "PO-9" },
         }),
       },
       env
@@ -5882,9 +5882,9 @@ describe("Payments routes", () => {
     );
     expect(transfersRes.status).toBe(200);
     const transfersBody = (await transfersRes.json()) as {
-      data: [{ metadata: Record<string, string> }];
+      data: [{ rampsMemo: Record<string, string> }];
     };
-    expect(transfersBody.data[0].metadata).toEqual({ invoice: "INV-123", po: "PO-9" });
+    expect(transfersBody.data[0].rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
     fetchSpy.mockRestore();
   });
 
