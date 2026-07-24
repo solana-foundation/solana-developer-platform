@@ -371,33 +371,95 @@ function translationOutputSchema(entries) {
   };
 }
 
-function parseAgentResult(body) {
-  const events = body
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
-
-  const failure = events.find(
-    (event) => event.type === "session.failed" || event.type === "turn.failed"
-  );
-  if (failure) {
-    throw new Error(`Translation agent failed: ${failure.data?.message ?? "unknown error"}`);
+function parseAgentEvent(line) {
+  let event;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(event)) {
+    return undefined;
   }
 
-  const completed = [...events].reverse().find((event) => event.type === "result.completed");
-  const translations = completed?.data?.result?.translations;
+  if (event.type === "session.failed" || event.type === "turn.failed") {
+    throw new Error(`Translation agent failed: ${event.data?.message ?? "unknown error"}`);
+  }
+  if (event.type !== "result.completed") {
+    return undefined;
+  }
+
+  const translations = event.data?.result?.translations;
   if (!Array.isArray(translations)) {
     throw new Error("Translation agent returned no structured translations");
   }
   return translations;
+}
+
+function parseAgentResult(body) {
+  let completed;
+  for (const line of body
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter(Boolean)) {
+    const translations = parseAgentEvent(line);
+    if (translations !== undefined) {
+      completed = translations;
+      break;
+    }
+  }
+  if (completed === undefined) {
+    throw new Error("Translation agent returned no structured translations");
+  }
+  return completed;
+}
+
+async function readAgentResult(stream) {
+  if (!stream.body || typeof stream.body.getReader !== "function") {
+    return parseAgentResult(await stream.text());
+  }
+
+  const reader = stream.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        newlineIndex = buffer.indexOf("\n");
+        if (!line) {
+          continue;
+        }
+
+        const translations = parseAgentEvent(line);
+        if (translations !== undefined) {
+          await reader.cancel().catch(() => {});
+          return translations;
+        }
+      }
+
+      if (done) {
+        const translations = parseAgentEvent(buffer.trim());
+        if (translations !== undefined) {
+          return translations;
+        }
+        break;
+      }
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+
+  throw new Error("Translation agent returned no structured translations");
 }
 
 async function requestTranslations({
@@ -457,7 +519,7 @@ async function requestTranslations({
         throw new Error(`Translation agent stream returned HTTP ${stream.status}`);
       }
 
-      return validateAgentTranslations(entries, parseAgentResult(await stream.text()));
+      return validateAgentTranslations(entries, await readAgentResult(stream));
     } catch (error) {
       if (attempt >= maxRetries) {
         throw error;
