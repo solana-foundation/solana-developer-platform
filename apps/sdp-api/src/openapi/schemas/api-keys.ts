@@ -310,7 +310,7 @@ export const apiKeyDetailSchema = z
       .array(z.string())
       .nullable()
       .openapi({
-        description: "CIDR ranges permitted to use the key.",
+        description: "IPv4/IPv6 addresses or CIDR ranges permitted to use the key.",
         example: ["203.0.113.0/24"],
       }),
     walletScope: apiKeyWalletScopeSchema,
@@ -447,7 +447,7 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       example: "selected",
     }),
     allowedIps: withOpenApi(apiKeyCreateSchemaBase.shape.allowedIps, {
-      description: "Optional list of CIDR ranges allowed to use the key.",
+      description: "Optional list of IPv4/IPv6 addresses or CIDR ranges allowed to use the key.",
       example: ["203.0.113.0/24"],
     }),
     expiresAt: withOpenApi(apiKeyCreateSchemaBase.shape.expiresAt, {
@@ -502,7 +502,7 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
       example: "all",
     }),
     allowedIps: withOpenApi(apiKeyUpdateSchemaBase.shape.allowedIps, {
-      description: "Updated IP allowlist. Use null to clear.",
+      description: "Updated IPv4/IPv6 address or CIDR allowlist. Use null to clear.",
       example: ["203.0.113.0/24"],
     }),
     expiresAt: withOpenApi(apiKeyUpdateSchemaBase.shape.expiresAt, {

@@ -736,6 +736,59 @@ export class TokenService {
   }
 
   /**
+   * Atomically claim a pending token for deployment, flipping it to the
+   * transient `deploying` state and returning the now-frozen snapshot.
+   *
+   * This closes the window the `updateToken` undeployed guard alone can't: a
+   * deploy reads a pending token, then spends seconds creating the on-chain mint
+   * from that snapshot, and only afterwards records `active` + the mint address.
+   * Throughout that gap the row is still `pending`/no-mint, so a concurrent
+   * identity PATCH (symbol/decimals/requiresAllowlist) would pass the guard and
+   * mutate the row — permanently diverging the DB identity from the immutable
+   * mint. Once claimed, the row is no longer `pending`, so both the route- and
+   * service-level PATCH guards reject those edits for the whole mint window.
+   *
+   * Guarded on `pending`/no-mint so exactly one caller wins; returns null if the
+   * token wasn't claimable (already deploying, deployed, or gone). `deploying`
+   * is internal and transient — never surfaced long-term: it advances to
+   * `active` via {@link setTokenDeployed} or back to `pending` via
+   * {@link releaseTokenDeploy}.
+   */
+  async beginTokenDeploy(tokenId: string): Promise<Token | null> {
+    const now = new Date().toISOString();
+    const rowsAffected = await this.db
+      .prepare(
+        `UPDATE issued_tokens SET status = 'deploying', updated_at = ?
+         WHERE id = ? AND status = 'pending' AND mint_address IS NULL`
+      )
+      .bind(now, tokenId)
+      .run();
+
+    if (rowsAffected === 0) {
+      return null;
+    }
+
+    return this._getTokenById(tokenId);
+  }
+
+  /**
+   * Release a `deploying` claim back to `pending` when a deploy fails before the
+   * mint lands on-chain, so the draft stays editable and redeployable. Guarded
+   * on `deploying`/no-mint, so it's a no-op once the mint is recorded (status
+   * `active`) — safe to call unconditionally from a deploy catch block.
+   */
+  async releaseTokenDeploy(tokenId: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this.db
+      .prepare(
+        `UPDATE issued_tokens SET status = 'pending', updated_at = ?
+         WHERE id = ? AND status = 'deploying' AND mint_address IS NULL`
+      )
+      .bind(now, tokenId)
+      .run();
+  }
+
+  /**
    * Set token as deployed with mint address and optional ABL list
    */
   async setTokenDeployed(
