@@ -59,7 +59,7 @@ export function withAlchemyApiKey(url: string, apiKey?: string): string {
   return appendQueryParam(url, "api_key", apiKey);
 }
 
-export function withQuickNodeApiKey(url: string, apiKey?: string): string {
+export function withOptionalApiKeyTemplate(url: string, apiKey?: string): string {
   if (!apiKey) {
     return url;
   }
@@ -99,7 +99,10 @@ export function resolveDefaultSolanaRpcUrl(env: RpcEnv): string | null {
   if (env.SOLANA_RPC_QUICKNODE_URL) {
     providers.push({
       id: "quicknode",
-      url: withQuickNodeApiKey(env.SOLANA_RPC_QUICKNODE_URL, env.SOLANA_RPC_QUICKNODE_API_KEY),
+      url: withOptionalApiKeyTemplate(
+        env.SOLANA_RPC_QUICKNODE_URL,
+        env.SOLANA_RPC_QUICKNODE_API_KEY
+      ),
     });
   }
 
@@ -110,6 +113,13 @@ export function resolveDefaultSolanaRpcUrl(env: RpcEnv): string | null {
         env.SOLANA_RPC_VALIDATIONCLOUD_URL,
         env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY ?? ""
       ),
+    });
+  }
+
+  if (env.SOLANA_RPC_NODIT_URL) {
+    providers.push({
+      id: "nodit",
+      url: withOptionalApiKeyTemplate(env.SOLANA_RPC_NODIT_URL, env.SOLANA_RPC_NODIT_API_KEY),
     });
   }
 

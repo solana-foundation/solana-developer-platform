@@ -40,6 +40,8 @@ const providerEnvKeys = [
   "SOLANA_RPC_QUICKNODE_URL",
   "SOLANA_RPC_TRITON_URL",
   "SOLANA_RPC_VALIDATIONCLOUD_URL",
+  "SOLANA_RPC_NODIT_URL",
+  "SOLANA_RPC_NODIT_API_KEY",
   "RANGE_API_KEY",
   "ELLIPTIC_API_TOKEN",
   "ELLIPTIC_API_KEY",
@@ -80,6 +82,8 @@ function setBaseProviderEnv(): void {
     SOLANA_RPC_HELIUS_URL: "https://rpc.helius.test",
     SOLANA_RPC_TRITON_URL: "https://rpc.triton.test",
     SOLANA_RPC_VALIDATIONCLOUD_URL: "https://rpc.validationcloud.test/v1/{API_KEY}",
+    SOLANA_RPC_NODIT_URL: "https://solana-devnet.nodit.io/{API_KEY}",
+    SOLANA_RPC_NODIT_API_KEY: "nodit_test_key",
     RANGE_API_KEY: "range_test_key",
     MOONPAY_API_KEY: "moonpay_test_key",
     MOONPAY_SECRET_KEY: "moonpay_test_secret",
@@ -162,6 +166,7 @@ describe("provider-availability.service", () => {
     expect(resolved.providers.rpc.helius).toBe(true);
     expect(resolved.providers.rpc.triton).toBe(true);
     expect(resolved.providers.rpc.validationcloud).toBe(true);
+    expect(resolved.providers.rpc.nodit).toBe(true);
     expect(resolved.providers.compliance.range).toBe(true);
     expect(resolved.providers.ramps.moonpay).toBe(true);
     expect(resolved.providers.ramps.lightspark).toBe(true);
@@ -183,6 +188,11 @@ describe("provider-availability.service", () => {
     expect(availability.providers.rpc.helius.enabled).toBe(true);
     expect(availability.providers.rpc.triton.enabled).toBe(true);
     expect(availability.providers.rpc.validationcloud).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
+    });
+    expect(availability.providers.rpc.nodit).toEqual({
       entitled: true,
       configured: true,
       enabled: true,
@@ -236,6 +246,45 @@ describe("provider-availability.service", () => {
       entitled: true,
       configured: false,
       enabled: false,
+    });
+  });
+
+  it.each([
+    "individual",
+    "enterprise",
+  ] as const)("treats configured Nodit as general for the legacy %s tier and honors an explicit disable", async (tier) => {
+    await setOrganizationTier(tier);
+
+    const enabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(enabled.providers.rpc.nodit).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
+    });
+
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { rpc: { nodit: false } } }), TEST_ORG_ID)
+      .run();
+
+    const disabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(disabled.providers.rpc.nodit).toEqual({
+      entitled: false,
+      configured: true,
+      enabled: false,
+    });
+  });
+
+  it("treats Nodit as configured when its URL is present like other RPC providers", async () => {
+    env.SOLANA_RPC_NODIT_URL = "https://rpc.proxy.test/nodit";
+    env.SOLANA_RPC_NODIT_API_KEY = undefined;
+
+    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+
+    expect(availability.providers.rpc.nodit).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
     });
   });
 

@@ -20,6 +20,7 @@ const RPC_LABELS: Record<OrganizationRpcProvider, string> = {
   alchemy: "Alchemy",
   default: "SDP RPC",
   helius: "Helius",
+  nodit: "Nodit",
   quicknode: "QuickNode",
   triton: "Triton",
   validationcloud: "Validation Cloud",
@@ -30,6 +31,7 @@ const RPC_DESCRIPTION_KEYS: Record<
   | "DashboardCustody.onboardingRpcDefaultDescription"
   | "DashboardCustody.onboardingRpcAlchemyDescription"
   | "DashboardCustody.onboardingRpcHeliusDescription"
+  | "DashboardCustody.onboardingRpcNoditDescription"
   | "DashboardCustody.onboardingRpcQuickNodeDescription"
   | "DashboardCustody.onboardingRpcTritonDescription"
   | "DashboardCustody.onboardingRpcValidationCloudDescription"
@@ -37,6 +39,7 @@ const RPC_DESCRIPTION_KEYS: Record<
   alchemy: "DashboardCustody.onboardingRpcAlchemyDescription",
   default: "DashboardCustody.onboardingRpcDefaultDescription",
   helius: "DashboardCustody.onboardingRpcHeliusDescription",
+  nodit: "DashboardCustody.onboardingRpcNoditDescription",
   quicknode: "DashboardCustody.onboardingRpcQuickNodeDescription",
   triton: "DashboardCustody.onboardingRpcTritonDescription",
   validationcloud: "DashboardCustody.onboardingRpcValidationCloudDescription",

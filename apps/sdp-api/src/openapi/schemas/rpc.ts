@@ -68,7 +68,7 @@ export const rpcProvidersResponseSchema = z
     }),
     roundRobinOrder: z.array(managedRpcProviderIdSchema).openapi({
       description: "Managed provider order used by round-robin fallback.",
-      example: ["alchemy", "default", "helius", "quicknode", "triton", "validationcloud"],
+      example: ["triton", "helius", "alchemy", "quicknode", "validationcloud", "nodit", "default"],
     }),
   })
   .openapi({ description: "RPC provider list and selection summary." });

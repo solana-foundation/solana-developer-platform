@@ -18,6 +18,7 @@ export const ORGANIZATION_RPC_PROVIDERS = [
   "alchemy",
   "default",
   "helius",
+  "nodit",
   "quicknode",
   "triton",
   "validationcloud",

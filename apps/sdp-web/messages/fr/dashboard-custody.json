@@ -349,6 +349,7 @@
     "onboardingRpcDefaultDescription": "Utilisez l'infrastructure RPC gérée par SDP, sans identifiants à configurer.",
     "onboardingRpcAlchemyDescription": "Acheminez les requêtes Solana via votre connexion Alchemy configurée.",
     "onboardingRpcHeliusDescription": "Utilisez l'infrastructure Helius pour les requêtes RPC Solana.",
+    "onboardingRpcNoditDescription": "Utilisez Nodit pour votre trafic RPC Solana.",
     "onboardingRpcQuickNodeDescription": "Utilisez votre point de terminaison QuickNode configuré pour le RPC Solana.",
     "onboardingRpcTritonDescription": "Acheminez les requêtes Solana via l'infrastructure Triton.",
     "onboardingRpcValidationCloudDescription": "Utilisez Validation Cloud pour votre trafic RPC Solana.",
