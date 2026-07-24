@@ -7,6 +7,7 @@ import {
   ArrowLeftIcon,
   ArrowLeftRightIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
   CircleCheckBigIcon,
   CoinsIcon,
   KeyRoundIcon,
@@ -992,7 +993,7 @@ function DashboardSidebarContent({
   const showMobileClose = variant === "mobile";
   return (
     <>
-      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain p-3">
+      <div className="min-h-0 flex-1 space-y-6 overflow-x-hidden overflow-y-auto overscroll-contain p-3">
         <div className="py-3">
           {showMobileClose ? (
             <div className="flex items-center justify-between gap-2">
@@ -1371,9 +1372,14 @@ export function DashboardShell({
                 ? t("Shared.dashboardShell.collapseSidebar")
                 : t("Shared.dashboardShell.expandSidebar")
             }
-            className="group absolute top-1/2 right-0 z-10 flex h-24 w-5 -translate-y-1/2 translate-x-3/4 cursor-pointer items-center justify-center"
+            className="absolute top-1/2 right-0 z-20 flex size-6 -translate-y-1/2 translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border-default bg-surface-raised text-secondary shadow-sm transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:border-border-strong hover:text-primary"
           >
-            <span className="block h-8 w-0.5 rounded-full bg-border-strong group-hover:bg-tertiary" />
+            <ChevronLeftIcon
+              className={cn(
+                "size-3.5 transition-transform motion-reduce:transition-none",
+                !isSidebarOpen && "rotate-180"
+              )}
+            />
           </button>
         </aside>
 
