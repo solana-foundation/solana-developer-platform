@@ -375,7 +375,19 @@ export function IssuanceTokenList({
   const totalOffset = running;
 
   return (
-    <div className="relative flex flex-col gap-2.5">
+    // Panels are absolute and rows/button move by transform, so opening a row
+    // adds no layout height. Inside the issuance workspace's fixed-height scroll
+    // region that means the displaced content (lower rows + Create Draft) would
+    // slide past the scrollable extent and become unreachable. Reserve that space
+    // with padding-bottom, transitioned in lockstep with the row transforms so
+    // scrollHeight grows/shrinks smoothly alongside the motion.
+    <div
+      className="relative flex flex-col gap-2.5"
+      style={{
+        paddingBottom: totalOffset,
+        transition: `padding ${ANIM_MS}ms ease-out`,
+      }}
+    >
       {rows.map(({ token, open, offset }) => (
         <IssuanceTokenListRow
           key={token.id}

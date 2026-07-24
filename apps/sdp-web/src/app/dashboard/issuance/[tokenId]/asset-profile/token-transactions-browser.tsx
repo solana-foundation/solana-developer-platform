@@ -43,21 +43,28 @@ function TransactionFilters({
   t,
   type,
   status,
+  busy,
   onTypeChange,
   onStatusChange,
 }: {
   t: ReturnType<typeof useTranslations>;
   type: string | null;
   status: string | null;
+  // While a fetch is in flight, the selects are blocked (like the button) and
+  // show a spinner so filter changes can't stack mid-request.
+  busy: boolean;
   onTypeChange: (value: string | null) => void;
   onStatusChange: (value: string | null) => void;
 }) {
+  const spinner = busy ? <Loader2 className="size-3.5 animate-spin" /> : null;
   return (
     <CardAction className="flex flex-wrap items-center justify-end gap-2">
       <div className="w-44">
         <Select
           ariaLabel={t("DashboardIssuance.transactions.filterByType")}
           value={type ?? ALL}
+          disabled={busy}
+          trailing={spinner}
           onValueChange={(value) => onTypeChange(value === ALL ? null : value)}
         >
           <SelectItem value={ALL}>{t("DashboardIssuance.transactions.filterAllTypes")}</SelectItem>
@@ -72,6 +79,8 @@ function TransactionFilters({
         <Select
           ariaLabel={t("DashboardIssuance.transactions.filterByStatus")}
           value={status ?? ALL}
+          disabled={busy}
+          trailing={spinner}
           onValueChange={(value) => onStatusChange(value === ALL ? null : value)}
         >
           <SelectItem value={ALL}>
@@ -123,6 +132,99 @@ function TransactionRow({
   );
 }
 
+function TransactionsResults({
+  t,
+  locale,
+  isInitialLoading,
+  isRefreshing,
+  busy,
+  errorMessage,
+  transactions,
+  total,
+  hasMore,
+  hasFilters,
+  onLoadMore,
+}: {
+  t: ReturnType<typeof useTranslations>;
+  locale: ReturnType<typeof useLocale>;
+  isInitialLoading: boolean;
+  isRefreshing: boolean;
+  busy: boolean;
+  errorMessage: string | null;
+  transactions: TokenTransaction[];
+  total: number;
+  hasMore: boolean;
+  hasFilters: boolean;
+  onLoadMore: () => void;
+}) {
+  if (isInitialLoading) {
+    return (
+      <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-border-subtle bg-fill-subtle px-6 py-10">
+        <div className="flex items-center gap-3 text-sm text-secondary">
+          <Loader2 className="size-4 animate-spin" />
+          <span>{t("DashboardIssuance.transactions.loading")}</span>
+        </div>
+      </div>
+    );
+  }
+  if (errorMessage) {
+    return <p className="text-sm text-error">{errorMessage}</p>;
+  }
+  if (transactions.length === 0) {
+    return (
+      <p className="text-sm text-secondary">
+        {hasFilters
+          ? t("DashboardIssuance.transactions.noMatches")
+          : t("DashboardIssuance.transactions.empty")}
+      </p>
+    );
+  }
+  return (
+    <div
+      aria-busy={isRefreshing}
+      className={`space-y-3 transition-opacity ${isRefreshing ? "opacity-60" : ""}`}
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("DashboardIssuance.transactions.type")}</TableHead>
+            <TableHead>{t("DashboardIssuance.transactions.status")}</TableHead>
+            <TableHead>{t("DashboardIssuance.transactions.signature")}</TableHead>
+            <TableHead className="text-right">
+              {t("DashboardIssuance.transactions.created")}
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {transactions.map((transaction) => (
+            <TransactionRow key={transaction.id} transaction={transaction} locale={locale} />
+          ))}
+        </TableBody>
+      </Table>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-secondary">
+          {t("DashboardIssuance.transactions.showing", {
+            count: transactions.length,
+            total: total ? ` of ${total}` : "",
+          })}
+        </p>
+        {hasMore ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            iconLeft={busy ? <Loader2 className="animate-spin" /> : undefined}
+            onClick={onLoadMore}
+          >
+            {t("DashboardIssuance.transactions.loadMore")}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -130,7 +232,7 @@ export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
   const [status, setStatus] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(PAGE_STEP);
 
-  const { data, error, isLoading } = usePersistedDashboardSWR(
+  const { data, error, isLoading, isValidating } = usePersistedDashboardSWR(
     [TOKEN_TRANSACTIONS_KEY, tokenId, type ?? "all", status ?? "all", pageSize] as const,
     ([, id, ty, st, size]) =>
       fetchTokenTransactionsPage(id, {
@@ -138,7 +240,9 @@ export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
         status: st === "all" ? null : st,
         pageSize: Number(size),
       }),
-    { revalidateOnFocus: true, revalidateIfStale: true },
+    // keepPreviousData → changing a filter keeps the current rows on screen
+    // (dimmed) while the new page loads, instead of flashing the empty state.
+    { revalidateOnFocus: true, revalidateIfStale: true, keepPreviousData: true },
     {
       key: `token.${tokenId}.transactions.${type ?? "all"}.${status ?? "all"}.${pageSize}`,
       ttlMs: 30_000,
@@ -148,6 +252,13 @@ export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
   const transactions = data?.transactions ?? [];
   const total = data?.total ?? 0;
   const hasFilters = type !== null || status !== null;
+  // `busy` = any in-flight fetch. With keepPreviousData, isLoading is only true on
+  // the very first load (no data yet), so isValidating is what catches filter
+  // changes and "Load more". The filters + button are blocked while busy; a
+  // refetch over already-shown rows also dims them.
+  const busy = isValidating;
+  const isInitialLoading = isLoading && transactions.length === 0;
+  const isRefreshing = busy && transactions.length > 0;
   const errorMessage = error
     ? error instanceof Error
       ? error.message
@@ -163,6 +274,7 @@ export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
           t={t}
           type={type}
           status={status}
+          busy={busy}
           onTypeChange={(value) => {
             setType(value);
             setPageSize(PAGE_STEP);
@@ -174,61 +286,19 @@ export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
         />
       </CardHeader>
       <CardContent>
-        {isLoading && transactions.length === 0 ? (
-          <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-border-subtle bg-fill-subtle px-6 py-10">
-            <div className="flex items-center gap-3 text-sm text-secondary">
-              <Loader2 className="size-4 animate-spin" />
-              <span>{t("DashboardIssuance.transactions.loading")}</span>
-            </div>
-          </div>
-        ) : errorMessage ? (
-          <p className="text-sm text-error">{errorMessage}</p>
-        ) : transactions.length === 0 ? (
-          <p className="text-sm text-secondary">
-            {hasFilters
-              ? t("DashboardIssuance.transactions.noMatches")
-              : t("DashboardIssuance.transactions.empty")}
-          </p>
-        ) : (
-          <div className="space-y-3">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("DashboardIssuance.transactions.type")}</TableHead>
-                  <TableHead>{t("DashboardIssuance.transactions.status")}</TableHead>
-                  <TableHead>{t("DashboardIssuance.transactions.signature")}</TableHead>
-                  <TableHead className="text-right">
-                    {t("DashboardIssuance.transactions.created")}
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {transactions.map((transaction) => (
-                  <TransactionRow key={transaction.id} transaction={transaction} locale={locale} />
-                ))}
-              </TableBody>
-            </Table>
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-secondary">
-                {t("DashboardIssuance.transactions.showing", {
-                  count: transactions.length,
-                  total: total ? ` of ${total}` : "",
-                })}
-              </p>
-              {data?.hasMore ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={isLoading}
-                  onClick={() => setPageSize((size) => size + PAGE_STEP)}
-                >
-                  {t("DashboardIssuance.transactions.loadMore")}
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        )}
+        <TransactionsResults
+          t={t}
+          locale={locale}
+          isInitialLoading={isInitialLoading}
+          isRefreshing={isRefreshing}
+          busy={busy}
+          errorMessage={errorMessage}
+          transactions={transactions}
+          total={total}
+          hasMore={data?.hasMore ?? false}
+          hasFilters={hasFilters}
+          onLoadMore={() => setPageSize((size) => size + PAGE_STEP)}
+        />
       </CardContent>
     </Card>
   );

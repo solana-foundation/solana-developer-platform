@@ -676,7 +676,166 @@ export function TokenActionAdminForms({
 
 // One "Load more" step; also the initial page size for the control list.
 const CONTROL_LIST_PAGE_STEP = 25;
-const ALL_LABELS = "all";
+// Sentinel value for the "All labels" Select option. A leading NUL byte can't be
+// typed into the label input and never comes back from the labels facet, so it
+// can never collide with a real label (e.g. one literally named "all").
+const ALL_LABELS = "\u0000__all_labels__";
+
+function ControlListFilters({
+  t,
+  query,
+  onQueryChange,
+  searchPlaceholder,
+  activeLabel,
+  onLabelChange,
+  labels,
+}: {
+  t: ReturnType<typeof useTranslations>;
+  query: string;
+  onQueryChange: (value: string) => void;
+  searchPlaceholder: string;
+  activeLabel: string;
+  onLabelChange: (value: string) => void;
+  labels: string[];
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Input
+        className="min-w-0 flex-1"
+        value={query}
+        onChange={(event) => onQueryChange(event.currentTarget.value)}
+        placeholder={searchPlaceholder}
+        iconLeft={<Search />}
+      />
+      <Select
+        className="w-44 shrink-0"
+        value={activeLabel}
+        onValueChange={(value) => onLabelChange(value ?? ALL_LABELS)}
+        ariaLabel={t("DashboardIssuance.controlLists.filterByLabel")}
+      >
+        <SelectItem value={ALL_LABELS}>{t("DashboardIssuance.controlLists.allLabels")}</SelectItem>
+        {labels.map((label) => (
+          <SelectItem key={label} value={label}>
+            {label}
+          </SelectItem>
+        ))}
+      </Select>
+    </div>
+  );
+}
+
+function ControlListEntryRow({
+  entry,
+  removeIcon,
+  isPending,
+  onRemove,
+}: {
+  entry: TokenAllowlistEntry;
+  removeIcon: ReactNode;
+  isPending: boolean;
+  onRemove: (entryId: string) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-border-default px-3 py-2">
+      <div className="min-w-0">
+        <p className="truncate font-mono text-xs text-primary">{entry.address}</p>
+        <p className="text-xs text-secondary">
+          {entry.label ?? t("DashboardIssuance.forms.noLabel")}
+        </p>
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        iconLeft={removeIcon}
+        onClick={() => onRemove(entry.id)}
+        disabled={isPending}
+      >
+        {t("DashboardIssuance.forms.removeEntry")}
+      </Button>
+    </div>
+  );
+}
+
+function ControlListResults({
+  t,
+  isLoading,
+  errorMessage,
+  entries,
+  total,
+  hasMore,
+  hasFilter,
+  emptyState,
+  removeIcon,
+  isPending,
+  onRemove,
+  onLoadMore,
+}: {
+  t: ReturnType<typeof useTranslations>;
+  isLoading: boolean;
+  errorMessage: string | null;
+  entries: TokenAllowlistEntry[];
+  total: number;
+  hasMore: boolean;
+  hasFilter: boolean;
+  emptyState: string;
+  removeIcon: ReactNode;
+  isPending: boolean;
+  onRemove: (entryId: string) => void;
+  onLoadMore: () => void;
+}) {
+  if (isLoading && entries.length === 0) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-8 text-sm text-secondary">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span>{t("DashboardIssuance.controlLists.loading")}</span>
+      </div>
+    );
+  }
+  if (errorMessage) {
+    return <p className="py-8 text-center text-sm text-error">{errorMessage}</p>;
+  }
+  if (entries.length === 0) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-8 text-center">
+        <Inbox className="h-6 w-6 text-tertiary" />
+        <p className="text-sm text-secondary">
+          {hasFilter ? t("DashboardIssuance.controlLists.noMatches") : emptyState}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      {entries.map((entry) => (
+        <ControlListEntryRow
+          key={entry.id}
+          entry={entry}
+          removeIcon={removeIcon}
+          isPending={isPending}
+          onRemove={onRemove}
+        />
+      ))}
+      {hasMore ? (
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <span className="text-xs text-tertiary">
+            {t("DashboardIssuance.controlLists.showingCount", { shown: entries.length, total })}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isLoading}
+            onClick={onLoadMore}
+          >
+            {t("DashboardIssuance.controlLists.loadMore")}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 // Server-driven search + label-filter + paged list for a control list. Search
 // (address/label contains) and the label filter run against the whole list on
@@ -717,25 +876,33 @@ function ControlListEntries({
   const activeLabel =
     labelFilter !== ALL_LABELS && labels.includes(labelFilter) ? labelFilter : ALL_LABELS;
 
+  // The real fetch args (null = no filter). Search requires ≥1 char (the API
+  // trims and rejects empty) and labelParam is only ever a real, non-empty facet
+  // label, so the "" fallbacks in the key below can't collide with an active
+  // value — and the fetcher reads these directly rather than reverse-mapping a
+  // sentinel out of the key, so a search/label equal to any sentinel is safe.
+  const searchParam = debouncedQuery.length > 0 ? debouncedQuery : null;
+  const labelParam = activeLabel !== ALL_LABELS && activeLabel.length > 0 ? activeLabel : null;
+
   const { data, error, isLoading } = usePersistedDashboardSWR(
-    [TOKEN_ALLOWLIST_KEY, tokenId, debouncedQuery || ALL_LABELS, activeLabel, pageSize] as const,
-    ([, id, search, label, size]) =>
-      fetchTokenAllowlistPage(id, {
+    [TOKEN_ALLOWLIST_KEY, tokenId, searchParam ?? "", labelParam ?? "", pageSize] as const,
+    () =>
+      fetchTokenAllowlistPage(tokenId, {
         page: 1,
-        pageSize: Number(size),
-        search: search === ALL_LABELS ? null : search,
-        label: label === ALL_LABELS ? null : label,
+        pageSize,
+        search: searchParam,
+        label: labelParam,
       }),
     { revalidateOnFocus: true, revalidateIfStale: true, keepPreviousData: true },
     {
-      key: `token.${tokenId}.allowlist.${debouncedQuery || ALL_LABELS}.${activeLabel}.${pageSize}`,
+      key: `token.${tokenId}.allowlist.${searchParam ?? ""}.${labelParam ?? ""}.${pageSize}`,
       ttlMs: 30_000,
     }
   );
 
   const entries = data?.entries ?? [];
   const total = data?.total ?? 0;
-  const hasFilter = debouncedQuery.length > 0 || activeLabel !== ALL_LABELS;
+  const hasFilter = searchParam !== null || labelParam !== null;
   const errorMessage = error
     ? error instanceof Error
       ? error.message
@@ -744,97 +911,36 @@ function ControlListEntries({
 
   return (
     <div className="space-y-3 border-t border-border-subtle pt-4">
-      <div className="flex items-center gap-2">
-        <Input
-          className="min-w-0 flex-1"
-          value={query}
-          onChange={(event) => {
-            setQuery(event.currentTarget.value);
-            setPageSize(CONTROL_LIST_PAGE_STEP);
-          }}
-          placeholder={searchPlaceholder}
-          iconLeft={<Search />}
-        />
-        <Select
-          className="w-44 shrink-0"
-          value={activeLabel}
-          onValueChange={(value) => {
-            setLabelFilter(value ?? ALL_LABELS);
-            setPageSize(CONTROL_LIST_PAGE_STEP);
-          }}
-          ariaLabel={t("DashboardIssuance.controlLists.filterByLabel")}
-        >
-          <SelectItem value={ALL_LABELS}>
-            {t("DashboardIssuance.controlLists.allLabels")}
-          </SelectItem>
-          {labels.map((label) => (
-            <SelectItem key={label} value={label}>
-              {label}
-            </SelectItem>
-          ))}
-        </Select>
-      </div>
+      <ControlListFilters
+        t={t}
+        query={query}
+        onQueryChange={(value) => {
+          setQuery(value);
+          setPageSize(CONTROL_LIST_PAGE_STEP);
+        }}
+        searchPlaceholder={searchPlaceholder}
+        activeLabel={activeLabel}
+        onLabelChange={(value) => {
+          setLabelFilter(value);
+          setPageSize(CONTROL_LIST_PAGE_STEP);
+        }}
+        labels={labels}
+      />
 
-      {isLoading && entries.length === 0 ? (
-        <div className="flex items-center justify-center gap-2 py-8 text-sm text-secondary">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <span>{t("DashboardIssuance.controlLists.loading")}</span>
-        </div>
-      ) : errorMessage ? (
-        <p className="py-8 text-center text-sm text-error">{errorMessage}</p>
-      ) : entries.length > 0 ? (
-        <div className="space-y-2">
-          {entries.map((entry) => (
-            <div
-              key={entry.id}
-              className="flex items-center justify-between gap-2 rounded-lg border border-border-default px-3 py-2"
-            >
-              <div className="min-w-0">
-                <p className="truncate font-mono text-xs text-primary">{entry.address}</p>
-                <p className="text-xs text-secondary">
-                  {entry.label ?? t("DashboardIssuance.forms.noLabel")}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                iconLeft={removeIcon}
-                onClick={() => onRemove(entry.id)}
-                disabled={isPending}
-              >
-                {t("DashboardIssuance.forms.removeEntry")}
-              </Button>
-            </div>
-          ))}
-          {data?.hasMore ? (
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <span className="text-xs text-tertiary">
-                {t("DashboardIssuance.controlLists.showingCount", {
-                  shown: entries.length,
-                  total,
-                })}
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={isLoading}
-                onClick={() => setPageSize((size) => size + CONTROL_LIST_PAGE_STEP)}
-              >
-                {t("DashboardIssuance.controlLists.loadMore")}
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      ) : (
-        <div className="flex flex-col items-center gap-2 py-8 text-center">
-          <Inbox className="h-6 w-6 text-tertiary" />
-          <p className="text-sm text-secondary">
-            {hasFilter ? t("DashboardIssuance.controlLists.noMatches") : emptyState}
-          </p>
-        </div>
-      )}
+      <ControlListResults
+        t={t}
+        isLoading={isLoading}
+        errorMessage={errorMessage}
+        entries={entries}
+        total={total}
+        hasMore={data?.hasMore ?? false}
+        hasFilter={hasFilter}
+        emptyState={emptyState}
+        removeIcon={removeIcon}
+        isPending={isPending}
+        onRemove={onRemove}
+        onLoadMore={() => setPageSize((size) => size + CONTROL_LIST_PAGE_STEP)}
+      />
     </div>
   );
 }
