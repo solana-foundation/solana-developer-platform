@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { updateOrganizationRpcSettingsAction } from "./actions";
 
@@ -362,26 +363,26 @@ export function OrganizationRpcSettingsForm({
         ) : null}
 
         <div className="grid gap-2">
-          <Label htmlFor="rpcProvider">{t("DashboardCustody.rpcProvider")}</Label>
+          <Label>{t("DashboardCustody.rpcProvider")}</Label>
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_112px] sm:items-center">
-            <select
-              id="rpcProvider"
-              name="rpcProvider"
-              className="h-10 w-full min-w-0 rounded-lg border border-border-default bg-surface-raised px-3 text-sm text-primary"
+            <Select
+              ariaLabel={t("DashboardCustody.rpcProvider")}
+              className="w-full min-w-0"
               value={selectedProvider}
               disabled={!canManageSettings || !hasEnabledProviders || isSaving || isTesting}
-              onChange={(event) => {
-                const nextProvider = event.currentTarget.value as typeof selectedProvider;
+              onValueChange={(value) => {
+                if (!value) return;
+                const nextProvider = value as typeof selectedProvider;
                 setSelectedProvider(nextProvider);
                 void saveProvider(nextProvider);
               }}
             >
               {availableProviders.map((provider) => (
-                <option key={provider} value={provider}>
+                <SelectItem key={provider} value={provider}>
                   {RPC_PROVIDER_LABELS[provider]}
-                </option>
+                </SelectItem>
               ))}
-            </select>
+            </Select>
             <Button
               type="button"
               size="sm"
