@@ -13,7 +13,6 @@ import { getDb } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { createKVStoreSet } from "@/runtime/kv-redis";
 import {
   ensureClerkOrganizationMapping,
   findClerkOrganizationMapping,
@@ -110,7 +109,7 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
       .bind(mapping.organization_id),
   ]);
 
-  const sessionService = new SessionService(getDb(c.env), createKVStoreSet(c.env).sessions);
+  const sessionService = new SessionService(getDb(c.env));
   await sessionService.revokeOrganizationSessions(mapping.organization_id);
 }
 
@@ -249,7 +248,7 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
       .bind(identity.user_id),
   ]);
 
-  const sessionService = new SessionService(getDb(c.env), createKVStoreSet(c.env).sessions);
+  const sessionService = new SessionService(getDb(c.env));
   await sessionService.revokeAllUserSessions(identity.user_id);
 }
 
@@ -291,7 +290,7 @@ async function upsertVerifiedMembership(
     .run();
 
   if (existing?.status === "active" && existing.role !== role) {
-    const sessionService = new SessionService(getDb(c.env), createKVStoreSet(c.env).sessions);
+    const sessionService = new SessionService(getDb(c.env));
     await sessionService.revokeUserOrganizationSessions(data.userId, organizationId);
   }
 
@@ -347,7 +346,7 @@ async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON)
     .bind(mapping.organization_id, identity.user_id)
     .run();
 
-  const sessionService = new SessionService(getDb(c.env), createKVStoreSet(c.env).sessions);
+  const sessionService = new SessionService(getDb(c.env));
   await sessionService.revokeUserOrganizationSessions(identity.user_id, mapping.organization_id);
 }
 

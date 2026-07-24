@@ -236,7 +236,7 @@ export const deleteOrganization = async (c: AppContext) => {
       .bind(orgId),
   ]);
 
-  const sessionService = new SessionService(db, c.var.kv.sessions);
+  const sessionService = new SessionService(db);
   await sessionService.revokeOrganizationSessions(orgId);
 
   // Audit log

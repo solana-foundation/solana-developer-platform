@@ -2,7 +2,6 @@
  * Session Authentication Middleware
  *
  * Validates session cookies for UI authentication.
- * Sessions are cached in KV for fast lookups.
  */
 
 import type { Context, Next } from "hono";
@@ -26,8 +25,7 @@ export function sessionAuthMiddleware() {
       throw new AppError("UNAUTHORIZED", "Session required");
     }
 
-    const sessionsKV = c.var.kv.sessions;
-    const sessionService = new SessionService(getDb(c.env), sessionsKV);
+    const sessionService = new SessionService(getDb(c.env));
     const cachedSession = await sessionService.getSession(sessionId);
 
     if (!cachedSession) {
@@ -53,8 +51,7 @@ export function optionalSessionAuth() {
 
     if (sessionId) {
       try {
-        const sessionsKV = c.var.kv.sessions;
-        const sessionService = new SessionService(getDb(c.env), sessionsKV);
+        const sessionService = new SessionService(getDb(c.env));
         const cachedSession = await sessionService.getSession(sessionId);
 
         if (cachedSession) {

@@ -2,19 +2,15 @@
  * Session Service
  *
  * Manages user sessions for UI authentication.
- * Sessions are stored in Postgres and cached in KV for fast lookups.
+ * Sessions are stored in Postgres.
  */
 
-import type { CachedSession, Permission, Session } from "@sdp/types";
+import type { CachedSession, Session } from "@sdp/types";
 import { getPermissionsForOrgRole } from "@sdp/types";
-import type { KVStore } from "@/runtime/kv";
 
 // Session TTL: 7 days
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const SESSION_TTL_MS = SESSION_TTL_SECONDS * 1000;
-
-// KV cache TTL: 1 hour (re-validated on activity)
-const SESSION_CACHE_TTL = 3600;
 
 export interface SessionMetadata {
   ipAddress?: string;
@@ -22,10 +18,7 @@ export interface SessionMetadata {
 }
 
 export class SessionService {
-  constructor(
-    private db: DatabaseClient,
-    private sessionsKV: KVStore
-  ) {}
+  constructor(private db: DatabaseClient) {}
 
   /**
    * Create a new session for a user
@@ -33,7 +26,6 @@ export class SessionService {
   async createSession(
     userId: string,
     organizationId: string,
-    permissions: Permission[],
     metadata: SessionMetadata
   ): Promise<Session> {
     const id = `ses_${crypto.randomUUID()}`;
@@ -53,7 +45,6 @@ export class SessionService {
       lastActivityAt: now.toISOString(),
     };
 
-    // Persist in Postgres
     await this.db
       .prepare(
         `INSERT INTO sessions (id, user_id, organization_id, auth_method, ip_address, user_agent, expires_at, created_at, last_activity_at)
@@ -72,26 +63,14 @@ export class SessionService {
       )
       .run();
 
-    // Cache in KV
-    const cachedSession: CachedSession = {
-      id: session.id,
-      userId: session.userId,
-      organizationId: session.organizationId,
-      permissions,
-      expiresAt: session.expiresAt,
-    };
-    await this.setSessionCacheBestEffort(session.id, cachedSession);
-
     return session;
   }
 
   /**
-   * Get a session from Postgres and refresh its cache entry.
+   * Resolve a session against the member's current role and permissions.
    *
-   * Membership state and permissions are authorization data, so the KV entry
-   * must never be authoritative. Re-validating them here ensures removals and
-   * role changes take effect even when an older permissions snapshot is still
-   * cached.
+   * Membership state and permissions are authorization data and are always
+   * read from Postgres, so removals and role changes take effect immediately.
    */
   async getSession(sessionId: string): Promise<CachedSession | null> {
     const row = await this.db
@@ -116,30 +95,24 @@ export class SessionService {
       }>();
 
     if (!row) {
-      await this.deleteSessionCacheBestEffort(sessionId);
       return null;
     }
 
     // Check expiration
     if (new Date(row.expires_at) < new Date()) {
-      await this.deleteSessionCacheBestEffort(sessionId);
       return null;
     }
 
     // Get permissions for the user's role
     const permissions = getPermissionsForOrgRole(row.role);
 
-    const cachedSession: CachedSession = {
+    return {
       id: row.id,
       userId: row.user_id,
       organizationId: row.organization_id,
       permissions,
       expiresAt: row.expires_at,
     };
-
-    await this.setSessionCacheBestEffort(sessionId, cachedSession);
-
-    return cachedSession;
   }
 
   /**
@@ -162,7 +135,6 @@ export class SessionService {
       .prepare("UPDATE sessions SET revoked_at = ? WHERE id = ?")
       .bind(now, sessionId)
       .run();
-    await this.deleteSessionCacheBestEffort(sessionId);
   }
 
   /**
@@ -191,19 +163,10 @@ export class SessionService {
 
   private async revokeMatchingSessions(whereClause: string, bindings: string[]): Promise<void> {
     const now = new Date().toISOString();
-    const sessions = await this.db
-      .prepare(`SELECT id FROM sessions WHERE ${whereClause} AND revoked_at IS NULL`)
-      .bind(...bindings)
-      .all<{ id: string }>();
-
     await this.db
       .prepare(`UPDATE sessions SET revoked_at = ? WHERE ${whereClause} AND revoked_at IS NULL`)
       .bind(now, ...bindings)
       .run();
-
-    await Promise.all(
-      sessions.results.map((session) => this.deleteSessionCacheBestEffort(session.id))
-    );
   }
 
   /**
@@ -244,35 +207,5 @@ export class SessionService {
       createdAt: row.created_at,
       lastActivityAt: row.last_activity_at,
     }));
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // KV Cache Helpers
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  private async setSessionCache(sessionId: string, data: CachedSession): Promise<void> {
-    await this.sessionsKV.put(`session:${sessionId}`, JSON.stringify(data), {
-      expirationTtl: SESSION_CACHE_TTL,
-    });
-  }
-
-  private async setSessionCacheBestEffort(sessionId: string, data: CachedSession): Promise<void> {
-    try {
-      await this.setSessionCache(sessionId, data);
-    } catch (error) {
-      console.error("Failed to refresh session cache:", error);
-    }
-  }
-
-  private async deleteSessionCache(sessionId: string): Promise<void> {
-    await this.sessionsKV.delete(`session:${sessionId}`);
-  }
-
-  private async deleteSessionCacheBestEffort(sessionId: string): Promise<void> {
-    try {
-      await this.deleteSessionCache(sessionId);
-    } catch (error) {
-      console.error("Failed to delete revoked session cache:", error);
-    }
   }
 }

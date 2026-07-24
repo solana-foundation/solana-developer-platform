@@ -1,8 +1,6 @@
 import { getPermissionsForOrgRole } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import type { KVStore } from "@/runtime/kv";
-import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -55,7 +53,7 @@ describe("SessionService", () => {
         .bind("mem_session_two_one", ORG_ONE, USER_TWO),
     ]);
 
-    service = new SessionService(db, createKVStoreSet(env).sessions);
+    service = new SessionService(db);
   });
 
   afterEach(async () => {
@@ -63,13 +61,8 @@ describe("SessionService", () => {
     await clearKVStores(env);
   });
 
-  it("rejects a removed member even when an authorized session is still cached", async () => {
-    const session = await service.createSession(
-      USER_ONE,
-      ORG_ONE,
-      getPermissionsForOrgRole("admin"),
-      {}
-    );
+  it("rejects a removed member with an otherwise valid session", async () => {
+    const session = await service.createSession(USER_ONE, ORG_ONE, {});
 
     await getDb(env)
       .prepare(
@@ -79,17 +72,10 @@ describe("SessionService", () => {
       .run();
 
     await expect(service.getSession(session.id)).resolves.toBeNull();
-    await expect(createKVStoreSet(env).sessions.get(`session:${session.id}`)).resolves.toBeNull();
   });
 
-  it("refreshes cached permissions from the member's current role", async () => {
-    const sessions = createKVStoreSet(env).sessions;
-    const session = await service.createSession(
-      USER_ONE,
-      ORG_ONE,
-      getPermissionsForOrgRole("admin"),
-      {}
-    );
+  it("resolves permissions from the member's current role", async () => {
+    const session = await service.createSession(USER_ONE, ORG_ONE, {});
 
     await getDb(env)
       .prepare(
@@ -101,30 +87,12 @@ describe("SessionService", () => {
     const refreshed = await service.getSession(session.id);
     expect(refreshed?.permissions).toEqual(getPermissionsForOrgRole("member"));
     expect(refreshed?.permissions).not.toContain("org:admin");
-
-    const cached = await sessions.get<{ permissions: string[] }>(`session:${session.id}`, "json");
-    expect(cached?.permissions).toEqual(getPermissionsForOrgRole("member"));
   });
 
   it("revokes only the user's sessions in the removed organization", async () => {
-    const target = await service.createSession(
-      USER_ONE,
-      ORG_ONE,
-      getPermissionsForOrgRole("admin"),
-      {}
-    );
-    const sameUserOtherOrg = await service.createSession(
-      USER_ONE,
-      ORG_TWO,
-      getPermissionsForOrgRole("admin"),
-      {}
-    );
-    const otherUserSameOrg = await service.createSession(
-      USER_TWO,
-      ORG_ONE,
-      getPermissionsForOrgRole("member"),
-      {}
-    );
+    const target = await service.createSession(USER_ONE, ORG_ONE, {});
+    const sameUserOtherOrg = await service.createSession(USER_ONE, ORG_TWO, {});
+    const otherUserSameOrg = await service.createSession(USER_TWO, ORG_ONE, {});
 
     await service.revokeUserOrganizationSessions(USER_ONE, ORG_ONE);
 
@@ -136,28 +104,12 @@ describe("SessionService", () => {
     expect(revokedById.get(target.id)).not.toBeNull();
     expect(revokedById.get(sameUserOtherOrg.id)).toBeNull();
     expect(revokedById.get(otherUserSameOrg.id)).toBeNull();
-    await expect(createKVStoreSet(env).sessions.get(`session:${target.id}`)).resolves.toBeNull();
   });
 
   it("revokes every session in a deleted organization without affecting other organizations", async () => {
-    const firstOrgSession = await service.createSession(
-      USER_ONE,
-      ORG_ONE,
-      getPermissionsForOrgRole("admin"),
-      {}
-    );
-    const secondOrgSession = await service.createSession(
-      USER_ONE,
-      ORG_TWO,
-      getPermissionsForOrgRole("admin"),
-      {}
-    );
-    const otherUserFirstOrgSession = await service.createSession(
-      USER_TWO,
-      ORG_ONE,
-      getPermissionsForOrgRole("member"),
-      {}
-    );
+    const firstOrgSession = await service.createSession(USER_ONE, ORG_ONE, {});
+    const secondOrgSession = await service.createSession(USER_ONE, ORG_TWO, {});
+    const otherUserFirstOrgSession = await service.createSession(USER_TWO, ORG_ONE, {});
 
     await service.revokeOrganizationSessions(ORG_ONE);
 
@@ -169,76 +121,5 @@ describe("SessionService", () => {
     expect(revokedById.get(firstOrgSession.id)).not.toBeNull();
     expect(revokedById.get(otherUserFirstOrgSession.id)).not.toBeNull();
     expect(revokedById.get(secondOrgSession.id)).toBeNull();
-  });
-
-  it("keeps committed revocation successful when cache cleanup is unavailable", async () => {
-    const sessions = createKVStoreSet(env).sessions;
-    const session = await service.createSession(
-      USER_ONE,
-      ORG_ONE,
-      getPermissionsForOrgRole("admin"),
-      {}
-    );
-    const failingCache: KVStore = {
-      get: sessions.get.bind(sessions),
-      put: sessions.put.bind(sessions),
-      delete: async () => {
-        throw new Error("Redis unavailable");
-      },
-      list: sessions.list.bind(sessions),
-      admitSlidingWindow: sessions.admitSlidingWindow.bind(sessions),
-    };
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    const serviceWithFailingCache = new SessionService(getDb(env), failingCache);
-
-    await expect(
-      serviceWithFailingCache.revokeUserOrganizationSessions(USER_ONE, ORG_ONE)
-    ).resolves.toBeUndefined();
-
-    const persisted = await getDb(env)
-      .prepare("SELECT revoked_at FROM sessions WHERE id = ?")
-      .bind(session.id)
-      .first<{ revoked_at: string | null }>();
-    expect(persisted?.revoked_at).not.toBeNull();
-    expect(consoleError).toHaveBeenCalledWith(
-      "Failed to delete revoked session cache:",
-      expect.any(Error)
-    );
-
-    await expect(serviceWithFailingCache.getSession(session.id)).resolves.toBeNull();
-  });
-
-  it("accepts a valid database-authorized session when cache refresh is unavailable", async () => {
-    const sessions = createKVStoreSet(env).sessions;
-    const session = await service.createSession(
-      USER_ONE,
-      ORG_ONE,
-      getPermissionsForOrgRole("admin"),
-      {}
-    );
-    const failingCache: KVStore = {
-      get: sessions.get.bind(sessions),
-      put: async () => {
-        throw new Error("Redis unavailable");
-      },
-      delete: sessions.delete.bind(sessions),
-      list: sessions.list.bind(sessions),
-      admitSlidingWindow: sessions.admitSlidingWindow.bind(sessions),
-    };
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    const serviceWithFailingCache = new SessionService(getDb(env), failingCache);
-
-    const authorized = await serviceWithFailingCache.getSession(session.id);
-
-    expect(authorized).toMatchObject({
-      id: session.id,
-      userId: USER_ONE,
-      organizationId: ORG_ONE,
-      permissions: getPermissionsForOrgRole("admin"),
-    });
-    expect(consoleError).toHaveBeenCalledWith(
-      "Failed to refresh session cache:",
-      expect.any(Error)
-    );
   });
 });

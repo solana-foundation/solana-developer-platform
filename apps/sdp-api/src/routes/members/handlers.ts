@@ -374,7 +374,7 @@ export const removeMember = async (c: AppContext) => {
     .bind(memberId)
     .run();
 
-  const sessionService = new SessionService(getDb(c.env), c.var.kv.sessions);
+  const sessionService = new SessionService(getDb(c.env));
   await sessionService.revokeUserOrganizationSessions(member.user_id, organizationId);
 
   // Audit log

@@ -1,9 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
-import { getPermissionsForOrgRole } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { createKVStoreSet } from "@/runtime/kv-redis";
 import { SessionService } from "@/services/session.service";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
@@ -21,7 +19,7 @@ describe("member session revocation", () => {
     await clearKVStores(env);
   });
 
-  it("revokes the removed member's cached sessions without affecting the administrator", async () => {
+  it("revokes the removed member's sessions without affecting the administrator", async () => {
     const db = getDb(env);
     const organizationId = TEST_CACHED_API_KEY.organizationId;
     const projectId = TEST_CACHED_API_KEY.projectId;
@@ -71,18 +69,15 @@ describe("member session revocation", () => {
       permissions: ["*"],
     });
 
-    const sessions = createKVStoreSet(env).sessions;
-    const sessionService = new SessionService(db, sessions);
+    const sessionService = new SessionService(db);
     const removedUserSession = await sessionService.createSession(
       removedUserId,
       organizationId,
-      getPermissionsForOrgRole("member"),
       {}
     );
     const administratorSession = await sessionService.createSession(
       administratorId,
       organizationId,
-      getPermissionsForOrgRole("admin"),
       {}
     );
 
@@ -104,6 +99,5 @@ describe("member session revocation", () => {
     const revokedById = new Map(persisted.results.map((row) => [row.id, row.revoked_at]));
     expect(revokedById.get(removedUserSession.id)).not.toBeNull();
     expect(revokedById.get(administratorSession.id)).toBeNull();
-    await expect(sessions.get(`session:${removedUserSession.id}`)).resolves.toBeNull();
   });
 });

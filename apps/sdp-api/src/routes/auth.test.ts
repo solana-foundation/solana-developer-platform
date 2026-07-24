@@ -2,11 +2,9 @@
  * Auth Routes E2E Tests
  */
 
-import { getPermissionsForOrgRole } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { createKVStoreSet } from "@/runtime/kv-redis";
 import { SessionService } from "@/services/session.service";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
@@ -64,13 +62,8 @@ describe("Auth Routes", () => {
           .bind(organizationId, userId),
       ]);
 
-      const sessionService = new SessionService(db, createKVStoreSet(env).sessions);
-      const session = await sessionService.createSession(
-        userId,
-        organizationId,
-        getPermissionsForOrgRole("admin"),
-        {}
-      );
+      const sessionService = new SessionService(db);
+      const session = await sessionService.createSession(userId, organizationId, {});
       const requestOptions = {
         method: "PATCH",
         headers: {
@@ -114,7 +107,6 @@ describe("Auth Routes", () => {
         env
       );
       expect(removedMember.status).toBe(401);
-      await expect(createKVStoreSet(env).sessions.get(`session:${session.id}`)).resolves.toBeNull();
     });
   });
 

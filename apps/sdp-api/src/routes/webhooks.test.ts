@@ -6,12 +6,10 @@ import {
   buildBvnkOnrampPaymentRuleKey,
   buildBvnkOnrampWalletName,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import { getPermissionsForOrgRole } from "@sdp/types";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { createKVStoreSet } from "@/runtime/kv-redis";
 import { SessionService } from "@/services/session.service";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
@@ -482,12 +480,10 @@ describe("Clerk webhooks", () => {
       throw new Error("Expected the Clerk membership to exist");
     }
 
-    const sessions = createKVStoreSet(env).sessions;
-    const sessionService = new SessionService(getDb(env), sessions);
+    const sessionService = new SessionService(getDb(env));
     const elevatedSession = await sessionService.createSession(
       membership.user_id,
       membership.organization_id,
-      getPermissionsForOrgRole("admin"),
       {}
     );
 
@@ -513,12 +509,10 @@ describe("Clerk webhooks", () => {
       .bind(elevatedSession.id)
       .first<{ revoked_at: string | null }>();
     expect(elevatedSessionRow?.revoked_at).not.toBeNull();
-    await expect(sessions.get(`session:${elevatedSession.id}`)).resolves.toBeNull();
 
     const memberSession = await sessionService.createSession(
       membership.user_id,
       membership.organization_id,
-      getPermissionsForOrgRole("member"),
       {}
     );
 
@@ -552,7 +546,6 @@ describe("Clerk webhooks", () => {
       .bind(memberSession.id)
       .first<{ revoked_at: string | null }>();
     expect(memberSessionRow?.revoked_at).not.toBeNull();
-    await expect(sessions.get(`session:${memberSession.id}`)).resolves.toBeNull();
 
     const delayedUserUpdate = await simulateClerkWebhook({
       type: "user.updated",
@@ -680,12 +673,10 @@ describe("Clerk webhooks", () => {
     if (!organization) {
       throw new Error("Expected the Clerk organization mapping to exist");
     }
-    const sessions = createKVStoreSet(env).sessions;
-    const sessionService = new SessionService(getDb(env), sessions);
+    const sessionService = new SessionService(getDb(env));
     const userSession = await sessionService.createSession(
       userId,
       organization.organization_id,
-      getPermissionsForOrgRole("member"),
       {}
     );
 
@@ -749,7 +740,6 @@ describe("Clerk webhooks", () => {
       .bind(userSession.id)
       .first<{ revoked_at: string | null }>();
     expect(userSessionRow?.revoked_at).not.toBeNull();
-    await expect(sessions.get(`session:${userSession.id}`)).resolves.toBeNull();
 
     const deletedOrg = await simulateClerkWebhook({
       type: "organization.deleted",
