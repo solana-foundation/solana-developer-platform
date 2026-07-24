@@ -1,14 +1,13 @@
-const BLOCKED_PATH_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
-
 export function setNestedValue(target: Record<string, unknown>, path: string, value: unknown) {
   const segments = path.split(".");
-  if (segments.some((segment) => BLOCKED_PATH_SEGMENTS.has(segment))) {
-    return;
-  }
-
   let current: Record<string, unknown> = target;
 
-  segments.forEach((segment, index) => {
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    if (segment === "__proto__" || segment === "constructor" || segment === "prototype") {
+      return;
+    }
+
     if (index === segments.length - 1) {
       current[segment] = value;
       return;
@@ -20,5 +19,5 @@ export function setNestedValue(target: Record<string, unknown>, path: string, va
     }
 
     current = current[segment] as Record<string, unknown>;
-  });
+  }
 }
