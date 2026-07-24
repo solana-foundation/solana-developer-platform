@@ -320,13 +320,13 @@ export function FieldRow({ label, value, href }: ExpandedField) {
           href={href}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 break-all text-sm font-medium text-primary hover:underline"
+          className="inline-flex items-center gap-1 break-all text-sm font-normal text-primary hover:underline"
         >
           {value}
           <ExternalLink className="h-3 w-3 shrink-0" />
         </a>
       ) : (
-        <span className="break-words text-sm font-medium text-primary">{value}</span>
+        <span className="break-words text-sm font-normal text-primary">{value}</span>
       )}
     </div>
   );

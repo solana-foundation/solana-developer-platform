@@ -1,10 +1,12 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { KeyRound, type LucideIcon, Wallet } from "lucide-react";
+import { Copy, KeyRound, type LucideIcon, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 import { formatCustodyProviderName } from "@/app/dashboard/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
+import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 
 interface TokenWalletIdentityCardProps {
@@ -122,7 +124,37 @@ function IdentityRow({
         <Icon className="h-3 w-3 shrink-0" aria-hidden />
         {label}
       </p>
-      <p className="mt-1 break-all text-xs leading-5 text-primary">{value}</p>
+      <div className="mt-1 flex items-center gap-0.5">
+        <p className="min-w-0 break-all text-xs leading-5 text-primary">{value}</p>
+        <CopyIdentityButton value={value} label={label} />
+      </div>
     </div>
+  );
+}
+
+function CopyIdentityButton({ value, label }: { value: string; label: string }) {
+  const t = useTranslations();
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(t("DashboardIssuance.wallet.copied", { label }));
+    } catch {
+      toast.error(t("DashboardIssuance.wallet.unableToCopy", { label }));
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      className="shrink-0 text-tertiary"
+      onClick={() => void handleCopy()}
+      aria-label={t("DashboardIssuance.wallet.copy", { label })}
+      title={t("DashboardIssuance.wallet.copy", { label })}
+    >
+      <Copy className="h-3 w-3" />
+    </Button>
   );
 }
