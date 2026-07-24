@@ -23,6 +23,7 @@ import {
   verifiedPrimaryEmailFromClerkUser,
 } from "@/services/clerk-users.service";
 import { ProjectService } from "@/services/project.service";
+import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 import { BvnkWebhookProcessor } from "./ramps/bvnk";
 import { CoinbaseWebhookProcessor } from "./ramps/coinbase";
@@ -107,6 +108,13 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
       )
       .bind(mapping.organization_id),
   ]);
+
+  const sessionService = new SessionService(getDb(c.env));
+  await sessionService
+    .revokeOrganizationSessions(mapping.organization_id)
+    .catch((error) =>
+      console.error("Failed to revoke sessions after organization deletion:", error)
+    );
 }
 
 async function resolveVerifiedUserEmail(env: Env, userId: string): Promise<string | null> {
@@ -243,6 +251,11 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
       .prepare("UPDATE organization_members SET status = 'removed' WHERE user_id = ?")
       .bind(identity.user_id),
   ]);
+
+  const sessionService = new SessionService(getDb(c.env));
+  await sessionService
+    .revokeAllUserSessions(identity.user_id)
+    .catch((error) => console.error("Failed to revoke sessions after user deletion:", error));
 }
 
 async function upsertVerifiedMembership(
@@ -257,6 +270,14 @@ async function upsertVerifiedMembership(
   const organizationId = await ensureOrganizationMapping(c, data.organization);
   const role = mapClerkRoleToOrgRole(data.role);
   const memberId = `mem_${crypto.randomUUID()}`;
+  const existing = await getDb(c.env)
+    .prepare(
+      `SELECT role, status
+       FROM organization_members
+       WHERE organization_id = ? AND user_id = ?`
+    )
+    .bind(organizationId, data.userId)
+    .first<{ role: string; status: string }>();
 
   await getDb(c.env)
     .prepare(
@@ -273,6 +294,15 @@ async function upsertVerifiedMembership(
     )
     .bind(memberId, organizationId, data.userId, role, data.reactivateRemoved ? 1 : 0)
     .run();
+
+  if (existing?.status === "active" && existing.role !== role) {
+    const sessionService = new SessionService(getDb(c.env));
+    await sessionService
+      .revokeUserOrganizationSessions(data.userId, organizationId)
+      .catch((error) =>
+        console.error("Failed to revoke sessions after membership role change:", error)
+      );
+  }
 
   const projectService = new ProjectService(getDb(c.env));
   await Promise.all([
@@ -325,6 +355,11 @@ async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON)
     )
     .bind(mapping.organization_id, identity.user_id)
     .run();
+
+  const sessionService = new SessionService(getDb(c.env));
+  await sessionService
+    .revokeUserOrganizationSessions(identity.user_id, mapping.organization_id)
+    .catch((error) => console.error("Failed to revoke sessions after membership deletion:", error));
 }
 
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
