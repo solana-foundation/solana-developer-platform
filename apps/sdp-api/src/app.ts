@@ -42,6 +42,7 @@ import organizations from "@/routes/organizations";
 import pay from "@/routes/pay";
 import payments from "@/routes/payments";
 import places from "@/routes/places";
+import playgroundInternal from "@/routes/playground-internal";
 import policies from "@/routes/policies";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
@@ -138,7 +139,9 @@ function mapFeePaymentError(err: FeePaymentError): {
   code: string;
   message: string;
 } {
-  const programError = /custom program error: (0x[0-9a-f]+)/i.exec(err.message)?.[1].toLowerCase();
+  const programError = /custom program error: (0x[0-9a-f]+)/i
+    .exec(err.message)?.[1]
+    .toLowerCase();
   if (programError === "0x1") {
     return {
       status: 400,
@@ -151,7 +154,8 @@ function mapFeePaymentError(err: FeePaymentError): {
     return {
       status: 400,
       code: "TRANSACTION_FAILED",
-      message: "The transaction was rejected on Solana. Check the payment wallet and try again.",
+      message:
+        "The transaction was rejected on Solana. Check the payment wallet and try again.",
     };
   }
 
@@ -164,7 +168,11 @@ function mapFeePaymentError(err: FeePaymentError): {
           "The wallet used for this payment does not have enough funds. Add funds and try again.",
       };
     case "RATE_LIMITED":
-      return { status: 429, code: err.code, message: "The signing provider is busy. Try again." };
+      return {
+        status: 429,
+        code: err.code,
+        message: "The signing provider is busy. Try again.",
+      };
     case "PROVIDER_NOT_AVAILABLE":
     case "NETWORK_ERROR":
       return {
@@ -201,7 +209,7 @@ function getFireblocksBlockedError(err: Error): {
 function captureUnexpectedError(
   observability: Observability,
   err: Error,
-  c: Context<{ Bindings: Env }>
+  c: Context<{ Bindings: Env }>,
 ): void {
   const requestId = c.get("requestId");
   const traceId = c.get("traceId");
@@ -359,7 +367,9 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   app.route("/v1", v1);
 
-  // Dashboard-only internal APIs
+  // Dashboard-only helpers. These routes are intentionally excluded from the
+  // public OpenAPI and AI discovery surfaces.
+  app.route("/internal/playground", playgroundInternal);
   app.route("/internal/dashboard/custody", internalCustody);
 
   // Admin routes (internal)
@@ -384,12 +394,14 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
           error: err.toResponse().error,
           meta: { requestId },
         },
-        mapErrorStatusCode(err.statusCode)
+        mapErrorStatusCode(err.statusCode),
       );
     }
 
     if (err instanceof SdpRpcError || err instanceof SdpPaymentsError) {
-      const details = err.details ? redactCredentialSecrets(err.details) : undefined;
+      const details = err.details
+        ? redactCredentialSecrets(err.details)
+        : undefined;
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
         {
@@ -400,7 +412,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
           },
           meta: { requestId },
         },
-        mapErrorStatusCode(err.statusCode)
+        mapErrorStatusCode(err.statusCode),
       );
     }
 
@@ -415,7 +427,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
           },
           meta: { requestId },
         },
-        mapped.status
+        mapped.status,
       );
     }
 
@@ -430,7 +442,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
           },
           meta: { requestId },
         },
-        mapped.status
+        mapped.status,
       );
     }
 
@@ -445,7 +457,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
           },
           meta: { requestId },
         },
-        fireblocksBlocked.status
+        fireblocksBlocked.status,
       );
     }
 
@@ -466,7 +478,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
         stack: err.stack,
         context: solanaErr.context,
         cause: solanaErr.cause,
-      })
+      }),
     );
     // SENTRY_DSN gate is the runtime-wiring decision: app-level error handling
     // shouldn't pay the cost of building a scope when no observability backend
@@ -485,7 +497,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
         },
         meta: { requestId },
       },
-      500
+      500,
     );
   });
 
@@ -499,7 +511,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
         },
         meta: { requestId: c.get("requestId") },
       },
-      404
+      404,
     );
   });
 

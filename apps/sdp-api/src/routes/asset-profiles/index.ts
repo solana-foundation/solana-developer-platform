@@ -16,8 +16,8 @@ import {
 
 const assetProfiles = new Hono<{ Bindings: Env }>();
 
-// Non-production environments always expose Asset Profiles. Production keeps
-// the explicit feature flag so rollout remains independently controlled.
+// Managed SDP exposes the authenticated API capability while Vercel controls
+// the UI rollout. Self-hosted production retains an explicit environment opt-in.
 async function requireAssetProfilesFeature(c: Context<{ Bindings: Env }>, next: Next) {
   if (!isAssetProfilesEnabled(c.env)) {
     throw new AppError("FORBIDDEN", "Asset Profiles are not enabled for this environment");

@@ -4,6 +4,18 @@ import { isAssetProfilesEnabled, isPrivyByokProvisioningEnabled } from "./featur
 describe("isAssetProfilesEnabled", () => {
   it.each([
     undefined,
+    "managed",
+  ] as const)("keeps the managed API capability available when deployment mode is %s", (deploymentMode) => {
+    expect(
+      isAssetProfilesEnabled({
+        ENVIRONMENT: "production",
+        SDP_DEPLOYMENT_MODE: deploymentMode,
+      })
+    ).toBe(true);
+  });
+
+  it.each([
+    undefined,
     "",
     "false",
     "0",
@@ -13,6 +25,7 @@ describe("isAssetProfilesEnabled", () => {
       isAssetProfilesEnabled({
         ENVIRONMENT: "development",
         ASSET_PROFILES_ENABLED: flag,
+        SDP_DEPLOYMENT_MODE: "self_hosted",
       })
     ).toBe(true);
   });
@@ -28,6 +41,7 @@ describe("isAssetProfilesEnabled", () => {
       isAssetProfilesEnabled({
         ENVIRONMENT: "production",
         ASSET_PROFILES_ENABLED: flag,
+        SDP_DEPLOYMENT_MODE: "self_hosted",
       })
     ).toBe(false);
   });
@@ -37,6 +51,7 @@ describe("isAssetProfilesEnabled", () => {
       isAssetProfilesEnabled({
         ENVIRONMENT: "production",
         ASSET_PROFILES_ENABLED: flag,
+        SDP_DEPLOYMENT_MODE: "self_hosted",
       })
     ).toBe(true);
   });

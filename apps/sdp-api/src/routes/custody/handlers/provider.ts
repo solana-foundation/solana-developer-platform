@@ -290,11 +290,10 @@ async function initializeProviderConnection(
         projectId
       );
 
-      const { vaultAccountId, assetId, apiBaseUrl } = existingFireblocksConfig
+      const { vaultAccountId, assetId } = existingFireblocksConfig
         ? {
             vaultAccountId: existingFireblocksConfig.vaultAccountId,
             assetId: existingFireblocksConfig.assetId,
-            apiBaseUrl: existingFireblocksConfig.apiBaseUrl,
           }
         : await provisionFireblocksVaultAccount(env, {
             orgId: organizationId,
@@ -308,19 +307,16 @@ async function initializeProviderConnection(
         apiSecretPem: resolvedApiSecretPem,
         vaultAccountId,
         assetId,
-        apiBaseUrl,
         walletLabel: request.walletLabel,
       });
     }
     case "privy":
       return signingService.initializePrivySigning(organizationId, projectId, {
-        apiBaseUrl: request.apiBaseUrl,
         requestDelayMs: request.requestDelayMs,
         walletLabel: request.walletLabel,
       });
     case "coinbase_cdp":
       return signingService.initializeCoinbaseCdpSigning(organizationId, projectId, {
-        apiBaseUrl: request.apiBaseUrl,
         network: request.network,
         walletAddress: request.walletAddress,
         accountPolicy: request.accountPolicy,
@@ -328,21 +324,18 @@ async function initializeProviderConnection(
       });
     case "para":
       return signingService.initializeParaSigning(organizationId, projectId, {
-        apiBaseUrl: request.apiBaseUrl,
         requestDelayMs: request.requestDelayMs,
         walletId: request.walletId,
         walletLabel: request.walletLabel,
       });
     case "turnkey":
       return signingService.initializeTurnkeySigning(organizationId, projectId, {
-        apiBaseUrl: request.apiBaseUrl,
         requestDelayMs: request.requestDelayMs,
         privateKeyId: request.privateKeyId,
         walletLabel: request.walletLabel,
       });
     case "dfns":
       return signingService.initializeDfnsSigning(organizationId, projectId, {
-        apiBaseUrl: request.apiBaseUrl,
         network: request.network,
         walletId: request.walletId,
         signingKeyId: request.signingKeyId,
@@ -350,7 +343,6 @@ async function initializeProviderConnection(
       });
     case "ibm_haven":
       return signingService.initializeIbmHavenSigning(organizationId, projectId, {
-        apiBaseUrl: request.apiBaseUrl,
         network: request.network,
         walletId: request.walletId,
         signingKeyId: request.signingKeyId,
@@ -358,7 +350,6 @@ async function initializeProviderConnection(
       });
     case "anchorage":
       return signingService.initializeAnchorageWalletLifecycle(organizationId, projectId, {
-        apiBaseUrl: request.apiBaseUrl,
         walletId: request.walletId,
         walletLabel: request.walletLabel,
         network: request.network,

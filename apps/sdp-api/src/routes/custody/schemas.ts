@@ -20,6 +20,9 @@ import { z } from "zod";
 
 const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);
 
+// Provider API endpoints are deployment configuration, not tenant input.
+// Keep initialize/switch payloads limited to wallet-scoped choices.
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Initialize Signing
 // ═══════════════════════════════════════════════════════════════════════════
@@ -36,14 +39,12 @@ export const initializeFireblocksSchema = z.object({
 
 export const initializePrivySchema = z.object({
   provider: z.literal("privy"),
-  apiBaseUrl: z.string().url().optional(),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
 export const initializeCoinbaseCdpSchema = z.object({
   provider: z.literal("coinbase_cdp"),
-  apiBaseUrl: z.string().url().optional(),
   network: z.enum(["solana", "solana-devnet"]).optional(),
   walletAddress: z.string().min(32).max(44).optional(),
   accountPolicy: z
@@ -55,7 +56,6 @@ export const initializeCoinbaseCdpSchema = z.object({
 
 export const initializeParaSchema = z.object({
   provider: z.literal("para"),
-  apiBaseUrl: z.string().url().optional(),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
   walletId: z.string().min(1).optional(),
   walletLabel: z.string().max(100).optional(),
@@ -63,7 +63,6 @@ export const initializeParaSchema = z.object({
 
 export const initializeTurnkeySchema = z.object({
   provider: z.literal("turnkey"),
-  apiBaseUrl: z.string().url().optional(),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
   privateKeyId: z.string().min(1).optional(),
   walletLabel: z.string().max(100).optional(),
@@ -71,7 +70,6 @@ export const initializeTurnkeySchema = z.object({
 
 export const initializeDfnsSchema = z.object({
   provider: z.literal("dfns"),
-  apiBaseUrl: z.string().url().optional(),
   network: z.enum(["Solana", "SolanaDevnet"]).optional(),
   walletId: z.string().min(1).optional(),
   signingKeyId: z.string().min(1).optional(),
@@ -80,7 +78,6 @@ export const initializeDfnsSchema = z.object({
 
 export const initializeIbmHavenSchema = z.object({
   provider: z.literal("ibm_haven"),
-  apiBaseUrl: z.string().url().optional(),
   network: z.enum(["Solana", "SolanaDevnet"]).optional(),
   walletId: z.string().min(1).optional(),
   signingKeyId: z.string().min(1).optional(),
@@ -89,7 +86,6 @@ export const initializeIbmHavenSchema = z.object({
 
 export const initializeAnchorageSchema = z.object({
   provider: z.literal("anchorage"),
-  apiBaseUrl: z.string().url().optional(),
   walletId: z.string().min(1).optional(),
   walletLabel: z.string().max(100).optional(),
   network: z.enum(["solana", "solana-devnet"]).optional(),

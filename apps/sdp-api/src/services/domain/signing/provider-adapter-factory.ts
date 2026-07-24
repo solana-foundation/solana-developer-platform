@@ -84,7 +84,7 @@ const providerAdapterFactories = {
     const privateKeyBase58 = await cipher.decrypt(orgId, parsed.encryptedPrivateKey);
     return KeychainMemoryAdapter.fromBase58(privateKeyBase58);
   },
-  fireblocks: async ({ orgId, parsed, cipher }) => {
+  fireblocks: async ({ env, orgId, parsed, cipher }) => {
     if (!("apiSecretEncrypted" in parsed) || !parsed.apiSecretEncrypted) {
       throw new SigningError(
         "Fireblocks config missing encrypted API secret",
@@ -99,7 +99,7 @@ const providerAdapterFactories = {
       apiSecretPem,
       vaultAccountId: parsed.vaultAccountId,
       assetId: parsed.assetId,
-      apiBaseUrl: parsed.apiBaseUrl,
+      apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
     });
   },
   privy: async ({ env, record, parsed }) => {
@@ -130,7 +130,7 @@ const providerAdapterFactories = {
     return new KeychainPrivyAdapter({
       appId,
       appSecret,
-      apiBaseUrl: parsed.apiBaseUrl ?? env.PRIVY_API_BASE_URL,
+      apiBaseUrl: env.PRIVY_API_BASE_URL,
       requestDelayMs,
       defaultWalletId,
     });
@@ -152,7 +152,7 @@ const providerAdapterFactories = {
       apiKeyId,
       apiKeySecret,
       walletSecret,
-      apiBaseUrl: parsed.apiBaseUrl ?? env.COINBASE_CDP_API_BASE_URL,
+      apiBaseUrl: env.COINBASE_CDP_API_BASE_URL,
       requestDelayMs: parsed.requestDelayMs,
       defaultWalletId,
     });
@@ -178,7 +178,7 @@ const providerAdapterFactories = {
 
     return new KeychainParaAdapter({
       apiKey,
-      apiBaseUrl: parsed.apiBaseUrl ?? env.PARA_API_BASE_URL,
+      apiBaseUrl: env.PARA_API_BASE_URL,
       requestDelayMs,
       defaultWalletId,
     });
@@ -228,7 +228,7 @@ const providerAdapterFactories = {
       apiPublicKey,
       apiPrivateKey,
       organizationId,
-      apiBaseUrl: parsed.apiBaseUrl ?? env.TURNKEY_API_BASE_URL,
+      apiBaseUrl: env.TURNKEY_API_BASE_URL,
       requestDelayMs,
       defaultWalletId,
       defaultWalletPublicKey,
@@ -247,7 +247,7 @@ const providerAdapterFactories = {
     }
 
     return new KeychainDfnsAdapter({
-      client: await createDfnsApiClient(env, { apiBaseUrl: parsed.apiBaseUrl }),
+      client: await createDfnsApiClient(env),
       defaultWalletId,
     });
   },
@@ -264,7 +264,7 @@ const providerAdapterFactories = {
     }
 
     return new KeychainIbmHavenAdapter({
-      client: await createIbmHavenApiClient(env, { apiBaseUrl: parsed.apiBaseUrl }),
+      client: await createIbmHavenApiClient(env),
       defaultWalletId,
     });
   },
@@ -272,7 +272,6 @@ const providerAdapterFactories = {
   utila: async ({ env, record, parsed }) => {
     return new KeychainUtilaAdapter(
       buildKeychainUtilaConfig(env, {
-        apiBaseUrl: parsed.apiBaseUrl,
         defaultWalletId: record.defaultWalletId,
         network: parsed.network,
         vaultId: parsed.vaultId,

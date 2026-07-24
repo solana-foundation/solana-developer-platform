@@ -347,14 +347,12 @@ export interface FireblocksCustodyOptions {
 
 export interface PrivyCustodyOptions {
   provider: "privy";
-  apiBaseUrl?: string;
   requestDelayMs?: number;
   walletId?: string;
 }
 
 export interface CoinbaseCdpCustodyOptions {
   provider: "coinbase_cdp";
-  apiBaseUrl?: string;
   network?: SolanaCustodyNetwork;
   walletAddress?: string;
   accountPolicy?: string;
@@ -362,21 +360,18 @@ export interface CoinbaseCdpCustodyOptions {
 
 export interface ParaCustodyOptions {
   provider: "para";
-  apiBaseUrl?: string;
   requestDelayMs?: number;
   walletId?: string;
 }
 
 export interface TurnkeyCustodyOptions {
   provider: "turnkey";
-  apiBaseUrl?: string;
   requestDelayMs?: number;
   privateKeyId?: string;
 }
 
 export interface DfnsCustodyOptions {
   provider: "dfns";
-  apiBaseUrl?: string;
   network?: DfnsCustodyNetwork;
   walletId?: string;
   signingKeyId?: string;
@@ -386,7 +381,6 @@ export interface DfnsCustodyOptions {
 // reuses the Dfns request/signing surface with an IBM-hosted base URL.
 export interface IbmHavenCustodyOptions {
   provider: "ibm_haven";
-  apiBaseUrl?: string;
   network?: DfnsCustodyNetwork;
   walletId?: string;
   signingKeyId?: string;
@@ -394,7 +388,6 @@ export interface IbmHavenCustodyOptions {
 
 export interface AnchorageCustodyOptions {
   provider: "anchorage";
-  apiBaseUrl?: string;
   walletId?: string;
   network?: SolanaCustodyNetwork;
 }

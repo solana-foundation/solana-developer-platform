@@ -6,6 +6,7 @@ import {
   type OrganizationRpcProvider,
 } from "@sdp/types";
 import { redirect } from "next/navigation";
+import { organizationOnboarding } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
@@ -23,10 +24,14 @@ const GENERAL_RPC_PROVIDERS = ORGANIZATION_RPC_PROVIDERS.filter(
 );
 
 export default async function OrganizationOnboardingPage() {
-  const t = await getTranslations();
-  const { getToken, userId, orgId } = await auth();
+  const [t, onboardingEnabled, { getToken, userId, orgId }] = await Promise.all([
+    getTranslations(),
+    organizationOnboarding(),
+    auth(),
+  ]);
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
+  if (!onboardingEnabled) redirect("/dashboard");
 
   const { organizationClient } = await createRequestScopedSdpApiClients({ getToken });
   const status = await organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
