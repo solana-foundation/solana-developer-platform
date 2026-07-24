@@ -181,17 +181,15 @@ describe("RedisKVStore (HOO-510)", () => {
       await closeAllRedisClients();
     });
 
-    it("wires four prefixed stores sharing one connection", async () => {
+    it("wires three prefixed stores sharing one connection", async () => {
       const set = createKVStoreSet({ REDIS_URL } as Env);
       await set.apiKeys.put("same-key", "from-apiKeys");
       await set.rateLimits.put("same-key", "from-rateLimits");
       await set.cache.put("same-key", "from-cache");
-      await set.sessions.put("same-key", "from-sessions");
 
       expect(await set.apiKeys.get("same-key")).toBe("from-apiKeys");
       expect(await set.rateLimits.get("same-key")).toBe("from-rateLimits");
       expect(await set.cache.get("same-key")).toBe("from-cache");
-      expect(await set.sessions.get("same-key")).toBe("from-sessions");
     });
 
     it("reuses the same Redis client across repeated calls (no connection leak)", () => {

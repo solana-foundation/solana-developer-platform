@@ -290,6 +290,49 @@ describe("para wallet provisioning", () => {
     vi.restoreAllMocks();
   });
 
+  it("uses only the server-configured Para endpoint", async () => {
+    const walletId = "wal_para_env";
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+        expect(url.startsWith("https://trusted.para.test/")).toBe(true);
+
+        if (url.endsWith("/v1/wallets") && init?.method === "POST") {
+          return jsonResponse({ data: { id: walletId, status: "creating" } }, 200);
+        }
+
+        if (url.endsWith(`/v1/wallets/${walletId}`) && init?.method === "GET") {
+          return jsonResponse(
+            {
+              data: {
+                id: walletId,
+                type: "SOLANA",
+                scheme: "ED25519",
+                status: "ready",
+                address: CREATED_ADDRESS,
+              },
+            },
+            200
+          );
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    await provisionParaWallet(
+      createParaEnv({
+        PARA_API_BASE_URL: "https://trusted.para.test",
+      }),
+      {
+        orgId: "org_abc",
+        orgSlug: "Acme Labs",
+      }
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("retries transient address-not-ready errors while waiting for wallet readiness", async () => {
     const walletId = "wal_para_123";
 

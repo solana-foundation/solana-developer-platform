@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.47.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.47.0...v0.47.1) (2026-07-24)
+
+### Bug Fixes
+
+* **api:** revoke stale organization sessions ([#896](https://github.com/solana-foundation/solana-developer-platform/pull/896)) ([cbcb084](https://github.com/solana-foundation/solana-developer-platform/commit/cbcb084ae90612c8769defa4033705f5e140f891))
+* **custody:** trust only server provider endpoints ([#902](https://github.com/solana-foundation/solana-developer-platform/pull/902)) ([d00495c](https://github.com/solana-foundation/solana-developer-platform/commit/d00495cefbe0c1d95048a220ef425714a37e9b8d))
+* **security:** isolate playground API keys by project ([#901](https://github.com/solana-foundation/solana-developer-platform/pull/901)) ([9955824](https://github.com/solana-foundation/solana-developer-platform/commit/995582428cd6c3d648f38fd8d3a45ef9370f0eb7))
+* **api:** authorize all MagicBlock custody signers ([#898](https://github.com/solana-foundation/solana-developer-platform/pull/898)) ([0ab0fb5](https://github.com/solana-foundation/solana-developer-platform/commit/0ab0fb54b3812b7b4784f650a728c4401513f99a))
+
 ## [0.47.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.46.4...v0.47.0) (2026-07-24)
 
 ### Features

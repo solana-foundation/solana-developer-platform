@@ -18,6 +18,7 @@ import {
   assertProviderAvailable,
   getProviderAvailability,
 } from "@/services/provider-availability.service";
+import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 import { updateOrgSchema } from "./schemas";
 
@@ -234,6 +235,13 @@ export const deleteOrganization = async (c: AppContext) => {
       )
       .bind(orgId),
   ]);
+
+  const sessionService = new SessionService(db);
+  await sessionService
+    .revokeOrganizationSessions(orgId)
+    .catch((error) =>
+      console.error("Failed to revoke sessions after organization deletion:", error)
+    );
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

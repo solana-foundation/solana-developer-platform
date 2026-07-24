@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, getSdpAuth } from "@/lib/sdp-api";
 
 type PlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -13,10 +13,36 @@ interface PlaygroundExecuteRequestBody {
 
 const ALLOWED_METHODS = new Set<PlaygroundMethod>(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 
+function failureResponse(
+  trace: ReturnType<typeof createTimedTrace>,
+  status: number,
+  error: string
+): NextResponse {
+  logRouteResult(trace, status, { error });
+  return NextResponse.json(
+    { error },
+    {
+      status,
+      headers: {
+        "X-SDP-Trace-ID": trace.traceId,
+        "Server-Timing": trace.serverTiming(),
+      },
+    }
+  );
+}
+
 export async function POST(request: Request) {
   const trace = createTimedTrace("route.playground.execute", request);
 
   try {
+    const { userId, orgId } = await getSdpAuth();
+    if (!userId) {
+      return failureResponse(trace, 401, "Authentication required");
+    }
+    if (!orgId) {
+      return failureResponse(trace, 403, "Active organization required");
+    }
+
     const payload = (await request.json()) as PlaygroundExecuteRequestBody;
     const method = payload.method;
     const path = payload.path;
@@ -67,12 +93,19 @@ export async function POST(request: Request) {
 
     const normalizedApiKey = typeof payload.apiKey === "string" ? payload.apiKey.trim() : "";
     const headers: Record<string, string> = {};
+    const client = await createSdpApiClient(trace.childContext("route.playground.execute.api"));
 
     if (normalizedApiKey) {
+      const verification = await client.request("/internal/playground/api-key/verify", {
+        method: "POST",
+        body: JSON.stringify({ apiKey: normalizedApiKey }),
+      });
+      if (!verification.ok) {
+        return failureResponse(trace, 403, "API key is not available for the selected project");
+      }
       headers.Authorization = `Bearer ${normalizedApiKey}`;
     }
 
-    const client = await createSdpApiClient(trace.childContext("route.playground.execute.api"));
     const response = await client.request(path, {
       method,
       headers,
@@ -121,7 +154,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const response = NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Playground execution failed",
+        error: "Playground execution failed",
       },
       {
         status: 500,

@@ -142,7 +142,6 @@ async function initializeCustodyWallet(formData: FormData) {
   const network = getOptionalString(formData, "network");
   const walletAddress = getOptionalString(formData, "walletAddress");
   const accountPolicy = getOptionalString(formData, "accountPolicy");
-  const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
 
   const payload: Record<string, unknown> = {
     provider,
@@ -150,9 +149,6 @@ async function initializeCustodyWallet(formData: FormData) {
   };
 
   if (provider !== "fireblocks") {
-    if (apiBaseUrl) {
-      payload.apiBaseUrl = apiBaseUrl;
-    }
     if (network) {
       payload.network = network;
     }

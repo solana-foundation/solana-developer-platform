@@ -162,7 +162,6 @@ export interface InitFireblocksSigningOptions {
   apiSecretPem: string;
   vaultAccountId: string;
   assetId?: string;
-  apiBaseUrl?: string;
   walletLabel?: string;
 }
 
@@ -170,7 +169,6 @@ export interface InitFireblocksSigningOptions {
  * Options for initializing org signing with Privy provider.
  */
 export interface InitPrivySigningOptions {
-  apiBaseUrl?: string;
   requestDelayMs?: number;
   walletLabel?: string;
 }
@@ -179,7 +177,6 @@ export interface InitPrivySigningOptions {
  * Options for initializing org signing with Coinbase CDP provider.
  */
 export interface InitCoinbaseCdpSigningOptions {
-  apiBaseUrl?: string;
   network?: "solana" | "solana-devnet";
   walletAddress?: string;
   accountPolicy?: string;
@@ -190,7 +187,6 @@ export interface InitCoinbaseCdpSigningOptions {
  * Options for initializing org signing with Para provider.
  */
 export interface InitParaSigningOptions {
-  apiBaseUrl?: string;
   requestDelayMs?: number;
   walletId?: string;
   walletLabel?: string;
@@ -200,7 +196,6 @@ export interface InitParaSigningOptions {
  * Options for initializing org signing with Turnkey provider.
  */
 export interface InitTurnkeySigningOptions {
-  apiBaseUrl?: string;
   requestDelayMs?: number;
   privateKeyId?: string;
   walletLabel?: string;
@@ -210,7 +205,6 @@ export interface InitTurnkeySigningOptions {
  * Options for initializing org signing with DFNS provider.
  */
 export interface InitDfnsSigningOptions {
-  apiBaseUrl?: string;
   network?: "Solana" | "SolanaDevnet";
   walletId?: string;
   signingKeyId?: string;
@@ -224,7 +218,6 @@ export interface InitDfnsSigningOptions {
  * platform-managed via IBM_HAVEN_* env bindings.
  */
 export interface InitIbmHavenSigningOptions {
-  apiBaseUrl?: string;
   network?: "Solana" | "SolanaDevnet";
   walletId?: string;
   signingKeyId?: string;
@@ -237,7 +230,6 @@ export interface InitIbmHavenSigningOptions {
  * Anchorage currently supports wallet lifecycle only (create/delete), not signing.
  */
 export interface InitAnchorageSigningOptions {
-  apiBaseUrl?: string;
   walletId?: string;
   walletLabel?: string;
   network?: "solana" | "solana-devnet";
@@ -622,7 +614,6 @@ export class SigningService {
       apiSecretEncrypted: encryptedSecret,
       vaultAccountId: options.vaultAccountId,
       assetId: options.assetId ?? "SOL",
-      apiBaseUrl: options.apiBaseUrl,
     };
 
     // Create the adapter to get the public key
@@ -631,7 +622,7 @@ export class SigningService {
       apiSecretPem: options.apiSecretPem,
       vaultAccountId: options.vaultAccountId,
       assetId: options.assetId ?? "SOL",
-      apiBaseUrl: options.apiBaseUrl,
+      apiBaseUrl: this.env.FIREBLOCKS_API_BASE_URL,
     });
 
     const publicKey = await adapter.getPublicKey();
@@ -699,7 +690,6 @@ export class SigningService {
 
     const configJson: PrivyProviderConfig = {
       provider: "privy",
-      apiBaseUrl: options.apiBaseUrl,
       requestDelayMs: options.requestDelayMs,
       privyAppId: appId,
     };
@@ -718,9 +708,7 @@ export class SigningService {
     }
 
     // Provision a new Privy server wallet under the platform app.
-    const provisioned = await custodyProvisioning.provisionPrivyWallet(this.env, {
-      apiBaseUrl: options.apiBaseUrl,
-    });
+    const provisioned = await custodyProvisioning.provisionPrivyWallet(this.env, {});
     const publicKey = provisioned.address as Address;
     const walletId = normalizePrivyWalletId(provisioned.walletId);
 
@@ -785,7 +773,6 @@ export class SigningService {
     if (reusable) {
       const configJson: CoinbaseCdpProviderConfig = {
         provider: "coinbase_cdp",
-        apiBaseUrl: options.apiBaseUrl,
         network: options.network ?? this.env.COINBASE_CDP_NETWORK,
         accountPolicy: options.accountPolicy,
       };
@@ -804,7 +791,6 @@ export class SigningService {
     const provisioned = await custodyProvisioning.provisionCoinbaseCdpAccount(this.env, {
       orgId,
       orgSlug: orgId,
-      apiBaseUrl: options.apiBaseUrl,
       network: options.network,
       walletAddress: options.walletAddress,
       accountPolicy: options.accountPolicy,
@@ -815,7 +801,6 @@ export class SigningService {
 
     const configJson: CoinbaseCdpProviderConfig = {
       provider: "coinbase_cdp",
-      apiBaseUrl: options.apiBaseUrl,
       network: provisioned.network,
       accountPolicy: options.accountPolicy,
     };
@@ -877,7 +862,6 @@ export class SigningService {
     if (reusable) {
       const configJson: ParaProviderConfig = {
         provider: "para",
-        apiBaseUrl: options.apiBaseUrl,
         requestDelayMs: options.requestDelayMs,
       };
 
@@ -896,7 +880,6 @@ export class SigningService {
       orgId,
       projectId,
       orgSlug: orgId,
-      apiBaseUrl: options.apiBaseUrl,
       walletId: options.walletId,
     });
 
@@ -905,7 +888,6 @@ export class SigningService {
 
     const configJson: ParaProviderConfig = {
       provider: "para",
-      apiBaseUrl: options.apiBaseUrl,
       requestDelayMs: options.requestDelayMs,
       walletId: provisioned.walletId,
       userIdentifier: provisioned.userIdentifier,
@@ -975,7 +957,6 @@ export class SigningService {
       const configJson: TurnkeyProviderConfig = {
         provider: "turnkey",
         organizationId: this.env.TURNKEY_ORGANIZATION_ID,
-        apiBaseUrl: options.apiBaseUrl,
         requestDelayMs: options.requestDelayMs,
         defaultWalletPublicKey: reusablePublicKey,
       };
@@ -995,7 +976,6 @@ export class SigningService {
       orgId,
       orgSlug: orgId,
       privateKeyId: options.privateKeyId,
-      apiBaseUrl: options.apiBaseUrl,
     });
 
     const publicKey = provisioned.address as Address;
@@ -1004,7 +984,6 @@ export class SigningService {
     const configJson: TurnkeyProviderConfig = {
       provider: "turnkey",
       organizationId: this.env.TURNKEY_ORGANIZATION_ID,
-      apiBaseUrl: options.apiBaseUrl,
       requestDelayMs: options.requestDelayMs,
       defaultWalletPublicKey: publicKey,
     };
@@ -1051,7 +1030,7 @@ export class SigningService {
       );
     }
 
-    const client = await createDfnsApiClient(this.env, { apiBaseUrl: options.apiBaseUrl });
+    const client = await createDfnsApiClient(this.env);
     const resolvedNetwork = resolveDfnsNetwork(options.network);
 
     const wallet = options.walletId
@@ -1080,7 +1059,6 @@ export class SigningService {
 
     const configJson: DfnsProviderConfig = {
       provider: "dfns",
-      apiBaseUrl: options.apiBaseUrl,
       network: walletNetwork,
       walletId: wallet.id,
       signingKeyId: wallet.signingKey?.id ?? options.signingKeyId,
@@ -1128,7 +1106,7 @@ export class SigningService {
       );
     }
 
-    const client = await createIbmHavenApiClient(this.env, { apiBaseUrl: options.apiBaseUrl });
+    const client = await createIbmHavenApiClient(this.env);
     const resolvedNetwork = resolveDfnsNetwork(options.network, IBM_HAVEN_PROVIDER_LABEL);
 
     const wallet = options.walletId
@@ -1157,7 +1135,6 @@ export class SigningService {
 
     const configJson: IbmHavenProviderConfig = {
       provider: "ibm_haven",
-      apiBaseUrl: options.apiBaseUrl,
       network: walletNetwork,
       walletId: wallet.id,
       signingKeyId: wallet.signingKey?.id ?? options.signingKeyId,
@@ -1205,7 +1182,6 @@ export class SigningService {
     }
 
     const provisioned = await custodyProvisioning.provisionAnchorageWallet(this.env, {
-      apiBaseUrl: options.apiBaseUrl,
       walletId: options.walletId,
       walletLabel: options.walletLabel,
       network: options.network,
@@ -1215,7 +1191,6 @@ export class SigningService {
     const publicKey = provisioned.address as Address;
     const configJson: AnchorageProviderConfig = {
       provider: "anchorage",
-      apiBaseUrl: options.apiBaseUrl,
       walletId: provisioned.walletId,
       network: options.network,
     };
@@ -1290,7 +1265,6 @@ export class SigningService {
         provider: "utila",
         vaultId: this.env.UTILA_VAULT_ID,
         network: this.env.UTILA_NETWORK,
-        apiBaseUrl: this.env.UTILA_API_BASE_URL,
       };
 
       await this.updateConfigJson(reusable.configId, configJson);
