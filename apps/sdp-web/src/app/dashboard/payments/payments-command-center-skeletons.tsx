@@ -26,7 +26,7 @@ export function PaymentsBalanceSkeleton() {
 export function PaymentsActivitySkeleton() {
   return (
     <section
-      className={skeletonSectionClassName}
+      className={`${skeletonSectionClassName} self-start`}
       aria-busy="true"
       data-payments-overview-skeleton="activity"
     >
