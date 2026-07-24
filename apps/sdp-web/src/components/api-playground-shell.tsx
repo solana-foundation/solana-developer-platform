@@ -10,6 +10,7 @@ import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { normalizeApiKeyInput } from "@/lib/playground-api-keys";
+import { setNestedValue } from "@/lib/set-nested-value";
 import { cn } from "@/lib/utils";
 
 export type ApiPlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -99,25 +100,6 @@ function buildInitialFieldValues(
 
 function hasRequestBody(method: ApiPlaygroundMethod): boolean {
   return method !== "GET" && method !== "DELETE";
-}
-
-function setNestedValue(target: Record<string, unknown>, path: string, value: unknown) {
-  const segments = path.split(".");
-  let current: Record<string, unknown> = target;
-
-  segments.forEach((segment, index) => {
-    if (index === segments.length - 1) {
-      current[segment] = value;
-      return;
-    }
-
-    const existing = current[segment];
-    if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
-      current[segment] = {};
-    }
-
-    current = current[segment] as Record<string, unknown>;
-  });
 }
 
 function serializeFieldValue(field: ApiPlaygroundFieldConfig, rawValue: string): unknown {
