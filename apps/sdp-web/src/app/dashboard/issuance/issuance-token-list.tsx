@@ -283,7 +283,10 @@ function IssuanceTokenListRow({
             label={t("DashboardIssuance.workspace.supply")}
             value={formatSupply(token.totalSupply, locale)}
           />
-          <CollapsedStat label={t("DashboardIssuance.list.decimals")} value={String(token.decimals)} />
+          <CollapsedStat
+            label={t("DashboardIssuance.list.decimals")}
+            value={String(token.decimals)}
+          />
           <CollapsedStat
             label={t("DashboardIssuance.workspace.created")}
             value={formatDate(token.createdAt, locale)}
