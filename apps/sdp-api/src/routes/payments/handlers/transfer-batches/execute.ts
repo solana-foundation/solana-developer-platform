@@ -1,6 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
-import { getBase64EncodedWireTransaction, getTransactionEncoder } from "@solana/kit";
-import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import { getBase64EncodedWireTransaction } from "@solana/kit";
 import { getDb } from "@/db";
 import { asTransactionalClient } from "@/db/client";
 import type {
@@ -14,6 +13,7 @@ import type {
 } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { internalError, transactionFailed } from "@/lib/errors";
+import { signMessageWithWalletFeePayment } from "@/lib/fee-payment";
 import {
   type AppContext,
   type getFeePayment,
@@ -160,9 +160,14 @@ export async function executeChunk(params: {
   preflight: boolean;
 }): Promise<void> {
   const { c, resolved, chunk } = params;
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(chunk.message);
+  const { partiallySigned, txBytes, walletFeePayment } = await signMessageWithWalletFeePayment({
+    env: c.env,
+    feePayment: params.feePayment,
+    wallet: resolved.sourceWallet,
+    sourceAddress: resolved.sourceAddress,
+    message: chunk.message,
+  });
   const serializedTx = getBase64EncodedWireTransaction(partiallySigned);
-  const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
   const recipientRows = chunk.recipientIndexes.map((index) => {
     const row = params.recipientsByIndex.get(index);
     if (!row) {
@@ -195,6 +200,15 @@ export async function executeChunk(params: {
       providerData: {
         batchRecipientCount: recipientRows.length,
         recipientIds: recipientRows.map((row) => row.id),
+        ...(walletFeePayment === null
+          ? {}
+          : {
+              feePayment: {
+                amountRaw: walletFeePayment.instruction.amountRaw.toString(),
+                token: walletFeePayment.feeToken.symbol,
+                paymentAddress: walletFeePayment.instruction.paymentAddress,
+              },
+            }),
       },
       serializedTx,
       signature: null,

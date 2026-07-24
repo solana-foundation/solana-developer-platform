@@ -24,6 +24,7 @@ import {
 } from "@sdp/custody/dfns";
 import type { SigningPort, SignRequest, SignResult, SignStatus } from "@sdp/custody/signing";
 import { isFullSigningPort, SigningError } from "@sdp/custody/signing";
+import type { WellKnownTokenSymbol } from "@sdp/types";
 import { getBase58Codec } from "@solana/codecs";
 import type { Address, KeyPairSigner, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
@@ -1388,6 +1389,7 @@ export class SigningService {
       purpose?: WalletPurpose;
       setDefault?: boolean;
       provider?: SigningConfiguration["provider"];
+      feePaymentToken?: WellKnownTokenSymbol;
     }
   ): Promise<CustodyWallet> {
     const config = params.provider
@@ -1424,6 +1426,7 @@ export class SigningService {
         publicKey,
         label: params.label,
         purpose: params.purpose,
+        feePaymentToken: params.feePaymentToken,
       });
     } catch (error) {
       throw new SigningError(
@@ -1772,6 +1775,7 @@ export class SigningService {
       purpose: wallet.purpose,
       status: wallet.status,
       createdAt: wallet.createdAt,
+      settings: wallet.settings,
       provider: wallet.provider,
       isDefaultProvider: defaultConfigId === wallet.custodyConfigId,
     };

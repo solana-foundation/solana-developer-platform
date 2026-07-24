@@ -789,6 +789,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: vi
         .fn()
         .mockResolvedValue(
@@ -1057,6 +1059,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1318,6 +1322,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1423,6 +1429,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1542,6 +1550,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1641,6 +1651,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1727,6 +1739,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1848,6 +1862,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -1903,6 +1919,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -2017,6 +2035,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -2099,6 +2119,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -2197,6 +2219,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -2297,6 +2321,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -2380,6 +2406,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -2446,6 +2474,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -2589,6 +2619,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -2710,6 +2742,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -2876,6 +2910,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3044,6 +3080,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3214,6 +3252,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3317,6 +3357,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3475,6 +3517,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3651,6 +3695,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3813,6 +3859,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3861,6 +3909,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -3944,6 +3994,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -4038,6 +4090,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -4225,6 +4279,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -4393,6 +4449,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     confirmTransactionMock
@@ -4523,6 +4581,8 @@ describe("Payments routes", () => {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
       signAsFeePayer: vi.fn(),
+      getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+      getPaymentInstruction: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     const headers = {
@@ -6336,6 +6396,8 @@ describe("Payments routes", () => {
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
         signAsFeePayer: vi.fn(),
+        getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+        getPaymentInstruction: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
@@ -6440,6 +6502,8 @@ describe("Payments routes", () => {
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
         signAsFeePayer: vi.fn(),
+        getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+        getPaymentInstruction: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
@@ -6523,6 +6587,8 @@ describe("Payments routes", () => {
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
         signAsFeePayer: vi.fn(),
+        getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+        getPaymentInstruction: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
@@ -6609,6 +6675,8 @@ describe("Payments routes", () => {
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
         signAsFeePayer: vi.fn(),
+        getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+        getPaymentInstruction: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
@@ -6979,6 +7047,8 @@ describe("Payments routes", () => {
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
         signAsFeePayer: vi.fn(),
+        getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+        getPaymentInstruction: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
@@ -7019,6 +7089,8 @@ describe("Payments routes", () => {
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
         signAsFeePayer: vi.fn(),
+        getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+        getPaymentInstruction: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
@@ -7062,6 +7134,8 @@ describe("Payments routes", () => {
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
         signAsFeePayer: vi.fn(),
+        getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+        getPaymentInstruction: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
@@ -7164,6 +7238,8 @@ describe("Payments routes", () => {
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
         signAsFeePayer: vi.fn(),
+        getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+        getPaymentInstruction: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
@@ -7191,6 +7267,8 @@ describe("Payments routes", () => {
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
         signAsFeePayer: vi.fn(),
+        getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+        getPaymentInstruction: vi.fn(),
         signAndSend: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
@@ -7233,6 +7311,8 @@ describe("Payments routes", () => {
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
         signAsFeePayer: vi.fn(),
+        getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+        getPaymentInstruction: vi.fn(),
         signAndSend: vi
           .fn()
           .mockRejectedValue(

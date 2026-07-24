@@ -80,6 +80,8 @@ function makeFeePayment(koraAddress: Address): {
     providerId: "test-kora",
     getFeePayer,
     signAsFeePayer: vi.fn(),
+    getPricingModel: vi.fn().mockResolvedValue({ type: "free" }),
+    getPaymentInstruction: vi.fn(),
     signAndSend,
   };
   return { port, getFeePayer, signAndSend };

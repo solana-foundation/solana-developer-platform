@@ -1,3 +1,5 @@
+import type { WellKnownTokenSymbol } from "./well-known-tokens";
+
 export const CUSTODY_PROVIDERS = [
   "local",
   "fireblocks",
@@ -483,12 +485,17 @@ export type SwitchSigningRequest =
   | InitializeAnchorageSigningRequest
   | InitializeUtilaSigningRequest;
 
+export interface CustodyWalletSettings {
+  feePaymentToken?: WellKnownTokenSymbol;
+}
+
 export interface CreateWalletRequest {
   projectId?: string;
   provider?: CustodyProvider;
   label?: string;
   purpose?: CustodyWalletPurpose;
   setDefault?: boolean;
+  feePaymentToken?: WellKnownTokenSymbol;
 }
 
 export interface SetDefaultWalletRequest {
@@ -530,6 +537,7 @@ export interface CustodyWalletSummary {
   purpose: string | null;
   status: CustodyWalletStatus;
   createdAt: string;
+  feePaymentToken?: WellKnownTokenSymbol;
   balances?: CustodyWalletTokenBalance[];
 }
 

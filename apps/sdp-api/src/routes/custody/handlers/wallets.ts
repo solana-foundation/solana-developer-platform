@@ -1,17 +1,22 @@
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
+import type { RpcEnv } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type {
   CustodyWalletAggregate,
+  CustodyWalletSettings,
   CustodyWalletSummary,
   CustodyWalletTokenBalance,
+  WellKnownTokenSymbol,
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { getDb } from "@/db";
+import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
+import { wellKnownTokenMintOnCluster } from "@/lib/fee-payment";
 import { created, success } from "@/lib/response";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
@@ -66,6 +71,31 @@ interface WalletSummaryRow {
   status: string;
   created_at: string;
   provider: string;
+  settings: unknown;
+}
+
+function assertFeePaymentTokenAvailable(env: RpcEnv, token: WellKnownTokenSymbol): void {
+  if (wellKnownTokenMintOnCluster(env, token) === undefined) {
+    throw badRequest(`Fee payment token ${token} is unavailable on the active cluster`);
+  }
+}
+
+/**
+ * Apply a feePaymentToken update to the wallet's stored settings: undefined
+ * leaves the settings untouched, null clears the token, a symbol sets it.
+ */
+function nextWalletSettings(
+  current: CustodyWalletSettings,
+  feePaymentToken: WellKnownTokenSymbol | null | undefined
+): CustodyWalletSettings {
+  if (feePaymentToken === undefined) {
+    return current;
+  }
+  if (feePaymentToken === null) {
+    const { feePaymentToken: _cleared, ...rest } = current;
+    return rest;
+  }
+  return { ...current, feePaymentToken };
 }
 
 const walletSummaryCache = new Map<string, CacheEntry<CustodyWalletSummary[]>>();
@@ -279,6 +309,7 @@ async function queryWalletSummaries(
        w.purpose,
        w.status,
        w.created_at,
+       w.settings,
        c.provider
      FROM custody_wallets w
      JOIN custody_configs c ON c.id = w.custody_config_id
@@ -302,6 +333,7 @@ async function queryWalletSummaries(
     purpose: row.purpose,
     status: row.status as CustodyWalletSummary["status"],
     createdAt: row.created_at,
+    feePaymentToken: parsePostgresJson<CustodyWalletSettings>(row.settings).feePaymentToken,
   }));
 }
 
@@ -472,6 +504,10 @@ export const createWallet = async (c: AppContext) => {
   }
 
   const signingService = signingServiceModule.createSigningService(c.env);
+  const feePaymentToken = parsed.data.feePaymentToken;
+  if (feePaymentToken !== undefined) {
+    assertFeePaymentTokenAvailable(c.env, feePaymentToken);
+  }
 
   try {
     const wallet = await signingService.createWallet(actor.organizationId, projectId, {
@@ -479,6 +515,7 @@ export const createWallet = async (c: AppContext) => {
       label: parsed.data.label,
       purpose: parsed.data.purpose,
       setDefault: parsed.data.setDefault,
+      feePaymentToken,
     });
 
     const response: CustodyWalletResponse = {
@@ -490,6 +527,7 @@ export const createWallet = async (c: AppContext) => {
         purpose: wallet.purpose,
         status: wallet.status,
         createdAt: wallet.createdAt,
+        feePaymentToken: wallet.settings.feePaymentToken,
       },
     };
 
@@ -671,14 +709,20 @@ export const updateWallet = async (c: AppContext) => {
   }
 
   const nextLabel = parsed.data.label?.trim() ? parsed.data.label.trim() : null;
+  const feePaymentToken = parsed.data.feePaymentToken;
+  if (feePaymentToken !== undefined && feePaymentToken !== null) {
+    assertFeePaymentTokenAvailable(c.env, feePaymentToken);
+  }
+
+  const nextSettings = nextWalletSettings(wallet.settings, feePaymentToken);
 
   await getDb(c.env)
     .prepare(
       `UPDATE custody_wallets
-     SET label = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
+     SET label = ?, settings = ?::jsonb, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
      WHERE id = ?`
     )
-    .bind(nextLabel, wallet.id)
+    .bind(nextLabel, JSON.stringify(nextSettings), wallet.id)
     .run();
 
   const auditService = new AuditService(getDb(c.env));
@@ -708,6 +752,7 @@ export const updateWallet = async (c: AppContext) => {
       purpose: wallet.purpose,
       status: wallet.status,
       createdAt: wallet.createdAt,
+      feePaymentToken: nextSettings.feePaymentToken,
     },
   };
 
@@ -748,6 +793,7 @@ export const listWallets = async (c: AppContext) => {
       purpose: wallet.purpose,
       status: wallet.status,
       createdAt: wallet.createdAt,
+      feePaymentToken: wallet.feePaymentToken,
       ...(filters.includeBalances
         ? {
             balances: balancesByWalletId.get(wallet.walletId) ?? [],
@@ -850,6 +896,7 @@ export const getWalletById = async (c: AppContext) => {
     label: wallet.label,
     purpose: wallet.purpose,
     status: wallet.status,
+    feePaymentToken: wallet.settings.feePaymentToken,
     createdAt: wallet.createdAt,
   };
   const includeBalanceQuery = c.req.query("includeBalance");

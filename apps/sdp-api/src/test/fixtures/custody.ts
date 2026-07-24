@@ -62,6 +62,7 @@ export const TEST_CUSTODY_WALLET: CustodyWallet = {
   purpose: "root",
   status: "active",
   createdAt: "2024-01-01T00:00:00.000Z",
+  settings: {},
 };
 
 /**
@@ -76,6 +77,7 @@ export const TEST_PROJECT_CUSTODY_WALLET: CustodyWallet = {
   purpose: "root",
   status: "active",
   createdAt: "2024-01-02T00:00:00.000Z",
+  settings: {},
 };
 
 /**

@@ -4,6 +4,7 @@ import { compileTransaction, createNoopSigner } from "@solana/kit";
 import { getTokenSize } from "@solana-program/token-2022";
 import { z } from "zod";
 import { badRequest, estimateNotAvailable } from "@/lib/errors";
+import { buildFeePaymentSizeProbeInstruction } from "@/lib/fee-payment";
 import { success } from "@/lib/response";
 import { type AppContext, getFeePayment } from "../../context";
 import { estimateTransferBatchSchema } from "../../schemas";
@@ -93,9 +94,15 @@ export async function estimateTransferBatch(c: AppContext) {
   const resolved = await resolveBatchRequest(c, parsed.data, ["payments:read"]);
   const feePayment = getFeePayment(c);
   const sourceSigner = createNoopSigner(resolved.sourceAddress);
-  const [feePayer, lifetime] = await Promise.all([
+  const [feePayer, lifetime, sizeProbeInstruction] = await Promise.all([
     feePayment.getFeePayer(),
     solanaRpc.getRecentBlockhash(resolved.rpc, "confirmed"),
+    buildFeePaymentSizeProbeInstruction({
+      env: c.env,
+      feePayment,
+      wallet: resolved.sourceWallet,
+      sourceSigner,
+    }),
   ]);
   const groups = await buildInstructionGroups({
     tokenContext: resolved.tokenContext,
@@ -110,6 +117,7 @@ export async function estimateTransferBatch(c: AppContext) {
     lifetime,
     maxRecipientsPerTransaction:
       parsed.data.options?.maxRecipientsPerTransaction ?? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
+    sizeProbeInstruction,
   });
   const [networkFeeLamports, tokenAccountRentLamports] = await Promise.all([
     estimateNetworkFeeLamports(resolved.rpc, chunks),
@@ -124,7 +132,7 @@ export async function estimateTransferBatch(c: AppContext) {
         networkFeeLamports: networkFeeLamports.toString(),
         priorityFeeLamports: "0",
         tokenAccountRentLamports: tokenAccountRentLamports.toString(),
-        sponsored: true,
+        sponsored: sizeProbeInstruction === null,
       },
     },
   });

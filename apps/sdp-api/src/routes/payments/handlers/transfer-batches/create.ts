@@ -6,6 +6,7 @@ import type {
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { badRequest, internalError } from "@/lib/errors";
+import { buildFeePaymentSizeProbeInstruction } from "@/lib/fee-payment";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import * as solanaServices from "@/services/solana";
@@ -102,12 +103,20 @@ export async function createTransferBatch(c: AppContext) {
   if (signer.address !== resolved.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");
   }
-  const groups = await buildInstructionGroups({
-    tokenContext: resolved.tokenContext,
-    recipients: resolved.recipients,
-    sourceSigner: signer,
-    feePayer,
-  });
+  const [sizeProbeInstruction, groups] = await Promise.all([
+    buildFeePaymentSizeProbeInstruction({
+      env: c.env,
+      feePayment,
+      wallet: resolved.sourceWallet,
+      sourceSigner: signer,
+    }),
+    buildInstructionGroups({
+      tokenContext: resolved.tokenContext,
+      recipients: resolved.recipients,
+      sourceSigner: signer,
+      feePayer,
+    }),
+  ]);
   const chunks = chunkInstructionGroups({
     groups,
     sourceSigner: signer,
@@ -115,6 +124,7 @@ export async function createTransferBatch(c: AppContext) {
     lifetime,
     maxRecipientsPerTransaction:
       parsed.data.options?.maxRecipientsPerTransaction ?? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
+    sizeProbeInstruction,
   });
 
   const batchRepository = getPaymentTransferBatchesRepository(c);

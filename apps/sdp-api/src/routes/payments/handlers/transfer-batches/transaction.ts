@@ -166,12 +166,35 @@ function buildCandidateChunk(
 }
 
 /**
+ * Compiles a chunk for size probing, appending the fee-payment stand-in
+ * instruction when one will be added at execution time.
+ *
+ * @param chunk - Candidate chunk to compile.
+ * @param sizeProbeInstruction - Fee-payment stand-in, or null under free pricing.
+ * @returns The compiled transaction used for size checks.
+ */
+function transactionForSizeProbe(
+  chunk: TransactionChunk,
+  sizeProbeInstruction: Instruction | null
+) {
+  const message =
+    sizeProbeInstruction === null
+      ? chunk.message
+      : appendTransactionMessageInstructions([sizeProbeInstruction], chunk.message);
+  return compileTransaction(message);
+}
+
+/**
  * Rejects a chunk whose compiled transaction exceeds the Solana size limit.
  *
  * @param chunk - Candidate chunk to validate.
+ * @param sizeProbeInstruction - Fee-payment stand-in, or null under free pricing.
  */
-function assertTransactionFits(chunk: TransactionChunk): void {
-  const transaction = compileTransaction(chunk.message);
+function assertTransactionFits(
+  chunk: TransactionChunk,
+  sizeProbeInstruction: Instruction | null
+): void {
+  const transaction = transactionForSizeProbe(chunk, sizeProbeInstruction);
   if (isTransactionWithinSizeLimit(transaction)) {
     return;
   }
@@ -185,13 +208,15 @@ function assertTransactionFits(chunk: TransactionChunk): void {
 
 /**
  * Packs instruction groups into transaction chunks, greedily filling each
- * chunk up to the recipient cap and the Solana transaction size limit.
+ * chunk up to the recipient cap and the Solana transaction size limit,
+ * reserving headroom for the fee-payment instruction when one applies.
  *
  * @param params.groups - Instruction groups in recipient order.
  * @param params.sourceSigner - Signer for the source wallet.
  * @param params.feePayer - Fee payer address.
  * @param params.lifetime - Blockhash lifetime applied to each chunk.
  * @param params.maxRecipientsPerTransaction - Upper bound on recipients per chunk.
+ * @param params.sizeProbeInstruction - Fee-payment stand-in, or null under free pricing.
  * @returns The chunks to submit, each within transaction size limits.
  */
 export function chunkInstructionGroups(params: {
@@ -200,6 +225,7 @@ export function chunkInstructionGroups(params: {
   feePayer: Address;
   lifetime: RecentBlockhash;
   maxRecipientsPerTransaction: number;
+  sizeProbeInstruction: Instruction | null;
 }): TransactionChunk[] {
   const chunks: TransactionChunk[] = [];
   let pending: RecipientInstructionGroup[] = [];
@@ -209,7 +235,7 @@ export function chunkInstructionGroups(params: {
       return;
     }
     const chunk = buildCandidateChunk(pending, params);
-    assertTransactionFits(chunk);
+    assertTransactionFits(chunk, params.sizeProbeInstruction);
     chunks.push(chunk);
     pending = [];
   };
@@ -221,14 +247,16 @@ export function chunkInstructionGroups(params: {
 
     const candidateGroups = [...pending, group];
     const candidate = buildCandidateChunk(candidateGroups, params);
-    if (isTransactionWithinSizeLimit(compileTransaction(candidate.message))) {
+    if (
+      isTransactionWithinSizeLimit(transactionForSizeProbe(candidate, params.sizeProbeInstruction))
+    ) {
       pending = candidateGroups;
       continue;
     }
 
     flush();
     pending = [group];
-    assertTransactionFits(buildCandidateChunk(pending, params));
+    assertTransactionFits(buildCandidateChunk(pending, params), params.sizeProbeInstruction);
   }
 
   flush();

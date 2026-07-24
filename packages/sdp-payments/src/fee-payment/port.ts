@@ -11,7 +11,24 @@
  */
 
 import type { RpcEnv } from "@sdp/rpc";
-import type { Address, Signature } from "@solana/kit";
+import type { Address, Instruction, Signature } from "@solana/kit";
+import type { PriceModel } from "@solana/kora";
+
+export type { PriceModel } from "@solana/kora";
+
+export interface FeePaymentInstructionInput {
+  transaction: Uint8Array;
+  sourceWallet: Address;
+  feeToken: Address;
+  tokenProgram: Address;
+}
+
+export interface FeePaymentInstruction {
+  instruction: Instruction;
+  amountRaw: bigint;
+  paymentToken: Address;
+  paymentAddress: Address;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Environment
@@ -48,6 +65,10 @@ export interface FeePaymentPort {
    * This is the address that will pay transaction fees (Kora's signer).
    */
   getFeePayer(): Promise<Address>;
+
+  getPricingModel(): Promise<PriceModel>;
+
+  getPaymentInstruction(input: FeePaymentInstructionInput): Promise<FeePaymentInstruction>;
 
   /**
    * Sign a transaction with the fee payer key without sending.

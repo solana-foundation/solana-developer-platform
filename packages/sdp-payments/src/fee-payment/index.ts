@@ -13,7 +13,10 @@ export type {
   ExtendedFeePaymentPort,
   FeePaymentEnv,
   FeePaymentErrorCode,
+  FeePaymentInstruction,
+  FeePaymentInstructionInput,
   FeePaymentPort,
+  PriceModel,
 } from "./port";
 export { FeePaymentError } from "./port";
 

@@ -20,7 +20,13 @@ import {
   partiallySignTransaction,
   type Signature,
 } from "@solana/kit";
-import type { FeePaymentEnv, FeePaymentErrorCode, FeePaymentPort } from "./port";
+import type {
+  FeePaymentEnv,
+  FeePaymentErrorCode,
+  FeePaymentInstruction,
+  FeePaymentInstructionInput,
+  FeePaymentPort,
+} from "./port";
 import { FeePaymentError } from "./port";
 
 const base58 = getBase58Codec();
@@ -57,6 +63,17 @@ export class NativeAdapter implements FeePaymentPort {
   async getFeePayer(): Promise<Address> {
     const signer = await this.getSigner();
     return signer.address;
+  }
+
+  async getPricingModel(): Promise<{ type: "free" }> {
+    return { type: "free" };
+  }
+
+  async getPaymentInstruction(_input: FeePaymentInstructionInput): Promise<FeePaymentInstruction> {
+    throw new FeePaymentError(
+      "Native fee payment does not support token payment instructions",
+      "PROVIDER_NOT_AVAILABLE"
+    );
   }
 
   /**

@@ -8,7 +8,6 @@ import {
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   createTransactionMessage,
-  getTransactionEncoder,
   type Instruction,
   pipe,
   type Signature,
@@ -16,9 +15,9 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   type TransactionSigner,
 } from "@solana/kit";
-import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { createTokenRepository } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
+import { signMessageWithWalletFeePayment } from "@/lib/fee-payment";
 import { isNativePaymentToken, normalizePaymentToken } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -106,8 +105,13 @@ export async function sendSubscriptionInstructions(input: {
     (m) => appendTransactionMessageInstructions(input.instructions, m),
     (m) => addSignersToTransactionMessage([signer], m)
   );
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
-  const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
+  const { txBytes } = await signMessageWithWalletFeePayment({
+    env: input.env,
+    feePayment,
+    wallet: input.sourceWallet,
+    sourceAddress: signer.address,
+    message,
+  });
   return feePayment.signAndSend(txBytes);
 }
 
