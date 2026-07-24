@@ -19,6 +19,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import {
   formatDirection,
@@ -27,7 +29,6 @@ import {
   resolveTransferTypeLabel,
   shortenAddress,
 } from "../payments-overview.utils";
-import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { TransactionAmount } from "./transactions-amount";
 import {
   getTransactionCounterpartyPresentation,
@@ -105,6 +106,7 @@ function TransactionDetail({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const cluster = useSolanaCluster();
   if (loading) {
     return (
       <div className="space-y-4 p-6" role="status">
@@ -174,7 +176,7 @@ function TransactionDetail({
       {transfer.signature ? (
         <div className="border-t border-border-default p-6">
           <Button asChild variant="outline" iconRight={<ExternalLinkIcon />}>
-            <a href={getDevnetExplorerUrl(transfer.signature)} target="_blank" rel="noreferrer">
+            <a href={explorerTxUrl(transfer.signature, cluster)} target="_blank" rel="noreferrer">
               {t("DashboardPayments.transactions.viewOnExplorer")}
             </a>
           </Button>

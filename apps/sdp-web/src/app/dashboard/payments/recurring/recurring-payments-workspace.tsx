@@ -54,9 +54,10 @@ import {
 } from "@/components/ui/table";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
 import { useDashboardRouter } from "@/lib/use-dashboard-router";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
-import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
 import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
 import {
@@ -282,6 +283,7 @@ function CollectionStatusBadge({ status }: { status: PaymentSubscriptionCollecti
 
 function ExplorerValue({ value }: { value: string | null }) {
   const t = useTranslations();
+  const cluster = useSolanaCluster();
   if (!value) {
     return <span className="text-tertiary">{t("DashboardPayments.recurring.notSet")}</span>;
   }
@@ -295,7 +297,7 @@ function ExplorerValue({ value }: { value: string | null }) {
         size="icon-xs"
         aria-label={t("DashboardPayments.recurring.openSignature")}
       >
-        <a href={getDevnetExplorerUrl(value)} target="_blank" rel="noreferrer">
+        <a href={explorerTxUrl(value, cluster)} target="_blank" rel="noreferrer">
           <ExternalLinkIcon />
         </a>
       </Button>

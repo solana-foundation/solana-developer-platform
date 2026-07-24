@@ -18,6 +18,8 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { explorerTxUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import {
   formatCurrencyAmount,
   formatDirection,
@@ -30,11 +32,7 @@ import {
   resolveUsdBalanceValue,
   selectTopAggregateBalanceRows,
 } from "./payments-overview.utils";
-import {
-  fetchTransfers,
-  fetchWalletAggregate,
-  getDevnetExplorerUrl,
-} from "./payments-workspace.data";
+import { fetchTransfers, fetchWalletAggregate } from "./payments-workspace.data";
 
 interface PaymentsOverviewProps {
   aggregate: CustodyWalletAggregate | null;
@@ -129,6 +127,7 @@ export function PaymentsOverview({
 }: PaymentsOverviewProps) {
   const t = useTranslations();
   const locale = useLocale();
+  const cluster = useSolanaCluster();
   const searchParams = useSearchParams();
   const refreshSeed = searchParams.get("refresh") ?? "default";
   const hasInitialAggregate = aggregate !== null && aggregateError === null;
@@ -366,7 +365,7 @@ export function PaymentsOverview({
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <a
-                                    href={getDevnetExplorerUrl(transfer.signature)}
+                                    href={explorerTxUrl(transfer.signature, cluster)}
                                     target="_blank"
                                     rel="noreferrer"
                                     className="flex min-w-0 max-w-full items-center gap-1 text-primary underline underline-offset-2"
