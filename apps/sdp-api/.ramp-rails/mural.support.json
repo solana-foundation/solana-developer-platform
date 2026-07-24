@@ -46,63 +46,172 @@
         "max": null
       }
     },
-    "cryptos": ["usdc.solana"],
+    "cryptos": [
+      "usdc.solana"
+    ],
     "countrySupport": {
       "coverage": "by-country",
       "countries": {
-        "AD": ["EUR"],
-        "AR": ["ARS"],
-        "AT": ["EUR"],
-        "AX": ["EUR"],
-        "BE": ["EUR"],
-        "BG": ["EUR"],
-        "BO": ["BOB"],
-        "BR": ["BRL"],
-        "CH": ["EUR"],
-        "CL": ["CLP"],
-        "CN": ["USD"],
-        "CO": ["COP"],
-        "CR": ["CRC"],
-        "CY": ["EUR"],
-        "CZ": ["EUR"],
-        "DE": ["EUR"],
-        "DK": ["EUR"],
-        "EE": ["EUR"],
-        "ES": ["EUR"],
-        "FI": ["EUR"],
-        "FR": ["EUR"],
-        "GB": ["EUR"],
-        "GF": ["EUR"],
-        "GP": ["EUR"],
-        "GR": ["EUR"],
-        "HK": ["USD"],
-        "HR": ["EUR"],
-        "HU": ["EUR"],
-        "IE": ["EUR"],
-        "IS": ["EUR"],
-        "IT": ["EUR"],
-        "LI": ["EUR"],
-        "LT": ["EUR"],
-        "LU": ["EUR"],
-        "LV": ["EUR"],
-        "MF": ["EUR"],
-        "MQ": ["EUR"],
-        "MT": ["EUR"],
-        "MX": ["MXN"],
-        "NL": ["EUR"],
-        "NO": ["EUR"],
-        "PA": ["USD"],
-        "PE": ["PEN", "USD"],
-        "PL": ["EUR"],
-        "PT": ["EUR"],
-        "RE": ["EUR"],
-        "RO": ["EUR"],
-        "SE": ["EUR"],
-        "SI": ["EUR"],
-        "SK": ["EUR"],
-        "US": ["USD"],
-        "YT": ["EUR"],
-        "ZA": ["ZAR"]
+        "AD": [
+          "EUR"
+        ],
+        "AR": [
+          "ARS"
+        ],
+        "AT": [
+          "EUR"
+        ],
+        "AX": [
+          "EUR"
+        ],
+        "BE": [
+          "EUR"
+        ],
+        "BG": [
+          "EUR"
+        ],
+        "BO": [
+          "BOB"
+        ],
+        "BR": [
+          "BRL"
+        ],
+        "CH": [
+          "EUR"
+        ],
+        "CL": [
+          "CLP"
+        ],
+        "CN": [
+          "USD"
+        ],
+        "CO": [
+          "COP"
+        ],
+        "CR": [
+          "CRC"
+        ],
+        "CY": [
+          "EUR"
+        ],
+        "CZ": [
+          "EUR"
+        ],
+        "DE": [
+          "EUR"
+        ],
+        "DK": [
+          "EUR"
+        ],
+        "EE": [
+          "EUR"
+        ],
+        "ES": [
+          "EUR"
+        ],
+        "FI": [
+          "EUR"
+        ],
+        "FR": [
+          "EUR"
+        ],
+        "GB": [
+          "EUR"
+        ],
+        "GF": [
+          "EUR"
+        ],
+        "GP": [
+          "EUR"
+        ],
+        "GR": [
+          "EUR"
+        ],
+        "HK": [
+          "USD"
+        ],
+        "HR": [
+          "EUR"
+        ],
+        "HU": [
+          "EUR"
+        ],
+        "IE": [
+          "EUR"
+        ],
+        "IS": [
+          "EUR"
+        ],
+        "IT": [
+          "EUR"
+        ],
+        "LI": [
+          "EUR"
+        ],
+        "LT": [
+          "EUR"
+        ],
+        "LU": [
+          "EUR"
+        ],
+        "LV": [
+          "EUR"
+        ],
+        "MF": [
+          "EUR"
+        ],
+        "MQ": [
+          "EUR"
+        ],
+        "MT": [
+          "EUR"
+        ],
+        "MX": [
+          "MXN"
+        ],
+        "NL": [
+          "EUR"
+        ],
+        "NO": [
+          "EUR"
+        ],
+        "PA": [
+          "USD"
+        ],
+        "PE": [
+          "PEN",
+          "USD"
+        ],
+        "PL": [
+          "EUR"
+        ],
+        "PT": [
+          "EUR"
+        ],
+        "RE": [
+          "EUR"
+        ],
+        "RO": [
+          "EUR"
+        ],
+        "SE": [
+          "EUR"
+        ],
+        "SI": [
+          "EUR"
+        ],
+        "SK": [
+          "EUR"
+        ],
+        "US": [
+          "USD"
+        ],
+        "YT": [
+          "EUR"
+        ],
+        "ZA": [
+          "ZAR"
+        ]
       }
     }
   },

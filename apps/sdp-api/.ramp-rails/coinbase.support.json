@@ -6,7 +6,11 @@
         "max": "7500"
       }
     },
-    "cryptos": ["pyusd.solana", "sol.solana", "usdc.solana"]
+    "cryptos": [
+      "pyusd.solana",
+      "sol.solana",
+      "usdc.solana"
+    ]
   },
   "offramp": {
     "currencies": {},
