@@ -27,6 +27,7 @@ import {
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -38,6 +39,7 @@ import {
   formatCurrencyAmount,
   formatDisplayAmount,
   resolveTotalBalance,
+  shortenAddress,
 } from "../../payments/payments-overview.utils";
 
 interface WalletBalancesResponse {
@@ -571,11 +573,18 @@ function WalletBalanceRow({
         href ? "transition-colors hover:bg-fill-subtle" : "",
       ].join(" ")}
     >
-      <div>
-        <p className="text-[17px] font-medium text-primary">{label}</p>
-        <p className="font-mono text-xs text-tertiary">{mint}</p>
+      <div className="flex min-w-0 items-center gap-3">
+        <TokenMark mint={mint} symbol={label} size="md" />
+        <div className="min-w-0">
+          <p className="text-[17px] font-medium text-primary">{label}</p>
+          {/* The full mint is 44 characters; keep it reachable on hover rather
+              than letting it dominate the row. */}
+          <p className="font-mono text-xs text-tertiary" title={mint}>
+            {shortenAddress(mint)}
+          </p>
+        </div>
       </div>
-      <p className="text-[15px] text-primary">{value}</p>
+      <p className="text-[15px] text-primary tabular-nums">{value}</p>
     </div>
   );
 

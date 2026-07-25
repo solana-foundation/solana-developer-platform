@@ -26,6 +26,7 @@ import {
   formatDirection,
   formatDisplayAmount,
   formatTimestamp,
+  resolveTransferTokenLabel,
   resolveTransferTypeLabel,
   shortenAddress,
 } from "../payments-overview.utils";
@@ -133,7 +134,7 @@ function TransactionDetail({
     [t("DashboardPayments.transactions.type"), resolveTransferTypeLabel(transfer.type, t)],
     [
       t("DashboardPayments.transactions.amount"),
-      formatDisplayAmount(transfer.amount, transfer.token, locale),
+      formatDisplayAmount(transfer.amount, resolveTransferTokenLabel(transfer.token), locale),
     ],
     [t("DashboardPayments.transactions.direction"), formatDirection(transfer.direction, t)],
     [t("DashboardPayments.transactions.wallet"), transfer.walletId],

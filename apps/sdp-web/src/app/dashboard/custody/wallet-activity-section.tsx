@@ -25,7 +25,10 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { formatDisplayAmount } from "../payments/payments-overview.utils";
+import {
+  formatDisplayAmount,
+  resolveTransferTokenLabel,
+} from "../payments/payments-overview.utils";
 
 interface WalletActivitySectionProps {
   isVisible?: boolean;
@@ -189,10 +192,13 @@ export function WalletActivitySection({ walletId, isVisible = true }: WalletActi
                 </TableHeader>
                 <TableBody>
                   {liveRows.map((row: WalletActivityRow) => {
+                    // row.token is a mint address, so it has to be resolved to a
+                    // symbol here too or the Asset column shows raw base58.
+                    const assetToken = resolveTransferTokenLabel(row.token);
                     const assetLabel =
-                      row.amount && row.token
-                        ? formatDisplayAmount(row.amount, row.token, locale)
-                        : (row.token ?? t("DashboardCustody.unknownAsset"));
+                      row.amount && assetToken
+                        ? formatDisplayAmount(row.amount, assetToken, locale)
+                        : (assetToken ?? t("DashboardCustody.unknownAsset"));
                     const createdLabel = formatTimestamp(row.createdAt, locale);
                     const address = row.address ?? t("DashboardCustody.unknown");
 

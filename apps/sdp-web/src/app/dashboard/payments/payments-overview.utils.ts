@@ -254,8 +254,11 @@ export function resolveTransferFlow(transfer: TransferRecord): {
   receive: string | null;
 } {
   const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
+  const transferTokenLabel = resolveTransferTokenLabel(transfer.token);
   const cryptoLabel =
-    transfer.amount && transfer.token ? formatDisplayAmount(transfer.amount, transfer.token) : null;
+    transfer.amount && transferTokenLabel
+      ? formatDisplayAmount(transfer.amount, transferTokenLabel)
+      : null;
   const fiatLabel =
     transfer.fiatAmount && transfer.fiatCurrency
       ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
