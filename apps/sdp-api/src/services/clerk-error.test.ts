@@ -48,3 +48,20 @@ describe("describeClerkFailure", () => {
     expect(message.endsWith("…")).toBe(true);
   });
 });
+
+describe("describeClerkFailure truncation", () => {
+  it("bounds a parsed long_message, not just a raw body", () => {
+    const body = JSON.stringify({ errors: [{ long_message: "y".repeat(1000) }] });
+    const message = describeClerkFailure(422, body);
+
+    expect(message.length).toBeLessThan(360);
+    expect(message.endsWith("…")).toBe(true);
+  });
+
+  it("bounds a top-level message too", () => {
+    const message = describeClerkFailure(500, JSON.stringify({ message: "z".repeat(1000) }));
+
+    expect(message.length).toBeLessThan(360);
+    expect(message.endsWith("…")).toBe(true);
+  });
+});
