@@ -6,7 +6,10 @@ import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
+import {
+  type ClerkOrganizationInvitation,
+  ClerkOrganizationsService,
+} from "@/services/clerk-organizations.service";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 import { acceptSchema, inviteSchema } from "./schemas";
@@ -118,6 +121,34 @@ function randomBase64Url(byteLength: number): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+/**
+ * Predicate that picks the Clerk invitation a local row stands for.
+ *
+ * Clerk's invitation id is the only unique key. Email is shared by every
+ * pending invitation raised for the same address, so matching on it cannot tell
+ * a second invitation for that address apart from ours — which is what let an
+ * ambiguous revocation response read someone else's live invitation as proof
+ * that ours survived.
+ *
+ * Rows written before the id was persisted have no better key available and
+ * fall back to email. That is why revocation acts on *every* email match rather
+ * than the first: it cannot identify which one is ours, so the invariant it
+ * enforces is that none survive.
+ */
+function matchesClerkInvitation(invitation: {
+  email: string;
+  clerk_invitation_id: string | null;
+}): (entry: ClerkOrganizationInvitation) => boolean {
+  const clerkInvitationId = invitation.clerk_invitation_id;
+
+  if (clerkInvitationId) {
+    return (entry) => entry.id === clerkInvitationId;
+  }
+
+  const email = invitation.email.toLowerCase();
+  return (entry) => entry.email_address?.toLowerCase() === email;
+}
+
 const MEMBERS_DEFAULT_PAGE_SIZE = 25;
 const MEMBERS_MAX_PAGE_SIZE = 100;
 
@@ -182,7 +213,7 @@ export const listMembers = async (c: AppContext) => {
   // excluded — they cannot be accepted, so listing them only misleads.
   const invitationRows = await getDb(c.env)
     .prepare(
-      `SELECT id, email, role, status, created_at, expires_at
+      `SELECT id, email, role, status, created_at, expires_at, clerk_invitation_id
          FROM invitations
         WHERE organization_id = ? AND status = 'pending' AND expires_at > ?
         ORDER BY created_at DESC`
@@ -194,7 +225,7 @@ export const listMembers = async (c: AppContext) => {
   // the shareable URL has to come from Clerk. Delivery of the invitation email
   // is not observable from here, so surfacing the link is the only way an
   // admin can unblock someone whose mail never arrived.
-  const acceptUrlByEmail = await resolveClerkInviteUrls(c, organizationId);
+  const clerkInvitations = await resolveClerkInvitations(c, organizationId);
 
   const invitationList = invitationRows.results.map((row) => ({
     id: row.id as string,
@@ -203,7 +234,16 @@ export const listMembers = async (c: AppContext) => {
     status: row.status as string,
     createdAt: row.created_at as string,
     expiresAt: row.expires_at as string,
-    acceptUrl: acceptUrlByEmail.get((row.email as string).toLowerCase()) ?? null,
+    // Matched by Clerk's invitation id, so two pending invitations for the same
+    // address each surface their own link rather than both showing whichever
+    // one an email-keyed lookup happened to land on.
+    acceptUrl:
+      clerkInvitations.find(
+        matchesClerkInvitation({
+          email: row.email as string,
+          clerk_invitation_id: (row.clerk_invitation_id as string | null) ?? null,
+        })
+      )?.url ?? null,
   }));
 
   const adminCountRow = await getDb(c.env)
@@ -231,37 +271,30 @@ export const listMembers = async (c: AppContext) => {
 };
 
 /**
- * Best-effort lookup of Clerk's accept URLs, keyed by email. A Clerk outage
- * must not take the member list down with it, so a failure degrades to no
- * links rather than an error.
+ * Best-effort lookup of Clerk's pending invitations, which carry the accept
+ * URLs. A Clerk outage must not take the member list down with it, so a failure
+ * degrades to no links rather than an error.
  */
-async function resolveClerkInviteUrls(
+async function resolveClerkInvitations(
   c: AppContext,
   organizationId: string
-): Promise<Map<string, string>> {
-  const urls = new Map<string, string>();
-
+): Promise<ClerkOrganizationInvitation[]> {
   try {
     const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
     if (!clerkOrgId) {
-      return urls;
+      return [];
     }
 
     const clerkService = new ClerkOrganizationsService(c.env);
-    for (const invitation of await clerkService.listPendingOrganizationInvitations(clerkOrgId)) {
-      if (invitation.email_address && invitation.url) {
-        urls.set(invitation.email_address.toLowerCase(), invitation.url);
-      }
-    }
+    return await clerkService.listPendingOrganizationInvitations(clerkOrgId);
   } catch (error) {
     console.error("listMembers: failed to resolve Clerk invitation URLs", {
       requestId: c.get("requestId"),
       organizationId,
       error: error instanceof Error ? error.message : String(error),
     });
+    return [];
   }
-
-  return urls;
 }
 
 export const inviteMember = async (c: AppContext) => {
@@ -348,10 +381,14 @@ export const inviteMember = async (c: AppContext) => {
   const tokenHash = await hashString(token);
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
 
+  // Clerk's invitation id is stored, not just audited. It is the only key that
+  // identifies exactly one pending Clerk invitation — email is shared by every
+  // invitation raised for the same address — and revocation depends on it to
+  // avoid acting on, or drawing conclusions from, somebody else's invitation.
   await getDb(c.env)
     .prepare(
-      `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`
+      `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status, clerk_invitation_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
     )
     .bind(
       invitationId,
@@ -360,7 +397,8 @@ export const inviteMember = async (c: AppContext) => {
       role,
       inviterUserId || "system",
       tokenHash,
-      expiresAt
+      expiresAt,
+      clerkInvitation.id
     )
     .run();
 
@@ -623,12 +661,18 @@ export const revokeInvitation = async (c: AppContext) => {
 
   const invitation = await getDb(c.env)
     .prepare(
-      `SELECT id, email, status, invited_by
+      `SELECT id, email, status, invited_by, clerk_invitation_id
          FROM invitations
         WHERE id = ? AND organization_id = ?`
     )
     .bind(invitationId, organizationId)
-    .first<{ id: string; email: string; status: string; invited_by: string }>();
+    .first<{
+      id: string;
+      email: string;
+      status: string;
+      invited_by: string;
+      clerk_invitation_id: string | null;
+    }>();
 
   // Scoped by organization so an id from another org reads as missing rather
   // than as a permission failure.
@@ -667,15 +711,10 @@ export const revokeInvitation = async (c: AppContext) => {
     clerkService = new ClerkOrganizationsService(c.env);
     const pending = await clerkService.listPendingOrganizationInvitations(clerkOrgId);
 
-    // Every pending Clerk invitation for this address, not just the first.
-    // Clerk's invitation id is not persisted locally, so email is the only key
-    // available and it is not unique — picking one match would leave any
-    // duplicate live and still redeemable after we reported the revocation.
-    // The invariant worth enforcing is that none survive, which sidesteps
-    // identifying which one was ours.
-    const matches = pending.filter(
-      (entry) => entry.email_address?.toLowerCase() === invitation.email.toLowerCase()
-    );
+    // Keyed on Clerk's invitation id, so exactly the invitation this row stands
+    // for is revoked. Legacy rows without that id fall back to email and match
+    // every invitation for the address — see matchesClerkInvitation.
+    const matches = pending.filter(matchesClerkInvitation(invitation));
 
     for (const match of matches) {
       // An API key has no Clerk user of its own. Clerk's own inviter_id is the
@@ -728,13 +767,12 @@ export const revokeInvitation = async (c: AppContext) => {
       // it rejected them, whereas releasing it when Clerk did revoke leaves an
       // invitation that merely reads as pending and cannot be accepted. Take
       // the harmless error.
+      // Matched on Clerk's invitation id, so a different invitation raised for
+      // the same address cannot be mistaken for ours and reopen a token that
+      // was in fact revoked.
       const stillPendingInClerk = await clerkService
         .listPendingOrganizationInvitations(clerkOrgId)
-        .then((entries) =>
-          entries.some(
-            (entry) => entry.email_address?.toLowerCase() === invitation.email.toLowerCase()
-          )
-        )
+        .then((entries) => entries.some(matchesClerkInvitation(invitation)))
         .catch(() => true);
 
       if (stillPendingInClerk) {
