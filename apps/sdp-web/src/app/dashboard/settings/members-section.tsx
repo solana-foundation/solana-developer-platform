@@ -1,4 +1,4 @@
-import { listMembers, type Member, readableApiError } from "@/app/members/actions";
+import { listMembers, type Member } from "@/app/members/actions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -9,6 +9,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getTranslations } from "@/i18n/server";
+import { readableApiError } from "@/lib/sdp-api-error";
 import { InviteMemberForm } from "./invite-member-form";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;

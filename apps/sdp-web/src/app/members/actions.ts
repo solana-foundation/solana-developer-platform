@@ -2,10 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
-// Project-scoped, not org-scoped: /v1/members applies projectContextMiddleware
-// to every route (routes/members/index.ts), so it rejects a request without an
-// x-project-id header even though membership itself is organization-level.
 import { createSdpApiClient } from "@/lib/sdp-api";
+import { readableApiError } from "@/lib/sdp-api-error";
+
+// createSdpApiClient is project-scoped rather than org-scoped on purpose:
+// /v1/members applies projectContextMiddleware to every route
+// (routes/members/index.ts), so it rejects a request without an x-project-id
+// header even though membership itself is organization-level.
 
 export interface Member {
   id: string;
@@ -17,29 +20,6 @@ export interface Member {
     email: string;
     name: string | null;
   };
-}
-
-/**
- * SDP API failures arrive as `SDP API request failed (400): {"error":{…}}`.
- * Rendering that verbatim puts a JSON blob in front of the user, so pull out
- * the message the API actually wrote and fall back to the raw text.
- */
-export function readableApiError(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  const jsonStart = raw.indexOf("{");
-  if (jsonStart === -1) {
-    return raw;
-  }
-
-  try {
-    const parsed = JSON.parse(raw.slice(jsonStart)) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    return parsed.error?.message ?? parsed.message ?? raw;
-  } catch {
-    return raw;
-  }
 }
 
 export async function listMembers(): Promise<Member[]> {
